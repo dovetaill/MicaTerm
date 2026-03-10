@@ -6,6 +6,12 @@ Project planning is in `docs/plans/`.
 - Overall style implementation plan: `docs/plans/2026-03-10-overall-style-implementation-plan.md`
 - Overall style verification: `docs/plans/2026-03-10-overall-style-verification.md`
 
+## Icon Assets
+
+- Source vectors: `assets/icons/`
+- Export script: `scripts/export-icons.sh`
+- Windows icon: `assets/icons/windows/mica-term.ico`
+
 ## Windows Build
 
 - `./build-win-x64.sh`

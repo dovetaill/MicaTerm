@@ -1,0 +1,16 @@
+<svg width="720" height="256" viewBox="0 0 720 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="mica-accent" x1="72" y1="32" x2="184" y2="208" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7CC4FF"/>
+      <stop offset="1" stop-color="#4ea1ff"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="208" height="208" rx="48" fill="#131720"/>
+  <rect x="24.5" y="24.5" width="207" height="207" rx="47.5" stroke="#FFFFFF" stroke-opacity="0.08"/>
+  <path id="m-frame" d="M68 176V80L106 130L144 88L182 176H154L132 123L106 156L82 123V176H68Z" fill="url(#mica-accent)"/>
+  <path d="M292 105.5H316.5L358 172L399.5 105.5H424V192H402.5V139L362.5 192H353L313.5 139V192H292V105.5Z" fill="#F5F7FB"/>
+  <path d="M445 105.5H512V123.5H466.5V140.5H507.5V158H466.5V192H445V105.5Z" fill="#F5F7FB"/>
+  <path d="M528 105.5H549.5V174H588V192H528V105.5Z" fill="#F5F7FB"/>
+  <path d="M602 105.5H623.5V192H602V105.5Z" fill="#F5F7FB"/>
+  <path d="M644 105.5H666L696 192H673.5L667.5 173.5H640.5L634.5 192H612L644 105.5ZM654 132.5L646 156.5H662L654 132.5Z" fill="#F5F7FB"/>
+</svg>

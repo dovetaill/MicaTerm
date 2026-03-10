@@ -101,6 +101,7 @@ esac
 STAGE_DIR="$DIST_DIR/${APP_NAME}-${TARGET}-${PROFILE}"
 ZIP_PATH="$DIST_DIR/${APP_NAME}-${TARGET}-${PROFILE}.zip"
 EXE_PATH="$ROOT_DIR/target/$TARGET/$PROFILE/$BIN_NAME.exe"
+ICON_PATH="$ROOT_DIR/assets/icons/windows/mica-term.ico"
 
 echo "==> Building $BIN_NAME for $TARGET ($PROFILE)"
 cargo build "${PROFILE_ARGS[@]}" --target "$TARGET" --locked
@@ -111,6 +112,10 @@ echo "==> Staging package in $STAGE_DIR"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 cp "$EXE_PATH" "$STAGE_DIR/"
+
+if [[ -f "$ICON_PATH" ]]; then
+  cp "$ICON_PATH" "$STAGE_DIR/"
+fi
 
 if [[ -f "$ROOT_DIR/readme.md" ]]; then
   cp "$ROOT_DIR/readme.md" "$STAGE_DIR/README.md"

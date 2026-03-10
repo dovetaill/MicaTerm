@@ -1,0 +1,4 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="24" y="24" width="208" height="208" rx="46" fill="#10141C"/>
+  <path id="taskbar-m-frame" d="M68 176V80L106 132L146 88L188 176H158L133 124L106 159L81 124V176H68Z" fill="#4ea1ff"/>
+</svg>

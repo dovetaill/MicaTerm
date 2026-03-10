@@ -2424,6 +2424,7 @@ dependencies = [
  "slint-build",
  "tokio",
  "window-vibrancy",
+ "winresource",
 ]
 
 [[package]]
@@ -5464,6 +5465,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winresource"
+version = "0.1.30"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e287ced0f21cd11f4035fe946fd3af145f068d1acb708afd248100f89ec7432d"
+dependencies = [
+ "toml",
+ "version_check",
 ]
 
 [[package]]
