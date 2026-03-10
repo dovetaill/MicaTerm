@@ -1,0 +1,17 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component StatusPill inherits Rectangle {
+    in property <string> label: "Connected";
+
+    width: 120px;
+    height: 28px;
+    border-radius: 999px;
+    background: ThemeTokens.panel-tint;
+
+    Text {
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

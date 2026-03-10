@@ -1,0 +1,11 @@
+export global ThemeTokens {
+    in property <bool> dark-mode: true;
+
+    out property <brush> shell-surface: dark-mode ? #181a20 : #f5f7fb;
+    out property <brush> shell-stroke: dark-mode ? #ffffff12 : #0f172a12;
+    out property <brush> command-tint: dark-mode ? #1c2430ee : #eef5ffea;
+    out property <brush> panel-tint: dark-mode ? #1a2230ee : #f2f7ffee;
+    out property <brush> terminal-surface: dark-mode ? #14161b : #f8f8f9;
+    out property <brush> accent: #4ea1ff;
+    out property <brush> text-primary: dark-mode ? #f5f7fb : #101418;
+}

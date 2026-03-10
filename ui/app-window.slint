@@ -1,0 +1,64 @@
+import { StatusPill } from "components/status-pill.slint";
+import { ThemeTokens } from "theme/tokens.slint";
+import { MotionTokens } from "theme/motion.slint";
+import { RightPanel } from "shell/right-panel.slint";
+import { Sidebar } from "shell/sidebar.slint";
+import { TabBar } from "shell/tabbar.slint";
+import { Titlebar } from "shell/titlebar.slint";
+import { WelcomeView } from "welcome/welcome-view.slint";
+
+export component AppWindow inherits Window {
+    in property <bool> dark-mode: true;
+    title: "Mica Term";
+    no-frame: true;
+    background: transparent;
+    preferred-width: 1440px;
+    preferred-height: 900px;
+
+    Rectangle {
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: ThemeTokens.shell-stroke;
+        background: ThemeTokens.shell-surface;
+
+        StatusPill {
+            x: parent.width - self.width - 12px;
+            y: 10px;
+            label: "Connecting";
+
+            animate opacity {
+                duration: MotionTokens.welcome-duration;
+            }
+        }
+
+        VerticalLayout {
+            spacing: 0px;
+
+            Titlebar {}
+
+            HorizontalLayout {
+                spacing: 0px;
+
+                Sidebar {}
+
+                Rectangle {
+                    background: ThemeTokens.terminal-surface;
+
+                    VerticalLayout {
+                        spacing: 0px;
+
+                        TabBar {}
+
+                        Rectangle {
+                            background: transparent;
+
+                            WelcomeView {}
+                        }
+                    }
+                }
+
+                RightPanel {}
+            }
+        }
+    }
+}

@@ -1,0 +1,15 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+import { CommandEntry } from "../components/command-entry.slint";
+
+export component Titlebar inherits Rectangle {
+    height: 48px;
+    background: ThemeTokens.command-tint;
+    border-radius: 12px;
+
+    CommandEntry {
+        x: 8px;
+        y: 8px;
+        width: 320px;
+        height: 32px;
+    }
+}

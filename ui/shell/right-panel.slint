@@ -1,0 +1,17 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+import { SegmentedControl } from "../components/segmented-control.slint";
+
+export component RightPanel inherits Rectangle {
+    width: 392px;
+    background: ThemeTokens.panel-tint;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: ThemeTokens.shell-stroke;
+
+    SegmentedControl {
+        x: 12px;
+        y: 12px;
+        width: parent.width - 24px;
+        height: 36px;
+    }
+}

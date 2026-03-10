@@ -1,0 +1,15 @@
+[package]
+name = "mica-term"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+raw-window-handle = "0.6.2"
+serde = { version = "1.0.228", features = ["derive"] }
+slint = { version = "1.15.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "compat-1-2"] }
+tokio = "1.50.0"
+window-vibrancy = "0.7.1"
+
+[build-dependencies]
+slint-build = "1.15.1"

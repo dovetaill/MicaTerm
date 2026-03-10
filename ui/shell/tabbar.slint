@@ -1,0 +1,16 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+import { ActiveTab } from "../components/active-tab.slint";
+
+export component TabBar inherits Rectangle {
+    height: 38px;
+    background: transparent;
+    border-width: 1px;
+    border-color: ThemeTokens.shell-stroke;
+
+    ActiveTab {
+        x: 12px;
+        y: 5px;
+        width: 140px;
+        height: 28px;
+    }
+}
