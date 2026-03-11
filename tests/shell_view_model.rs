@@ -19,3 +19,29 @@ fn shell_view_model_starts_in_welcome_mode_with_right_panel_hidden() {
     assert!(view_model.show_welcome);
     assert!(!view_model.show_right_panel);
 }
+
+#[test]
+fn shell_view_model_tracks_top_status_bar_state() {
+    let mut view_model = ShellViewModel::default();
+
+    assert!(view_model.show_welcome);
+    assert!(!view_model.show_right_panel);
+    assert!(!view_model.show_settings_menu);
+    assert!(!view_model.is_window_maximized);
+    assert!(view_model.is_window_active);
+
+    view_model.toggle_right_panel();
+    assert!(view_model.show_right_panel);
+
+    view_model.toggle_settings_menu();
+    assert!(view_model.show_settings_menu);
+
+    view_model.close_settings_menu();
+    assert!(!view_model.show_settings_menu);
+
+    view_model.set_window_maximized(true);
+    assert!(view_model.is_window_maximized);
+
+    view_model.set_window_active(false);
+    assert!(!view_model.is_window_active);
+}

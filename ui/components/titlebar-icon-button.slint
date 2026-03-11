@@ -1,0 +1,31 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component TitlebarIconButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked;
+
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border-width: root.active ? 1px : 0px;
+    border-color: ThemeTokens.shell-stroke;
+    background: touch.pressed
+        ? ThemeTokens.panel-tint
+        : (touch.has-hover || root.active)
+            ? ThemeTokens.shell-surface
+            : transparent;
+
+    Text {
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}

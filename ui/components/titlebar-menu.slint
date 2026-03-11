@@ -1,0 +1,79 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+component MenuActionItem inherits Rectangle {
+    in property <string> label;
+    callback invoked;
+
+    height: 36px;
+    border-radius: 8px;
+    background: touch.pressed
+        ? ThemeTokens.command-tint
+        : touch.has-hover
+            ? ThemeTokens.shell-surface
+            : transparent;
+
+    Text {
+        x: 12px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.invoked();
+        }
+    }
+}
+
+export component TitlebarMenu inherits PopupWindow {
+    callback settings-selected;
+    callback appearance-selected;
+    callback close-requested;
+
+    width: 196px;
+    height: 132px;
+    close-policy: PopupClosePolicy.close-on-click;
+
+    background-layer := Rectangle {
+        width: root.width;
+        height: root.height;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: ThemeTokens.shell-stroke;
+        background: ThemeTokens.panel-tint;
+
+        VerticalLayout {
+            padding: 8px;
+            spacing: 4px;
+
+            MenuActionItem {
+                label: "Settings";
+                invoked => {
+                    root.settings-selected();
+                    root.close-requested();
+                    root.close();
+                }
+            }
+
+            MenuActionItem {
+                label: "Appearance";
+                invoked => {
+                    root.appearance-selected();
+                    root.close-requested();
+                    root.close();
+                }
+            }
+
+            MenuActionItem {
+                label: "Close menu";
+                invoked => {
+                    root.close-requested();
+                    root.close();
+                }
+            }
+        }
+    }
+}

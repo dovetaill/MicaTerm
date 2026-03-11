@@ -1,6 +1,4 @@
-import { StatusPill } from "components/status-pill.slint";
 import { ThemeTokens } from "theme/tokens.slint";
-import { MotionTokens } from "theme/motion.slint";
 import { RightPanel } from "shell/right-panel.slint";
 import { Sidebar } from "shell/sidebar.slint";
 import { TabBar } from "shell/tabbar.slint";
@@ -9,6 +7,20 @@ import { WelcomeView } from "welcome/welcome-view.slint";
 
 export component AppWindow inherits Window {
     in property <bool> dark-mode: true;
+    in-out property <bool> show-right-panel: false;
+    in-out property <bool> show-settings-menu: false;
+    in-out property <bool> is-window-maximized: false;
+    in-out property <bool> is-window-active: true;
+
+    callback drag-requested();
+    callback drag-double-clicked();
+    callback minimize-requested();
+    callback maximize-toggle-requested();
+    callback close-requested();
+    callback toggle-right-panel-requested();
+    callback toggle-settings-menu-requested();
+    callback close-settings-menu-requested();
+
     title: "Mica Term";
     no-frame: true;
     background: transparent;
@@ -21,20 +33,47 @@ export component AppWindow inherits Window {
         border-color: ThemeTokens.shell-stroke;
         background: ThemeTokens.shell-surface;
 
-        StatusPill {
-            x: parent.width - self.width - 12px;
-            y: 10px;
-            label: "Connecting";
-
-            animate opacity {
-                duration: MotionTokens.welcome-duration;
-            }
-        }
-
         VerticalLayout {
             spacing: 0px;
 
-            Titlebar {}
+            Titlebar {
+                show-right-panel: root.show-right-panel;
+                show-settings-menu: root.show-settings-menu;
+                is-window-maximized: root.is-window-maximized;
+                is-window-active: root.is-window-active;
+
+                drag-requested => {
+                    root.drag-requested();
+                }
+
+                drag-double-clicked => {
+                    root.drag-double-clicked();
+                }
+
+                minimize-requested => {
+                    root.minimize-requested();
+                }
+
+                maximize-toggle-requested => {
+                    root.maximize-toggle-requested();
+                }
+
+                close-requested => {
+                    root.close-requested();
+                }
+
+                toggle-right-panel-requested => {
+                    root.toggle-right-panel-requested();
+                }
+
+                toggle-settings-menu-requested => {
+                    root.toggle-settings-menu-requested();
+                }
+
+                close-settings-menu-requested => {
+                    root.close-settings-menu-requested();
+                }
+            }
 
             HorizontalLayout {
                 spacing: 0px;
@@ -57,7 +96,9 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                RightPanel {}
+                RightPanel {
+                    expanded: root.show-right-panel;
+                }
             }
         }
     }
