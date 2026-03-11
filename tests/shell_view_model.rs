@@ -1,3 +1,4 @@
+use mica_term::shell::sidebar::SidebarDestination;
 use mica_term::shell::view_model::{ShellViewModel, WelcomeAction, welcome_actions};
 use mica_term::theme::ThemeMode;
 
@@ -19,6 +20,11 @@ fn shell_view_model_starts_in_welcome_mode_with_right_panel_hidden() {
     let view_model = ShellViewModel::default();
     assert!(view_model.show_welcome);
     assert!(!view_model.show_right_panel);
+    assert!(view_model.show_assets_sidebar);
+    assert_eq!(
+        view_model.active_sidebar_destination,
+        SidebarDestination::Console
+    );
 }
 
 #[test]

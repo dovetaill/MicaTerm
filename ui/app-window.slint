@@ -1,7 +1,7 @@
 import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
 import { RightPanel } from "shell/right-panel.slint";
-import { Sidebar } from "shell/sidebar.slint";
+import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
 import { TabBar } from "shell/tabbar.slint";
 import { Titlebar } from "shell/titlebar.slint";
 import { WelcomeView } from "welcome/welcome-view.slint";
@@ -13,6 +13,9 @@ export component AppWindow inherits Window {
     in-out property <bool> is-window-maximized: false;
     in-out property <bool> is-window-active: true;
     in-out property <bool> is-window-always-on-top: false;
+    in-out property <bool> show-assets-sidebar: true;
+    in-out property <string> active-sidebar-destination: "console";
+    in-out property <[SidebarNavItem]> sidebar-items: [];
 
     callback drag-requested();
     callback drag-double-clicked();
@@ -24,6 +27,8 @@ export component AppWindow inherits Window {
     callback close-global-menu-requested();
     callback toggle-theme-mode-requested();
     callback toggle-window-always-on-top-requested();
+    callback toggle-assets-sidebar-requested();
+    callback sidebar-destination-selected(string);
 
     title: "Mica Term";
     no-frame: true;
@@ -94,7 +99,19 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 spacing: 0px;
 
-                Sidebar {}
+                sidebar := Sidebar {
+                    items: root.sidebar-items;
+                    show-assets-sidebar: root.show-assets-sidebar;
+                    active-sidebar-destination: root.active-sidebar-destination;
+
+                    toggle-assets-sidebar-requested => {
+                        root.toggle-assets-sidebar-requested();
+                    }
+
+                    destination-selected(id) => {
+                        root.sidebar-destination-selected(id);
+                    }
+                }
 
                 Rectangle {
                     background: ThemeTokens.terminal-surface;
@@ -125,5 +142,16 @@ export component AppWindow inherits Window {
         anchor-y: titlebar.tooltip-anchor-y;
         tooltip-visible: titlebar.tooltip-visible;
         host-width: root.width;
+    }
+
+    sidebar-tooltip-overlay := TitlebarTooltip {
+        text: sidebar.tooltip-text;
+        anchor-x: sidebar.tooltip-anchor-x;
+        anchor-y: sidebar.tooltip-anchor-y;
+        anchor-width: sidebar.tooltip-anchor-width;
+        tooltip-visible: sidebar.tooltip-visible;
+        host-width: root.width;
+        host-height: root.height;
+        place-right: true;
     }
 }

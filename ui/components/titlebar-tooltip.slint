@@ -4,11 +4,18 @@ export component TitlebarTooltip inherits Rectangle {
     in property <string> text;
     in property <length> anchor-x: 0px;
     in property <length> anchor-y: 0px;
+    in property <length> anchor-width: 0px;
     in property <bool> tooltip-visible: false;
     in property <length> host-width: 0px;
+    in property <length> host-height: 0px;
+    in property <bool> place-right: false;
 
-    x: max(0px, min(root.anchor-x - self.width / 2, max(0px, root.host-width - self.width)));
-    y: root.anchor-y;
+    x: root.place-right
+        ? max(0px, min(root.anchor-x + root.anchor-width + 8px, max(0px, root.host-width - self.width)))
+        : max(0px, min(root.anchor-x - self.width / 2, max(0px, root.host-width - self.width)));
+    y: root.place-right
+        ? max(0px, min(root.anchor-y - self.height / 2, max(0px, root.host-height - self.height)))
+        : root.anchor-y;
     width: max(96px, tooltip-label.preferred-width + 20px);
     height: max(28px, tooltip-label.preferred-height + 10px);
     visible: root.tooltip-visible;

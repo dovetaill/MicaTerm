@@ -64,6 +64,8 @@ fn bootstrap_binds_top_status_bar_callbacks_to_window_state() {
     assert!(!app.get_is_window_maximized());
     assert!(app.get_is_window_active());
     assert!(!app.get_is_window_always_on_top());
+    assert!(app.get_show_assets_sidebar());
+    assert_eq!(app.get_active_sidebar_destination().as_str(), "console");
 
     app.invoke_toggle_right_panel_requested();
     assert!(app.get_show_right_panel());

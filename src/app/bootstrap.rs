@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use anyhow::Result;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::AppWindow;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
@@ -10,6 +10,7 @@ use crate::app::window_effects::{
     PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
 };
 use crate::app::windowing::{WindowController, window_appearance};
+use crate::shell::sidebar::{SidebarDestination, sidebar_items_for};
 use crate::shell::view_model::ShellViewModel;
 use crate::theme::ThemeMode;
 
@@ -42,6 +43,21 @@ fn sync_top_status_bar_state(
     window.set_is_window_maximized(state.is_window_maximized);
     window.set_is_window_active(state.is_window_active);
     window.set_is_window_always_on_top(state.is_always_on_top);
+}
+
+fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
+    window.set_show_assets_sidebar(state.show_assets_sidebar);
+    window.set_active_sidebar_destination(state.active_sidebar_destination.id().into());
+    window.set_sidebar_items(ModelRc::new(VecModel::from(sidebar_items_for(state))));
+}
+
+fn sync_shell_state(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    effects: &dyn PlatformWindowEffects,
+) {
+    sync_top_status_bar_state(window, state, effects);
+    sync_sidebar_state(window, state);
 }
 
 fn load_ui_preferences(store: &Option<Rc<UiPreferencesStore>>) -> UiPreferences {
@@ -79,7 +95,7 @@ pub fn bind_top_status_bar_with_store_and_effects(
     }));
     let controller = Rc::new(WindowController::new(window));
 
-    sync_top_status_bar_state(window, &view_model.borrow(), effects.as_ref());
+    sync_shell_state(window, &view_model.borrow(), effects.as_ref());
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
@@ -145,6 +161,26 @@ pub fn bind_top_status_bar_with_store_and_effects(
         let next = controller_ref.toggle_maximize(state.is_window_maximized);
         state.set_window_maximized(next);
         window.set_is_window_maximized(next);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_toggle_assets_sidebar_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_assets_sidebar();
+        sync_sidebar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sidebar_destination_selected(move |destination_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let destination = SidebarDestination::from_id(destination_id.as_str())
+            .unwrap_or(SidebarDestination::Console);
+        state.select_sidebar_destination(destination);
+        sync_sidebar_state(&window, &state);
     });
 
     let controller_ref = Rc::clone(&controller);
