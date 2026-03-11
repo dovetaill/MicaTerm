@@ -18,9 +18,12 @@ export component AppWindow inherits Window {
     in-out property <bool> effective-show-right-panel: false;
     in-out property <string> active-sidebar-destination: "console";
     in-out property <[SidebarNavItem]> sidebar-items: [];
+    out property <length> layout-titlebar-content-width: titlebar.layout-content-width;
+    out property <length> layout-titlebar-nav-zone-width: titlebar.layout-nav-zone-width;
+    out property <length> layout-titlebar-window-controls-width: titlebar.layout-window-controls-width;
     out property <length> layout-titlebar-width: titlebar.width;
     out property <length> layout-titlebar-height: titlebar.height;
-    out property <length> layout-shell-body-height: body-host.height;
+    out property <length> layout-shell-body-height: shell-frame.height - titlebar.height;
     out property <length> layout-main-workspace-width: main-workspace.width;
     out property <length> layout-right-panel-width: right-panel.width;
     out property <length> layout-activity-bar-width: sidebar.activity-bar-width;
@@ -63,102 +66,110 @@ export component AppWindow inherits Window {
         border-color: ThemeTokens.shell-stroke;
         background: ThemeTokens.shell-surface;
 
-        titlebar := Titlebar {
+        content-column := Rectangle {
             width: parent.width;
-            clip: false;
-            dark-mode: root.dark-mode;
-            show-right-panel: root.show-right-panel;
-            show-global-menu: root.show-global-menu;
-            is-window-maximized: root.is-window-maximized;
-            is-window-active: root.is-window-active;
-            is-window-always-on-top: root.is-window-always-on-top;
-
-            drag-requested => {
-                root.drag-requested();
-            }
-
-            drag-double-clicked => {
-                root.drag-double-clicked();
-            }
-
-            minimize-requested => {
-                root.minimize-requested();
-            }
-
-            maximize-toggle-requested => {
-                root.maximize-toggle-requested();
-            }
-
-            close-requested => {
-                root.close-requested();
-            }
-
-            toggle-right-panel-requested => {
-                root.toggle-right-panel-requested();
-            }
-
-            toggle-global-menu-requested => {
-                root.toggle-global-menu-requested();
-            }
-
-            close-global-menu-requested => {
-                root.close-global-menu-requested();
-            }
-
-            toggle-theme-mode-requested => {
-                root.toggle-theme-mode-requested();
-            }
-
-            toggle-window-always-on-top-requested => {
-                root.toggle-window-always-on-top-requested();
-            }
-        }
-
-        body-host := Rectangle {
-            y: titlebar.height;
-            width: parent.width;
-            height: parent.height - titlebar.height;
+            height: parent.height;
             background: transparent;
 
-            shell-body := HorizontalLayout {
+            VerticalLayout {
                 width: parent.width;
                 height: parent.height;
                 spacing: 0px;
 
-                sidebar := Sidebar {
-                    items: root.sidebar-items;
-                    show-assets-sidebar: root.effective-show-assets-sidebar;
-                    active-sidebar-destination: root.active-sidebar-destination;
+                titlebar := Titlebar {
+                    dark-mode: root.dark-mode;
+                    show-right-panel: root.show-right-panel;
+                    show-global-menu: root.show-global-menu;
+                    is-window-maximized: root.is-window-maximized;
+                    is-window-active: root.is-window-active;
+                    is-window-always-on-top: root.is-window-always-on-top;
 
-                    toggle-assets-sidebar-requested => {
-                        root.toggle-assets-sidebar-requested();
+                    drag-requested => {
+                        root.drag-requested();
                     }
 
-                    destination-selected(id) => {
-                        root.sidebar-destination-selected(id);
+                    drag-double-clicked => {
+                        root.drag-double-clicked();
+                    }
+
+                    minimize-requested => {
+                        root.minimize-requested();
+                    }
+
+                    maximize-toggle-requested => {
+                        root.maximize-toggle-requested();
+                    }
+
+                    close-requested => {
+                        root.close-requested();
+                    }
+
+                    toggle-right-panel-requested => {
+                        root.toggle-right-panel-requested();
+                    }
+
+                    toggle-global-menu-requested => {
+                        root.toggle-global-menu-requested();
+                    }
+
+                    close-global-menu-requested => {
+                        root.close-global-menu-requested();
+                    }
+
+                    toggle-theme-mode-requested => {
+                        root.toggle-theme-mode-requested();
+                    }
+
+                    toggle-window-always-on-top-requested => {
+                        root.toggle-window-always-on-top-requested();
                     }
                 }
 
-                main-workspace := Rectangle {
-                    horizontal-stretch: 1;
-                    background: ThemeTokens.terminal-surface;
+                body-host := Rectangle {
+                    vertical-stretch: 1;
+                    background: transparent;
 
-                    VerticalLayout {
+                    shell-body := HorizontalLayout {
+                        width: parent.width;
+                        height: parent.height;
                         spacing: 0px;
 
-                        TabBar {}
+                        sidebar := Sidebar {
+                            items: root.sidebar-items;
+                            show-assets-sidebar: root.effective-show-assets-sidebar;
+                            active-sidebar-destination: root.active-sidebar-destination;
 
-                        content-host := Rectangle {
-                            vertical-stretch: 1;
-                            background: transparent;
+                            toggle-assets-sidebar-requested => {
+                                root.toggle-assets-sidebar-requested();
+                            }
 
-                            WelcomeView {}
+                            destination-selected(id) => {
+                                root.sidebar-destination-selected(id);
+                            }
+                        }
+
+                        main-workspace := Rectangle {
+                            horizontal-stretch: 1;
+                            background: ThemeTokens.terminal-surface;
+
+                            VerticalLayout {
+                                spacing: 0px;
+
+                                TabBar {}
+
+                                content-host := Rectangle {
+                                    vertical-stretch: 1;
+                                    background: transparent;
+
+                                    WelcomeView {}
+                                }
+                            }
+                        }
+
+                        right-panel := RightPanel {
+                            expanded: root.effective-show-right-panel;
                         }
                     }
-                }
-
-                right-panel := RightPanel {
-                    expanded: root.effective-show-right-panel;
                 }
             }
         }

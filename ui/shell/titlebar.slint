@@ -33,6 +33,9 @@ export component Titlebar inherits Rectangle {
     out property <bool> tooltip-visible <=> root.tooltip-visible-value;
     out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
     out property <length> tooltip-anchor-y <=> root.tooltip-anchor-y-value;
+    out property <length> layout-content-width: content.width;
+    out property <length> layout-nav-zone-width: nav-zone.width;
+    out property <length> layout-window-controls-width: window-controls.width;
 
     callback drag-requested;
     callback drag-double-clicked;

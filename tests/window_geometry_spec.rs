@@ -35,6 +35,28 @@ fn titlebar_spans_window_width_for_button_layout() {
 }
 
 #[test]
+fn titlebar_content_zones_receive_layout_width() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.show().unwrap();
+
+    assert_eq!(
+        app.get_layout_titlebar_content_width() as u32,
+        ShellMetrics::WINDOW_DEFAULT_WIDTH - 12
+    );
+    assert_eq!(
+        app.get_layout_titlebar_nav_zone_width() as u32,
+        ShellMetrics::TITLEBAR_NAV_WIDTH
+    );
+    assert_eq!(
+        app.get_layout_titlebar_window_controls_width() as u32,
+        ShellMetrics::TITLEBAR_WINDOW_CONTROL_WIDTH
+    );
+}
+
+#[test]
 fn larger_window_expands_shell_body_instead_of_leaving_blank_space() {
     i_slint_backend_testing::init_no_event_loop();
 
