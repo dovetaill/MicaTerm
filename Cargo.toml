@@ -17,6 +17,9 @@ slint = { version = "1.15.1", default-features = false, features = [
     "unstable-winit-030",
 ] }
 tokio = "1.50.0"
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 window-vibrancy = "0.7.1"
 
 [build-dependencies]
@@ -24,4 +27,5 @@ slint-build = "1.15.1"
 winresource = "0.1.19"
 
 [dev-dependencies]
+filetime = "0.2"
 i-slint-backend-testing = "1.15.1"

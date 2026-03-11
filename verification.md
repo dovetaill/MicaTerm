@@ -98,3 +98,49 @@ Date: 2026-03-11 06:46:34 UTC
 
 - 本报告仅确认自动化验证矩阵通过。
 - Windows 11 手工验证尚未执行，因此当前只能确认代码路径与契约层正确，不能在本环境中宣称“窗口越界切换主题”场景已实机验证。
+
+## System Logging Verification
+
+Date: 2026-03-11 17:00:25 CST
+
+### Source Documents
+
+- Design: `docs/plans/2026-03-11-system-logging-design.md`
+- Implementation Plan: `docs/plans/2026-03-11-system-logging-implementation-plan.md`
+
+### Commands Executed
+
+- [x] `cargo fmt`
+- [x] `cargo fmt --check`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+- [x] `cargo test --test logging_paths --test logging_runtime --test logging_cleanup --test panic_logging -q`
+- [x] `cargo test --test bootstrap_smoke --test top_status_bar_smoke -q`
+- [x] `bash tests/bootstrap_logging_contract_smoke.sh`
+- [x] `cargo test --tests -q`
+
+### Automated Results
+
+- `cargo fmt`: passed
+- `cargo fmt --check`: passed
+- `cargo check --workspace`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+- `cargo test --test logging_paths --test logging_runtime --test logging_cleanup --test panic_logging -q`: passed
+- `cargo test --test bootstrap_smoke --test top_status_bar_smoke -q`: passed
+- `bash tests/bootstrap_logging_contract_smoke.sh`: passed
+- `cargo test --tests -q`: passed
+
+### Logging Conclusions
+
+- [x] 默认模式下 `ERROR` 可写入 `logs/system-error.log`
+- [x] 默认模式下 `DEBUG` 事件被过滤
+- [x] `env override > portable marker > standard local app data` 路径优先级测试通过
+- [x] panic 子进程 smoke 会生成 `crash/panic-*.log`
+- [x] cleanup 策略满足 `14 天 + 64MB`
+- [x] `bootstrap` 的 `eprintln!` 已迁移为统一 `tracing::error!`
+- [x] 顶部状态栏现有绑定与 Fluent SVG 资产未回归
+
+### Notes
+
+- `panic_logging` 的输出中会看到子进程内那次故意触发的 panic 打印为 `FAILED`，这是 smoke 的预期现象；父进程依赖该非零退出码与 `crash/` 文件完成断言，因此整体测试结果为通过。
+- 当前环境未执行 GUI 实机验证，因此本报告只确认自动化契约、回归和编译验证通过。

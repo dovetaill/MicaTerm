@@ -28,7 +28,18 @@ fn sync_theme_and_window_effects(
 ) {
     window.set_dark_mode(state.theme_mode == ThemeMode::Dark);
     let request = build_native_window_appearance_request(state.theme_mode, window_appearance());
-    let _ = effects.apply_to_app_window(window, &request);
+    let report = effects.apply_to_app_window(window, &request);
+    if matches!(
+        report.backdrop_status,
+        crate::app::window_effects::BackdropApplyStatus::Failed
+    ) {
+        tracing::error!(
+            target: "app.window",
+            theme = ?request.theme,
+            backdrop = ?request.backdrop,
+            "failed to apply native window appearance"
+        );
+    }
 }
 
 fn sync_top_status_bar_state(
@@ -49,7 +60,11 @@ fn load_ui_preferences(store: &Option<Rc<UiPreferencesStore>>) -> UiPreferences 
         Some(store) => match store.load_or_default() {
             Ok(prefs) => prefs,
             Err(err) => {
-                eprintln!("failed to load ui preferences: {err}");
+                tracing::error!(
+                    target: "config.preferences",
+                    error = %err,
+                    "failed to load ui preferences"
+                );
                 UiPreferences::default()
             }
         },
@@ -61,7 +76,11 @@ fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellView
     if let Some(store) = store
         && let Err(err) = store.save(&UiPreferences::from(state))
     {
-        eprintln!("failed to save ui preferences: {err}");
+        tracing::error!(
+            target: "config.preferences",
+            error = %err,
+            "failed to save ui preferences"
+        );
     }
 }
 
@@ -177,7 +196,11 @@ pub fn bind_top_status_bar(window: &AppWindow) {
     let store = match UiPreferencesStore::for_app() {
         Ok(store) => Some(store),
         Err(err) => {
-            eprintln!("failed to resolve ui preferences store: {err}");
+            tracing::error!(
+                target: "config.preferences",
+                error = %err,
+                "failed to resolve ui preferences store"
+            );
             None
         }
     };
