@@ -5,9 +5,10 @@ export component TitlebarIconButton inherits Rectangle {
     in property <image> active-icon-source;
     in property <bool> active: false;
     in property <string> tooltip-text;
+    in property <string> tooltip-source-id;
     callback clicked;
-    callback tooltip-open-requested(string, length, length);
-    callback tooltip-close-requested();
+    callback tooltip-open-requested(string, string, length, length);
+    callback tooltip-close-requested(string);
 
     private property <image> displayed-icon: root.active
         && root.active-icon-source.width > 0
@@ -40,18 +41,19 @@ export component TitlebarIconButton inherits Rectangle {
     changed has-hover => {
         if self.has-hover && root.tooltip-text != "" {
             root.tooltip-open-requested(
+                root.tooltip-source-id,
                 root.tooltip-text,
                 self.absolute-position.x + self.width / 2,
                 self.absolute-position.y + self.height + 8px,
             );
         } else {
-            root.tooltip-close-requested();
+            root.tooltip-close-requested(root.tooltip-source-id);
         }
     }
 
     touch := TouchArea {
         clicked => {
-            root.tooltip-close-requested();
+            root.tooltip-close-requested(root.tooltip-source-id);
             root.clicked();
         }
     }

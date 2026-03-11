@@ -1,15 +1,18 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 
-export component TitlebarTooltip inherits PopupWindow {
+export component TitlebarTooltip inherits Rectangle {
     in property <string> text;
     in property <length> anchor-x: 0px;
     in property <length> anchor-y: 0px;
+    in property <bool> tooltip-visible: false;
+    in property <length> host-width: 0px;
 
-    x: root.anchor-x - root.width / 2;
+    x: max(0px, min(root.anchor-x - self.width / 2, max(0px, root.host-width - self.width)));
     y: root.anchor-y;
     width: max(96px, tooltip-label.preferred-width + 20px);
     height: max(28px, tooltip-label.preferred-height + 10px);
-    close-policy: PopupClosePolicy.no-auto-close;
+    visible: root.tooltip-visible;
+    z: 100;
 
     background-layer := Rectangle {
         width: parent.width;

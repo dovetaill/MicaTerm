@@ -1,11 +1,11 @@
-# Top Status Bar Style Bugfix2 Verification
+# Top Status Bar Style Bugfix3 Verification
 
-Date: 2026-03-11 13:18:15 CST
+Date: 2026-03-11 14:33:42 CST
 
 ## Source Documents
 
-- Design: `docs/plans/2026-03-11-top-status-bar-style-bugfix2-design.md`
-- Implementation Plan: `docs/plans/2026-03-11-top-status-bar-style-bugfix2-implementation-plan.md`
+- Design: `docs/plans/2026-03-11-top-status-bar-style-bugfix3-design.md`
+- Implementation Plan: `docs/plans/2026-03-11-top-status-bar-style-bugfix3-implementation-plan.md`
 
 ## Commands Executed
 
@@ -27,23 +27,20 @@ Date: 2026-03-11 13:18:15 CST
 - `bash tests/top_status_bar_ui_contract_smoke.sh`: passed
 - `cargo clippy --workspace -- -D warnings`: passed
 
+## Final Review Gate
+
+- [x] Tooltip is rendered by in-window overlay
+- [x] Shared tooltip remains a single instance in `Titlebar`
+- [x] Button hover still flows through shared intent callbacks
+- [x] `logs/titlebar-tooltip.log` is created on demand by the Rust bridge
+- [x] Hover `schedule / show / close` events are emitted for debugging
+- [ ] Windows 11 manual hover behavior verified against the design
+
 ## GUI Smoke Status
 
-- [ ] `cargo run`
+- [ ] `cargo run` on Windows 11
 - GUI smoke was not executed in this environment.
 - Environment evidence:
   - `DISPLAY=`
   - `WAYLAND_DISPLAY=`
-- No desktop-capable session was available for manual window interaction.
-
-## Windows 11 Manual Checklist
-
-- [ ] `Navigation` fixed at the far left
-- [ ] Titlebar brand uses the new header logotype
-- [ ] `Workspace` no longer appears in the titlebar
-- [ ] `SSH` no longer appears in the titlebar
-- [ ] Right-side order is `theme -> panel-toggle -> divider -> pin -> min -> maximize/restore -> close`
-- [ ] `theme` toggles immediately and persists after restart
-- [ ] `pin` toggles always-on-top immediately and persists after restart
-- [ ] All titlebar buttons show tooltip on hover
-- [ ] `maximize / restore` icon changes correctly with window state
+- Manual follow-up is still required for real hover rendering, rapid button sweep, menu-open close behavior, and log inspection on Windows 11.

@@ -1,10 +1,12 @@
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use anyhow::Result;
 use slint::ComponentHandle;
 
 use crate::AppWindow;
+use crate::app::tooltip_debug_log::{TooltipDebugEvent, TooltipDebugLog};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::windowing::WindowController;
 use crate::shell::view_model::ShellViewModel;
@@ -48,8 +50,28 @@ fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellView
     }
 }
 
-pub fn bind_top_status_bar_with_store(window: &AppWindow, store: Option<UiPreferencesStore>) {
+fn create_tooltip_debug_logger(log_root: Option<PathBuf>) -> Option<Rc<TooltipDebugLog>> {
+    let logger = match log_root {
+        Some(root) => TooltipDebugLog::in_directory(root.join("logs")),
+        None => TooltipDebugLog::for_current_dir(),
+    };
+
+    match logger {
+        Ok(logger) => Some(Rc::new(logger)),
+        Err(err) => {
+            eprintln!("failed to initialize tooltip debug log: {err}");
+            None
+        }
+    }
+}
+
+pub fn bind_top_status_bar_with_store_and_log_dir(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    log_root: Option<PathBuf>,
+) {
     let store = store.map(Rc::new);
+    let logger = create_tooltip_debug_logger(log_root);
     let prefs = load_ui_preferences(&store);
     let view_model = Rc::new(RefCell::new(ShellViewModel {
         theme_mode: prefs.theme_mode,
@@ -59,6 +81,21 @@ pub fn bind_top_status_bar_with_store(window: &AppWindow, store: Option<UiPrefer
     let controller = Rc::new(WindowController::new(window));
 
     sync_top_status_bar_state(window, &view_model.borrow());
+
+    let logger_ref = logger.clone();
+    window.on_tooltip_debug_event_requested(move |source_id, phase, text, anchor_x, anchor_y| {
+        if let Some(logger) = &logger_ref
+            && let Err(err) = logger.append(TooltipDebugEvent {
+                phase: phase.as_str(),
+                source_id: source_id.as_str(),
+                text: text.as_str(),
+                anchor_x,
+                anchor_y,
+            })
+        {
+            eprintln!("failed to append tooltip debug event: {err}");
+        }
+    });
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
@@ -145,6 +182,10 @@ pub fn bind_top_status_bar_with_store(window: &AppWindow, store: Option<UiPrefer
         state.set_window_maximized(next);
         window.set_is_window_maximized(next);
     });
+}
+
+pub fn bind_top_status_bar_with_store(window: &AppWindow, store: Option<UiPreferencesStore>) {
+    bind_top_status_bar_with_store_and_log_dir(window, store, None);
 }
 
 pub fn bind_top_status_bar(window: &AppWindow) {

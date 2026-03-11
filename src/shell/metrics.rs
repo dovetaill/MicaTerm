@@ -9,6 +9,9 @@ impl ShellMetrics {
     pub const TITLEBAR_MIN_DRAG_WIDTH: u32 = 96;
     pub const TITLEBAR_TOOL_BUTTON_SIZE: u32 = 36;
     pub const TITLEBAR_TOOL_ICON_SIZE: u32 = 20;
+    pub const TITLEBAR_TOOLTIP_DELAY_MS: u32 = 280;
+    pub const TITLEBAR_TOOLTIP_OFFSET_Y: u32 = 8;
+    pub const TITLEBAR_TOOLTIP_MIN_WIDTH: u32 = 96;
     pub const ACTIVITY_BAR_WIDTH: u32 = 48;
     pub const ASSETS_SIDEBAR_WIDTH: u32 = 256;
     pub const TAB_BAR_HEIGHT: u32 = 38;

@@ -11,6 +11,7 @@ export component Titlebar inherits Rectangle {
     in property <bool> is-window-maximized: false;
     in property <bool> is-window-active: true;
     in property <bool> is-window-always-on-top: false;
+    in property <bool> tooltip-visible: false;
 
     private property <image> navigation-icon: @image-url("../../assets/icons/fluent/navigation-24-regular.svg");
     private property <image> header-logotype: @image-url("../../assets/icons/mica-term-header-logotype.svg");
@@ -25,6 +26,8 @@ export component Titlebar inherits Rectangle {
     private property <image> restore-icon: @image-url("../../assets/icons/fluent/restore-20-regular.svg");
     private property <image> close-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
     private property <string> tooltip-text-value: "";
+    private property <bool> tooltip-visible-value: false;
+    private property <string> tooltip-source-id-value: "";
     private property <length> tooltip-anchor-x-value: 0px;
     private property <length> tooltip-anchor-y-value: 0px;
 
@@ -38,6 +41,7 @@ export component Titlebar inherits Rectangle {
     callback minimize-requested;
     callback maximize-toggle-requested;
     callback close-requested;
+    callback tooltip-debug-event-requested(string, string, string, length, length);
 
     height: 48px;
     background: ThemeTokens.command-tint;
@@ -46,7 +50,7 @@ export component Titlebar inherits Rectangle {
     border-color: ThemeTokens.shell-stroke;
 
     changed show-global-menu => {
-        close-tooltip();
+        close-tooltip("");
         if root.show-global-menu {
             global-menu.show();
         } else {
@@ -54,17 +58,36 @@ export component Titlebar inherits Rectangle {
         }
     }
 
-    function schedule-tooltip(text: string, anchor-x: length, anchor-y: length) {
+    function schedule-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length) {
+        root.tooltip-source-id-value = source-id;
         root.tooltip-text-value = text;
-        root.tooltip-anchor-x-value = anchor-x;
-        root.tooltip-anchor-y-value = anchor-y;
+        root.tooltip-anchor-x-value = anchor-x - self.absolute-position.x;
+        root.tooltip-anchor-y-value = anchor-y - self.absolute-position.y;
+        root.tooltip-debug-event-requested(
+            source-id,
+            "schedule-tooltip",
+            text,
+            root.tooltip-anchor-x-value,
+            root.tooltip-anchor-y-value,
+        );
+        root.tooltip-visible-value = false;
         tooltip-delay.restart();
     }
 
-    function close-tooltip() {
-        root.tooltip-text-value = "";
-        tooltip-delay.stop();
-        tooltip-popup.close();
+    function close-tooltip(source-id: string) {
+        if root.tooltip-source-id-value == source-id || source-id == "" {
+            root.tooltip-debug-event-requested(
+                root.tooltip-source-id-value,
+                "close-tooltip",
+                root.tooltip-text-value,
+                root.tooltip-anchor-x-value,
+                root.tooltip-anchor-y-value,
+            );
+            root.tooltip-visible-value = false;
+            root.tooltip-text-value = "";
+            root.tooltip-source-id-value = "";
+            tooltip-delay.stop();
+        }
     }
 
     content := HorizontalLayout {
@@ -86,17 +109,18 @@ export component Titlebar inherits Rectangle {
                 icon-source: root.navigation-icon;
                 active: root.show-global-menu;
                 tooltip-text: "Open menu";
+                tooltip-source-id: "nav-button";
 
                 clicked => {
                     root.toggle-global-menu-requested();
                 }
 
-                tooltip-open-requested(text, anchor-x, anchor-y) => {
-                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y);
                 }
 
-                tooltip-close-requested => {
-                    root.close-tooltip();
+                tooltip-close-requested(source-id) => {
+                    root.close-tooltip(source-id);
                 }
             }
         }
@@ -150,17 +174,18 @@ export component Titlebar inherits Rectangle {
                 y: 0px;
                 icon-source: root.dark-mode ? root.dark-theme-icon : root.weather-sunny-icon;
                 tooltip-text: root.dark-mode ? "Switch to light mode" : "Switch to dark mode";
+                tooltip-source-id: "theme-button";
 
                 clicked => {
                     root.toggle-theme-mode-requested();
                 }
 
-                tooltip-open-requested(text, anchor-x, anchor-y) => {
-                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y);
                 }
 
-                tooltip-close-requested => {
-                    root.close-tooltip();
+                tooltip-close-requested(source-id) => {
+                    root.close-tooltip(source-id);
                 }
             }
 
@@ -171,17 +196,18 @@ export component Titlebar inherits Rectangle {
                 active-icon-source: root.panel-right-icon-filled;
                 active: root.show-right-panel;
                 tooltip-text: "Toggle right panel";
+                tooltip-source-id: "panel-toggle-button";
 
                 clicked => {
                     root.toggle-right-panel-requested();
                 }
 
-                tooltip-open-requested(text, anchor-x, anchor-y) => {
-                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y);
                 }
 
-                tooltip-close-requested => {
-                    root.close-tooltip();
+                tooltip-close-requested(source-id) => {
+                    root.close-tooltip(source-id);
                 }
             }
 
@@ -200,17 +226,18 @@ export component Titlebar inherits Rectangle {
                 icon-source: root.is-window-always-on-top ? root.pin-icon : root.pin-off-icon;
                 active: root.is-window-always-on-top;
                 tooltip-text: root.is-window-always-on-top ? "Unpin window from top" : "Pin window on top";
+                tooltip-source-id: "pin-button";
 
                 clicked => {
                     root.toggle-window-always-on-top-requested();
                 }
 
-                tooltip-open-requested(text, anchor-x, anchor-y) => {
-                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y);
                 }
 
-                tooltip-close-requested => {
-                    root.close-tooltip();
+                tooltip-close-requested(source-id) => {
+                    root.close-tooltip(source-id);
                 }
             }
         }
@@ -226,17 +253,18 @@ export component Titlebar inherits Rectangle {
                 y: 0px;
                 icon-source: root.minimize-icon;
                 tooltip-text: "Minimize window";
+                tooltip-source-id: "minimize-button";
 
                 clicked => {
                     root.minimize-requested();
                 }
 
-                tooltip-open-requested(text, anchor-x, anchor-y) => {
-                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y);
                 }
 
-                tooltip-close-requested => {
-                    root.close-tooltip();
+                tooltip-close-requested(source-id) => {
+                    root.close-tooltip(source-id);
                 }
             }
 
@@ -245,17 +273,18 @@ export component Titlebar inherits Rectangle {
                 y: 0px;
                 icon-source: root.is-window-maximized ? root.restore-icon : root.maximize-icon;
                 tooltip-text: root.is-window-maximized ? "Restore window" : "Maximize window";
+                tooltip-source-id: "maximize-button";
 
                 clicked => {
                     root.maximize-toggle-requested();
                 }
 
-                tooltip-open-requested(text, anchor-x, anchor-y) => {
-                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y);
                 }
 
-                tooltip-close-requested => {
-                    root.close-tooltip();
+                tooltip-close-requested(source-id) => {
+                    root.close-tooltip(source-id);
                 }
             }
 
@@ -265,17 +294,18 @@ export component Titlebar inherits Rectangle {
                 icon-source: root.close-icon;
                 danger: true;
                 tooltip-text: "Close window";
+                tooltip-source-id: "close-button";
 
                 clicked => {
                     root.close-requested();
                 }
 
-                tooltip-open-requested(text, anchor-x, anchor-y) => {
-                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y);
                 }
 
-                tooltip-close-requested => {
-                    root.close-tooltip();
+                tooltip-close-requested(source-id) => {
+                    root.close-tooltip(source-id);
                 }
             }
         }
@@ -289,7 +319,14 @@ export component Titlebar inherits Rectangle {
             self.running = false;
 
             if root.tooltip-text-value != "" {
-                tooltip-popup.show();
+                root.tooltip-visible-value = true;
+                root.tooltip-debug-event-requested(
+                    root.tooltip-source-id-value,
+                    "show-tooltip",
+                    root.tooltip-text-value,
+                    root.tooltip-anchor-x-value,
+                    root.tooltip-anchor-y-value,
+                );
             }
         }
     }
@@ -311,9 +348,11 @@ export component Titlebar inherits Rectangle {
         }
     }
 
-    tooltip-popup := TitlebarTooltip {
+    tooltip-overlay := TitlebarTooltip {
         text: root.tooltip-text-value;
         anchor-x: root.tooltip-anchor-x-value;
         anchor-y: root.tooltip-anchor-y-value;
+        tooltip-visible: root.tooltip-visible-value;
+        host-width: root.width;
     }
 }
