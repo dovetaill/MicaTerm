@@ -2,7 +2,10 @@ import { ThemeTokens } from "../theme/tokens.slint";
 import { SegmentedControl } from "../components/segmented-control.slint";
 
 export component RightPanel inherits Rectangle {
-    width: 392px;
+    in property <bool> expanded: false;
+
+    width: root.expanded ? 392px : 0px;
+    visible: root.expanded;
     background: ThemeTokens.panel-tint;
     border-radius: 14px;
     border-width: 1px;

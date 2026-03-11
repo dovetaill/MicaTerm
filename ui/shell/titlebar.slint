@@ -1,15 +1,212 @@
 import { ThemeTokens } from "../theme/tokens.slint";
-import { CommandEntry } from "../components/command-entry.slint";
+import { TitlebarIconButton } from "../components/titlebar-icon-button.slint";
+import { TitlebarMenu } from "../components/titlebar-menu.slint";
+import { WindowControlButton } from "../components/window-control-button.slint";
 
 export component Titlebar inherits Rectangle {
+    in property <bool> show-right-panel: false;
+    in property <bool> show-settings-menu: false;
+    in property <bool> is-window-maximized: false;
+    in property <bool> is-window-active: true;
+
+    callback drag-requested;
+    callback drag-double-clicked;
+    callback toggle-right-panel-requested;
+    callback toggle-settings-menu-requested;
+    callback close-settings-menu-requested;
+    callback minimize-requested;
+    callback maximize-toggle-requested;
+    callback close-requested;
+
     height: 48px;
     background: ThemeTokens.command-tint;
     border-radius: 12px;
+    border-width: 1px;
+    border-color: ThemeTokens.shell-stroke;
 
-    CommandEntry {
-        x: 8px;
+    changed show-settings-menu => {
+        if root.show-settings-menu {
+            settings-menu.show();
+        } else {
+            settings-menu.close();
+        }
+    }
+
+    content := HorizontalLayout {
+        x: 12px;
         y: 8px;
-        width: 320px;
+        width: parent.width - 12px;
         height: 32px;
+        spacing: 8px;
+
+        brand-zone := Rectangle {
+            width: 220px;
+            background: transparent;
+
+            brand-chip := Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 10px;
+                background: ThemeTokens.shell-surface;
+
+                Text {
+                    text: "MT";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Text {
+                x: 44px;
+                width: 112px;
+                height: parent.height;
+                text: "Mica Term";
+                color: ThemeTokens.text-primary;
+                vertical-alignment: center;
+            }
+
+            TitlebarIconButton {
+                x: parent.width - self.width;
+                label: "M";
+
+                clicked => {
+                    root.toggle-settings-menu-requested();
+                }
+            }
+        }
+
+        drag-zone := Rectangle {
+            background: transparent;
+            border-radius: 8px;
+
+            Text {
+                text: "Workspace";
+                color: ThemeTokens.text-primary;
+                opacity: 0.48;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            drag-touch := TouchArea {
+                moved => {
+                    if self.pressed {
+                        root.drag-requested();
+                    }
+                }
+
+                double-clicked => {
+                    root.drag-double-clicked();
+                }
+            }
+        }
+
+        actions-zone := Rectangle {
+            width: 120px;
+            background: transparent;
+            opacity: root.is-window-active ? 1 : 0.72;
+
+            status-slot := Rectangle {
+                width: 48px;
+                height: 32px;
+                border-radius: 999px;
+                background: ThemeTokens.panel-tint;
+
+                Text {
+                    text: "SSH";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            TitlebarIconButton {
+                x: 52px;
+                label: root.show-right-panel ? "R-" : "R+";
+                active: root.show-right-panel;
+
+                clicked => {
+                    root.toggle-right-panel-requested();
+                }
+            }
+
+            settings-button := TitlebarIconButton {
+                x: 88px;
+                label: "S";
+                active: root.show-settings-menu;
+
+                clicked => {
+                    root.toggle-settings-menu-requested();
+                }
+            }
+        }
+
+        drag-safety-zone := Rectangle {
+            width: 96px;
+            background: transparent;
+            border-radius: 8px;
+
+            safe-drag-touch := TouchArea {
+                moved => {
+                    if self.pressed {
+                        root.drag-requested();
+                    }
+                }
+
+                double-clicked => {
+                    root.drag-double-clicked();
+                }
+            }
+        }
+
+        window-controls := Rectangle {
+            width: 138px;
+            background: transparent;
+            opacity: root.is-window-active ? 1 : 0.72;
+
+            WindowControlButton {
+                label: "-";
+
+                clicked => {
+                    root.minimize-requested();
+                }
+            }
+
+            WindowControlButton {
+                x: 46px;
+                label: root.is-window-maximized ? "R" : "+";
+
+                clicked => {
+                    root.maximize-toggle-requested();
+                }
+            }
+
+            WindowControlButton {
+                x: 92px;
+                label: "X";
+                danger: true;
+
+                clicked => {
+                    root.close-requested();
+                }
+            }
+        }
+    }
+
+    settings-menu := TitlebarMenu {
+        x: actions-zone.absolute-position.x - 72px;
+        y: actions-zone.absolute-position.y + actions-zone.height + 6px;
+
+        close-requested => {
+            root.close-settings-menu-requested();
+        }
+
+        settings-selected => {
+            root.close-settings-menu-requested();
+        }
+
+        appearance-selected => {
+            root.close-settings-menu-requested();
+        }
     }
 }

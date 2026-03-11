@@ -1,4 +1,6 @@
-use mica_term::app::windowing::{MaterialKind, window_appearance};
+use mica_term::app::windowing::{
+    MaterialKind, next_maximize_state, window_appearance, window_command_spec,
+};
 use mica_term::shell::metrics::ShellMetrics;
 
 #[test]
@@ -15,4 +17,16 @@ fn window_shell_prefers_frameless_mica_alt() {
     let appearance = window_appearance();
     assert!(appearance.no_frame);
     assert_eq!(appearance.material, MaterialKind::MicaAlt);
+}
+
+#[test]
+fn top_status_bar_window_commands_match_the_approved_strategy() {
+    let spec = window_command_spec();
+
+    assert!(spec.uses_winit_drag);
+    assert!(spec.self_drawn_controls);
+    assert!(spec.supports_double_click_maximize);
+
+    assert!(next_maximize_state(false));
+    assert!(!next_maximize_state(true));
 }
