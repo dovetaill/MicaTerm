@@ -1,8 +1,162 @@
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AssetsSidebar } from "assets-sidebar.slint";
+import { SidebarNavButton } from "../components/sidebar-nav-button.slint";
+
+export struct SidebarNavItem {
+    id: string,
+    label: string,
+    active: bool,
+}
 
 export component Sidebar inherits Rectangle {
-    width: 48px;
-    background: ThemeTokens.shell-surface;
-    border-width: 1px;
-    border-color: ThemeTokens.shell-stroke;
+    in property <[SidebarNavItem]> items;
+    in property <bool> show-assets-sidebar: true;
+    in property <string> active-sidebar-destination: "console";
+    private property <string> tooltip-text-value: "";
+    private property <bool> tooltip-visible-value: false;
+    private property <string> tooltip-source-id-value: "";
+    private property <string> tooltip-close-source-id-value: "";
+    private property <length> tooltip-anchor-x-value: 0px;
+    private property <length> tooltip-anchor-y-value: 0px;
+    private property <length> tooltip-anchor-width-value: 0px;
+    out property <string> tooltip-text <=> root.tooltip-text-value;
+    out property <bool> tooltip-visible <=> root.tooltip-visible-value;
+    out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
+    out property <length> tooltip-anchor-y <=> root.tooltip-anchor-y-value;
+    out property <length> tooltip-anchor-width <=> root.tooltip-anchor-width-value;
+    callback toggle-assets-sidebar-requested();
+    callback destination-selected(string);
+
+    width: 48px + (root.show-assets-sidebar ? 256px : 0px);
+    background: transparent;
+
+    function schedule-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length, anchor-width: length) {
+        root.tooltip-anchor-x-value = anchor-x;
+        root.tooltip-anchor-y-value = anchor-y;
+        root.tooltip-anchor-width-value = anchor-width;
+
+        if root.tooltip-source-id-value == source-id && root.tooltip-text-value == text {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+        } else {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+            root.tooltip-source-id-value = source-id;
+            root.tooltip-text-value = text;
+            root.tooltip-visible-value = false;
+            tooltip-delay.start();
+        }
+    }
+
+    function queue-tooltip-close(source-id: string) {
+        if root.tooltip-source-id-value == source-id && source-id != "" {
+            root.tooltip-close-source-id-value = source-id;
+            tooltip-close-delay.start();
+        }
+    }
+
+    function close-tooltip(source-id: string) {
+        if root.tooltip-source-id-value == source-id || source-id == "" {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+            root.tooltip-visible-value = false;
+            root.tooltip-text-value = "";
+            root.tooltip-source-id-value = "";
+            tooltip-delay.stop();
+        }
+    }
+
+    HorizontalLayout {
+        spacing: 0px;
+
+        activity-bar := Rectangle {
+            width: 48px;
+            background: ThemeTokens.shell-surface;
+            border-width: 1px;
+            border-color: ThemeTokens.shell-stroke;
+
+            VerticalLayout {
+                padding-top: 6px;
+                padding-left: 6px;
+                padding-right: 6px;
+                spacing: 8px;
+
+                toggle-button := SidebarNavButton {
+                    item-id: "sidebar-toggle";
+                    label: "Toggle Sidebar";
+                    sidebar-open: root.show-assets-sidebar;
+                    tooltip-text: root.show-assets-sidebar ? "Collapse sidebar" : "Expand sidebar";
+                    tooltip-source-id: "sidebar-toggle";
+                    clicked(clicked-id) => {
+                        root.toggle-assets-sidebar-requested();
+                    }
+
+                    tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                        root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                    }
+
+                    tooltip-close-requested(source-id) => {
+                        root.queue-tooltip-close(source-id);
+                    }
+                }
+
+                divider-line := Rectangle {
+                    width: parent.width - 12px;
+                    height: 1px;
+                    background: ThemeTokens.shell-stroke;
+                }
+
+                for item in root.items : SidebarNavButton {
+                    item-id: item.id;
+                    label: item.label;
+                    active: item.active;
+                    sidebar-open: root.show-assets-sidebar;
+                    tooltip-text: item.label;
+                    tooltip-source-id: item.id;
+                    clicked(clicked-id) => {
+                        root.destination-selected(clicked-id);
+                    }
+
+                    tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                        root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                    }
+
+                    tooltip-close-requested(source-id) => {
+                        root.queue-tooltip-close(source-id);
+                    }
+                }
+            }
+        }
+
+        AssetsSidebar {
+            expanded: root.show-assets-sidebar;
+            active-panel: root.active-sidebar-destination;
+        }
+    }
+
+    tooltip-delay := Timer {
+        interval: 280ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.tooltip-text-value != "" {
+                root.tooltip-visible-value = true;
+            }
+        }
+    }
+
+    tooltip-close-delay := Timer {
+        interval: 80ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.tooltip-close-source-id-value != "" {
+                root.close-tooltip(root.tooltip-close-source-id-value);
+            }
+        }
+    }
 }

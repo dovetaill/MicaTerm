@@ -1,3 +1,4 @@
+use crate::shell::sidebar::SidebarDestination;
 use crate::theme::ThemeMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +14,8 @@ pub struct ShellViewModel {
     pub show_welcome: bool,
     pub show_right_panel: bool,
     pub show_global_menu: bool,
+    pub show_assets_sidebar: bool,
+    pub active_sidebar_destination: SidebarDestination,
     pub is_window_maximized: bool,
     pub is_window_active: bool,
     pub theme_mode: ThemeMode,
@@ -25,6 +28,8 @@ impl Default for ShellViewModel {
             show_welcome: true,
             show_right_panel: false,
             show_global_menu: false,
+            show_assets_sidebar: true,
+            active_sidebar_destination: SidebarDestination::Console,
             is_window_maximized: false,
             is_window_active: true,
             theme_mode: ThemeMode::Dark,
@@ -44,6 +49,15 @@ impl ShellViewModel {
 
     pub fn close_global_menu(&mut self) {
         self.show_global_menu = false;
+    }
+
+    pub fn toggle_assets_sidebar(&mut self) {
+        self.show_assets_sidebar = !self.show_assets_sidebar;
+    }
+
+    pub fn select_sidebar_destination(&mut self, destination: SidebarDestination) {
+        self.active_sidebar_destination = destination;
+        self.show_assets_sidebar = true;
     }
 
     pub fn set_window_maximized(&mut self, value: bool) {

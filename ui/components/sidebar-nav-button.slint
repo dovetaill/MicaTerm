@@ -1,0 +1,71 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component SidebarNavButton inherits Rectangle {
+    in property <string> item-id;
+    in property <string> label;
+    in property <bool> active: false;
+    in property <bool> sidebar-open: true;
+    in property <string> tooltip-text;
+    in property <string> tooltip-source-id;
+    callback clicked(string);
+    callback tooltip-open-requested(string, string, length, length, length);
+    callback tooltip-close-requested(string);
+
+    private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
+    private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
+    private property <image> console-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
+    private property <image> snippets-icon: @image-url("../../assets/icons/fluent/document-code-16-regular.svg");
+    private property <image> keychain-icon: @image-url("../../assets/icons/fluent/key-multiple-20-regular.svg");
+
+    private property <image> displayed-icon:
+        item-id == "sidebar-toggle"
+            ? (sidebar-open ? folder-open-icon : folder-icon)
+            : item-id == "console"
+                ? console-icon
+                : item-id == "snippets"
+                    ? snippets-icon
+                    : keychain-icon;
+    out property <bool> has-hover: touch.has-hover;
+
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    border-width: root.active ? 1px : 0px;
+    border-color: ThemeTokens.shell-stroke;
+    background: touch.pressed
+        ? ThemeTokens.panel-tint
+        : (touch.has-hover || root.active)
+            ? ThemeTokens.shell-surface
+            : transparent;
+
+    if (root.displayed-icon.width > 0 && root.displayed-icon.height > 0) : Image {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 20px;
+        height: 20px;
+        source <=> root.displayed-icon;
+        image-fit: contain;
+        colorize: ThemeTokens.text-primary;
+    }
+
+    changed has-hover => {
+        if self.has-hover && root.tooltip-text != "" {
+            root.tooltip-open-requested(
+                root.tooltip-source-id,
+                root.tooltip-text,
+                self.absolute-position.x,
+                self.absolute-position.y + self.height / 2,
+                self.width,
+            );
+        } else {
+            root.tooltip-close-requested(root.tooltip-source-id);
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.tooltip-close-requested(root.tooltip-source-id);
+            root.clicked(root.item-id);
+        }
+    }
+}

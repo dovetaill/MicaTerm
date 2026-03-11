@@ -1,0 +1,58 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component AssetsSidebar inherits Rectangle {
+    in property <bool> expanded: true;
+    in property <string> active-panel: "console";
+
+    width: expanded ? 256px : 0px;
+    visible: expanded;
+    clip: true;
+    background: ThemeTokens.shell-surface;
+    border-width: 1px;
+    border-color: ThemeTokens.shell-stroke;
+
+    if root.active-panel == "console" : VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+
+        Text {
+            text: "Window Console";
+            color: ThemeTokens.text-primary;
+        }
+
+        Text {
+            text: "Hosts, recent sessions, favorites";
+            color: ThemeTokens.text-primary;
+        }
+    }
+
+    if root.active-panel == "snippets" : VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+
+        Text {
+            text: "Snippets";
+            color: ThemeTokens.text-primary;
+        }
+
+        Text {
+            text: "Groups, favorites, templates";
+            color: ThemeTokens.text-primary;
+        }
+    }
+
+    if root.active-panel == "keychain" : VerticalLayout {
+        padding: 16px;
+        spacing: 8px;
+
+        Text {
+            text: "Keychain";
+            color: ThemeTokens.text-primary;
+        }
+
+        Text {
+            text: "Accounts, identities, SSH keys";
+            color: ThemeTokens.text-primary;
+        }
+    }
+}

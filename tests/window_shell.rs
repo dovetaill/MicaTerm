@@ -15,6 +15,14 @@ fn balanced_desktop_metrics_match_the_design_doc() {
 }
 
 #[test]
+fn sidebar_metrics_match_the_navigation_design() {
+    assert_eq!(ShellMetrics::ACTIVITY_BAR_WIDTH, 48);
+    assert_eq!(ShellMetrics::ASSETS_SIDEBAR_WIDTH, 256);
+    assert_eq!(ShellMetrics::ACTIVITY_BAR_BUTTON_SIZE, 36);
+    assert_eq!(ShellMetrics::ACTIVITY_BAR_ICON_SIZE, 20);
+}
+
+#[test]
 fn window_shell_prefers_frameless_mica_alt() {
     let appearance = window_appearance();
     assert!(appearance.no_frame);
