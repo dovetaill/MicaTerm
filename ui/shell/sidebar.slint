@@ -24,6 +24,8 @@ export component Sidebar inherits Rectangle {
     out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
     out property <length> tooltip-anchor-y <=> root.tooltip-anchor-y-value;
     out property <length> tooltip-anchor-width <=> root.tooltip-anchor-width-value;
+    out property <length> activity-bar-width: activity-bar.width;
+    out property <length> assets-sidebar-width: assets-sidebar.width;
     callback toggle-assets-sidebar-requested();
     callback destination-selected(string);
 
@@ -128,7 +130,7 @@ export component Sidebar inherits Rectangle {
             }
         }
 
-        AssetsSidebar {
+        assets-sidebar := AssetsSidebar {
             expanded: root.show-assets-sidebar;
             active-panel: root.active-sidebar-destination;
         }

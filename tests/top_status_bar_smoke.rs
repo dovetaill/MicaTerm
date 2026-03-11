@@ -11,6 +11,7 @@ use mica_term::app::window_effects::{
     BackdropApplyStatus, NativeWindowAppearanceRequest, NativeWindowTheme, PlatformWindowEffects,
     WindowAppearanceSyncReport,
 };
+use slint::{ComponentHandle, PhysicalSize};
 
 #[derive(Clone)]
 struct RecordingWindowEffects {
@@ -128,4 +129,17 @@ fn bootstrap_syncs_native_window_effects_on_bind_and_theme_toggle() {
     }
 
     let _ = fs::remove_file(temp_path);
+}
+
+#[test]
+fn bootstrap_applies_default_restored_size_before_run() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    app.window().set_size(PhysicalSize::new(800, 500));
+
+    bind_top_status_bar_with_store(&app, None);
+
+    let size = app.window().size();
+    assert_eq!((size.width, size.height), (1440, 900));
 }

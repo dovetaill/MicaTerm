@@ -23,7 +23,7 @@ grep -F 'in property <bool> show-assets-sidebar: true;' "$SIDEBAR" >/dev/null
 grep -F 'callback toggle-assets-sidebar-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback sidebar-destination-selected(string);' "$APP_WINDOW" >/dev/null
 grep -F 'Sidebar {' "$APP_WINDOW" >/dev/null
-grep -F 'show-assets-sidebar: root.show-assets-sidebar;' "$APP_WINDOW" >/dev/null
+grep -F 'show-assets-sidebar: root.effective-show-assets-sidebar;' "$APP_WINDOW" >/dev/null
 grep -F 'active-sidebar-destination: root.active-sidebar-destination;' "$APP_WINDOW" >/dev/null
 grep -F 'Folder Open' "$ASSETS" >/dev/null || true
 grep -F 'Window Console' "$ASSETS" >/dev/null

@@ -3,6 +3,7 @@ use std::fs;
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store;
 use mica_term::app::ui_preferences::UiPreferencesStore;
+use slint::{ComponentHandle, PhysicalSize};
 
 #[test]
 fn bootstrap_initializes_sidebar_defaults() {
@@ -67,4 +68,20 @@ fn selecting_destination_auto_expands_assets_sidebar() {
     assert_eq!(app.get_active_sidebar_destination().as_str(), "keychain");
 
     let _ = fs::remove_file(temp_path);
+}
+
+#[test]
+fn narrow_width_preserves_requested_right_panel_but_hides_it_effectively() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_toggle_right_panel_requested();
+    app.window().set_size(PhysicalSize::new(1000, 900));
+    app.invoke_shell_layout_invalidated(1000.0, 900.0);
+
+    assert!(app.get_show_right_panel());
+    assert!(!app.get_effective_show_assets_sidebar());
+    assert!(!app.get_effective_show_right_panel());
 }

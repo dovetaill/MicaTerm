@@ -3,18 +3,26 @@ import { ThemeTokens } from "../theme/tokens.slint";
 export component WelcomeView inherits Rectangle {
     background: transparent;
 
-    Text {
-        x: 24px;
-        y: 32px;
-        text: "Welcome to Mica Term";
-        color: ThemeTokens.text-primary;
-        font-size: 28px;
-    }
+    VerticalLayout {
+        padding-top: 32px;
+        padding-left: 24px;
+        padding-right: 24px;
+        spacing: 8px;
 
-    Text {
-        x: 24px;
-        y: 72px;
-        text: "Command-first SSH and SFTP workspace";
-        color: ThemeTokens.text-primary;
+        Text {
+            text: "Welcome to Mica Term";
+            color: ThemeTokens.text-primary;
+            font-size: 28px;
+        }
+
+        Text {
+            text: "Command-first SSH and SFTP workspace";
+            color: ThemeTokens.text-primary;
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            background: transparent;
+        }
     }
 }

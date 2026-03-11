@@ -1,6 +1,10 @@
 pub struct ShellMetrics;
 
 impl ShellMetrics {
+    pub const WINDOW_DEFAULT_WIDTH: u32 = 1440;
+    pub const WINDOW_DEFAULT_HEIGHT: u32 = 900;
+    pub const WINDOW_MIN_HEIGHT: u32 = 640;
+    pub const MAIN_WORKSPACE_MIN_WIDTH: u32 = 640;
     pub const TITLEBAR_HEIGHT: u32 = 48;
     pub const TITLEBAR_NAV_WIDTH: u32 = 44;
     pub const TITLEBAR_BRAND_WIDTH: u32 = 188;
@@ -24,4 +28,11 @@ impl ShellMetrics {
     pub const TAB_BAR_HEIGHT: u32 = 38;
     pub const RIGHT_PANEL_WIDTH: u32 = 392;
     pub const BASE_SPACING: u32 = 8;
+    pub const FULL_LAYOUT_MIN_WIDTH: u32 = Self::ACTIVITY_BAR_WIDTH
+        + Self::ASSETS_SIDEBAR_WIDTH
+        + Self::MAIN_WORKSPACE_MIN_WIDTH
+        + Self::RIGHT_PANEL_WIDTH;
+    pub const RIGHT_PANEL_ONLY_MIN_WIDTH: u32 =
+        Self::ACTIVITY_BAR_WIDTH + Self::MAIN_WORKSPACE_MIN_WIDTH + Self::RIGHT_PANEL_WIDTH;
+    pub const WINDOW_MIN_WIDTH: u32 = Self::ACTIVITY_BAR_WIDTH + Self::MAIN_WORKSPACE_MIN_WIDTH;
 }

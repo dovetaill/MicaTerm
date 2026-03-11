@@ -6,6 +6,7 @@ export component RightPanel inherits Rectangle {
 
     width: root.expanded ? 392px : 0px;
     visible: root.expanded;
+    clip: true;
     background: ThemeTokens.panel-tint;
     border-radius: 14px;
     border-width: 1px;

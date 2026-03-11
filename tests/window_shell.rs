@@ -23,6 +23,16 @@ fn sidebar_metrics_match_the_navigation_design() {
 }
 
 #[test]
+fn shell_layout_metrics_match_the_layout_bugfix_budget() {
+    assert_eq!(ShellMetrics::WINDOW_DEFAULT_WIDTH, 1440);
+    assert_eq!(ShellMetrics::WINDOW_DEFAULT_HEIGHT, 900);
+    assert_eq!(ShellMetrics::ACTIVITY_BAR_WIDTH, 48);
+    assert_eq!(ShellMetrics::ASSETS_SIDEBAR_WIDTH, 256);
+    assert_eq!(ShellMetrics::RIGHT_PANEL_WIDTH, 392);
+    assert_eq!(ShellMetrics::MAIN_WORKSPACE_MIN_WIDTH, 640);
+}
+
+#[test]
 fn window_shell_prefers_frameless_mica_alt() {
     let appearance = window_appearance();
     assert!(appearance.no_frame);

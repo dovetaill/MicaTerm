@@ -39,6 +39,14 @@ impl Default for ShellViewModel {
 }
 
 impl ShellViewModel {
+    pub fn requested_assets_sidebar(&self) -> bool {
+        self.show_assets_sidebar
+    }
+
+    pub fn requested_right_panel(&self) -> bool {
+        self.show_right_panel
+    }
+
     pub fn toggle_right_panel(&mut self) {
         self.show_right_panel = !self.show_right_panel;
     }

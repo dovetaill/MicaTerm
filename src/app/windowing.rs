@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use slint::{ComponentHandle, Window};
+use slint::{ComponentHandle, PhysicalSize, Window};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaterialKind {
@@ -38,6 +38,12 @@ pub fn window_command_spec() -> WindowCommandSpec {
 
 pub fn next_maximize_state(is_maximized: bool) -> bool {
     !is_maximized
+}
+
+pub fn apply_restored_window_size<C: ComponentHandle>(component: &C, size: (u32, u32)) {
+    component
+        .window()
+        .set_size(PhysicalSize::new(size.0, size.1));
 }
 
 pub struct WindowController<C: ComponentHandle> {

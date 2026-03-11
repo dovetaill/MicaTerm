@@ -9,7 +9,9 @@ use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::window_effects::{
     PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
 };
-use crate::app::windowing::{WindowController, window_appearance};
+use crate::app::windowing::{WindowController, apply_restored_window_size, window_appearance};
+use crate::shell::layout::{ShellLayoutInput, resolve_shell_layout};
+use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::{SidebarDestination, sidebar_items_for};
 use crate::shell::view_model::ShellViewModel;
 use crate::theme::ThemeMode;
@@ -19,7 +21,10 @@ pub fn app_title() -> &'static str {
 }
 
 pub fn default_window_size() -> (u32, u32) {
-    (1440, 900)
+    (
+        ShellMetrics::WINDOW_DEFAULT_WIDTH,
+        ShellMetrics::WINDOW_DEFAULT_HEIGHT,
+    )
 }
 
 fn sync_theme_and_window_effects(
@@ -71,6 +76,21 @@ fn sync_shell_state(
     sync_sidebar_state(window, state);
 }
 
+fn sync_shell_layout(window: &AppWindow, state: &ShellViewModel, logical_width: u32) {
+    let layout = resolve_shell_layout(ShellLayoutInput {
+        window_width: logical_width.max(ShellMetrics::WINDOW_MIN_WIDTH),
+        request_assets_sidebar: state.requested_assets_sidebar(),
+        request_right_panel: state.requested_right_panel(),
+    });
+
+    window.set_effective_show_assets_sidebar(layout.show_assets_sidebar);
+    window.set_effective_show_right_panel(layout.show_right_panel);
+}
+
+fn current_window_width(window: &AppWindow) -> u32 {
+    window.window().size().width
+}
+
 fn load_ui_preferences(store: &Option<Rc<UiPreferencesStore>>) -> UiPreferences {
     match store {
         Some(store) => match store.load_or_default() {
@@ -114,7 +134,13 @@ pub fn bind_top_status_bar_with_store_and_effects(
     }));
     let controller = Rc::new(WindowController::new(window));
 
+    apply_restored_window_size(window, default_window_size());
     sync_shell_state(window, &view_model.borrow(), effects.as_ref());
+    sync_shell_layout(
+        window,
+        &view_model.borrow(),
+        ShellMetrics::WINDOW_DEFAULT_WIDTH,
+    );
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
@@ -123,6 +149,7 @@ pub fn bind_top_status_bar_with_store_and_effects(
         let mut state = state.borrow_mut();
         state.toggle_right_panel();
         window.set_show_right_panel(state.show_right_panel);
+        sync_shell_layout(&window, &state, current_window_width(&window));
     });
 
     let state = Rc::clone(&view_model);
@@ -189,6 +216,7 @@ pub fn bind_top_status_bar_with_store_and_effects(
         let mut state = state.borrow_mut();
         state.toggle_assets_sidebar();
         sync_sidebar_state(&window, &state);
+        sync_shell_layout(&window, &state, current_window_width(&window));
     });
 
     let state = Rc::clone(&view_model);
@@ -200,6 +228,15 @@ pub fn bind_top_status_bar_with_store_and_effects(
             .unwrap_or(SidebarDestination::Console);
         state.select_sidebar_destination(destination);
         sync_sidebar_state(&window, &state);
+        sync_shell_layout(&window, &state, current_window_width(&window));
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_shell_layout_invalidated(move |width, _height| {
+        let window = handle.unwrap();
+        let state = state.borrow();
+        sync_shell_layout(&window, &state, width as u32);
     });
 
     let controller_ref = Rc::clone(&controller);

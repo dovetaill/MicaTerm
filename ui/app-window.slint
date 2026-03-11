@@ -14,8 +14,16 @@ export component AppWindow inherits Window {
     in-out property <bool> is-window-active: true;
     in-out property <bool> is-window-always-on-top: false;
     in-out property <bool> show-assets-sidebar: true;
+    in-out property <bool> effective-show-assets-sidebar: true;
+    in-out property <bool> effective-show-right-panel: false;
     in-out property <string> active-sidebar-destination: "console";
     in-out property <[SidebarNavItem]> sidebar-items: [];
+    out property <length> layout-titlebar-height: titlebar.height;
+    out property <length> layout-shell-body-height: body-host.height;
+    out property <length> layout-main-workspace-width: main-workspace.width;
+    out property <length> layout-right-panel-width: right-panel.width;
+    out property <length> layout-activity-bar-width: sidebar.activity-bar-width;
+    out property <length> layout-assets-sidebar-width: sidebar.assets-sidebar-width;
 
     callback drag-requested();
     callback drag-double-clicked();
@@ -29,6 +37,7 @@ export component AppWindow inherits Window {
     callback toggle-window-always-on-top-requested();
     callback toggle-assets-sidebar-requested();
     callback sidebar-destination-selected(string);
+    callback shell-layout-invalidated(length, length);
 
     title: "Mica Term";
     no-frame: true;
@@ -37,71 +46,85 @@ export component AppWindow inherits Window {
     preferred-width: 1440px;
     preferred-height: 900px;
 
-    shell-root := Rectangle {
+    changed width => {
+        root.shell-layout-invalidated(self.width, self.height);
+    }
+
+    changed height => {
+        root.shell-layout-invalidated(self.width, self.height);
+    }
+
+    shell-frame := Rectangle {
         border-radius: 14px;
         border-width: 1px;
         border-color: ThemeTokens.shell-stroke;
         background: ThemeTokens.shell-surface;
 
-        VerticalLayout {
-            spacing: 0px;
+        titlebar := Titlebar {
+            width: parent.width;
+            clip: false;
+            dark-mode: root.dark-mode;
+            show-right-panel: root.show-right-panel;
+            show-global-menu: root.show-global-menu;
+            is-window-maximized: root.is-window-maximized;
+            is-window-active: root.is-window-active;
+            is-window-always-on-top: root.is-window-always-on-top;
 
-            titlebar := Titlebar {
-                clip: false;
-                dark-mode: root.dark-mode;
-                show-right-panel: root.show-right-panel;
-                show-global-menu: root.show-global-menu;
-                is-window-maximized: root.is-window-maximized;
-                is-window-active: root.is-window-active;
-                is-window-always-on-top: root.is-window-always-on-top;
-
-                drag-requested => {
-                    root.drag-requested();
-                }
-
-                drag-double-clicked => {
-                    root.drag-double-clicked();
-                }
-
-                minimize-requested => {
-                    root.minimize-requested();
-                }
-
-                maximize-toggle-requested => {
-                    root.maximize-toggle-requested();
-                }
-
-                close-requested => {
-                    root.close-requested();
-                }
-
-                toggle-right-panel-requested => {
-                    root.toggle-right-panel-requested();
-                }
-
-                toggle-global-menu-requested => {
-                    root.toggle-global-menu-requested();
-                }
-
-                close-global-menu-requested => {
-                    root.close-global-menu-requested();
-                }
-
-                toggle-theme-mode-requested => {
-                    root.toggle-theme-mode-requested();
-                }
-
-                toggle-window-always-on-top-requested => {
-                    root.toggle-window-always-on-top-requested();
-                }
+            drag-requested => {
+                root.drag-requested();
             }
 
-            HorizontalLayout {
+            drag-double-clicked => {
+                root.drag-double-clicked();
+            }
+
+            minimize-requested => {
+                root.minimize-requested();
+            }
+
+            maximize-toggle-requested => {
+                root.maximize-toggle-requested();
+            }
+
+            close-requested => {
+                root.close-requested();
+            }
+
+            toggle-right-panel-requested => {
+                root.toggle-right-panel-requested();
+            }
+
+            toggle-global-menu-requested => {
+                root.toggle-global-menu-requested();
+            }
+
+            close-global-menu-requested => {
+                root.close-global-menu-requested();
+            }
+
+            toggle-theme-mode-requested => {
+                root.toggle-theme-mode-requested();
+            }
+
+            toggle-window-always-on-top-requested => {
+                root.toggle-window-always-on-top-requested();
+            }
+        }
+
+        body-host := Rectangle {
+            y: titlebar.height;
+            width: parent.width;
+            height: parent.height - titlebar.height;
+            background: transparent;
+
+            shell-body := HorizontalLayout {
+                width: parent.width;
+                height: parent.height;
                 spacing: 0px;
 
                 sidebar := Sidebar {
                     items: root.sidebar-items;
-                    show-assets-sidebar: root.show-assets-sidebar;
+                    show-assets-sidebar: root.effective-show-assets-sidebar;
                     active-sidebar-destination: root.active-sidebar-destination;
 
                     toggle-assets-sidebar-requested => {
@@ -113,7 +136,8 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                Rectangle {
+                main-workspace := Rectangle {
+                    horizontal-stretch: 1;
                     background: ThemeTokens.terminal-surface;
 
                     VerticalLayout {
@@ -121,7 +145,8 @@ export component AppWindow inherits Window {
 
                         TabBar {}
 
-                        Rectangle {
+                        content-host := Rectangle {
+                            vertical-stretch: 1;
                             background: transparent;
 
                             WelcomeView {}
@@ -129,8 +154,8 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                RightPanel {
-                    expanded: root.show-right-panel;
+                right-panel := RightPanel {
+                    expanded: root.effective-show-right-panel;
                 }
             }
         }
