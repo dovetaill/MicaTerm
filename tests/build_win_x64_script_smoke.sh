@@ -15,4 +15,4 @@ HELP_OUTPUT="$("$SCRIPT_PATH" --help)"
 
 grep -F "x86_64-pc-windows-gnu" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "x86_64-pc-windows-msvc" <<<"$HELP_OUTPUT" >/dev/null
-grep -F "dist/" <<<"$HELP_OUTPUT" >/dev/null
+grep -F ".zip" <<<"$HELP_OUTPUT" >/dev/null
