@@ -10,6 +10,7 @@ impl ShellMetrics {
     pub const TITLEBAR_TOOL_BUTTON_SIZE: u32 = 36;
     pub const TITLEBAR_TOOL_ICON_SIZE: u32 = 20;
     pub const TITLEBAR_TOOLTIP_DELAY_MS: u32 = 280;
+    pub const TITLEBAR_TOOLTIP_CLOSE_DEBOUNCE_MS: u32 = 80;
     pub const TITLEBAR_TOOLTIP_OFFSET_Y: u32 = 8;
     pub const TITLEBAR_TOOLTIP_MIN_WIDTH: u32 = 96;
     pub const ACTIVITY_BAR_WIDTH: u32 = 48;

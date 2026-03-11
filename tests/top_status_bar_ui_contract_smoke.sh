@@ -20,6 +20,9 @@ grep -F 'tooltip-overlay := TitlebarTooltip' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-visible: root.tooltip-visible' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-source-id-value' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-delay := Timer' "$TITLEBAR" >/dev/null
+grep -F 'tooltip-close-delay := Timer' "$TITLEBAR" >/dev/null
+grep -F 'tooltip-close-source-id-value' "$TITLEBAR" >/dev/null
+grep -F 'function queue-tooltip-close(source-id: string)' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-text: "Open menu"' "$TITLEBAR" >/dev/null
 grep -F '"Switch to dark mode"' "$TITLEBAR" >/dev/null
 grep -F '"Switch to light mode"' "$TITLEBAR" >/dev/null
@@ -47,6 +50,7 @@ grep -F 'callback tooltip-open-requested(string, string, length, length);' "$ROO
 grep -F 'callback tooltip-close-requested(string);' "$ROOT_DIR/ui/components/window-control-button.slint" >/dev/null
 grep -F 'visible: root.tooltip-visible;' "$TOOLTIP" >/dev/null
 grep -F 'TITLEBAR_TOOLTIP_DELAY_MS' "$ROOT_DIR/src/shell/metrics.rs" >/dev/null
+grep -F 'TITLEBAR_TOOLTIP_CLOSE_DEBOUNCE_MS' "$ROOT_DIR/src/shell/metrics.rs" >/dev/null
 ! grep -F 'inherits PopupWindow' "$TOOLTIP" >/dev/null
 ! grep -F 'tooltip-popup := TitlebarTooltip' "$TITLEBAR" >/dev/null
 ! grep -F 'actions-zone.absolute-position.x' "$TITLEBAR" >/dev/null

@@ -28,6 +28,7 @@ export component Titlebar inherits Rectangle {
     private property <string> tooltip-text-value: "";
     private property <bool> tooltip-visible-value: false;
     private property <string> tooltip-source-id-value: "";
+    private property <string> tooltip-close-source-id-value: "";
     private property <length> tooltip-anchor-x-value: 0px;
     private property <length> tooltip-anchor-y-value: 0px;
 
@@ -59,6 +60,8 @@ export component Titlebar inherits Rectangle {
     }
 
     function schedule-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length) {
+        tooltip-close-delay.stop();
+        root.tooltip-close-source-id-value = "";
         root.tooltip-source-id-value = source-id;
         root.tooltip-text-value = text;
         root.tooltip-anchor-x-value = anchor-x - self.absolute-position.x;
@@ -74,8 +77,17 @@ export component Titlebar inherits Rectangle {
         tooltip-delay.restart();
     }
 
+    function queue-tooltip-close(source-id: string) {
+        if root.tooltip-source-id-value == source-id && source-id != "" {
+            root.tooltip-close-source-id-value = source-id;
+            tooltip-close-delay.restart();
+        }
+    }
+
     function close-tooltip(source-id: string) {
         if root.tooltip-source-id-value == source-id || source-id == "" {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
             root.tooltip-debug-event-requested(
                 root.tooltip-source-id-value,
                 "close-tooltip",
@@ -120,7 +132,7 @@ export component Titlebar inherits Rectangle {
                 }
 
                 tooltip-close-requested(source-id) => {
-                    root.close-tooltip(source-id);
+                    root.queue-tooltip-close(source-id);
                 }
             }
         }
@@ -185,7 +197,7 @@ export component Titlebar inherits Rectangle {
                 }
 
                 tooltip-close-requested(source-id) => {
-                    root.close-tooltip(source-id);
+                    root.queue-tooltip-close(source-id);
                 }
             }
 
@@ -207,7 +219,7 @@ export component Titlebar inherits Rectangle {
                 }
 
                 tooltip-close-requested(source-id) => {
-                    root.close-tooltip(source-id);
+                    root.queue-tooltip-close(source-id);
                 }
             }
 
@@ -237,7 +249,7 @@ export component Titlebar inherits Rectangle {
                 }
 
                 tooltip-close-requested(source-id) => {
-                    root.close-tooltip(source-id);
+                    root.queue-tooltip-close(source-id);
                 }
             }
         }
@@ -264,7 +276,7 @@ export component Titlebar inherits Rectangle {
                 }
 
                 tooltip-close-requested(source-id) => {
-                    root.close-tooltip(source-id);
+                    root.queue-tooltip-close(source-id);
                 }
             }
 
@@ -284,7 +296,7 @@ export component Titlebar inherits Rectangle {
                 }
 
                 tooltip-close-requested(source-id) => {
-                    root.close-tooltip(source-id);
+                    root.queue-tooltip-close(source-id);
                 }
             }
 
@@ -305,7 +317,7 @@ export component Titlebar inherits Rectangle {
                 }
 
                 tooltip-close-requested(source-id) => {
-                    root.close-tooltip(source-id);
+                    root.queue-tooltip-close(source-id);
                 }
             }
         }
@@ -327,6 +339,19 @@ export component Titlebar inherits Rectangle {
                     root.tooltip-anchor-x-value,
                     root.tooltip-anchor-y-value,
                 );
+            }
+        }
+    }
+
+    tooltip-close-delay := Timer {
+        interval: 80ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.tooltip-close-source-id-value != "" {
+                root.close-tooltip(root.tooltip-close-source-id-value);
             }
         }
     }

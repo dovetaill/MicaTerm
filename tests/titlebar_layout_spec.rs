@@ -14,6 +14,7 @@ fn top_status_bar_layout_matches_bugfix2_budget() {
 #[test]
 fn top_status_bar_tooltip_budget_matches_bugfix3_overlay_design() {
     assert_eq!(ShellMetrics::TITLEBAR_TOOLTIP_DELAY_MS, 280);
+    assert_eq!(ShellMetrics::TITLEBAR_TOOLTIP_CLOSE_DEBOUNCE_MS, 80);
     assert_eq!(ShellMetrics::TITLEBAR_TOOLTIP_OFFSET_Y, 8);
     assert!(ShellMetrics::TITLEBAR_TOOLTIP_MIN_WIDTH >= 96);
 }
