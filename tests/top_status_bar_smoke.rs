@@ -5,7 +5,6 @@ use std::rc::Rc;
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store, bind_top_status_bar_with_store_and_effects,
-    bind_top_status_bar_with_store_and_log_dir,
 };
 use mica_term::app::ui_preferences::UiPreferencesStore;
 use mica_term::app::window_effects::{
@@ -88,40 +87,6 @@ fn bootstrap_binds_top_status_bar_callbacks_to_window_state() {
     assert!(!app.get_is_window_maximized());
 
     let _ = fs::remove_file(temp_path);
-}
-
-#[test]
-fn bootstrap_routes_tooltip_debug_events_to_log_file() {
-    i_slint_backend_testing::init_no_event_loop();
-
-    let app = AppWindow::new().unwrap();
-    let temp_root = std::env::temp_dir()
-        .join("mica-term")
-        .join("tests")
-        .join("tooltip-debug-bridge");
-    let _ = fs::remove_dir_all(&temp_root);
-
-    bind_top_status_bar_with_store_and_log_dir(
-        &app,
-        Some(UiPreferencesStore::new(
-            temp_root.join("ui-preferences.json"),
-        )),
-        Some(temp_root.clone()),
-    );
-
-    app.invoke_tooltip_debug_event_requested(
-        "nav-button".into(),
-        "show-tooltip".into(),
-        "Open menu".into(),
-        24.0,
-        44.0,
-    );
-
-    let content = fs::read_to_string(temp_root.join("logs").join("titlebar-tooltip.log")).unwrap();
-    assert!(content.contains("show-tooltip"));
-    assert!(content.contains("nav-button"));
-
-    let _ = fs::remove_dir_all(temp_root);
 }
 
 #[test]

@@ -24,7 +24,6 @@ export component AppWindow inherits Window {
     callback close-global-menu-requested();
     callback toggle-theme-mode-requested();
     callback toggle-window-always-on-top-requested();
-    callback tooltip-debug-event-requested(string, string, string, length, length);
 
     title: "Mica Term";
     no-frame: true;
@@ -89,10 +88,6 @@ export component AppWindow inherits Window {
 
                 toggle-window-always-on-top-requested => {
                     root.toggle-window-always-on-top-requested();
-                }
-
-                tooltip-debug-event-requested(source_id, phase, text, anchor_x, anchor_y) => {
-                    root.tooltip-debug-event-requested(source_id, phase, text, anchor_x, anchor_y);
                 }
             }
 

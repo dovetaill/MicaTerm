@@ -28,7 +28,6 @@ grep -F 'tooltip-close-delay.start();' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-close-source-id-value' "$TITLEBAR" >/dev/null
 grep -F 'function queue-tooltip-close(source-id: string)' "$TITLEBAR" >/dev/null
 grep -F 'root.tooltip-source-id-value == source-id && root.tooltip-text-value == text' "$TITLEBAR" >/dev/null
-grep -F 'cancel-close-tooltip' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-text: "Open menu"' "$TITLEBAR" >/dev/null
 grep -F '"Switch to dark mode"' "$TITLEBAR" >/dev/null
 grep -F '"Switch to light mode"' "$TITLEBAR" >/dev/null
@@ -64,10 +63,16 @@ grep -F 'callback tooltip-close-requested(string);' "$ROOT_DIR/ui/components/win
 grep -F 'visible: root.tooltip-visible;' "$TOOLTIP" >/dev/null
 grep -F 'TITLEBAR_TOOLTIP_DELAY_MS' "$ROOT_DIR/src/shell/metrics.rs" >/dev/null
 grep -F 'TITLEBAR_TOOLTIP_CLOSE_DEBOUNCE_MS' "$ROOT_DIR/src/shell/metrics.rs" >/dev/null
+[[ ! -f "$ROOT_DIR/src/app/tooltip_debug_log.rs" ]]
 ! grep -F 'inherits PopupWindow' "$TOOLTIP" >/dev/null
 ! grep -F 'tooltip-overlay := TitlebarTooltip' "$TITLEBAR" >/dev/null
 ! grep -F 'tooltip-delay.restart();' "$TITLEBAR" >/dev/null
 ! grep -F 'tooltip-close-delay.restart();' "$TITLEBAR" >/dev/null
+! grep -F 'tooltip-debug-event-requested' "$TITLEBAR" >/dev/null
+! grep -F 'tooltip-debug-event-requested' "$APP_WINDOW" >/dev/null
+! grep -F 'bind_top_status_bar_with_store_and_log_dir' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
+! grep -F 'bind_top_status_bar_with_store_and_effects_and_log_dir' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
+! grep -F 'titlebar-tooltip.log' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
 ! grep -F 'actions-zone.absolute-position.x' "$TITLEBAR" >/dev/null
 ! grep -F 'text: "Workspace"' "$TITLEBAR" >/dev/null
 ! grep -F 'text: "SSH"' "$TITLEBAR" >/dev/null

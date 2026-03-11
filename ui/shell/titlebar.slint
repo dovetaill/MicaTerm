@@ -44,7 +44,6 @@ export component Titlebar inherits Rectangle {
     callback minimize-requested;
     callback maximize-toggle-requested;
     callback close-requested;
-    callback tooltip-debug-event-requested(string, string, string, length, length);
 
     height: 48px;
     background: ThemeTokens.command-tint;
@@ -66,16 +65,6 @@ export component Titlebar inherits Rectangle {
         root.tooltip-anchor-y-value = anchor-y;
 
         if root.tooltip-source-id-value == source-id && root.tooltip-text-value == text {
-            if root.tooltip-close-source-id-value == source-id {
-                root.tooltip-debug-event-requested(
-                    source-id,
-                    "cancel-close-tooltip",
-                    text,
-                    root.tooltip-anchor-x-value,
-                    root.tooltip-anchor-y-value,
-                );
-            }
-
             tooltip-close-delay.stop();
             root.tooltip-close-source-id-value = "";
         } else {
@@ -83,13 +72,6 @@ export component Titlebar inherits Rectangle {
             root.tooltip-close-source-id-value = "";
             root.tooltip-source-id-value = source-id;
             root.tooltip-text-value = text;
-            root.tooltip-debug-event-requested(
-                source-id,
-                "schedule-tooltip",
-                text,
-                root.tooltip-anchor-x-value,
-                root.tooltip-anchor-y-value,
-            );
             root.tooltip-visible-value = false;
             tooltip-delay.start();
         }
@@ -106,13 +88,6 @@ export component Titlebar inherits Rectangle {
         if root.tooltip-source-id-value == source-id || source-id == "" {
             tooltip-close-delay.stop();
             root.tooltip-close-source-id-value = "";
-            root.tooltip-debug-event-requested(
-                root.tooltip-source-id-value,
-                "close-tooltip",
-                root.tooltip-text-value,
-                root.tooltip-anchor-x-value,
-                root.tooltip-anchor-y-value,
-            );
             root.tooltip-visible-value = false;
             root.tooltip-text-value = "";
             root.tooltip-source-id-value = "";
@@ -350,13 +325,6 @@ export component Titlebar inherits Rectangle {
 
             if root.tooltip-text-value != "" {
                 root.tooltip-visible-value = true;
-                root.tooltip-debug-event-requested(
-                    root.tooltip-source-id-value,
-                    "show-tooltip",
-                    root.tooltip-text-value,
-                    root.tooltip-anchor-x-value,
-                    root.tooltip-anchor-y-value,
-                );
             }
         }
     }
