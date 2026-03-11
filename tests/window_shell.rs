@@ -1,7 +1,9 @@
+use mica_term::app::window_effects::{BackdropPreference, build_native_window_appearance_request};
 use mica_term::app::windowing::{
     MaterialKind, next_maximize_state, window_appearance, window_command_spec,
 };
 use mica_term::shell::metrics::ShellMetrics;
+use mica_term::theme::ThemeMode;
 
 #[test]
 fn balanced_desktop_metrics_match_the_design_doc() {
@@ -17,6 +19,17 @@ fn window_shell_prefers_frameless_mica_alt() {
     let appearance = window_appearance();
     assert!(appearance.no_frame);
     assert_eq!(appearance.material, MaterialKind::MicaAlt);
+}
+
+#[test]
+fn window_shell_prefers_alt_mica_backdrop_for_both_themes() {
+    let appearance = window_appearance();
+
+    let dark = build_native_window_appearance_request(ThemeMode::Dark, appearance);
+    let light = build_native_window_appearance_request(ThemeMode::Light, appearance);
+
+    assert_eq!(dark.backdrop, BackdropPreference::MicaAlt);
+    assert_eq!(light.backdrop, BackdropPreference::MicaAlt);
 }
 
 #[test]

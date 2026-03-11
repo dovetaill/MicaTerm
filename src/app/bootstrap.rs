@@ -8,7 +8,10 @@ use slint::ComponentHandle;
 use crate::AppWindow;
 use crate::app::tooltip_debug_log::{TooltipDebugEvent, TooltipDebugLog};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
-use crate::app::windowing::WindowController;
+use crate::app::window_effects::{
+    PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
+};
+use crate::app::windowing::{WindowController, window_appearance};
 use crate::shell::view_model::ShellViewModel;
 use crate::theme::ThemeMode;
 
@@ -20,8 +23,22 @@ pub fn default_window_size() -> (u32, u32) {
     (1440, 900)
 }
 
-fn sync_top_status_bar_state(window: &AppWindow, state: &ShellViewModel) {
+fn sync_theme_and_window_effects(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    effects: &dyn PlatformWindowEffects,
+) {
     window.set_dark_mode(state.theme_mode == ThemeMode::Dark);
+    let request = build_native_window_appearance_request(state.theme_mode, window_appearance());
+    let _ = effects.apply_to_app_window(window, &request);
+}
+
+fn sync_top_status_bar_state(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    effects: &dyn PlatformWindowEffects,
+) {
+    sync_theme_and_window_effects(window, state, effects);
     window.set_show_right_panel(state.show_right_panel);
     window.set_show_global_menu(state.show_global_menu);
     window.set_is_window_maximized(state.is_window_maximized);
@@ -65,10 +82,11 @@ fn create_tooltip_debug_logger(log_root: Option<PathBuf>) -> Option<Rc<TooltipDe
     }
 }
 
-pub fn bind_top_status_bar_with_store_and_log_dir(
+pub fn bind_top_status_bar_with_store_and_effects_and_log_dir(
     window: &AppWindow,
     store: Option<UiPreferencesStore>,
     log_root: Option<PathBuf>,
+    effects: Rc<dyn PlatformWindowEffects>,
 ) {
     let store = store.map(Rc::new);
     let logger = create_tooltip_debug_logger(log_root);
@@ -80,7 +98,7 @@ pub fn bind_top_status_bar_with_store_and_log_dir(
     }));
     let controller = Rc::new(WindowController::new(window));
 
-    sync_top_status_bar_state(window, &view_model.borrow());
+    sync_top_status_bar_state(window, &view_model.borrow(), effects.as_ref());
 
     let logger_ref = logger.clone();
     window.on_tooltip_debug_event_requested(move |source_id, phase, text, anchor_x, anchor_y| {
@@ -127,11 +145,12 @@ pub fn bind_top_status_bar_with_store_and_log_dir(
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
     window.on_toggle_theme_mode_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.toggle_theme_mode();
-        window.set_dark_mode(state.theme_mode == ThemeMode::Dark);
+        sync_theme_and_window_effects(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
     });
 
@@ -182,6 +201,27 @@ pub fn bind_top_status_bar_with_store_and_log_dir(
         state.set_window_maximized(next);
         window.set_is_window_maximized(next);
     });
+}
+
+pub fn bind_top_status_bar_with_store_and_effects(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    effects: Rc<dyn PlatformWindowEffects>,
+) {
+    bind_top_status_bar_with_store_and_effects_and_log_dir(window, store, None, effects);
+}
+
+pub fn bind_top_status_bar_with_store_and_log_dir(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    log_root: Option<PathBuf>,
+) {
+    bind_top_status_bar_with_store_and_effects_and_log_dir(
+        window,
+        store,
+        log_root,
+        default_platform_window_effects(),
+    );
 }
 
 pub fn bind_top_status_bar_with_store(window: &AppWindow, store: Option<UiPreferencesStore>) {
