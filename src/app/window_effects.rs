@@ -37,10 +37,11 @@ pub enum BackdropApplyStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowAppearanceSyncReport {
     pub theme_applied: bool,
     pub backdrop_status: BackdropApplyStatus,
+    pub backdrop_error: Option<String>,
     pub redraw_requested: bool,
 }
 
@@ -49,8 +50,22 @@ impl WindowAppearanceSyncReport {
         Self {
             theme_applied: false,
             backdrop_status: BackdropApplyStatus::Skipped,
+            backdrop_error: None,
             redraw_requested: false,
         }
+    }
+}
+
+#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+fn classify_backdrop_result(
+    result: Result<(), window_vibrancy::Error>,
+) -> (BackdropApplyStatus, Option<String>) {
+    match result {
+        Ok(()) => (BackdropApplyStatus::Applied, None),
+        Err(window_vibrancy::Error::UnsupportedPlatformVersion(_)) => {
+            (BackdropApplyStatus::Skipped, None)
+        }
+        Err(err) => (BackdropApplyStatus::Failed, Some(err.to_string())),
     }
 }
 
@@ -123,6 +138,7 @@ impl PlatformWindowEffects for WindowsWindowEffects {
 
         let mut theme_applied = false;
         let mut backdrop_status = BackdropApplyStatus::Skipped;
+        let mut backdrop_error = None;
         let mut redraw_requested = false;
 
         let _ = app
@@ -136,20 +152,14 @@ impl PlatformWindowEffects for WindowsWindowEffects {
                 window.set_theme(Some(theme));
                 theme_applied = true;
 
-                backdrop_status = match request.backdrop {
-                    BackdropPreference::None => BackdropApplyStatus::Skipped,
-                    BackdropPreference::MicaAlt => {
-                        match window_vibrancy::apply_tabbed(window, Some(request.theme.is_dark())) {
-                            Ok(()) => BackdropApplyStatus::Applied,
-                            Err(_) => BackdropApplyStatus::Failed,
-                        }
-                    }
-                    BackdropPreference::Mica => {
-                        match window_vibrancy::apply_mica(window, Some(request.theme.is_dark())) {
-                            Ok(()) => BackdropApplyStatus::Applied,
-                            Err(_) => BackdropApplyStatus::Failed,
-                        }
-                    }
+                (backdrop_status, backdrop_error) = match request.backdrop {
+                    BackdropPreference::None => (BackdropApplyStatus::Skipped, None),
+                    BackdropPreference::MicaAlt => classify_backdrop_result(
+                        window_vibrancy::apply_tabbed(window, Some(request.theme.is_dark())),
+                    ),
+                    BackdropPreference::Mica => classify_backdrop_result(
+                        window_vibrancy::apply_mica(window, Some(request.theme.is_dark())),
+                    ),
                 };
 
                 if request.request_redraw {
@@ -161,7 +171,35 @@ impl PlatformWindowEffects for WindowsWindowEffects {
         WindowAppearanceSyncReport {
             theme_applied,
             backdrop_status,
+            backdrop_error,
             redraw_requested,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BackdropApplyStatus;
+
+    #[test]
+    fn unsupported_backdrop_version_is_treated_as_skipped() {
+        let (status, error) = super::classify_backdrop_result(Err(
+            window_vibrancy::Error::UnsupportedPlatformVersion(
+                "\"apply_tabbed()\" is only available on Windows 11.",
+            ),
+        ));
+
+        assert_eq!(status, BackdropApplyStatus::Skipped);
+        assert_eq!(error, None);
+    }
+
+    #[test]
+    fn unexpected_backdrop_error_is_reported_as_failed() {
+        let (status, error) = super::classify_backdrop_result(Err(
+            window_vibrancy::Error::NotMainThread("main thread required"),
+        ));
+
+        assert_eq!(status, BackdropApplyStatus::Failed);
+        assert_eq!(error.as_deref(), Some("main thread required"));
     }
 }

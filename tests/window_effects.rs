@@ -29,6 +29,7 @@ fn skipped_sync_report_is_explicit() {
 
     assert!(!report.theme_applied);
     assert_eq!(report.backdrop_status, BackdropApplyStatus::Skipped);
+    assert_eq!(report.backdrop_error, None);
     assert!(!report.redraw_requested);
 }
 
