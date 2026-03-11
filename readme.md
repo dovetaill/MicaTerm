@@ -35,6 +35,9 @@ Compatibility wrapper:
   - Output: `dist/mica-term-x86_64-pc-windows-gnu-release.zip`
 - `TARGET=x86_64-pc-windows-msvc ./build-win-x64.sh`
   - Windows x64 MSVC build on Windows MSVC environments
+- `./build-win-x64-skia.sh`
+  - Experimental Windows x64 MSVC build with Slint Skia renderer enabled
+  - Output: `dist/mica-term-x86_64-pc-windows-msvc-release.zip`
 
 Archive formats:
 
@@ -59,3 +62,43 @@ Prerequisites by target:
 - Windows MSVC x64 / ARM64:
   - installed Rust target: `rustup target add x86_64-pc-windows-msvc` or `rustup target add aarch64-pc-windows-msvc`
   - must be built from a Windows MSVC shell or Git Bash environment
+
+Experimental renderer overrides:
+
+- `CARGO_FEATURES=windows-skia-experimental ./build-win-x64.sh`
+  - Compiles the Windows package with Slint Skia renderer support enabled
+- `./build-win-x64-skia.sh`
+  - Convenience wrapper for the same experimental Windows Skia build on a Windows MSVC shell
+- `CARGO_NO_DEFAULT_FEATURES=1`
+  - Optional advanced override if you want to drop the default software renderer feature during a custom build
+
+Current limitation:
+
+- `windows-skia-experimental` is not currently viable on the Linux -> `x86_64-pc-windows-gnu` cross-build path in this repo.
+- The upstream `rust-skia` download step for `x86_64-pc-windows-gnu` falls back to a full Skia source build, which requires a Windows MSVC / VC toolchain.
+- Use a Windows MSVC shell with `TARGET=x86_64-pc-windows-msvc` for this experiment.
+
+## Windows Logging
+
+To keep logs next to `mica-term.exe` on Windows, create an empty `.mica-term-portable`
+file in the packaged app directory before launching the app.
+
+PowerShell example:
+
+```powershell
+cd .\dist\mica-term-x86_64-pc-windows-gnu-release
+ni .mica-term-portable -ItemType File -Force
+$env:MICA_TERM_LOG = "debug"
+.\mica-term.exe
+```
+
+Expected output location:
+
+- portable mode: `logs/system-error.log.YYYY-MM-DD`
+- standard mode without `.mica-term-portable`: `%LOCALAPPDATA%\MicaTerm\MicaTerm\logs\`
+
+Notes:
+
+- `MICA_TERM_LOG=debug` enables `ui.theme` and `app.window` diagnostics.
+- Without `MICA_TERM_LOG=debug`, only error-level events are persisted.
+- Windows builds use daily log rotation, so the file name includes the current date.

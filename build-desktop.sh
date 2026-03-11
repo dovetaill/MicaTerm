@@ -36,6 +36,8 @@ Environment overrides:
   APP_NAME=<package name>
   BIN_NAME=<binary file name without extension>
   DIST_DIR=<output directory>
+  CARGO_FEATURES=<space or comma separated cargo features>
+  CARGO_NO_DEFAULT_FEATURES=1
   CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=<gnu linker path>
   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=<linux arm64 linker path>
 
@@ -161,7 +163,17 @@ ARCHIVE_PATH="$DIST_DIR/${APP_NAME}-${TARGET}-${PROFILE}${ARCHIVE_SUFFIX}"
 BIN_PATH="$ROOT_DIR/target/$TARGET/$PROFILE/$BIN_NAME$BIN_SUFFIX"
 
 echo "==> Building $BIN_NAME for $TARGET ($PROFILE)"
-cargo build "${PROFILE_ARGS[@]}" --target "$TARGET" --locked
+CARGO_BUILD_ARGS=("${PROFILE_ARGS[@]}" --target "$TARGET" --locked)
+
+if [[ "${CARGO_NO_DEFAULT_FEATURES:-0}" == "1" ]]; then
+  CARGO_BUILD_ARGS+=(--no-default-features)
+fi
+
+if [[ -n "${CARGO_FEATURES:-}" ]]; then
+  CARGO_BUILD_ARGS+=(--features "$CARGO_FEATURES")
+fi
+
+cargo build "${CARGO_BUILD_ARGS[@]}"
 
 [[ -f "$BIN_PATH" ]] || fail "expected binary not found: $BIN_PATH"
 
