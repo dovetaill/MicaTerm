@@ -21,6 +21,8 @@ grep -F 'tooltip-visible: root.tooltip-visible' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-source-id-value' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-delay := Timer' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-close-delay := Timer' "$TITLEBAR" >/dev/null
+grep -F 'tooltip-delay.start();' "$TITLEBAR" >/dev/null
+grep -F 'tooltip-close-delay.start();' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-close-source-id-value' "$TITLEBAR" >/dev/null
 grep -F 'function queue-tooltip-close(source-id: string)' "$TITLEBAR" >/dev/null
 grep -F 'root.tooltip-source-id-value == source-id && root.tooltip-text-value == text' "$TITLEBAR" >/dev/null
@@ -55,6 +57,8 @@ grep -F 'TITLEBAR_TOOLTIP_DELAY_MS' "$ROOT_DIR/src/shell/metrics.rs" >/dev/null
 grep -F 'TITLEBAR_TOOLTIP_CLOSE_DEBOUNCE_MS' "$ROOT_DIR/src/shell/metrics.rs" >/dev/null
 ! grep -F 'inherits PopupWindow' "$TOOLTIP" >/dev/null
 ! grep -F 'tooltip-popup := TitlebarTooltip' "$TITLEBAR" >/dev/null
+! grep -F 'tooltip-delay.restart();' "$TITLEBAR" >/dev/null
+! grep -F 'tooltip-close-delay.restart();' "$TITLEBAR" >/dev/null
 ! grep -F 'actions-zone.absolute-position.x' "$TITLEBAR" >/dev/null
 ! grep -F 'text: "Workspace"' "$TITLEBAR" >/dev/null
 ! grep -F 'text: "SSH"' "$TITLEBAR" >/dev/null

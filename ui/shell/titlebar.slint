@@ -89,14 +89,14 @@ export component Titlebar inherits Rectangle {
                 root.tooltip-anchor-y-value,
             );
             root.tooltip-visible-value = false;
-            tooltip-delay.restart();
+            tooltip-delay.start();
         }
     }
 
     function queue-tooltip-close(source-id: string) {
         if root.tooltip-source-id-value == source-id && source-id != "" {
             root.tooltip-close-source-id-value = source-id;
-            tooltip-close-delay.restart();
+            tooltip-close-delay.start();
         }
     }
 
