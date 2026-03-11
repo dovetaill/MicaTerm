@@ -23,6 +23,8 @@ grep -F 'tooltip-delay := Timer' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-close-delay := Timer' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-close-source-id-value' "$TITLEBAR" >/dev/null
 grep -F 'function queue-tooltip-close(source-id: string)' "$TITLEBAR" >/dev/null
+grep -F 'root.tooltip-source-id-value == source-id && root.tooltip-text-value == text' "$TITLEBAR" >/dev/null
+grep -F 'cancel-close-tooltip' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-text: "Open menu"' "$TITLEBAR" >/dev/null
 grep -F '"Switch to dark mode"' "$TITLEBAR" >/dev/null
 grep -F '"Switch to light mode"' "$TITLEBAR" >/dev/null
