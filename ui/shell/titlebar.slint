@@ -1,7 +1,6 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 import { TitlebarIconButton } from "../components/titlebar-icon-button.slint";
 import { TitlebarMenu } from "../components/titlebar-menu.slint";
-import { TitlebarTooltip } from "../components/titlebar-tooltip.slint";
 import { WindowControlButton } from "../components/window-control-button.slint";
 
 export component Titlebar inherits Rectangle {
@@ -11,7 +10,6 @@ export component Titlebar inherits Rectangle {
     in property <bool> is-window-maximized: false;
     in property <bool> is-window-active: true;
     in property <bool> is-window-always-on-top: false;
-    in property <bool> tooltip-visible: false;
 
     private property <image> navigation-icon: @image-url("../../assets/icons/fluent/navigation-24-regular.svg");
     private property <image> header-logotype: @image-url("../../assets/icons/mica-term-header-logotype.svg");
@@ -31,6 +29,10 @@ export component Titlebar inherits Rectangle {
     private property <string> tooltip-close-source-id-value: "";
     private property <length> tooltip-anchor-x-value: 0px;
     private property <length> tooltip-anchor-y-value: 0px;
+    out property <string> tooltip-text <=> root.tooltip-text-value;
+    out property <bool> tooltip-visible <=> root.tooltip-visible-value;
+    out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
+    out property <length> tooltip-anchor-y <=> root.tooltip-anchor-y-value;
 
     callback drag-requested;
     callback drag-double-clicked;
@@ -60,8 +62,8 @@ export component Titlebar inherits Rectangle {
     }
 
     function schedule-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length) {
-        root.tooltip-anchor-x-value = anchor-x - self.absolute-position.x;
-        root.tooltip-anchor-y-value = anchor-y - self.absolute-position.y;
+        root.tooltip-anchor-x-value = anchor-x;
+        root.tooltip-anchor-y-value = anchor-y;
 
         if root.tooltip-source-id-value == source-id && root.tooltip-text-value == text {
             if root.tooltip-close-source-id-value == source-id {
@@ -389,11 +391,4 @@ export component Titlebar inherits Rectangle {
         }
     }
 
-    tooltip-overlay := TitlebarTooltip {
-        text: root.tooltip-text-value;
-        anchor-x: root.tooltip-anchor-x-value;
-        anchor-y: root.tooltip-anchor-y-value;
-        tooltip-visible: root.tooltip-visible-value;
-        host-width: root.width;
-    }
 }

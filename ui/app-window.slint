@@ -1,4 +1,5 @@
 import { ThemeTokens } from "theme/tokens.slint";
+import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
 import { RightPanel } from "shell/right-panel.slint";
 import { Sidebar } from "shell/sidebar.slint";
 import { TabBar } from "shell/tabbar.slint";
@@ -32,7 +33,7 @@ export component AppWindow inherits Window {
     preferred-width: 1440px;
     preferred-height: 900px;
 
-    Rectangle {
+    shell-root := Rectangle {
         border-radius: 14px;
         border-width: 1px;
         border-color: ThemeTokens.shell-stroke;
@@ -41,7 +42,7 @@ export component AppWindow inherits Window {
         VerticalLayout {
             spacing: 0px;
 
-            Titlebar {
+            titlebar := Titlebar {
                 clip: false;
                 dark-mode: root.dark-mode;
                 show-right-panel: root.show-right-panel;
@@ -121,5 +122,13 @@ export component AppWindow inherits Window {
                 }
             }
         }
+    }
+
+    tooltip-overlay := TitlebarTooltip {
+        text: titlebar.tooltip-text;
+        anchor-x: titlebar.tooltip-anchor-x;
+        anchor-y: titlebar.tooltip-anchor-y;
+        tooltip-visible: titlebar.tooltip-visible;
+        host-width: root.width;
     }
 }
