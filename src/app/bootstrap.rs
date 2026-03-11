@@ -401,7 +401,12 @@ fn sync_shell_state(
     sync_sidebar_state(window, state);
 }
 
-fn sync_shell_layout(window: &AppWindow, state: &ShellViewModel, logical_width: u32) {
+fn sync_shell_layout(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    logical_width: u32,
+    logical_height: u32,
+) {
     let layout = resolve_shell_layout(ShellLayoutInput {
         window_width: logical_width.max(ShellMetrics::WINDOW_MIN_WIDTH),
         request_assets_sidebar: state.requested_assets_sidebar(),
@@ -410,10 +415,16 @@ fn sync_shell_layout(window: &AppWindow, state: &ShellViewModel, logical_width: 
 
     window.set_effective_show_assets_sidebar(layout.show_assets_sidebar);
     window.set_effective_show_right_panel(layout.show_right_panel);
+    window.set_shell_body_height_cache(
+        logical_height
+            .saturating_sub(ShellMetrics::TITLEBAR_HEIGHT)
+            as f32,
+    );
 }
 
-fn current_window_width(window: &AppWindow) -> u32 {
-    window.window().size().width
+fn current_window_size(window: &AppWindow) -> (u32, u32) {
+    let size = window.window().size();
+    (size.width, size.height)
 }
 
 fn load_ui_preferences(store: &Option<Rc<UiPreferencesStore>>) -> UiPreferences {
@@ -467,6 +478,7 @@ pub fn bind_top_status_bar_with_store_and_effects(
         window,
         &view_model.borrow(),
         ShellMetrics::WINDOW_DEFAULT_WIDTH,
+        ShellMetrics::WINDOW_DEFAULT_HEIGHT,
     );
 
     let state = Rc::clone(&view_model);
@@ -476,7 +488,8 @@ pub fn bind_top_status_bar_with_store_and_effects(
         let mut state = state.borrow_mut();
         state.toggle_right_panel();
         window.set_show_right_panel(state.show_right_panel);
-        sync_shell_layout(&window, &state, current_window_width(&window));
+        let (width, height) = current_window_size(&window);
+        sync_shell_layout(&window, &state, width, height);
     });
 
     let state = Rc::clone(&view_model);
@@ -545,7 +558,8 @@ pub fn bind_top_status_bar_with_store_and_effects(
         let mut state = state.borrow_mut();
         state.toggle_assets_sidebar();
         sync_sidebar_state(&window, &state);
-        sync_shell_layout(&window, &state, current_window_width(&window));
+        let (width, height) = current_window_size(&window);
+        sync_shell_layout(&window, &state, width, height);
     });
 
     let state = Rc::clone(&view_model);
@@ -557,15 +571,16 @@ pub fn bind_top_status_bar_with_store_and_effects(
             .unwrap_or(SidebarDestination::Console);
         state.select_sidebar_destination(destination);
         sync_sidebar_state(&window, &state);
-        sync_shell_layout(&window, &state, current_window_width(&window));
+        let (width, height) = current_window_size(&window);
+        sync_shell_layout(&window, &state, width, height);
     });
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
-    window.on_shell_layout_invalidated(move |width, _height| {
+    window.on_shell_layout_invalidated(move |width, height| {
         let window = handle.unwrap();
         let state = state.borrow();
-        sync_shell_layout(&window, &state, width as u32);
+        sync_shell_layout(&window, &state, width as u32, height as u32);
     });
 
     let controller_ref = Rc::clone(&controller);

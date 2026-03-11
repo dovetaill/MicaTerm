@@ -135,3 +135,49 @@ fn titlebar_renders_visible_chrome_in_software_renderer() {
         "window controls should render visible icons, only found {window_control_pixels} distinct pixels"
     );
 }
+
+#[test]
+fn shell_body_fills_to_window_bottom_in_software_renderer() {
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+    slint::platform::set_platform(Box::new(SoftwareTestPlatform {
+        window: window.clone(),
+        started_at: Instant::now(),
+    }))
+    .unwrap();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.set_dark_mode(false);
+    app.window().set_size(PhysicalSize::new(1440, 900));
+    app.show().unwrap();
+
+    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(1440, 900);
+    let stride = buffer.width() as usize;
+    assert!(window.draw_if_needed(|renderer| {
+        renderer.render(buffer.make_mut_slice(), stride);
+    }));
+
+    let upper_body = pixel_at(&buffer, 720, 120);
+    let lower_body = pixel_at(&buffer, 720, 850);
+
+    eprintln!(
+        "upper body=({}, {}, {}), lower body=({}, {}, {})",
+        upper_body.r,
+        upper_body.g,
+        upper_body.b,
+        lower_body.r,
+        lower_body.g,
+        lower_body.b
+    );
+
+    assert!(
+        color_distance(upper_body, lower_body) <= 2,
+        "shell body should extend to the bottom of the window, got upper=({}, {}, {}) lower=({}, {}, {})",
+        upper_body.r,
+        upper_body.g,
+        upper_body.b,
+        lower_body.r,
+        lower_body.g,
+        lower_body.b
+    );
+}

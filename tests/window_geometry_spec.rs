@@ -18,6 +18,10 @@ fn shell_body_height_matches_window_height_minus_titlebar() {
         body_height,
         ShellMetrics::WINDOW_DEFAULT_HEIGHT - ShellMetrics::TITLEBAR_HEIGHT
     );
+    assert_eq!(
+        app.get_layout_shell_body_actual_height() as u32,
+        ShellMetrics::WINDOW_DEFAULT_HEIGHT - ShellMetrics::TITLEBAR_HEIGHT
+    );
 }
 
 #[test]
@@ -68,6 +72,10 @@ fn larger_window_expands_shell_body_instead_of_leaving_blank_space() {
 
     assert_eq!(
         app.get_layout_shell_body_height() as u32,
+        1000 - ShellMetrics::TITLEBAR_HEIGHT
+    );
+    assert_eq!(
+        app.get_layout_shell_body_actual_height() as u32,
         1000 - ShellMetrics::TITLEBAR_HEIGHT
     );
 }
