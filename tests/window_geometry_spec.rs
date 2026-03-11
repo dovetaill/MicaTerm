@@ -21,6 +21,20 @@ fn shell_body_height_matches_window_height_minus_titlebar() {
 }
 
 #[test]
+fn titlebar_spans_window_width_for_button_layout() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.show().unwrap();
+
+    assert_eq!(
+        app.get_layout_titlebar_width() as u32,
+        ShellMetrics::WINDOW_DEFAULT_WIDTH
+    );
+}
+
+#[test]
 fn larger_window_expands_shell_body_instead_of_leaving_blank_space() {
     i_slint_backend_testing::init_no_event_loop();
 

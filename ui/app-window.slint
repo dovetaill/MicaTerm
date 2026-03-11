@@ -18,6 +18,7 @@ export component AppWindow inherits Window {
     in-out property <bool> effective-show-right-panel: false;
     in-out property <string> active-sidebar-destination: "console";
     in-out property <[SidebarNavItem]> sidebar-items: [];
+    out property <length> layout-titlebar-width: titlebar.width;
     out property <length> layout-titlebar-height: titlebar.height;
     out property <length> layout-shell-body-height: body-host.height;
     out property <length> layout-main-workspace-width: main-workspace.width;
@@ -55,6 +56,8 @@ export component AppWindow inherits Window {
     }
 
     shell-frame := Rectangle {
+        width: root.width;
+        height: root.height;
         border-radius: 14px;
         border-width: 1px;
         border-color: ThemeTokens.shell-stroke;
