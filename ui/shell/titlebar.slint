@@ -5,15 +5,21 @@ import { TitlebarTooltip } from "../components/titlebar-tooltip.slint";
 import { WindowControlButton } from "../components/window-control-button.slint";
 
 export component Titlebar inherits Rectangle {
+    in property <bool> dark-mode: true;
     in property <bool> show-right-panel: false;
     in property <bool> show-global-menu: false;
     in property <bool> is-window-maximized: false;
     in property <bool> is-window-active: true;
+    in property <bool> is-window-always-on-top: false;
 
-    private property <image> menu-icon-regular: @image-url("../../assets/icons/fluent/menu-20-regular.svg");
-    private property <image> menu-icon-filled: @image-url("../../assets/icons/fluent/menu-20-filled.svg");
+    private property <image> navigation-icon: @image-url("../../assets/icons/fluent/navigation-24-regular.svg");
+    private property <image> header-logotype: @image-url("../../assets/icons/mica-term-header-logotype.svg");
+    private property <image> dark-theme-icon: @image-url("../../assets/icons/fluent/dark-theme-20-regular.svg");
+    private property <image> weather-sunny-icon: @image-url("../../assets/icons/fluent/weather-sunny-20-regular.svg");
     private property <image> panel-right-icon-regular: @image-url("../../assets/icons/fluent/panel-right-20-regular.svg");
     private property <image> panel-right-icon-filled: @image-url("../../assets/icons/fluent/panel-right-20-filled.svg");
+    private property <image> pin-icon: @image-url("../../assets/icons/fluent/pin-20-regular.svg");
+    private property <image> pin-off-icon: @image-url("../../assets/icons/fluent/pin-off-20-regular.svg");
     private property <image> minimize-icon: @image-url("../../assets/icons/fluent/subtract-20-regular.svg");
     private property <image> maximize-icon: @image-url("../../assets/icons/fluent/maximize-20-regular.svg");
     private property <image> restore-icon: @image-url("../../assets/icons/fluent/restore-20-regular.svg");
@@ -24,9 +30,11 @@ export component Titlebar inherits Rectangle {
 
     callback drag-requested;
     callback drag-double-clicked;
+    callback toggle-theme-mode-requested;
     callback toggle-right-panel-requested;
     callback toggle-global-menu-requested;
     callback close-global-menu-requested;
+    callback toggle-window-always-on-top-requested;
     callback minimize-requested;
     callback maximize-toggle-requested;
     callback close-requested;
@@ -60,43 +68,22 @@ export component Titlebar inherits Rectangle {
     }
 
     content := HorizontalLayout {
-        x: 12px;
-        y: 8px;
-        width: parent.width - 24px;
-        height: 32px;
-        spacing: 8px;
+        x: 6px;
+        y: 6px;
+        width: parent.width - 12px;
+        height: 36px;
+        spacing: 0px;
 
-        brand-zone := Rectangle {
-            width: 220px;
+        nav-zone := Rectangle {
+            width: 44px;
+            height: parent.height;
             background: transparent;
+            opacity: root.is-window-active ? 1 : 0.72;
 
-            brand-chip := Rectangle {
-                width: 32px;
-                height: 32px;
-                border-radius: 10px;
-                background: ThemeTokens.shell-surface;
-
-                Text {
-                    text: "MT";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-
-            Text {
-                x: 44px;
-                width: 112px;
-                height: parent.height;
-                text: "Mica Term";
-                color: ThemeTokens.text-primary;
-                vertical-alignment: center;
-            }
-
-            menu-button := TitlebarIconButton {
-                x: parent.width - self.width;
-                icon-source: root.menu-icon-regular;
-                active-icon-source: root.menu-icon-filled;
+            nav-button := TitlebarIconButton {
+                x: 4px;
+                y: 0px;
+                icon-source: root.navigation-icon;
                 active: root.show-global-menu;
                 tooltip-text: "Open menu";
 
@@ -114,22 +101,32 @@ export component Titlebar inherits Rectangle {
             }
         }
 
+        brand-zone := Rectangle {
+            width: 188px;
+            height: parent.height;
+            background: transparent;
+            opacity: root.is-window-active ? 1 : 0.84;
+
+            brand-logotype := Image {
+                x: 0px;
+                y: 6px;
+                width: 170px;
+                height: 24px;
+                source: root.header-logotype;
+                image-fit: contain;
+                colorize: ThemeTokens.text-primary;
+            }
+        }
+
         drag-zone := Rectangle {
             background: transparent;
             border-radius: 8px;
-            opacity: root.is-window-active ? 1 : 0.8;
-
-            Text {
-                x: 16px;
-                width: parent.width - 32px;
-                text: "Workspace";
-                color: ThemeTokens.text-primary;
-                opacity: 0.48;
-                horizontal-alignment: left;
-                vertical-alignment: center;
-            }
+            opacity: root.is-window-active ? 1 : 0.72;
 
             drag-touch := TouchArea {
+                width: parent.width;
+                height: parent.height;
+
                 moved => {
                     if self.pressed {
                         root.drag-requested();
@@ -142,27 +139,34 @@ export component Titlebar inherits Rectangle {
             }
         }
 
-        actions-zone := Rectangle {
-            width: 84px;
+        utility-zone := Rectangle {
+            width: 136px;
+            height: parent.height;
             background: transparent;
             opacity: root.is-window-active ? 1 : 0.72;
 
-            status-slot := Rectangle {
-                width: 48px;
-                height: 32px;
-                border-radius: 999px;
-                background: ThemeTokens.panel-tint;
+            theme-button := TitlebarIconButton {
+                x: 0px;
+                y: 0px;
+                icon-source: root.dark-mode ? root.dark-theme-icon : root.weather-sunny-icon;
+                tooltip-text: root.dark-mode ? "Switch to light mode" : "Switch to dark mode";
 
-                Text {
-                    text: "SSH";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                clicked => {
+                    root.toggle-theme-mode-requested();
+                }
+
+                tooltip-open-requested(text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                }
+
+                tooltip-close-requested => {
+                    root.close-tooltip();
                 }
             }
 
             panel-toggle-button := TitlebarIconButton {
-                x: parent.width - self.width;
+                x: 40px;
+                y: 0px;
                 icon-source: root.panel-right-icon-regular;
                 active-icon-source: root.panel-right-icon-filled;
                 active: root.show-right-panel;
@@ -180,32 +184,46 @@ export component Titlebar inherits Rectangle {
                     root.close-tooltip();
                 }
             }
-        }
 
-        drag-safety-zone := Rectangle {
-            width: 96px;
-            background: transparent;
-            border-radius: 8px;
+            divider-line := Rectangle {
+                x: 84px;
+                y: 8px;
+                width: 1px;
+                height: 20px;
+                border-radius: 1px;
+                background: ThemeTokens.shell-stroke;
+            }
 
-            safe-drag-touch := TouchArea {
-                moved => {
-                    if self.pressed {
-                        root.drag-requested();
-                    }
+            pin-button := TitlebarIconButton {
+                x: 100px;
+                y: 0px;
+                icon-source: root.is-window-always-on-top ? root.pin-icon : root.pin-off-icon;
+                active: root.is-window-always-on-top;
+                tooltip-text: root.is-window-always-on-top ? "Unpin window from top" : "Pin window on top";
+
+                clicked => {
+                    root.toggle-window-always-on-top-requested();
                 }
 
-                double-clicked => {
-                    root.drag-double-clicked();
+                tooltip-open-requested(text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                }
+
+                tooltip-close-requested => {
+                    root.close-tooltip();
                 }
             }
         }
 
         window-controls := Rectangle {
             width: 138px;
+            height: parent.height;
             background: transparent;
             opacity: root.is-window-active ? 1 : 0.72;
 
-            WindowControlButton {
+            minimize-button := WindowControlButton {
+                x: 0px;
+                y: 0px;
                 icon-source: root.minimize-icon;
                 tooltip-text: "Minimize window";
 
@@ -222,8 +240,9 @@ export component Titlebar inherits Rectangle {
                 }
             }
 
-            WindowControlButton {
+            maximize-button := WindowControlButton {
                 x: 46px;
+                y: 0px;
                 icon-source: root.is-window-maximized ? root.restore-icon : root.maximize-icon;
                 tooltip-text: root.is-window-maximized ? "Restore window" : "Maximize window";
 
@@ -240,8 +259,9 @@ export component Titlebar inherits Rectangle {
                 }
             }
 
-            WindowControlButton {
+            close-button := WindowControlButton {
                 x: 92px;
+                y: 0px;
                 icon-source: root.close-icon;
                 danger: true;
                 tooltip-text: "Close window";
@@ -275,8 +295,8 @@ export component Titlebar inherits Rectangle {
     }
 
     global-menu := TitlebarMenu {
-        x: menu-button.absolute-position.x;
-        y: menu-button.absolute-position.y + menu-button.height + 6px;
+        x: nav-button.absolute-position.x;
+        y: nav-button.absolute-position.y + nav-button.height + 6px;
 
         close-requested => {
             root.close-global-menu-requested();

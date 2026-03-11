@@ -1,3 +1,5 @@
+use crate::theme::ThemeMode;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WelcomeAction {
     NewConnection,
@@ -13,6 +15,8 @@ pub struct ShellViewModel {
     pub show_global_menu: bool,
     pub is_window_maximized: bool,
     pub is_window_active: bool,
+    pub theme_mode: ThemeMode,
+    pub is_always_on_top: bool,
 }
 
 impl Default for ShellViewModel {
@@ -23,6 +27,8 @@ impl Default for ShellViewModel {
             show_global_menu: false,
             is_window_maximized: false,
             is_window_active: true,
+            theme_mode: ThemeMode::Dark,
+            is_always_on_top: false,
         }
     }
 }
@@ -46,6 +52,14 @@ impl ShellViewModel {
 
     pub fn set_window_active(&mut self, value: bool) {
         self.is_window_active = value;
+    }
+
+    pub fn toggle_theme_mode(&mut self) {
+        self.theme_mode = self.theme_mode.toggled();
+    }
+
+    pub fn toggle_always_on_top(&mut self) {
+        self.is_always_on_top = !self.is_always_on_top;
     }
 }
 

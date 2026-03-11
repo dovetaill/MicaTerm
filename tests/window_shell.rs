@@ -26,6 +26,7 @@ fn top_status_bar_window_commands_match_the_approved_strategy() {
     assert!(spec.uses_winit_drag);
     assert!(spec.self_drawn_controls);
     assert!(spec.supports_double_click_maximize);
+    assert!(spec.supports_always_on_top);
 
     assert!(next_maximize_state(false));
     assert!(!next_maximize_state(true));

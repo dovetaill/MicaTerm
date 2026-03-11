@@ -16,8 +16,8 @@ export component TitlebarIconButton inherits Rectangle {
         : root.icon-source;
     out property <bool> has-hover: touch.has-hover;
 
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
     border-radius: 8px;
     border-width: root.active ? 1px : 0px;
     border-color: ThemeTokens.shell-stroke;
@@ -30,8 +30,8 @@ export component TitlebarIconButton inherits Rectangle {
     if (root.displayed-icon.width > 0 && root.displayed-icon.height > 0) : Image {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
-        width: 16px;
-        height: 16px;
+        width: 20px;
+        height: 20px;
         source <=> root.displayed-icon;
         image-fit: contain;
         colorize: ThemeTokens.text-primary;

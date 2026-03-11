@@ -19,8 +19,10 @@ check_file "$ROOT_DIR/assets/icons/mica-term-logo.svg" 'viewBox="0 0 720 256"'
 check_file "$ROOT_DIR/assets/icons/mica-term-app.svg" 'viewBox="0 0 256 256"'
 check_file "$ROOT_DIR/assets/icons/mica-term-taskbar.svg" 'viewBox="0 0 256 256"'
 check_file "$ROOT_DIR/assets/icons/mica-term-mark.svg" 'viewBox="0 0 256 256"'
+check_file "$ROOT_DIR/assets/icons/mica-term-header-logotype.svg" 'viewBox='
 
 grep -F '#4ea1ff' "$ROOT_DIR/assets/icons/mica-term-logo.svg" >/dev/null
 grep -F 'id="m-frame"' "$ROOT_DIR/assets/icons/mica-term-app.svg" >/dev/null
 grep -F 'id="taskbar-m-frame"' "$ROOT_DIR/assets/icons/mica-term-taskbar.svg" >/dev/null
 grep -F 'fill="currentColor"' "$ROOT_DIR/assets/icons/mica-term-mark.svg" >/dev/null
+grep -F 'currentColor' "$ROOT_DIR/assets/icons/mica-term-header-logotype.svg" >/dev/null

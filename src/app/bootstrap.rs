@@ -5,8 +5,10 @@ use anyhow::Result;
 use slint::ComponentHandle;
 
 use crate::AppWindow;
+use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::windowing::WindowController;
 use crate::shell::view_model::ShellViewModel;
+use crate::theme::ThemeMode;
 
 pub fn app_title() -> &'static str {
     "Mica Term"
@@ -17,14 +19,43 @@ pub fn default_window_size() -> (u32, u32) {
 }
 
 fn sync_top_status_bar_state(window: &AppWindow, state: &ShellViewModel) {
+    window.set_dark_mode(state.theme_mode == ThemeMode::Dark);
     window.set_show_right_panel(state.show_right_panel);
     window.set_show_global_menu(state.show_global_menu);
     window.set_is_window_maximized(state.is_window_maximized);
     window.set_is_window_active(state.is_window_active);
+    window.set_is_window_always_on_top(state.is_always_on_top);
 }
 
-pub fn bind_top_status_bar(window: &AppWindow) {
-    let view_model = Rc::new(RefCell::new(ShellViewModel::default()));
+fn load_ui_preferences(store: &Option<Rc<UiPreferencesStore>>) -> UiPreferences {
+    match store {
+        Some(store) => match store.load_or_default() {
+            Ok(prefs) => prefs,
+            Err(err) => {
+                eprintln!("failed to load ui preferences: {err}");
+                UiPreferences::default()
+            }
+        },
+        None => UiPreferences::default(),
+    }
+}
+
+fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellViewModel) {
+    if let Some(store) = store
+        && let Err(err) = store.save(&UiPreferences::from(state))
+    {
+        eprintln!("failed to save ui preferences: {err}");
+    }
+}
+
+pub fn bind_top_status_bar_with_store(window: &AppWindow, store: Option<UiPreferencesStore>) {
+    let store = store.map(Rc::new);
+    let prefs = load_ui_preferences(&store);
+    let view_model = Rc::new(RefCell::new(ShellViewModel {
+        theme_mode: prefs.theme_mode,
+        is_always_on_top: prefs.always_on_top,
+        ..ShellViewModel::default()
+    }));
     let controller = Rc::new(WindowController::new(window));
 
     sync_top_status_bar_state(window, &view_model.borrow());
@@ -54,6 +85,28 @@ pub fn bind_top_status_bar(window: &AppWindow) {
         let mut state = state.borrow_mut();
         state.close_global_menu();
         window.set_show_global_menu(state.show_global_menu);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    window.on_toggle_theme_mode_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_theme_mode();
+        window.set_dark_mode(state.theme_mode == ThemeMode::Dark);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    window.on_toggle_window_always_on_top_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_always_on_top();
+        window.set_is_window_always_on_top(state.is_always_on_top);
+        save_ui_preferences(&store_ref, &state);
     });
 
     let controller_ref = Rc::clone(&controller);
@@ -92,6 +145,18 @@ pub fn bind_top_status_bar(window: &AppWindow) {
         state.set_window_maximized(next);
         window.set_is_window_maximized(next);
     });
+}
+
+pub fn bind_top_status_bar(window: &AppWindow) {
+    let store = match UiPreferencesStore::for_app() {
+        Ok(store) => Some(store),
+        Err(err) => {
+            eprintln!("failed to resolve ui preferences store: {err}");
+            None
+        }
+    };
+
+    bind_top_status_bar_with_store(window, store);
 }
 
 pub fn run() -> Result<()> {

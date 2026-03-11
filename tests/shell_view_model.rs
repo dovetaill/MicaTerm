@@ -1,4 +1,5 @@
 use mica_term::shell::view_model::{ShellViewModel, WelcomeAction, welcome_actions};
+use mica_term::theme::ThemeMode;
 
 #[test]
 fn welcome_actions_match_the_approved_order() {
@@ -44,4 +45,18 @@ fn shell_view_model_tracks_top_status_bar_state() {
 
     view_model.set_window_active(false);
     assert!(!view_model.is_window_active);
+}
+
+#[test]
+fn shell_view_model_tracks_titlebar_theme_and_pin_state() {
+    let mut view_model = ShellViewModel::default();
+
+    assert_eq!(view_model.theme_mode, ThemeMode::Dark);
+    assert!(!view_model.is_always_on_top);
+
+    view_model.toggle_theme_mode();
+    assert_eq!(view_model.theme_mode, ThemeMode::Light);
+
+    view_model.toggle_always_on_top();
+    assert!(view_model.is_always_on_top);
 }

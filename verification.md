@@ -1,30 +1,49 @@
-# Top Status Bar Style Bugfix Verification
+# Top Status Bar Style Bugfix2 Verification
 
-Date: 2026-03-11 10:17:36 CST
+Date: 2026-03-11 13:18:15 CST
 
-This document records verification evidence for the 2026-03-11 top status bar style bugfix work.
+## Source Documents
 
-## Automated Verification
+- Design: `docs/plans/2026-03-11-top-status-bar-style-bugfix2-design.md`
+- Implementation Plan: `docs/plans/2026-03-11-top-status-bar-style-bugfix2-implementation-plan.md`
 
-- [x] `cargo fmt --all --check`
+## Commands Executed
+
+- [x] `cargo fmt --all`
 - [x] `cargo check --workspace`
-- [x] `cargo clippy --all-targets --all-features -- -D warnings`
 - [x] `cargo test -q`
 - [x] `bash tests/fluent_titlebar_assets_smoke.sh`
+- [x] `bash tests/icon_svg_assets_smoke.sh`
 - [x] `bash tests/top_status_bar_ui_contract_smoke.sh`
+- [x] `cargo clippy --workspace -- -D warnings`
+
+## Automated Results
+
+- `cargo fmt --all`: passed
+- `cargo check --workspace`: passed
+- `cargo test -q`: passed
+- `bash tests/fluent_titlebar_assets_smoke.sh`: passed
+- `bash tests/icon_svg_assets_smoke.sh`: passed
+- `bash tests/top_status_bar_ui_contract_smoke.sh`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
 
 ## GUI Smoke Status
 
 - [ ] `cargo run`
 - GUI smoke was not executed in this environment.
-- Verification environment reported `DISPLAY=` and `WAYLAND_DISPLAY=`, so no desktop-capable session was available.
+- Environment evidence:
+  - `DISPLAY=`
+  - `WAYLAND_DISPLAY=`
+- No desktop-capable session was available for manual window interaction.
 
-## Manual GUI Checklist For Desktop Session
+## Windows 11 Manual Checklist
 
-- [ ] Top status bar no longer shows the crowded `SSR+`-style visual merge.
-- [ ] The left `M` button is the only global menu entry.
-- [ ] The global menu opens under the left `M` button anchor.
-- [ ] The right side keeps only independent utility actions and no duplicate settings entry.
-- [ ] `Minimize / Maximize / Restore / Close` use Fluent SVG icons with clear semantics.
-- [ ] Default titlebar icons use `Regular`, with only limited active-state `Filled` usage.
-- [ ] All titlebar buttons show tooltip text on hover.
+- [ ] `Navigation` fixed at the far left
+- [ ] Titlebar brand uses the new header logotype
+- [ ] `Workspace` no longer appears in the titlebar
+- [ ] `SSH` no longer appears in the titlebar
+- [ ] Right-side order is `theme -> panel-toggle -> divider -> pin -> min -> maximize/restore -> close`
+- [ ] `theme` toggles immediately and persists after restart
+- [ ] `pin` toggles always-on-top immediately and persists after restart
+- [ ] All titlebar buttons show tooltip on hover
+- [ ] `maximize / restore` icon changes correctly with window state

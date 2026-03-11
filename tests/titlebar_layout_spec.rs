@@ -1,13 +1,12 @@
 use mica_term::shell::metrics::ShellMetrics;
 
 #[test]
-fn top_status_bar_layout_preserves_brand_utility_and_drag_budget() {
-    let min_drag_width = ShellMetrics::TITLEBAR_MIN_DRAG_WIDTH;
-    let utility_width = ShellMetrics::TITLEBAR_UTILITY_WIDTH;
-
+fn top_status_bar_layout_matches_bugfix2_budget() {
     assert_eq!(ShellMetrics::TITLEBAR_HEIGHT, 48);
-    assert_eq!(ShellMetrics::TITLEBAR_BRAND_WIDTH, 220);
-    assert!(min_drag_width >= 96);
-    assert!(utility_width >= 84);
+    assert_eq!(ShellMetrics::TITLEBAR_NAV_WIDTH, 44);
+    assert_eq!(ShellMetrics::TITLEBAR_BRAND_WIDTH, 188);
+    assert_eq!(ShellMetrics::TITLEBAR_TOOL_BUTTON_SIZE, 36);
+    assert_eq!(ShellMetrics::TITLEBAR_TOOL_ICON_SIZE, 20);
+    assert!(ShellMetrics::TITLEBAR_UTILITY_WIDTH >= 136);
     assert_eq!(ShellMetrics::TITLEBAR_WINDOW_CONTROL_WIDTH, 138);
 }

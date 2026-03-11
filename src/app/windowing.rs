@@ -24,6 +24,7 @@ pub struct WindowCommandSpec {
     pub uses_winit_drag: bool,
     pub self_drawn_controls: bool,
     pub supports_double_click_maximize: bool,
+    pub supports_always_on_top: bool,
 }
 
 pub fn window_command_spec() -> WindowCommandSpec {
@@ -31,6 +32,7 @@ pub fn window_command_spec() -> WindowCommandSpec {
         uses_winit_drag: true,
         self_drawn_controls: true,
         supports_double_click_maximize: true,
+        supports_always_on_top: true,
     }
 }
 
