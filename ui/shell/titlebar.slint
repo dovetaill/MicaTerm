@@ -1,19 +1,32 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 import { TitlebarIconButton } from "../components/titlebar-icon-button.slint";
 import { TitlebarMenu } from "../components/titlebar-menu.slint";
+import { TitlebarTooltip } from "../components/titlebar-tooltip.slint";
 import { WindowControlButton } from "../components/window-control-button.slint";
 
 export component Titlebar inherits Rectangle {
     in property <bool> show-right-panel: false;
-    in property <bool> show-settings-menu: false;
+    in property <bool> show-global-menu: false;
     in property <bool> is-window-maximized: false;
     in property <bool> is-window-active: true;
+
+    private property <image> menu-icon-regular: @image-url("../../assets/icons/fluent/menu-20-regular.svg");
+    private property <image> menu-icon-filled: @image-url("../../assets/icons/fluent/menu-20-filled.svg");
+    private property <image> panel-right-icon-regular: @image-url("../../assets/icons/fluent/panel-right-20-regular.svg");
+    private property <image> panel-right-icon-filled: @image-url("../../assets/icons/fluent/panel-right-20-filled.svg");
+    private property <image> minimize-icon: @image-url("../../assets/icons/fluent/subtract-20-regular.svg");
+    private property <image> maximize-icon: @image-url("../../assets/icons/fluent/maximize-20-regular.svg");
+    private property <image> restore-icon: @image-url("../../assets/icons/fluent/restore-20-regular.svg");
+    private property <image> close-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
+    private property <string> tooltip-text-value: "";
+    private property <length> tooltip-anchor-x-value: 0px;
+    private property <length> tooltip-anchor-y-value: 0px;
 
     callback drag-requested;
     callback drag-double-clicked;
     callback toggle-right-panel-requested;
-    callback toggle-settings-menu-requested;
-    callback close-settings-menu-requested;
+    callback toggle-global-menu-requested;
+    callback close-global-menu-requested;
     callback minimize-requested;
     callback maximize-toggle-requested;
     callback close-requested;
@@ -24,18 +37,32 @@ export component Titlebar inherits Rectangle {
     border-width: 1px;
     border-color: ThemeTokens.shell-stroke;
 
-    changed show-settings-menu => {
-        if root.show-settings-menu {
-            settings-menu.show();
+    changed show-global-menu => {
+        close-tooltip();
+        if root.show-global-menu {
+            global-menu.show();
         } else {
-            settings-menu.close();
+            global-menu.close();
         }
+    }
+
+    function schedule-tooltip(text: string, anchor-x: length, anchor-y: length) {
+        root.tooltip-text-value = text;
+        root.tooltip-anchor-x-value = anchor-x;
+        root.tooltip-anchor-y-value = anchor-y;
+        tooltip-delay.restart();
+    }
+
+    function close-tooltip() {
+        root.tooltip-text-value = "";
+        tooltip-delay.stop();
+        tooltip-popup.close();
     }
 
     content := HorizontalLayout {
         x: 12px;
         y: 8px;
-        width: parent.width - 12px;
+        width: parent.width - 24px;
         height: 32px;
         spacing: 8px;
 
@@ -66,12 +93,23 @@ export component Titlebar inherits Rectangle {
                 vertical-alignment: center;
             }
 
-            TitlebarIconButton {
+            menu-button := TitlebarIconButton {
                 x: parent.width - self.width;
-                label: "M";
+                icon-source: root.menu-icon-regular;
+                active-icon-source: root.menu-icon-filled;
+                active: root.show-global-menu;
+                tooltip-text: "Open menu";
 
                 clicked => {
-                    root.toggle-settings-menu-requested();
+                    root.toggle-global-menu-requested();
+                }
+
+                tooltip-open-requested(text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                }
+
+                tooltip-close-requested => {
+                    root.close-tooltip();
                 }
             }
         }
@@ -79,12 +117,15 @@ export component Titlebar inherits Rectangle {
         drag-zone := Rectangle {
             background: transparent;
             border-radius: 8px;
+            opacity: root.is-window-active ? 1 : 0.8;
 
             Text {
+                x: 16px;
+                width: parent.width - 32px;
                 text: "Workspace";
                 color: ThemeTokens.text-primary;
                 opacity: 0.48;
-                horizontal-alignment: center;
+                horizontal-alignment: left;
                 vertical-alignment: center;
             }
 
@@ -102,7 +143,7 @@ export component Titlebar inherits Rectangle {
         }
 
         actions-zone := Rectangle {
-            width: 120px;
+            width: 84px;
             background: transparent;
             opacity: root.is-window-active ? 1 : 0.72;
 
@@ -120,23 +161,23 @@ export component Titlebar inherits Rectangle {
                 }
             }
 
-            TitlebarIconButton {
-                x: 52px;
-                label: root.show-right-panel ? "R-" : "R+";
+            panel-toggle-button := TitlebarIconButton {
+                x: parent.width - self.width;
+                icon-source: root.panel-right-icon-regular;
+                active-icon-source: root.panel-right-icon-filled;
                 active: root.show-right-panel;
+                tooltip-text: "Toggle right panel";
 
                 clicked => {
                     root.toggle-right-panel-requested();
                 }
-            }
 
-            settings-button := TitlebarIconButton {
-                x: 88px;
-                label: "S";
-                active: root.show-settings-menu;
+                tooltip-open-requested(text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                }
 
-                clicked => {
-                    root.toggle-settings-menu-requested();
+                tooltip-close-requested => {
+                    root.close-tooltip();
                 }
             }
         }
@@ -165,48 +206,94 @@ export component Titlebar inherits Rectangle {
             opacity: root.is-window-active ? 1 : 0.72;
 
             WindowControlButton {
-                label: "-";
+                icon-source: root.minimize-icon;
+                tooltip-text: "Minimize window";
 
                 clicked => {
                     root.minimize-requested();
+                }
+
+                tooltip-open-requested(text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                }
+
+                tooltip-close-requested => {
+                    root.close-tooltip();
                 }
             }
 
             WindowControlButton {
                 x: 46px;
-                label: root.is-window-maximized ? "R" : "+";
+                icon-source: root.is-window-maximized ? root.restore-icon : root.maximize-icon;
+                tooltip-text: root.is-window-maximized ? "Restore window" : "Maximize window";
 
                 clicked => {
                     root.maximize-toggle-requested();
+                }
+
+                tooltip-open-requested(text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                }
+
+                tooltip-close-requested => {
+                    root.close-tooltip();
                 }
             }
 
             WindowControlButton {
                 x: 92px;
-                label: "X";
+                icon-source: root.close-icon;
                 danger: true;
+                tooltip-text: "Close window";
 
                 clicked => {
                     root.close-requested();
+                }
+
+                tooltip-open-requested(text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(text, anchor-x, anchor-y);
+                }
+
+                tooltip-close-requested => {
+                    root.close-tooltip();
                 }
             }
         }
     }
 
-    settings-menu := TitlebarMenu {
-        x: actions-zone.absolute-position.x - 72px;
-        y: actions-zone.absolute-position.y + actions-zone.height + 6px;
+    tooltip-delay := Timer {
+        interval: 280ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.tooltip-text-value != "" {
+                tooltip-popup.show();
+            }
+        }
+    }
+
+    global-menu := TitlebarMenu {
+        x: menu-button.absolute-position.x;
+        y: menu-button.absolute-position.y + menu-button.height + 6px;
 
         close-requested => {
-            root.close-settings-menu-requested();
+            root.close-global-menu-requested();
         }
 
         settings-selected => {
-            root.close-settings-menu-requested();
+            root.close-global-menu-requested();
         }
 
         appearance-selected => {
-            root.close-settings-menu-requested();
+            root.close-global-menu-requested();
         }
+    }
+
+    tooltip-popup := TitlebarTooltip {
+        text: root.tooltip-text-value;
+        anchor-x: root.tooltip-anchor-x-value;
+        anchor-y: root.tooltip-anchor-y-value;
     }
 }

@@ -8,7 +8,7 @@ import { WelcomeView } from "welcome/welcome-view.slint";
 export component AppWindow inherits Window {
     in property <bool> dark-mode: true;
     in-out property <bool> show-right-panel: false;
-    in-out property <bool> show-settings-menu: false;
+    in-out property <bool> show-global-menu: false;
     in-out property <bool> is-window-maximized: false;
     in-out property <bool> is-window-active: true;
 
@@ -18,8 +18,8 @@ export component AppWindow inherits Window {
     callback maximize-toggle-requested();
     callback close-requested();
     callback toggle-right-panel-requested();
-    callback toggle-settings-menu-requested();
-    callback close-settings-menu-requested();
+    callback toggle-global-menu-requested();
+    callback close-global-menu-requested();
 
     title: "Mica Term";
     no-frame: true;
@@ -38,7 +38,7 @@ export component AppWindow inherits Window {
 
             Titlebar {
                 show-right-panel: root.show-right-panel;
-                show-settings-menu: root.show-settings-menu;
+                show-global-menu: root.show-global-menu;
                 is-window-maximized: root.is-window-maximized;
                 is-window-active: root.is-window-active;
 
@@ -66,12 +66,12 @@ export component AppWindow inherits Window {
                     root.toggle-right-panel-requested();
                 }
 
-                toggle-settings-menu-requested => {
-                    root.toggle-settings-menu-requested();
+                toggle-global-menu-requested => {
+                    root.toggle-global-menu-requested();
                 }
 
-                close-settings-menu-requested => {
-                    root.close-settings-menu-requested();
+                close-global-menu-requested => {
+                    root.close-global-menu-requested();
                 }
             }
 

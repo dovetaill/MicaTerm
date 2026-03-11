@@ -1,0 +1,32 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component TitlebarTooltip inherits PopupWindow {
+    in property <string> text;
+    in property <length> anchor-x: 0px;
+    in property <length> anchor-y: 0px;
+
+    x: root.anchor-x - root.width / 2;
+    y: root.anchor-y;
+    width: max(96px, tooltip-label.preferred-width + 20px);
+    height: max(28px, tooltip-label.preferred-height + 10px);
+    close-policy: PopupClosePolicy.no-auto-close;
+
+    background-layer := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: 8px;
+        border-width: 1px;
+        border-color: ThemeTokens.shell-stroke;
+        background: ThemeTokens.panel-tint;
+
+        tooltip-label := Text {
+            x: 10px;
+            width: parent.width - 20px;
+            height: parent.height;
+            text: root.text;
+            color: ThemeTokens.text-primary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}

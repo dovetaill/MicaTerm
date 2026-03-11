@@ -18,7 +18,7 @@ pub fn default_window_size() -> (u32, u32) {
 
 fn sync_top_status_bar_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_show_right_panel(state.show_right_panel);
-    window.set_show_settings_menu(state.show_settings_menu);
+    window.set_show_global_menu(state.show_global_menu);
     window.set_is_window_maximized(state.is_window_maximized);
     window.set_is_window_active(state.is_window_active);
 }
@@ -40,20 +40,20 @@ pub fn bind_top_status_bar(window: &AppWindow) {
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
-    window.on_toggle_settings_menu_requested(move || {
+    window.on_toggle_global_menu_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.toggle_settings_menu();
-        window.set_show_settings_menu(state.show_settings_menu);
+        state.toggle_global_menu();
+        window.set_show_global_menu(state.show_global_menu);
     });
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
-    window.on_close_settings_menu_requested(move || {
+    window.on_close_global_menu_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.close_settings_menu();
-        window.set_show_settings_menu(state.show_settings_menu);
+        state.close_global_menu();
+        window.set_show_global_menu(state.show_global_menu);
     });
 
     let controller_ref = Rc::clone(&controller);

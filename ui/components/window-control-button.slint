@@ -1,9 +1,13 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 
 export component WindowControlButton inherits Rectangle {
-    in property <string> label;
+    in property <image> icon-source;
     in property <bool> danger: false;
+    in property <string> tooltip-text;
     callback clicked;
+    callback tooltip-open-requested(string, length, length);
+    callback tooltip-close-requested();
+    out property <bool> has-hover: touch.has-hover;
 
     width: 46px;
     height: 32px;
@@ -13,15 +17,31 @@ export component WindowControlButton inherits Rectangle {
             ? (root.danger ? #be123c : ThemeTokens.shell-surface)
             : transparent;
 
-    Text {
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    if (root.icon-source.width > 0 && root.icon-source.height > 0) : Image {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        source <=> root.icon-source;
+        image-fit: contain;
+        colorize: ThemeTokens.text-primary;
+    }
+
+    changed has-hover => {
+        if self.has-hover && root.tooltip-text != "" {
+            root.tooltip-open-requested(
+                root.tooltip-text,
+                self.absolute-position.x + self.width / 2,
+                self.absolute-position.y + self.height + 8px,
+            );
+        } else {
+            root.tooltip-close-requested();
+        }
     }
 
     touch := TouchArea {
         clicked => {
+            root.tooltip-close-requested();
             root.clicked();
         }
     }

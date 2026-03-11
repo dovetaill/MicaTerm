@@ -26,18 +26,18 @@ fn shell_view_model_tracks_top_status_bar_state() {
 
     assert!(view_model.show_welcome);
     assert!(!view_model.show_right_panel);
-    assert!(!view_model.show_settings_menu);
+    assert!(!view_model.show_global_menu);
     assert!(!view_model.is_window_maximized);
     assert!(view_model.is_window_active);
 
     view_model.toggle_right_panel();
     assert!(view_model.show_right_panel);
 
-    view_model.toggle_settings_menu();
-    assert!(view_model.show_settings_menu);
+    view_model.toggle_global_menu();
+    assert!(view_model.show_global_menu);
 
-    view_model.close_settings_menu();
-    assert!(!view_model.show_settings_menu);
+    view_model.close_global_menu();
+    assert!(!view_model.show_global_menu);
 
     view_model.set_window_maximized(true);
     assert!(view_model.is_window_maximized);

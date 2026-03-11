@@ -1,9 +1,20 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 
 export component TitlebarIconButton inherits Rectangle {
-    in property <string> label;
+    in property <image> icon-source;
+    in property <image> active-icon-source;
     in property <bool> active: false;
+    in property <string> tooltip-text;
     callback clicked;
+    callback tooltip-open-requested(string, length, length);
+    callback tooltip-close-requested();
+
+    private property <image> displayed-icon: root.active
+        && root.active-icon-source.width > 0
+        && root.active-icon-source.height > 0
+        ? root.active-icon-source
+        : root.icon-source;
+    out property <bool> has-hover: touch.has-hover;
 
     width: 32px;
     height: 32px;
@@ -16,15 +27,31 @@ export component TitlebarIconButton inherits Rectangle {
             ? ThemeTokens.shell-surface
             : transparent;
 
-    Text {
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    if (root.displayed-icon.width > 0 && root.displayed-icon.height > 0) : Image {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        source <=> root.displayed-icon;
+        image-fit: contain;
+        colorize: ThemeTokens.text-primary;
+    }
+
+    changed has-hover => {
+        if self.has-hover && root.tooltip-text != "" {
+            root.tooltip-open-requested(
+                root.tooltip-text,
+                self.absolute-position.x + self.width / 2,
+                self.absolute-position.y + self.height + 8px,
+            );
+        } else {
+            root.tooltip-close-requested();
+        }
     }
 
     touch := TouchArea {
         clicked => {
+            root.tooltip-close-requested();
             root.clicked();
         }
     }
