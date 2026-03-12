@@ -3,4 +3,7 @@ pub mod logging;
 pub mod runtime_profile;
 pub mod ui_preferences;
 pub mod window_effects;
+pub mod window_recovery;
+pub mod windows_frame;
+pub mod window_state;
 pub mod windowing;

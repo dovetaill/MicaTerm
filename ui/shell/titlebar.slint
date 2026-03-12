@@ -8,6 +8,7 @@ export component Titlebar inherits Rectangle {
     in property <bool> show-right-panel: false;
     in property <bool> show-global-menu: false;
     in property <bool> is-window-maximized: false;
+    in property <bool> use-flat-window-chrome: false;
     in property <bool> is-window-active: true;
     in property <bool> is-window-always-on-top: false;
 
@@ -36,6 +37,11 @@ export component Titlebar inherits Rectangle {
     out property <length> layout-content-width: content.width;
     out property <length> layout-nav-zone-width: nav-zone.width;
     out property <length> layout-window-controls-width: window-controls.width;
+    out property <length> layout-radius: root.border-radius;
+    out property <length> layout-maximize-button-x: maximize-button.absolute-position.x + 5px;
+    out property <length> layout-maximize-button-y: maximize-button.absolute-position.y;
+    out property <length> layout-maximize-button-width: 36px;
+    out property <length> layout-maximize-button-height: 36px;
 
     callback drag-requested;
     callback drag-double-clicked;
@@ -50,7 +56,7 @@ export component Titlebar inherits Rectangle {
 
     height: 48px;
     background: ThemeTokens.command-tint;
-    border-radius: 12px;
+    border-radius: root.use-flat-window-chrome ? 0px : 12px;
     border-width: 1px;
     border-color: ThemeTokens.shell-stroke;
 

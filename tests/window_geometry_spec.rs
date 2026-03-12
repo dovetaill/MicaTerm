@@ -101,3 +101,52 @@ fn collapse_order_matches_design_under_narrow_widths() {
     app.invoke_shell_layout_invalidated(1079.0, 900.0);
     assert_eq!(app.get_layout_right_panel_width() as u32, 0);
 }
+
+#[test]
+fn restored_window_uses_rounded_shell_frame_and_titlebar() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.show().unwrap();
+
+    assert_eq!(app.get_layout_shell_frame_radius() as u32, 14);
+    assert_eq!(app.get_layout_titlebar_radius() as u32, 12);
+}
+
+#[test]
+fn flat_window_chrome_flattens_shell_frame_and_titlebar() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.set_use_flat_window_chrome(true);
+    app.show().unwrap();
+
+    assert_eq!(app.get_layout_shell_frame_radius() as u32, 0);
+    assert_eq!(app.get_layout_titlebar_radius() as u32, 0);
+}
+
+#[test]
+fn maximize_button_geometry_is_exported_for_native_frame_adapter() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.show().unwrap();
+
+    assert_eq!(app.get_layout_titlebar_maximize_button_width() as u32, 36);
+    assert_eq!(app.get_layout_titlebar_maximize_button_height() as u32, 36);
+    assert!(app.get_layout_titlebar_maximize_button_x() > 0.0);
+}
+
+#[test]
+fn frameless_window_exports_resize_border_budget() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.show().unwrap();
+
+    assert_eq!(app.get_layout_resize_border_width() as u32, 6);
+}

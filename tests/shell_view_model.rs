@@ -1,3 +1,4 @@
+use mica_term::app::window_state::WindowPlacementKind;
 use mica_term::shell::sidebar::SidebarDestination;
 use mica_term::shell::view_model::{ShellViewModel, WelcomeAction, welcome_actions};
 use mica_term::theme::ThemeMode;
@@ -34,7 +35,7 @@ fn shell_view_model_tracks_top_status_bar_state() {
     assert!(view_model.show_welcome);
     assert!(!view_model.show_right_panel);
     assert!(!view_model.show_global_menu);
-    assert!(!view_model.is_window_maximized);
+    assert!(!view_model.is_window_maximized());
     assert!(view_model.is_window_active);
 
     view_model.toggle_right_panel();
@@ -46,11 +47,29 @@ fn shell_view_model_tracks_top_status_bar_state() {
     view_model.close_global_menu();
     assert!(!view_model.show_global_menu);
 
-    view_model.set_window_maximized(true);
-    assert!(view_model.is_window_maximized);
+    view_model.set_window_placement(WindowPlacementKind::Maximized);
+    assert!(view_model.is_window_maximized());
 
     view_model.set_window_active(false);
     assert!(!view_model.is_window_active);
+}
+
+#[test]
+fn shell_view_model_tracks_window_placement_and_chrome_mode() {
+    let mut view_model = ShellViewModel::default();
+
+    assert_eq!(view_model.window_placement(), WindowPlacementKind::Restored);
+    assert!(!view_model.uses_flat_window_chrome());
+    assert!(!view_model.is_window_maximized());
+
+    view_model.set_window_placement(WindowPlacementKind::SnappedLeft);
+    assert_eq!(view_model.window_placement(), WindowPlacementKind::SnappedLeft);
+    assert!(view_model.uses_flat_window_chrome());
+    assert!(!view_model.is_window_maximized());
+
+    view_model.set_window_placement(WindowPlacementKind::Maximized);
+    assert!(view_model.is_window_maximized());
+    assert!(view_model.uses_flat_window_chrome());
 }
 
 #[test]
