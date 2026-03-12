@@ -182,12 +182,11 @@ Date: 2026-03-12 11:59:15 CST
 
 - [x] formal linux build path documented
 - [x] formal windows gnu build path documented
-- [x] skia experimental path documented
-- [x] experimental backend conflict override documented
-- [x] explicit skia init failure path documented
+- [x] skia experimental path removed from mainline docs and scripts
+- [x] experimental backend override removed from the formal runtime entry
 - [x] `build-release.sh` exposes `fail-fast` and `best-effort`
-- [x] `build-win-x64-skia.sh` remains a pure-Skia wrapper with `CARGO_NO_DEFAULT_FEATURES=1`
-- [x] experimental runtime diagnostics expose `Skia Experimental` and `winit-skia-software`
+- [x] `build_win_x64_skia_script_smoke.sh` now guards the absence of the old skia wrapper
+- [x] runtime diagnostics no longer advertise the removed experimental renderer route
 
 ### Notes
 
@@ -202,4 +201,68 @@ Date: 2026-03-12 11:59:15 CST
   - `Linux 6.12.57+deb13-amd64 x86_64 GNU/Linux`
   - `DISPLAY=`
   - `WAYLAND_DISPLAY=`
-- Manual follow-up is still required for Windows `winit-software` 正式包、Windows MSVC `Skia Experimental` 包，以及真实机上的标题/日志观察路径。
+- Manual follow-up is still required for the Windows formal package and real-machine title / log observation paths.
+
+## Windows Theme Minimal Repro And Skia Removal Verification
+
+Date: 2026-03-12 14:35:00 CST
+
+### Source Documents
+
+- Design: `docs/plans/2026-03-12-windows-theme-min-repro-and-skia-removal-design.md`
+- Implementation Plan: `docs/plans/2026-03-12-windows-theme-min-repro-and-skia-removal-implementation-plan.md`
+
+### Commands Executed
+
+- [x] `cargo test -q`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+- [x] `bash tests/window_theme_contract_smoke.sh`
+- [x] `bash tests/build_win_x64_skia_script_smoke.sh`
+- [x] `cargo test --test windows_theme_repro_smoke -q`
+- [x] `cargo check --bin windows_theme_repro`
+
+### Automated Results
+
+- `cargo test -q`: passed
+- `cargo check --workspace`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+- `bash tests/window_theme_contract_smoke.sh`: passed
+- `bash tests/build_win_x64_skia_script_smoke.sh`: passed
+- `cargo test --test windows_theme_repro_smoke -q`: passed
+- `cargo check --bin windows_theme_repro`: passed
+
+### Verification Conclusions
+
+- [x] 主线 Cargo feature 已不再暴露已移除的实验渲染入口
+- [x] 主入口不再强制旧实验渲染 backend 环境变量
+- [x] 旧 Windows Skia wrapper 脚本已删除
+- [x] README 和 verification 不再把 Skia experimental 作为正式构建路径
+- [x] 负向 smoke 已覆盖旧 Skia 入口不会回流
+- [x] 独立最小 repro binary `windows_theme_repro` 已加入构建
+- [x] 最小 repro 不依赖正式 `bootstrap`、`window_effects` 或 `AppWindow::new`
+
+### Notes
+
+- `cargo test -q` 的输出里仍会出现 `panic_hook_writes_crash_file_for_child_process ... FAILED`，这是测试子进程故意触发 panic 的既有 smoke 行为；父测试依赖该非零退出码和 `crash/` 文件完成断言，因此整条命令返回成功。
+- 当前环境只能确认主线收敛、最小 repro 编译通过和自动化契约通过，不能替代 Windows 真机上的图形现象验证。
+
+### Windows Manual Repro Checklist
+
+- [ ] 在 Windows 机器执行 `cargo run --bin windows_theme_repro`
+- [ ] 启动后确认窗口默认高度足够大，能够拖出屏幕底部
+- [ ] 将窗口底部拖出屏幕，再点击 `Toggle Theme`
+- [ ] 验证 `Dark -> Light -> Dark` 时，屏外区域是否会整体刷新
+- [ ] 将窗口左侧、右侧、顶部分别拖出屏幕，再重复切换
+- [ ] 若问题仍复现，记录“哪一侧超屏 + 哪次切换残留旧颜色”
+- [ ] 若问题不再复现，记录标准窗口最小 repro 与正式应用行为差异
+
+### GUI Smoke Status
+
+- [ ] `cargo run --bin windows_theme_repro` on Windows 11
+- GUI smoke was not executed in this environment.
+- Environment evidence:
+  - `Linux 6.12.57+deb13-amd64 x86_64 GNU/Linux`
+  - `DISPLAY=`
+  - `WAYLAND_DISPLAY=`
+- Manual follow-up is still required for the offscreen repaint observation on Windows.

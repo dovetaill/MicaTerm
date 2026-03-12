@@ -30,23 +30,12 @@ pub fn app_title() -> &'static str {
     "Mica Term"
 }
 
-pub fn runtime_window_title(profile: AppRuntimeProfile) -> String {
-    if profile.is_experimental() {
-        format!("{} [Skia Experimental]", app_title())
-    } else {
-        app_title().to_owned()
-    }
+pub fn runtime_window_title(_profile: AppRuntimeProfile) -> String {
+    app_title().to_owned()
 }
 
-pub fn startup_failure_message(profile: AppRuntimeProfile, err: &str) -> Option<String> {
-    profile.forced_backend().map(|backend| {
-        format!(
-            "{} Skia Experimental failed to initialize {}: {}",
-            app_title(),
-            backend,
-            err
-        )
-    })
+pub fn startup_failure_message(_profile: AppRuntimeProfile, _err: &str) -> Option<String> {
+    None
 }
 
 pub fn default_window_size() -> (u32, u32) {

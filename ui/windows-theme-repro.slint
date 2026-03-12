@@ -1,0 +1,54 @@
+export component WindowsThemeRepro inherits Window {
+    in-out property <bool> dark-mode: true;
+    callback toggle_theme_requested();
+
+    title: dark-mode ? "Mica Term Theme Repro [Dark]" : "Mica Term Theme Repro [Light]";
+    preferred-width: 1280px;
+    preferred-height: 1800px;
+    background: dark-mode ? #000000 : #ffffff;
+
+    header := Rectangle {
+        width: parent.width;
+        height: 72px;
+        background: root.dark-mode ? #181818 : #f0f0f0;
+
+        state-label := Text {
+            x: 24px;
+            y: 26px;
+            text: root.dark-mode ? "Theme: Dark" : "Theme: Light";
+            color: root.dark-mode ? #f5f5f5 : #111111;
+        }
+
+        toggle-button := Rectangle {
+            width: 180px;
+            height: 40px;
+            x: parent.width - self.width - 24px;
+            y: 16px;
+            border-radius: 20px;
+            background: root.dark-mode ? #f2f2f2 : #202020;
+
+            button-label := Text {
+                width: parent.width;
+                y: 11px;
+                horizontal-alignment: center;
+                text: "Toggle Theme";
+                color: root.dark-mode ? #101010 : #ffffff;
+            }
+
+            TouchArea {
+                width: parent.width;
+                height: parent.height;
+                clicked => {
+                    root.toggle_theme_requested();
+                }
+            }
+        }
+    }
+
+    body := Rectangle {
+        y: header.height;
+        width: parent.width;
+        height: root.height - header.height;
+        background: root.dark-mode ? #000000 : #ffffff;
+    }
+}

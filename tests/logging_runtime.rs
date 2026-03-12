@@ -85,14 +85,15 @@ fn debug_logging_can_emit_runtime_profile_metadata() {
     let runtime = build_test_logging_runtime(&paths, &config).unwrap();
 
     tracing::dispatcher::with_default(&runtime.dispatch, || {
-        emit_runtime_profile_metadata(AppRuntimeProfile::skia_experimental());
+        emit_runtime_profile_metadata(AppRuntimeProfile::formal());
     });
 
     drop(runtime.guard);
 
     let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
     assert!(content.contains("initialized runtime profile"));
-    assert!(content.contains("SkiaExperimental"));
-    assert!(content.contains("SkiaSoftware"));
-    assert!(content.contains("winit-skia-software"));
+    assert!(content.contains("Formal"));
+    assert!(content.contains("Software"));
+    assert!(!content.contains("SkiaExperimental"));
+    assert!(!content.contains("SkiaSoftware"));
 }
