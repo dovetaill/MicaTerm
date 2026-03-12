@@ -5,10 +5,19 @@ use anyhow::Result;
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::AppWindow;
+use crate::app::window_recovery::WindowRecoveryController;
+use crate::app::window_recovery::WindowVisibilitySnapshot;
+#[cfg(target_os = "windows")]
+use crate::app::window_recovery::WindowRecoveryAction;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
+#[cfg(target_os = "windows")]
+use crate::app::windows_frame::{
+    CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
+};
 use crate::app::window_effects::{
     PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
 };
+use crate::app::window_state::WindowPlacementKind;
 use crate::app::windowing::{WindowController, apply_restored_window_size, window_appearance};
 use crate::shell::layout::{ShellLayoutInput, resolve_shell_layout};
 use crate::shell::metrics::ShellMetrics;
@@ -27,7 +36,7 @@ pub fn default_window_size() -> (u32, u32) {
     )
 }
 
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WindowRect {
     x: i32,
@@ -36,7 +45,7 @@ struct WindowRect {
     height: u32,
 }
 
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 impl WindowRect {
     fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
         Self {
@@ -60,7 +69,7 @@ impl WindowRect {
     }
 }
 
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MonitorRect {
     x: i32,
@@ -69,7 +78,7 @@ struct MonitorRect {
     height: u32,
 }
 
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 impl MonitorRect {
     fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
         Self {
@@ -89,137 +98,7 @@ impl MonitorRect {
     }
 }
 
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct WindowVisibilitySnapshot {
-    total_area: u64,
-    visible_area: u64,
-}
-
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
-impl WindowVisibilitySnapshot {
-    fn from_rects(window: WindowRect, monitors: &[MonitorRect]) -> Self {
-        let visible_area = monitors
-            .iter()
-            .map(|monitor| intersection_area(window, *monitor))
-            .sum();
-
-        Self {
-            total_area: window.area(),
-            visible_area,
-        }
-    }
-}
-
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ThemeRecoveryAction {
-    None,
-    NudgeWindowSize { width: u32, height: u32 },
-    RestoreWindowSize { width: u32, height: u32 },
-}
-
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PendingWindowSizeRestore {
-    nudged_width: u32,
-    nudged_height: u32,
-    restore_width: u32,
-    restore_height: u32,
-}
-
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct ThemeRedrawRecovery {
-    pending_visible_area: Option<u64>,
-    pending_restore_size: Option<PendingWindowSizeRestore>,
-}
-
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
-impl ThemeRedrawRecovery {
-    fn mark_theme_toggle(&mut self, snapshot: WindowVisibilitySnapshot) {
-        self.pending_restore_size = None;
-        self.pending_visible_area =
-            (snapshot.total_area > 0 && snapshot.visible_area < snapshot.total_area)
-                .then_some(snapshot.visible_area);
-    }
-
-    fn next_action(
-        &mut self,
-        snapshot: WindowVisibilitySnapshot,
-        window_width: u32,
-        window_height: u32,
-        window_maximized: bool,
-    ) -> ThemeRecoveryAction {
-        if let Some(pending_restore) = self.pending_restore_size {
-            if window_width == pending_restore.nudged_width
-                && window_height == pending_restore.nudged_height
-            {
-                self.pending_restore_size = None;
-                return ThemeRecoveryAction::RestoreWindowSize {
-                    width: pending_restore.restore_width,
-                    height: pending_restore.restore_height,
-                };
-            }
-
-            if window_width != pending_restore.restore_width
-                || window_height != pending_restore.restore_height
-            {
-                self.pending_restore_size = None;
-            }
-
-            return ThemeRecoveryAction::None;
-        }
-
-        let Some(previous_visible_area) = self.pending_visible_area else {
-            return ThemeRecoveryAction::None;
-        };
-
-        if snapshot.visible_area <= previous_visible_area {
-            return ThemeRecoveryAction::None;
-        }
-
-        if window_maximized {
-            self.pending_visible_area =
-                (snapshot.visible_area < snapshot.total_area).then_some(snapshot.visible_area);
-            return ThemeRecoveryAction::None;
-        }
-
-        let Some((nudged_width, nudged_height)) =
-            nudged_window_size(window_width, window_height)
-        else {
-            self.pending_visible_area =
-                (snapshot.visible_area < snapshot.total_area).then_some(snapshot.visible_area);
-            return ThemeRecoveryAction::None;
-        };
-
-        self.pending_visible_area =
-            (snapshot.visible_area < snapshot.total_area).then_some(snapshot.visible_area);
-
-        self.pending_restore_size = Some(PendingWindowSizeRestore {
-            nudged_width,
-            nudged_height,
-            restore_width: window_width,
-            restore_height: window_height,
-        });
-
-        ThemeRecoveryAction::NudgeWindowSize {
-            width: nudged_width,
-            height: nudged_height,
-        }
-    }
-}
-
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
-fn nudged_window_size(window_width: u32, window_height: u32) -> Option<(u32, u32)> {
-    if let Some(width) = window_width.checked_add(1) {
-        return Some((width, window_height));
-    }
-
-    window_height.checked_add(1).map(|height| (window_width, height))
-}
-
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn intersection_area(window: WindowRect, monitor: MonitorRect) -> u64 {
     let left = i64::from(window.x).max(i64::from(monitor.x));
     let top = i64::from(window.y).max(i64::from(monitor.y));
@@ -252,34 +131,180 @@ fn current_window_visibility_snapshot(
         })
         .collect();
 
-    WindowVisibilitySnapshot::from_rects(
-        WindowRect::new(position.x, position.y, size.width, size.height),
-        &monitors,
-    )
+    let window = WindowRect::new(position.x, position.y, size.width, size.height);
+    let visible_area = monitors
+        .iter()
+        .map(|monitor| intersection_area(window, *monitor))
+        .sum();
+
+    WindowVisibilitySnapshot::new(window.area(), visible_area)
 }
 
 #[cfg(target_os = "windows")]
-fn mark_windows_theme_redraw_recovery(window: &AppWindow, recovery: &Rc<RefCell<ThemeRedrawRecovery>>) {
+fn arm_windows_window_recovery(
+    window: &AppWindow,
+    recovery: &Rc<RefCell<WindowRecoveryController>>,
+) {
     use slint::winit_030::WinitWindowAccessor;
 
     let _ = window.window().with_winit_window(|winit_window| {
         recovery
             .borrow_mut()
-            .mark_theme_toggle(current_window_visibility_snapshot(winit_window));
+            .arm_visibility_recovery(current_window_visibility_snapshot(winit_window));
     });
 }
 
 #[cfg(not(target_os = "windows"))]
-fn mark_windows_theme_redraw_recovery(
+fn arm_windows_window_recovery(
     _window: &AppWindow,
-    _recovery: &Rc<RefCell<ThemeRedrawRecovery>>,
+    _recovery: &Rc<RefCell<WindowRecoveryController>>,
 ) {
 }
 
 #[cfg(target_os = "windows")]
-fn bind_windows_theme_redraw_recovery(
+fn apply_window_recovery_action(
+    handle: &slint::Weak<AppWindow>,
+    slint_window: &slint::Window,
+    action: WindowRecoveryAction,
+) {
+    use slint::winit_030::{WinitWindowAccessor, winit};
+
+    match action {
+        WindowRecoveryAction::None => {}
+        WindowRecoveryAction::RequestRedraw => {
+            let window = handle.unwrap();
+            bump_render_revision(&window);
+            slint_window.request_redraw();
+            let _ = slint_window.with_winit_window(|winit_window| {
+                winit_window.request_redraw();
+            });
+        }
+        WindowRecoveryAction::NudgeWindowSize { width, height } => {
+            let window = handle.unwrap();
+            bump_render_revision(&window);
+            slint_window.request_redraw();
+            let _ = slint_window.with_winit_window(|winit_window| {
+                winit_window.request_redraw();
+                let _ = winit_window
+                    .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+            });
+        }
+        WindowRecoveryAction::RestoreWindowSize { width, height } => {
+            slint_window.request_redraw();
+            let _ = slint_window.with_winit_window(|winit_window| {
+                winit_window.request_redraw();
+                let _ = winit_window
+                    .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+            });
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn notify_windows_window_recovery_transition_with_snapshot(
     window: &AppWindow,
-    recovery: Rc<RefCell<ThemeRedrawRecovery>>,
+    recovery: &Rc<RefCell<WindowRecoveryController>>,
+    previous: WindowPlacementKind,
+    next: WindowPlacementKind,
+    snapshot: WindowVisibilitySnapshot,
+    width: u32,
+    height: u32,
+) {
+    let handle = window.as_weak();
+    let action = recovery
+        .borrow_mut()
+        .on_placement_changed(previous, next, snapshot, width, height);
+
+    apply_window_recovery_action(&handle, window.window(), action);
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[cfg(not(target_os = "windows"))]
+fn notify_windows_window_recovery_transition_with_snapshot(
+    _window: &AppWindow,
+    _recovery: &Rc<RefCell<WindowRecoveryController>>,
+    _previous: WindowPlacementKind,
+    _next: WindowPlacementKind,
+    _snapshot: WindowVisibilitySnapshot,
+    _width: u32,
+    _height: u32,
+) {
+}
+
+#[cfg(target_os = "windows")]
+fn notify_windows_window_recovery_transition(
+    window: &AppWindow,
+    recovery: &Rc<RefCell<WindowRecoveryController>>,
+    previous: WindowPlacementKind,
+    next: WindowPlacementKind,
+) {
+    use slint::winit_030::WinitWindowAccessor;
+
+    let _ = window.window().with_winit_window(|winit_window| {
+        let size = winit_window.inner_size();
+        notify_windows_window_recovery_transition_with_snapshot(
+            window,
+            recovery,
+            previous,
+            next,
+            current_window_visibility_snapshot(winit_window),
+            size.width,
+            size.height,
+        );
+    });
+}
+
+#[cfg(not(target_os = "windows"))]
+fn notify_windows_window_recovery_transition(
+    _window: &AppWindow,
+    _recovery: &Rc<RefCell<WindowRecoveryController>>,
+    _previous: WindowPlacementKind,
+    _next: WindowPlacementKind,
+) {
+}
+
+#[cfg(target_os = "windows")]
+fn sync_windows_true_window_placement(
+    window: &AppWindow,
+    state: &Rc<RefCell<ShellViewModel>>,
+    effects: &dyn PlatformWindowEffects,
+    recovery: &Rc<RefCell<WindowRecoveryController>>,
+    winit_window: &slint::winit_030::winit::window::Window,
+) {
+    let Some(next) = query_true_window_placement(winit_window) else {
+        return;
+    };
+
+    let previous = {
+        let mut state = state.borrow_mut();
+        let previous = state.window_placement();
+        if previous == next {
+            return;
+        }
+
+        state.set_window_placement(next);
+        sync_top_status_bar_state(window, &state, effects);
+        previous
+    };
+
+    let size = winit_window.inner_size();
+    notify_windows_window_recovery_transition_with_snapshot(
+        window,
+        recovery,
+        previous,
+        next,
+        current_window_visibility_snapshot(winit_window),
+        size.width,
+        size.height,
+    );
+}
+
+#[cfg(target_os = "windows")]
+fn bind_windows_window_recovery(
+    window: &AppWindow,
+    state: Rc<RefCell<ShellViewModel>>,
+    effects: Rc<dyn PlatformWindowEffects>,
+    recovery: Rc<RefCell<WindowRecoveryController>>,
 ) {
     use slint::ComponentHandle;
     use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
@@ -294,41 +319,33 @@ fn bind_windows_theme_redraw_recovery(
         );
 
         if should_check_visibility {
+            let window = handle.unwrap();
             let action = slint_window
                 .with_winit_window(|winit_window| {
-                    let size = winit_window.inner_size();
-                    recovery
-                        .borrow_mut()
-                        .next_action(
-                            current_window_visibility_snapshot(winit_window),
-                            size.width,
-                            size.height,
-                            winit_window.is_maximized(),
-                        )
-                })
-                .unwrap_or(ThemeRecoveryAction::None);
+                    sync_windows_true_window_placement(
+                        &window,
+                        &state,
+                        effects.as_ref(),
+                        &recovery,
+                        winit_window,
+                    );
 
-            match action {
-                ThemeRecoveryAction::None => {}
-                ThemeRecoveryAction::NudgeWindowSize { width, height } => {
-                    let window = handle.unwrap();
-                    bump_render_revision(&window);
-                    slint_window.request_redraw();
-                    let _ = slint_window.with_winit_window(|winit_window| {
-                        winit_window.request_redraw();
-                        let _ = winit_window
-                            .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
-                    });
-                }
-                ThemeRecoveryAction::RestoreWindowSize { width, height } => {
-                    slint_window.request_redraw();
-                    let _ = slint_window.with_winit_window(|winit_window| {
-                        winit_window.request_redraw();
-                        let _ = winit_window
-                            .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
-                    });
-                }
-            }
+                    let size = winit_window.inner_size();
+                    let mut recovery = recovery.borrow_mut();
+                    let action = recovery.on_resize_ack(size.width, size.height);
+                    if action != WindowRecoveryAction::None {
+                        return action;
+                    }
+
+                    recovery.on_visibility_changed(
+                        current_window_visibility_snapshot(winit_window),
+                        size.width,
+                        size.height,
+                    )
+                })
+                .unwrap_or(WindowRecoveryAction::None);
+
+            apply_window_recovery_action(&handle, slint_window, action);
         }
 
         EventResult::Propagate
@@ -336,9 +353,11 @@ fn bind_windows_theme_redraw_recovery(
 }
 
 #[cfg(not(target_os = "windows"))]
-fn bind_windows_theme_redraw_recovery(
+fn bind_windows_window_recovery(
     _window: &AppWindow,
-    _recovery: Rc<RefCell<ThemeRedrawRecovery>>,
+    _state: Rc<RefCell<ShellViewModel>>,
+    _effects: Rc<dyn PlatformWindowEffects>,
+    _recovery: Rc<RefCell<WindowRecoveryController>>,
 ) {
 }
 
@@ -381,7 +400,8 @@ fn sync_top_status_bar_state(
     sync_theme_and_window_effects(window, state, effects);
     window.set_show_right_panel(state.show_right_panel);
     window.set_show_global_menu(state.show_global_menu);
-    window.set_is_window_maximized(state.is_window_maximized);
+    window.set_is_window_maximized(state.is_window_maximized());
+    window.set_use_flat_window_chrome(state.uses_flat_window_chrome());
     window.set_is_window_active(state.is_window_active);
     window.set_is_window_always_on_top(state.is_always_on_top);
 }
@@ -427,6 +447,38 @@ fn current_window_size(window: &AppWindow) -> (u32, u32) {
     (size.width, size.height)
 }
 
+#[cfg(target_os = "windows")]
+fn install_windows_frame_adapter(window: &AppWindow) {
+    use slint::winit_030::WinitWindowAccessor;
+
+    let placement = query_true_window_placement_from_app(window);
+    let maximize_button = CaptionButtonGeometry {
+        x: window.get_layout_titlebar_maximize_button_x() as i32,
+        y: window.get_layout_titlebar_maximize_button_y() as i32,
+        width: window.get_layout_titlebar_maximize_button_width() as i32,
+        height: window.get_layout_titlebar_maximize_button_height() as i32,
+    };
+
+    let _ = window.window().with_winit_window(|winit_window| {
+        install_window_frame_adapter(winit_window, maximize_button, placement);
+    });
+}
+
+#[cfg(not(target_os = "windows"))]
+fn install_windows_frame_adapter(_window: &AppWindow) {
+}
+
+#[cfg(target_os = "windows")]
+fn query_true_window_placement_from_app(window: &AppWindow) -> WindowPlacementKind {
+    use slint::winit_030::WinitWindowAccessor;
+
+    window
+        .window()
+        .with_winit_window(query_true_window_placement)
+        .flatten()
+        .unwrap_or(WindowPlacementKind::Unknown)
+}
+
 fn load_ui_preferences(store: &Option<Rc<UiPreferencesStore>>) -> UiPreferences {
     match store {
         Some(store) => match store.load_or_default() {
@@ -463,16 +515,20 @@ pub fn bind_top_status_bar_with_store_and_effects(
 ) {
     let store = store.map(Rc::new);
     let prefs = load_ui_preferences(&store);
-    let view_model = Rc::new(RefCell::new(ShellViewModel {
-        theme_mode: prefs.theme_mode,
-        is_always_on_top: prefs.always_on_top,
-        ..ShellViewModel::default()
-    }));
+    let mut initial_view_model = ShellViewModel::default();
+    initial_view_model.theme_mode = prefs.theme_mode;
+    initial_view_model.is_always_on_top = prefs.always_on_top;
+    let view_model = Rc::new(RefCell::new(initial_view_model));
     let controller = Rc::new(WindowController::new(window));
-    let redraw_recovery = Rc::new(RefCell::new(ThemeRedrawRecovery::default()));
+    let window_recovery = Rc::new(RefCell::new(WindowRecoveryController::default()));
 
     apply_restored_window_size(window, default_window_size());
-    bind_windows_theme_redraw_recovery(window, Rc::clone(&redraw_recovery));
+    bind_windows_window_recovery(
+        window,
+        Rc::clone(&view_model),
+        Rc::clone(&effects),
+        Rc::clone(&window_recovery),
+    );
     sync_shell_state(window, &view_model.borrow(), effects.as_ref());
     sync_shell_layout(
         window,
@@ -480,6 +536,7 @@ pub fn bind_top_status_bar_with_store_and_effects(
         ShellMetrics::WINDOW_DEFAULT_WIDTH,
         ShellMetrics::WINDOW_DEFAULT_HEIGHT,
     );
+    install_windows_frame_adapter(window);
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
@@ -514,11 +571,11 @@ pub fn bind_top_status_bar_with_store_and_effects(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(&effects);
-    let redraw_recovery_ref = Rc::clone(&redraw_recovery);
+    let window_recovery_ref = Rc::clone(&window_recovery);
     window.on_toggle_theme_mode_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        mark_windows_theme_redraw_recovery(&window, &redraw_recovery_ref);
+        arm_windows_window_recovery(&window, &window_recovery_ref);
         state.toggle_theme_mode();
         sync_theme_and_window_effects(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
@@ -543,12 +600,21 @@ pub fn bind_top_status_bar_with_store_and_effects(
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let controller_ref = Rc::clone(&controller);
+    let effects_ref = Rc::clone(&effects);
+    let window_recovery_ref = Rc::clone(&window_recovery);
     window.on_maximize_toggle_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let next = controller_ref.toggle_maximize(state.is_window_maximized);
-        state.set_window_maximized(next);
-        window.set_is_window_maximized(next);
+        let previous = state.window_placement();
+        let next = controller_ref.toggle_maximize(state.is_window_maximized());
+        let next = if next {
+            WindowPlacementKind::Maximized
+        } else {
+            WindowPlacementKind::Restored
+        };
+        state.set_window_placement(next);
+        notify_windows_window_recovery_transition(&window, &window_recovery_ref, previous, next);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
     });
 
     let state = Rc::clone(&view_model);
@@ -581,6 +647,7 @@ pub fn bind_top_status_bar_with_store_and_effects(
         let window = handle.unwrap();
         let state = state.borrow();
         sync_shell_layout(&window, &state, width as u32, height as u32);
+        install_windows_frame_adapter(&window);
     });
 
     let controller_ref = Rc::clone(&controller);
@@ -596,12 +663,21 @@ pub fn bind_top_status_bar_with_store_and_effects(
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let controller_ref = Rc::clone(&controller);
+    let effects_ref = Rc::clone(&effects);
+    let window_recovery_ref = Rc::clone(&window_recovery);
     window.on_drag_double_clicked(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let next = controller_ref.toggle_maximize(state.is_window_maximized);
-        state.set_window_maximized(next);
-        window.set_is_window_maximized(next);
+        let previous = state.window_placement();
+        let next = controller_ref.toggle_maximize(state.is_window_maximized());
+        let next = if next {
+            WindowPlacementKind::Maximized
+        } else {
+            WindowPlacementKind::Restored
+        };
+        state.set_window_placement(next);
+        notify_windows_window_recovery_transition(&window, &window_recovery_ref, previous, next);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
     });
 }
 
@@ -635,145 +711,6 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use crate::AppWindow;
-
-    use super::{
-        MonitorRect, ThemeRecoveryAction, ThemeRedrawRecovery, WindowRect,
-        WindowVisibilitySnapshot,
-    };
-
-    #[test]
-    fn redraw_recovery_stays_idle_when_theme_toggles_fully_visible() {
-        let mut recovery = ThemeRedrawRecovery::default();
-        let window = WindowRect::new(100, 100, 1440, 900);
-        let monitors = [MonitorRect::new(0, 0, 1920, 1080)];
-
-        recovery.mark_theme_toggle(WindowVisibilitySnapshot::from_rects(window, &monitors));
-
-        assert_eq!(
-            recovery.next_action(
-                WindowVisibilitySnapshot::from_rects(window, &monitors),
-                window.width,
-                window.height,
-                false,
-            ),
-            ThemeRecoveryAction::None
-        );
-    }
-
-    #[test]
-    fn redraw_recovery_requests_size_nudge_once_when_window_reenters_visible_area() {
-        let mut recovery = ThemeRedrawRecovery::default();
-        let mostly_offscreen = WindowRect::new(-400, 120, 1440, 900);
-        let restored = WindowRect::new(80, 120, 1440, 900);
-        let monitors = [MonitorRect::new(0, 0, 1920, 1080)];
-
-        recovery.mark_theme_toggle(WindowVisibilitySnapshot::from_rects(
-            mostly_offscreen,
-            &monitors,
-        ));
-
-        let restored_snapshot = WindowVisibilitySnapshot::from_rects(restored, &monitors);
-        assert_eq!(
-            recovery.next_action(
-                restored_snapshot,
-                restored.width,
-                restored.height,
-                false,
-            ),
-            ThemeRecoveryAction::NudgeWindowSize {
-                width: restored.width + 1,
-                height: restored.height,
-            }
-        );
-        assert_eq!(
-            recovery.next_action(restored_snapshot, restored.width + 1, restored.height, false),
-            ThemeRecoveryAction::RestoreWindowSize {
-                width: restored.width,
-                height: restored.height,
-            }
-        );
-        assert_eq!(
-            recovery.next_action(restored_snapshot, restored.width, restored.height, false),
-            ThemeRecoveryAction::None
-        );
-    }
-
-    #[test]
-    fn redraw_recovery_skips_size_nudge_for_maximized_windows() {
-        let mut recovery = ThemeRedrawRecovery::default();
-        let mostly_offscreen = WindowRect::new(-400, 120, 1440, 900);
-        let restored = WindowRect::new(80, 120, 1440, 900);
-        let monitors = [MonitorRect::new(0, 0, 1920, 1080)];
-
-        recovery.mark_theme_toggle(WindowVisibilitySnapshot::from_rects(
-            mostly_offscreen,
-            &monitors,
-        ));
-
-        assert_eq!(
-            recovery.next_action(
-                WindowVisibilitySnapshot::from_rects(restored, &monitors),
-                restored.width,
-                restored.height,
-                true,
-            ),
-            ThemeRecoveryAction::None
-        );
-    }
-
-    #[test]
-    fn redraw_recovery_can_nudge_again_while_window_keeps_becoming_more_visible() {
-        let mut recovery = ThemeRedrawRecovery::default();
-        let mostly_offscreen = WindowRect::new(-400, 120, 1440, 900);
-        let partially_restored = WindowRect::new(-320, 120, 1440, 900);
-        let more_visible = WindowRect::new(-160, 120, 1440, 900);
-        let monitors = [MonitorRect::new(0, 0, 1920, 1080)];
-
-        recovery.mark_theme_toggle(WindowVisibilitySnapshot::from_rects(
-            mostly_offscreen,
-            &monitors,
-        ));
-
-        let partially_restored_snapshot =
-            WindowVisibilitySnapshot::from_rects(partially_restored, &monitors);
-        assert_eq!(
-            recovery.next_action(
-                partially_restored_snapshot,
-                partially_restored.width,
-                partially_restored.height,
-                false,
-            ),
-            ThemeRecoveryAction::NudgeWindowSize {
-                width: partially_restored.width + 1,
-                height: partially_restored.height,
-            }
-        );
-        assert_eq!(
-            recovery.next_action(
-                partially_restored_snapshot,
-                partially_restored.width + 1,
-                partially_restored.height,
-                false,
-            ),
-            ThemeRecoveryAction::RestoreWindowSize {
-                width: partially_restored.width,
-                height: partially_restored.height,
-            }
-        );
-
-        assert_eq!(
-            recovery.next_action(
-                WindowVisibilitySnapshot::from_rects(more_visible, &monitors),
-                more_visible.width,
-                more_visible.height,
-                false,
-            ),
-            ThemeRecoveryAction::NudgeWindowSize {
-                width: more_visible.width + 1,
-                height: more_visible.height,
-            }
-        );
-    }
 
     #[test]
     fn bump_render_revision_increments_hidden_revision() {

@@ -62,3 +62,19 @@ fn top_status_bar_window_commands_match_the_approved_strategy() {
     assert!(next_maximize_state(false));
     assert!(!next_maximize_state(true));
 }
+
+#[test]
+fn top_status_bar_window_commands_match_the_windows_restore_strategy() {
+    let spec = window_command_spec();
+
+    assert!(spec.uses_winit_drag);
+    assert!(spec.supports_true_window_state_tracking);
+    assert!(spec.supports_native_frame_adapter);
+}
+
+#[test]
+fn window_shell_exposes_resize_border_for_frameless_resize() {
+    let spec = window_command_spec();
+
+    assert_eq!(spec.resize_border_width, 6);
+}

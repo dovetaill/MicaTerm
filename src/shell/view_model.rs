@@ -1,3 +1,4 @@
+use crate::app::window_state::{WindowChromeMode, WindowPlacementKind};
 use crate::shell::sidebar::SidebarDestination;
 use crate::theme::ThemeMode;
 
@@ -16,10 +17,10 @@ pub struct ShellViewModel {
     pub show_global_menu: bool,
     pub show_assets_sidebar: bool,
     pub active_sidebar_destination: SidebarDestination,
-    pub is_window_maximized: bool,
     pub is_window_active: bool,
     pub theme_mode: ThemeMode,
     pub is_always_on_top: bool,
+    window_placement: WindowPlacementKind,
 }
 
 impl Default for ShellViewModel {
@@ -30,10 +31,10 @@ impl Default for ShellViewModel {
             show_global_menu: false,
             show_assets_sidebar: true,
             active_sidebar_destination: SidebarDestination::Console,
-            is_window_maximized: false,
             is_window_active: true,
             theme_mode: ThemeMode::Dark,
             is_always_on_top: false,
+            window_placement: WindowPlacementKind::Restored,
         }
     }
 }
@@ -68,8 +69,20 @@ impl ShellViewModel {
         self.show_assets_sidebar = true;
     }
 
-    pub fn set_window_maximized(&mut self, value: bool) {
-        self.is_window_maximized = value;
+    pub fn window_placement(&self) -> WindowPlacementKind {
+        self.window_placement
+    }
+
+    pub fn set_window_placement(&mut self, value: WindowPlacementKind) {
+        self.window_placement = value;
+    }
+
+    pub fn is_window_maximized(&self) -> bool {
+        self.window_placement.is_maximized()
+    }
+
+    pub fn uses_flat_window_chrome(&self) -> bool {
+        matches!(self.window_placement.chrome_mode(), WindowChromeMode::Flat)
     }
 
     pub fn set_window_active(&mut self, value: bool) {

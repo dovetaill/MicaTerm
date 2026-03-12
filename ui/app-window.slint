@@ -12,6 +12,7 @@ export component AppWindow inherits Window {
     in-out property <bool> show-right-panel: false;
     in-out property <bool> show-global-menu: false;
     in-out property <bool> is-window-maximized: false;
+    in-out property <bool> use-flat-window-chrome: false;
     in-out property <bool> is-window-active: true;
     in-out property <bool> is-window-always-on-top: false;
     in-out property <bool> show-assets-sidebar: true;
@@ -25,8 +26,15 @@ export component AppWindow inherits Window {
     out property <length> layout-titlebar-window-controls-width: titlebar.layout-window-controls-width;
     out property <length> layout-titlebar-width: titlebar.width;
     out property <length> layout-titlebar-height: titlebar.height;
+    out property <length> layout-titlebar-radius: titlebar.layout-radius;
+    out property <length> layout-titlebar-maximize-button-x: titlebar.layout-maximize-button-x;
+    out property <length> layout-titlebar-maximize-button-y: titlebar.layout-maximize-button-y;
+    out property <length> layout-titlebar-maximize-button-width: titlebar.layout-maximize-button-width;
+    out property <length> layout-titlebar-maximize-button-height: titlebar.layout-maximize-button-height;
     out property <length> layout-shell-body-height: shell-frame.height - titlebar.height;
     out property <length> layout-shell-body-actual-height: body-host.height;
+    out property <length> layout-shell-frame-radius: shell-frame.border-radius;
+    out property <length> layout-resize-border-width: root.resize-border-width;
     out property <length> layout-main-workspace-width: main-workspace.width;
     out property <length> layout-right-panel-width: right-panel.width;
     out property <length> layout-activity-bar-width: sidebar.activity-bar-width;
@@ -48,6 +56,7 @@ export component AppWindow inherits Window {
 
     title: "Mica Term";
     no-frame: true;
+    resize-border-width: 6px;
     always-on-top: root.is-window-always-on-top;
     background: transparent;
     preferred-width: 1440px;
@@ -70,7 +79,7 @@ export component AppWindow inherits Window {
     shell-frame := Rectangle {
         width: root.width;
         height: root.height;
-        border-radius: 14px;
+        border-radius: root.use-flat-window-chrome ? 0px : 14px;
         border-width: 1px;
         border-color: ThemeTokens.shell-stroke;
         background: ThemeTokens.shell-surface;
@@ -91,6 +100,7 @@ export component AppWindow inherits Window {
                     show-right-panel: root.show-right-panel;
                     show-global-menu: root.show-global-menu;
                     is-window-maximized: root.is-window-maximized;
+                    use-flat-window-chrome: root.use-flat-window-chrome;
                     is-window-active: root.is-window-active;
                     is-window-always-on-top: root.is-window-always-on-top;
 

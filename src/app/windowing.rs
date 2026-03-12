@@ -25,6 +25,9 @@ pub struct WindowCommandSpec {
     pub self_drawn_controls: bool,
     pub supports_double_click_maximize: bool,
     pub supports_always_on_top: bool,
+    pub supports_true_window_state_tracking: bool,
+    pub supports_native_frame_adapter: bool,
+    pub resize_border_width: u32,
 }
 
 pub fn window_command_spec() -> WindowCommandSpec {
@@ -33,6 +36,9 @@ pub fn window_command_spec() -> WindowCommandSpec {
         self_drawn_controls: true,
         supports_double_click_maximize: true,
         supports_always_on_top: true,
+        supports_true_window_state_tracking: true,
+        supports_native_frame_adapter: true,
+        resize_border_width: 6,
     }
 }
 
