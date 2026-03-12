@@ -1,3 +1,5 @@
+use std::fs;
+
 use mica_term::app::runtime_profile::{AppBuildFlavor, AppRuntimeProfile, RendererMode};
 
 #[test]
@@ -7,14 +9,16 @@ fn formal_profile_defaults_to_software_renderer() {
     assert_eq!(profile.build_flavor, AppBuildFlavor::Formal);
     assert_eq!(profile.renderer_mode, RendererMode::Software);
     assert!(!profile.is_experimental());
+    assert!(!profile.requires_backend_lock());
+    assert_eq!(profile.forced_backend(), None);
+    assert!(profile.uses_theme_redraw_recovery());
 }
 
 #[test]
-fn skia_experimental_profile_is_pure_skia() {
-    let profile = AppRuntimeProfile::skia_experimental();
+fn runtime_profile_source_no_longer_exposes_skia_experimental_path() {
+    let content = fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
 
-    assert_eq!(profile.build_flavor, AppBuildFlavor::SkiaExperimental);
-    assert_eq!(profile.renderer_mode, RendererMode::SkiaSoftware);
-    assert!(profile.is_experimental());
-    assert!(profile.requires_backend_lock());
+    assert!(!content.contains("SkiaExperimental"));
+    assert!(!content.contains("SkiaSoftware"));
+    assert!(!content.contains("skia_experimental"));
 }

@@ -3,26 +3,18 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_PATH="$ROOT_DIR/build-win-x64-skia.sh"
-BUILD_SCRIPT_PATH="$ROOT_DIR/build-desktop.sh"
 CARGO_TOML="$ROOT_DIR/Cargo.toml"
 README_PATH="$ROOT_DIR/readme.md"
+VERIFICATION_PATH="$ROOT_DIR/verification.md"
 
-if [[ ! -f "$SCRIPT_PATH" ]]; then
-  echo "missing build script: $SCRIPT_PATH" >&2
+if [[ -f "$SCRIPT_PATH" ]]; then
+  echo "unexpected skia build script remains: $SCRIPT_PATH" >&2
   exit 1
 fi
 
-bash -n "$SCRIPT_PATH"
-
-grep -F 'windows-skia-experimental' "$CARGO_TOML" >/dev/null
-grep -F 'slint/renderer-skia' "$CARGO_TOML" >/dev/null
-grep -F 'CARGO_FEATURES' "$BUILD_SCRIPT_PATH" >/dev/null
-grep -F 'CARGO_NO_DEFAULT_FEATURES' "$BUILD_SCRIPT_PATH" >/dev/null
-grep -F 'build-win-x64-skia.sh' "$README_PATH" >/dev/null
-grep -F 'windows-skia-experimental' "$SCRIPT_PATH" >/dev/null
-grep -F 'build-desktop.sh' "$SCRIPT_PATH" >/dev/null
-grep -F 'x86_64-pc-windows-msvc' "$SCRIPT_PATH" >/dev/null
-grep -F 'TARGET="${TARGET:-x86_64-pc-windows-msvc}"' "$SCRIPT_PATH" >/dev/null
-grep -F 'CARGO_NO_DEFAULT_FEATURES' "$SCRIPT_PATH" >/dev/null
-grep -F 'CARGO_NO_DEFAULT_FEATURES="${CARGO_NO_DEFAULT_FEATURES:-1}"' "$SCRIPT_PATH" >/dev/null
-grep -F 'Windows MSVC shell' "$README_PATH" >/dev/null
+for target in "$CARGO_TOML" "$README_PATH" "$VERIFICATION_PATH"; do
+  if rg -n 'windows-skia-experimental|slint/renderer-skia|build-win-x64-skia\.sh|winit-skia-software|Skia Experimental' "$target" >/dev/null; then
+    echo "unexpected skia experimental reference remains in $target" >&2
+    exit 1
+  fi
+done

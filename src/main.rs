@@ -2,43 +2,8 @@
 
 use mica_term::app::runtime_profile::AppRuntimeProfile;
 
-const SKIA_SOFTWARE_BACKEND: &str = "winit-skia-software";
-
-fn select_runtime_profile() -> AppRuntimeProfile {
-    #[cfg(feature = "windows-skia-experimental")]
-    {
-        AppRuntimeProfile::skia_experimental()
-    }
-
-    #[cfg(not(feature = "windows-skia-experimental"))]
-    {
-        AppRuntimeProfile::formal()
-    }
-}
-
-fn apply_renderer_lock(profile: AppRuntimeProfile) {
-    if profile.requires_backend_lock() {
-        debug_assert_eq!(profile.forced_backend(), Some(SKIA_SOFTWARE_BACKEND));
-
-        let requested_backend = std::env::var("SLINT_BACKEND").ok();
-        if requested_backend.as_deref() != Some(SKIA_SOFTWARE_BACKEND) {
-            tracing::warn!(
-                target: "app.renderer",
-                requested = ?requested_backend,
-                forced = SKIA_SOFTWARE_BACKEND,
-                "overriding conflicting SLINT_BACKEND for experimental profile"
-            );
-        }
-
-        // Safety: startup is still single-threaded here and no UI/runtime has been initialized yet.
-        unsafe {
-            std::env::set_var("SLINT_BACKEND", SKIA_SOFTWARE_BACKEND);
-        }
-    }
-}
-
 fn main() -> anyhow::Result<()> {
-    let profile = select_runtime_profile();
+    let profile = AppRuntimeProfile::formal();
     let logging = match mica_term::app::logging::runtime::try_init_global_logging() {
         Ok(runtime) => {
             if let Err(err) =
@@ -58,7 +23,6 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    apply_renderer_lock(profile);
     mica_term::app::logging::runtime::emit_runtime_profile_metadata(profile);
 
     if let Err(err) = mica_term::app::bootstrap::run_with_profile(profile) {

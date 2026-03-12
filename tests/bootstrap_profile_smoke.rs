@@ -10,11 +10,12 @@ fn formal_profile_does_not_require_backend_lock() {
 }
 
 #[test]
-fn skia_experimental_profile_requires_winit_skia_software() {
-    let profile = AppRuntimeProfile::skia_experimental();
+fn formal_profile_is_the_only_bootstrap_runtime_path() {
+    let profile = AppRuntimeProfile::formal();
 
-    assert!(profile.requires_backend_lock());
-    assert_eq!(profile.renderer_mode, RendererMode::SkiaSoftware);
-    assert_eq!(profile.forced_backend(), Some("winit-skia-software"));
-    assert!(!profile.uses_theme_redraw_recovery());
+    assert_eq!(profile.renderer_mode, RendererMode::Software);
+    assert_eq!(profile.build_flavor, mica_term::app::runtime_profile::AppBuildFlavor::Formal);
+    assert!(!profile.requires_backend_lock());
+    assert_eq!(profile.forced_backend(), None);
+    assert!(profile.uses_theme_redraw_recovery());
 }

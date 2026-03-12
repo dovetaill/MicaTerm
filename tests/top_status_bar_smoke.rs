@@ -66,14 +66,10 @@ impl PlatformWindowEffects for FailingBackdropWindowEffects {
 }
 
 #[test]
-fn app_title_can_be_extended_for_experimental_profile() {
+fn app_title_stays_stable_for_formal_profile() {
     assert_eq!(
         runtime_window_title(AppRuntimeProfile::formal()),
         "Mica Term"
-    );
-    assert_eq!(
-        runtime_window_title(AppRuntimeProfile::skia_experimental()),
-        "Mica Term [Skia Experimental]"
     );
 }
 

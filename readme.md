@@ -37,26 +37,9 @@ Per-target formal entrypoints:
 - `./build-win-x64.sh`
   - Compatibility wrapper for the formal `x86_64-pc-windows-gnu` package
   - Output: `dist/mica-term-x86_64-pc-windows-gnu-release.zip`
-
-## Windows Skia Experimental
-
-- `./build-win-x64-skia.sh`
-  - Pure-Skia Windows x64 MSVC wrapper for the `windows-skia-experimental` package
-  - Output: `dist/mica-term-x86_64-pc-windows-msvc-release.zip`
-  - Defaults:
-    - `TARGET=x86_64-pc-windows-msvc`
-    - `CARGO_NO_DEFAULT_FEATURES=1`
-    - `CARGO_FEATURES=windows-skia-experimental`
-    - Internal backend lock: `SLINT_BACKEND=winit-skia-software`
-    - Failure path: startup prints an explicit `winit-skia-software` initialization error instead of silently degrading
-- `CARGO_FEATURES=windows-skia-experimental ./build-win-x64.sh`
-  - Optional manual override if you need to experiment through the generic Windows wrapper
-
-Current limitation:
-
-- `windows-skia-experimental` is not currently viable on the Linux -> `x86_64-pc-windows-gnu` cross-build path in this repo.
-- The upstream `rust-skia` download step for `x86_64-pc-windows-gnu` falls back to a full Skia source build, which requires a Windows MSVC / VC toolchain.
-- Use a Windows MSVC shell with `TARGET=x86_64-pc-windows-msvc` for this experiment.
+- `./build-win-x64-repro.sh`
+  - Compatibility wrapper for the minimal `windows_theme_repro` package
+  - Output: `dist/windows-theme-repro-x86_64-pc-windows-gnu-release.zip`
 
 ## Try / Future Renderer Exploration
 

@@ -44,16 +44,6 @@ fn panic_hook_writes_crash_file_for_child_process() {
 }
 
 #[test]
-fn startup_failure_message_is_explicit_for_skia_experimental() {
-    assert_eq!(
-        startup_failure_message(AppRuntimeProfile::skia_experimental(), "mock init failure")
-            .as_deref(),
-        Some(
-            "Mica Term Skia Experimental failed to initialize winit-skia-software: mock init failure",
-        )
-    );
-    assert_eq!(
-        startup_failure_message(AppRuntimeProfile::formal(), "mock init failure"),
-        None
-    );
+fn startup_failure_message_is_absent_for_formal_profile() {
+    assert_eq!(startup_failure_message(AppRuntimeProfile::formal(), "mock init failure"), None);
 }
