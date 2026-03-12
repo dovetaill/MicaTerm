@@ -4,29 +4,25 @@ use std::rc::Rc;
 use anyhow::Result;
 use slint::{ComponentHandle, ModelRc, VecModel};
 
-use crate::AppWindow;
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::window_effects::{
-    PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
+    build_native_window_appearance_request, default_platform_window_effects, PlatformWindowEffects,
 };
-#[cfg(target_os = "windows")]
-use crate::app::window_recovery::WindowRecoveryAction;
-use crate::app::window_recovery::WindowRecoveryController;
-use crate::app::window_recovery::WindowVisibilitySnapshot;
 use crate::app::window_state::WindowPlacementKind;
 use crate::app::windowing::{
-    WindowController, apply_restored_window_size, parse_resize_direction, window_appearance,
+    apply_restored_window_size, parse_resize_direction, window_appearance, WindowController,
 };
 #[cfg(target_os = "windows")]
 use crate::app::windows_frame::{
-    CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
+    install_window_frame_adapter, query_true_window_placement, CaptionButtonGeometry,
 };
-use crate::shell::layout::{ShellLayoutInput, resolve_shell_layout};
+use crate::shell::layout::{resolve_shell_layout, ShellLayoutInput};
 use crate::shell::metrics::ShellMetrics;
-use crate::shell::sidebar::{SidebarDestination, sidebar_items_for};
+use crate::shell::sidebar::{sidebar_items_for, SidebarDestination};
 use crate::shell::view_model::ShellViewModel;
 use crate::theme::ThemeMode;
+use crate::AppWindow;
 
 pub fn app_title() -> &'static str {
     "Mica Term"
@@ -47,318 +43,54 @@ pub fn default_window_size() -> (u32, u32) {
     )
 }
 
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct WindowRect {
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-}
-
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-impl WindowRect {
-    fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-
-    fn area(self) -> u64 {
-        u64::from(self.width) * u64::from(self.height)
-    }
-
-    fn right(self) -> i64 {
-        i64::from(self.x) + i64::from(self.width)
-    }
-
-    fn bottom(self) -> i64 {
-        i64::from(self.y) + i64::from(self.height)
-    }
-}
-
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct MonitorRect {
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-}
-
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-impl MonitorRect {
-    fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-
-    fn right(self) -> i64 {
-        i64::from(self.x) + i64::from(self.width)
-    }
-
-    fn bottom(self) -> i64 {
-        i64::from(self.y) + i64::from(self.height)
-    }
-}
-
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn intersection_area(window: WindowRect, monitor: MonitorRect) -> u64 {
-    let left = i64::from(window.x).max(i64::from(monitor.x));
-    let top = i64::from(window.y).max(i64::from(monitor.y));
-    let right = window.right().min(monitor.right());
-    let bottom = window.bottom().min(monitor.bottom());
-
-    if right <= left || bottom <= top {
-        return 0;
-    }
-
-    let width = u64::try_from(right - left).unwrap_or_default();
-    let height = u64::try_from(bottom - top).unwrap_or_default();
-    width * height
-}
-
-#[cfg(target_os = "windows")]
-fn current_window_visibility_snapshot(
-    window: &slint::winit_030::winit::window::Window,
-) -> WindowVisibilitySnapshot {
-    let position = window
-        .outer_position()
-        .unwrap_or(slint::winit_030::winit::dpi::PhysicalPosition::new(0, 0));
-    let size = window.outer_size();
-    let monitors: Vec<_> = window
-        .available_monitors()
-        .map(|monitor| {
-            let position = monitor.position();
-            let size = monitor.size();
-            MonitorRect::new(position.x, position.y, size.width, size.height)
-        })
-        .collect();
-
-    let window = WindowRect::new(position.x, position.y, size.width, size.height);
-    let visible_area = monitors
-        .iter()
-        .map(|monitor| intersection_area(window, *monitor))
-        .sum();
-
-    WindowVisibilitySnapshot::new(window.area(), visible_area)
-}
-
-#[cfg(target_os = "windows")]
-fn arm_windows_window_recovery(
-    window: &AppWindow,
-    recovery: &Rc<RefCell<WindowRecoveryController>>,
-) {
-    use slint::winit_030::WinitWindowAccessor;
-
-    let _ = window.window().with_winit_window(|winit_window| {
-        recovery
-            .borrow_mut()
-            .arm_visibility_recovery(current_window_visibility_snapshot(winit_window));
-    });
-}
-
-#[cfg(not(target_os = "windows"))]
-fn arm_windows_window_recovery(
-    _window: &AppWindow,
-    _recovery: &Rc<RefCell<WindowRecoveryController>>,
-) {
-}
-
-#[cfg(target_os = "windows")]
-fn apply_window_recovery_action(
-    handle: &slint::Weak<AppWindow>,
-    slint_window: &slint::Window,
-    action: WindowRecoveryAction,
-) {
-    use slint::winit_030::{WinitWindowAccessor, winit};
-
-    match action {
-        WindowRecoveryAction::None => {}
-        WindowRecoveryAction::RequestRedraw => {
-            let window = handle.unwrap();
-            bump_render_revision(&window);
-            slint_window.request_redraw();
-            let _ = slint_window.with_winit_window(|winit_window| {
-                winit_window.request_redraw();
-            });
-        }
-        WindowRecoveryAction::NudgeWindowSize { width, height } => {
-            let window = handle.unwrap();
-            bump_render_revision(&window);
-            slint_window.request_redraw();
-            let _ = slint_window.with_winit_window(|winit_window| {
-                winit_window.request_redraw();
-                let _ =
-                    winit_window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
-            });
-        }
-        WindowRecoveryAction::RestoreWindowSize { width, height } => {
-            slint_window.request_redraw();
-            let _ = slint_window.with_winit_window(|winit_window| {
-                winit_window.request_redraw();
-                let _ =
-                    winit_window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
-            });
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn notify_windows_window_recovery_transition_with_snapshot(
-    window: &AppWindow,
-    recovery: &Rc<RefCell<WindowRecoveryController>>,
-    previous: WindowPlacementKind,
-    next: WindowPlacementKind,
-    snapshot: WindowVisibilitySnapshot,
-    width: u32,
-    height: u32,
-) {
-    let handle = window.as_weak();
-    let action = recovery
-        .borrow_mut()
-        .on_placement_changed(previous, next, snapshot, width, height);
-
-    apply_window_recovery_action(&handle, window.window(), action);
-}
-
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-#[cfg(not(target_os = "windows"))]
-fn notify_windows_window_recovery_transition_with_snapshot(
-    _window: &AppWindow,
-    _recovery: &Rc<RefCell<WindowRecoveryController>>,
-    _previous: WindowPlacementKind,
-    _next: WindowPlacementKind,
-    _snapshot: WindowVisibilitySnapshot,
-    _width: u32,
-    _height: u32,
-) {
-}
-
-#[cfg(target_os = "windows")]
-fn notify_windows_window_recovery_transition(
-    window: &AppWindow,
-    recovery: &Rc<RefCell<WindowRecoveryController>>,
-    previous: WindowPlacementKind,
-    next: WindowPlacementKind,
-) {
-    use slint::winit_030::WinitWindowAccessor;
-
-    let _ = window.window().with_winit_window(|winit_window| {
-        let size = winit_window.inner_size();
-        notify_windows_window_recovery_transition_with_snapshot(
-            window,
-            recovery,
-            previous,
-            next,
-            current_window_visibility_snapshot(winit_window),
-            size.width,
-            size.height,
-        );
-    });
-}
-
-#[cfg(not(target_os = "windows"))]
-fn notify_windows_window_recovery_transition(
-    _window: &AppWindow,
-    _recovery: &Rc<RefCell<WindowRecoveryController>>,
-    _previous: WindowPlacementKind,
-    _next: WindowPlacementKind,
-) {
-}
-
 #[cfg(target_os = "windows")]
 fn sync_windows_true_window_placement(
     window: &AppWindow,
     state: &Rc<RefCell<ShellViewModel>>,
     effects: &dyn PlatformWindowEffects,
-    recovery: &Rc<RefCell<WindowRecoveryController>>,
     winit_window: &slint::winit_030::winit::window::Window,
 ) {
     let Some(next) = query_true_window_placement(winit_window) else {
         return;
     };
 
-    let previous = {
-        let mut state = state.borrow_mut();
-        let previous = state.window_placement();
-        if previous == next {
-            return;
-        }
+    let mut state = state.borrow_mut();
+    if state.window_placement() == next {
+        return;
+    }
 
-        state.set_window_placement(next);
-        sync_top_status_bar_state(window, &state, effects);
-        previous
-    };
-
-    let size = winit_window.inner_size();
-    notify_windows_window_recovery_transition_with_snapshot(
-        window,
-        recovery,
-        previous,
-        next,
-        current_window_visibility_snapshot(winit_window),
-        size.width,
-        size.height,
-    );
+    state.set_window_placement(next);
+    sync_top_status_bar_state(window, &state, effects);
 }
 
 #[cfg(target_os = "windows")]
-fn bind_windows_window_recovery(
+fn bind_windows_window_state_tracking(
     window: &AppWindow,
     state: Rc<RefCell<ShellViewModel>>,
     effects: Rc<dyn PlatformWindowEffects>,
-    recovery: Rc<RefCell<WindowRecoveryController>>,
 ) {
+    use slint::winit_030::{winit, EventResult, WinitWindowAccessor};
     use slint::ComponentHandle;
-    use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 
     let handle = window.as_weak();
     window
         .window()
-        .on_winit_window_event(move |slint_window, event| {
-            let should_check_visibility = matches!(
+        .on_winit_window_event(move |_slint_window, event| {
+            if matches!(
                 event,
                 winit::event::WindowEvent::Moved(_)
                     | winit::event::WindowEvent::Resized(_)
                     | winit::event::WindowEvent::ScaleFactorChanged { .. }
-            );
-
-            if should_check_visibility {
+            ) {
                 let window = handle.unwrap();
-                let action = slint_window
-                    .with_winit_window(|winit_window| {
-                        sync_windows_true_window_placement(
-                            &window,
-                            &state,
-                            effects.as_ref(),
-                            &recovery,
-                            winit_window,
-                        );
-
-                        let size = winit_window.inner_size();
-                        let mut recovery = recovery.borrow_mut();
-                        let action = recovery.on_resize_ack(size.width, size.height);
-                        if action != WindowRecoveryAction::None {
-                            return action;
-                        }
-
-                        recovery.on_visibility_changed(
-                            current_window_visibility_snapshot(winit_window),
-                            size.width,
-                            size.height,
-                        )
-                    })
-                    .unwrap_or(WindowRecoveryAction::None);
-
-                apply_window_recovery_action(&handle, slint_window, action);
+                let _ = window.window().with_winit_window(|winit_window| {
+                    sync_windows_true_window_placement(
+                        &window,
+                        &state,
+                        effects.as_ref(),
+                        winit_window,
+                    );
+                });
             }
 
             EventResult::Propagate
@@ -366,18 +98,11 @@ fn bind_windows_window_recovery(
 }
 
 #[cfg(not(target_os = "windows"))]
-fn bind_windows_window_recovery(
+fn bind_windows_window_state_tracking(
     _window: &AppWindow,
     _state: Rc<RefCell<ShellViewModel>>,
     _effects: Rc<dyn PlatformWindowEffects>,
-    _recovery: Rc<RefCell<WindowRecoveryController>>,
 ) {
-}
-
-#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
-fn bump_render_revision(window: &AppWindow) {
-    let next_revision = window.get_render_revision().wrapping_add(1);
-    window.set_render_revision(next_revision);
 }
 
 fn sync_theme_and_window_effects(
@@ -515,14 +240,14 @@ fn load_ui_preferences(store: &Option<Rc<UiPreferencesStore>>) -> UiPreferences 
 }
 
 fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellViewModel) {
-    if let Some(store) = store
-        && let Err(err) = store.save(&UiPreferences::from(state))
-    {
-        tracing::error!(
-            target: "config.preferences",
-            error = %err,
-            "failed to save ui preferences"
-        );
+    if let Some(store) = store {
+        if let Err(err) = store.save(&UiPreferences::from(state)) {
+            tracing::error!(
+                target: "config.preferences",
+                error = %err,
+                "failed to save ui preferences"
+            );
+        }
     }
 }
 
@@ -542,7 +267,7 @@ pub fn bind_top_status_bar_with_store_and_effects(
 pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window: &AppWindow,
     store: Option<UiPreferencesStore>,
-    profile: AppRuntimeProfile,
+    _profile: AppRuntimeProfile,
     effects: Rc<dyn PlatformWindowEffects>,
 ) {
     let store = store.map(Rc::new);
@@ -552,16 +277,9 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     initial_view_model.is_always_on_top = prefs.always_on_top;
     let view_model = Rc::new(RefCell::new(initial_view_model));
     let controller = Rc::new(WindowController::new(window));
-    let window_recovery = Rc::new(RefCell::new(WindowRecoveryController::default()));
-    let theme_redraw_recovery_enabled = profile.uses_theme_redraw_recovery();
 
     apply_restored_window_size(window, default_window_size());
-    bind_windows_window_recovery(
-        window,
-        Rc::clone(&view_model),
-        Rc::clone(&effects),
-        Rc::clone(&window_recovery),
-    );
+    bind_windows_window_state_tracking(window, Rc::clone(&view_model), Rc::clone(&effects));
     sync_shell_state(window, &view_model.borrow(), effects.as_ref());
     sync_shell_layout(
         window,
@@ -604,13 +322,9 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(&effects);
-    let window_recovery_ref = Rc::clone(&window_recovery);
     window.on_toggle_theme_mode_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        if theme_redraw_recovery_enabled {
-            arm_windows_window_recovery(&window, &window_recovery_ref);
-        }
         state.toggle_theme_mode();
         sync_theme_and_window_effects(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
@@ -636,11 +350,9 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     let handle = window.as_weak();
     let controller_ref = Rc::clone(&controller);
     let effects_ref = Rc::clone(&effects);
-    let window_recovery_ref = Rc::clone(&window_recovery);
     window.on_maximize_toggle_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let previous = state.window_placement();
         let next = controller_ref.toggle_maximize(state.is_window_maximized());
         let next = if next {
             WindowPlacementKind::Maximized
@@ -648,7 +360,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
             WindowPlacementKind::Restored
         };
         state.set_window_placement(next);
-        notify_windows_window_recovery_transition(&window, &window_recovery_ref, previous, next);
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
     });
 
@@ -706,11 +417,9 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     let handle = window.as_weak();
     let controller_ref = Rc::clone(&controller);
     let effects_ref = Rc::clone(&effects);
-    let window_recovery_ref = Rc::clone(&window_recovery);
     window.on_drag_double_clicked(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let previous = state.window_placement();
         let next = controller_ref.toggle_maximize(state.is_window_maximized());
         let next = if next {
             WindowPlacementKind::Maximized
@@ -718,7 +427,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
             WindowPlacementKind::Restored
         };
         state.set_window_placement(next);
-        notify_windows_window_recovery_transition(&window, &window_recovery_ref, previous, next);
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
     });
 }
@@ -767,22 +475,4 @@ pub fn run_with_profile(profile: AppRuntimeProfile) -> Result<()> {
     bind_top_status_bar_with_profile(&window, profile);
     window.run()?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::AppWindow;
-
-    #[test]
-    fn bump_render_revision_increments_hidden_revision() {
-        i_slint_backend_testing::init_no_event_loop();
-
-        let window = AppWindow::new().unwrap();
-
-        assert_eq!(window.get_render_revision(), 0);
-
-        super::bump_render_revision(&window);
-
-        assert_eq!(window.get_render_revision(), 1);
-    }
 }

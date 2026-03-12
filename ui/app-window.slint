@@ -9,7 +9,6 @@ import { WelcomeView } from "welcome/welcome-view.slint";
 
 export component AppWindow inherits Window {
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
-    in-out property <int> render-revision: 0;
     in-out property <bool> show-right-panel: false;
     in-out property <bool> show-global-menu: false;
     in-out property <bool> is-window-maximized: false;
@@ -87,7 +86,6 @@ export component AppWindow inherits Window {
         border-width: 1px;
         border-color: ThemeTokens.shell-stroke;
         background: ThemeTokens.shell-surface;
-        opacity: Math.mod(root.render-revision, 2) == 0 ? 1.0 : 0.999999;
 
         content-column := Rectangle {
             width: parent.width;

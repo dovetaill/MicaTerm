@@ -11,7 +11,6 @@ fn formal_profile_defaults_to_software_renderer() {
     assert!(!profile.is_experimental());
     assert!(!profile.requires_backend_lock());
     assert_eq!(profile.forced_backend(), None);
-    assert!(profile.uses_theme_redraw_recovery());
 }
 
 #[test]

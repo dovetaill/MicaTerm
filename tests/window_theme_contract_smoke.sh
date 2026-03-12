@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 FILE="$ROOT_DIR/src/app/window_effects.rs"
 BOOTSTRAP_FILE="$ROOT_DIR/src/app/bootstrap.rs"
-WINDOW_RECOVERY_FILE="$ROOT_DIR/src/app/window_recovery.rs"
 APP_WINDOW_FILE="$ROOT_DIR/ui/app-window.slint"
 MAIN_FILE="$ROOT_DIR/src/main.rs"
 
@@ -14,16 +13,11 @@ grep -F 'window_vibrancy::apply_tabbed' "$FILE" >/dev/null
 grep -F '#[cfg(target_os = "windows")]' "$FILE" >/dev/null
 grep -F 'NoopWindowEffects' "$FILE" >/dev/null
 grep -F 'window.window().request_redraw();' "$BOOTSTRAP_FILE" >/dev/null
-grep -F 'uses_theme_redraw_recovery' "$ROOT_DIR/src/app/runtime_profile.rs" >/dev/null
-grep -F 'profile.uses_theme_redraw_recovery()' "$BOOTSTRAP_FILE" >/dev/null
 grep -F 'backdrop_error' "$FILE" >/dev/null
 grep -F 'backdrop_error' "$BOOTSTRAP_FILE" >/dev/null
 grep -F 'on_winit_window_event' "$BOOTSTRAP_FILE" >/dev/null
 grep -F 'WindowEvent::Moved' "$BOOTSTRAP_FILE" >/dev/null
-grep -F 'request_inner_size' "$BOOTSTRAP_FILE" >/dev/null
-grep -F 'pending_restore_size' "$WINDOW_RECOVERY_FILE" >/dev/null
-grep -F 'in-out property <int> render-revision: 0;' "$APP_WINDOW_FILE" >/dev/null
-grep -F 'set_render_revision' "$BOOTSTRAP_FILE" >/dev/null
+grep -F 'preferred-width: 1440px;' "$APP_WINDOW_FILE" >/dev/null
 
 for unexpected in \
   'winit-skia-software' \

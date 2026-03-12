@@ -33,8 +33,4 @@ impl AppRuntimeProfile {
     pub fn forced_backend(self) -> Option<&'static str> {
         None
     }
-
-    pub fn uses_theme_redraw_recovery(self) -> bool {
-        true
-    }
 }

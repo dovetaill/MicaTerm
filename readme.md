@@ -37,9 +37,6 @@ Per-target formal entrypoints:
 - `./build-win-x64.sh`
   - Compatibility wrapper for the formal `x86_64-pc-windows-gnu` package
   - Output: `dist/mica-term-x86_64-pc-windows-gnu-release.zip`
-- `./build-win-x64-repro.sh`
-  - Compatibility wrapper for the minimal `windows_theme_repro` package
-  - Output: `dist/windows-theme-repro-x86_64-pc-windows-gnu-release.zip`
 
 ## Try / Future Renderer Exploration
 
