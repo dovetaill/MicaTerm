@@ -38,6 +38,7 @@ grep -F 'tooltip-text: "Minimize window"' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-text: "Close window"' "$TITLEBAR" >/dev/null
 grep -F 'pointer-event(event)' "$TITLEBAR" >/dev/null
 grep -F 'PointerEventKind.down' "$TITLEBAR" >/dev/null
+grep -F 'root.drag-requested();' "$TITLEBAR" >/dev/null
 grep -F 'nav-button.absolute-position.x' "$TITLEBAR" >/dev/null
 grep -F 'nav-button.absolute-position.y' "$TITLEBAR" >/dev/null
 grep -F 'titlebar := Titlebar {' "$APP_WINDOW" >/dev/null
@@ -85,5 +86,10 @@ grep -F 'TITLEBAR_TOOLTIP_CLOSE_DEBOUNCE_MS' "$ROOT_DIR/src/shell/metrics.rs" >/
 ! grep -F 'label: "X"' "$TITLEBAR" >/dev/null
 
 if grep -F 'moved => {' "$TITLEBAR" >/dev/null; then
+    exit 1
+fi
+
+if grep -F 'mouse-cursor: MouseCursor.grab;' "$TITLEBAR" >/dev/null; then
+    echo "titlebar drag zone should keep default cursor" >&2
     exit 1
 fi
