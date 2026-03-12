@@ -92,105 +92,105 @@ export component AppWindow inherits Window {
             height: parent.height;
             background: transparent;
 
-            VerticalLayout {
+            titlebar := Titlebar {
+                x: 0px;
+                y: 0px;
                 width: parent.width;
-                height: parent.height;
-                spacing: 0px;
+                dark-mode: root.dark-mode;
+                show-right-panel: root.show-right-panel;
+                show-global-menu: root.show-global-menu;
+                is-window-maximized: root.is-window-maximized;
+                use-flat-window-chrome: root.use-flat-window-chrome;
+                is-window-active: root.is-window-active;
+                is-window-always-on-top: root.is-window-always-on-top;
 
-                titlebar := Titlebar {
-                    dark-mode: root.dark-mode;
-                    show-right-panel: root.show-right-panel;
-                    show-global-menu: root.show-global-menu;
-                    is-window-maximized: root.is-window-maximized;
-                    use-flat-window-chrome: root.use-flat-window-chrome;
-                    is-window-active: root.is-window-active;
-                    is-window-always-on-top: root.is-window-always-on-top;
-
-                    drag-requested => {
-                        root.drag-requested();
-                    }
-
-                    drag-double-clicked => {
-                        root.drag-double-clicked();
-                    }
-
-                    minimize-requested => {
-                        root.minimize-requested();
-                    }
-
-                    maximize-toggle-requested => {
-                        root.maximize-toggle-requested();
-                    }
-
-                    close-requested => {
-                        root.close-requested();
-                    }
-
-                    toggle-right-panel-requested => {
-                        root.toggle-right-panel-requested();
-                    }
-
-                    toggle-global-menu-requested => {
-                        root.toggle-global-menu-requested();
-                    }
-
-                    close-global-menu-requested => {
-                        root.close-global-menu-requested();
-                    }
-
-                    toggle-theme-mode-requested => {
-                        root.toggle-theme-mode-requested();
-                    }
-
-                    toggle-window-always-on-top-requested => {
-                        root.toggle-window-always-on-top-requested();
-                    }
+                drag-requested => {
+                    root.drag-requested();
                 }
 
-                body-host := Rectangle {
-                    height: root.shell-body-height-cache;
-                    background: transparent;
+                drag-double-clicked => {
+                    root.drag-double-clicked();
+                }
 
-                    shell-body := HorizontalLayout {
-                        width: parent.width;
-                        height: parent.height;
-                        spacing: 0px;
+                minimize-requested => {
+                    root.minimize-requested();
+                }
 
-                        sidebar := Sidebar {
-                            items: root.sidebar-items;
-                            show-assets-sidebar: root.effective-show-assets-sidebar;
-                            active-sidebar-destination: root.active-sidebar-destination;
+                maximize-toggle-requested => {
+                    root.maximize-toggle-requested();
+                }
 
-                            toggle-assets-sidebar-requested => {
-                                root.toggle-assets-sidebar-requested();
-                            }
+                close-requested => {
+                    root.close-requested();
+                }
 
-                            destination-selected(id) => {
-                                root.sidebar-destination-selected(id);
-                            }
+                toggle-right-panel-requested => {
+                    root.toggle-right-panel-requested();
+                }
+
+                toggle-global-menu-requested => {
+                    root.toggle-global-menu-requested();
+                }
+
+                close-global-menu-requested => {
+                    root.close-global-menu-requested();
+                }
+
+                toggle-theme-mode-requested => {
+                    root.toggle-theme-mode-requested();
+                }
+
+                toggle-window-always-on-top-requested => {
+                    root.toggle-window-always-on-top-requested();
+                }
+            }
+
+            body-host := Rectangle {
+                x: 0px;
+                y: titlebar.height;
+                width: parent.width;
+                height: max(0px, parent.height - titlebar.height);
+                background: transparent;
+
+                shell-body := HorizontalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    spacing: 0px;
+
+                    sidebar := Sidebar {
+                        items: root.sidebar-items;
+                        show-assets-sidebar: root.effective-show-assets-sidebar;
+                        active-sidebar-destination: root.active-sidebar-destination;
+
+                        toggle-assets-sidebar-requested => {
+                            root.toggle-assets-sidebar-requested();
                         }
 
-                        main-workspace := Rectangle {
-                            horizontal-stretch: 1;
-                            background: ThemeTokens.terminal-surface;
+                        destination-selected(id) => {
+                            root.sidebar-destination-selected(id);
+                        }
+                    }
 
-                            VerticalLayout {
-                                spacing: 0px;
+                    main-workspace := Rectangle {
+                        horizontal-stretch: 1;
+                        background: ThemeTokens.terminal-surface;
 
-                                TabBar {}
+                        VerticalLayout {
+                            spacing: 0px;
 
-                                content-host := Rectangle {
-                                    vertical-stretch: 1;
-                                    background: transparent;
+                            TabBar {}
 
-                                    WelcomeView {}
-                                }
+                            content-host := Rectangle {
+                                vertical-stretch: 1;
+                                background: transparent;
+
+                                WelcomeView {}
                             }
                         }
+                    }
 
-                        right-panel := RightPanel {
-                            expanded: root.effective-show-right-panel;
-                        }
+                    right-panel := RightPanel {
+                        expanded: root.effective-show-right-panel;
                     }
                 }
             }
