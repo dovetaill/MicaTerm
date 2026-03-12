@@ -5,10 +5,12 @@ use std::rc::Rc;
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store, bind_top_status_bar_with_store_and_effects,
+    runtime_window_title,
 };
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::build_test_logging_runtime;
+use mica_term::app::runtime_profile::AppRuntimeProfile;
 use mica_term::app::ui_preferences::UiPreferencesStore;
 use mica_term::app::window_effects::{
     BackdropApplyStatus, NativeWindowAppearanceRequest, NativeWindowTheme, PlatformWindowEffects,
@@ -61,6 +63,18 @@ impl PlatformWindowEffects for FailingBackdropWindowEffects {
             redraw_requested: request.request_redraw,
         }
     }
+}
+
+#[test]
+fn app_title_can_be_extended_for_experimental_profile() {
+    assert_eq!(
+        runtime_window_title(AppRuntimeProfile::formal()),
+        "Mica Term"
+    );
+    assert_eq!(
+        runtime_window_title(AppRuntimeProfile::skia_experimental()),
+        "Mica Term [Skia Experimental]"
+    );
 }
 
 #[test]

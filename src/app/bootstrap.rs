@@ -5,6 +5,7 @@ use anyhow::Result;
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::AppWindow;
+use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::window_effects::{
     PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
@@ -18,6 +19,25 @@ use crate::theme::ThemeMode;
 
 pub fn app_title() -> &'static str {
     "Mica Term"
+}
+
+pub fn runtime_window_title(profile: AppRuntimeProfile) -> String {
+    if profile.is_experimental() {
+        format!("{} [Skia Experimental]", app_title())
+    } else {
+        app_title().to_owned()
+    }
+}
+
+pub fn startup_failure_message(profile: AppRuntimeProfile, err: &str) -> Option<String> {
+    profile.forced_backend().map(|backend| {
+        format!(
+            "{} Skia Experimental failed to initialize {}: {}",
+            app_title(),
+            backend,
+            err
+        )
+    })
 }
 
 pub fn default_window_size() -> (u32, u32) {
@@ -139,9 +159,9 @@ struct ThemeRedrawRecovery {
 impl ThemeRedrawRecovery {
     fn mark_theme_toggle(&mut self, snapshot: WindowVisibilitySnapshot) {
         self.pending_restore_size = None;
-        self.pending_visible_area =
-            (snapshot.total_area > 0 && snapshot.visible_area < snapshot.total_area)
-                .then_some(snapshot.visible_area);
+        self.pending_visible_area = (snapshot.total_area > 0
+            && snapshot.visible_area < snapshot.total_area)
+            .then_some(snapshot.visible_area);
     }
 
     fn next_action(
@@ -185,8 +205,7 @@ impl ThemeRedrawRecovery {
             return ThemeRecoveryAction::None;
         }
 
-        let Some((nudged_width, nudged_height)) =
-            nudged_window_size(window_width, window_height)
+        let Some((nudged_width, nudged_height)) = nudged_window_size(window_width, window_height)
         else {
             self.pending_visible_area =
                 (snapshot.visible_area < snapshot.total_area).then_some(snapshot.visible_area);
@@ -216,7 +235,9 @@ fn nudged_window_size(window_width: u32, window_height: u32) -> Option<(u32, u32
         return Some((width, window_height));
     }
 
-    window_height.checked_add(1).map(|height| (window_width, height))
+    window_height
+        .checked_add(1)
+        .map(|height| (window_width, height))
 }
 
 #[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
@@ -259,7 +280,10 @@ fn current_window_visibility_snapshot(
 }
 
 #[cfg(target_os = "windows")]
-fn mark_windows_theme_redraw_recovery(window: &AppWindow, recovery: &Rc<RefCell<ThemeRedrawRecovery>>) {
+fn mark_windows_theme_redraw_recovery(
+    window: &AppWindow,
+    recovery: &Rc<RefCell<ThemeRedrawRecovery>>,
+) {
     use slint::winit_030::WinitWindowAccessor;
 
     let _ = window.window().with_winit_window(|winit_window| {
@@ -285,54 +309,54 @@ fn bind_windows_theme_redraw_recovery(
     use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 
     let handle = window.as_weak();
-    window.window().on_winit_window_event(move |slint_window, event| {
-        let should_check_visibility = matches!(
-            event,
-            winit::event::WindowEvent::Moved(_)
-                | winit::event::WindowEvent::Resized(_)
-                | winit::event::WindowEvent::ScaleFactorChanged { .. }
-        );
+    window
+        .window()
+        .on_winit_window_event(move |slint_window, event| {
+            let should_check_visibility = matches!(
+                event,
+                winit::event::WindowEvent::Moved(_)
+                    | winit::event::WindowEvent::Resized(_)
+                    | winit::event::WindowEvent::ScaleFactorChanged { .. }
+            );
 
-        if should_check_visibility {
-            let action = slint_window
-                .with_winit_window(|winit_window| {
-                    let size = winit_window.inner_size();
-                    recovery
-                        .borrow_mut()
-                        .next_action(
+            if should_check_visibility {
+                let action = slint_window
+                    .with_winit_window(|winit_window| {
+                        let size = winit_window.inner_size();
+                        recovery.borrow_mut().next_action(
                             current_window_visibility_snapshot(winit_window),
                             size.width,
                             size.height,
                             winit_window.is_maximized(),
                         )
-                })
-                .unwrap_or(ThemeRecoveryAction::None);
+                    })
+                    .unwrap_or(ThemeRecoveryAction::None);
 
-            match action {
-                ThemeRecoveryAction::None => {}
-                ThemeRecoveryAction::NudgeWindowSize { width, height } => {
-                    let window = handle.unwrap();
-                    bump_render_revision(&window);
-                    slint_window.request_redraw();
-                    let _ = slint_window.with_winit_window(|winit_window| {
-                        winit_window.request_redraw();
-                        let _ = winit_window
-                            .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
-                    });
-                }
-                ThemeRecoveryAction::RestoreWindowSize { width, height } => {
-                    slint_window.request_redraw();
-                    let _ = slint_window.with_winit_window(|winit_window| {
-                        winit_window.request_redraw();
-                        let _ = winit_window
-                            .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
-                    });
+                match action {
+                    ThemeRecoveryAction::None => {}
+                    ThemeRecoveryAction::NudgeWindowSize { width, height } => {
+                        let window = handle.unwrap();
+                        bump_render_revision(&window);
+                        slint_window.request_redraw();
+                        let _ = slint_window.with_winit_window(|winit_window| {
+                            winit_window.request_redraw();
+                            let _ = winit_window
+                                .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+                        });
+                    }
+                    ThemeRecoveryAction::RestoreWindowSize { width, height } => {
+                        slint_window.request_redraw();
+                        let _ = slint_window.with_winit_window(|winit_window| {
+                            winit_window.request_redraw();
+                            let _ = winit_window
+                                .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+                        });
+                    }
                 }
             }
-        }
 
-        EventResult::Propagate
-    });
+            EventResult::Propagate
+        });
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -416,9 +440,7 @@ fn sync_shell_layout(
     window.set_effective_show_assets_sidebar(layout.show_assets_sidebar);
     window.set_effective_show_right_panel(layout.show_right_panel);
     window.set_shell_body_height_cache(
-        logical_height
-            .saturating_sub(ShellMetrics::TITLEBAR_HEIGHT)
-            as f32,
+        logical_height.saturating_sub(ShellMetrics::TITLEBAR_HEIGHT) as f32,
     );
 }
 
@@ -626,6 +648,11 @@ pub fn bind_top_status_bar(window: &AppWindow) {
 }
 
 pub fn run() -> Result<()> {
+    run_with_profile(AppRuntimeProfile::formal())
+}
+
+pub fn run_with_profile(profile: AppRuntimeProfile) -> Result<()> {
+    let _window_title = runtime_window_title(profile);
     let window = AppWindow::new()?;
     bind_top_status_bar(&window);
     window.run()?;
@@ -637,8 +664,7 @@ mod tests {
     use crate::AppWindow;
 
     use super::{
-        MonitorRect, ThemeRecoveryAction, ThemeRedrawRecovery, WindowRect,
-        WindowVisibilitySnapshot,
+        MonitorRect, ThemeRecoveryAction, ThemeRedrawRecovery, WindowRect, WindowVisibilitySnapshot,
     };
 
     #[test]
@@ -674,19 +700,19 @@ mod tests {
 
         let restored_snapshot = WindowVisibilitySnapshot::from_rects(restored, &monitors);
         assert_eq!(
-            recovery.next_action(
-                restored_snapshot,
-                restored.width,
-                restored.height,
-                false,
-            ),
+            recovery.next_action(restored_snapshot, restored.width, restored.height, false,),
             ThemeRecoveryAction::NudgeWindowSize {
                 width: restored.width + 1,
                 height: restored.height,
             }
         );
         assert_eq!(
-            recovery.next_action(restored_snapshot, restored.width + 1, restored.height, false),
+            recovery.next_action(
+                restored_snapshot,
+                restored.width + 1,
+                restored.height,
+                false
+            ),
             ThemeRecoveryAction::RestoreWindowSize {
                 width: restored.width,
                 height: restored.height,

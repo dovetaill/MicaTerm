@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 FILE="$ROOT_DIR/src/app/window_effects.rs"
 BOOTSTRAP_FILE="$ROOT_DIR/src/app/bootstrap.rs"
 APP_WINDOW_FILE="$ROOT_DIR/ui/app-window.slint"
+MAIN_FILE="$ROOT_DIR/src/main.rs"
 
 grep -F 'window.set_theme(Some(' "$FILE" >/dev/null
 grep -F 'window.request_redraw();' "$FILE" >/dev/null
@@ -12,6 +13,8 @@ grep -F 'window_vibrancy::apply_tabbed' "$FILE" >/dev/null
 grep -F '#[cfg(target_os = "windows")]' "$FILE" >/dev/null
 grep -F 'NoopWindowEffects' "$FILE" >/dev/null
 grep -F 'window.window().request_redraw();' "$BOOTSTRAP_FILE" >/dev/null
+grep -F 'winit-skia-software' "$MAIN_FILE" >/dev/null
+grep -F 'SLINT_BACKEND' "$MAIN_FILE" >/dev/null
 grep -F 'backdrop_error' "$FILE" >/dev/null
 grep -F 'backdrop_error' "$BOOTSTRAP_FILE" >/dev/null
 grep -F 'on_winit_window_event' "$BOOTSTRAP_FILE" >/dev/null

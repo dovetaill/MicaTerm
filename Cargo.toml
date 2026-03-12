@@ -6,7 +6,8 @@ edition = "2024"
 [features]
 default = ["slint-renderer-software"]
 slint-renderer-software = ["slint/renderer-software"]
-windows-skia-experimental = ["slint/renderer-skia"]
+slint-renderer-skia = ["slint/renderer-skia"]
+windows-skia-experimental = ["slint-renderer-skia"]
 
 [dependencies]
 anyhow = "1.0.102"

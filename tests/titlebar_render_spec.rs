@@ -93,8 +93,7 @@ fn titlebar_renders_visible_chrome_in_software_renderer() {
     let body_background = pixel_at(&buffer, 720, 120);
 
     let nav_zone_pixels = count_distinct_pixels(&buffer, 8, 8, 36, 28, titlebar_background, 24);
-    let brand_zone_pixels =
-        count_distinct_pixels(&buffer, 48, 8, 180, 28, titlebar_background, 24);
+    let brand_zone_pixels = count_distinct_pixels(&buffer, 48, 8, 180, 28, titlebar_background, 24);
     let window_control_pixels =
         count_distinct_pixels(&buffer, 1300, 8, 128, 28, titlebar_background, 24);
 
@@ -162,12 +161,7 @@ fn shell_body_fills_to_window_bottom_in_software_renderer() {
 
     eprintln!(
         "upper body=({}, {}, {}), lower body=({}, {}, {})",
-        upper_body.r,
-        upper_body.g,
-        upper_body.b,
-        lower_body.r,
-        lower_body.g,
-        lower_body.b
+        upper_body.r, upper_body.g, upper_body.b, lower_body.r, lower_body.g, lower_body.b
     );
 
     assert!(

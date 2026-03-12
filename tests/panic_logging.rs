@@ -2,7 +2,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use mica_term::app::bootstrap::startup_failure_message;
 use mica_term::app::logging::panic::install_panic_hook;
+use mica_term::app::runtime_profile::AppRuntimeProfile;
 
 #[test]
 fn panic_hook_writes_crash_file_for_child_process() {
@@ -39,4 +41,19 @@ fn panic_hook_writes_crash_file_for_child_process() {
     assert!(content.contains("panic hook smoke"));
     assert!(content.contains("thread="));
     assert!(content.contains("backtrace="));
+}
+
+#[test]
+fn startup_failure_message_is_explicit_for_skia_experimental() {
+    assert_eq!(
+        startup_failure_message(AppRuntimeProfile::skia_experimental(), "mock init failure")
+            .as_deref(),
+        Some(
+            "Mica Term Skia Experimental failed to initialize winit-skia-software: mock init failure",
+        )
+    );
+    assert_eq!(
+        startup_failure_message(AppRuntimeProfile::formal(), "mock init failure"),
+        None
+    );
 }

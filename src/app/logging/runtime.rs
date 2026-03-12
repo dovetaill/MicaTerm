@@ -2,6 +2,8 @@ use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
 
+use crate::app::runtime_profile::AppRuntimeProfile;
+
 use super::cleanup::{CleanupPolicy, cleanup_logging_dirs};
 use super::config::AppLoggingConfig;
 use super::paths::{LoggingPaths, resolve_logging_paths_for_app};
@@ -14,6 +16,16 @@ pub struct AppLoggingRuntime {
 pub struct TestLoggingRuntime {
     pub dispatch: tracing::Dispatch,
     pub guard: WorkerGuard,
+}
+
+pub fn emit_runtime_profile_metadata(profile: AppRuntimeProfile) {
+    tracing::info!(
+        target: "app.renderer",
+        build_flavor = ?profile.build_flavor,
+        renderer_mode = ?profile.renderer_mode,
+        forced_backend = ?profile.forced_backend(),
+        "initialized runtime profile"
+    );
 }
 
 pub fn build_test_logging_runtime(

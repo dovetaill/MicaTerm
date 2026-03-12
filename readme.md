@@ -12,9 +12,16 @@ Project planning is in `docs/plans/`.
 - Export script: `scripts/export-icons.sh`
 - Windows icon: `assets/icons/windows/mica-term.ico`
 
-## Desktop Build
+## Formal Release
 
-Primary entrypoint:
+Debian formal release aggregator:
+
+- `./build-release.sh`
+  - Runs the formal Debian release path for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu`
+  - Default mode: `MODE=fail-fast`
+  - Optional mode: `MODE=best-effort`
+
+Per-target formal entrypoints:
 
 - `./build-desktop.sh`
   - Default target: `x86_64-unknown-linux-gnu`
@@ -27,17 +34,34 @@ Primary entrypoint:
   - macOS Apple Silicon build on macOS hosts
 - `TARGET=aarch64-pc-windows-msvc ./build-desktop.sh`
   - Windows ARM64 build on Windows MSVC environments
-
-Compatibility wrapper:
-
 - `./build-win-x64.sh`
-  - Default target: `x86_64-pc-windows-gnu`
+  - Compatibility wrapper for the formal `x86_64-pc-windows-gnu` package
   - Output: `dist/mica-term-x86_64-pc-windows-gnu-release.zip`
-- `TARGET=x86_64-pc-windows-msvc ./build-win-x64.sh`
-  - Windows x64 MSVC build on Windows MSVC environments
+
+## Windows Skia Experimental
+
 - `./build-win-x64-skia.sh`
-  - Experimental Windows x64 MSVC build with Slint Skia renderer enabled
+  - Pure-Skia Windows x64 MSVC wrapper for the `windows-skia-experimental` package
   - Output: `dist/mica-term-x86_64-pc-windows-msvc-release.zip`
+  - Defaults:
+    - `TARGET=x86_64-pc-windows-msvc`
+    - `CARGO_NO_DEFAULT_FEATURES=1`
+    - `CARGO_FEATURES=windows-skia-experimental`
+    - Internal backend lock: `SLINT_BACKEND=winit-skia-software`
+    - Failure path: startup prints an explicit `winit-skia-software` initialization error instead of silently degrading
+- `CARGO_FEATURES=windows-skia-experimental ./build-win-x64.sh`
+  - Optional manual override if you need to experiment through the generic Windows wrapper
+
+Current limitation:
+
+- `windows-skia-experimental` is not currently viable on the Linux -> `x86_64-pc-windows-gnu` cross-build path in this repo.
+- The upstream `rust-skia` download step for `x86_64-pc-windows-gnu` falls back to a full Skia source build, which requires a Windows MSVC / VC toolchain.
+- Use a Windows MSVC shell with `TARGET=x86_64-pc-windows-msvc` for this experiment.
+
+## Try / Future Renderer Exploration
+
+- `docs/plans/try-winit-femtovg-wgpu.md`
+  - Kept as a try document only, not part of the current formal or experimental default route
 
 Archive formats:
 
@@ -62,21 +86,6 @@ Prerequisites by target:
 - Windows MSVC x64 / ARM64:
   - installed Rust target: `rustup target add x86_64-pc-windows-msvc` or `rustup target add aarch64-pc-windows-msvc`
   - must be built from a Windows MSVC shell or Git Bash environment
-
-Experimental renderer overrides:
-
-- `CARGO_FEATURES=windows-skia-experimental ./build-win-x64.sh`
-  - Compiles the Windows package with Slint Skia renderer support enabled
-- `./build-win-x64-skia.sh`
-  - Convenience wrapper for the same experimental Windows Skia build on a Windows MSVC shell
-- `CARGO_NO_DEFAULT_FEATURES=1`
-  - Optional advanced override if you want to drop the default software renderer feature during a custom build
-
-Current limitation:
-
-- `windows-skia-experimental` is not currently viable on the Linux -> `x86_64-pc-windows-gnu` cross-build path in this repo.
-- The upstream `rust-skia` download step for `x86_64-pc-windows-gnu` falls back to a full Skia source build, which requires a Windows MSVC / VC toolchain.
-- Use a Windows MSVC shell with `TARGET=x86_64-pc-windows-msvc` for this experiment.
 
 ## Windows Logging
 

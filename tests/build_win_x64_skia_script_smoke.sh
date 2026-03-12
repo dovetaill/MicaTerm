@@ -22,4 +22,7 @@ grep -F 'build-win-x64-skia.sh' "$README_PATH" >/dev/null
 grep -F 'windows-skia-experimental' "$SCRIPT_PATH" >/dev/null
 grep -F 'build-desktop.sh' "$SCRIPT_PATH" >/dev/null
 grep -F 'x86_64-pc-windows-msvc' "$SCRIPT_PATH" >/dev/null
+grep -F 'TARGET="${TARGET:-x86_64-pc-windows-msvc}"' "$SCRIPT_PATH" >/dev/null
+grep -F 'CARGO_NO_DEFAULT_FEATURES' "$SCRIPT_PATH" >/dev/null
+grep -F 'CARGO_NO_DEFAULT_FEATURES="${CARGO_NO_DEFAULT_FEATURES:-1}"' "$SCRIPT_PATH" >/dev/null
 grep -F 'Windows MSVC shell' "$README_PATH" >/dev/null
