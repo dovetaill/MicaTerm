@@ -483,6 +483,20 @@ pub fn bind_top_status_bar_with_store_and_effects(
     store: Option<UiPreferencesStore>,
     effects: Rc<dyn PlatformWindowEffects>,
 ) {
+    bind_top_status_bar_with_store_and_profile_and_effects(
+        window,
+        store,
+        AppRuntimeProfile::formal(),
+        effects,
+    );
+}
+
+pub fn bind_top_status_bar_with_store_and_profile_and_effects(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    profile: AppRuntimeProfile,
+    effects: Rc<dyn PlatformWindowEffects>,
+) {
     let store = store.map(Rc::new);
     let prefs = load_ui_preferences(&store);
     let view_model = Rc::new(RefCell::new(ShellViewModel {
@@ -494,7 +508,9 @@ pub fn bind_top_status_bar_with_store_and_effects(
     let redraw_recovery = Rc::new(RefCell::new(ThemeRedrawRecovery::default()));
 
     apply_restored_window_size(window, default_window_size());
-    bind_windows_theme_redraw_recovery(window, Rc::clone(&redraw_recovery));
+    if profile.uses_theme_redraw_recovery() {
+        bind_windows_theme_redraw_recovery(window, Rc::clone(&redraw_recovery));
+    }
     sync_shell_state(window, &view_model.borrow(), effects.as_ref());
     sync_shell_layout(
         window,
@@ -537,10 +553,13 @@ pub fn bind_top_status_bar_with_store_and_effects(
     let store_ref = store.clone();
     let effects_ref = Rc::clone(&effects);
     let redraw_recovery_ref = Rc::clone(&redraw_recovery);
+    let profile_for_theme_toggle = profile;
     window.on_toggle_theme_mode_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        mark_windows_theme_redraw_recovery(&window, &redraw_recovery_ref);
+        if profile_for_theme_toggle.uses_theme_redraw_recovery() {
+            mark_windows_theme_redraw_recovery(&window, &redraw_recovery_ref);
+        }
         state.toggle_theme_mode();
         sync_theme_and_window_effects(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
@@ -628,10 +647,15 @@ pub fn bind_top_status_bar_with_store_and_effects(
 }
 
 pub fn bind_top_status_bar_with_store(window: &AppWindow, store: Option<UiPreferencesStore>) {
-    bind_top_status_bar_with_store_and_effects(window, store, default_platform_window_effects());
+    bind_top_status_bar_with_store_and_profile_and_effects(
+        window,
+        store,
+        AppRuntimeProfile::formal(),
+        default_platform_window_effects(),
+    );
 }
 
-pub fn bind_top_status_bar(window: &AppWindow) {
+pub fn bind_top_status_bar_with_profile(window: &AppWindow, profile: AppRuntimeProfile) {
     let store = match UiPreferencesStore::for_app() {
         Ok(store) => Some(store),
         Err(err) => {
@@ -644,7 +668,16 @@ pub fn bind_top_status_bar(window: &AppWindow) {
         }
     };
 
-    bind_top_status_bar_with_store(window, store);
+    bind_top_status_bar_with_store_and_profile_and_effects(
+        window,
+        store,
+        profile,
+        default_platform_window_effects(),
+    );
+}
+
+pub fn bind_top_status_bar(window: &AppWindow) {
+    bind_top_status_bar_with_profile(window, AppRuntimeProfile::formal());
 }
 
 pub fn run() -> Result<()> {
@@ -654,7 +687,7 @@ pub fn run() -> Result<()> {
 pub fn run_with_profile(profile: AppRuntimeProfile) -> Result<()> {
     let _window_title = runtime_window_title(profile);
     let window = AppWindow::new()?;
-    bind_top_status_bar(&window);
+    bind_top_status_bar_with_profile(&window, profile);
     window.run()?;
     Ok(())
 }

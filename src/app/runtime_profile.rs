@@ -45,4 +45,8 @@ impl AppRuntimeProfile {
             RendererMode::SkiaSoftware => Some("winit-skia-software"),
         }
     }
+
+    pub fn uses_theme_redraw_recovery(self) -> bool {
+        !self.is_experimental()
+    }
 }

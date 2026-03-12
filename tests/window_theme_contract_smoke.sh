@@ -15,6 +15,8 @@ grep -F 'NoopWindowEffects' "$FILE" >/dev/null
 grep -F 'window.window().request_redraw();' "$BOOTSTRAP_FILE" >/dev/null
 grep -F 'winit-skia-software' "$MAIN_FILE" >/dev/null
 grep -F 'SLINT_BACKEND' "$MAIN_FILE" >/dev/null
+grep -F 'uses_theme_redraw_recovery' "$ROOT_DIR/src/app/runtime_profile.rs" >/dev/null
+grep -F 'profile.uses_theme_redraw_recovery()' "$BOOTSTRAP_FILE" >/dev/null
 grep -F 'backdrop_error' "$FILE" >/dev/null
 grep -F 'backdrop_error' "$BOOTSTRAP_FILE" >/dev/null
 grep -F 'on_winit_window_event' "$BOOTSTRAP_FILE" >/dev/null
