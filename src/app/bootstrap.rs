@@ -6,20 +6,22 @@ use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::AppWindow;
 use crate::app::runtime_profile::AppRuntimeProfile;
-use crate::app::window_recovery::WindowRecoveryController;
-use crate::app::window_recovery::WindowVisibilitySnapshot;
+use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
+use crate::app::window_effects::{
+    PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
+};
 #[cfg(target_os = "windows")]
 use crate::app::window_recovery::WindowRecoveryAction;
-use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
+use crate::app::window_recovery::WindowRecoveryController;
+use crate::app::window_recovery::WindowVisibilitySnapshot;
+use crate::app::window_state::WindowPlacementKind;
+use crate::app::windowing::{
+    WindowController, apply_restored_window_size, parse_resize_direction, window_appearance,
+};
 #[cfg(target_os = "windows")]
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
 };
-use crate::app::window_effects::{
-    PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
-};
-use crate::app::window_state::WindowPlacementKind;
-use crate::app::windowing::{WindowController, apply_restored_window_size, window_appearance};
 use crate::shell::layout::{ShellLayoutInput, resolve_shell_layout};
 use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::{SidebarDestination, sidebar_items_for};
@@ -194,16 +196,16 @@ fn apply_window_recovery_action(
             slint_window.request_redraw();
             let _ = slint_window.with_winit_window(|winit_window| {
                 winit_window.request_redraw();
-                let _ = winit_window
-                    .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+                let _ =
+                    winit_window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
             });
         }
         WindowRecoveryAction::RestoreWindowSize { width, height } => {
             slint_window.request_redraw();
             let _ = slint_window.with_winit_window(|winit_window| {
                 winit_window.request_redraw();
-                let _ = winit_window
-                    .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
+                let _ =
+                    winit_window.request_inner_size(winit::dpi::PhysicalSize::new(width, height));
             });
         }
     }
@@ -457,6 +459,9 @@ fn current_window_size(window: &AppWindow) -> (u32, u32) {
 }
 
 #[cfg(target_os = "windows")]
+const WINDOW_FRAME_RESERVED_RESIZE_BAND: i32 = 10;
+
+#[cfg(target_os = "windows")]
 fn install_windows_frame_adapter(window: &AppWindow) {
     use slint::winit_030::WinitWindowAccessor;
 
@@ -469,13 +474,17 @@ fn install_windows_frame_adapter(window: &AppWindow) {
     };
 
     let _ = window.window().with_winit_window(|winit_window| {
-        install_window_frame_adapter(winit_window, maximize_button, placement);
+        install_window_frame_adapter(
+            winit_window,
+            maximize_button,
+            placement,
+            WINDOW_FRAME_RESERVED_RESIZE_BAND,
+        );
     });
 }
 
 #[cfg(not(target_os = "windows"))]
-fn install_windows_frame_adapter(_window: &AppWindow) {
-}
+fn install_windows_frame_adapter(_window: &AppWindow) {}
 
 #[cfg(target_os = "windows")]
 fn query_true_window_placement_from_app(window: &AppWindow) -> WindowPlacementKind {
@@ -684,6 +693,13 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     let controller_ref = Rc::clone(&controller);
     window.on_drag_requested(move || {
         let _ = controller_ref.drag();
+    });
+
+    let controller_ref = Rc::clone(&controller);
+    window.on_drag_resize_requested(move |direction| {
+        if let Some(direction) = parse_resize_direction(direction.as_str()) {
+            let _ = controller_ref.drag_resize(direction);
+        }
     });
 
     let state = Rc::clone(&view_model);

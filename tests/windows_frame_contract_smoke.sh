@@ -15,6 +15,8 @@ grep -F 'GetPropW' "$FRAME_FILE" >/dev/null
 grep -F 'SetPropW' "$FRAME_FILE" >/dev/null
 grep -F 'RemovePropW' "$FRAME_FILE" >/dev/null
 grep -F 'WM_NCDESTROY' "$FRAME_FILE" >/dev/null
+grep -F 'point_hits_outer_resize_band' "$FRAME_FILE" >/dev/null
+grep -F 'reserved resize band' "$FRAME_FILE" >/dev/null
 grep -F 'layout-maximize-button-x' "$TITLEBAR" >/dev/null
 grep -F 'layout-titlebar-maximize-button-x' "$APP_FILE" >/dev/null
 

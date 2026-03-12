@@ -1,0 +1,118 @@
+export component WindowResizeGrips inherits Rectangle {
+    in property <length> grip-size: 10px;
+    callback resize-requested(string);
+
+    background: transparent;
+
+    north := TouchArea {
+        x: root.grip-size;
+        y: 0px;
+        width: root.width - root.grip-size * 2;
+        height: root.grip-size;
+        mouse-cursor: MouseCursor.n-resize;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                root.resize-requested("north");
+            }
+        }
+    }
+
+    south := TouchArea {
+        x: root.grip-size;
+        y: root.height - root.grip-size;
+        width: root.width - root.grip-size * 2;
+        height: root.grip-size;
+        mouse-cursor: MouseCursor.s-resize;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                root.resize-requested("south");
+            }
+        }
+    }
+
+    east := TouchArea {
+        x: root.width - root.grip-size;
+        y: root.grip-size;
+        width: root.grip-size;
+        height: root.height - root.grip-size * 2;
+        mouse-cursor: MouseCursor.e-resize;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                root.resize-requested("east");
+            }
+        }
+    }
+
+    west := TouchArea {
+        x: 0px;
+        y: root.grip-size;
+        width: root.grip-size;
+        height: root.height - root.grip-size * 2;
+        mouse-cursor: MouseCursor.w-resize;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                root.resize-requested("west");
+            }
+        }
+    }
+
+    north-east := TouchArea {
+        x: root.width - root.grip-size;
+        y: 0px;
+        width: root.grip-size;
+        height: root.grip-size;
+        mouse-cursor: MouseCursor.ne-resize;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                root.resize-requested("north-east");
+            }
+        }
+    }
+
+    north-west := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: root.grip-size;
+        height: root.grip-size;
+        mouse-cursor: MouseCursor.nw-resize;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                root.resize-requested("north-west");
+            }
+        }
+    }
+
+    south-east := TouchArea {
+        x: root.width - root.grip-size;
+        y: root.height - root.grip-size;
+        width: root.grip-size;
+        height: root.grip-size;
+        mouse-cursor: MouseCursor.se-resize;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                root.resize-requested("south-east");
+            }
+        }
+    }
+
+    south-west := TouchArea {
+        x: 0px;
+        y: root.height - root.grip-size;
+        width: root.grip-size;
+        height: root.grip-size;
+        mouse-cursor: MouseCursor.sw-resize;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                root.resize-requested("south-west");
+            }
+        }
+    }
+}

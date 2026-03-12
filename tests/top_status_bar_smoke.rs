@@ -195,6 +195,22 @@ fn maximize_toggle_updates_flat_window_chrome_binding() {
 }
 
 #[test]
+fn maximize_toggle_keeps_drag_related_window_state_bindings_consistent() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_maximize_toggle_requested();
+    assert!(app.get_is_window_maximized());
+    assert!(app.get_use_flat_window_chrome());
+
+    app.invoke_drag_double_clicked();
+    assert!(!app.get_is_window_maximized());
+    assert!(!app.get_use_flat_window_chrome());
+}
+
+#[test]
 fn bootstrap_omits_theme_sync_debug_diagnostics_when_debug_logging_is_enabled() {
     i_slint_backend_testing::init_no_event_loop();
 

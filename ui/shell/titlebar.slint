@@ -164,9 +164,11 @@ export component Titlebar inherits Rectangle {
             drag-touch := TouchArea {
                 width: parent.width;
                 height: parent.height;
+                mouse-cursor: MouseCursor.grab;
 
-                moved => {
-                    if self.pressed {
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left
+                    {
                         root.drag-requested();
                     }
                 }

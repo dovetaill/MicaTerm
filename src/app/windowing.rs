@@ -1,6 +1,8 @@
 use anyhow::{Result, anyhow};
 use slint::{ComponentHandle, PhysicalSize, Window};
 
+use crate::shell::metrics::ShellMetrics;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaterialKind {
     MicaAlt,
@@ -22,23 +24,55 @@ pub fn window_appearance() -> WindowAppearance {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowCommandSpec {
     pub uses_winit_drag: bool,
+    pub uses_winit_drag_resize: bool,
     pub self_drawn_controls: bool,
     pub supports_double_click_maximize: bool,
     pub supports_always_on_top: bool,
     pub supports_true_window_state_tracking: bool,
     pub supports_native_frame_adapter: bool,
     pub resize_border_width: u32,
+    pub min_window_width: u32,
+    pub min_window_height: u32,
 }
 
 pub fn window_command_spec() -> WindowCommandSpec {
     WindowCommandSpec {
         uses_winit_drag: true,
+        uses_winit_drag_resize: true,
         self_drawn_controls: true,
         supports_double_click_maximize: true,
         supports_always_on_top: true,
         supports_true_window_state_tracking: true,
         supports_native_frame_adapter: true,
         resize_border_width: 6,
+        min_window_width: ShellMetrics::WINDOW_MIN_WIDTH,
+        min_window_height: ShellMetrics::WINDOW_MIN_HEIGHT,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowResizeDirection {
+    North,
+    South,
+    East,
+    West,
+    NorthEast,
+    NorthWest,
+    SouthEast,
+    SouthWest,
+}
+
+pub fn parse_resize_direction(value: &str) -> Option<WindowResizeDirection> {
+    match value {
+        "north" => Some(WindowResizeDirection::North),
+        "south" => Some(WindowResizeDirection::South),
+        "east" => Some(WindowResizeDirection::East),
+        "west" => Some(WindowResizeDirection::West),
+        "north-east" => Some(WindowResizeDirection::NorthEast),
+        "north-west" => Some(WindowResizeDirection::NorthWest),
+        "south-east" => Some(WindowResizeDirection::SouthEast),
+        "south-west" => Some(WindowResizeDirection::SouthWest),
+        _ => None,
     }
 }
 
@@ -95,6 +129,32 @@ impl<C: ComponentHandle> WindowController<C> {
             window
                 .with_winit_window(|window: &winit::window::Window| {
                     window.drag_window().map_err(|err| anyhow!(err.to_string()))
+                })
+                .unwrap_or_else(|| Err(anyhow!("winit window is unavailable")))
+        })
+        .unwrap_or_else(|| Err(anyhow!("window is unavailable")))
+    }
+
+    pub fn drag_resize(&self, direction: WindowResizeDirection) -> Result<()> {
+        use slint::winit_030::{WinitWindowAccessor, winit};
+
+        let mapped = match direction {
+            WindowResizeDirection::North => winit::window::ResizeDirection::North,
+            WindowResizeDirection::South => winit::window::ResizeDirection::South,
+            WindowResizeDirection::East => winit::window::ResizeDirection::East,
+            WindowResizeDirection::West => winit::window::ResizeDirection::West,
+            WindowResizeDirection::NorthEast => winit::window::ResizeDirection::NorthEast,
+            WindowResizeDirection::NorthWest => winit::window::ResizeDirection::NorthWest,
+            WindowResizeDirection::SouthEast => winit::window::ResizeDirection::SouthEast,
+            WindowResizeDirection::SouthWest => winit::window::ResizeDirection::SouthWest,
+        };
+
+        self.with_window(|window| {
+            window
+                .with_winit_window(|window: &winit::window::Window| {
+                    window
+                        .drag_resize_window(mapped)
+                        .map_err(|err| anyhow!(err.to_string()))
                 })
                 .unwrap_or_else(|| Err(anyhow!("winit window is unavailable")))
         })

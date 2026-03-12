@@ -68,6 +68,7 @@ fn top_status_bar_window_commands_match_the_windows_restore_strategy() {
     let spec = window_command_spec();
 
     assert!(spec.uses_winit_drag);
+    assert!(spec.uses_winit_drag_resize);
     assert!(spec.supports_true_window_state_tracking);
     assert!(spec.supports_native_frame_adapter);
 }
@@ -77,4 +78,12 @@ fn window_shell_exposes_resize_border_for_frameless_resize() {
     let spec = window_command_spec();
 
     assert_eq!(spec.resize_border_width, 6);
+}
+
+#[test]
+fn window_shell_exposes_minimum_window_budget() {
+    let spec = window_command_spec();
+
+    assert_eq!(spec.min_window_width, ShellMetrics::WINDOW_MIN_WIDTH);
+    assert_eq!(spec.min_window_height, ShellMetrics::WINDOW_MIN_HEIGHT);
 }

@@ -1,5 +1,6 @@
 import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
+import { WindowResizeGrips } from "components/window-resize-grips.slint";
 import { RightPanel } from "shell/right-panel.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
 import { TabBar } from "shell/tabbar.slint";
@@ -41,6 +42,7 @@ export component AppWindow inherits Window {
     out property <length> layout-assets-sidebar-width: sidebar.assets-sidebar-width;
 
     callback drag-requested();
+    callback drag-resize-requested(string);
     callback drag-double-clicked();
     callback minimize-requested();
     callback maximize-toggle-requested();
@@ -61,6 +63,8 @@ export component AppWindow inherits Window {
     background: transparent;
     preferred-width: 1440px;
     preferred-height: 900px;
+    min-width: 688px;
+    min-height: 640px;
 
     function sync-shell-body-height() {
         root.shell-body-height-cache = max(0px, root.height - titlebar.height);
@@ -192,6 +196,15 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+        }
+    }
+
+    resize-grips := WindowResizeGrips {
+        width: root.width;
+        height: root.height;
+
+        resize-requested(direction) => {
+            root.drag-resize-requested(direction);
         }
     }
 

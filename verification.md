@@ -266,3 +266,67 @@ Date: 2026-03-12 14:35:00 CST
   - `DISPLAY=`
   - `WAYLAND_DISPLAY=`
 - Manual follow-up is still required for the offscreen repaint observation on Windows.
+
+## Windows Frameless Resize Drag Verification
+
+Date: 2026-03-12 15:20:44 CST
+
+### Source Documents
+
+- Design: `docs/plans/2026-03-12-windows-frameless-resize-drag-design.md`
+- Implementation Plan: `docs/plans/2026-03-12-windows-frameless-resize-drag-implementation-plan.md`
+
+### Commands Executed
+
+- [x] `cargo fmt --check -- src/app/bootstrap.rs src/app/windowing.rs src/app/windows_frame.rs tests/top_status_bar_smoke.rs tests/window_shell.rs tests/windows_frame_spec.rs tests/window_resize_direction_spec.rs`
+- [x] `cargo test --test window_shell --test window_resize_direction_spec --test windows_frame_spec --test window_geometry_spec --test top_status_bar_smoke -q`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+- [x] `bash tests/window_resize_drag_contract_smoke.sh`
+- [x] `bash tests/windows_frame_contract_smoke.sh`
+- [x] `bash tests/windows_drag_restore_contract_smoke.sh`
+- [x] `bash tests/top_status_bar_ui_contract_smoke.sh`
+
+### Automated Results
+
+- `cargo fmt --check -- src/app/bootstrap.rs src/app/windowing.rs src/app/windows_frame.rs tests/top_status_bar_smoke.rs tests/window_shell.rs tests/windows_frame_spec.rs tests/window_resize_direction_spec.rs`: passed
+- `cargo test --test window_shell --test window_resize_direction_spec --test windows_frame_spec --test window_geometry_spec --test top_status_bar_smoke -q`: passed
+- `cargo check --workspace`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+- `bash tests/window_resize_drag_contract_smoke.sh`: passed
+- `bash tests/windows_frame_contract_smoke.sh`: passed
+- `bash tests/windows_drag_restore_contract_smoke.sh`: passed
+- `bash tests/top_status_bar_ui_contract_smoke.sh`: passed
+
+### Verification Conclusions
+
+- [x] `ShellMetrics` 与 `AppWindow` 的最小尺寸 contract 一致
+- [x] `WindowCommandSpec` 已导出 frameless drag / drag-resize capability
+- [x] 上下左右与四角 resize direction 均具备显式 bridge
+- [x] Windows frame adapter 会避开 outer resize band
+- [x] titlebar drag 已切换到 `pointer-event(down)` 触发
+- [x] 最终自动化验证矩阵通过
+
+### Notes
+
+- 全仓 `cargo fmt --check` 目前会命中仓库里若干与本 feature 无关的既有格式漂移，因此这里对本次修改涉及的 Rust 文件执行了定向格式检查，避免把无关格式化噪音带入本次合并。
+- 当前环境未执行 Windows 11 图形实机验证，因此这里只能确认 Rust/Slint contract、smoke 和编译验证。
+
+### Windows 11 Manual Checklist
+
+- [ ] restored 状态下从上、下、左、右拖动，方向正确
+- [ ] restored 状态下从四角拖动，角落拖动可同时改变宽高
+- [ ] 缩小到 `688 x 640` 后继续拖动不会再变小
+- [ ] 双击顶栏最大化后，再拖动顶栏空白区可恢复并继续拖动
+- [ ] 点击 maximize button 最大化后，再拖动顶栏空白区可恢复并继续拖动
+- [ ] snap / unsnap 后仍可 resize，且 titlebar drag 与窗口按钮不退化
+
+### GUI Smoke Status
+
+- [ ] `cargo run` on Windows 11
+- GUI smoke was not executed in this environment.
+- Environment evidence:
+  - `Linux 6.12.57+deb13-amd64 x86_64 GNU/Linux`
+  - `DISPLAY=`
+  - `WAYLAND_DISPLAY=`
+- Manual follow-up is still required for real Windows 11 resize / drag behavior.

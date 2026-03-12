@@ -24,11 +24,29 @@ impl CaptionButtonGeometry {
 struct WindowFrameState {
     maximize_button: CaptionButtonGeometry,
     native_maximize_button_hit_test: bool,
+    reserved_resize_band: i32,
 }
 
 pub fn uses_native_maximize_button_hit_test(placement: WindowPlacementKind) -> bool {
     let _ = placement;
     false
+}
+
+pub fn point_hits_outer_resize_band(
+    x: i32,
+    y: i32,
+    window_width: i32,
+    window_height: i32,
+    band: i32,
+) -> bool {
+    if band <= 0 {
+        return false;
+    }
+
+    x < band
+        || y < band
+        || x >= window_width.saturating_sub(band)
+        || y >= window_height.saturating_sub(band)
 }
 
 #[cfg(target_os = "windows")]
@@ -92,11 +110,9 @@ unsafe extern "system" fn window_frame_subclass_proc(
         }
 
         let property_name = window_frame_property_name();
-        let Some(frame_state) =
-            (unsafe {
-                (GetPropW(hwnd, property_name.as_ptr()) as *const WindowFrameState).as_ref()
-            })
-        else {
+        let Some(frame_state) = (unsafe {
+            (GetPropW(hwnd, property_name.as_ptr()) as *const WindowFrameState).as_ref()
+        }) else {
             return result;
         };
 
@@ -112,8 +128,24 @@ unsafe extern "system" fn window_frame_subclass_proc(
         let (screen_x, screen_y) = screen_point_from_lparam(lparam);
         let window_x = screen_x - window_rect.left;
         let window_y = screen_y - window_rect.top;
+        let window_width = window_rect.right.saturating_sub(window_rect.left);
+        let window_height = window_rect.bottom.saturating_sub(window_rect.top);
 
-        if frame_state.maximize_button.contains_window_point(window_x, window_y) {
+        // Keep the reserved resize band for explicit edge grips out of the maximize hit-test path.
+        if point_hits_outer_resize_band(
+            window_x,
+            window_y,
+            window_width,
+            window_height,
+            frame_state.reserved_resize_band,
+        ) {
+            return result;
+        }
+
+        if frame_state
+            .maximize_button
+            .contains_window_point(window_x, window_y)
+        {
             return HTMAXBUTTON as LRESULT;
         }
 
@@ -146,7 +178,7 @@ pub fn query_true_window_placement(
 ) -> Option<WindowPlacementKind> {
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTONEAREST, MonitorFromWindow,
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetWindowPlacement, GetWindowRect, SW_SHOWMAXIMIZED, WINDOWPLACEMENT,
@@ -210,6 +242,7 @@ pub fn install_window_frame_adapter(
     window: &slint::winit_030::winit::window::Window,
     maximize_button: CaptionButtonGeometry,
     placement: WindowPlacementKind,
+    reserved_resize_band: i32,
 ) {
     use windows_sys::Win32::UI::Shell::SetWindowSubclass;
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetPropW, RemovePropW, SetPropW};
@@ -225,12 +258,14 @@ pub fn install_window_frame_adapter(
             *frame_state = WindowFrameState {
                 maximize_button,
                 native_maximize_button_hit_test: uses_native_maximize_button_hit_test(placement),
+                reserved_resize_band,
             };
             false
         } else {
             let frame_state = Box::into_raw(Box::new(WindowFrameState {
                 maximize_button,
                 native_maximize_button_hit_test: uses_native_maximize_button_hit_test(placement),
+                reserved_resize_band,
             }));
             if SetPropW(hwnd, property_name.as_ptr(), frame_state.cast()) == 0 {
                 drop(Box::from_raw(frame_state));
@@ -239,7 +274,12 @@ pub fn install_window_frame_adapter(
             true
         };
 
-        if SetWindowSubclass(hwnd, Some(window_frame_subclass_proc), WINDOW_FRAME_SUBCLASS_ID, 0) == 0
+        if SetWindowSubclass(
+            hwnd,
+            Some(window_frame_subclass_proc),
+            WINDOW_FRAME_SUBCLASS_ID,
+            0,
+        ) == 0
             && created_geometry
         {
             let geometry = RemovePropW(hwnd, property_name.as_ptr());
@@ -255,5 +295,6 @@ pub fn install_window_frame_adapter(
     _window: &slint::winit_030::winit::window::Window,
     _maximize_button: CaptionButtonGeometry,
     _placement: WindowPlacementKind,
+    _reserved_resize_band: i32,
 ) {
 }
