@@ -66,18 +66,10 @@ impl PlatformWindowEffects for FailingBackdropWindowEffects {
 }
 
 #[test]
-fn app_title_stays_stable_for_formal_profile() {
+fn app_title_stays_stable_for_mainline_profile() {
     assert_eq!(
-        runtime_window_title(AppRuntimeProfile::formal()),
+        runtime_window_title(AppRuntimeProfile::mainline()),
         "Mica Term"
-    );
-}
-
-#[test]
-fn runtime_window_title_marks_femtovg_wgpu_experimental_build() {
-    assert_eq!(
-        runtime_window_title(AppRuntimeProfile::femtovg_wgpu_experimental()),
-        "Mica Term [FemtoVG WGPU Experimental]"
     );
 }
 
@@ -87,6 +79,14 @@ fn app_window_title_is_runtime_bound() {
 
     assert!(content.contains("in property <string> window-title"));
     assert!(content.contains("title: root.window-title;"));
+}
+
+#[test]
+fn app_window_source_no_longer_exposes_recovery_mask_contract() {
+    let content = std::fs::read_to_string("ui/app-window.slint").unwrap();
+
+    assert!(!content.contains("render-revision"));
+    assert!(!content.contains("experimental-recovery-mask"));
 }
 
 #[test]

@@ -4,3 +4,9 @@
 /.DS_Store
 /.worktrees
 /dist
+vendor/*
+!vendor/gpu-allocator/
+!vendor/gpu-allocator/**
+!vendor/i-slint-renderer-femtovg/
+!vendor/i-slint-renderer-femtovg/**
+vendor/i-slint-renderer-femtovg/target/

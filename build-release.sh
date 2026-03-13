@@ -8,13 +8,13 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [--help]
 
-Formal Debian release aggregator.
+Mainline GPU release aggregator.
 
 Modes:
   MODE=fail-fast   Stop on first failure (default)
   MODE=best-effort Continue both targets and report summary
 
-Formal targets:
+Mainline targets:
   x86_64-unknown-linux-gnu
   x86_64-pc-windows-gnu
 EOF
@@ -28,7 +28,7 @@ fail() {
 run_target() {
   local target="$1"
 
-  echo "==> Formal release target: $target"
+  echo "==> Mainline release target: $target"
   TARGET="$target" "$ROOT_DIR/build-desktop.sh"
 }
 
@@ -49,7 +49,7 @@ case "$MODE" in
     ;;
 esac
 
-formal_targets=(
+mainline_targets=(
   "x86_64-unknown-linux-gnu"
   "x86_64-pc-windows-gnu"
 )
@@ -57,7 +57,7 @@ formal_targets=(
 failures=0
 results=()
 
-for target in "${formal_targets[@]}"; do
+for target in "${mainline_targets[@]}"; do
   if run_target "$target"; then
     results+=("ok $target")
   else
@@ -70,7 +70,7 @@ for target in "${formal_targets[@]}"; do
   fi
 done
 
-echo "==> Formal release summary ($MODE)"
+echo "==> Mainline release summary ($MODE)"
 for result in "${results[@]}"; do
   echo "   $result"
 done

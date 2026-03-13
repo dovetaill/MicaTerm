@@ -4,13 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["slint-renderer-software"]
+default = ["slint-renderer-femtovg-wgpu"]
 slint-renderer-software = ["slint/renderer-software"]
 slint-renderer-femtovg-wgpu = [
     "slint/renderer-femtovg-wgpu",
     "slint/unstable-wgpu-28",
 ]
-femtovg-wgpu-experimental = ["slint-renderer-femtovg-wgpu"]
 
 [dependencies]
 anyhow = "1.0.102"
@@ -46,3 +45,4 @@ i-slint-backend-testing = "1.15.1"
 
 [patch.crates-io]
 gpu-allocator = { path = "vendor/gpu-allocator" }
+i-slint-renderer-femtovg = { path = "vendor/i-slint-renderer-femtovg" }

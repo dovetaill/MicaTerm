@@ -2,38 +2,48 @@
 use mica_term::app::runtime_profile::AppRuntimeProfile;
 
 fn select_runtime_profile() -> AppRuntimeProfile {
-    #[cfg(feature = "femtovg-wgpu-experimental")]
-    {
-        return AppRuntimeProfile::femtovg_wgpu_experimental();
-    }
-
-    #[cfg(not(feature = "femtovg-wgpu-experimental"))]
-    {
-        AppRuntimeProfile::formal()
-    }
+    AppRuntimeProfile::mainline()
 }
 
-#[cfg(feature = "femtovg-wgpu-experimental")]
-fn apply_renderer_selector(profile: AppRuntimeProfile) -> anyhow::Result<()> {
+fn apply_renderer_selector(_profile: AppRuntimeProfile) -> anyhow::Result<()> {
     use anyhow::Context;
     use slint::{BackendSelector, wgpu_28::WGPUConfiguration};
 
-    if !profile.is_experimental() {
-        return Ok(());
-    }
+    #[cfg(target_os = "windows")]
+    let wgpu_configuration = {
+        let mut settings = slint::wgpu_28::WGPUSettings::default();
+        settings.backends = slint::wgpu_28::wgpu::Backends::DX12;
+        tracing::info!(
+            target: "app.renderer",
+            requested_backends = ?settings.backends,
+            "configuring wgpu backend preferences for femtovg renderer"
+        );
+        WGPUConfiguration::Automatic(settings)
+    };
 
-    BackendSelector::new()
+    #[cfg(not(target_os = "windows"))]
+    let wgpu_configuration = WGPUConfiguration::default();
+
+    let selector = BackendSelector::new()
         .backend_name("winit".into())
         .renderer_name("femtovg-wgpu".into())
-        .require_wgpu_28(WGPUConfiguration::default())
+        .require_wgpu_28(wgpu_configuration);
+
+    #[cfg(target_os = "windows")]
+    let selector = {
+        tracing::info!(
+            target: "app.renderer",
+            transparent_window = false,
+            reason = "wgpu_surface_reports_opaque_alpha_only",
+            "configuring winit window attributes for femtovg renderer"
+        );
+        selector.with_winit_window_attributes_hook(|attributes| attributes.with_transparent(false))
+    };
+
+    selector
         .select()
         .map_err(anyhow::Error::from)
-        .context("failed to select winit-femtovg-wgpu backend for femtovg-wgpu-experimental")
-}
-
-#[cfg(not(feature = "femtovg-wgpu-experimental"))]
-fn apply_renderer_selector(_profile: AppRuntimeProfile) -> anyhow::Result<()> {
-    Ok(())
+        .context("failed to select winit-femtovg-wgpu backend for mainline runtime")
 }
 
 fn main() -> anyhow::Result<()> {

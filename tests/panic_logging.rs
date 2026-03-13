@@ -44,22 +44,11 @@ fn panic_hook_writes_crash_file_for_child_process() {
 }
 
 #[test]
-fn startup_failure_message_is_absent_for_formal_profile() {
-    assert_eq!(
-        startup_failure_message(AppRuntimeProfile::formal(), "mock init failure"),
-        None
-    );
-}
+fn startup_failure_message_is_explicit_for_mainline_profile() {
+    let message = startup_failure_message(AppRuntimeProfile::mainline(), "mock init failure")
+        .expect("mainline profile should expose a startup message");
 
-#[test]
-fn startup_failure_message_is_explicit_for_femtovg_wgpu_profile() {
-    let message = startup_failure_message(
-        AppRuntimeProfile::femtovg_wgpu_experimental(),
-        "mock init failure",
-    )
-    .expect("experimental profile should expose a startup message");
-
-    assert!(message.contains("FemtoVG WGPU Experimental"));
+    assert!(message.contains("Mica Term"));
     assert!(message.contains("winit-femtovg-wgpu"));
     assert!(message.contains("mock init failure"));
 }

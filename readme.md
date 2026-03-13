@@ -5,6 +5,8 @@ Project planning is in `docs/plans/`.
 - Overall style design: `docs/plans/2026-03-10-overall-style-design.md`
 - Overall style implementation plan: `docs/plans/2026-03-10-overall-style-implementation-plan.md`
 - Overall style verification: `docs/plans/2026-03-10-overall-style-verification.md`
+- Windows FemtoVG WGPU DX12 retrospective:
+  `docs/plans/2026-03-13-windows-femtovg-wgpu-dx12-retrospective.md`
 
 ## Icon Assets
 
@@ -12,16 +14,12 @@ Project planning is in `docs/plans/`.
 - Export script: `scripts/export-icons.sh`
 - Windows icon: `assets/icons/windows/mica-term.ico`
 
-## Formal Release
-
-Debian formal release aggregator:
+## Mainline Build Entry Points
 
 - `./build-release.sh`
-  - Runs the formal Debian release path for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu`
+  - Runs the mainline GPU release path for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu`
   - Default mode: `MODE=fail-fast`
   - Optional mode: `MODE=best-effort`
-
-Per-target formal entrypoints:
 
 - `./build-desktop.sh`
   - Default target: `x86_64-unknown-linux-gnu`
@@ -35,36 +33,36 @@ Per-target formal entrypoints:
 - `TARGET=aarch64-pc-windows-msvc ./build-desktop.sh`
   - Windows ARM64 build on Windows MSVC environments
 - `./build-win-x64.sh`
-  - Compatibility wrapper for the formal `x86_64-pc-windows-gnu` package
-  - Output: `dist/mica-term-x86_64-pc-windows-gnu-release.zip`
-
-## FemtoVG WGPU Experimental
-
-Experimental renderer entrypoints are wrapper-only and do not change `./build-release.sh`.
+  - Single Windows x64 wrapper
+  - Default target: `x86_64-pc-windows-gnu`
+  - Override target: `TARGET=x86_64-pc-windows-msvc ./build-win-x64.sh`
+  - Outputs:
+    `dist/mica-term-x86_64-pc-windows-gnu-release.zip`
+    `dist/mica-term-x86_64-pc-windows-msvc-release.zip`
 
 - `./build-linux-x64-femtovg-wgpu.sh`
-  - Linux experimental package for `x86_64-unknown-linux-gnu`
-  - Uses `--no-default-features --features femtovg-wgpu-experimental`
-  - Keeps executable name as `mica-term`
-  - Produces `dist/mica-term-femtovg-wgpu-experimental-x86_64-unknown-linux-gnu-release.tar.gz`
-- `./build-win-x64-femtovg-wgpu.sh`
-  - Windows experimental package for `x86_64-pc-windows-msvc`
-  - Uses `--no-default-features --features femtovg-wgpu-experimental`
-  - Keeps executable name as `mica-term`
-  - Produces `dist/mica-term-femtovg-wgpu-experimental-x86_64-pc-windows-msvc-release.zip`
-- `./build-win-x64-gnu-femtovg-wgpu.sh`
-  - Linux-host Windows GNU experimental package for `x86_64-pc-windows-gnu`
-  - Uses `--no-default-features --features femtovg-wgpu-experimental`
-  - Keeps executable name as `mica-term`
-  - Produces `dist/mica-term-femtovg-wgpu-experimental-x86_64-pc-windows-gnu-release.zip`
+  - Linux x64 mainline convenience wrapper for `x86_64-unknown-linux-gnu`
+  - Produces `dist/mica-term-x86_64-unknown-linux-gnu-release.tar.gz`
 
 Notes:
 
-- Both wrappers stage and archive under `mica-term-femtovg-wgpu-experimental-*`.
-- The runtime profile is internal to the app and must lock `winit + femtovg-wgpu + wgpu-28`.
-- `./build-win-x64-femtovg-wgpu.sh` remains the Windows-host MSVC experimental path.
-- Experimental packages are intentionally separate from the formal Debian release aggregator.
-- `./build-release.sh` remains the formal release path and must not expose the experimental wrapper entrypoints.
+- All build entrypoints now resolve to the same runtime route: `winit + femtovg-wgpu + wgpu-28`.
+- The runtime profile is internal to the app and is always locked to that GPU renderer.
+- `./build-release.sh` remains the aggregate Linux x64 + Windows GNU release entrypoint.
+
+## Windows FemtoVG WGPU Note
+
+- On Windows, the mainline `femtovg-wgpu` route now explicitly requests `wgpu::Backends::DX12`.
+- This is intentional and not a cosmetic tweak. The visual corruption issue still reproduced on the
+  tested RX550 system after `transparent_window=false`, `present_mode=Fifo`, and `alpha_mode=Opaque`
+  were already in place, but it stopped once the runtime actually initialized WGPU with `backend=Dx12`
+  instead of `backend=Vulkan`.
+- If you need to verify the live path, run with `MICA_TRACE_RENDER_PIPELINE=1` and confirm both of
+  these log lines are present:
+  - `femtovg renderer received requested graphics api ... requested_backends=Some(Backends(DX12))`
+  - `wgpu adapter initialized for femtovg renderer backend=Dx12`
+- The complete investigation and timeline are recorded in
+  `docs/plans/2026-03-13-windows-femtovg-wgpu-dx12-retrospective.md`.
 
 ## Try / Future Renderer Exploration
 

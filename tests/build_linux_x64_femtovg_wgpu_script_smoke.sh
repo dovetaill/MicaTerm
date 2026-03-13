@@ -13,7 +13,13 @@ bash -n "$SCRIPT_PATH"
 HELP_OUTPUT="$("$SCRIPT_PATH" --help)"
 
 grep -F 'x86_64-unknown-linux-gnu' <<<"$HELP_OUTPUT" >/dev/null
-grep -F 'mica-term-femtovg-wgpu-experimental' <<<"$HELP_OUTPUT" >/dev/null
-grep -F -- '--no-default-features' <<<"$HELP_OUTPUT" >/dev/null
+grep -F 'mica-term-x86_64-unknown-linux-gnu-release.tar.gz' <<<"$HELP_OUTPUT" >/dev/null
 grep -F '.tar.gz' <<<"$HELP_OUTPUT" >/dev/null
-grep -F 'femtovg-wgpu-experimental' "$SCRIPT_PATH" >/dev/null
+
+if grep -F 'femtovg-wgpu-experimental' "$SCRIPT_PATH" >/dev/null \
+  || grep -F -- '--no-default-features' "$SCRIPT_PATH" >/dev/null \
+  || grep -F 'CARGO_FEATURES=' "$SCRIPT_PATH" >/dev/null
+then
+  echo "linux femtovg-wgpu wrapper should now use the default mainline cargo shape" >&2
+  exit 1
+fi
