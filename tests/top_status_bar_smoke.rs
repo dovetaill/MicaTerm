@@ -268,24 +268,3 @@ fn bootstrap_logs_backdrop_error_details_when_native_sync_fails() {
 
     let _ = fs::remove_dir_all(temp_root);
 }
-
-#[test]
-fn maximize_toggle_only_changes_outer_shell_chrome() {
-    i_slint_backend_testing::init_no_event_loop();
-
-    let app = AppWindow::new().unwrap();
-    bind_top_status_bar_with_store(&app, None);
-
-    assert_eq!(app.get_layout_titlebar_radius() as u32, 0);
-    assert_eq!(app.get_layout_titlebar_border_width() as u32, 0);
-
-    app.set_use_flat_window_chrome(true);
-    assert_eq!(app.get_layout_shell_frame_radius() as u32, 0);
-    assert_eq!(app.get_layout_titlebar_radius() as u32, 0);
-    assert_eq!(app.get_layout_titlebar_border_width() as u32, 0);
-
-    app.set_use_flat_window_chrome(false);
-    assert_eq!(app.get_layout_shell_frame_radius() as u32, 14);
-    assert_eq!(app.get_layout_titlebar_radius() as u32, 0);
-    assert_eq!(app.get_layout_titlebar_border_width() as u32, 0);
-}

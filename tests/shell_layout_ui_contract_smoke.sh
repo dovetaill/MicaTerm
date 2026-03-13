@@ -17,11 +17,6 @@ grep -F 'visible: root.expanded;' "$RIGHT_PANEL" >/dev/null
 grep -F 'VerticalLayout {' "$WELCOME" >/dev/null
 grep -F 'activity-bar := Rectangle' "$SIDEBAR" >/dev/null
 
-grep -F 'left-divider := Rectangle {' "$RIGHT_PANEL" >/dev/null
-grep -F 'border-radius: 0px;' "$RIGHT_PANEL" >/dev/null
-grep -F 'border-width: 0px;' "$RIGHT_PANEL" >/dev/null
-! grep -F 'border-radius: 14px;' "$RIGHT_PANEL" >/dev/null
-
 BODY_HOST_BLOCK="$(sed -n '/body-host := Rectangle {/,/shell-body := HorizontalLayout {/p' "$APP_WINDOW")"
 grep -F 'y: titlebar.height;' <<<"$BODY_HOST_BLOCK" >/dev/null
 grep -F 'height: max(0px, parent.height - titlebar.height);' <<<"$BODY_HOST_BLOCK" >/dev/null

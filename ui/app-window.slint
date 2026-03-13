@@ -27,9 +27,6 @@ export component AppWindow inherits Window {
     out property <length> layout-titlebar-width: titlebar.width;
     out property <length> layout-titlebar-height: titlebar.height;
     out property <length> layout-titlebar-radius: titlebar.layout-radius;
-    out property <length> layout-titlebar-border-width: titlebar.layout-border-width;
-    out property <length> layout-right-panel-radius: right-panel.layout-radius;
-    out property <length> layout-right-panel-border-width: right-panel.layout-border-width;
     out property <length> layout-titlebar-maximize-button-x: titlebar.layout-maximize-button-x;
     out property <length> layout-titlebar-maximize-button-y: titlebar.layout-maximize-button-y;
     out property <length> layout-titlebar-maximize-button-width: titlebar.layout-maximize-button-width;
@@ -92,11 +89,9 @@ export component AppWindow inherits Window {
         border-color: ThemeTokens.shell-stroke;
         background: ThemeTokens.shell-surface;
 
-        chrome-mask := Rectangle {
+        content-column := Rectangle {
             width: parent.width;
             height: parent.height;
-            border-radius: parent.border-radius;
-            clip: true;
             background: transparent;
 
             titlebar := Titlebar {
@@ -107,6 +102,7 @@ export component AppWindow inherits Window {
                 show-right-panel: root.show-right-panel;
                 show-global-menu: root.show-global-menu;
                 is-window-maximized: root.is-window-maximized;
+                use-flat-window-chrome: root.use-flat-window-chrome;
                 is-window-active: root.is-window-active;
                 is-window-always-on-top: root.is-window-always-on-top;
 
