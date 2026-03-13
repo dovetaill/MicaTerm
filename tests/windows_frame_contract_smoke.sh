@@ -20,6 +20,8 @@ grep -F 'reserved resize band' "$FRAME_FILE" >/dev/null
 grep -F 'layout-maximize-button-x' "$TITLEBAR" >/dev/null
 grep -F 'layout-titlebar-maximize-button-x' "$APP_FILE" >/dev/null
 
+! grep -F 'layout-titlebar-radius' "$FRAME_FILE" >/dev/null
+
 if grep -F 'GetWindowSubclass' "$FRAME_FILE" >/dev/null; then
     exit 1
 fi

@@ -103,7 +103,7 @@ fn collapse_order_matches_design_under_narrow_widths() {
 }
 
 #[test]
-fn restored_window_uses_rounded_shell_frame_and_titlebar() {
+fn restored_window_keeps_rounded_shell_frame_but_flattens_titlebar() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -111,11 +111,12 @@ fn restored_window_uses_rounded_shell_frame_and_titlebar() {
     app.show().unwrap();
 
     assert_eq!(app.get_layout_shell_frame_radius() as u32, 14);
-    assert_eq!(app.get_layout_titlebar_radius() as u32, 12);
+    assert_eq!(app.get_layout_titlebar_radius() as u32, 0);
+    assert_eq!(app.get_layout_titlebar_border_width() as u32, 0);
 }
 
 #[test]
-fn flat_window_chrome_flattens_shell_frame_and_titlebar() {
+fn flat_window_chrome_flattens_shell_frame_without_reintroducing_titlebar_card() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -125,6 +126,7 @@ fn flat_window_chrome_flattens_shell_frame_and_titlebar() {
 
     assert_eq!(app.get_layout_shell_frame_radius() as u32, 0);
     assert_eq!(app.get_layout_titlebar_radius() as u32, 0);
+    assert_eq!(app.get_layout_titlebar_border_width() as u32, 0);
 }
 
 #[test]
@@ -138,6 +140,33 @@ fn maximize_button_geometry_is_exported_for_native_frame_adapter() {
     assert_eq!(app.get_layout_titlebar_maximize_button_width() as u32, 36);
     assert_eq!(app.get_layout_titlebar_maximize_button_height() as u32, 36);
     assert!(app.get_layout_titlebar_maximize_button_x() > 0.0);
+}
+
+#[test]
+fn shell_exports_internal_chrome_geometry_contracts() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.invoke_toggle_right_panel_requested();
+    app.show().unwrap();
+
+    assert_eq!(app.get_layout_titlebar_border_width() as u32, 0);
+    assert_eq!(app.get_layout_right_panel_radius() as u32, 0);
+    assert_eq!(app.get_layout_right_panel_border_width() as u32, 0);
+}
+
+#[test]
+fn expanded_right_panel_is_flat_and_owns_no_full_card_border() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.invoke_toggle_right_panel_requested();
+    app.show().unwrap();
+
+    assert_eq!(app.get_layout_right_panel_radius() as u32, 0);
+    assert_eq!(app.get_layout_right_panel_border_width() as u32, 0);
 }
 
 #[test]

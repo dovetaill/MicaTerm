@@ -85,6 +85,14 @@ grep -F 'TITLEBAR_TOOLTIP_CLOSE_DEBOUNCE_MS' "$ROOT_DIR/src/shell/metrics.rs" >/
 ! grep -F 'label: "-"' "$TITLEBAR" >/dev/null
 ! grep -F 'label: "X"' "$TITLEBAR" >/dev/null
 
+grep -F 'chrome-mask := Rectangle {' "$APP_WINDOW" >/dev/null
+grep -F 'clip: true;' "$APP_WINDOW" >/dev/null
+grep -F 'border-radius: 0px;' "$TITLEBAR" >/dev/null
+grep -F 'border-width: 0px;' "$TITLEBAR" >/dev/null
+! grep -F 'border-radius: root.use-flat-window-chrome ? 0px : 12px;' "$TITLEBAR" >/dev/null
+! grep -F 'in property <bool> use-flat-window-chrome: false;' "$TITLEBAR" >/dev/null
+! grep -F 'use-flat-window-chrome: root.use-flat-window-chrome;' "$APP_WINDOW" >/dev/null
+
 if grep -F 'moved => {' "$TITLEBAR" >/dev/null; then
     exit 1
 fi
