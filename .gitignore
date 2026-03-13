@@ -10,3 +10,4 @@ vendor/*
 !vendor/i-slint-renderer-femtovg/
 !vendor/i-slint-renderer-femtovg/**
 vendor/i-slint-renderer-femtovg/target/
+.mcp.json
