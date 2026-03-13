@@ -227,62 +227,6 @@ fn maximize_toggle_keeps_drag_related_window_state_bindings_consistent() {
 }
 
 #[test]
-fn bootstrap_omits_theme_sync_debug_diagnostics_when_debug_logging_is_enabled() {
-    i_slint_backend_testing::init_no_event_loop();
-
-    let app = AppWindow::new().unwrap();
-    let temp_root = std::env::temp_dir()
-        .join("mica-term")
-        .join("tests")
-        .join("theme-sync-debug-log");
-    let _ = fs::remove_dir_all(&temp_root);
-    fs::create_dir_all(temp_root.join("logs")).unwrap();
-    fs::create_dir_all(temp_root.join("crash")).unwrap();
-
-    let temp_prefs = temp_root.join("ui-preferences.json");
-    let requests = Rc::new(RefCell::new(Vec::new()));
-    let effects = Rc::new(RecordingWindowEffects::new(Rc::clone(&requests)));
-    let paths = LoggingPaths {
-        root_source: LoggingRootSource::EnvOverride,
-        root_dir: temp_root.clone(),
-        logs_dir: temp_root.join("logs"),
-        crash_dir: temp_root.join("crash"),
-    };
-    let config = AppLoggingConfig::new(AppLogMode::Debug);
-    let runtime = build_test_logging_runtime(&paths, &config).unwrap();
-
-    tracing::dispatcher::with_default(&runtime.dispatch, || {
-        bind_top_status_bar_with_store_and_effects(
-            &app,
-            Some(UiPreferencesStore::new(temp_prefs.clone())),
-            effects,
-        );
-        app.invoke_toggle_theme_mode_requested();
-    });
-
-    drop(runtime.guard);
-
-    let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
-    for unexpected in [
-        "theme toggle requested",
-        "syncing theme state to slint window",
-        "requested slint redraw after theme change",
-        "native window appearance sync finished",
-        "marked offscreen theme recovery state",
-        "queued offscreen theme recovery size nudge",
-        "restoring window size after offscreen theme recovery nudge",
-        "bumped slint render revision after offscreen theme recovery",
-    ] {
-        assert!(
-            !content.contains(unexpected),
-            "unexpected theme debug diagnostics found in log: {unexpected}\n{content}"
-        );
-    }
-
-    let _ = fs::remove_dir_all(temp_root);
-}
-
-#[test]
 fn bootstrap_logs_backdrop_error_details_when_native_sync_fails() {
     i_slint_backend_testing::init_no_event_loop();
 

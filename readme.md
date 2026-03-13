@@ -57,17 +57,8 @@ Notes:
   tested RX550 system after `transparent_window=false`, `present_mode=Fifo`, and `alpha_mode=Opaque`
   were already in place, but it stopped once the runtime actually initialized WGPU with `backend=Dx12`
   instead of `backend=Vulkan`.
-- If you need to verify the live path, run with `MICA_TRACE_RENDER_PIPELINE=1` and confirm both of
-  these log lines are present:
-  - `femtovg renderer received requested graphics api ... requested_backends=Some(Backends(DX12))`
-  - `wgpu adapter initialized for femtovg renderer backend=Dx12`
 - The complete investigation and timeline are recorded in
   `docs/plans/2026-03-13-windows-femtovg-wgpu-dx12-retrospective.md`.
-
-## Try / Future Renderer Exploration
-
-- `docs/plans/try-winit-femtovg-wgpu.md`
-  - Kept as a try document only, not part of the current formal or experimental default route
 
 Archive formats:
 

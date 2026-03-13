@@ -13,11 +13,6 @@ fn apply_renderer_selector(_profile: AppRuntimeProfile) -> anyhow::Result<()> {
     let wgpu_configuration = {
         let mut settings = slint::wgpu_28::WGPUSettings::default();
         settings.backends = slint::wgpu_28::wgpu::Backends::DX12;
-        tracing::info!(
-            target: "app.renderer",
-            requested_backends = ?settings.backends,
-            "configuring wgpu backend preferences for femtovg renderer"
-        );
         WGPUConfiguration::Automatic(settings)
     };
 
@@ -30,15 +25,8 @@ fn apply_renderer_selector(_profile: AppRuntimeProfile) -> anyhow::Result<()> {
         .require_wgpu_28(wgpu_configuration);
 
     #[cfg(target_os = "windows")]
-    let selector = {
-        tracing::info!(
-            target: "app.renderer",
-            transparent_window = false,
-            reason = "wgpu_surface_reports_opaque_alpha_only",
-            "configuring winit window attributes for femtovg renderer"
-        );
-        selector.with_winit_window_attributes_hook(|attributes| attributes.with_transparent(false))
-    };
+    let selector =
+        selector.with_winit_window_attributes_hook(|attributes| attributes.with_transparent(false));
 
     selector
         .select()

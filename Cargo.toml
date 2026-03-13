@@ -5,7 +5,6 @@ edition = "2024"
 
 [features]
 default = ["slint-renderer-femtovg-wgpu"]
-slint-renderer-software = ["slint/renderer-software"]
 slint-renderer-femtovg-wgpu = [
     "slint/renderer-femtovg-wgpu",
     "slint/unstable-wgpu-28",

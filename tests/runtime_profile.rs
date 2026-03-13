@@ -22,3 +22,11 @@ fn runtime_profile_source_no_longer_exposes_formal_software_or_experimental_spli
     assert!(!content.contains("FemtoVgWgpuExperimental"));
     assert!(!content.contains("femtovg_wgpu_experimental"));
 }
+
+#[test]
+fn cargo_manifest_no_longer_exposes_software_renderer_feature_toggle() {
+    let content = fs::read_to_string("Cargo.toml").expect("read cargo manifest");
+
+    assert!(!content.contains("slint-renderer-software ="));
+    assert!(!content.contains("renderer-software"));
+}

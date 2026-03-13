@@ -1,9 +1,8 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::OnceLock;
 
 use anyhow::Result;
-use slint::{ComponentHandle, GraphicsAPI, ModelRc, RenderingState, VecModel};
+use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::AppWindow;
 use crate::app::runtime_profile::AppRuntimeProfile;
@@ -46,113 +45,6 @@ pub fn default_window_size() -> (u32, u32) {
     )
 }
 
-fn render_pipeline_trace_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("MICA_TRACE_RENDER_PIPELINE").is_some())
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct RenderTraceSnapshot {
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-}
-
-struct RenderTraceGeometry {
-    x: Cell<i32>,
-    y: Cell<i32>,
-    width: Cell<u32>,
-    height: Cell<u32>,
-}
-
-impl RenderTraceGeometry {
-    fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
-        Self {
-            x: Cell::new(x),
-            y: Cell::new(y),
-            width: Cell::new(width),
-            height: Cell::new(height),
-        }
-    }
-
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    fn update_position(&self, x: i32, y: i32) {
-        self.x.set(x);
-        self.y.set(y);
-    }
-
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    fn update_size(&self, width: u32, height: u32) {
-        self.width.set(width);
-        self.height.set(height);
-    }
-
-    fn snapshot(&self) -> RenderTraceSnapshot {
-        RenderTraceSnapshot {
-            x: self.x.get(),
-            y: self.y.get(),
-            width: self.width.get(),
-            height: self.height.get(),
-        }
-    }
-}
-
-fn install_render_pipeline_tracing(window: &AppWindow) -> Option<Rc<RenderTraceGeometry>> {
-    if !render_pipeline_trace_enabled() {
-        return None;
-    }
-
-    let frame_counter = Rc::new(Cell::new(0_u64));
-    let position = window.window().position();
-    let size = window.window().size();
-    let geometry = Rc::new(RenderTraceGeometry::new(
-        position.x,
-        position.y,
-        size.width,
-        size.height,
-    ));
-    if let Err(err) = window.window().set_rendering_notifier({
-        let frame_counter = Rc::clone(&frame_counter);
-        let geometry = Rc::clone(&geometry);
-        move |state: RenderingState, graphics_api: &GraphicsAPI<'_>| {
-            let frame = match state {
-                RenderingState::BeforeRendering => {
-                    let next = frame_counter.get().saturating_add(1);
-                    frame_counter.set(next);
-                    next
-                }
-                RenderingState::AfterRendering => frame_counter.get(),
-                RenderingState::RenderingSetup | RenderingState::RenderingTeardown => {
-                    frame_counter.get()
-                }
-                _ => frame_counter.get(),
-            };
-
-            let snapshot = geometry.snapshot();
-            tracing::info!(
-                target: "app.renderer",
-                rendering_state = ?state,
-                graphics_api = ?graphics_api,
-                frame,
-                x = snapshot.x,
-                y = snapshot.y,
-                width = snapshot.width,
-                height = snapshot.height,
-                "observed slint rendering lifecycle"
-            );
-        }
-    }) {
-        tracing::warn!(
-            target: "app.renderer",
-            error = %err,
-            "failed to install rendering pipeline tracing"
-        );
-    }
-
-    Some(geometry)
-}
-
 #[cfg(target_os = "windows")]
 fn sync_windows_true_window_placement(
     window: &AppWindow,
@@ -169,14 +61,8 @@ fn sync_windows_true_window_placement(
         return;
     }
 
-    tracing::info!(
-        target: "app.window",
-        previous_placement = ?state.window_placement(),
-        next_placement = ?next,
-        "observed true window placement transition"
-    );
     state.set_window_placement(next);
-    sync_top_status_bar_state(window, &state, effects, "placement_sync");
+    sync_top_status_bar_state(window, &state, effects);
 }
 
 #[cfg(target_os = "windows")]
@@ -184,7 +70,6 @@ fn bind_windows_window_state_tracking(
     window: &AppWindow,
     state: Rc<RefCell<ShellViewModel>>,
     effects: Rc<dyn PlatformWindowEffects>,
-    trace_geometry: Option<Rc<RenderTraceGeometry>>,
 ) {
     use slint::ComponentHandle;
     use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
@@ -193,65 +78,6 @@ fn bind_windows_window_state_tracking(
     window
         .window()
         .on_winit_window_event(move |_slint_window, event| {
-            if let Some(trace_geometry) = trace_geometry.as_ref() {
-                match event {
-                    winit::event::WindowEvent::Moved(position) => {
-                        trace_geometry.update_position(position.x, position.y);
-                    }
-                    winit::event::WindowEvent::Resized(size) => {
-                        trace_geometry.update_size(size.width, size.height);
-                    }
-                    _ => {}
-                }
-            }
-
-            if render_pipeline_trace_enabled() {
-                match event {
-                    winit::event::WindowEvent::Moved(position) => {
-                        tracing::info!(
-                            target: "app.window",
-                            event = "Moved",
-                            x = position.x,
-                            y = position.y,
-                            "observed winit window event"
-                        );
-                    }
-                    winit::event::WindowEvent::Resized(size) => {
-                        tracing::info!(
-                            target: "app.window",
-                            event = "Resized",
-                            width = size.width,
-                            height = size.height,
-                            "observed winit window event"
-                        );
-                    }
-                    winit::event::WindowEvent::Focused(focused) => {
-                        tracing::info!(
-                            target: "app.window",
-                            event = "Focused",
-                            focused,
-                            "observed winit window event"
-                        );
-                    }
-                    winit::event::WindowEvent::Occluded(occluded) => {
-                        tracing::info!(
-                            target: "app.window",
-                            event = "Occluded",
-                            occluded,
-                            "observed winit window event"
-                        );
-                    }
-                    winit::event::WindowEvent::RedrawRequested => {
-                        tracing::info!(
-                            target: "app.window",
-                            event = "RedrawRequested",
-                            "observed winit window event"
-                        );
-                    }
-                    _ => {}
-                }
-            }
-
             if matches!(
                 event,
                 winit::event::WindowEvent::Moved(_)
@@ -278,7 +104,6 @@ fn bind_windows_window_state_tracking(
     _window: &AppWindow,
     _state: Rc<RefCell<ShellViewModel>>,
     _effects: Rc<dyn PlatformWindowEffects>,
-    _trace_geometry: Option<Rc<RenderTraceGeometry>>,
 ) {
 }
 
@@ -286,34 +111,12 @@ fn sync_theme_and_window_effects(
     window: &AppWindow,
     state: &ShellViewModel,
     effects: &dyn PlatformWindowEffects,
-    reason: &'static str,
 ) {
-    let (width, height) = current_window_size(window);
-    tracing::info!(
-        target: "app.window",
-        sync_reason = reason,
-        dark_mode = state.theme_mode == ThemeMode::Dark,
-        width,
-        height,
-        "syncing theme and native window effects"
-    );
     window.set_dark_mode(state.theme_mode == ThemeMode::Dark);
     window.window().request_redraw();
 
     let request = build_native_window_appearance_request(state.theme_mode, window_appearance());
     let report = effects.apply_to_app_window(window, &request);
-
-    tracing::info!(
-        target: "app.window",
-        sync_reason = reason,
-        theme = ?request.theme,
-        backdrop = ?request.backdrop,
-        theme_applied = report.theme_applied,
-        backdrop_status = ?report.backdrop_status,
-        redraw_requested = report.redraw_requested,
-        backdrop_error = ?report.backdrop_error.as_deref(),
-        "finished syncing theme and native window effects"
-    );
 
     if matches!(
         report.backdrop_status,
@@ -333,9 +136,8 @@ fn sync_top_status_bar_state(
     window: &AppWindow,
     state: &ShellViewModel,
     effects: &dyn PlatformWindowEffects,
-    reason: &'static str,
 ) {
-    sync_theme_and_window_effects(window, state, effects, reason);
+    sync_theme_and_window_effects(window, state, effects);
     window.set_show_right_panel(state.show_right_panel);
     window.set_show_global_menu(state.show_global_menu);
     window.set_is_window_maximized(state.is_window_maximized());
@@ -355,7 +157,7 @@ fn sync_shell_state(
     state: &ShellViewModel,
     effects: &dyn PlatformWindowEffects,
 ) {
-    sync_top_status_bar_state(window, state, effects, "initial_sync");
+    sync_top_status_bar_state(window, state, effects);
     sync_sidebar_state(window, state);
 }
 
@@ -467,25 +269,8 @@ pub fn bind_top_status_bar_with_store_and_effects(
 pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window: &AppWindow,
     store: Option<UiPreferencesStore>,
-    profile: AppRuntimeProfile,
-    effects: Rc<dyn PlatformWindowEffects>,
-) {
-    let trace_geometry = install_render_pipeline_tracing(window);
-    bind_top_status_bar_with_store_and_profile_and_effects_and_trace(
-        window,
-        store,
-        profile,
-        effects,
-        trace_geometry,
-    );
-}
-
-fn bind_top_status_bar_with_store_and_profile_and_effects_and_trace(
-    window: &AppWindow,
-    store: Option<UiPreferencesStore>,
     _profile: AppRuntimeProfile,
     effects: Rc<dyn PlatformWindowEffects>,
-    trace_geometry: Option<Rc<RenderTraceGeometry>>,
 ) {
     let store = store.map(Rc::new);
     let prefs = load_ui_preferences(&store);
@@ -500,7 +285,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_trace(
         window,
         Rc::clone(&view_model),
         Rc::clone(&effects),
-        trace_geometry,
     );
     sync_shell_state(window, &view_model.borrow(), effects.as_ref());
     sync_shell_layout(
@@ -548,7 +332,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_trace(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.toggle_theme_mode();
-        sync_theme_and_window_effects(&window, &state, effects_ref.as_ref(), "theme_toggle");
+        sync_theme_and_window_effects(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
     });
 
@@ -565,7 +349,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_trace(
 
     let controller_ref = Rc::clone(&controller);
     window.on_minimize_requested(move || {
-        tracing::info!(target: "app.window", action = "minimize_requested", "requested window minimize");
         controller_ref.minimize();
     });
 
@@ -583,7 +366,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_trace(
             WindowPlacementKind::Restored
         };
         state.set_window_placement(next);
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref(), "maximize_toggle");
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
     });
 
     let state = Rc::clone(&view_model);
@@ -650,12 +433,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_trace(
             WindowPlacementKind::Restored
         };
         state.set_window_placement(next);
-        sync_top_status_bar_state(
-            &window,
-            &state,
-            effects_ref.as_ref(),
-            "drag_double_click_maximize_toggle",
-        );
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
     });
 }
 
@@ -703,47 +481,4 @@ pub fn run_with_profile(profile: AppRuntimeProfile) -> Result<()> {
     bind_top_status_bar_with_profile(&window, profile);
     window.run()?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{RenderTraceGeometry, RenderTraceSnapshot};
-
-    #[test]
-    fn render_trace_geometry_snapshot_tracks_last_known_window_metrics() {
-        let geometry = RenderTraceGeometry::new(26, 26, 1440, 900);
-        assert_eq!(
-            geometry.snapshot(),
-            RenderTraceSnapshot {
-                x: 26,
-                y: 26,
-                width: 1440,
-                height: 900,
-            }
-        );
-
-        geometry.update_position(-619, 95);
-        geometry.update_size(160, 28);
-        assert_eq!(
-            geometry.snapshot(),
-            RenderTraceSnapshot {
-                x: -619,
-                y: 95,
-                width: 160,
-                height: 28,
-            }
-        );
-
-        geometry.update_size(1440, 900);
-        geometry.update_position(-572, 530);
-        assert_eq!(
-            geometry.snapshot(),
-            RenderTraceSnapshot {
-                x: -572,
-                y: 530,
-                width: 1440,
-                height: 900,
-            }
-        );
-    }
 }

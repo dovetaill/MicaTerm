@@ -238,10 +238,13 @@ Windows 上 `slint + winit + femtovg-wgpu` 的真实显示异常。
 
 ### 诊断与防回归
 
-- `winit` 事件和 Slint rendering lifecycle 日志
-- WGPU adapter / surface config 日志
-- renderer 边界日志，确认请求的 graphics API 是否真的传到 FemtoVG renderer
-- 针对 `WGPUSettings` 和 renderer 边界分类逻辑补了单测
+- 为定位问题，曾临时加入 `winit` 事件、Slint rendering lifecycle、WGPU adapter /
+  surface config、renderer 边界日志
+- 在确认 DX12 才是决定性修复后，这些临时日志和只为日志存在的辅助测试已经从 live 代码移除
+- 当前保留的是更小的防回归契约：
+  - Windows 主线仍显式请求 `DX12`
+  - vendor 里仍显式配置 `surface_config.format/present_mode/alpha_mode`
+  - runtime profile 与脚本 smoke test 会阻止旧的 software/experimental 路线回流
 
 ## 经验教训
 
@@ -279,5 +282,5 @@ Windows 上 `slint + winit + femtovg-wgpu` 的真实显示异常。
 ## 建议的后续守则
 
 - Windows `femtovg-wgpu` 主线继续保持显式 `DX12`
-- 保留 renderer 边界日志能力，便于未来换机或换驱动时再核对
+- 如果未来需要再次调查 backend 差异，重新临时加日志可以，但不要把排障 trace 长期留在主线
 - 如果未来要重新尝试 Vulkan，必须在单独实验分支里做，不能直接替换当前 Windows 主线

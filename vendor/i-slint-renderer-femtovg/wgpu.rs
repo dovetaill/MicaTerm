@@ -9,10 +9,6 @@ use crate::{FemtoVGRenderer, GraphicsBackend, WindowSurface, wgpu::wgpu::Texture
 
 use wgpu_28 as wgpu;
 
-fn wgpu_init_trace_enabled() -> bool {
-    std::env::var_os("MICA_TRACE_RENDER_PIPELINE").is_some()
-}
-
 fn select_preferred_present_mode(present_modes: &[wgpu::PresentMode]) -> wgpu::PresentMode {
     if present_modes.contains(&wgpu::PresentMode::Fifo) {
         wgpu::PresentMode::Fifo
@@ -47,59 +43,6 @@ fn select_preferred_alpha_mode(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct RequestedWgpuApiSummary {
-    api: &'static str,
-    backends: Option<wgpu::Backends>,
-}
-
-fn summarize_requested_wgpu_api(
-    requested_graphics_api: Option<&RequestedGraphicsAPI>,
-) -> RequestedWgpuApiSummary {
-    match requested_graphics_api {
-        Some(RequestedGraphicsAPI::WGPU28(
-            i_slint_core::graphics::wgpu_28::api::WGPUConfiguration::Automatic(settings),
-        )) => RequestedWgpuApiSummary {
-            api: "wgpu28-automatic",
-            backends: Some(settings.backends),
-        },
-        Some(RequestedGraphicsAPI::WGPU28(
-            i_slint_core::graphics::wgpu_28::api::WGPUConfiguration::Manual { .. },
-        )) => RequestedWgpuApiSummary {
-            api: "wgpu28-manual",
-            backends: None,
-        },
-        Some(RequestedGraphicsAPI::WGPU28(_)) => RequestedWgpuApiSummary {
-            api: "wgpu28-other",
-            backends: None,
-        },
-        #[cfg(feature = "unstable-wgpu-27")]
-        Some(RequestedGraphicsAPI::WGPU27(..)) => RequestedWgpuApiSummary {
-            api: "wgpu27",
-            backends: None,
-        },
-        Some(RequestedGraphicsAPI::OpenGL(_)) => RequestedWgpuApiSummary {
-            api: "opengl",
-            backends: None,
-        },
-        Some(RequestedGraphicsAPI::Metal) => RequestedWgpuApiSummary {
-            api: "metal",
-            backends: None,
-        },
-        Some(RequestedGraphicsAPI::Vulkan) => RequestedWgpuApiSummary {
-            api: "vulkan",
-            backends: None,
-        },
-        Some(RequestedGraphicsAPI::Direct3D) => RequestedWgpuApiSummary {
-            api: "direct3d",
-            backends: None,
-        },
-        None => RequestedWgpuApiSummary {
-            api: "none",
-            backends: None,
-        },
-    }
-}
 
 pub struct WGPUBackend {
     instance: RefCell<Option<wgpu::Instance>>,
@@ -226,19 +169,6 @@ impl FemtoVGRenderer<WGPUBackend> {
         size: PhysicalWindowSize,
         requested_graphics_api: Option<RequestedGraphicsAPI>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let requested_wgpu_api = summarize_requested_wgpu_api(requested_graphics_api.as_ref());
-        if wgpu_init_trace_enabled() {
-            tracing::info!(
-                target: "app.renderer",
-                requested_api = requested_wgpu_api.api,
-                requested_backends = ?requested_wgpu_api.backends,
-                backends_to_avoid = ?wgpu::Backends::GL,
-                requested_width = size.width,
-                requested_height = size.height,
-                "femtovg renderer received requested graphics api"
-            );
-        }
-
         let (instance, adapter, device, queue, surface) =
             i_slint_core::graphics::wgpu_28::init_instance_adapter_device_queue_surface(
                 window_handle,
@@ -250,39 +180,7 @@ impl FemtoVGRenderer<WGPUBackend> {
         let mut surface_config =
             surface.get_default_config(&adapter, size.width, size.height).unwrap();
 
-        let adapter_info = adapter.get_info();
         let swapchain_capabilities = surface.get_capabilities(&adapter);
-        if wgpu_init_trace_enabled() {
-            tracing::info!(
-                target: "app.renderer",
-                backend = ?adapter_info.backend,
-                device_type = ?adapter_info.device_type,
-                adapter_name = %adapter_info.name,
-                vendor = adapter_info.vendor,
-                device = adapter_info.device,
-                driver = %adapter_info.driver,
-                driver_info = %adapter_info.driver_info,
-                "wgpu adapter initialized for femtovg renderer"
-            );
-            tracing::info!(
-                target: "app.renderer",
-                surface_formats = ?swapchain_capabilities.formats,
-                present_modes = ?swapchain_capabilities.present_modes,
-                alpha_modes = ?swapchain_capabilities.alpha_modes,
-                requested_width = size.width,
-                requested_height = size.height,
-                "wgpu surface capabilities resolved for femtovg renderer"
-            );
-            tracing::info!(
-                target: "app.renderer",
-                surface_format = ?surface_config.format,
-                present_mode = ?surface_config.present_mode,
-                alpha_mode = ?surface_config.alpha_mode,
-                width = surface_config.width,
-                height = surface_config.height,
-                "wgpu default surface configuration resolved for femtovg renderer"
-            );
-        }
 
         let swapchain_format = swapchain_capabilities
             .formats
@@ -297,17 +195,6 @@ impl FemtoVGRenderer<WGPUBackend> {
             select_preferred_present_mode(&swapchain_capabilities.present_modes);
         surface_config.alpha_mode =
             select_preferred_alpha_mode(&swapchain_capabilities.alpha_modes);
-        if wgpu_init_trace_enabled() {
-            tracing::info!(
-                target: "app.renderer",
-                surface_format = ?surface_config.format,
-                present_mode = ?surface_config.present_mode,
-                alpha_mode = ?surface_config.alpha_mode,
-                width = surface_config.width,
-                height = surface_config.height,
-                "wgpu surface configured for femtovg renderer"
-            );
-        }
         surface.configure(&device, &surface_config);
 
         *self.graphics_backend.instance.borrow_mut() = Some(instance.clone());
@@ -331,10 +218,7 @@ impl FemtoVGRenderer<WGPUBackend> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        select_preferred_alpha_mode, select_preferred_present_mode, summarize_requested_wgpu_api,
-    };
-    use i_slint_core::graphics::RequestedGraphicsAPI;
+    use super::{select_preferred_alpha_mode, select_preferred_present_mode};
     use wgpu_28 as wgpu;
 
     #[test]
@@ -363,26 +247,5 @@ mod tests {
         let selected = select_preferred_alpha_mode(&[wgpu::CompositeAlphaMode::Opaque]);
 
         assert_eq!(selected, wgpu::CompositeAlphaMode::Opaque);
-    }
-
-    #[test]
-    fn summarizes_absent_requested_graphics_api() {
-        let summary = summarize_requested_wgpu_api(None);
-
-        assert_eq!(summary.api, "none");
-        assert_eq!(summary.backends, None);
-    }
-
-    #[test]
-    fn summarizes_wgpu28_automatic_requested_backends() {
-        let mut settings = i_slint_core::graphics::wgpu_28::api::WGPUSettings::default();
-        settings.backends = wgpu::Backends::DX12;
-        let requested =
-            RequestedGraphicsAPI::WGPU28(i_slint_core::graphics::wgpu_28::api::WGPUConfiguration::Automatic(settings));
-
-        let summary = summarize_requested_wgpu_api(Some(&requested));
-
-        assert_eq!(summary.api, "wgpu28-automatic");
-        assert_eq!(summary.backends, Some(wgpu::Backends::DX12));
     }
 }
