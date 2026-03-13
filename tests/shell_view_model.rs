@@ -63,7 +63,10 @@ fn shell_view_model_tracks_window_placement_and_chrome_mode() {
     assert!(!view_model.is_window_maximized());
 
     view_model.set_window_placement(WindowPlacementKind::SnappedLeft);
-    assert_eq!(view_model.window_placement(), WindowPlacementKind::SnappedLeft);
+    assert_eq!(
+        view_model.window_placement(),
+        WindowPlacementKind::SnappedLeft
+    );
     assert!(view_model.uses_flat_window_chrome());
     assert!(!view_model.is_window_maximized());
 

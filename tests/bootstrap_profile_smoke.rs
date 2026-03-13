@@ -1,22 +1,19 @@
-use mica_term::app::runtime_profile::{AppRuntimeProfile, RendererMode};
+use mica_term::app::runtime_profile::AppRuntimeProfile;
 
 #[test]
-fn formal_profile_does_not_require_backend_lock() {
+fn formal_profile_does_not_request_selector_lock() {
     let profile = AppRuntimeProfile::formal();
 
-    assert!(!profile.requires_backend_lock());
     assert_eq!(profile.forced_backend(), None);
+    assert_eq!(profile.forced_renderer(), None);
+    assert!(!profile.requires_wgpu_28());
 }
 
 #[test]
-fn formal_profile_is_the_only_bootstrap_runtime_path() {
-    let profile = AppRuntimeProfile::formal();
+fn experimental_profile_requests_internal_selector_lock() {
+    let profile = AppRuntimeProfile::femtovg_wgpu_experimental();
 
-    assert_eq!(profile.renderer_mode, RendererMode::Software);
-    assert_eq!(
-        profile.build_flavor,
-        mica_term::app::runtime_profile::AppBuildFlavor::Formal
-    );
-    assert!(!profile.requires_backend_lock());
-    assert_eq!(profile.forced_backend(), None);
+    assert_eq!(profile.forced_backend(), Some("winit"));
+    assert_eq!(profile.forced_renderer(), Some("femtovg-wgpu"));
+    assert!(profile.requires_wgpu_28());
 }

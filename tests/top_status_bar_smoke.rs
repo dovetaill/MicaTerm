@@ -74,6 +74,22 @@ fn app_title_stays_stable_for_formal_profile() {
 }
 
 #[test]
+fn runtime_window_title_marks_femtovg_wgpu_experimental_build() {
+    assert_eq!(
+        runtime_window_title(AppRuntimeProfile::femtovg_wgpu_experimental()),
+        "Mica Term [FemtoVG WGPU Experimental]"
+    );
+}
+
+#[test]
+fn app_window_title_is_runtime_bound() {
+    let content = std::fs::read_to_string("ui/app-window.slint").unwrap();
+
+    assert!(content.contains("in property <string> window-title"));
+    assert!(content.contains("title: root.window-title;"));
+}
+
+#[test]
 fn bootstrap_binds_top_status_bar_callbacks_to_window_state() {
     i_slint_backend_testing::init_no_event_loop();
 

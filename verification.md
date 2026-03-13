@@ -47,6 +47,86 @@ Date: 2026-03-11 14:33:42 CST
   - `WAYLAND_DISPLAY=`
 - Manual follow-up is still required for real hover rendering, rapid button sweep, menu-open close behavior, and log inspection on Windows 11.
 
+## FemtoVG WGPU Experimental Verification
+
+Date: 2026-03-13 08:58:47 CST
+
+### Source Documents
+
+- Design: `docs/plans/2026-03-12-femtovg-wgpu-experimental-design.md`
+- Implementation Plan: `docs/plans/2026-03-12-femtovg-wgpu-experimental-implementation-plan.md`
+
+### Commands Executed
+
+- [x] `cargo fmt`
+- [x] `cargo fmt --check`
+- [x] `cargo check --workspace`
+- [x] `cargo check --no-default-features --features femtovg-wgpu-experimental -q`
+- [x] `cargo test --workspace -q`
+- [x] `cargo clippy --workspace --all-targets -- -D warnings`
+- [x] `bash tests/femtovg_wgpu_contract_smoke.sh`
+- [x] `bash tests/build_linux_x64_femtovg_wgpu_script_smoke.sh`
+- [x] `bash tests/build_win_x64_femtovg_wgpu_script_smoke.sh`
+- [x] `bash tests/build_release_script_smoke.sh`
+- [x] `./build-win-x64-femtovg-wgpu.sh --help`
+- [x] `PATH="/tmp/mica-term-toolshim:$PATH" cargo check --target x86_64-pc-windows-msvc --no-default-features --features femtovg-wgpu-experimental -q`
+
+### Automated Results
+
+- `cargo fmt`: passed
+- `cargo fmt --check`: passed
+- `cargo check --workspace`: passed
+- `cargo check --no-default-features --features femtovg-wgpu-experimental -q`: passed
+- `cargo test --workspace -q`: passed
+- `cargo clippy --workspace --all-targets -- -D warnings`: passed
+- `bash tests/femtovg_wgpu_contract_smoke.sh`: passed
+- `bash tests/build_linux_x64_femtovg_wgpu_script_smoke.sh`: passed
+- `bash tests/build_win_x64_femtovg_wgpu_script_smoke.sh`: passed
+- `bash tests/build_release_script_smoke.sh`: passed
+- `./build-win-x64-femtovg-wgpu.sh --help`: passed
+- `PATH="/tmp/mica-term-toolshim:$PATH" cargo check --target x86_64-pc-windows-msvc --no-default-features --features femtovg-wgpu-experimental -q`: passed
+
+### Verification Conclusions
+
+- [x] formal build flavor remains on `RendererMode::Software`
+- [x] experimental build flavor locks `winit + femtovg-wgpu + wgpu-28` from inside `main`
+- [x] experimental runtime title exposes `FemtoVG WGPU Experimental`
+- [x] experimental startup failure text explicitly mentions `winit-femtovg-wgpu`
+- [x] runtime logging now emits `forced_backend`, `forced_renderer`, and `wgpu_28_required`
+- [x] `build-release.sh` remains free of experimental entrypoints
+- [x] Linux experimental wrapper and Windows MSVC experimental wrapper both expose the expected help contracts
+- [x] Linux host automation matrix passes
+- [x] Windows MSVC experimental cross-target `cargo check` passes on this Linux host with the required toolchain helpers
+
+### Linux Manual Checklist
+
+- [ ] `cargo run --no-default-features --features femtovg-wgpu-experimental`
+- [ ] Confirm the window title shows `Mica Term [FemtoVG WGPU Experimental]`
+- [ ] Verify `resize / maximize / restore` remains functional
+- [ ] Verify `theme toggle` remains functional
+- [ ] Verify startup failure paths emit explicit experimental stderr and crash/log records
+
+### Windows Manual Checklist
+
+- [ ] Run `cargo run --target x86_64-pc-windows-msvc --no-default-features --features femtovg-wgpu-experimental`
+- [ ] Verify the title shows `Mica Term [FemtoVG WGPU Experimental]`
+- [ ] Verify `resize / maximize / restore` remains functional on a real Windows window manager
+- [ ] Verify `theme toggle` remains functional on Windows
+- [ ] Verify failing startup paths emit explicit experimental stderr and log records
+- [ ] Run the packaged wrapper on a real Windows MSVC / Git Bash host
+
+### Notes
+
+- `cargo test --workspace -q` still prints `panic_hook_writes_crash_file_for_child_process ... FAILED` from the child process that intentionally panics; the parent smoke test expects that non-zero child exit and still returns success overall.
+- Linux host validation for the experimental feature required `libwayland-dev` so that Slint's winit path could resolve `wayland-client.pc`.
+- Windows MSVC cross-target validation required installing the Rust target, `llvm-19`, and `clang-19`, then exposing `llvm-rc` and `clang` through `/tmp/mica-term-toolshim`.
+- A local `[patch.crates-io] gpu-allocator` override is present so `gpu-allocator 0.28.0` uses `windows 0.62.2`, which removes the `windows 0.58` vs `windows 0.62` type split that otherwise breaks `wgpu-hal` on `x86_64-pc-windows-msvc`.
+- No GUI desktop session was available in this environment:
+  - `Linux twilight 6.12.57+deb13-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.12.57-1 (2025-11-05) x86_64 GNU/Linux`
+  - `DISPLAY=`
+  - `WAYLAND_DISPLAY=`
+  Therefore the Linux and Windows manual GUI checklists remain pending.
+
 ## Theme Toggle Window Appearance Verification
 
 Date: 2026-03-11 06:46:34 UTC

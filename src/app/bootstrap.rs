@@ -4,36 +4,46 @@ use std::rc::Rc;
 use anyhow::Result;
 use slint::{ComponentHandle, ModelRc, VecModel};
 
+use crate::AppWindow;
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::window_effects::{
-    build_native_window_appearance_request, default_platform_window_effects, PlatformWindowEffects,
+    PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
 };
 use crate::app::window_state::WindowPlacementKind;
 use crate::app::windowing::{
-    apply_restored_window_size, parse_resize_direction, window_appearance, WindowController,
+    WindowController, apply_restored_window_size, parse_resize_direction, window_appearance,
 };
 #[cfg(target_os = "windows")]
 use crate::app::windows_frame::{
-    install_window_frame_adapter, query_true_window_placement, CaptionButtonGeometry,
+    CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
 };
-use crate::shell::layout::{resolve_shell_layout, ShellLayoutInput};
+use crate::shell::layout::{ShellLayoutInput, resolve_shell_layout};
 use crate::shell::metrics::ShellMetrics;
-use crate::shell::sidebar::{sidebar_items_for, SidebarDestination};
+use crate::shell::sidebar::{SidebarDestination, sidebar_items_for};
 use crate::shell::view_model::ShellViewModel;
 use crate::theme::ThemeMode;
-use crate::AppWindow;
 
 pub fn app_title() -> &'static str {
     "Mica Term"
 }
 
-pub fn runtime_window_title(_profile: AppRuntimeProfile) -> String {
-    app_title().to_owned()
+pub fn runtime_window_title(profile: AppRuntimeProfile) -> String {
+    if profile.is_experimental() {
+        "Mica Term [FemtoVG WGPU Experimental]".into()
+    } else {
+        app_title().to_owned()
+    }
 }
 
-pub fn startup_failure_message(_profile: AppRuntimeProfile, _err: &str) -> Option<String> {
-    None
+pub fn startup_failure_message(profile: AppRuntimeProfile, err: &str) -> Option<String> {
+    if profile.is_experimental() {
+        Some(format!(
+            "Mica Term FemtoVG WGPU Experimental failed to initialize winit-femtovg-wgpu: {err}"
+        ))
+    } else {
+        None
+    }
 }
 
 pub fn default_window_size() -> (u32, u32) {
@@ -69,8 +79,8 @@ fn bind_windows_window_state_tracking(
     state: Rc<RefCell<ShellViewModel>>,
     effects: Rc<dyn PlatformWindowEffects>,
 ) {
-    use slint::winit_030::{winit, EventResult, WinitWindowAccessor};
     use slint::ComponentHandle;
+    use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 
     let handle = window.as_weak();
     window
@@ -240,14 +250,14 @@ fn load_ui_preferences(store: &Option<Rc<UiPreferencesStore>>) -> UiPreferences 
 }
 
 fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellViewModel) {
-    if let Some(store) = store {
-        if let Err(err) = store.save(&UiPreferences::from(state)) {
-            tracing::error!(
-                target: "config.preferences",
-                error = %err,
-                "failed to save ui preferences"
-            );
-        }
+    if let Some(store) = store
+        && let Err(err) = store.save(&UiPreferences::from(state))
+    {
+        tracing::error!(
+            target: "config.preferences",
+            error = %err,
+            "failed to save ui preferences"
+        );
     }
 }
 
@@ -470,8 +480,8 @@ pub fn run() -> Result<()> {
 }
 
 pub fn run_with_profile(profile: AppRuntimeProfile) -> Result<()> {
-    let _window_title = runtime_window_title(profile);
     let window = AppWindow::new()?;
+    window.set_window_title(runtime_window_title(profile).into());
     bind_top_status_bar_with_profile(&window, profile);
     window.run()?;
     Ok(())

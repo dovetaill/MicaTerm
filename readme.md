@@ -38,6 +38,34 @@ Per-target formal entrypoints:
   - Compatibility wrapper for the formal `x86_64-pc-windows-gnu` package
   - Output: `dist/mica-term-x86_64-pc-windows-gnu-release.zip`
 
+## FemtoVG WGPU Experimental
+
+Experimental renderer entrypoints are wrapper-only and do not change `./build-release.sh`.
+
+- `./build-linux-x64-femtovg-wgpu.sh`
+  - Linux experimental package for `x86_64-unknown-linux-gnu`
+  - Uses `--no-default-features --features femtovg-wgpu-experimental`
+  - Keeps executable name as `mica-term`
+  - Produces `dist/mica-term-femtovg-wgpu-experimental-x86_64-unknown-linux-gnu-release.tar.gz`
+- `./build-win-x64-femtovg-wgpu.sh`
+  - Windows experimental package for `x86_64-pc-windows-msvc`
+  - Uses `--no-default-features --features femtovg-wgpu-experimental`
+  - Keeps executable name as `mica-term`
+  - Produces `dist/mica-term-femtovg-wgpu-experimental-x86_64-pc-windows-msvc-release.zip`
+- `./build-win-x64-gnu-femtovg-wgpu.sh`
+  - Linux-host Windows GNU experimental package for `x86_64-pc-windows-gnu`
+  - Uses `--no-default-features --features femtovg-wgpu-experimental`
+  - Keeps executable name as `mica-term`
+  - Produces `dist/mica-term-femtovg-wgpu-experimental-x86_64-pc-windows-gnu-release.zip`
+
+Notes:
+
+- Both wrappers stage and archive under `mica-term-femtovg-wgpu-experimental-*`.
+- The runtime profile is internal to the app and must lock `winit + femtovg-wgpu + wgpu-28`.
+- `./build-win-x64-femtovg-wgpu.sh` remains the Windows-host MSVC experimental path.
+- Experimental packages are intentionally separate from the formal Debian release aggregator.
+- `./build-release.sh` remains the formal release path and must not expose the experimental wrapper entrypoints.
+
 ## Try / Future Renderer Exploration
 
 - `docs/plans/try-winit-femtovg-wgpu.md`

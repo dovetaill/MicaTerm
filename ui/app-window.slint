@@ -55,7 +55,9 @@ export component AppWindow inherits Window {
     callback sidebar-destination-selected(string);
     callback shell-layout-invalidated(length, length);
 
-    title: "Mica Term";
+    in property <string> window-title: "Mica Term";
+
+    title: root.window-title;
     no-frame: true;
     resize-border-width: 6px;
     always-on-top: root.is-window-always-on-top;

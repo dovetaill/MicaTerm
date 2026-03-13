@@ -24,6 +24,8 @@ pub fn emit_runtime_profile_metadata(profile: AppRuntimeProfile) {
         build_flavor = ?profile.build_flavor,
         renderer_mode = ?profile.renderer_mode,
         forced_backend = ?profile.forced_backend(),
+        forced_renderer = ?profile.forced_renderer(),
+        wgpu_28_required = profile.requires_wgpu_28(),
         "initialized runtime profile"
     );
 }

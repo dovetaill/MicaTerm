@@ -6,6 +6,11 @@ edition = "2024"
 [features]
 default = ["slint-renderer-software"]
 slint-renderer-software = ["slint/renderer-software"]
+slint-renderer-femtovg-wgpu = [
+    "slint/renderer-femtovg-wgpu",
+    "slint/unstable-wgpu-28",
+]
+femtovg-wgpu-experimental = ["slint-renderer-femtovg-wgpu"]
 
 [dependencies]
 anyhow = "1.0.102"
@@ -14,7 +19,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1"
 slint = { version = "1.15.1", default-features = false, features = [
     "std",
-    "backend-winit",
+    "backend-winit-x11",
     "compat-1-2",
     "unstable-winit-030",
 ] }
@@ -38,3 +43,6 @@ winresource = "0.1.19"
 [dev-dependencies]
 filetime = "0.2"
 i-slint-backend-testing = "1.15.1"
+
+[patch.crates-io]
+gpu-allocator = { path = "vendor/gpu-allocator" }
