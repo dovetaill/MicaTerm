@@ -45,6 +45,16 @@ export component AssetsSidebar inherits Rectangle {
             height: 44px;
             background: transparent;
 
+            header-search-dismiss-touch := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                enabled: root.asset-search-expanded && root.assets-search-query == "";
+
+                clicked => {
+                    root.collapse-assets-search-requested();
+                }
+            }
+
             toolbar-content := HorizontalLayout {
                 padding-left: 12px;
                 padding-right: 12px;
@@ -124,52 +134,67 @@ export component AssetsSidebar inherits Rectangle {
             }
         }
 
-        if root.active-panel == "console" : VerticalLayout {
-            padding: 16px;
-            spacing: 8px;
+        panel-content-host := Rectangle {
+            vertical-stretch: 1;
+            background: transparent;
 
-            Text {
-                text: root.asset-view-mode == "tree"
-                    ? (root.asset-tree-fully-expanded ? "Console Tree — Expanded" : "Console Tree — Collapsed")
-                    : "Console Flat List";
-                color: ThemeTokens.text-primary;
+            panel-search-dismiss-touch := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                enabled: root.asset-search-expanded && root.assets-search-query == "";
+
+                clicked => {
+                    root.collapse-assets-search-requested();
+                }
             }
 
-            Text {
-                text: root.assets-search-query == ""
-                    ? "Hosts, recent sessions, favorites"
-                    : "Filter: " + root.assets-search-query;
-                color: ThemeTokens.text-primary;
-            }
-        }
+            if root.active-panel == "console" : VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
 
-        if root.active-panel == "snippets" : VerticalLayout {
-            padding: 16px;
-            spacing: 8px;
+                Text {
+                    text: root.asset-view-mode == "tree"
+                        ? (root.asset-tree-fully-expanded ? "Console Tree — Expanded" : "Console Tree — Collapsed")
+                        : "Console Flat List";
+                    color: ThemeTokens.text-primary;
+                }
 
-            Text {
-                text: "Snippets";
-                color: ThemeTokens.text-primary;
-            }
-
-            Text {
-                text: "Groups, favorites, templates";
-                color: ThemeTokens.text-primary;
-            }
-        }
-
-        if root.active-panel == "keychain" : VerticalLayout {
-            padding: 16px;
-            spacing: 8px;
-
-            Text {
-                text: "Keychain";
-                color: ThemeTokens.text-primary;
+                Text {
+                    text: root.assets-search-query == ""
+                        ? "Hosts, recent sessions, favorites"
+                        : "Filter: " + root.assets-search-query;
+                    color: ThemeTokens.text-primary;
+                }
             }
 
-            Text {
-                text: "Accounts, identities, SSH keys";
-                color: ThemeTokens.text-primary;
+            if root.active-panel == "snippets" : VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
+
+                Text {
+                    text: "Snippets";
+                    color: ThemeTokens.text-primary;
+                }
+
+                Text {
+                    text: "Groups, favorites, templates";
+                    color: ThemeTokens.text-primary;
+                }
+            }
+
+            if root.active-panel == "keychain" : VerticalLayout {
+                padding: 16px;
+                spacing: 8px;
+
+                Text {
+                    text: "Keychain";
+                    color: ThemeTokens.text-primary;
+                }
+
+                Text {
+                    text: "Accounts, identities, SSH keys";
+                    color: ThemeTokens.text-primary;
+                }
             }
         }
     }

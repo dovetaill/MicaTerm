@@ -297,6 +297,18 @@ export component AppWindow inherits Window {
         place-right: true;
     }
 
+    workspace-search-dismiss-layer := TouchArea {
+        x: sidebar.width;
+        y: titlebar.height;
+        width: root.width - sidebar.width;
+        height: root.height - titlebar.height;
+        enabled: root.asset-search-expanded && root.assets-search-query == "";
+
+        clicked => {
+            root.collapse-assets-search-requested();
+        }
+    }
+
     overlay-dismiss-layer := TouchArea {
         x: 0px;
         y: titlebar.height;
