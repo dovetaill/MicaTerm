@@ -2,6 +2,7 @@ import { ThemeTokens } from "../theme/tokens.slint";
 
 component MenuActionItem inherits Rectangle {
     in property <string> label;
+    in property <image> icon-source;
     callback invoked;
 
     height: 36px;
@@ -12,13 +13,29 @@ component MenuActionItem inherits Rectangle {
             ? ThemeTokens.shell-surface
             : transparent;
 
-    Text {
-        x: 12px;
-        width: parent.width - 24px;
-        height: parent.height;
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        vertical-alignment: center;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+
+        icon := Image {
+            width: 16px;
+            height: 16px;
+            source <=> root.icon-source;
+            image-fit: contain;
+            colorize: ThemeTokens.text-primary;
+        }
+
+        Text {
+            text: root.label;
+            color: ThemeTokens.text-primary;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            background: transparent;
+        }
     }
 
     touch := TouchArea {
@@ -32,6 +49,8 @@ export component AssetsCreateMenu inherits PopupWindow {
     callback new-folder-selected;
     callback new-ssh-connection-selected;
     callback close-requested;
+    private property <image> new-folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
+    private property <image> new-ssh-connection-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
 
     width: 196px;
     height: 88px;
@@ -51,6 +70,7 @@ export component AssetsCreateMenu inherits PopupWindow {
 
             MenuActionItem {
                 label: "New Folder";
+                icon-source: root.new-folder-icon;
                 invoked => {
                     root.new-folder-selected();
                     root.close-requested();
@@ -60,6 +80,7 @@ export component AssetsCreateMenu inherits PopupWindow {
 
             MenuActionItem {
                 label: "New SSH Connection";
+                icon-source: root.new-ssh-connection-icon;
                 invoked => {
                     root.new-ssh-connection-selected();
                     root.close-requested();

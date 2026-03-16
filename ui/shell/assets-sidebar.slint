@@ -1,5 +1,4 @@
 import { ThemeTokens } from "../theme/tokens.slint";
-import { AssetsCreateMenu } from "../components/assets-create-menu.slint";
 import { SidebarToolbarIconButton } from "../components/sidebar-toolbar-icon-button.slint";
 
 export component AssetsSidebar inherits Rectangle {
@@ -10,6 +9,10 @@ export component AssetsSidebar inherits Rectangle {
     in property <bool> asset-create-menu-open: false;
     in property <bool> asset-tree-fully-expanded: false;
     in property <string> asset-view-mode: "tree";
+    out property <length> create-menu-anchor-x: create-button.absolute-position.x;
+    out property <length> create-menu-anchor-y: create-button.absolute-position.y;
+    out property <length> create-menu-anchor-width: create-button.width;
+    out property <length> create-menu-anchor-height: create-button.height;
     callback toggle-assets-search-requested();
     callback assets-search-query-changed(string);
     callback collapse-assets-search-requested();
@@ -18,6 +21,13 @@ export component AssetsSidebar inherits Rectangle {
     callback toggle-assets-create-menu-requested();
     callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
+    private property <image> search-icon: @image-url("../../assets/icons/fluent/search-20-regular.svg");
+    private property <image> tree-expand-icon: @image-url("../../assets/icons/fluent/arrow-expand-all-20-regular.svg");
+    private property <image> tree-collapse-icon: @image-url("../../assets/icons/fluent/arrow-collapse-all-20-regular.svg");
+    private property <image> tree-view-icon: @image-url("../../assets/icons/fluent/branch-20-regular.svg");
+    private property <image> list-view-icon: @image-url("../../assets/icons/fluent/list-20-regular.svg");
+    private property <image> create-add-icon: @image-url("../../assets/icons/fluent/add-20-regular.svg");
+    private property <image> create-chevron-icon: @image-url("../../assets/icons/fluent/chevron-down-20-regular.svg");
 
     width: expanded ? 256px : 0px;
     visible: expanded;
@@ -25,14 +35,6 @@ export component AssetsSidebar inherits Rectangle {
     background: ThemeTokens.shell-surface;
     border-width: 1px;
     border-color: ThemeTokens.shell-stroke;
-
-    changed asset-create-menu-open => {
-        if root.asset-create-menu-open {
-            create-menu.show();
-        } else {
-            create-menu.close();
-        }
-    }
 
     VerticalLayout {
         spacing: 0px;
@@ -48,7 +50,7 @@ export component AssetsSidebar inherits Rectangle {
                 padding-bottom: 8px;
                 spacing: 8px;
 
-                Text { text: "资产列表"; color: ThemeTokens.text-primary; vertical-alignment: center; }
+                Text { text: "Assets"; color: ThemeTokens.text-primary; vertical-alignment: center; }
 
                 Rectangle {
                     horizontal-stretch: 1;
@@ -56,6 +58,7 @@ export component AssetsSidebar inherits Rectangle {
                 }
 
                 search-button := SidebarToolbarIconButton {
+                    icon-source: root.search-icon;
                     active: root.asset-search-expanded;
                     clicked => {
                         root.toggle-assets-search-requested();
@@ -63,6 +66,7 @@ export component AssetsSidebar inherits Rectangle {
                 }
 
                 tree-expansion-button := SidebarToolbarIconButton {
+                    icon-source: root.asset-tree-fully-expanded ? root.tree-collapse-icon : root.tree-expand-icon;
                     active: root.asset-tree-fully-expanded;
                     enabled: root.asset-view-mode == "tree";
                     clicked => {
@@ -71,6 +75,7 @@ export component AssetsSidebar inherits Rectangle {
                 }
 
                 view-mode-button := SidebarToolbarIconButton {
+                    icon-source: root.asset-view-mode == "flat" ? root.list-view-icon : root.tree-view-icon;
                     active: root.asset-view-mode == "flat";
                     clicked => {
                         root.toggle-assets-view-mode-requested();
@@ -78,18 +83,48 @@ export component AssetsSidebar inherits Rectangle {
                 }
 
                 create-button := Rectangle {
-                    width: 72px;
+                    width: 104px;
                     height: 28px;
                     border-radius: 6px;
                     border-width: 1px;
                     border-color: ThemeTokens.shell-stroke;
-                    background: ThemeTokens.command-tint;
+                    background: touch.pressed
+                        ? ThemeTokens.panel-tint
+                        : touch.has-hover
+                            ? ThemeTokens.command-tint
+                            : ThemeTokens.command-tint;
 
-                    Text {
-                        text: "Create";
-                        color: ThemeTokens.text-primary;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 6px;
+
+                        create-icon := Image {
+                            width: 16px;
+                            height: 16px;
+                            source: root.create-add-icon;
+                            image-fit: contain;
+                            colorize: ThemeTokens.text-primary;
+                        }
+
+                        create-label := Text {
+                            text: "Create";
+                            color: ThemeTokens.text-primary;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            background: transparent;
+                        }
+
+                        create-chevron := Image {
+                            width: 16px;
+                            height: 16px;
+                            source: root.create-chevron-icon;
+                            image-fit: contain;
+                            colorize: ThemeTokens.text-primary;
+                        }
                     }
 
                     touch := TouchArea {
@@ -176,20 +211,4 @@ export component AssetsSidebar inherits Rectangle {
         }
     }
 
-    create-menu := AssetsCreateMenu {
-        x: create-button.absolute-position.x;
-        y: create-button.absolute-position.y + create-button.height + 6px;
-
-        close-requested => {
-            root.close-assets-create-menu-requested();
-        }
-
-        new-folder-selected => {
-            root.assets-create-action-selected("new-folder");
-        }
-
-        new-ssh-connection-selected => {
-            root.assets-create-action-selected("new-ssh-connection");
-        }
-    }
 }

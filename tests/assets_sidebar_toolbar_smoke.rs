@@ -66,3 +66,14 @@ fn create_menu_toggle_and_close_round_trip() {
     app.invoke_close_assets_create_menu_requested();
     assert!(!app.get_asset_create_menu_open());
 }
+
+#[test]
+fn assets_create_menu_anchor_is_exposed_at_root_window() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    assert!(app.get_layout_assets_create_menu_anchor_width() > 0.0);
+    assert!(app.get_layout_assets_create_menu_anchor_height() > 0.0);
+}

@@ -1,3 +1,4 @@
+import { AssetsCreateMenu } from "components/assets-create-menu.slint";
 import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
 import { WindowResizeGrips } from "components/window-resize-grips.slint";
@@ -47,6 +48,10 @@ export component AppWindow inherits Window {
     out property <length> layout-right-panel-border-width: right-panel.layout-border-width;
     out property <length> layout-activity-bar-width: sidebar.activity-bar-width;
     out property <length> layout-assets-sidebar-width: sidebar.assets-sidebar-width;
+    out property <length> layout-assets-create-menu-anchor-x: sidebar.create-menu-anchor-x;
+    out property <length> layout-assets-create-menu-anchor-y: sidebar.create-menu-anchor-y;
+    out property <length> layout-assets-create-menu-anchor-width: sidebar.create-menu-anchor-width;
+    out property <length> layout-assets-create-menu-anchor-height: sidebar.create-menu-anchor-height;
 
     callback drag-requested();
     callback drag-resize-requested(string);
@@ -95,6 +100,14 @@ export component AppWindow inherits Window {
     changed height => {
         root.sync-shell-body-height();
         root.shell-layout-invalidated(self.width, self.height);
+    }
+
+    changed asset-create-menu-open => {
+        if root.asset-create-menu-open {
+            assets-create-menu-overlay.show();
+        } else {
+            assets-create-menu-overlay.close();
+        }
     }
 
     shell-frame := Rectangle {
@@ -279,5 +292,22 @@ export component AppWindow inherits Window {
         host-width: root.width;
         host-height: root.height;
         place-right: true;
+    }
+
+    assets-create-menu-overlay := AssetsCreateMenu {
+        x: sidebar.create-menu-anchor-x;
+        y: sidebar.create-menu-anchor-y + sidebar.create-menu-anchor-height + 6px;
+
+        close-requested => {
+            root.close-assets-create-menu-requested();
+        }
+
+        new-folder-selected => {
+            root.assets-create-action-selected("new-folder");
+        }
+
+        new-ssh-connection-selected => {
+            root.assets-create-action-selected("new-ssh-connection");
+        }
     }
 }
