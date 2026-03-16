@@ -10,12 +10,6 @@ pub enum WindowPlacementKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WindowChromeMode {
-    Rounded,
-    Flat,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,
@@ -35,17 +29,6 @@ impl Rect {
 }
 
 impl WindowPlacementKind {
-    pub fn chrome_mode(self) -> WindowChromeMode {
-        match self {
-            Self::Restored | Self::Unknown => WindowChromeMode::Rounded,
-            Self::Maximized
-            | Self::SnappedLeft
-            | Self::SnappedRight
-            | Self::SnappedTop
-            | Self::SnappedBottom => WindowChromeMode::Flat,
-        }
-    }
-
     pub fn is_maximized(self) -> bool {
         matches!(self, Self::Maximized)
     }

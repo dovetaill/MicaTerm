@@ -103,27 +103,29 @@ fn collapse_order_matches_design_under_narrow_widths() {
 }
 
 #[test]
-fn restored_window_keeps_rounded_shell_frame_but_flattens_titlebar() {
+fn restored_window_uses_square_shell_frame() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
     app.show().unwrap();
 
-    assert_eq!(app.get_layout_shell_frame_radius() as u32, 14);
+    assert_eq!(app.get_layout_shell_frame_radius() as u32, 0);
     assert_eq!(app.get_layout_titlebar_radius() as u32, 0);
     assert_eq!(app.get_layout_titlebar_border_width() as u32, 0);
 }
 
 #[test]
-fn flat_window_chrome_flattens_shell_frame_without_reintroducing_titlebar_card() {
+fn maximize_toggle_does_not_change_shell_frame_radius() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
-    app.invoke_maximize_toggle_requested();
     app.show().unwrap();
 
+    assert_eq!(app.get_layout_shell_frame_radius() as u32, 0);
+
+    app.invoke_maximize_toggle_requested();
     assert_eq!(app.get_layout_shell_frame_radius() as u32, 0);
     assert_eq!(app.get_layout_titlebar_radius() as u32, 0);
     assert_eq!(app.get_layout_titlebar_border_width() as u32, 0);

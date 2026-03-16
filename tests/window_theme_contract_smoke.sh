@@ -8,6 +8,8 @@ APP_WINDOW_FILE="$ROOT_DIR/ui/app-window.slint"
 MAIN_FILE="$ROOT_DIR/src/main.rs"
 
 grep -F 'window.set_theme(Some(' "$FILE" >/dev/null
+grep -F 'set_corner_preference' "$FILE" >/dev/null
+grep -F 'CornerPreference::DoNotRound' "$FILE" >/dev/null
 grep -F 'window.request_redraw();' "$FILE" >/dev/null
 grep -F 'window_vibrancy::apply_tabbed' "$FILE" >/dev/null
 grep -F '#[cfg(target_os = "windows")]' "$FILE" >/dev/null

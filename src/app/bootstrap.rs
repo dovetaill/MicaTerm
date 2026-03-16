@@ -141,7 +141,6 @@ fn sync_top_status_bar_state(
     window.set_show_right_panel(state.show_right_panel);
     window.set_show_global_menu(state.show_global_menu);
     window.set_is_window_maximized(state.is_window_maximized());
-    window.set_use_flat_window_chrome(state.uses_flat_window_chrome());
     window.set_is_window_active(state.is_window_active);
     window.set_is_window_always_on_top(state.is_always_on_top);
 }

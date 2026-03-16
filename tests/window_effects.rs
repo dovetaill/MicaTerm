@@ -1,6 +1,7 @@
 use mica_term::app::window_effects::{
-    BackdropApplyStatus, BackdropPreference, NativeWindowTheme, WindowAppearanceSyncReport,
-    build_native_window_appearance_request, default_platform_window_effects,
+    BackdropApplyStatus, BackdropPreference, NativeWindowCornerPreference, NativeWindowTheme,
+    WindowAppearanceSyncReport, build_native_window_appearance_request,
+    default_platform_window_effects,
 };
 use mica_term::app::windowing::window_appearance;
 use mica_term::theme::ThemeMode;
@@ -11,6 +12,10 @@ fn dark_theme_maps_to_dark_native_theme_and_alt_mica_backdrop() {
 
     assert_eq!(request.theme, NativeWindowTheme::Dark);
     assert_eq!(request.backdrop, BackdropPreference::MicaAlt);
+    assert_eq!(
+        request.corner_preference,
+        NativeWindowCornerPreference::DoNotRound
+    );
     assert!(request.request_redraw);
 }
 
@@ -20,6 +25,10 @@ fn light_theme_maps_to_light_native_theme_and_alt_mica_backdrop() {
 
     assert_eq!(request.theme, NativeWindowTheme::Light);
     assert_eq!(request.backdrop, BackdropPreference::MicaAlt);
+    assert_eq!(
+        request.corner_preference,
+        NativeWindowCornerPreference::DoNotRound
+    );
     assert!(request.request_redraw);
 }
 

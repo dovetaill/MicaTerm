@@ -51,6 +51,7 @@ grep -F 'anchor-x: titlebar.tooltip-anchor-x;' "$APP_WINDOW" >/dev/null
 grep -F 'anchor-y: titlebar.tooltip-anchor-y;' "$APP_WINDOW" >/dev/null
 grep -F 'tooltip-visible: titlebar.tooltip-visible;' "$APP_WINDOW" >/dev/null
 grep -F 'host-width: root.width;' "$APP_WINDOW" >/dev/null
+grep -F 'border-radius: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'navigation-24-regular.svg' "$TITLEBAR" >/dev/null
 grep -F 'mica-term-header-logotype.svg' "$TITLEBAR" >/dev/null
 grep -F 'dark-theme-20-regular.svg' "$TITLEBAR" >/dev/null
@@ -79,6 +80,7 @@ grep -F 'TITLEBAR_TOOLTIP_CLOSE_DEBOUNCE_MS' "$ROOT_DIR/src/shell/metrics.rs" >/
 ! grep -F 'bind_top_status_bar_with_store_and_log_dir' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
 ! grep -F 'bind_top_status_bar_with_store_and_effects_and_log_dir' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
 ! grep -F 'titlebar-tooltip.log' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
+! grep -F 'root.use-flat-window-chrome ? 0px : 14px' "$APP_WINDOW" >/dev/null
 ! grep -F 'in property <bool> use-flat-window-chrome: false;' "$TITLEBAR" >/dev/null
 ! grep -F 'border-radius: root.use-flat-window-chrome ? 0px : 12px;' "$TITLEBAR" >/dev/null
 ! grep -F 'use-flat-window-chrome: root.use-flat-window-chrome;' "$APP_WINDOW" >/dev/null

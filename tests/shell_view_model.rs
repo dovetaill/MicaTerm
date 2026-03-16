@@ -56,24 +56,18 @@ fn shell_view_model_tracks_top_status_bar_state() {
 }
 
 #[test]
-fn shell_view_model_tracks_window_placement_and_chrome_mode() {
+fn shell_view_model_tracks_window_placement_without_chrome_state() {
     let mut view_model = ShellViewModel::default();
 
     assert_eq!(view_model.window_placement(), WindowPlacementKind::Restored);
-    assert!(!view_model.uses_flat_window_chrome());
-    assert!(!view_model.is_window_maximized());
-
-    view_model.set_window_placement(WindowPlacementKind::SnappedLeft);
-    assert_eq!(
-        view_model.window_placement(),
-        WindowPlacementKind::SnappedLeft
-    );
-    assert!(view_model.uses_flat_window_chrome());
     assert!(!view_model.is_window_maximized());
 
     view_model.set_window_placement(WindowPlacementKind::Maximized);
+    assert_eq!(
+        view_model.window_placement(),
+        WindowPlacementKind::Maximized
+    );
     assert!(view_model.is_window_maximized());
-    assert!(view_model.uses_flat_window_chrome());
 }
 
 #[test]

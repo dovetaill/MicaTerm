@@ -1,26 +1,8 @@
-use mica_term::app::window_state::{
-    Rect, WindowChromeMode, WindowPlacementKind, classify_window_placement,
-};
+use mica_term::app::window_state::{Rect, WindowPlacementKind, classify_window_placement};
 
 #[test]
-fn restored_state_keeps_rounded_chrome() {
-    assert_eq!(
-        WindowPlacementKind::Restored.chrome_mode(),
-        WindowChromeMode::Rounded
-    );
-}
-
-#[test]
-fn maximized_and_snapped_states_use_flat_chrome() {
-    for placement in [
-        WindowPlacementKind::Maximized,
-        WindowPlacementKind::SnappedLeft,
-        WindowPlacementKind::SnappedRight,
-        WindowPlacementKind::SnappedTop,
-        WindowPlacementKind::SnappedBottom,
-    ] {
-        assert_eq!(placement.chrome_mode(), WindowChromeMode::Flat);
-    }
+fn restored_state_is_not_maximized() {
+    assert!(!WindowPlacementKind::Restored.is_maximized());
 }
 
 #[test]

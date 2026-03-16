@@ -1,4 +1,4 @@
-use crate::app::window_state::{WindowChromeMode, WindowPlacementKind};
+use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::AssetViewMode;
 use crate::shell::sidebar::SidebarDestination;
 use crate::theme::ThemeMode;
@@ -90,10 +90,6 @@ impl ShellViewModel {
 
     pub fn is_window_maximized(&self) -> bool {
         self.window_placement.is_maximized()
-    }
-
-    pub fn uses_flat_window_chrome(&self) -> bool {
-        matches!(self.window_placement.chrome_mode(), WindowChromeMode::Flat)
     }
 
     pub fn set_window_active(&mut self, value: bool) {

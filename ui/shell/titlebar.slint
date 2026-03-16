@@ -158,7 +158,7 @@ export component Titlebar inherits Rectangle {
 
         drag-zone := Rectangle {
             background: transparent;
-            border-radius: 8px;
+            border-radius: 0px;
             opacity: root.is-window-active ? 1 : 0.72;
 
             drag-touch := TouchArea {
@@ -231,7 +231,7 @@ export component Titlebar inherits Rectangle {
                 y: 8px;
                 width: 1px;
                 height: 20px;
-                border-radius: 1px;
+                border-radius: 0px;
                 background: ThemeTokens.shell-stroke;
             }
 

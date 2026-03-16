@@ -24,9 +24,16 @@ pub enum BackdropPreference {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeWindowCornerPreference {
+    Default,
+    DoNotRound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NativeWindowAppearanceRequest {
     pub theme: NativeWindowTheme,
     pub backdrop: BackdropPreference,
+    pub corner_preference: NativeWindowCornerPreference,
     pub request_redraw: bool,
 }
 
@@ -85,6 +92,7 @@ pub fn build_native_window_appearance_request(
     NativeWindowAppearanceRequest {
         theme,
         backdrop,
+        corner_preference: NativeWindowCornerPreference::DoNotRound,
         request_redraw: true,
     }
 }
@@ -134,6 +142,7 @@ impl PlatformWindowEffects for WindowsWindowEffects {
         request: &NativeWindowAppearanceRequest,
     ) -> WindowAppearanceSyncReport {
         use slint::ComponentHandle;
+        use slint::winit_030::winit::platform::windows::{CornerPreference, WindowExtWindows};
         use slint::winit_030::{WinitWindowAccessor, winit};
 
         let mut theme_applied = false;
@@ -148,8 +157,13 @@ impl PlatformWindowEffects for WindowsWindowEffects {
                     NativeWindowTheme::Dark => winit::window::Theme::Dark,
                     NativeWindowTheme::Light => winit::window::Theme::Light,
                 };
+                let corner_preference = match request.corner_preference {
+                    NativeWindowCornerPreference::Default => CornerPreference::Default,
+                    NativeWindowCornerPreference::DoNotRound => CornerPreference::DoNotRound,
+                };
 
                 window.set_theme(Some(theme));
+                window.set_corner_preference(corner_preference);
                 theme_applied = true;
 
                 (backdrop_status, backdrop_error) = match request.backdrop {

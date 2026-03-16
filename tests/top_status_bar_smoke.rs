@@ -13,8 +13,8 @@ use mica_term::app::logging::runtime::build_test_logging_runtime;
 use mica_term::app::runtime_profile::AppRuntimeProfile;
 use mica_term::app::ui_preferences::UiPreferencesStore;
 use mica_term::app::window_effects::{
-    BackdropApplyStatus, NativeWindowAppearanceRequest, NativeWindowTheme, PlatformWindowEffects,
-    WindowAppearanceSyncReport,
+    BackdropApplyStatus, NativeWindowAppearanceRequest, NativeWindowCornerPreference,
+    NativeWindowTheme, PlatformWindowEffects, WindowAppearanceSyncReport,
 };
 use slint::{ComponentHandle, PhysicalSize};
 
@@ -87,6 +87,13 @@ fn app_window_source_no_longer_exposes_recovery_mask_contract() {
 
     assert!(!content.contains("render-revision"));
     assert!(!content.contains("experimental-recovery-mask"));
+}
+
+#[test]
+fn app_window_source_does_not_expose_flat_window_chrome_binding() {
+    let content = std::fs::read_to_string("ui/app-window.slint").unwrap();
+
+    assert!(!content.contains("use-flat-window-chrome"));
 }
 
 #[test]
@@ -166,6 +173,10 @@ fn bootstrap_syncs_native_window_effects_on_bind_and_theme_toggle() {
         let requests = requests.borrow();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].theme, NativeWindowTheme::Dark);
+        assert_eq!(
+            requests[0].corner_preference,
+            NativeWindowCornerPreference::DoNotRound
+        );
         assert!(requests[0].request_redraw);
     }
 
@@ -175,6 +186,10 @@ fn bootstrap_syncs_native_window_effects_on_bind_and_theme_toggle() {
         let requests = requests.borrow();
         assert_eq!(requests.len(), 2);
         assert_eq!(requests[1].theme, NativeWindowTheme::Light);
+        assert_eq!(
+            requests[1].corner_preference,
+            NativeWindowCornerPreference::DoNotRound
+        );
         assert!(requests[1].request_redraw);
     }
 
@@ -195,19 +210,19 @@ fn bootstrap_applies_default_restored_size_before_run() {
 }
 
 #[test]
-fn maximize_toggle_updates_flat_window_chrome_binding() {
+fn maximize_toggle_updates_window_maximized_binding() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
-    assert!(!app.get_use_flat_window_chrome());
+    assert!(!app.get_is_window_maximized());
 
     app.invoke_maximize_toggle_requested();
-    assert!(app.get_use_flat_window_chrome());
+    assert!(app.get_is_window_maximized());
 
     app.invoke_drag_double_clicked();
-    assert!(!app.get_use_flat_window_chrome());
+    assert!(!app.get_is_window_maximized());
 }
 
 #[test]
@@ -219,15 +234,13 @@ fn maximize_toggle_keeps_drag_related_window_state_bindings_consistent() {
 
     app.invoke_maximize_toggle_requested();
     assert!(app.get_is_window_maximized());
-    assert!(app.get_use_flat_window_chrome());
 
     app.invoke_drag_double_clicked();
     assert!(!app.get_is_window_maximized());
-    assert!(!app.get_use_flat_window_chrome());
 }
 
 #[test]
-fn maximize_toggle_only_changes_outer_shell_chrome() {
+fn maximize_toggle_does_not_change_shell_geometry_exports_yet() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -236,13 +249,7 @@ fn maximize_toggle_only_changes_outer_shell_chrome() {
     assert_eq!(app.get_layout_titlebar_radius() as u32, 0);
     assert_eq!(app.get_layout_titlebar_border_width() as u32, 0);
 
-    app.set_use_flat_window_chrome(true);
-    assert_eq!(app.get_layout_shell_frame_radius() as u32, 0);
-    assert_eq!(app.get_layout_titlebar_radius() as u32, 0);
-    assert_eq!(app.get_layout_titlebar_border_width() as u32, 0);
-
-    app.set_use_flat_window_chrome(false);
-    assert_eq!(app.get_layout_shell_frame_radius() as u32, 14);
+    app.invoke_maximize_toggle_requested();
     assert_eq!(app.get_layout_titlebar_radius() as u32, 0);
     assert_eq!(app.get_layout_titlebar_border_width() as u32, 0);
 }

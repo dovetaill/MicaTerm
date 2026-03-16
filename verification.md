@@ -219,67 +219,60 @@ Date: 2026-03-11 17:00:25 CST
 - [x] cleanup 策略满足 `14 天 + 64MB`
 - [x] `bootstrap` 的 `eprintln!` 已迁移为统一 `tracing::error!`
 
-## 2026-03-16 Top Status Bar Corner Background
+## 2026-03-16 Remove Rounded Corners
 
 Date: 2026-03-16
 
 ### Source Documents
 
-- Design: `docs/plans/2026-03-16-top-status-bar-corner-background-design.md`
-- Implementation Plan: `docs/plans/2026-03-16-top-status-bar-corner-background-implementation-plan.md`
-- TDD Spec: `docs/plans/2026-03-16-top-status-bar-corner-background-tdd-spec.md`
+- Design: `docs/plans/2026-03-16-remove-rounded-corners-design.md`
+- Implementation Plan: `docs/plans/2026-03-16-remove-rounded-corners-implementation-plan.md`
+
+### Contract Baseline
+
+- `tests/window_chrome_contract_smoke.sh`
+- `tests/square_component_contract_smoke.sh`
+- `tests/top_status_bar_ui_contract_smoke.sh`
+- `tests/window_theme_contract_smoke.sh`
 
 ### Commands Executed
 
-- [x] `cargo fmt`
-- [x] `cargo fmt --check`
-- [x] `cargo test --test window_geometry_spec -q`
-- [x] `cargo test --test top_status_bar_smoke -q`
+- [x] `bash tests/window_chrome_contract_smoke.sh`
+- [x] `bash tests/square_component_contract_smoke.sh`
 - [x] `bash tests/top_status_bar_ui_contract_smoke.sh`
-- [x] `bash tests/shell_layout_ui_contract_smoke.sh`
-- [x] `bash tests/windows_frame_contract_smoke.sh`
-- [x] `cargo check -q`
+- [x] `bash tests/window_theme_contract_smoke.sh`
+- [x] `cargo test --test window_state_spec --test shell_view_model --test window_effects --test window_geometry_spec --test top_status_bar_smoke -q`
+- [x] `cargo check --workspace`
 - [x] `cargo clippy --workspace -- -D warnings`
 
 ### Automated Results
 
-- `cargo fmt`: passed
-- `cargo fmt --check`: passed
-- `cargo test --test window_geometry_spec -q`: passed
-- `cargo test --test top_status_bar_smoke -q`: passed
+- `bash tests/window_chrome_contract_smoke.sh`: passed
+- `bash tests/square_component_contract_smoke.sh`: passed
 - `bash tests/top_status_bar_ui_contract_smoke.sh`: passed
-- `bash tests/shell_layout_ui_contract_smoke.sh`: passed
-- `bash tests/windows_frame_contract_smoke.sh`: passed
-- `cargo check -q`: passed
+- `bash tests/window_theme_contract_smoke.sh`: passed
+- `cargo test --test window_state_spec --test shell_view_model --test window_effects --test window_geometry_spec --test top_status_bar_smoke -q`: passed
+- `cargo check --workspace`: passed
 - `cargo clippy --workspace -- -D warnings`: passed
 
 ### Verification Conclusions
 
-- [x] restored state keeps `shell-frame` rounded while `Titlebar` stays flat
-- [x] `use-flat-window-chrome` no longer reintroduces a rounded `Titlebar` card
-- [x] `chrome-host` constrains internal chrome to outer shell geometry
-- [x] `RightPanel` is now a square docked pane with a single left divider
-- [x] `windows_frame_contract_smoke.sh` still passes, so maximize geometry and native frame adapter contract did not regress
+- [x] `WindowChromeMode`、`chrome_mode()`、`uses_flat_window_chrome()` 与 `use-flat-window-chrome` 已从生产代码中移除
+- [x] `AppWindow` 外层 `shell-frame` / `chrome-host` 已固定为 `0px` 方角，恢复态与最大化态几何一致
+- [x] Windows native appearance request 现在固定输出 `CornerPreference::DoNotRound`
+- [x] `ui/` 下当前已无非零 `border-radius` 残留
+- [x] superseded `top-status-bar-corner-background` 文档链路已从当前分支移除
 
 ### Manual Windows Checklist
 
-- [ ] restored window shows only outer rounded corners
-- [ ] dark and light theme both avoid square bleed behind the top corners
-- [ ] expanded `RightPanel` renders as square docked pane instead of rounded card
-- [ ] maximized window keeps both outer geometry and inner chrome flat
-- [ ] snapped window keeps flat geometry with no residual rounded inner chrome
-- [ ] drag zone, maximize button, and resize band still match existing behavior on a real Windows 11 desktop
+- [ ] Windows 11 restored / maximized / snapped 状态下实机确认顶层窗口不再被系统补圆角
+- [ ] Mica/backdrop 与 `CornerPreference::DoNotRound` 在真实 Windows 11 桌面上无视觉冲突
+- [ ] 方角后的 hover / active / focus 反馈在标题栏、侧边栏和菜单中仍然清晰
 
 ### Notes
 
-- `cargo fmt --check` initially failed because `src/app/bootstrap.rs` needed rustfmt normalization; `cargo fmt` was run before the final verification matrix and only changed line wrapping.
-- No Windows 11 GUI session was available in this Linux environment, so the manual checklist remains pending.
-- [x] 顶部状态栏现有绑定与 Fluent SVG 资产未回归
-
-### Notes
-
-- `panic_logging` 的输出中会看到子进程内那次故意触发的 panic 打印为 `FAILED`，这是 smoke 的预期现象；父进程依赖该非零退出码与 `crash/` 文件完成断言，因此整体测试结果为通过。
-- 当前环境未执行 GUI 实机验证，因此本报告只确认自动化契约、回归和编译验证通过。
+- 本轮自动化验证全部在 Linux CLI 环境完成，未包含 Windows 11 GUI 实机检查。
+- The superseded `top-status-bar-corner-background` design, implementation plan, and TDD spec were removed from this branch.
 
 ## Build Chain And Renderer Strategy Verification
 

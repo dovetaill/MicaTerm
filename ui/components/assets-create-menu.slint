@@ -5,7 +5,7 @@ component MenuActionItem inherits Rectangle {
     callback invoked;
 
     height: 36px;
-    border-radius: 8px;
+    border-radius: 0px;
     background: touch.pressed
         ? ThemeTokens.command-tint
         : touch.has-hover
@@ -40,7 +40,7 @@ export component AssetsCreateMenu inherits PopupWindow {
     background-layer := Rectangle {
         width: root.width;
         height: root.height;
-        border-radius: 12px;
+        border-radius: 0px;
         border-width: 1px;
         border-color: ThemeTokens.shell-stroke;
         background: ThemeTokens.panel-tint;
