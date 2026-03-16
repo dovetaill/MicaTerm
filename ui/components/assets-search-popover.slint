@@ -3,38 +3,66 @@ import { ThemeTokens } from "../theme/tokens.slint";
 export component AssetsSearchPopover inherits Rectangle {
     in property <string> query: "";
     callback query-changed(string);
+    callback collapse-requested();
     callback close-requested();
 
     width: 272px;
-    height: 34px;
+    height: 32px;
     border-radius: 0px;
-    border-width: 1px;
-    border-color: ThemeTokens.shell-stroke;
-    background: ThemeTokens.panel-tint;
+    background: transparent;
     z: 100;
 
     public function focus-input() {
         search-input.focus();
     }
 
-    search-input := TextInput {
-        x: 10px;
-        y: 7px;
-        width: parent.width - 20px;
-        height: 20px;
-        font-size: 13px;
-        text: root.query;
+    glow-frame := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        border-radius: 0px;
+        border-width: 1px;
+        border-color: ThemeTokens.accent;
+        opacity: ThemeTokens.dark-mode ? 0.16 : 0.20;
+        background: transparent;
+    }
 
-        edited => {
-            root.query-changed(self.text);
-        }
+    field-frame := Rectangle {
+        x: 1px;
+        y: 1px;
+        width: parent.width - 2px;
+        height: parent.height - 2px;
+        border-radius: 0px;
+        border-width: 1px;
+        border-color: ThemeTokens.shell-stroke;
+        background: ThemeTokens.panel-tint;
 
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.close-requested();
-                accept
-            } else {
-                reject
+        search-input := TextInput {
+            x: 10px;
+            y: 5px;
+            width: parent.width - 20px;
+            height: 22px;
+            font-size: 13px;
+            text: root.query;
+
+            changed has-focus => {
+                if !self.has-focus {
+                    root.collapse-requested();
+                }
+            }
+
+            edited => {
+                root.query-changed(self.text);
+            }
+
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.close-requested();
+                    accept
+                } else {
+                    reject
+                }
             }
         }
     }

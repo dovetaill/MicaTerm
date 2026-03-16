@@ -94,25 +94,23 @@ fn assets_create_menu_anchor_is_exposed_at_root_window() {
 }
 
 #[test]
-fn assets_search_anchor_is_exposed_at_root_window() {
+fn search_row_occupies_height_only_when_expanded() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
-    assert!(app.get_layout_assets_search_anchor_width() > 0.0);
-    assert!(app.get_layout_assets_search_anchor_height() > 0.0);
-}
+    assert_eq!(app.get_layout_assets_search_row_height(), 0.0);
 
-#[test]
-fn search_anchor_tracks_toolbar_content_rect() {
-    i_slint_backend_testing::init_no_event_loop();
+    app.invoke_toggle_assets_search_requested();
+    assert!(app.get_layout_assets_search_row_height() >= 40.0);
 
-    let app = AppWindow::new().unwrap();
-    bind_top_status_bar_with_store(&app, None);
+    app.invoke_assets_search_query_changed("prod".into());
+    app.invoke_collapse_assets_search_requested();
+    assert!(app.get_layout_assets_search_row_height() >= 40.0);
 
-    assert!(app.get_layout_assets_search_anchor_width() > 160.0);
-    assert!(app.get_layout_assets_search_anchor_height() >= 28.0);
+    app.invoke_close_assets_search_requested();
+    assert_eq!(app.get_layout_assets_search_row_height(), 0.0);
 }
 
 #[test]

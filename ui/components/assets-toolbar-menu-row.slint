@@ -13,42 +13,29 @@ export component AssetsToolbarMenuRow inherits Rectangle {
             ? ThemeTokens.shell-surface
             : transparent;
 
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 10px;
+    icon-slot := Rectangle {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        background: transparent;
 
-        icon-slot := Rectangle {
+        Image {
             width: 16px;
             height: 16px;
-            background: transparent;
-
-            Image {
-                width: 16px;
-                height: 16px;
-                source <=> root.icon-source;
-                image-fit: contain;
-                colorize: ThemeTokens.text-primary;
-            }
+            source <=> root.icon-source;
+            image-fit: contain;
+            colorize: ThemeTokens.text-primary;
         }
+    }
 
-        text-slot := Rectangle {
-            vertical-stretch: 1;
-            background: transparent;
-
-            Text {
-                width: parent.width;
-                height: parent.height;
-                text: root.label;
-                color: ThemeTokens.text-primary;
-                vertical-alignment: center;
-            }
-        }
-
-        Rectangle {
-            horizontal-stretch: 1;
-            background: transparent;
-        }
+    label-text := Text {
+        x: 38px;
+        width: parent.width - 50px;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        vertical-alignment: center;
     }
 
     touch := TouchArea {
