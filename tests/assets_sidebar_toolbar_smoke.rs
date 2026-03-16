@@ -77,3 +77,14 @@ fn assets_create_menu_anchor_is_exposed_at_root_window() {
     assert!(app.get_layout_assets_create_menu_anchor_width() > 0.0);
     assert!(app.get_layout_assets_create_menu_anchor_height() > 0.0);
 }
+
+#[test]
+fn assets_search_anchor_is_exposed_at_root_window() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    assert!(app.get_layout_assets_search_anchor_width() > 0.0);
+    assert!(app.get_layout_assets_search_anchor_height() > 0.0);
+}

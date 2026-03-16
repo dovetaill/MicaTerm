@@ -9,6 +9,10 @@ export component AssetsSidebar inherits Rectangle {
     in property <bool> asset-create-menu-open: false;
     in property <bool> asset-tree-fully-expanded: false;
     in property <string> asset-view-mode: "tree";
+    out property <length> search-anchor-x: search-button.absolute-position.x;
+    out property <length> search-anchor-y: search-button.absolute-position.y;
+    out property <length> search-anchor-width: search-button.width;
+    out property <length> search-anchor-height: search-button.height;
     out property <length> create-menu-anchor-x: create-button.absolute-position.x;
     out property <length> create-menu-anchor-y: create-button.absolute-position.y;
     out property <length> create-menu-anchor-width: create-button.width;
@@ -27,9 +31,8 @@ export component AssetsSidebar inherits Rectangle {
     private property <image> tree-view-icon: @image-url("../../assets/icons/fluent/branch-20-regular.svg");
     private property <image> list-view-icon: @image-url("../../assets/icons/fluent/list-20-regular.svg");
     private property <image> create-add-icon: @image-url("../../assets/icons/fluent/add-20-regular.svg");
-    private property <image> create-chevron-icon: @image-url("../../assets/icons/fluent/chevron-down-20-regular.svg");
 
-    width: expanded ? 256px : 0px;
+    width: expanded ? 288px : 0px;
     visible: expanded;
     clip: true;
     background: ThemeTokens.shell-surface;
@@ -82,80 +85,11 @@ export component AssetsSidebar inherits Rectangle {
                     }
                 }
 
-                create-button := Rectangle {
-                    width: 104px;
-                    height: 28px;
-                    border-radius: 0px;
-                    border-width: 1px;
-                    border-color: ThemeTokens.shell-stroke;
-                    background: touch.pressed
-                        ? ThemeTokens.panel-tint
-                        : touch.has-hover
-                            ? ThemeTokens.command-tint
-                            : ThemeTokens.command-tint;
-
-                    HorizontalLayout {
-                        padding-left: 10px;
-                        padding-right: 10px;
-                        spacing: 6px;
-
-                        create-icon := Image {
-                            width: 16px;
-                            height: 16px;
-                            source: root.create-add-icon;
-                            image-fit: contain;
-                            colorize: ThemeTokens.text-primary;
-                        }
-
-                        create-label := Text {
-                            text: "Create";
-                            color: ThemeTokens.text-primary;
-                            vertical-alignment: center;
-                        }
-
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            background: transparent;
-                        }
-
-                        create-chevron := Image {
-                            width: 16px;
-                            height: 16px;
-                            source: root.create-chevron-icon;
-                            image-fit: contain;
-                            colorize: ThemeTokens.text-primary;
-                        }
-                    }
-
-                    touch := TouchArea {
-                        clicked => {
-                            root.toggle-assets-create-menu-requested();
-                        }
-                    }
-                }
-            }
-        }
-
-        if root.asset-search-expanded : Rectangle {
-            height: 40px;
-            border-width: 1px;
-            border-color: ThemeTokens.shell-stroke;
-            background: ThemeTokens.command-tint;
-
-            search-input := TextInput {
-                x: 8px;
-                y: 6px;
-                width: parent.width - 16px;
-                height: parent.height - 12px;
-                text: root.assets-search-query;
-
-                edited => {
-                    root.assets-search-query-changed(self.text);
-                }
-
-                changed has-focus => {
-                    if !self.has-focus {
-                        root.collapse-assets-search-requested();
+                create-button := SidebarToolbarIconButton {
+                    icon-source: root.create-add-icon;
+                    active: root.asset-create-menu-open;
+                    clicked => {
+                        root.toggle-assets-create-menu-requested();
                     }
                 }
             }

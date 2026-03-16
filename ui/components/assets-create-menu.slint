@@ -52,9 +52,9 @@ export component AssetsCreateMenu inherits PopupWindow {
     private property <image> new-folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
     private property <image> new-ssh-connection-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
 
-    width: 196px;
+    width: 216px;
     height: 88px;
-    close-policy: PopupClosePolicy.close-on-click;
+    close-policy: PopupClosePolicy.no-auto-close;
 
     background-layer := Rectangle {
         width: root.width;

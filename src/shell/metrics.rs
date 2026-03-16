@@ -22,7 +22,7 @@ impl ShellMetrics {
     pub const ACTIVITY_BAR_ICON_SIZE: u32 = 20;
     pub const ACTIVITY_BAR_DIVIDER_WIDTH: u32 = 1;
     pub const ACTIVITY_BAR_DIVIDER_HEIGHT: u32 = 20;
-    pub const ASSETS_SIDEBAR_WIDTH: u32 = 256;
+    pub const ASSETS_SIDEBAR_WIDTH: u32 = 288;
     pub const ASSETS_SIDEBAR_HEADER_HEIGHT: u32 = 44;
     pub const ASSETS_TOOLBAR_HEIGHT: u32 = 44;
     pub const ASSETS_TOOLBAR_BUTTON_SIZE: u32 = 28;
