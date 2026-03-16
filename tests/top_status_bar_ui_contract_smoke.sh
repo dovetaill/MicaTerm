@@ -16,6 +16,8 @@ grep -F 'theme-button := TitlebarIconButton' "$TITLEBAR" >/dev/null
 grep -F 'panel-toggle-button := TitlebarIconButton' "$TITLEBAR" >/dev/null
 grep -F 'pin-button := TitlebarIconButton' "$TITLEBAR" >/dev/null
 grep -F 'brand-logotype := Image' "$TITLEBAR" >/dev/null
+grep -F 'border-radius: 0px;' "$TITLEBAR" >/dev/null
+grep -F 'border-width: 0px;' "$TITLEBAR" >/dev/null
 grep -F 'out property <string> tooltip-text <=> root.tooltip-text-value;' "$TITLEBAR" >/dev/null
 grep -F 'out property <bool> tooltip-visible <=> root.tooltip-visible-value;' "$TITLEBAR" >/dev/null
 grep -F 'out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;' "$TITLEBAR" >/dev/null
@@ -41,6 +43,7 @@ grep -F 'PointerEventKind.down' "$TITLEBAR" >/dev/null
 grep -F 'root.drag-requested();' "$TITLEBAR" >/dev/null
 grep -F 'nav-button.absolute-position.x' "$TITLEBAR" >/dev/null
 grep -F 'nav-button.absolute-position.y' "$TITLEBAR" >/dev/null
+grep -F 'chrome-host := Rectangle' "$APP_WINDOW" >/dev/null
 grep -F 'titlebar := Titlebar {' "$APP_WINDOW" >/dev/null
 grep -F 'tooltip-overlay := TitlebarTooltip {' "$APP_WINDOW" >/dev/null
 grep -F 'text: titlebar.tooltip-text;' "$APP_WINDOW" >/dev/null
@@ -76,6 +79,9 @@ grep -F 'TITLEBAR_TOOLTIP_CLOSE_DEBOUNCE_MS' "$ROOT_DIR/src/shell/metrics.rs" >/
 ! grep -F 'bind_top_status_bar_with_store_and_log_dir' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
 ! grep -F 'bind_top_status_bar_with_store_and_effects_and_log_dir' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
 ! grep -F 'titlebar-tooltip.log' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
+! grep -F 'in property <bool> use-flat-window-chrome: false;' "$TITLEBAR" >/dev/null
+! grep -F 'border-radius: root.use-flat-window-chrome ? 0px : 12px;' "$TITLEBAR" >/dev/null
+! grep -F 'use-flat-window-chrome: root.use-flat-window-chrome;' "$APP_WINDOW" >/dev/null
 ! grep -F 'actions-zone.absolute-position.x' "$TITLEBAR" >/dev/null
 ! grep -F 'text: "Workspace"' "$TITLEBAR" >/dev/null
 ! grep -F 'text: "SSH"' "$TITLEBAR" >/dev/null

@@ -8,14 +8,22 @@ RIGHT_PANEL="$ROOT_DIR/ui/shell/right-panel.slint"
 WELCOME="$ROOT_DIR/ui/welcome/welcome-view.slint"
 
 grep -F 'shell-frame := Rectangle' "$APP_WINDOW" >/dev/null
+grep -F 'chrome-host := Rectangle' "$APP_WINDOW" >/dev/null
 grep -F 'body-host := Rectangle' "$APP_WINDOW" >/dev/null
+grep -F 'border-radius: parent.border-radius;' "$APP_WINDOW" >/dev/null
+grep -F 'clip: true;' "$APP_WINDOW" >/dev/null
 grep -F 'vertical-stretch: 1;' "$APP_WINDOW" >/dev/null
 grep -F 'shell-body := HorizontalLayout' "$APP_WINDOW" >/dev/null
 grep -F 'show-assets-sidebar: root.effective-show-assets-sidebar;' "$APP_WINDOW" >/dev/null
 grep -F 'expanded: root.effective-show-right-panel;' "$APP_WINDOW" >/dev/null
+grep -F 'left-divider := Rectangle {' "$RIGHT_PANEL" >/dev/null
 grep -F 'visible: root.expanded;' "$RIGHT_PANEL" >/dev/null
+grep -F 'border-radius: 0px;' "$RIGHT_PANEL" >/dev/null
+grep -F 'border-width: 0px;' "$RIGHT_PANEL" >/dev/null
 grep -F 'VerticalLayout {' "$WELCOME" >/dev/null
 grep -F 'activity-bar := Rectangle' "$SIDEBAR" >/dev/null
+
+! grep -F 'border-radius: 14px;' "$RIGHT_PANEL" >/dev/null
 
 BODY_HOST_BLOCK="$(sed -n '/body-host := Rectangle {/,/shell-body := HorizontalLayout {/p' "$APP_WINDOW")"
 grep -F 'y: titlebar.height;' <<<"$BODY_HOST_BLOCK" >/dev/null

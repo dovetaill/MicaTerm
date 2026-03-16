@@ -218,6 +218,62 @@ Date: 2026-03-11 17:00:25 CST
 - [x] panic 子进程 smoke 会生成 `crash/panic-*.log`
 - [x] cleanup 策略满足 `14 天 + 64MB`
 - [x] `bootstrap` 的 `eprintln!` 已迁移为统一 `tracing::error!`
+
+## 2026-03-16 Top Status Bar Corner Background
+
+Date: 2026-03-16
+
+### Source Documents
+
+- Design: `docs/plans/2026-03-16-top-status-bar-corner-background-design.md`
+- Implementation Plan: `docs/plans/2026-03-16-top-status-bar-corner-background-implementation-plan.md`
+- TDD Spec: `docs/plans/2026-03-16-top-status-bar-corner-background-tdd-spec.md`
+
+### Commands Executed
+
+- [x] `cargo fmt`
+- [x] `cargo fmt --check`
+- [x] `cargo test --test window_geometry_spec -q`
+- [x] `cargo test --test top_status_bar_smoke -q`
+- [x] `bash tests/top_status_bar_ui_contract_smoke.sh`
+- [x] `bash tests/shell_layout_ui_contract_smoke.sh`
+- [x] `bash tests/windows_frame_contract_smoke.sh`
+- [x] `cargo check -q`
+- [x] `cargo clippy --workspace -- -D warnings`
+
+### Automated Results
+
+- `cargo fmt`: passed
+- `cargo fmt --check`: passed
+- `cargo test --test window_geometry_spec -q`: passed
+- `cargo test --test top_status_bar_smoke -q`: passed
+- `bash tests/top_status_bar_ui_contract_smoke.sh`: passed
+- `bash tests/shell_layout_ui_contract_smoke.sh`: passed
+- `bash tests/windows_frame_contract_smoke.sh`: passed
+- `cargo check -q`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+
+### Verification Conclusions
+
+- [x] restored state keeps `shell-frame` rounded while `Titlebar` stays flat
+- [x] `use-flat-window-chrome` no longer reintroduces a rounded `Titlebar` card
+- [x] `chrome-host` constrains internal chrome to outer shell geometry
+- [x] `RightPanel` is now a square docked pane with a single left divider
+- [x] `windows_frame_contract_smoke.sh` still passes, so maximize geometry and native frame adapter contract did not regress
+
+### Manual Windows Checklist
+
+- [ ] restored window shows only outer rounded corners
+- [ ] dark and light theme both avoid square bleed behind the top corners
+- [ ] expanded `RightPanel` renders as square docked pane instead of rounded card
+- [ ] maximized window keeps both outer geometry and inner chrome flat
+- [ ] snapped window keeps flat geometry with no residual rounded inner chrome
+- [ ] drag zone, maximize button, and resize band still match existing behavior on a real Windows 11 desktop
+
+### Notes
+
+- `cargo fmt --check` initially failed because `src/app/bootstrap.rs` needed rustfmt normalization; `cargo fmt` was run before the final verification matrix and only changed line wrapping.
+- No Windows 11 GUI session was available in this Linux environment, so the manual checklist remains pending.
 - [x] 顶部状态栏现有绑定与 Fluent SVG 资产未回归
 
 ### Notes

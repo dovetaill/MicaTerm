@@ -281,11 +281,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     let controller = Rc::new(WindowController::new(window));
 
     apply_restored_window_size(window, default_window_size());
-    bind_windows_window_state_tracking(
-        window,
-        Rc::clone(&view_model),
-        Rc::clone(&effects),
-    );
+    bind_windows_window_state_tracking(window, Rc::clone(&view_model), Rc::clone(&effects));
     sync_shell_state(window, &view_model.borrow(), effects.as_ref());
     sync_shell_layout(
         window,
