@@ -1,4 +1,5 @@
 use mica_term::app::window_state::WindowPlacementKind;
+use mica_term::shell::assets::AssetViewMode;
 use mica_term::shell::sidebar::SidebarDestination;
 use mica_term::shell::view_model::{ShellViewModel, WelcomeAction, welcome_actions};
 use mica_term::theme::ThemeMode;
@@ -87,4 +88,14 @@ fn shell_view_model_tracks_titlebar_theme_and_pin_state() {
 
     view_model.toggle_always_on_top();
     assert!(view_model.is_always_on_top);
+}
+
+#[test]
+fn shell_view_model_starts_with_assets_toolbar_defaults() {
+    let view_model = ShellViewModel::default();
+
+    assert_eq!(view_model.asset_view_mode, AssetViewMode::Tree);
+    assert!(!view_model.asset_search_expanded);
+    assert!(view_model.asset_search_query.is_empty());
+    assert!(!view_model.asset_create_menu_open);
 }

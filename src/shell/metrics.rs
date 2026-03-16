@@ -24,6 +24,9 @@ impl ShellMetrics {
     pub const ACTIVITY_BAR_DIVIDER_HEIGHT: u32 = 20;
     pub const ASSETS_SIDEBAR_WIDTH: u32 = 256;
     pub const ASSETS_SIDEBAR_HEADER_HEIGHT: u32 = 44;
+    pub const ASSETS_TOOLBAR_HEIGHT: u32 = 44;
+    pub const ASSETS_TOOLBAR_BUTTON_SIZE: u32 = 28;
+    pub const ASSETS_SEARCH_ROW_HEIGHT: u32 = 40;
     pub const ASSETS_SIDEBAR_SECTION_GAP: u32 = 12;
     pub const TAB_BAR_HEIGHT: u32 = 38;
     pub const RIGHT_PANEL_WIDTH: u32 = 392;

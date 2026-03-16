@@ -19,6 +19,11 @@ export component AppWindow inherits Window {
     in-out property <bool> effective-show-assets-sidebar: true;
     in-out property <bool> effective-show-right-panel: false;
     in-out property <string> active-sidebar-destination: "console";
+    in-out property <string> assets-search-query: "";
+    in-out property <bool> asset-search-expanded: false;
+    in-out property <bool> asset-create-menu-open: false;
+    in-out property <bool> asset-tree-fully-expanded: false;
+    in-out property <string> asset-view-mode: "tree";
     in-out property <[SidebarNavItem]> sidebar-items: [];
     in-out property <length> shell-body-height-cache: 852px;
     out property <length> layout-titlebar-content-width: titlebar.layout-content-width;
@@ -53,6 +58,14 @@ export component AppWindow inherits Window {
     callback toggle-window-always-on-top-requested();
     callback toggle-assets-sidebar-requested();
     callback sidebar-destination-selected(string);
+    callback toggle-assets-search-requested();
+    callback assets-search-query-changed(string);
+    callback collapse-assets-search-requested();
+    callback toggle-assets-view-mode-requested();
+    callback toggle-assets-tree-expansion-requested();
+    callback toggle-assets-create-menu-requested();
+    callback close-assets-create-menu-requested();
+    callback assets-create-action-selected(string);
     callback shell-layout-invalidated(length, length);
 
     in property <string> window-title: "Mica Term";
@@ -163,6 +176,11 @@ export component AppWindow inherits Window {
                         items: root.sidebar-items;
                         show-assets-sidebar: root.effective-show-assets-sidebar;
                         active-sidebar-destination: root.active-sidebar-destination;
+                        assets-search-query: root.assets-search-query;
+                        asset-search-expanded: root.asset-search-expanded;
+                        asset-create-menu-open: root.asset-create-menu-open;
+                        asset-tree-fully-expanded: root.asset-tree-fully-expanded;
+                        asset-view-mode: root.asset-view-mode;
 
                         toggle-assets-sidebar-requested => {
                             root.toggle-assets-sidebar-requested();
@@ -170,6 +188,38 @@ export component AppWindow inherits Window {
 
                         destination-selected(id) => {
                             root.sidebar-destination-selected(id);
+                        }
+
+                        toggle-assets-search-requested => {
+                            root.toggle-assets-search-requested();
+                        }
+
+                        assets-search-query-changed(query) => {
+                            root.assets-search-query-changed(query);
+                        }
+
+                        collapse-assets-search-requested => {
+                            root.collapse-assets-search-requested();
+                        }
+
+                        toggle-assets-view-mode-requested => {
+                            root.toggle-assets-view-mode-requested();
+                        }
+
+                        toggle-assets-tree-expansion-requested => {
+                            root.toggle-assets-tree-expansion-requested();
+                        }
+
+                        toggle-assets-create-menu-requested => {
+                            root.toggle-assets-create-menu-requested();
+                        }
+
+                        close-assets-create-menu-requested => {
+                            root.close-assets-create-menu-requested();
+                        }
+
+                        assets-create-action-selected(action-id) => {
+                            root.assets-create-action-selected(action-id);
                         }
                     }
 

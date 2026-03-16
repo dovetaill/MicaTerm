@@ -150,6 +150,15 @@ fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_show_assets_sidebar(state.show_assets_sidebar);
     window.set_active_sidebar_destination(state.active_sidebar_destination.id().into());
     window.set_sidebar_items(ModelRc::new(VecModel::from(sidebar_items_for(state))));
+    sync_assets_toolbar_state(window, state);
+}
+
+fn sync_assets_toolbar_state(window: &AppWindow, state: &ShellViewModel) {
+    window.set_asset_view_mode(state.asset_view_mode.id().into());
+    window.set_asset_search_expanded(state.asset_search_expanded);
+    window.set_assets_search_query(state.asset_search_query.clone().into());
+    window.set_asset_create_menu_open(state.asset_create_menu_open);
+    window.set_asset_tree_fully_expanded(state.asset_tree_fully_expanded);
 }
 
 fn sync_shell_state(
@@ -281,11 +290,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     let controller = Rc::new(WindowController::new(window));
 
     apply_restored_window_size(window, default_window_size());
-    bind_windows_window_state_tracking(
-        window,
-        Rc::clone(&view_model),
-        Rc::clone(&effects),
-    );
+    bind_windows_window_state_tracking(window, Rc::clone(&view_model), Rc::clone(&effects));
     sync_shell_state(window, &view_model.borrow(), effects.as_ref());
     sync_shell_layout(
         window,
@@ -391,6 +396,79 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         sync_sidebar_state(&window, &state);
         let (width, height) = current_window_size(&window);
         sync_shell_layout(&window, &state, width, height);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_toggle_assets_search_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_asset_search();
+        sync_assets_toolbar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_assets_search_query_changed(move |query| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_asset_search_query(query.to_string());
+        sync_assets_toolbar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_collapse_assets_search_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.collapse_asset_search_if_empty();
+        sync_assets_toolbar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_toggle_assets_view_mode_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_asset_view_mode();
+        sync_assets_toolbar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_toggle_assets_tree_expansion_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_asset_tree_expansion();
+        sync_assets_toolbar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_toggle_assets_create_menu_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_asset_create_menu();
+        sync_assets_toolbar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_close_assets_create_menu_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_asset_create_menu();
+        sync_assets_toolbar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_assets_create_action_selected(move |action_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_asset_create_menu();
+        sync_assets_toolbar_state(&window, &state);
+        tracing::info!(target: "ui.assets", action = %action_id, "assets create action selected");
     });
 
     let state = Rc::clone(&view_model);
