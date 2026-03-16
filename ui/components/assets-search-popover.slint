@@ -3,10 +3,11 @@ import { ThemeTokens } from "../theme/tokens.slint";
 export component AssetsSearchPopover inherits Rectangle {
     in property <string> query: "";
     callback query-changed(string);
+    callback close-requested();
 
     width: 272px;
-    height: 36px;
-    border-radius: 8px;
+    height: 34px;
+    border-radius: 0px;
     border-width: 1px;
     border-color: ThemeTokens.shell-stroke;
     background: ThemeTokens.panel-tint;
@@ -18,13 +19,23 @@ export component AssetsSearchPopover inherits Rectangle {
 
     search-input := TextInput {
         x: 10px;
-        y: 6px;
+        y: 7px;
         width: parent.width - 20px;
-        height: parent.height - 12px;
+        height: 20px;
+        font-size: 13px;
         text: root.query;
 
         edited => {
             root.query-changed(self.text);
+        }
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-requested();
+                accept
+            } else {
+                reject
+            }
         }
     }
 }

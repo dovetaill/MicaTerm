@@ -109,7 +109,16 @@ impl ShellViewModel {
     }
 
     pub fn toggle_asset_search(&mut self) {
+        self.activate_asset_search();
+    }
+
+    pub fn activate_asset_search(&mut self) {
         self.asset_search_expanded = true;
+        self.asset_create_menu_open = false;
+    }
+
+    pub fn close_asset_search(&mut self) {
+        self.asset_search_expanded = false;
     }
 
     pub fn set_asset_search_query(&mut self, query: String) {
@@ -129,7 +138,12 @@ impl ShellViewModel {
     }
 
     pub fn toggle_asset_create_menu(&mut self) {
-        self.asset_create_menu_open = !self.asset_create_menu_open;
+        if self.asset_create_menu_open {
+            self.asset_create_menu_open = false;
+        } else {
+            self.asset_create_menu_open = true;
+            self.asset_search_expanded = false;
+        }
     }
 
     pub fn close_asset_create_menu(&mut self) {

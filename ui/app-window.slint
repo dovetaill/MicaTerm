@@ -72,6 +72,7 @@ export component AppWindow inherits Window {
     callback sidebar-destination-selected(string);
     callback toggle-assets-search-requested();
     callback assets-search-query-changed(string);
+    callback close-assets-search-requested();
     callback collapse-assets-search-requested();
     callback toggle-assets-view-mode-requested();
     callback toggle-assets-tree-expansion-requested();
@@ -114,9 +115,7 @@ export component AppWindow inherits Window {
 
     changed asset-create-menu-open => {
         if root.asset-create-menu-open {
-            assets-create-menu-overlay.show();
-        } else {
-            assets-create-menu-overlay.close();
+            assets-create-menu-overlay.focus-menu();
         }
     }
 
@@ -221,6 +220,10 @@ export component AppWindow inherits Window {
                             root.toggle-assets-search-requested();
                         }
 
+                        focus-assets-search-requested => {
+                            assets-search-overlay.focus-input();
+                        }
+
                         assets-search-query-changed(query) => {
                             root.assets-search-query-changed(query);
                         }
@@ -321,14 +324,20 @@ export component AppWindow inherits Window {
         visible: root.asset-search-expanded;
         x: sidebar.search-anchor-x;
         y: sidebar.search-anchor-y + sidebar.search-anchor-height + 6px;
+        width: sidebar.search-anchor-width;
         query: root.assets-search-query;
 
         query-changed(value) => {
             root.assets-search-query-changed(value);
         }
+
+        close-requested => {
+            root.close-assets-search-requested();
+        }
     }
 
     assets-create-menu-overlay := AssetsCreateMenu {
+        visible: root.asset-create-menu-open;
         x: sidebar.create-menu-anchor-x + sidebar.create-menu-anchor-width - self.width;
         y: sidebar.create-menu-anchor-y + sidebar.create-menu-anchor-height + 6px;
 

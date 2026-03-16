@@ -402,7 +402,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_toggle_assets_search_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.toggle_asset_search();
+        state.activate_asset_search();
         sync_assets_toolbar_state(&window, &state);
     });
 
@@ -412,6 +412,15 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.set_asset_search_query(query.to_string());
+        sync_assets_toolbar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_close_assets_search_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_asset_search();
         sync_assets_toolbar_state(&window, &state);
     });
 

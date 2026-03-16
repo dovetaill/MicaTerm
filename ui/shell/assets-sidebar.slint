@@ -9,15 +9,16 @@ export component AssetsSidebar inherits Rectangle {
     in property <bool> asset-create-menu-open: false;
     in property <bool> asset-tree-fully-expanded: false;
     in property <string> asset-view-mode: "tree";
-    out property <length> search-anchor-x: search-button.absolute-position.x;
-    out property <length> search-anchor-y: search-button.absolute-position.y;
-    out property <length> search-anchor-width: search-button.width;
-    out property <length> search-anchor-height: search-button.height;
+    out property <length> search-anchor-x: toolbar-content.absolute-position.x;
+    out property <length> search-anchor-y: toolbar-content.absolute-position.y;
+    out property <length> search-anchor-width: toolbar-content.width;
+    out property <length> search-anchor-height: toolbar-content.height;
     out property <length> create-menu-anchor-x: create-button.absolute-position.x;
     out property <length> create-menu-anchor-y: create-button.absolute-position.y;
     out property <length> create-menu-anchor-width: create-button.width;
     out property <length> create-menu-anchor-height: create-button.height;
     callback toggle-assets-search-requested();
+    callback focus-assets-search-requested();
     callback assets-search-query-changed(string);
     callback collapse-assets-search-requested();
     callback toggle-assets-view-mode-requested();
@@ -46,7 +47,7 @@ export component AssetsSidebar inherits Rectangle {
             height: 44px;
             background: transparent;
 
-            HorizontalLayout {
+            toolbar-content := HorizontalLayout {
                 padding-left: 12px;
                 padding-right: 12px;
                 padding-top: 8px;
@@ -64,7 +65,11 @@ export component AssetsSidebar inherits Rectangle {
                     icon-source: root.search-icon;
                     active: root.asset-search-expanded;
                     clicked => {
-                        root.toggle-assets-search-requested();
+                        if root.asset-search-expanded {
+                            root.focus-assets-search-requested();
+                        } else {
+                            root.toggle-assets-search-requested();
+                        }
                     }
                 }
 

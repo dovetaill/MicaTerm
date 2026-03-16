@@ -37,6 +37,21 @@ fn search_toggle_and_query_binding_round_trip() {
 }
 
 #[test]
+fn close_assets_search_requested_hides_non_empty_search() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_toggle_assets_search_requested();
+    app.invoke_assets_search_query_changed("prod".into());
+    app.invoke_close_assets_search_requested();
+
+    assert!(!app.get_asset_search_expanded());
+    assert_eq!(app.get_assets_search_query().as_str(), "prod");
+}
+
+#[test]
 fn view_mode_toggle_and_tree_expansion_follow_the_contract() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -87,4 +102,36 @@ fn assets_search_anchor_is_exposed_at_root_window() {
 
     assert!(app.get_layout_assets_search_anchor_width() > 0.0);
     assert!(app.get_layout_assets_search_anchor_height() > 0.0);
+}
+
+#[test]
+fn search_anchor_tracks_toolbar_content_rect() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    assert!(app.get_layout_assets_search_anchor_width() > 160.0);
+    assert!(app.get_layout_assets_search_anchor_height() >= 28.0);
+}
+
+#[test]
+fn search_and_create_are_mutually_exclusive_in_window_contract() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_toggle_assets_search_requested();
+    assert!(app.get_asset_search_expanded());
+    assert!(!app.get_asset_create_menu_open());
+
+    app.invoke_assets_search_query_changed("prod".into());
+    app.invoke_toggle_assets_create_menu_requested();
+    assert!(app.get_asset_create_menu_open());
+    assert!(!app.get_asset_search_expanded());
+
+    app.invoke_toggle_assets_search_requested();
+    assert!(app.get_asset_search_expanded());
+    assert!(!app.get_asset_create_menu_open());
 }

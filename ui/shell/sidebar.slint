@@ -42,6 +42,7 @@ export component Sidebar inherits Rectangle {
     callback toggle-assets-sidebar-requested();
     callback destination-selected(string);
     callback toggle-assets-search-requested();
+    callback focus-assets-search-requested();
     callback assets-search-query-changed(string);
     callback collapse-assets-search-requested();
     callback toggle-assets-view-mode-requested();
@@ -162,6 +163,10 @@ export component Sidebar inherits Rectangle {
 
             toggle-assets-search-requested => {
                 root.toggle-assets-search-requested();
+            }
+
+            focus-assets-search-requested => {
+                root.focus-assets-search-requested();
             }
 
             assets-search-query-changed(query) => {

@@ -1,0 +1,62 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component AssetsToolbarMenuRow inherits Rectangle {
+    in property <string> label;
+    in property <image> icon-source;
+    callback invoked;
+
+    height: 36px;
+    border-radius: 0px;
+    background: touch.pressed
+        ? ThemeTokens.command-tint
+        : touch.has-hover
+            ? ThemeTokens.shell-surface
+            : transparent;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+
+        icon-slot := Rectangle {
+            width: 16px;
+            height: 16px;
+            background: transparent;
+
+            Image {
+                width: 16px;
+                height: 16px;
+                source <=> root.icon-source;
+                image-fit: contain;
+                colorize: ThemeTokens.text-primary;
+            }
+        }
+
+        text-slot := Rectangle {
+            vertical-stretch: 1;
+            background: transparent;
+
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: root.label;
+                color: ThemeTokens.text-primary;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            background: transparent;
+        }
+    }
+
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.invoked();
+        }
+    }
+}

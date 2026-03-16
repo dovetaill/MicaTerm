@@ -1,51 +1,7 @@
+import { AssetsToolbarMenuRow } from "assets-toolbar-menu-row.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 
-component MenuActionItem inherits Rectangle {
-    in property <string> label;
-    in property <image> icon-source;
-    callback invoked;
-
-    height: 36px;
-    border-radius: 0px;
-    background: touch.pressed
-        ? ThemeTokens.command-tint
-        : touch.has-hover
-            ? ThemeTokens.shell-surface
-            : transparent;
-
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 12px;
-        spacing: 10px;
-
-        icon := Image {
-            width: 16px;
-            height: 16px;
-            source <=> root.icon-source;
-            image-fit: contain;
-            colorize: ThemeTokens.text-primary;
-        }
-
-        Text {
-            text: root.label;
-            color: ThemeTokens.text-primary;
-            vertical-alignment: center;
-        }
-
-        Rectangle {
-            horizontal-stretch: 1;
-            background: transparent;
-        }
-    }
-
-    touch := TouchArea {
-        clicked => {
-            root.invoked();
-        }
-    }
-}
-
-export component AssetsCreateMenu inherits PopupWindow {
+export component AssetsCreateMenu inherits Rectangle {
     callback new-folder-selected;
     callback new-ssh-connection-selected;
     callback close-requested;
@@ -54,37 +10,50 @@ export component AssetsCreateMenu inherits PopupWindow {
 
     width: 216px;
     height: 88px;
-    close-policy: PopupClosePolicy.no-auto-close;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: ThemeTokens.shell-stroke;
+    background: ThemeTokens.panel-tint;
+    z: 110;
 
-    background-layer := Rectangle {
-        width: root.width;
-        height: root.height;
-        border-radius: 0px;
-        border-width: 1px;
-        border-color: ThemeTokens.shell-stroke;
-        background: ThemeTokens.panel-tint;
+    public function focus-menu() {
+        menu-focus.focus();
+    }
+
+    menu-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-requested();
+                accept
+            } else {
+                reject
+            }
+        }
 
         VerticalLayout {
             padding: 8px;
             spacing: 4px;
 
-            MenuActionItem {
+            AssetsToolbarMenuRow {
                 label: "New Folder";
                 icon-source: root.new-folder-icon;
+
                 invoked => {
                     root.new-folder-selected();
                     root.close-requested();
-                    root.close();
                 }
             }
 
-            MenuActionItem {
+            AssetsToolbarMenuRow {
                 label: "New SSH Connection";
                 icon-source: root.new-ssh-connection-icon;
+
                 invoked => {
                     root.new-ssh-connection-selected();
                     root.close-requested();
-                    root.close();
                 }
             }
         }
