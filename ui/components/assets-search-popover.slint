@@ -1,0 +1,30 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component AssetsSearchPopover inherits Rectangle {
+    in property <string> query: "";
+    callback query-changed(string);
+
+    width: 272px;
+    height: 36px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: ThemeTokens.shell-stroke;
+    background: ThemeTokens.panel-tint;
+    z: 100;
+
+    public function focus-input() {
+        search-input.focus();
+    }
+
+    search-input := TextInput {
+        x: 10px;
+        y: 6px;
+        width: parent.width - 20px;
+        height: parent.height - 12px;
+        text: root.query;
+
+        edited => {
+            root.query-changed(self.text);
+        }
+    }
+}

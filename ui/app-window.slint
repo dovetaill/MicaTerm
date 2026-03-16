@@ -1,4 +1,5 @@
 import { AssetsCreateMenu } from "components/assets-create-menu.slint";
+import { AssetsSearchPopover } from "components/assets-search-popover.slint";
 import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
 import { WindowResizeGrips } from "components/window-resize-grips.slint";
@@ -47,6 +48,10 @@ export component AppWindow inherits Window {
     out property <length> layout-right-panel-border-width: right-panel.layout-border-width;
     out property <length> layout-activity-bar-width: sidebar.activity-bar-width;
     out property <length> layout-assets-sidebar-width: sidebar.assets-sidebar-width;
+    out property <length> layout-assets-search-anchor-x: sidebar.search-anchor-x;
+    out property <length> layout-assets-search-anchor-y: sidebar.search-anchor-y;
+    out property <length> layout-assets-search-anchor-width: sidebar.search-anchor-width;
+    out property <length> layout-assets-search-anchor-height: sidebar.search-anchor-height;
     out property <length> layout-assets-create-menu-anchor-x: sidebar.create-menu-anchor-x;
     out property <length> layout-assets-create-menu-anchor-y: sidebar.create-menu-anchor-y;
     out property <length> layout-assets-create-menu-anchor-width: sidebar.create-menu-anchor-width;
@@ -99,6 +104,12 @@ export component AppWindow inherits Window {
     changed height => {
         root.sync-shell-body-height();
         root.shell-layout-invalidated(self.width, self.height);
+    }
+
+    changed asset-search-expanded => {
+        if root.asset-search-expanded {
+            assets-search-overlay.focus-input();
+        }
     }
 
     changed asset-create-menu-open => {
@@ -293,8 +304,32 @@ export component AppWindow inherits Window {
         place-right: true;
     }
 
+    overlay-dismiss-layer := TouchArea {
+        x: 0px;
+        y: titlebar.height;
+        width: root.width;
+        height: root.height - titlebar.height;
+        enabled: root.asset-search-expanded || root.asset-create-menu-open;
+
+        clicked => {
+            root.collapse-assets-search-requested();
+            root.close-assets-create-menu-requested();
+        }
+    }
+
+    assets-search-overlay := AssetsSearchPopover {
+        visible: root.asset-search-expanded;
+        x: sidebar.search-anchor-x;
+        y: sidebar.search-anchor-y + sidebar.search-anchor-height + 6px;
+        query: root.assets-search-query;
+
+        query-changed(value) => {
+            root.assets-search-query-changed(value);
+        }
+    }
+
     assets-create-menu-overlay := AssetsCreateMenu {
-        x: sidebar.create-menu-anchor-x;
+        x: sidebar.create-menu-anchor-x + sidebar.create-menu-anchor-width - self.width;
         y: sidebar.create-menu-anchor-y + sidebar.create-menu-anchor-height + 6px;
 
         close-requested => {
