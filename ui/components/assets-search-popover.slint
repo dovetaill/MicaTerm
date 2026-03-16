@@ -45,6 +45,9 @@ export component AssetsSearchPopover inherits Rectangle {
             height: 22px;
             font-size: 13px;
             text: root.query;
+            color: ThemeTokens.text-primary;
+            selection-background-color: ThemeTokens.accent;
+            selection-foreground-color: ThemeTokens.text-primary;
 
             changed has-focus => {
                 if !self.has-focus {
