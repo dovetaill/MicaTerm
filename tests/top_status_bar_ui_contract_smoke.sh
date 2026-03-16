@@ -67,6 +67,9 @@ grep -F 'in property <string> tooltip-source-id;' "$ROOT_DIR/ui/components/title
 grep -F 'in property <string> tooltip-source-id;' "$ROOT_DIR/ui/components/window-control-button.slint" >/dev/null
 grep -F 'callback tooltip-open-requested(string, string, length, length);' "$ROOT_DIR/ui/components/titlebar-icon-button.slint" >/dev/null
 grep -F 'callback tooltip-close-requested(string);' "$ROOT_DIR/ui/components/window-control-button.slint" >/dev/null
+grep -F 'border-radius: 8px;' "$ROOT_DIR/ui/components/titlebar-tooltip.slint" >/dev/null
+grep -F 'border-radius: 8px;' "$ROOT_DIR/ui/components/titlebar-icon-button.slint" >/dev/null
+grep -F 'border-radius: 6px;' "$ROOT_DIR/ui/components/sidebar-toolbar-icon-button.slint" >/dev/null
 grep -F 'visible: root.tooltip-visible;' "$TOOLTIP" >/dev/null
 grep -F 'TITLEBAR_TOOLTIP_DELAY_MS' "$ROOT_DIR/src/shell/metrics.rs" >/dev/null
 grep -F 'TITLEBAR_TOOLTIP_CLOSE_DEBOUNCE_MS' "$ROOT_DIR/src/shell/metrics.rs" >/dev/null
