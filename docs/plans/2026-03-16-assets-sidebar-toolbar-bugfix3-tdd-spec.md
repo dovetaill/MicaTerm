@@ -1,205 +1,169 @@
 # Assets Sidebar Toolbar Bugfix3 TDD Spec
 
 日期: 2026-03-16
-分支工作目录: `/home/wwwroot/mica-term/.worktrees/assets-sidebar-toolbar-bugfix3-exec`
-对应计划: `docs/plans/2026-03-16-assets-sidebar-toolbar-bugfix3-implementation-plan.md`
-对应设计: `docs/plans/2026-03-16-assets-sidebar-toolbar-bugfix3-design.md`
+状态: 实现完成，待进入 test-driven-development 阶段
+分支: `feature/assets-sidebar-toolbar-bugfix3-exec-2`
 
-## 1. 变更目标
+## 本轮变更范围
 
-本轮已完成 `AssetsSidebar` 顶部工具区 bugfix3 的 4 个实现任务：
+本轮只覆盖 `AssetsSidebar` 顶部 Search 的两个问题：
 
-- Search 从 `AppWindow` 根层 overlay 回收为 `AssetsSidebar` 内部的 inline search row
-- Search 增加真实占位高度暴露 `search-row-height`
-- Search 输入壳层改为双层 frame，并修正 caret/文字区度量
-- `Create` 菜单行改为显式几何布局，移除 `HorizontalLayout` 基线依赖
+- 空搜索框点击外部区域时要稳定收起
+- 暗色模式下 `TextInput` 输入文字与选区颜色要显式绑定主题 token
 
-## 2. 核心 Struct 与接口
+本轮没有改动 terminal runtime、renderer、SSH/SFTP、`Create` 菜单结构，也没有新增 Rust 状态字段。
 
-### Rust 侧核心 Struct
+## 核心 Rust 结构与状态契约
 
-- `ShellViewModel`
-  - 字段:
-    - `asset_search_expanded: bool`
-    - `asset_search_query: String`
-    - `asset_create_menu_open: bool`
-    - `asset_tree_fully_expanded: bool`
-    - `asset_view_mode: AssetViewMode`
-  - 关键方法:
-    - `activate_asset_search()`
-    - `close_asset_search()`
-    - `set_asset_search_query(String)`
-    - `collapse_asset_search_if_empty()`
-    - `toggle_asset_create_menu()`
-    - `close_asset_create_menu()`
+### `ShellViewModel`
 
-### Rust 侧绑定入口
+文件: [src/shell/view_model.rs](/home/wwwroot/mica-term/.worktrees/assets-sidebar-toolbar-bugfix3-exec-2/src/shell/view_model.rs)
 
-- `src/app/bootstrap.rs`
-  - `sync_assets_toolbar_state(window, state)` 仍然是 Search/Create/ViewMode/TreeExpansion 的唯一 UI 同步入口
-  - `window.on_*` 回调继续在 UI 线程上同步更新 `ShellViewModel`
+关键字段：
 
-### Trait 接口
+- `asset_search_expanded: bool`
+- `asset_search_query: String`
+- `asset_create_menu_open: bool`
 
-- 本轮没有新增或修改 Rust trait
-- `PlatformWindowEffects`、窗口控制、Tokio/Channel 接口均未介入本次改动
+关键方法：
 
-## 3. Slint 组件与契约
+- `activate_asset_search()`
+  - 展开 Search
+  - 同时关闭 `asset_create_menu_open`
+- `collapse_asset_search_if_empty()`
+  - 仅当 `asset_search_query.is_empty()` 时收起 Search
+- `close_asset_search()`
+  - 无条件收起 Search
+  - 不清空 `asset_search_query`
 
-### `ui/app-window.slint`
+当前没有新增或修改 trait 接口。本轮 Rust 侧仍以既有 `ShellViewModel` 状态机为唯一真相来源。
 
-- 删除了 root `assets-search-overlay := AssetsSearchPopover`
-- 新增:
-  - `out property <length> layout-assets-search-row-height: sidebar.search-row-height;`
-- 保留:
-  - `assets-create-menu-overlay := AssetsCreateMenu`
-- 语义变化:
-  - `overlay-dismiss-layer` 现在只负责关闭 Create 菜单
-  - Search 不再依赖 root anchor 几何
+## 关键 Slint 组件与回调链
 
-### `ui/shell/sidebar.slint`
+### `AppWindow`
 
-- 删除 search anchor 透传
-- 新增:
-  - `out property <length> search-row-height: assets-sidebar.search-row-height;`
-- 回调链路:
-  - `toggle-assets-search-requested()`
-  - `assets-search-query-changed(string)`
-  - `close-assets-search-requested()`
-  - `collapse-assets-search-requested()`
+文件: [ui/app-window.slint](/home/wwwroot/mica-term/.worktrees/assets-sidebar-toolbar-bugfix3-exec-2/ui/app-window.slint)
 
-### `ui/shell/assets-sidebar.slint`
+关键回调：
 
-- 在 header 下方新增 `search-row-host`
-- 新增:
-  - `out property <length> search-row-height: search-row-host.height;`
-- `search-row-host` 当前契约:
-  - `height: root.asset-search-expanded ? 44px : 0px;`
-  - `clip: true`
-- `inline-search := AssetsSearchPopover` 当前契约:
-  - `x: 12px`
-  - `y: 6px`
-  - `width: parent.width - 24px`
-  - `visible: parent.height > 0px`
+- `toggle-assets-search-requested()`
+- `assets-search-query-changed(string)`
+- `close-assets-search-requested()`
+- `collapse-assets-search-requested()`
+- `toggle-assets-create-menu-requested()`
+- `close-assets-create-menu-requested()`
 
-### `ui/components/assets-search-popover.slint`
+关键宿主：
 
-- Search 当前为双层壳：
-  - `glow-frame`
-  - `field-frame`
-- 关键几何契约:
-  - 外层高度 `32px`
-  - `search-input.y = 5px`
-  - `search-input.height = 22px`
-  - `font-size = 13px`
-- 关键 callback:
-  - `query-changed(string)`
-  - `collapse-requested()`
-  - `close-requested()`
-- 关键 public function:
-  - `focus-input()`
+- `workspace-search-dismiss-layer := TouchArea`
+  - 区域从 `sidebar.width` 开始，只覆盖 workspace
+  - `enabled` 条件为 `root.asset-search-expanded && root.assets-search-query == ""`
+  - `clicked` 只转发 `root.collapse-assets-search-requested()`
+- `overlay-dismiss-layer := TouchArea`
+  - 仍只服务 `asset-create-menu-open`
+  - 不复用为 Search dismiss
 
-### `ui/components/assets-toolbar-menu-row.slint`
+### `AssetsSidebar`
 
-- 菜单行不再使用 `HorizontalLayout`
-- 关键几何契约:
-  - `icon-slot.x = 12px`
-  - `icon-slot.y = (parent.height - self.height) / 2`
-  - `label-text.x = 38px`
-  - `label-text.width = parent.width - 50px`
-  - `label-text.height = parent.height`
-  - `label-text.vertical-alignment = center`
+文件: [ui/shell/assets-sidebar.slint](/home/wwwroot/mica-term/.worktrees/assets-sidebar-toolbar-bugfix3-exec-2/ui/shell/assets-sidebar.slint)
 
-## 4. Slint Callback 链路
+关键回调：
 
-### Search 打开
+- `toggle-assets-search-requested()`
+- `assets-search-query-changed(string)`
+- `close-assets-search-requested()`
+- `collapse-assets-search-requested()`
 
-1. `search-button.clicked`
-2. `toggle-assets-search-requested()`
-3. `AppWindow.on_toggle_assets_search_requested`
-4. `ShellViewModel::activate_asset_search()`
-5. `sync_assets_toolbar_state()`
+关键宿主：
 
-### Search 输入
+- `header-search-dismiss-touch := TouchArea`
+  - 覆盖 header 背景
+  - 仅在空 query 且 Search 展开时启用
+- `panel-search-dismiss-touch := TouchArea`
+  - 覆盖面板正文背景
+  - 仅在空 query 且 Search 展开时启用
 
-1. `AssetsSearchPopover.query-changed(value)`
-2. `AssetsSidebar.assets-search-query-changed(value)`
-3. `AppWindow.on_assets_search_query_changed`
-4. `ShellViewModel::set_asset_search_query()`
-5. `sync_assets_toolbar_state()`
+交互要求：
 
-### Search 失焦折叠
+- 这两个 TouchArea 必须处于背景层，不能拦截 toolbar button 与 inline search 本体点击
+- `Sidebar` 仍只是透传层，不持有新的搜索状态
 
-1. `TextInput.changed has-focus`
-2. `collapse-requested()`
-3. `collapse-assets-search-requested()`
-4. `AppWindow.on_collapse_assets_search_requested`
-5. `ShellViewModel::collapse_asset_search_if_empty()`
+### `AssetsSearchPopover`
 
-### Search 强制关闭
+文件: [ui/components/assets-search-popover.slint](/home/wwwroot/mica-term/.worktrees/assets-sidebar-toolbar-bugfix3-exec-2/ui/components/assets-search-popover.slint)
 
-1. `Esc` 命中 `close-requested()`
-2. `close-assets-search-requested()`
-3. `AppWindow.on_close_assets_search_requested`
-4. `ShellViewModel::close_asset_search()`
+关键回调与函数：
 
-### Create 菜单
+- `query-changed(string)`
+- `collapse-requested()`
+- `close-requested()`
+- `public function focus-input()`
 
-1. `create-button.clicked`
-2. `toggle-assets-create-menu-requested()`
-3. `AppWindow.on_toggle_assets_create_menu_requested`
-4. `ShellViewModel::toggle_asset_create_menu()`
-5. `sync_assets_toolbar_state()`
+关键输入样式绑定：
 
-## 5. 已确认的行为契约
+- `color: ThemeTokens.text-primary`
+- `selection-background-color: ThemeTokens.accent`
+- `selection-foreground-color: ThemeTokens.text-primary`
 
-- Search 展开时必须占据真实高度，`layout-assets-search-row-height >= 40.0`
-- Search 收起后 `layout-assets-search-row-height == 0.0`
-- 空 query 失焦时允许自动折叠
-- 非空 query 失焦时不得自动折叠
-- `Esc` 强制关闭 Search 时，query 保留
-- Search 与 Create 菜单必须互斥
-- Create 菜单仍由 root overlay 宿主承载
-- Search 不再暴露 root anchor 几何
+当前仍保留：
 
-## 6. 边缘情况与风险
+- `changed has-focus => { if !self.has-focus { root.collapse-requested(); } }`
 
-### 当前已处理
+这条路径现在是 blur fallback，不再是唯一 dismiss 机制。
 
-- 空搜索失焦折叠与非空搜索保留之间的状态分歧，交给 `collapse_asset_search_if_empty()` 统一处理
-- 点击 Create 时，Search 由 `toggle_asset_create_menu()` 关闭，避免两个面板同时可见
-- root dismiss layer 不再错误折叠 Search，避免和 inline row 语义冲突
+## 已确认的行为契约
 
-### 后续 TDD 应重点覆盖
+1. Search 保持 inline row 结构，不回退 root overlay。
+2. 点击外部区域只触发 `collapse_asset_search_if_empty()` 语义。
+3. 非空 query 在 blur 或 click-away 后必须保持展开。
+4. `Esc` 仍走 `close_asset_search()` 语义，并保留现有 query。
+5. Search 与 `Create` 菜单继续互斥，但 dismiss 层逻辑彼此独立。
+6. 输入颜色必须来自 `ThemeTokens`，不允许在组件内写死 dark/light 十六进制颜色。
 
-- Search 失焦后立即点回 Search 按钮时，焦点恢复与折叠顺序是否稳定
-- 深浅色主题下 `glow-frame` 的可见度是否都在可接受范围
-- 长文本菜单项是否在 `label-text.width = parent.width - 50px` 下出现不可接受裁切
-- 不同 DPI 或字体渲染环境下，`32px / 22px / y: 5px` 的输入度量是否仍视觉居中
-- Search query 非空时打开 Create，确认 query 保留且 Search 正确关闭
+## 下一阶段 TDD 重点
 
-### 并发与线程说明
+### 1. Click-away 路径测试
 
-- 本轮没有引入新的 Tokio task、Actor 或 channel
-- 本轮没有新增共享可变状态，因此不存在新的数据竞争面
-- 若后续把 Search 接入异步搜索源，必须通过 `slint::invoke_from_event_loop` 回到 UI 线程，避免后台线程直接写 UI
+- 覆盖 `header-search-dismiss-touch`
+- 覆盖 `panel-search-dismiss-touch`
+- 覆盖 `workspace-search-dismiss-layer`
+- 断言空 query 时触发 collapse，非空 query 时不触发关闭
 
-## 7. 建议的测试入口
+### 2. 关闭语义测试
 
-- UI contract:
-  - `bash tests/assets_sidebar_toolbar_ui_contract_smoke.sh`
-- 状态语义:
-  - `cargo test --test assets_sidebar_toolbar_spec -- --nocapture`
-- 窗口级契约:
-  - `cargo test --test assets_sidebar_toolbar_smoke -- --nocapture`
-- 编译与 lint:
-  - `cargo check --workspace`
-  - `cargo clippy --workspace -- -D warnings`
+- 断言 click-away 不会走 force close
+- 断言 `Esc` 会走 `close-requested()`
+- 断言 close 后 query 仍然保留
 
-## 8. 最终验证快照
+### 3. 互斥与层级测试
 
-- `bash tests/assets_sidebar_toolbar_ui_contract_smoke.sh` 通过
-- `cargo test --test assets_sidebar_toolbar_spec -- --nocapture` 通过，9/9
-- `cargo test --test assets_sidebar_toolbar_smoke -- --nocapture` 通过，8/8
-- `cargo check --workspace` 通过
-- `cargo clippy --workspace -- -D warnings` 通过
+- Search 展开时 `Create` 菜单仍能按既有规则关闭
+- `workspace-search-dismiss-layer` 不能覆盖 sidebar 区域
+- 背景 TouchArea 不能吞掉 toolbar button 和 search input 的点击
+
+### 4. 主题契约测试
+
+- 暗色模式下输入文本使用 `ThemeTokens.text-primary`
+- 选区背景使用 `ThemeTokens.accent`
+- 选区前景使用 `ThemeTokens.text-primary`
+- 不允许回归到局部硬编码颜色
+
+## 潜在边缘情况
+
+- Slint `TouchArea` 命中顺序若变化，背景 dismiss host 可能误拦截前景控件点击。
+- `workspace-search-dismiss-layer` 如果范围扩得过宽，可能误覆盖 sidebar 内部交互。
+- 如果后续有人把 click-away 改成统一 `close_asset_search()`，会破坏非空 query 保持展开的契约。
+- 如果只保留 `color` 而遗漏选区颜色，暗色模式选区可见性会再次退化。
+- 当前 query 保留策略依赖 `close_asset_search()` 不清空文本；后续若变更此方法，需要同步更新契约测试。
+
+## 当前验证基线
+
+本轮实现完成后，已通过以下验证：
+
+- `bash tests/assets_sidebar_toolbar_ui_contract_smoke.sh`
+- `cargo test --test assets_sidebar_toolbar_spec --test assets_sidebar_toolbar_smoke --test shell_view_model -q`
+- `cargo check -q`
+- `cargo check --workspace`
+- `cargo clippy --workspace -- -D warnings`
+
+建议下一阶段继续以这组命令为回归基线，再补充更细的交互测试。
