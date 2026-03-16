@@ -1,4 +1,5 @@
 use crate::app::window_state::{WindowChromeMode, WindowPlacementKind};
+use crate::shell::assets::AssetViewMode;
 use crate::shell::sidebar::SidebarDestination;
 use crate::theme::ThemeMode;
 
@@ -10,7 +11,7 @@ pub enum WelcomeAction {
     Sftp,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellViewModel {
     pub show_welcome: bool,
     pub show_right_panel: bool,
@@ -20,6 +21,11 @@ pub struct ShellViewModel {
     pub is_window_active: bool,
     pub theme_mode: ThemeMode,
     pub is_always_on_top: bool,
+    pub asset_view_mode: AssetViewMode,
+    pub asset_search_expanded: bool,
+    pub asset_search_query: String,
+    pub asset_create_menu_open: bool,
+    pub asset_tree_fully_expanded: bool,
     window_placement: WindowPlacementKind,
 }
 
@@ -34,6 +40,11 @@ impl Default for ShellViewModel {
             is_window_active: true,
             theme_mode: ThemeMode::Dark,
             is_always_on_top: false,
+            asset_view_mode: AssetViewMode::Tree,
+            asset_search_expanded: false,
+            asset_search_query: String::new(),
+            asset_create_menu_open: false,
+            asset_tree_fully_expanded: false,
             window_placement: WindowPlacementKind::Restored,
         }
     }
@@ -95,6 +106,38 @@ impl ShellViewModel {
 
     pub fn toggle_always_on_top(&mut self) {
         self.is_always_on_top = !self.is_always_on_top;
+    }
+
+    pub fn toggle_asset_view_mode(&mut self) {
+        self.asset_view_mode = self.asset_view_mode.toggle();
+    }
+
+    pub fn toggle_asset_search(&mut self) {
+        self.asset_search_expanded = true;
+    }
+
+    pub fn set_asset_search_query(&mut self, query: String) {
+        self.asset_search_query = query;
+    }
+
+    pub fn collapse_asset_search_if_empty(&mut self) {
+        if self.asset_search_query.is_empty() {
+            self.asset_search_expanded = false;
+        }
+    }
+
+    pub fn toggle_asset_tree_expansion(&mut self) {
+        if self.asset_view_mode == AssetViewMode::Tree {
+            self.asset_tree_fully_expanded = !self.asset_tree_fully_expanded;
+        }
+    }
+
+    pub fn toggle_asset_create_menu(&mut self) {
+        self.asset_create_menu_open = !self.asset_create_menu_open;
+    }
+
+    pub fn close_asset_create_menu(&mut self) {
+        self.asset_create_menu_open = false;
     }
 }
 

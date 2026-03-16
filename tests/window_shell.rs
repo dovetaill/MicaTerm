@@ -23,6 +23,13 @@ fn sidebar_metrics_match_the_navigation_design() {
 }
 
 #[test]
+fn assets_toolbar_metrics_match_the_design_budget() {
+    assert_eq!(ShellMetrics::ASSETS_TOOLBAR_HEIGHT, 44);
+    assert_eq!(ShellMetrics::ASSETS_TOOLBAR_BUTTON_SIZE, 28);
+    assert_eq!(ShellMetrics::ASSETS_SEARCH_ROW_HEIGHT, 40);
+}
+
+#[test]
 fn shell_layout_metrics_match_the_layout_bugfix_budget() {
     assert_eq!(ShellMetrics::WINDOW_DEFAULT_WIDTH, 1440);
     assert_eq!(ShellMetrics::WINDOW_DEFAULT_HEIGHT, 900);

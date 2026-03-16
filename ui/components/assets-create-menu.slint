@@ -1,0 +1,71 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+component MenuActionItem inherits Rectangle {
+    in property <string> label;
+    callback invoked;
+
+    height: 36px;
+    border-radius: 8px;
+    background: touch.pressed
+        ? ThemeTokens.command-tint
+        : touch.has-hover
+            ? ThemeTokens.shell-surface
+            : transparent;
+
+    Text {
+        x: 12px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.invoked();
+        }
+    }
+}
+
+export component AssetsCreateMenu inherits PopupWindow {
+    callback new-folder-selected;
+    callback new-ssh-connection-selected;
+    callback close-requested;
+
+    width: 196px;
+    height: 88px;
+    close-policy: PopupClosePolicy.close-on-click;
+
+    background-layer := Rectangle {
+        width: root.width;
+        height: root.height;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: ThemeTokens.shell-stroke;
+        background: ThemeTokens.panel-tint;
+
+        VerticalLayout {
+            padding: 8px;
+            spacing: 4px;
+
+            MenuActionItem {
+                label: "New Folder";
+                invoked => {
+                    root.new-folder-selected();
+                    root.close-requested();
+                    root.close();
+                }
+            }
+
+            MenuActionItem {
+                label: "New SSH Connection";
+                invoked => {
+                    root.new-ssh-connection-selected();
+                    root.close-requested();
+                    root.close();
+                }
+            }
+        }
+    }
+}

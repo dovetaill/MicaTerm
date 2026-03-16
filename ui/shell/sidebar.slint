@@ -12,6 +12,11 @@ export component Sidebar inherits Rectangle {
     in property <[SidebarNavItem]> items;
     in property <bool> show-assets-sidebar: true;
     in property <string> active-sidebar-destination: "console";
+    in property <string> assets-search-query: "";
+    in property <bool> asset-search-expanded: false;
+    in property <bool> asset-create-menu-open: false;
+    in property <bool> asset-tree-fully-expanded: false;
+    in property <string> asset-view-mode: "tree";
     private property <string> tooltip-text-value: "";
     private property <bool> tooltip-visible-value: false;
     private property <string> tooltip-source-id-value: "";
@@ -28,6 +33,14 @@ export component Sidebar inherits Rectangle {
     out property <length> assets-sidebar-width: assets-sidebar.width;
     callback toggle-assets-sidebar-requested();
     callback destination-selected(string);
+    callback toggle-assets-search-requested();
+    callback assets-search-query-changed(string);
+    callback collapse-assets-search-requested();
+    callback toggle-assets-view-mode-requested();
+    callback toggle-assets-tree-expansion-requested();
+    callback toggle-assets-create-menu-requested();
+    callback close-assets-create-menu-requested();
+    callback assets-create-action-selected(string);
 
     width: 48px + (root.show-assets-sidebar ? 256px : 0px);
     background: transparent;
@@ -133,6 +146,43 @@ export component Sidebar inherits Rectangle {
         assets-sidebar := AssetsSidebar {
             expanded: root.show-assets-sidebar;
             active-panel: root.active-sidebar-destination;
+            assets-search-query: root.assets-search-query;
+            asset-search-expanded: root.asset-search-expanded;
+            asset-create-menu-open: root.asset-create-menu-open;
+            asset-tree-fully-expanded: root.asset-tree-fully-expanded;
+            asset-view-mode: root.asset-view-mode;
+
+            toggle-assets-search-requested => {
+                root.toggle-assets-search-requested();
+            }
+
+            assets-search-query-changed(query) => {
+                root.assets-search-query-changed(query);
+            }
+
+            collapse-assets-search-requested => {
+                root.collapse-assets-search-requested();
+            }
+
+            toggle-assets-view-mode-requested => {
+                root.toggle-assets-view-mode-requested();
+            }
+
+            toggle-assets-tree-expansion-requested => {
+                root.toggle-assets-tree-expansion-requested();
+            }
+
+            toggle-assets-create-menu-requested => {
+                root.toggle-assets-create-menu-requested();
+            }
+
+            close-assets-create-menu-requested => {
+                root.close-assets-create-menu-requested();
+            }
+
+            assets-create-action-selected(action-id) => {
+                root.assets-create-action-selected(action-id);
+            }
         }
     }
 

@@ -1,0 +1,46 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component SidebarToolbarIconButton inherits Rectangle {
+    in property <image> icon-source;
+    in property <image> active-icon-source;
+    in property <bool> active: false;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    private property <image> displayed-icon: root.active
+        && root.active-icon-source.width > 0
+        && root.active-icon-source.height > 0
+        ? root.active-icon-source
+        : root.icon-source;
+
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border-width: root.active ? 1px : 0px;
+    border-color: ThemeTokens.shell-stroke;
+    background: !root.enabled
+        ? transparent
+        : touch.pressed
+            ? ThemeTokens.panel-tint
+            : (touch.has-hover || root.active)
+                ? ThemeTokens.command-tint
+                : transparent;
+
+    if (root.displayed-icon.width > 0 && root.displayed-icon.height > 0) : Image {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 20px;
+        height: 20px;
+        source <=> root.displayed-icon;
+        image-fit: contain;
+        colorize: ThemeTokens.text-primary;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            if root.enabled {
+                root.clicked();
+            }
+        }
+    }
+}
