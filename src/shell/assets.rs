@@ -19,18 +19,3 @@ impl AssetViewMode {
         }
     }
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AssetCreateAction {
-    NewFolder,
-    NewSshConnection,
-}
-
-impl AssetCreateAction {
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::NewFolder => "new-folder",
-            Self::NewSshConnection => "new-ssh-connection",
-        }
-    }
-}

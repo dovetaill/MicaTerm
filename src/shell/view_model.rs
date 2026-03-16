@@ -3,14 +3,6 @@ use crate::shell::assets::AssetViewMode;
 use crate::shell::sidebar::SidebarDestination;
 use crate::theme::ThemeMode;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WelcomeAction {
-    NewConnection,
-    OpenRecent,
-    Snippets,
-    Sftp,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellViewModel {
     pub show_welcome: bool,
@@ -149,13 +141,4 @@ impl ShellViewModel {
     pub fn close_asset_create_menu(&mut self) {
         self.asset_create_menu_open = false;
     }
-}
-
-pub fn welcome_actions() -> &'static [WelcomeAction] {
-    &[
-        WelcomeAction::NewConnection,
-        WelcomeAction::OpenRecent,
-        WelcomeAction::Snippets,
-        WelcomeAction::Sftp,
-    ]
 }

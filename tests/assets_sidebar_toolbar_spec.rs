@@ -1,4 +1,4 @@
-use mica_term::shell::assets::{AssetCreateAction, AssetViewMode};
+use mica_term::shell::assets::AssetViewMode;
 use mica_term::shell::view_model::ShellViewModel;
 
 #[test]
@@ -96,15 +96,9 @@ fn flat_mode_disables_tree_expansion_toggle() {
 }
 
 #[test]
-fn create_menu_toggles_and_actions_are_named() {
+fn create_menu_toggles_open_state() {
     let mut view_model = ShellViewModel::default();
 
     view_model.toggle_asset_create_menu();
     assert!(view_model.asset_create_menu_open);
-
-    assert_eq!(AssetCreateAction::NewFolder.id(), "new-folder");
-    assert_eq!(
-        AssetCreateAction::NewSshConnection.id(),
-        "new-ssh-connection"
-    );
 }
