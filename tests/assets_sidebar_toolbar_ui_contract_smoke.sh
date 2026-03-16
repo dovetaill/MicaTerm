@@ -35,6 +35,9 @@ grep -F 'view-mode-button := SidebarToolbarIconButton' "$ASSETS" >/dev/null
 grep -F 'out property <length> search-row-height: search-row-host.height;' "$ASSETS" >/dev/null
 grep -F 'search-row-host := Rectangle {' "$ASSETS" >/dev/null
 grep -F 'inline-search := AssetsSearchPopover {' "$ASSETS" >/dev/null
+grep -F 'header-search-dismiss-touch := TouchArea {' "$ASSETS" >/dev/null
+grep -F 'panel-search-dismiss-touch := TouchArea {' "$ASSETS" >/dev/null
+grep -F 'enabled: root.asset-search-expanded && root.assets-search-query == "";' "$ASSETS" >/dev/null
 grep -F 'search-icon: @image-url("../../assets/icons/fluent/search-20-regular.svg")' "$ASSETS" >/dev/null
 grep -F 'tree-expand-icon: @image-url("../../assets/icons/fluent/arrow-expand-all-20-regular.svg")' "$ASSETS" >/dev/null
 grep -F 'tree-collapse-icon: @image-url("../../assets/icons/fluent/arrow-collapse-all-20-regular.svg")' "$ASSETS" >/dev/null
@@ -66,8 +69,10 @@ grep -F 'callback toggle-assets-create-menu-requested();' "$APP_WINDOW" >/dev/nu
 grep -F 'callback close-assets-create-menu-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback assets-create-action-selected(string);' "$APP_WINDOW" >/dev/null
 grep -F 'overlay-dismiss-layer := TouchArea {' "$APP_WINDOW" >/dev/null
+grep -F 'workspace-search-dismiss-layer := TouchArea {' "$APP_WINDOW" >/dev/null
 grep -F 'enabled: root.asset-create-menu-open;' "$APP_WINDOW" >/dev/null
-! grep -F 'root.collapse-assets-search-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'enabled: root.asset-search-expanded && root.assets-search-query == "";' "$APP_WINDOW" >/dev/null
+grep -F 'root.collapse-assets-search-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'root.close-assets-create-menu-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'public function focus-input()' "$SEARCH" >/dev/null
 grep -F 'callback collapse-requested();' "$SEARCH" >/dev/null
@@ -82,10 +87,15 @@ grep -F 'search-input := TextInput {' "$SEARCH" >/dev/null
 grep -F 'y: 5px;' "$SEARCH" >/dev/null
 grep -F 'height: 22px;' "$SEARCH" >/dev/null
 grep -F 'font-size: 13px;' "$SEARCH" >/dev/null
+grep -F 'color: ThemeTokens.text-primary;' "$SEARCH" >/dev/null
+grep -F 'selection-background-color: ThemeTokens.accent;' "$SEARCH" >/dev/null
+grep -F 'selection-foreground-color: ThemeTokens.text-primary;' "$SEARCH" >/dev/null
 grep -F 'changed has-focus => {' "$SEARCH" >/dev/null
 grep -F 'root.collapse-requested();' "$SEARCH" >/dev/null
 grep -F 'key-pressed(event) => {' "$SEARCH" >/dev/null
 grep -F 'event.text == Key.Escape' "$SEARCH" >/dev/null
+! grep -F '#101418' "$SEARCH" >/dev/null
+! grep -F '#f5f7fb' "$SEARCH" >/dev/null
 grep -F 'callback close-assets-search-requested();' "$APP_WINDOW" >/dev/null
 ! grep -F 'assets-search-overlay := AssetsSearchPopover {' "$APP_WINDOW" >/dev/null
 ! grep -F 'layout-assets-search-anchor-x' "$APP_WINDOW" >/dev/null
