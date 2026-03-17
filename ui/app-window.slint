@@ -1,9 +1,13 @@
 // Root desktop window that composes chrome, sidebars, workspace content, overlays, and resize grips.
 
 import { AssetsCreateMenu } from "components/assets-create-menu.slint";
+import { AssetsContextMenuItem } from "components/assets-context-menu-column.slint";
+import { AssetsContextMenuOverlay } from "components/assets-context-menu-overlay.slint";
+import { StatusPill } from "components/status-pill.slint";
 import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
 import { WindowResizeGrips } from "components/window-resize-grips.slint";
+import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { RightPanel } from "shell/right-panel.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
 import { TabBar } from "shell/tabbar.slint";
@@ -26,6 +30,20 @@ export component AppWindow inherits Window {
     in-out property <bool> asset-create-menu-open: false;
     in-out property <bool> asset-tree-fully-expanded: false;
     in-out property <string> asset-view-mode: "tree";
+    in-out property <[ConsoleAssetItem]> console-asset-items: [];
+    in-out property <bool> assets-context-menu-open: false;
+    in-out property <length> assets-context-menu-anchor-x: 0px;
+    in-out property <length> assets-context-menu-anchor-y: 0px;
+    in-out property <length> assets-context-menu-origin-x: 0px;
+    in-out property <length> assets-context-menu-origin-y: 0px;
+    in-out property <bool> assets-context-menu-child-flows-left: false;
+    in-out property <string> assets-context-menu-primary-title: "";
+    in-out property <[AssetsContextMenuItem]> assets-context-menu-primary-items: [];
+    in-out property <string> assets-context-menu-secondary-title: "";
+    in-out property <[AssetsContextMenuItem]> assets-context-menu-secondary-items: [];
+    in-out property <string> assets-context-menu-tertiary-title: "";
+    in-out property <[AssetsContextMenuItem]> assets-context-menu-tertiary-items: [];
+    in-out property <string> context-menu-feedback-text: "";
     in-out property <[SidebarNavItem]> sidebar-items: [];
     in-out property <length> shell-body-height-cache: 852px;
     out property <length> layout-titlebar-content-width: titlebar.layout-content-width;
@@ -54,6 +72,10 @@ export component AppWindow inherits Window {
     out property <length> layout-assets-create-menu-anchor-y: sidebar.create-menu-anchor-y;
     out property <length> layout-assets-create-menu-anchor-width: sidebar.create-menu-anchor-width;
     out property <length> layout-assets-create-menu-anchor-height: sidebar.create-menu-anchor-height;
+    out property <length> layout-assets-context-menu-origin-x: assets-context-menu-overlay.x;
+    out property <length> layout-assets-context-menu-origin-y: assets-context-menu-overlay.y;
+    out property <length> layout-assets-context-menu-width: assets-context-menu-overlay.width;
+    out property <length> layout-assets-context-menu-height: assets-context-menu-overlay.height;
 
     callback drag-requested();
     callback drag-resize-requested(string);
@@ -77,6 +99,12 @@ export component AppWindow inherits Window {
     callback toggle-assets-create-menu-requested();
     callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
+    callback asset-context-menu-requested(string, string, length, length);
+    callback assets-context-menu-action-invoked(string);
+    callback assets-context-menu-key-pressed(string);
+    callback assets-context-menu-row-hovered(int, int);
+    callback assets-context-menu-pointer-moved(length, length);
+    callback close-assets-context-menu-requested();
     callback shell-layout-invalidated(length, length);
 
     in property <string> window-title: "Mica Term";
@@ -109,6 +137,12 @@ export component AppWindow inherits Window {
     changed asset-create-menu-open => {
         if root.asset-create-menu-open {
             assets-create-menu-overlay.focus-menu();
+        }
+    }
+
+    changed assets-context-menu-open => {
+        if root.assets-context-menu-open {
+            assets-context-menu-overlay.focus-menu();
         }
     }
 
@@ -202,6 +236,7 @@ export component AppWindow inherits Window {
                         asset-create-menu-open: root.asset-create-menu-open;
                         asset-tree-fully-expanded: root.asset-tree-fully-expanded;
                         asset-view-mode: root.asset-view-mode;
+                        console-asset-items: root.console-asset-items;
 
                         toggle-assets-sidebar-requested => {
                             root.toggle-assets-sidebar-requested();
@@ -245,6 +280,10 @@ export component AppWindow inherits Window {
 
                         assets-create-action-selected(action-id) => {
                             root.assets-create-action-selected(action-id);
+                        }
+
+                        asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
+                            root.asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
                         }
                     }
 
@@ -326,6 +365,18 @@ export component AppWindow inherits Window {
         }
     }
 
+    assets-context-menu-dismiss-layer := TouchArea {
+        x: 0px;
+        y: titlebar.height;
+        width: root.width;
+        height: root.height - titlebar.height;
+        enabled: root.assets-context-menu-open;
+
+        clicked => {
+            root.close-assets-context-menu-requested();
+        }
+    }
+
     assets-create-menu-overlay := AssetsCreateMenu {
         visible: root.asset-create-menu-open;
         x: sidebar.create-menu-anchor-x + sidebar.create-menu-anchor-width - self.width;
@@ -342,5 +393,45 @@ export component AppWindow inherits Window {
         new-ssh-connection-selected => {
             root.assets-create-action-selected("new-ssh-connection");
         }
+    }
+
+    assets-context-menu-overlay := AssetsContextMenuOverlay {
+        visible: root.assets-context-menu-open;
+        x: root.assets-context-menu-origin-x;
+        y: root.assets-context-menu-origin-y;
+        flow-left: root.assets-context-menu-child-flows-left;
+        primary-title: root.assets-context-menu-primary-title;
+        primary-items: root.assets-context-menu-primary-items;
+        secondary-title: root.assets-context-menu-secondary-title;
+        secondary-items: root.assets-context-menu-secondary-items;
+        tertiary-title: root.assets-context-menu-tertiary-title;
+        tertiary-items: root.assets-context-menu-tertiary-items;
+
+        close-requested => {
+            root.close-assets-context-menu-requested();
+        }
+
+        item-invoked(action-id) => {
+            root.assets-context-menu-action-invoked(action-id);
+        }
+
+        row-hovered(column-index, row-index) => {
+            root.assets-context-menu-row-hovered(column-index, row-index);
+        }
+
+        key-command(command) => {
+            root.assets-context-menu-key-pressed(command);
+        }
+
+        pointer-moved(pointer-x, pointer-y) => {
+            root.assets-context-menu-pointer-moved(pointer-x, pointer-y);
+        }
+    }
+
+    if root.context-menu-feedback-text != "" : StatusPill {
+        x: min(root.width - self.width - 16px, assets-context-menu-overlay.x);
+        y: max(16px, assets-context-menu-overlay.y - self.height - 8px);
+        width: 280px;
+        label: root.context-menu-feedback-text;
     }
 }

@@ -210,6 +210,44 @@ Date: 2026-03-11 17:00:25 CST
 - `bash tests/bootstrap_logging_contract_smoke.sh`: passed
 - `cargo test --tests -q`: passed
 
+## Windows Console Assets Context Menu Verification
+
+Date: 2026-03-17 17:00:00 CST
+
+### Source Documents
+
+- Design: `docs/plans/2026-03-17-windows-console-assets-context-menu-design.md`
+- Implementation Plan: `docs/plans/2026-03-17-windows-console-assets-context-menu-implementation-plan.md`
+- Planned Actions: `docs/plans/2026-03-17-windows-console-assets-context-menu-unimplemented-actions.md`
+
+### Commands Executed
+
+- [x] `bash tests/assets_context_menu_ui_contract_smoke.sh`
+- [x] `cargo test --test assets_context_menu_spec --test assets_context_menu_smoke -- --nocapture`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+
+### Automated Results
+
+- `bash tests/assets_context_menu_ui_contract_smoke.sh`: passed
+- `cargo test --test assets_context_menu_spec --test assets_context_menu_smoke -- --nocapture`: passed
+- `cargo check --workspace`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+
+### Verification Conclusions
+
+- [x] Root menu / submenu flip logic is covered by pure Rust geometry tests
+- [x] Planned SSH actions keep a visible feedback path instead of pretending to execute
+- [x] `Esc`, `Left`, `Right`, and `Enter` now have a root-overlay keyboard bridge
+- [x] Root `StatusPill` is bound to `context-menu-feedback-text`
+- [x] Planned-action inventory is tracked in the dedicated markdown file
+
+### Manual Follow-up
+
+- [ ] Verify real keyboard focus reaches the context menu overlay on Windows 11
+- [ ] Verify planned-action `StatusPill` placement and legibility against the Fluent visual target
+- [ ] Verify submenu keyboard semantics against a real desktop session, especially `Enter` on submenu parents
+
 ### Logging Conclusions
 
 - [x] 默认模式下 `ERROR` 可写入 `logs/system-error.log`

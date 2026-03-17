@@ -21,3 +21,47 @@ impl AssetViewMode {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsoleAssetKind {
+    SshConnection,
+    Folder,
+}
+
+impl ConsoleAssetKind {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::SshConnection => "ssh",
+            Self::Folder => "folder",
+        }
+    }
+
+    pub fn from_id(value: &str) -> Option<Self> {
+        match value {
+            "ssh" => Some(Self::SshConnection),
+            "folder" => Some(Self::Folder),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MockConsoleAssetItem {
+    pub id: String,
+    pub kind: ConsoleAssetKind,
+    pub label: String,
+}
+
+impl MockConsoleAssetItem {
+    pub fn new(
+        id: impl Into<String>,
+        kind: ConsoleAssetKind,
+        label: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            kind,
+            label: label.into(),
+        }
+    }
+}

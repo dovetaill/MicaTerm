@@ -1,0 +1,139 @@
+import { AssetsContextMenuColumn, AssetsContextMenuItem } from "assets-context-menu-column.slint";
+
+export component AssetsContextMenuOverlay inherits Rectangle {
+    in property <string> primary-title: "操作";
+    in property <[AssetsContextMenuItem]> primary-items: [];
+    in property <string> secondary-title: "";
+    in property <[AssetsContextMenuItem]> secondary-items: [];
+    in property <string> tertiary-title: "";
+    in property <[AssetsContextMenuItem]> tertiary-items: [];
+    in property <bool> flow-left: false;
+    property <int> pending-hover-column: -1;
+    property <int> pending-hover-row: -1;
+    callback close-requested();
+    callback item-invoked(string);
+    callback row-hovered(int, int);
+    callback pointer-moved(length, length);
+    callback key-command(string);
+
+    width: primary-column.width
+        + (secondary-column.visible ? secondary-column.width + 8px : 0px)
+        + (tertiary-column.visible ? tertiary-column.width + 8px : 0px);
+    height: 320px;
+    background: transparent;
+
+    public function focus-menu() {
+        menu-focus.focus();
+    }
+
+    menu-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.key-command("escape");
+                accept
+            } else if (event.text == Key.LeftArrow) {
+                root.key-command("left");
+                accept
+            } else if (event.text == Key.RightArrow) {
+                root.key-command("right");
+                accept
+            } else if (event.text == Key.Return) {
+                root.key-command("enter");
+                accept
+            } else {
+                reject
+            }
+        }
+
+        primary-column := AssetsContextMenuColumn {
+            x: root.flow-left ? root.width - self.width : 0px;
+            y: 0px;
+            height: parent.height;
+            title: root.primary-title;
+            items: root.primary-items;
+
+            item-invoked(action-id) => {
+                root.item-invoked(action-id);
+            }
+
+            item-hovered(index) => {
+                root.pending-hover-column = 0;
+                root.pending-hover-row = index;
+                corridor-close-delay.running = false;
+                hover-open-delay.running = false;
+                hover-open-delay.start();
+            }
+        }
+
+        secondary-column := AssetsContextMenuColumn {
+            x: root.flow-left
+                ? primary-column.x - self.width - 8px
+                : primary-column.x + primary-column.width + 8px;
+            y: 0px;
+            height: parent.height;
+            visible: root.secondary-items.length > 0;
+            title: root.secondary-title;
+            items: root.secondary-items;
+
+            item-invoked(action-id) => {
+                root.item-invoked(action-id);
+            }
+
+            item-hovered(index) => {
+                root.pending-hover-column = 1;
+                root.pending-hover-row = index;
+                corridor-close-delay.running = false;
+                hover-open-delay.running = false;
+                hover-open-delay.start();
+            }
+        }
+
+        tertiary-column := AssetsContextMenuColumn {
+            x: root.flow-left
+                ? secondary-column.x - self.width - 8px
+                : secondary-column.x + secondary-column.width + 8px;
+            y: 0px;
+            height: parent.height;
+            visible: root.tertiary-items.length > 0;
+            title: root.tertiary-title;
+            items: root.tertiary-items;
+
+            item-invoked(action-id) => {
+                root.item-invoked(action-id);
+            }
+
+            item-hovered(index) => {
+                root.pending-hover-column = 2;
+                root.pending-hover-row = index;
+                corridor-close-delay.running = false;
+                hover-open-delay.running = false;
+                hover-open-delay.start();
+            }
+        }
+    }
+
+    hover-open-delay := Timer {
+        interval: 120ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.pending-hover-column >= 0 && root.pending-hover-row >= 0 {
+                root.row-hovered(root.pending-hover-column, root.pending-hover-row);
+            }
+        }
+    }
+
+    corridor-close-delay := Timer {
+        interval: 140ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+        }
+    }
+}
