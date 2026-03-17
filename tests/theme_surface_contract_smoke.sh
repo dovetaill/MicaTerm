@@ -31,3 +31,13 @@ grep -F 'background: ThemeTokens.workspace-surface;' "$APP_WINDOW" >/dev/null
 grep -F 'background: ThemeTokens.inspector-surface;' "$RIGHT_PANEL" >/dev/null
 grep -F 'border-color: ThemeTokens.divider-subtle;' "$APP_WINDOW" >/dev/null
 grep -F 'background: ThemeTokens.divider-strong;' "$RIGHT_PANEL" >/dev/null
+
+if rg -n 'ThemeTokens\.(shell-surface|shell-stroke|command-tint|panel-tint|terminal-surface)' "$ROOT_DIR/ui" >/dev/null; then
+  echo "obsolete generic surface token reference remains under ui/" >&2
+  exit 1
+fi
+
+if rg -n 'out property <brush> (shell-surface|shell-stroke|command-tint|panel-tint|terminal-surface)' "$TOKENS" >/dev/null; then
+  echo "obsolete generic surface token alias remains in ui/theme/tokens.slint" >&2
+  exit 1
+fi

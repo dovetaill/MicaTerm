@@ -121,3 +121,40 @@ fn semantic_surface_tokens_define_dual_theme_ladder() {
     }
 }
 
+
+#[test]
+fn semantic_surface_tokens_lock_the_approved_dual_theme_values() {
+    let content = std::fs::read_to_string("ui/theme/tokens.slint").unwrap();
+
+    for line in [
+        "out property <brush> window-surface: dark-mode ? #171a20 : #f4f6fa;",
+        "out property <brush> titlebar-surface: dark-mode ? #202734ee : #edf3fbea;",
+        "out property <brush> activity-surface: dark-mode ? #14181f : #eef2f7;",
+        "out property <brush> assets-surface: dark-mode ? #1a2029 : #f7f9fc;",
+        "out property <brush> workspace-surface: dark-mode ? #101419 : #ffffff;",
+        "out property <brush> inspector-surface: dark-mode ? #1e2632 : #e9eef7;",
+        "out property <brush> divider-subtle: dark-mode ? #ffffff14 : #0f172a12;",
+        "out property <brush> divider-strong: dark-mode ? #ffffff22 : #0f172a1e;",
+    ] {
+        assert!(content.contains(line), "missing approved token value: {line}");
+    }
+}
+
+
+#[test]
+fn semantic_surface_tokens_remove_legacy_surface_aliases() {
+    let content = std::fs::read_to_string("ui/theme/tokens.slint").unwrap();
+
+    for legacy in [
+        "out property <brush> shell-surface:",
+        "out property <brush> shell-stroke:",
+        "out property <brush> command-tint:",
+        "out property <brush> panel-tint:",
+        "out property <brush> terminal-surface:",
+    ] {
+        assert!(
+            !content.contains(legacy),
+            "legacy semantic alias should be removed from ui/theme/tokens.slint: {legacy}"
+        );
+    }
+}
