@@ -12,7 +12,7 @@ WELCOME="$ROOT_DIR/ui/welcome/welcome-view.slint"
 grep -F 'shell-frame := Rectangle' "$APP_WINDOW" >/dev/null
 grep -F 'chrome-host := Rectangle' "$APP_WINDOW" >/dev/null
 grep -F 'body-host := Rectangle' "$APP_WINDOW" >/dev/null
-grep -F 'border-radius: parent.border-radius;' "$APP_WINDOW" >/dev/null
+grep -F 'border-radius: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'clip: true;' "$APP_WINDOW" >/dev/null
 grep -F 'vertical-stretch: 1;' "$APP_WINDOW" >/dev/null
 grep -F 'shell-body := HorizontalLayout' "$APP_WINDOW" >/dev/null

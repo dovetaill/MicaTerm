@@ -2,366 +2,400 @@
 
 日期: 2026-03-16
 执行者: Codex
-状态: 方案已确认，待实现
+状态: 方案已确认，待进入实现规划
 
 ## 背景
 
-`AssetsSidebar` 的顶部工具区已在 `2026-03-16` 首轮接入，但当前实现仍存在明显 UI 契约缺口：
+`AssetsSidebar` 顶部工具区已在今天早些时候完成首轮接入，但当前落地结果与目标视觉明显不一致：
 
-- 顶部三个工具按钮未显示图标
-- 左上标题仍为中文 `资产列表`
-- `Create` 按钮没有采用 Fluent icon 体系
-- `Create` 下拉菜单没有稳定地出现在按钮正下方
-- 下拉菜单项只有文字，没有图标
+- Search 采用 `inline row` 展开，观感像“挤出一行输入框”，不像竞品那种贴顶的浮层式搜索条
+- Search 在空值时点击其他区域没有稳定收起
+- `Create` 仍然带文字，不符合当前顶部工具区必须采用纯 icon button 的明确约束
+- `Create` 下拉菜单的视觉宽度、锚点方向、图文对齐仍不自然
+- 左侧 `AssetsSidebar` 宽度偏紧，header 呼吸感不足
 
-本轮目标不是重做整套侧栏，而是在不触碰 terminal runtime、renderer 主路径和业务逻辑的前提下，完成一次聚焦于 shell UI 层的 bugfix 设计收敛。
+本轮目标不是重做整套 sidebar，而是在不修改终端 runtime、不变更 renderer 主路径的前提下，对 `AssetsSidebar` 顶部工具区做一次聚焦于交互与视觉契约的方案收敛。
 
 ## 调研结论
 
 ### 相关 Git 历史
 
 - `53c4b1d feat: implement assets sidebar toolbar shell`
-- `d7135b5 docs: add assets sidebar toolbar planning docs`
+- `1d4de33 fix: complete assets sidebar toolbar bugfix`
 - `9266180 Stabilize Windows femtovg-wgpu mainline on DX12`
 
 结论：
 
-- 当前问题直接来自 `53c4b1d` 引入的首轮工具区壳层实现
-- 当前主线运行时仍是 `winit + femtovg-wgpu + wgpu-28`
-- Windows 路径已显式锁定 `DX12`，本轮不涉及 renderer 切换或 terminal widget 接入
+- 当前问题直接来自 `53c4b1d` 的首版 toolbar 方案，以及 `1d4de33` 对 `Create` popup 宿主迁移后的第二轮补丁
+- 当前主线路径仍是 `winit + femtovg-wgpu + wgpu-28`，本轮不涉及 terminal widget、renderer 或 DX12 路线变更
+- 现有 `Create` 菜单已提升到根窗口 host，但搜索交互仍停留在 `AssetsSidebar` 内联行方案
 
-关键代码位置：
+### 关键代码位置
 
 - [ui/shell/assets-sidebar.slint](/home/wwwroot/mica-term/ui/shell/assets-sidebar.slint)
 - [ui/components/assets-create-menu.slint](/home/wwwroot/mica-term/ui/components/assets-create-menu.slint)
 - [ui/components/sidebar-toolbar-icon-button.slint](/home/wwwroot/mica-term/ui/components/sidebar-toolbar-icon-button.slint)
+- [ui/components/titlebar-menu.slint](/home/wwwroot/mica-term/ui/components/titlebar-menu.slint)
 - [ui/app-window.slint](/home/wwwroot/mica-term/ui/app-window.slint)
+- [src/shell/view_model.rs](/home/wwwroot/mica-term/src/shell/view_model.rs)
 - [src/app/bootstrap.rs](/home/wwwroot/mica-term/src/app/bootstrap.rs)
-- [src/main.rs](/home/wwwroot/mica-term/src/main.rs)
+- [src/shell/metrics.rs](/home/wwwroot/mica-term/src/shell/metrics.rs)
+- [src/shell/layout.rs](/home/wwwroot/mica-term/src/shell/layout.rs)
 
 ### 现状证据
 
-1. 顶部图标按钮组件本身已经支持 `icon-source` / `active-icon-source`，见 [ui/components/sidebar-toolbar-icon-button.slint](/home/wwwroot/mica-term/ui/components/sidebar-toolbar-icon-button.slint)。
-2. 但 [ui/shell/assets-sidebar.slint](/home/wwwroot/mica-term/ui/shell/assets-sidebar.slint) 中的 `search-button`、`tree-expansion-button`、`view-mode-button` 目前均未绑定任何图标资源，因此按钮“完全不显示图标”是接线缺失，不是图标库不可用。
-3. `Create` 菜单当前是嵌套在 `AssetsSidebar` 内部的 `PopupWindow`，直接使用 `create-button.absolute-position` 作为 `x/y` 锚点。
-4. Slint 官方文档对 `absolute-position` 的定义指出它是相对 enclosing `Window` 或 `PopupWindow` 的绝对坐标，但参考系描述并不适合作为跨层级 popup 锚点的长期契约；结合当前截图，嵌套 popup 已出现偏移现象。
+1. 当前 Search 位于 `AssetsSidebar` 内部，是 `if root.asset-search-expanded : Rectangle` 的内联展开行，不是 popup。
+2. 当前 Search 收起依赖 `TextInput.has-focus`，只能处理部分失焦路径，不能可靠覆盖所有 click-away 场景。
+3. 当前 `Create` 是 `Add + Create + Chevron` 的 104px 复合按钮，直接违背“顶部图标按钮栏不要文字”的约束。
+4. 当前 `Create` 菜单虽然已提升到根窗口，但锚点仍只是简单地放在按钮下方，菜单展开方向、宽度和行内容对齐未与触发器形成统一几何语言。
+5. 当前 `AssetsSidebar` 宽度仍固定为 `256px`，header 在 3 个 icon button 加触发器并排时偏拥挤。
+6. 标题栏已有 [titlebar-menu.slint](/home/wwwroot/mica-term/ui/components/titlebar-menu.slint) 这套 root popup 模式，可作为 `Create` 菜单几何与交互的参考，而不是继续发展第二套不一致菜单语义。
 
-外部参考：
+### 官方能力确认
 
-- Slint `PopupWindow`: <https://docs.slint.dev/latest/docs/slint/reference/window/popupwindow/>
-- Slint `absolute-position`: <https://docs.slint.dev/latest/docs/slint/reference/common/>
-- Windows Iconography: <https://learn.microsoft.com/en-us/windows/apps/design/iconography/>
-- Fluent UI System Icons: <https://github.com/microsoft/fluentui-system-icons>
+通过官方文档检索，以下能力已确认可用：
+
+- `PopupWindow` 支持 `close-on-click-outside` 与 `no-auto-close`
+- `TextInput` 支持 `focus()` / `clear-focus()`
+- `absolute-position` 可作为根窗口级锚点计算输入
+
+参考：
+
+- <https://docs.slint.dev/latest/docs/slint/reference/window/popupwindow/>
+- <https://docs.slint.dev/latest/docs/slint/reference/keyboard-input/textinput/>
+- <https://docs.slint.dev/latest/docs/slint/guide/development/focus/>
+
+结论：
+
+- 本轮问题不是 Slint 做不到，而是当前方案选择不对
+- Search 与 `Create` 都应转向“根窗口锚定 overlay”的统一思路
 
 ## 目标
 
-- 修复 `AssetsSidebar` 顶部工具区按钮图标缺失
-- 将左上标题切换为英文产品文案
-- 让 `Create` 按钮与下拉项统一采用 Fluent icon 视觉语言
-- 让 `Create` 菜单稳定锚定在按钮正下方
+- 将 Search 从内联展开行改为更贴近竞品的 anchored search popup
+- 明确 Search 的 click-away 关闭规则：空值可自动关闭，非空保持展开
+- 将 `Create` 触发器改为纯 icon button，移除文字
+- 调整 `Create` 菜单的锚点方向、宽度与行布局，使其与 trigger 几何语言一致
+- 将 `AssetsSidebar` 宽度从 `256px` 提升到更舒展的档位
 - 保持现有 `AppWindow -> Sidebar -> AssetsSidebar` 架构不变
-- 为后续更多 sidebar overlay / menu 交互保留可扩展路径
 
 ## 边界
 
 ### 本文档覆盖
 
-- 资产列表顶部工具区图标资源接入方式
-- 左上标题英文命名
-- `Create` 按钮视觉表达
-- `Create` 下拉菜单锚点定位策略
-- 菜单项图标与文字的布局约定
-- 风险、回滚、验证标准
+- Search 触发器与 popup 形态
+- Search 关闭规则
+- `Create` 触发器形态
+- `Create` 菜单锚点方向、宽度与行对齐
+- `AssetsSidebar` 宽度调整
+- 风险、回滚与验证标准
 
 ### 本文档不覆盖
 
 - `wezterm-term` / `termwiz` / `russh` / `russh-sftp`
-- 真实 terminal widget 或 SSH/SFTP 业务逻辑
-- 资产树真实数据源、持久化、创建表单
-- 去圆角重构
-- 主题色板和全局动效重构
-
-注：本轮明确选择 `F0`，即只修复工具区与菜单问题，不顺带处理圆角收敛。
+- 真实 terminal widget
+- 真实资产树数据、搜索算法、创建向导
+- 全局主题 token 重构
+- 顶部状态栏、右侧面板、窗口 frame 策略
 
 ## 设计点与方案对比
 
-### 设计点 1：Toolbar 图标资源接入
+### 设计点 1：Search 形态
 
-#### 方案 A：继续使用 Slint 本地 `@image-url(...)` 绑定 Fluent SVG
-
-优点：
-
-- 与 titlebar、activity bar 现有图标接入方式完全一致
-- 无新增运行时解析成本
-- 改动面最小，便于快速验证
-
-缺点：
-
-- 图标声明主要位于 `.slint` 层，后续若要做运行时可配置图标，需要再扩展
-
-#### 方案 B：由 Rust/view-model 提供 icon id 或 image handle
+#### 方案 S1A：保留 `inline search row`
 
 优点：
 
-- 未来更容易做动态图标策略与平台差异化
+- 改动最小
+- 不增加新的 popup 层级
+- 与现有状态结构兼容
 
 缺点：
 
-- 对当前 bugfix 来说过重
-- 会显著放大状态与绑定复杂度
+- 视觉上仍像“展开一行”，不接近竞品
+- 会把列表内容整体下压
+- click-away 规则更难做干净
 
-最终选择：`D1A`
-
-### 设计点 2：左上标题英文文案
-
-#### 方案 A：`Assets`
+#### 方案 S1B：改为 anchored search popup
 
 优点：
 
-- 与 `AssetsSidebar` 命名一致
-- 语义中性，能覆盖 hosts、recent sessions、favorites 等内容
+- 视觉最接近参考图
+- 不会挤压列表内容
+- 更容易和 `Create` 菜单统一为根窗口 overlay 体系
 
 缺点：
 
-- 产品感偏工程术语
+- 需要新增 search anchor 与 popup 状态同步
+- 相比内联行多一层几何管理
 
-#### 方案 B：`Workspace`
+最终选择：`S1B`
+
+### 设计点 2：Search 关闭规则
+
+#### 方案 S2A：任何 outside click 都关闭
 
 优点：
 
-- 更具桌面终端产品语气
+- 规则最简单
+- 与一般 popup 行为一致
 
 缺点：
 
-- 容易与主工作区语义冲突
+- 用户带着过滤结果点击列表时，搜索框会立刻消失
+- 过滤上下文感被打断
 
-#### 方案 C：`Explorer`
+#### 方案 S2B：空值 outside click 自动关闭，非空保持展开
 
 优点：
 
-- 浏览区语义直接
+- 更符合“搜索是临时工作台”的桌面工具直觉
+- 保留 query 的可见上下文
+- 与你当前要求完全一致
 
 缺点：
 
-- 过于偏文件管理器，不完全贴合 SSH host / session 资产语义
+- 不能只依赖 `PopupClosePolicy`
+- 需要 Search popup 与状态机配合
 
-最终选择：`D2A`
+最终选择：`S2B`
 
-### 设计点 3：`Create` 按钮表达方式
+### 设计点 3：`Create` 触发器形态
 
-#### 方案 A：单个复合按钮，布局为 `Add icon + Create + ChevronDown`
+#### 方案 S3A：纯 icon button
 
 优点：
 
-- 最符合当前需求
-- 点击热区大，交互简单
-- 视觉上接近 Fluent command button
+- 与顶部其余工具按钮语言完全统一
+- 满足“顶部图标按钮栏不要文字”的硬约束
+- 减轻 header 宽度压力
 
 缺点：
 
-- 宽度会略大于当前纯文字按钮
+- 首次可发现性略低于文字按钮
 
-#### 方案 B：split button
+#### 方案 S3B：icon 内嵌 dropdown 提示
 
 优点：
 
-- 专业感更强
-- 未来可挂默认动作
+- 更明确表达“这是菜单入口”
 
 缺点：
 
-- 当前没有明确默认动作
-- 交互与实现复杂度明显上升
+- 在 `28px` 档位中容易显得拥挤
+- 需要额外自绘复合图形
 
-#### 方案 C：纯图标按钮
+最终选择：`S3A`
+
+### 设计点 4：`Create` 菜单锚点与几何语言
+
+#### 方案 S4A：保持当前向下展开，只修 item 样式
 
 优点：
 
-- 最省空间
+- 实现成本最低
 
 缺点：
 
-- 可发现性差
-- 不适合作为当前首发版本的主创建入口
+- 菜单仍容易“飘”向主工作区
+- 触发器与菜单之间缺乏统一几何语言
+- 只能治表，不治根
 
-最终选择：`D3A`
-
-### 设计点 4：`Create` 下拉菜单定位机制
-
-#### 方案 A：继续在 `AssetsSidebar` 内部使用嵌套 `PopupWindow`，手动修正坐标
+#### 方案 S4B：根窗口 popup，按 trigger 右缘或 sidebar 内边距对齐，统一宽度和行布局
 
 优点：
 
-- 表面上实现最快
+- 几何关系更稳定
+- 菜单更像侧栏自身控件，不像飘出的独立窗
+- 可以统一 item 的 icon 列、text baseline、padding、菜单宽度
 
 缺点：
 
-- 依赖当前层级的坐标语义
-- 对缩放、布局调整和未来 overlay 复用不稳
-- 当前截图已经证明这一思路会产生偏移风险
+- 要同时调整 anchor 策略与 menu 内容布局
 
-#### 方案 B：将菜单提升到 `AppWindow` overlay / popup host，由根窗口统一锚点定位
+#### 方案 S4C：退回 sidebar 内部 overlay
 
 优点：
 
-- 锚点参考系最清晰
-- 与现有 `tooltip-overlay` 的根窗口宿主模式一致
-- 后续 titlebar menu、asset context menu 等可复用同一策略
-- 跨平台可维护性最好
+- containment 直觉最强
 
 缺点：
 
-- 需要额外穿透 anchor rect 或 popup state
+- 会重新碰到 clip、z-order、click-away 和宿主约束问题
+- 与当前 root popup 路线冲突
 
-#### 方案 C：放弃 `PopupWindow`，改为 `AssetsSidebar` 内部 absolute overlay
+最终选择：`S4B`
+
+### 设计点 5：`AssetsSidebar` 宽度
+
+#### 方案 S5A：从 `256px` 提升到 `272px`
 
 优点：
 
-- 可以规避 `PopupWindow` 坐标歧义
+- 对整体 layout 契约冲击最小
+- 几乎不影响现有窗口阈值
 
 缺点：
 
-- click-away、层级、裁剪要自己承担
-- 复用性不如根窗口 overlay
+- 体感提升有限
 
-最终选择：`D4B`
-
-### 设计点 5：菜单项图标 + 文本样式
-
-#### 方案 A：静态自绘两项菜单，直接绑定 leading Fluent icon
-
-建议项：
-
-- `New Folder` -> `folder-20-regular.svg`
-- `New SSH Connection` -> `window-console-20-regular.svg`
+#### 方案 S5B：从 `256px` 提升到 `288px`
 
 优点：
 
-- 与当前两项固定动作完全匹配
-- 视觉控制简单
-- 改动范围最小
+- header 与未来树节点都更舒展
+- 能明显缓解当前侧栏偏窄的问题
+- 为 anchored popup 留出更自然的视觉边界
 
 缺点：
 
-- 后续动作数增加时还需要扩展结构
+- `FULL_LAYOUT_MIN_WIDTH` 会同步增大
+- 窄窗口下右侧面板更早退出
 
-#### 方案 B：将菜单项抽象为 Rust 数据模型数组，Slint `for item in ...` 渲染
+#### 方案 S5C：改为可拖拽宽度
 
 优点：
 
-- 扩展性最好
+- 长期体验最好
 
 缺点：
 
-- 对当前两项菜单偏重
+- 已超出当前 bugfix 范围
 
-最终选择：`D5A`
+最终选择：`S5B`
 
 ## 最终决策
 
 本轮确认的设计组合为：
 
-- `D1A`: Toolbar 图标继续使用 Slint 本地 `@image-url(...)` 绑定 Fluent SVG
-- `D2A`: 左上标题改为 `Assets`
-- `D3A`: `Create` 使用单个复合按钮，布局为 `Add icon + Create + ChevronDown`
-- `D4B`: `Create` 菜单提升到 `AppWindow` overlay / popup host
-- `D5A`: 菜单项使用静态自绘 `leading icon + label`
-- `F0`: 本轮不处理圆角收敛
+- `S1B`: Search 采用 anchored search popup，而不是内联展开行
+- `S2B`: Search 为空时 outside click 自动关闭；非空时保持展开
+- `S3A`: `Create` 改为纯 icon trigger，不保留文字
+- `S4B`: `Create` 菜单继续使用根窗口 popup，但按 trigger 右缘或 sidebar 内边距对齐，并重做菜单宽度与行布局
+- `S5B`: `AssetsSidebar` 宽度由 `256px` 调整为 `288px`
 
-## 视觉与交互约定
+## 最终设计
 
-### Toolbar
+### 1. Search
 
-- 左侧标题显示为 `Assets`
-- 右侧保留 3 个 icon button：
-  - Search
-  - Tree expand / collapse
-  - View mode toggle
-- `Create` 为单个复合按钮，不拆分默认动作区
+- Search button 继续位于 header 工具区
+- 点击后不再挤出一行 `TextInput`，而是在 header 下方打开 anchored popup
+- popup 视觉目标参考竞品：更聚焦、更贴边、更像“当前面板的即时搜索器”
+- popup 打开后应自动 focus 到输入框
+- 点击外部区域时：
+  - 若 `query == ""`，关闭 popup
+  - 若 `query != ""`，保持 popup 打开，只丢失焦点，不清空 query
+- 后续可预留 `Esc` 行为：
+  - 空值时关闭
+  - 非空时先清空，再次 `Esc` 才关闭
 
-### `Create` 按钮
+### 2. `Create` Trigger
 
-- 左侧使用 `Add` Fluent icon
-- 右侧保留 `ChevronDown`
-- 中间为 `Create` 文本
-- 点击整个按钮均打开同一个下拉菜单
+- `Create` 不再显示文字，只保留纯 icon button
+- trigger 应与 Search / Tree / View 三个按钮保持同一尺寸体系
+- 可通过 tooltip 提供文案 `Create`
+- 不再使用“按钮本体承担品牌性 CTA”的思路，而是回归工具区动作入口
 
-### `Create` 菜单
+### 3. `Create` Menu
 
-- 菜单锚点定义为按钮外框的底边
-- 菜单默认出现在按钮正下方，保留小间距
-- 菜单项统一为 `leading icon + label`
-- 首轮仅保留两项：
+- 菜单宿主继续保留在根窗口 [app-window.slint](/home/wwwroot/mica-term/ui/app-window.slint)
+- 锚点不再只做“按钮左上角向下偏移”，而应改为：
+  - 以 trigger 的右边缘对齐菜单右边缘，或
+  - 以 sidebar 右内边距为约束，确保菜单不会视觉上漂向主工作区
+- 菜单宽度应明显大于当前 icon trigger，但不能显得臃肿
+- 菜单项采用统一结构：
+  - 固定 leading icon 列
+  - 固定文字列起始线
+  - 固定行高
+  - 固定左右 padding
+- 首轮菜单项仍仅保留：
   - `New Folder`
   - `New SSH Connection`
 
+### 4. Sidebar 宽度
+
+- `AssetsSidebar` 从 `256px` 提升至 `288px`
+- 这是本轮唯一的 layout budget 调整
+- 对应的 Rust metrics 与 layout threshold 需要同步更新，避免 Slint 与 Rust 契约分叉
+
+### 5. 统一 overlay 方向
+
+- Search popup 与 `Create` menu 都应采用“根窗口锚定 overlay”体系
+- 两者不必长得完全一样，但需要共享一致的几何规则：
+  - 都从 header 区域出发
+  - 都遵守 sidebar 的视觉边界
+  - 都具备明确的 click-away 语义
+
 ## 实施步骤
 
-1. 在 `AssetsSidebar` 中补齐 toolbar 图标资源声明与按钮绑定。
-2. 将 header 文案从 `资产列表` 切换为 `Assets`。
-3. 将 `Create` 按钮重构为复合按钮视觉，但保留现有单击打开菜单的交互语义。
-4. 将 `Create` 菜单从 `AssetsSidebar` 内部 popup 提升到 `AppWindow` 层级，改由根窗口管理锚点与开闭。
-5. 为 `AssetsCreateMenu` 的菜单项增加 Fluent icon 槽位与统一布局。
-6. 更新现有 UI contract smoke test 与必要的 Slint/Rust 状态同步测试。
+1. 在 `AssetsSidebar` 中移除内联 search row 方案，改为导出 search anchor 几何。
+2. 在 `AppWindow` 根层新增或接管 search popup 宿主，并与 `ShellViewModel` 的搜索状态联动。
+3. 明确 Search popup 的关闭状态机，实现 `S2B` 规则。
+4. 将 `Create` 触发器改为纯 icon button，并补 tooltip 文案。
+5. 重做 `AssetsCreateMenu` 的锚点策略、菜单宽度、item 对齐方式。
+6. 将 `AssetsSidebar` 宽度与相关 metrics/layout threshold 调整到 `288px`。
+7. 补充或修订 UI contract / state smoke 测试，覆盖 search popup、create menu 和宽度契约。
 
 ## 风险与回滚
 
-### 风险 1：Popup 提升到根窗口后，状态穿透链路变长
+### 风险 1：Search popup 引入后，状态机比当前内联行更复杂
 
 影响：
 
-- `AssetsSidebar -> Sidebar -> AppWindow -> bootstrap` 的属性链需要新增 popup anchor 信息
+- 需要额外区分 `open`、`focused`、`query empty/non-empty`
 
 缓解：
 
-- 只提升菜单宿主，不改变现有 `asset_create_menu_open` 状态语义
-- 保持 `assets-create-action-selected` 回调链不变
+- 业务状态仍由 Rust `ShellViewModel` 持有
+- UI 层只负责展示与本地焦点事件
 
 回滚：
 
-- 若根窗口 overlay 在实现中出现意外阻塞，可临时退回 `AssetsSidebar` 内 absolute overlay，而不是退回当前嵌套 `PopupWindow + absolute-position` 写法
+- 若 popup 行为在某个平台出现明显问题，可暂时保留 popup 外观，但降低规则为“只由按钮二次点击和 `Esc` 关闭”
 
-### 风险 2：图标选择与现有 Fluent 资源库存不完全对齐
+### 风险 2：`Create` 菜单右缘对齐后，极窄窗口下可能贴近主工作区边界
 
 影响：
 
-- 若现有仓库缺少目标 SVG，需要补充资源文件
+- 某些窗口尺寸下菜单边界可能显得过于靠外
 
 缓解：
 
-- 优先复用仓库中已存在的 Fluent SVG
-- 仅在缺失时再补新增资源
+- 用 sidebar 内边距作为二级约束，而不是只信任 trigger 右缘
 
 回滚：
 
-- 若个别图标缺失，可暂时使用语义最接近的现有 Fluent icon，不引入新的图标技术栈
+- 若右缘对齐在极端尺寸下表现不好，可退为“trigger 左缘 + 固定菜单宽度”，但保留统一 item 布局
 
-### 风险 3：复合按钮宽度增加后压缩 toolbar
+### 风险 3：`AssetsSidebar` 加宽后改变整体 layout 阈值
 
 影响：
 
-- 在 `256px` 固定宽度下，header 水平空间会更紧
+- `FULL_LAYOUT_MIN_WIDTH` 与相关测试需要同步更新
 
 缓解：
 
-- 保持 3 个 icon button 为紧凑尺寸
-- 让标题区优先占用剩余空间，必要时压缩 `Create` 的左右内边距，而不是删除图标
+- 宽度调整只做一档，从 `256px` 到 `288px`
+- 同步修正 [metrics.rs](/home/wwwroot/mica-term/src/shell/metrics.rs) 与 [layout.rs](/home/wwwroot/mica-term/src/shell/layout.rs)
 
 回滚：
 
-- 若实际验证表明宽度过紧，可在不改变 `D3A` 语义的前提下减小按钮 padding，而不是切换到 split button 或纯图标按钮
+- 如果实测发现对窄窗口影响过大，可降回 `272px`，但不回退到 `256px`
 
 ## 验证清单
 
-- 顶部 3 个工具按钮均显示 Fluent icon
-- 左上标题已改为 `Assets`
-- `Create` 按钮显示 `Add icon + Create + ChevronDown`
-- 点击 `Create` 后，菜单锚定在按钮正下方，而不是偏移到 sidebar 左侧
-- 菜单项同时显示图标和文字
-- `New Folder` 与 `New SSH Connection` 的动作回调保持原有语义不变
-- 现有 `AppWindow -> Sidebar -> AssetsSidebar` 主结构不被改写
-- 不引入新的图标技术栈，不切换 renderer，不触碰 terminal runtime
+- Search 不再以内联行方式出现在 `AssetsSidebar` 中
+- Search 点击后以 anchored popup 形式出现，视觉方向接近参考图
+- Search 在 `query == ""` 时 outside click 会关闭
+- Search 在 `query != ""` 时 outside click 不会强制关闭
+- `Create` trigger 不再显示文字
+- `Create` trigger 与其他 toolbar button 采用统一 icon-button 尺寸
+- `Create` 菜单不再显得过窄或图文错位
+- `Create` 菜单锚点不再视觉漂向主工作区
+- `AssetsSidebar` 宽度契约已从 `256px` 调整为 `288px`
+- Rust metrics、layout threshold、Slint 宽度声明三者保持一致
+- 不触碰 terminal runtime、renderer 和 SSH/SFTP 业务逻辑
 
 ## 备注
 
-本设计文档是对更宽范围 [2026-03-16-assets-sidebar-toolbar-design.md](/home/wwwroot/mica-term/docs/plans/2026-03-16-assets-sidebar-toolbar-design.md) 的 bugfix 收敛补充，后续实现阶段应以本文档的最终决策为准。
+本设计文档是对 `AssetsSidebar` 顶部工具区当前 bugfix 轮次的最终收敛。若后续需要进入实现阶段，应在本文件基础上另写 `implementation-plan`，而不是再回到早上那份首版 toolbar 设计文档继续追加。
