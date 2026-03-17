@@ -96,3 +96,28 @@ fn window_shell_exposes_minimum_window_budget() {
     assert_eq!(spec.min_window_width, ShellMetrics::WINDOW_MIN_WIDTH);
     assert_eq!(spec.min_window_height, ShellMetrics::WINDOW_MIN_HEIGHT);
 }
+
+
+#[test]
+fn semantic_surface_tokens_define_dual_theme_ladder() {
+    let content = std::fs::read_to_string("ui/theme/tokens.slint").unwrap();
+
+    for token in [
+        "window-surface",
+        "titlebar-surface",
+        "activity-surface",
+        "assets-surface",
+        "workspace-surface",
+        "inspector-surface",
+        "divider-subtle",
+        "divider-strong",
+        "control-hover-surface",
+        "control-active-surface",
+    ] {
+        assert!(
+            content.contains(token),
+            "missing semantic token in ui/theme/tokens.slint: {token}"
+        );
+    }
+}
+
