@@ -212,50 +212,46 @@ Date: 2026-03-11 17:00:25 CST
 
 ## Windows Console Assets Context Menu Verification
 
-Date: 2026-03-17 17:00:00 CST
+Date: 2026-03-17 18:15:00 CST
 
 ### Source Documents
 
-- Design: `docs/plans/2026-03-17-windows-console-assets-context-menu-design.md`
-- Implementation Plan: `docs/plans/2026-03-17-windows-console-assets-context-menu-implementation-plan.md`
+- Design: `docs/plans/2026-03-17-windows-console-assets-context-menu-bugfix-design.md`
+- Implementation Plan: `docs/plans/2026-03-17-windows-console-assets-context-menu-bugfix-implementation-plan.md`
 - Planned Actions: `docs/plans/2026-03-17-windows-console-assets-context-menu-unimplemented-actions.md`
 
 ### Commands Executed
 
 - [x] `bash tests/assets_context_menu_ui_contract_smoke.sh`
-- [x] `cargo test --test assets_context_menu_spec --test assets_context_menu_smoke -- --nocapture`
+- [x] `cargo test --test assets_context_menu_spec --test assets_context_menu_smoke --test shell_view_model -- --nocapture`
 - [x] `cargo check --workspace`
 - [x] `cargo clippy --workspace -- -D warnings`
 
 ### Automated Results
 
 - `bash tests/assets_context_menu_ui_contract_smoke.sh`: passed
-- `cargo test --test assets_context_menu_spec --test assets_context_menu_smoke -- --nocapture`: passed
+- `cargo test --test assets_context_menu_spec --test assets_context_menu_smoke --test shell_view_model -- --nocapture`: passed
 - `cargo check --workspace`: passed
 - `cargo clippy --workspace -- -D warnings`: passed
 
 ### Verification Conclusions
 
-- [x] Root menu / submenu flip logic is covered by pure Rust geometry tests
-- [x] Planned SSH actions keep a visible feedback path instead of pretending to execute
-- [x] `Esc`, `Left`, `Right`, and `Enter` now have a root-overlay keyboard bridge
-- [x] Root `StatusPill` is bound to `context-menu-feedback-text`
+- [x] Bootstrap no longer seeds demo assets; `Windows Console` starts from a true empty state
+- [x] Blank-area right-click is available in both empty-state and list-tail fill regions without a full-surface touch overlay
+- [x] Blank-area create IA is reduced to `New Folder` and `New SSH Connection`
+- [x] Toolbar and context-menu create actions now insert placeholder assets into Rust state
+- [x] Placeholder assets immediately enter rename mode through `renaming_asset_id` / `renaming_asset_text`
+- [x] Inline rename now bridges through `AssetsSidebar -> Sidebar -> AppWindow -> bootstrap -> ShellViewModel`
+- [x] Rename draft / commit / cancel paths are covered by automated tests
+- [x] Planned SSH-only actions still keep a visible feedback path instead of pretending to execute
 - [x] Planned-action inventory is tracked in the dedicated markdown file
 
 ### Manual Follow-up
 
-- [ ] Verify real keyboard focus reaches the context menu overlay on Windows 11
+- [ ] Verify inline rename focus lands in the row `TextInput` on a real Windows 11 desktop session
+- [ ] Verify right-click hit testing still prefers row interactions over blank-area fill in dense lists
 - [ ] Verify planned-action `StatusPill` placement and legibility against the Fluent visual target
-- [ ] Verify submenu keyboard semantics against a real desktop session, especially `Enter` on submenu parents
-
-### Logging Conclusions
-
-- [x] 默认模式下 `ERROR` 可写入 `logs/system-error.log`
-- [x] 默认模式下 `DEBUG` 事件被过滤
-- [x] `env override > portable marker > standard local app data` 路径优先级测试通过
-- [x] panic 子进程 smoke 会生成 `crash/panic-*.log`
-- [x] cleanup 策略满足 `14 天 + 64MB`
-- [x] `bootstrap` 的 `eprintln!` 已迁移为统一 `tracing::error!`
+- [ ] Verify rename commit / cancel behavior feels correct with real pointer focus changes and IME input
 
 ## 2026-03-16 Remove Rounded Corners
 

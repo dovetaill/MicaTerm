@@ -14,3 +14,5 @@ Scope: `Window Console` assets context menu
 
 - This file tracks actions that are intentionally exposed in the menu IA but are not wired to real business execution yet.
 - Actions that are merely shell placeholders and currently close the menu without business work are not treated as `Planned` in this file; this list stays focused on the explicit planned-action pathway.
+- The first shipped blank-area and item create IA is now limited to `New Folder` and `New SSH Connection`.
+- Legacy protocol entries such as `Local Terminal`, `Serial`, `Telnet`, and `SSH Tunnel` are backlog references only; they are not part of the current shipped context menu.

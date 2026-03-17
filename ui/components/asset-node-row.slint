@@ -5,8 +5,13 @@ export component AssetNodeRow inherits Rectangle {
     in property <string> item-kind;
     in property <string> label;
     in property <bool> selected: false;
+    in property <bool> renaming: false;
+    in property <string> rename-text: "";
     callback clicked(string);
     callback context-menu-requested(string, string, length, length);
+    callback rename-text-changed(string, string);
+    callback rename-commit-requested(string, string);
+    callback rename-cancel-requested(string);
 
     height: 32px;
     border-radius: 6px;
@@ -16,7 +21,7 @@ export component AssetNodeRow inherits Rectangle {
             ? ThemeTokens.control-hover-surface
             : transparent;
 
-    Text {
+    if !root.renaming : Text {
         x: 12px;
         y: 0px;
         width: parent.width - 24px;
@@ -26,9 +31,52 @@ export component AssetNodeRow inherits Rectangle {
         vertical-alignment: center;
     }
 
+    rename-frame := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        visible: root.renaming;
+        background: transparent;
+
+        rename-input := TextInput {
+            x: 8px;
+            y: 4px;
+            width: parent.width - 16px;
+            height: parent.height - 8px;
+            visible: root.renaming;
+            enabled: root.renaming;
+            text: root.rename-text;
+            color: ThemeTokens.text-primary;
+            selection-background-color: ThemeTokens.accent;
+            selection-foreground-color: ThemeTokens.text-primary;
+
+            changed has-focus => {
+                if !self.has-focus {
+                    root.rename-commit-requested(root.item-id, self.text);
+                }
+            }
+
+            edited => {
+                root.rename-text-changed(root.item-id, self.text);
+            }
+
+            key-pressed(event) => {
+                if (event.text == Key.Return) {
+                    root.rename-commit-requested(root.item-id, self.text);
+                    accept
+                } else if (event.text == Key.Escape) {
+                    root.rename-cancel-requested(root.item-id);
+                    accept
+                } else {
+                    reject
+                }
+            }
+        }
+    }
+
     touch := TouchArea {
         width: parent.width;
         height: parent.height;
+        enabled: !root.renaming;
 
         pointer-event(event) => {
             if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
@@ -43,6 +91,12 @@ export component AssetNodeRow inherits Rectangle {
 
         clicked => {
             root.clicked(root.item-id);
+        }
+    }
+
+    changed renaming => {
+        if root.renaming {
+            rename-input.focus();
         }
     }
 }

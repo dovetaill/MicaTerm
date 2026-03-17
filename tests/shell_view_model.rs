@@ -1,8 +1,10 @@
 //! Stateful shell view-model coverage for toolbar, sidebar, and window toggles.
 
 use mica_term::app::window_state::WindowPlacementKind;
-use mica_term::shell::assets::AssetViewMode;
-use mica_term::shell::context_menu::{ContextTargetKind, SelectionContext, resolve_action_tree, visible_columns_for_path};
+use mica_term::shell::assets::{AssetViewMode, ConsoleAssetKind};
+use mica_term::shell::context_menu::{
+    ContextTargetKind, SelectionContext, resolve_action_tree, visible_columns_for_path,
+};
 use mica_term::shell::sidebar::SidebarDestination;
 use mica_term::shell::view_model::ShellViewModel;
 use mica_term::theme::ThemeMode;
@@ -118,7 +120,7 @@ fn opening_context_menu_tracks_target_anchor_and_resets_open_path() {
 }
 
 #[test]
-fn selecting_submenu_path_updates_visible_columns() {
+fn selecting_primary_leaf_path_keeps_blank_area_menu_flat() {
     let mut view_model = ShellViewModel::default();
     view_model.open_context_menu_for_target(ContextTargetKind::BlankArea, None, 24.0, 36.0);
 
@@ -131,20 +133,15 @@ fn selecting_submenu_path_updates_visible_columns() {
             target_has_active_connection: false,
         },
     );
-    let new_connection_index = roots
+    let new_folder_index = roots
         .iter()
-        .position(|node| node.id == "new-connection")
-        .expect("blank-area menu should expose the new-connection submenu");
+        .position(|node| node.id == "new-folder")
+        .expect("blank-area menu should expose the new-folder row");
 
-    view_model.set_context_menu_open_path(vec![new_connection_index]);
+    view_model.set_context_menu_open_path(vec![new_folder_index]);
 
     let columns = visible_columns_for_path(&roots, &view_model.context_menu_open_path);
-    let secondary_ids: Vec<_> = columns[1].iter().map(|node| node.id).collect();
-
-    assert_eq!(
-        secondary_ids,
-        vec!["ssh", "local-terminal", "serial", "telnet", "ssh-tunnel"]
-    );
+    assert!(columns[1].is_empty());
 }
 
 #[test]
@@ -163,4 +160,61 @@ fn closing_context_menu_clears_open_path_but_keeps_selection() {
     assert!(!view_model.context_menu_open);
     assert!(view_model.context_menu_open_path.is_empty());
     assert_eq!(view_model.selected_asset_ids, vec!["folder-favorites"]);
+}
+
+#[test]
+fn toolbar_create_action_inserts_ssh_placeholder_and_starts_rename() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.handle_assets_create_action("new-ssh-connection");
+
+    assert_eq!(view_model.console_asset_items.len(), 1);
+    assert_eq!(
+        view_model.console_asset_items[0].kind,
+        ConsoleAssetKind::SshConnection
+    );
+    assert_eq!(view_model.console_asset_items[0].label, "New SSH Connection");
+    assert_eq!(
+        view_model.renaming_asset_id.as_deref(),
+        Some(view_model.console_asset_items[0].id.as_str())
+    );
+    assert_eq!(view_model.renaming_asset_text, "New SSH Connection");
+}
+
+#[test]
+fn context_menu_create_action_inserts_folder_placeholder_and_closes_menu() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_context_menu_for_target(ContextTargetKind::BlankArea, None, 32.0, 48.0);
+
+    view_model.handle_context_menu_leaf_action("new-folder");
+
+    assert!(!view_model.context_menu_open);
+    assert_eq!(view_model.console_asset_items.len(), 1);
+    assert_eq!(view_model.console_asset_items[0].kind, ConsoleAssetKind::Folder);
+}
+
+#[test]
+fn committing_inline_rename_updates_label_and_clears_editing_state() {
+    let mut view_model = ShellViewModel::default();
+    view_model.handle_assets_create_action("new-ssh-connection");
+    let asset_id = view_model.console_asset_items[0].id.clone();
+
+    view_model.update_asset_rename_draft(&asset_id, "Prod Bastion".into());
+    view_model.commit_asset_rename(&asset_id, "Prod Bastion".into());
+
+    assert_eq!(view_model.console_asset_items[0].label, "Prod Bastion");
+    assert_eq!(view_model.renaming_asset_id, None);
+    assert!(view_model.renaming_asset_text.is_empty());
+}
+
+#[test]
+fn cancelling_inline_rename_keeps_default_label_and_exits_editing() {
+    let mut view_model = ShellViewModel::default();
+    view_model.handle_assets_create_action("new-folder");
+    let asset_id = view_model.console_asset_items[0].id.clone();
+
+    view_model.cancel_asset_rename(&asset_id);
+
+    assert_eq!(view_model.console_asset_items[0].label, "New Folder");
+    assert_eq!(view_model.renaming_asset_id, None);
 }

@@ -1,7 +1,7 @@
 //! Central shell state mirrored into Slint properties and mutated by UI callbacks.
 
 use crate::app::window_state::WindowPlacementKind;
-use crate::shell::assets::{AssetViewMode, MockConsoleAssetItem};
+use crate::shell::assets::{AssetViewMode, ConsoleAssetKind, MockConsoleAssetItem};
 use crate::shell::context_menu::{
     ContextMenuActionNode, ContextMenuActionState, ContextTargetKind, SelectionContext,
     resolve_action_tree,
@@ -26,6 +26,8 @@ pub struct ShellViewModel {
     pub asset_tree_fully_expanded: bool,
     pub console_asset_items: Vec<MockConsoleAssetItem>,
     pub selected_asset_ids: Vec<String>,
+    pub renaming_asset_id: Option<String>,
+    pub renaming_asset_text: String,
     pub context_menu_open: bool,
     pub context_menu_target_kind: Option<ContextTargetKind>,
     pub context_menu_anchor_x: f32,
@@ -35,6 +37,7 @@ pub struct ShellViewModel {
     pub context_menu_child_flows_left: bool,
     pub context_menu_open_path: Vec<usize>,
     pub context_menu_feedback_text: String,
+    next_console_asset_serial: u64,
     window_placement: WindowPlacementKind,
 }
 
@@ -56,6 +59,8 @@ impl Default for ShellViewModel {
             asset_tree_fully_expanded: false,
             console_asset_items: Vec::new(),
             selected_asset_ids: Vec::new(),
+            renaming_asset_id: None,
+            renaming_asset_text: String::new(),
             context_menu_open: false,
             context_menu_target_kind: None,
             context_menu_anchor_x: 0.0,
@@ -65,6 +70,7 @@ impl Default for ShellViewModel {
             context_menu_child_flows_left: false,
             context_menu_open_path: Vec::new(),
             context_menu_feedback_text: String::new(),
+            next_console_asset_serial: 0,
             window_placement: WindowPlacementKind::Restored,
         }
     }
@@ -174,6 +180,13 @@ impl ShellViewModel {
         self.asset_create_menu_open = false;
     }
 
+    pub fn handle_assets_create_action(&mut self, action_id: &str) {
+        if let Some(kind) = ConsoleAssetKind::from_create_action_id(action_id) {
+            self.create_placeholder_asset(kind);
+            self.close_asset_create_menu();
+        }
+    }
+
     pub fn open_context_menu_for_target(
         &mut self,
         target_kind: ContextTargetKind,
@@ -263,6 +276,55 @@ impl ShellViewModel {
         }
     }
 
+    pub fn handle_context_menu_leaf_action(&mut self, action_id: &str) {
+        if let Some(kind) = ConsoleAssetKind::from_create_action_id(action_id) {
+            self.create_placeholder_asset(kind);
+            self.close_context_menu();
+            return;
+        }
+
+        let roots = self.context_menu_roots();
+        let Some(action) = find_action_node_by_id(&roots, action_id) else {
+            return;
+        };
+
+        match action.state {
+            ContextMenuActionState::Planned => {
+                self.set_context_menu_feedback(format!("{} is not wired yet.", action.title));
+            }
+            ContextMenuActionState::Enabled => self.close_context_menu(),
+            ContextMenuActionState::Disabled => {}
+        }
+    }
+
+    pub fn update_asset_rename_draft(&mut self, asset_id: &str, text: String) {
+        if self.renaming_asset_id.as_deref() == Some(asset_id) {
+            self.renaming_asset_text = text;
+        }
+    }
+
+    pub fn commit_asset_rename(&mut self, asset_id: &str, text: String) {
+        if let Some(item) = self
+            .console_asset_items
+            .iter_mut()
+            .find(|item| item.id == asset_id)
+        {
+            item.label = text;
+        }
+
+        if self.renaming_asset_id.as_deref() == Some(asset_id) {
+            self.renaming_asset_id = None;
+            self.renaming_asset_text.clear();
+        }
+    }
+
+    pub fn cancel_asset_rename(&mut self, asset_id: &str) {
+        if self.renaming_asset_id.as_deref() == Some(asset_id) {
+            self.renaming_asset_id = None;
+            self.renaming_asset_text.clear();
+        }
+    }
+
     pub fn set_context_menu_feedback(&mut self, text: impl Into<String>) {
         self.context_menu_feedback_text = text.into();
     }
@@ -294,6 +356,18 @@ impl ShellViewModel {
             target_has_active_connection: true,
         }
     }
+
+    fn create_placeholder_asset(&mut self, kind: ConsoleAssetKind) {
+        let id = format!("draft-asset-{}", self.next_console_asset_serial);
+        self.next_console_asset_serial += 1;
+
+        let label = kind.placeholder_label().to_string();
+        self.console_asset_items
+            .push(MockConsoleAssetItem::new(id.clone(), kind, label.clone()));
+        self.selected_asset_ids = vec![id.clone()];
+        self.renaming_asset_id = Some(id);
+        self.renaming_asset_text = label;
+    }
 }
 
 fn current_action_node<'a>(
@@ -319,4 +393,21 @@ fn action_node_at_path<'a>(
     }
 
     Some(current)
+}
+
+fn find_action_node_by_id<'a>(
+    nodes: &'a [ContextMenuActionNode],
+    action_id: &str,
+) -> Option<&'a ContextMenuActionNode> {
+    for node in nodes {
+        if node.id == action_id {
+            return Some(node);
+        }
+
+        if let Some(found) = find_action_node_by_id(&node.children, action_id) {
+            return Some(found);
+        }
+    }
+
+    None
 }

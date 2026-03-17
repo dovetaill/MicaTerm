@@ -191,63 +191,12 @@ fn lerp(start: f32, end: f32, progress: f32) -> f32 {
 }
 
 fn resolve_blank_area_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
-    let has_selection = selection.has_selection();
-
-    vec![
-        action("new-folder", "New Folder"),
-        new_connection_submenu(false),
-        action_with_state(
-            "batch-open",
-            "Batch Open",
-            if has_selection {
-                ContextMenuActionState::Enabled
-            } else {
-                ContextMenuActionState::Disabled
-            },
-            false,
-        ),
-        action_with_state(
-            "delete-asset",
-            "Delete",
-            mutable_selection_state(selection),
-            true,
-        ),
-        action_with_state(
-            "rename-asset",
-            "Rename",
-            mutable_selection_state(selection),
-            false,
-        ),
-        action_with_state(
-            "copy-asset",
-            "Copy",
-            selection_state(selection),
-            false,
-        ),
-        action_with_state(
-            "cut-asset",
-            "Cut",
-            mutable_selection_state(selection),
-            false,
-        ),
-        action_with_state(
-            "paste-asset",
-            "Paste",
-            if selection.clipboard_has_asset_payload {
-                ContextMenuActionState::Enabled
-            } else {
-                ContextMenuActionState::Disabled
-            },
-            false,
-        ),
-        action_with_state("refresh-assets", "Refresh", ContextMenuActionState::Enabled, true),
-        action_with_state("import-assets", "Import", ContextMenuActionState::Enabled, false),
-        action_with_state("export-assets", "Export", ContextMenuActionState::Enabled, false),
-    ]
+    let _ = selection;
+    create_actions(false)
 }
 
 fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
-    vec![
+    let mut actions = vec![
         action_with_state(
             "close-connection",
             "Close",
@@ -264,17 +213,9 @@ fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNod
             selection_state(selection),
             false,
         ),
-        action_with_state(
-            "new-folder",
-            "New Folder",
-            if selection.target_mutable {
-                ContextMenuActionState::Enabled
-            } else {
-                ContextMenuActionState::Disabled
-            },
-            true,
-        ),
-        new_connection_submenu(false),
+    ];
+    actions.extend(create_actions(true));
+    actions.extend([
         action_with_state("edit-connection", "Edit", selection_state(selection), true),
         action_with_state("batch-edit", "Batch Edit", selection_state(selection), false),
         action_with_state("clone-connection", "Clone", selection_state(selection), false),
@@ -306,24 +247,15 @@ fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNod
         action_with_state("refresh-assets", "Refresh", ContextMenuActionState::Enabled, true),
         action_with_state("import-assets", "Import", ContextMenuActionState::Enabled, false),
         action_with_state("export-assets", "Export", ContextMenuActionState::Enabled, false),
-    ]
+    ]);
+    actions
 }
 
 fn resolve_folder_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
     let has_selection = selection.has_selection();
 
-    vec![
-        action_with_state(
-            "new-folder",
-            "New Folder",
-            if selection.target_mutable {
-                ContextMenuActionState::Enabled
-            } else {
-                ContextMenuActionState::Disabled
-            },
-            false,
-        ),
-        new_connection_submenu(false),
+    let mut actions = create_actions(false);
+    actions.extend([
         action_with_state(
             "batch-open",
             "Batch Open",
@@ -361,22 +293,25 @@ fn resolve_folder_actions(selection: &SelectionContext) -> Vec<ContextMenuAction
         action_with_state("refresh-assets", "Refresh", ContextMenuActionState::Enabled, true),
         action_with_state("import-assets", "Import", ContextMenuActionState::Enabled, false),
         action_with_state("export-assets", "Export", ContextMenuActionState::Enabled, false),
-    ]
+    ]);
+    actions
 }
 
-fn new_connection_submenu(divider_before: bool) -> ContextMenuActionNode {
-    submenu(
-        "new-connection",
-        "New Connection",
-        vec![
-            action("ssh", "SSH"),
-            action("local-terminal", "Local Terminal"),
-            action("serial", "Serial"),
-            action("telnet", "Telnet"),
-            action("ssh-tunnel", "SSH Tunnel"),
-        ],
-        divider_before,
-    )
+fn create_actions(divider_before: bool) -> Vec<ContextMenuActionNode> {
+    vec![
+        action_with_state(
+            "new-folder",
+            "New Folder",
+            ContextMenuActionState::Enabled,
+            divider_before,
+        ),
+        action_with_state(
+            "new-ssh-connection",
+            "New SSH Connection",
+            ContextMenuActionState::Enabled,
+            false,
+        ),
+    ]
 }
 
 fn selection_state(selection: &SelectionContext) -> ContextMenuActionState {
@@ -392,25 +327,6 @@ fn mutable_selection_state(selection: &SelectionContext) -> ContextMenuActionSta
         ContextMenuActionState::Enabled
     } else {
         ContextMenuActionState::Disabled
-    }
-}
-
-fn action(id: &'static str, title: &'static str) -> ContextMenuActionNode {
-    action_with_state(id, title, ContextMenuActionState::Enabled, false)
-}
-
-fn submenu(
-    id: &'static str,
-    title: &'static str,
-    children: Vec<ContextMenuActionNode>,
-    divider_before: bool,
-) -> ContextMenuActionNode {
-    ContextMenuActionNode {
-        id,
-        title,
-        state: ContextMenuActionState::Enabled,
-        children,
-        divider_before,
     }
 }
 

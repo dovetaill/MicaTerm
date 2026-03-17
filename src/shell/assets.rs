@@ -43,6 +43,21 @@ impl ConsoleAssetKind {
             _ => None,
         }
     }
+
+    pub fn from_create_action_id(value: &str) -> Option<Self> {
+        match value {
+            "new-folder" => Some(Self::Folder),
+            "new-ssh-connection" => Some(Self::SshConnection),
+            _ => None,
+        }
+    }
+
+    pub fn placeholder_label(self) -> &'static str {
+        match self {
+            Self::Folder => "New Folder",
+            Self::SshConnection => "New SSH Connection",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

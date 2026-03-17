@@ -22,7 +22,7 @@ use crate::app::windowing::{
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
 };
-use crate::shell::assets::{ConsoleAssetKind, MockConsoleAssetItem};
+use crate::shell::assets::MockConsoleAssetItem;
 use crate::shell::context_menu::{
     CONTEXT_MENU_COLUMN_GAP, CONTEXT_MENU_COLUMN_WIDTH, CONTEXT_MENU_HEIGHT,
     ContextMenuActionNode, ContextMenuActionState, ContextTargetKind, MenuPlacementInput,
@@ -204,22 +204,27 @@ fn parse_context_target_kind(value: &str) -> ContextTargetKind {
 }
 
 fn default_console_asset_items() -> Vec<MockConsoleAssetItem> {
-    vec![
-        MockConsoleAssetItem::new("ssh-prod-01", ConsoleAssetKind::SshConnection, "Prod SSH"),
-        MockConsoleAssetItem::new("folder-favorites", ConsoleAssetKind::Folder, "Favorites"),
-        MockConsoleAssetItem::new("ssh-jump-01", ConsoleAssetKind::SshConnection, "Jump Host"),
-    ]
+    Vec::new()
 }
 
 fn console_asset_items_for(state: &ShellViewModel) -> Vec<ConsoleAssetItem> {
     state
         .console_asset_items
         .iter()
-        .map(|item| ConsoleAssetItem {
-            id: item.id.clone().into(),
-            kind: item.kind.id().into(),
-            label: item.label.clone().into(),
-            selected: state.selected_asset_ids.iter().any(|selected| selected == &item.id),
+        .map(|item| {
+            let renaming = state.renaming_asset_id.as_deref() == Some(item.id.as_str());
+            ConsoleAssetItem {
+                id: item.id.clone().into(),
+                kind: item.kind.id().into(),
+                label: item.label.clone().into(),
+                selected: state.selected_asset_ids.iter().any(|selected| selected == &item.id),
+                renaming,
+                rename_text: if renaming {
+                    state.renaming_asset_text.clone().into()
+                } else {
+                    item.label.clone().into()
+                },
+            }
         })
         .collect()
 }
@@ -742,9 +747,35 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_assets_create_action_selected(move |action_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.close_asset_create_menu();
-        sync_assets_toolbar_state(&window, &state);
-        tracing::info!(target: "ui.assets", action = %action_id, "assets create action selected");
+        state.handle_assets_create_action(action_id.as_str());
+        sync_sidebar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_asset_rename_text_changed(move |asset_id, text| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.update_asset_rename_draft(asset_id.as_str(), text.to_string());
+        sync_sidebar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_asset_rename_commit_requested(move |asset_id, text| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.commit_asset_rename(asset_id.as_str(), text.to_string());
+        sync_sidebar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_asset_rename_cancel_requested(move |asset_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.cancel_asset_rename(asset_id.as_str());
+        sync_sidebar_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -777,24 +808,11 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
             if !action.children.is_empty() {
                 state.set_context_menu_open_path(path);
             } else {
-                match action.state {
-                    ContextMenuActionState::Planned => {
-                        state.set_context_menu_feedback(format!(
-                            "{} is not wired yet.",
-                            action.title
-                        ));
-                        tracing::info!(
-                            target: "ui.assets",
-                            action = %action.id,
-                            "planned assets context menu action invoked"
-                        );
-                    }
-                    ContextMenuActionState::Enabled => state.close_context_menu(),
-                    ContextMenuActionState::Disabled => {}
-                }
+                state.handle_context_menu_leaf_action(action_id.as_str());
             }
         }
 
+        sync_sidebar_state(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
     });

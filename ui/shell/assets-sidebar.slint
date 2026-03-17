@@ -10,6 +10,8 @@ export struct ConsoleAssetItem {
     kind: string,
     label: string,
     selected: bool,
+    renaming: bool,
+    rename_text: string,
 }
 
 export component AssetsSidebar inherits Rectangle {
@@ -36,6 +38,9 @@ export component AssetsSidebar inherits Rectangle {
     callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
     callback asset-context-menu-requested(string, string, length, length);
+    callback asset-rename-text-changed(string, string);
+    callback asset-rename-commit-requested(string, string);
+    callback asset-rename-cancel-requested(string);
     private property <image> search-icon: @image-url("../../assets/icons/fluent/search-20-regular.svg");
     private property <image> tree-expand-icon: @image-url("../../assets/icons/fluent/arrow-expand-all-20-regular.svg");
     private property <image> tree-collapse-icon: @image-url("../../assets/icons/fluent/arrow-collapse-all-20-regular.svg");
@@ -164,7 +169,50 @@ export component AssetsSidebar inherits Rectangle {
                 }
             }
 
-            if root.active-panel == "console" : VerticalLayout {
+            if root.active-panel == "console" && root.console-asset-items.length == 0 : Rectangle {
+                vertical-stretch: 1;
+                background: transparent;
+
+                empty-state-context-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                            root.asset-context-menu-requested(
+                                "",
+                                "blank",
+                                self.mouse-x + self.absolute-position.x,
+                                self.mouse-y + self.absolute-position.y,
+                            );
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    x: 16px;
+                    y: 24px;
+                    width: parent.width - 32px;
+                    spacing: 6px;
+
+                    Text {
+                        width: parent.width;
+                        text: "No assets yet";
+                        color: ThemeTokens.text-primary;
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        width: parent.width;
+                        text: "Right-click or use Create to add a folder or SSH connection."; 
+                        color: ThemeTokens.text-primary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            if root.active-panel == "console" && root.console-asset-items.length > 0 : VerticalLayout {
                 padding: 16px;
                 spacing: 8px;
 
@@ -188,9 +236,45 @@ export component AssetsSidebar inherits Rectangle {
                     item-kind: item.kind;
                     label: item.label;
                     selected: item.selected;
+                    renaming: item.renaming;
+                    rename-text: item.rename_text;
 
                     context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
                         root.asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
+                    }
+
+                    rename-text-changed(item-id, text) => {
+                        root.asset-rename-text-changed(item-id, text);
+                    }
+
+                    rename-commit-requested(item-id, text) => {
+                        root.asset-rename-commit-requested(item-id, text);
+                    }
+
+                    rename-cancel-requested(item-id) => {
+                        root.asset-rename-cancel-requested(item-id);
+                    }
+                }
+
+                list-blank-fill := Rectangle {
+                    width: parent.width;
+                    vertical-stretch: 1;
+                    background: transparent;
+
+                    list-blank-fill-context-touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+
+                        pointer-event(event) => {
+                            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                                root.asset-context-menu-requested(
+                                    "",
+                                    "blank",
+                                    self.mouse-x + self.absolute-position.x,
+                                    self.mouse-y + self.absolute-position.y,
+                                );
+                            }
+                        }
                     }
                 }
             }

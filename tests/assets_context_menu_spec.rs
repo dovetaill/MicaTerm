@@ -6,7 +6,22 @@ use mica_term::shell::context_menu::{
 use mica_term::shell::view_model::ShellViewModel;
 
 #[test]
-fn resolver_returns_blank_area_groups_in_expected_order() {
+fn blank_area_scene_only_exposes_minimal_create_actions() {
+    let selection = SelectionContext {
+        selected_ids: Vec::new(),
+        clipboard_has_asset_payload: false,
+        target_mutable: true,
+        target_has_active_connection: false,
+    };
+
+    let roots = resolve_action_tree(ContextTargetKind::BlankArea, &selection);
+    let ids: Vec<_> = roots.iter().map(|node| node.id).collect();
+
+    assert_eq!(ids, vec!["new-folder", "new-ssh-connection"]);
+}
+
+#[test]
+fn blank_area_scene_omits_paste_and_other_legacy_actions() {
     let selection = SelectionContext {
         selected_ids: Vec::new(),
         clipboard_has_asset_payload: true,
@@ -19,7 +34,9 @@ fn resolver_returns_blank_area_groups_in_expected_order() {
         .map(|node| node.id)
         .collect();
 
-    assert_eq!(ids[..3], ["new-folder", "new-connection", "batch-open"]);
+    assert!(!ids.contains(&"new-connection"));
+    assert!(!ids.contains(&"paste-asset"));
+    assert!(!ids.contains(&"batch-open"));
 }
 
 #[test]
@@ -42,25 +59,7 @@ fn resolver_returns_ssh_actions_with_planned_proxy_tools() {
 }
 
 #[test]
-fn resolver_marks_paste_disabled_when_clipboard_is_empty() {
-    let selection = SelectionContext {
-        selected_ids: Vec::new(),
-        clipboard_has_asset_payload: false,
-        target_mutable: true,
-        target_has_active_connection: false,
-    };
-
-    let nodes = resolve_action_tree(ContextTargetKind::BlankArea, &selection);
-    let paste = nodes
-        .iter()
-        .find(|node| node.id == "paste-asset")
-        .expect("blank-area menu should expose paste");
-
-    assert_eq!(paste.state, ContextMenuActionState::Disabled);
-}
-
-#[test]
-fn visible_columns_projection_opens_new_connection_submenu() {
+fn blank_area_visible_columns_stay_flat_for_primary_leaf_selection() {
     let selection = SelectionContext {
         selected_ids: Vec::new(),
         clipboard_has_asset_payload: true,
@@ -71,21 +70,17 @@ fn visible_columns_projection_opens_new_connection_submenu() {
     let roots = resolve_action_tree(ContextTargetKind::BlankArea, &selection);
     let open_index = roots
         .iter()
-        .position(|node| node.id == "new-connection")
-        .expect("blank-area menu should expose the new connection submenu");
+        .position(|node| node.id == "new-folder")
+        .expect("blank-area menu should expose the new-folder row");
 
     let columns = visible_columns_for_path(&roots, &[open_index]);
-    let secondary_ids: Vec<_> = columns[1].iter().map(|node| node.id).collect();
-
-    assert_eq!(
-        secondary_ids,
-        vec!["ssh", "local-terminal", "serial", "telnet", "ssh-tunnel"]
-    );
+    assert_eq!(columns[0].len(), 2);
+    assert!(columns[1].is_empty());
     assert!(columns[2].is_empty());
 }
 
 #[test]
-fn submenu_projection_exposes_new_connection_children_in_second_column() {
+fn ssh_scene_exposes_flat_create_actions_without_connection_submenu() {
     let selection = SelectionContext {
         selected_ids: vec!["ssh-prod-01".into()],
         clipboard_has_asset_payload: true,
@@ -93,19 +88,14 @@ fn submenu_projection_exposes_new_connection_children_in_second_column() {
         target_has_active_connection: true,
     };
 
-    let roots = resolve_action_tree(ContextTargetKind::SshConnection, &selection);
-    let new_connection_index = roots
-        .iter()
-        .position(|node| node.id == "new-connection")
-        .expect("ssh menu should expose the new connection submenu");
+    let ids: Vec<_> = resolve_action_tree(ContextTargetKind::SshConnection, &selection)
+        .into_iter()
+        .map(|node| node.id)
+        .collect();
 
-    let columns = visible_columns_for_path(&roots, &[new_connection_index]);
-    let secondary_ids: Vec<_> = columns[1].iter().map(|node| node.id).collect();
-
-    assert_eq!(
-        secondary_ids,
-        vec!["ssh", "local-terminal", "serial", "telnet", "ssh-tunnel"]
-    );
+    assert!(ids.contains(&"new-folder"));
+    assert!(ids.contains(&"new-ssh-connection"));
+    assert!(!ids.contains(&"new-connection"));
 }
 
 #[test]
@@ -124,24 +114,6 @@ fn ssh_scene_marks_proxy_chrome_as_planned_but_clickable() {
         .expect("ssh menu should expose the proxy chrome action");
 
     assert_eq!(proxy.state, ContextMenuActionState::Planned);
-}
-
-#[test]
-fn blank_area_scene_disables_paste_when_clipboard_is_empty() {
-    let selection = SelectionContext {
-        selected_ids: Vec::new(),
-        clipboard_has_asset_payload: false,
-        target_mutable: true,
-        target_has_active_connection: false,
-    };
-
-    let roots = resolve_action_tree(ContextTargetKind::BlankArea, &selection);
-    let paste = roots
-        .iter()
-        .find(|node| node.id == "paste-asset")
-        .expect("blank-area menu should expose paste");
-
-    assert_eq!(paste.state, ContextMenuActionState::Disabled);
 }
 
 #[test]
@@ -212,29 +184,11 @@ fn esc_closes_context_menu() {
 }
 
 #[test]
-fn right_key_opens_submenu_and_left_key_returns_to_parent() {
+fn right_key_leaves_flat_blank_area_menu_on_primary_column() {
     let mut view_model = ShellViewModel::default();
     view_model.open_context_menu_for_target(ContextTargetKind::BlankArea, None, 24.0, 36.0);
 
     view_model.navigate_context_menu_right();
-
-    let roots = resolve_action_tree(
-        ContextTargetKind::BlankArea,
-        &SelectionContext {
-            selected_ids: view_model.selected_asset_ids.clone(),
-            clipboard_has_asset_payload: false,
-            target_mutable: true,
-            target_has_active_connection: true,
-        },
-    );
-    let new_connection_index = roots
-        .iter()
-        .position(|node| node.id == "new-connection")
-        .expect("blank-area menu should expose the new-connection submenu");
-
-    assert_eq!(view_model.context_menu_open_path, vec![new_connection_index]);
-
-    view_model.navigate_context_menu_left();
 
     assert!(view_model.context_menu_open_path.is_empty());
 }

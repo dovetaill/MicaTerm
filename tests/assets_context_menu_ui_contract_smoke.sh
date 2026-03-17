@@ -20,6 +20,16 @@ grep -F 'callback asset-context-menu-requested(string, string, length, length);'
 grep -F 'export component AssetsContextMenuRow inherits Rectangle' "$MENU_ROW" >/dev/null
 grep -F 'export component AssetsContextMenuColumn inherits Rectangle' "$MENU_COLUMN" >/dev/null
 grep -F 'export component AssetsContextMenuOverlay inherits Rectangle' "$MENU_OVERLAY" >/dev/null
+grep -F 'text: "No assets yet";' "$ASSETS" >/dev/null
+grep -F 'text: "Right-click or use Create to add a folder or SSH connection."; ' "$ASSETS" >/dev/null
+grep -F 'empty-state-context-touch := TouchArea {' "$ASSETS" >/dev/null
+grep -F 'list-blank-fill-context-touch := TouchArea {' "$ASSETS" >/dev/null
+grep -F 'renaming: bool,' "$ASSETS" >/dev/null
+grep -F 'rename_text: string,' "$ASSETS" >/dev/null
+grep -F 'callback asset-rename-text-changed(string, string);' "$APP_WINDOW" >/dev/null
+grep -F 'callback asset-rename-commit-requested(string, string);' "$APP_WINDOW" >/dev/null
+grep -F 'callback asset-rename-cancel-requested(string);' "$APP_WINDOW" >/dev/null
+grep -F 'rename-input := TextInput {' "$ROW" >/dev/null
 grep -F 'Text { text: "操作";' "$MENU_COLUMN" >/dev/null
 grep -F 'hover-open-delay := Timer {' "$MENU_OVERLAY" >/dev/null
 grep -F 'corridor-close-delay := Timer {' "$MENU_OVERLAY" >/dev/null

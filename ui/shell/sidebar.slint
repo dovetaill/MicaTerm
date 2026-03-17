@@ -51,6 +51,9 @@ export component Sidebar inherits Rectangle {
     callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
     callback asset-context-menu-requested(string, string, length, length);
+    callback asset-rename-text-changed(string, string);
+    callback asset-rename-commit-requested(string, string);
+    callback asset-rename-cancel-requested(string);
 
     width: 48px + (root.show-assets-sidebar ? 288px : 0px);
     background: transparent;
@@ -201,6 +204,18 @@ export component Sidebar inherits Rectangle {
 
             asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
                 root.asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
+            }
+
+            asset-rename-text-changed(item-id, text) => {
+                root.asset-rename-text-changed(item-id, text);
+            }
+
+            asset-rename-commit-requested(item-id, text) => {
+                root.asset-rename-commit-requested(item-id, text);
+            }
+
+            asset-rename-cancel-requested(item-id) => {
+                root.asset-rename-cancel-requested(item-id);
             }
         }
     }

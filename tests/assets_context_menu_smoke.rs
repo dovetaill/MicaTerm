@@ -39,21 +39,13 @@ fn right_click_request_opens_context_menu_and_sets_anchor() {
 }
 
 #[test]
-fn bootstrap_exposes_mock_console_assets() {
+fn bootstrap_starts_with_empty_console_assets() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
-    let items = app.get_console_asset_items();
-    let kinds: Vec<String> = (0..items.row_count())
-        .filter_map(|index| items.row_data(index))
-        .map(|item| item.kind.to_string())
-        .collect();
-
-    assert_eq!(items.row_count(), 3);
-    assert!(kinds.iter().any(|kind| kind == "ssh"));
-    assert!(kinds.iter().any(|kind| kind == "folder"));
+    assert_eq!(app.get_console_asset_items().row_count(), 0);
 }
 
 #[test]
@@ -76,41 +68,59 @@ fn right_click_request_populates_primary_menu_title() {
 }
 
 #[test]
-fn hovering_or_selecting_new_connection_populates_secondary_column() {
+fn blank_area_right_click_opens_minimal_primary_menu() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
-    app.invoke_asset_context_menu_requested(
-        "ssh-prod-01".into(),
-        "ssh".into(),
-        144.0,
-        188.0,
-    );
+    app.invoke_asset_context_menu_requested("".into(), "blank".into(), 96.0, 160.0);
 
-    let primary_items = app.get_assets_context_menu_primary_items();
-    let new_connection_index = (0..primary_items.row_count())
-        .find(|index| {
-            primary_items
-                .row_data(*index)
-                .map(|item| item.id.as_str() == "new-connection")
-                .unwrap_or(false)
-        })
-        .expect("ssh primary menu should expose the new-connection row");
-
-    app.invoke_assets_context_menu_row_hovered(0, new_connection_index as i32);
-
-    let secondary_items = app.get_assets_context_menu_secondary_items();
-    let secondary_ids: Vec<String> = (0..secondary_items.row_count())
-        .filter_map(|index| secondary_items.row_data(index))
+    let primary = app.get_assets_context_menu_primary_items();
+    let ids: Vec<String> = (0..primary.row_count())
+        .filter_map(|index| primary.row_data(index))
         .map(|item| item.id.to_string())
         .collect();
 
-    assert_eq!(app.get_assets_context_menu_secondary_title().as_str(), "New Connection");
+    assert_eq!(ids, vec!["new-folder", "new-ssh-connection"]);
+    assert_eq!(app.get_assets_context_menu_secondary_items().row_count(), 0);
+}
+
+#[test]
+fn create_menu_action_projects_placeholder_item_into_window_model() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+
+    let items = app.get_console_asset_items();
+    assert_eq!(items.row_count(), 1);
+    assert_eq!(items.row_data(0).unwrap().label.as_str(), "New Folder");
+}
+
+#[test]
+fn rename_commit_round_trips_through_window_callbacks() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    let asset_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string();
+
+    app.invoke_asset_rename_text_changed(asset_id.clone().into(), "Prod Bastion".into());
+    app.invoke_asset_rename_commit_requested(asset_id.into(), "Prod Bastion".into());
+
     assert_eq!(
-        secondary_ids,
-        vec!["ssh", "local-terminal", "serial", "telnet", "ssh-tunnel"]
+        app.get_console_asset_items().row_data(0).unwrap().label.as_str(),
+        "Prod Bastion"
     );
 }
 
