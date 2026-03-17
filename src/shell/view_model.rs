@@ -1,11 +1,15 @@
 //! Central shell state mirrored into Slint properties and mutated by UI callbacks.
 
 use crate::app::window_state::WindowPlacementKind;
-use crate::shell::assets::AssetViewMode;
+use crate::shell::assets::{AssetViewMode, MockConsoleAssetItem};
+use crate::shell::context_menu::{
+    ContextMenuActionNode, ContextMenuActionState, ContextTargetKind, SelectionContext,
+    resolve_action_tree,
+};
 use crate::shell::sidebar::SidebarDestination;
 use crate::theme::ThemeMode;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ShellViewModel {
     pub show_welcome: bool,
     pub show_right_panel: bool,
@@ -20,6 +24,17 @@ pub struct ShellViewModel {
     pub asset_search_query: String,
     pub asset_create_menu_open: bool,
     pub asset_tree_fully_expanded: bool,
+    pub console_asset_items: Vec<MockConsoleAssetItem>,
+    pub selected_asset_ids: Vec<String>,
+    pub context_menu_open: bool,
+    pub context_menu_target_kind: Option<ContextTargetKind>,
+    pub context_menu_anchor_x: f32,
+    pub context_menu_anchor_y: f32,
+    pub context_menu_origin_x: f32,
+    pub context_menu_origin_y: f32,
+    pub context_menu_child_flows_left: bool,
+    pub context_menu_open_path: Vec<usize>,
+    pub context_menu_feedback_text: String,
     window_placement: WindowPlacementKind,
 }
 
@@ -39,6 +54,17 @@ impl Default for ShellViewModel {
             asset_search_query: String::new(),
             asset_create_menu_open: false,
             asset_tree_fully_expanded: false,
+            console_asset_items: Vec::new(),
+            selected_asset_ids: Vec::new(),
+            context_menu_open: false,
+            context_menu_target_kind: None,
+            context_menu_anchor_x: 0.0,
+            context_menu_anchor_y: 0.0,
+            context_menu_origin_x: 0.0,
+            context_menu_origin_y: 0.0,
+            context_menu_child_flows_left: false,
+            context_menu_open_path: Vec::new(),
+            context_menu_feedback_text: String::new(),
             window_placement: WindowPlacementKind::Restored,
         }
     }
@@ -147,4 +173,150 @@ impl ShellViewModel {
     pub fn close_asset_create_menu(&mut self) {
         self.asset_create_menu_open = false;
     }
+
+    pub fn open_context_menu_for_target(
+        &mut self,
+        target_kind: ContextTargetKind,
+        target_id: Option<String>,
+        anchor_x: f32,
+        anchor_y: f32,
+    ) {
+        self.context_menu_open = true;
+        self.context_menu_target_kind = Some(target_kind);
+        self.context_menu_anchor_x = anchor_x;
+        self.context_menu_anchor_y = anchor_y;
+        self.context_menu_origin_x = anchor_x;
+        self.context_menu_origin_y = anchor_y;
+        self.context_menu_child_flows_left = false;
+        self.context_menu_open_path.clear();
+        self.context_menu_feedback_text.clear();
+        self.asset_create_menu_open = false;
+
+        match target_id {
+            Some(target_id) => {
+                if self.selected_asset_ids.is_empty()
+                    || !self.selected_asset_ids.iter().any(|id| id == &target_id)
+                {
+                    self.selected_asset_ids = vec![target_id];
+                }
+            }
+            None => self.selected_asset_ids.clear(),
+        }
+    }
+
+    pub fn close_context_menu(&mut self) {
+        self.context_menu_open = false;
+        self.context_menu_target_kind = None;
+        self.context_menu_origin_x = 0.0;
+        self.context_menu_origin_y = 0.0;
+        self.context_menu_child_flows_left = false;
+        self.context_menu_open_path.clear();
+    }
+
+    pub fn set_context_menu_open_path(&mut self, path: Vec<usize>) {
+        self.context_menu_open_path = path;
+    }
+
+    pub fn hover_context_menu_path(&mut self, path: Vec<usize>) {
+        self.context_menu_open_path = path;
+    }
+
+    pub fn handle_context_menu_escape(&mut self) {
+        self.close_context_menu();
+    }
+
+    pub fn navigate_context_menu_left(&mut self) {
+        self.context_menu_open_path.pop();
+    }
+
+    pub fn navigate_context_menu_right(&mut self) {
+        let roots = self.context_menu_roots();
+
+        if self.context_menu_open_path.is_empty() {
+            if let Some(index) = roots.iter().position(|node| !node.children.is_empty()) {
+                self.context_menu_open_path = vec![index];
+            }
+            return;
+        }
+
+        let Some(current) = action_node_at_path(&roots, &self.context_menu_open_path) else {
+            return;
+        };
+
+        if current.children.iter().any(|node| !node.children.is_empty()) {
+            self.context_menu_open_path.push(0);
+        }
+    }
+
+    pub fn invoke_current_context_menu_item(&mut self) {
+        let roots = self.context_menu_roots();
+        let Some(current) = current_action_node(&roots, &self.context_menu_open_path) else {
+            return;
+        };
+
+        match current.state {
+            ContextMenuActionState::Planned => {
+                self.set_context_menu_feedback(format!("{} is not wired yet.", current.title));
+            }
+            ContextMenuActionState::Enabled => self.close_context_menu(),
+            ContextMenuActionState::Disabled => {}
+        }
+    }
+
+    pub fn set_context_menu_feedback(&mut self, text: impl Into<String>) {
+        self.context_menu_feedback_text = text.into();
+    }
+
+    pub fn set_context_menu_placement(
+        &mut self,
+        origin_x: f32,
+        origin_y: f32,
+        child_flows_left: bool,
+    ) {
+        self.context_menu_origin_x = origin_x;
+        self.context_menu_origin_y = origin_y;
+        self.context_menu_child_flows_left = child_flows_left;
+    }
+
+    fn context_menu_roots(&self) -> Vec<ContextMenuActionNode> {
+        let Some(target_kind) = self.context_menu_target_kind else {
+            return Vec::new();
+        };
+
+        resolve_action_tree(target_kind, &self.context_menu_selection())
+    }
+
+    fn context_menu_selection(&self) -> SelectionContext {
+        SelectionContext {
+            selected_ids: self.selected_asset_ids.clone(),
+            clipboard_has_asset_payload: false,
+            target_mutable: true,
+            target_has_active_connection: true,
+        }
+    }
+}
+
+fn current_action_node<'a>(
+    roots: &'a [ContextMenuActionNode],
+    open_path: &[usize],
+) -> Option<&'a ContextMenuActionNode> {
+    if open_path.is_empty() {
+        roots.first()
+    } else {
+        action_node_at_path(roots, open_path)
+    }
+}
+
+fn action_node_at_path<'a>(
+    roots: &'a [ContextMenuActionNode],
+    open_path: &[usize],
+) -> Option<&'a ContextMenuActionNode> {
+    let (first, rest) = open_path.split_first()?;
+    let mut current = roots.get(*first)?;
+
+    for index in rest {
+        current = current.children.get(*index)?;
+    }
+
+    Some(current)
 }

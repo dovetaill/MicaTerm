@@ -1,0 +1,48 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component AssetNodeRow inherits Rectangle {
+    in property <string> item-id;
+    in property <string> item-kind;
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked(string);
+    callback context-menu-requested(string, string, length, length);
+
+    height: 32px;
+    border-radius: 6px;
+    background: touch.pressed
+        ? ThemeTokens.control-active-surface
+        : (touch.has-hover || root.selected)
+            ? ThemeTokens.control-hover-surface
+            : transparent;
+
+    Text {
+        x: 12px;
+        y: 0px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                root.context-menu-requested(
+                    root.item-id,
+                    root.item-kind,
+                    self.mouse-x + self.absolute-position.x,
+                    self.mouse-y + self.absolute-position.y,
+                );
+            }
+        }
+
+        clicked => {
+            root.clicked(root.item-id);
+        }
+    }
+}

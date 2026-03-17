@@ -1,0 +1,56 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+import { AssetsContextMenuRow } from "assets-context-menu-row.slint";
+
+export struct AssetsContextMenuItem {
+    id: string,
+    title: string,
+    enabled: bool,
+    planned: bool,
+    has_children: bool,
+    divider_before: bool,
+}
+
+export component AssetsContextMenuColumn inherits Rectangle {
+    in property <string> title: "操作";
+    in property <[AssetsContextMenuItem]> items: [];
+    callback item-invoked(string);
+    callback item-hovered(int);
+
+    width: 224px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: ThemeTokens.divider-strong;
+    background: ThemeTokens.inspector-surface;
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 4px;
+
+        if root.title == "操作" : Text { text: "操作"; color: ThemeTokens.text-primary; }
+        if root.title != "操作" : Text { text: root.title; color: ThemeTokens.text-primary; }
+
+        Rectangle {
+            width: parent.width;
+            height: 1px;
+            background: ThemeTokens.divider-subtle;
+        }
+
+        for item[index] in root.items : AssetsContextMenuRow {
+            width: parent.width;
+            action-id: item.id;
+            label: item.title;
+            enabled: item.enabled;
+            planned: item.planned;
+            has-children: item.has_children;
+            divider-before: item.divider_before;
+
+            invoked(action-id) => {
+                root.item-invoked(action-id);
+            }
+
+            hovered => {
+                root.item-hovered(index);
+            }
+        }
+    }
+}

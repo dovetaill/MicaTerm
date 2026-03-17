@@ -1,0 +1,64 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component AssetsContextMenuRow inherits Rectangle {
+    in property <string> action-id;
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> planned: false;
+    in property <bool> has-children: false;
+    in property <bool> divider-before: false;
+    out property <bool> has-hover: touch.has-hover;
+    callback invoked(string);
+    callback hovered();
+
+    height: 32px;
+    background: touch.pressed
+        ? ThemeTokens.control-active-surface
+        : touch.has-hover
+            ? ThemeTokens.control-hover-surface
+            : transparent;
+
+    if root.divider-before : Rectangle {
+        x: 12px;
+        y: 0px;
+        width: parent.width - 24px;
+        height: 1px;
+        background: ThemeTokens.divider-subtle;
+    }
+
+    label-text := Text {
+        x: 12px;
+        y: 0px;
+        width: parent.width - 36px;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        opacity: root.enabled ? 1.0 : 0.54;
+        vertical-alignment: center;
+    }
+
+    if root.has-children : Text {
+        x: parent.width - self.width - 12px;
+        y: 0px;
+        width: 8px;
+        height: parent.height;
+        text: "›";
+        color: ThemeTokens.text-primary;
+        opacity: 0.68;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled || root.planned;
+
+        clicked => {
+            root.invoked(root.action-id);
+        }
+    }
+
+    changed has-hover => {
+        if self.has-hover {
+            root.hovered();
+        }
+    }
+}
