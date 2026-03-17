@@ -37,3 +37,5 @@ grep -F 'folder-open-20-regular.svg' "$BUTTON" >/dev/null
 grep -F 'window-console-20-regular.svg' "$BUTTON" >/dev/null
 grep -F 'document-code-16-regular.svg' "$BUTTON" >/dev/null
 grep -F 'key-multiple-20-regular.svg' "$BUTTON" >/dev/null
+grep -F 'ThemeTokens.control-hover-surface' "$BUTTON" >/dev/null
+grep -F 'ThemeTokens.control-active-surface' "$BUTTON" >/dev/null

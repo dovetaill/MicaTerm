@@ -106,3 +106,11 @@ if grep -F 'mouse-cursor: MouseCursor.grab;' "$TITLEBAR" >/dev/null; then
     echo "titlebar drag zone should keep default cursor" >&2
     exit 1
 fi
+
+grep -F 'ThemeTokens.control-hover-surface' "$ROOT_DIR/ui/components/titlebar-icon-button.slint" >/dev/null
+grep -F 'ThemeTokens.control-active-surface' "$ROOT_DIR/ui/components/titlebar-icon-button.slint" >/dev/null
+grep -F 'ThemeTokens.control-hover-surface' "$ROOT_DIR/ui/components/window-control-button.slint" >/dev/null
+grep -F 'ThemeTokens.control-active-surface' "$ROOT_DIR/ui/components/window-control-button.slint" >/dev/null
+grep -F 'background: ThemeTokens.inspector-surface;' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
+grep -F 'background: ThemeTokens.inspector-surface;' "$ROOT_DIR/ui/components/titlebar-tooltip.slint" >/dev/null
+grep -F 'border-color: ThemeTokens.divider-strong;' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null

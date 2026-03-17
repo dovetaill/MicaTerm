@@ -132,3 +132,12 @@ grep -F 'new-folder-icon: @image-url("../../assets/icons/fluent/folder-20-regula
 grep -F 'new-ssh-connection-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg")' "$MENU" >/dev/null
 grep -F 'icon-source: root.new-folder-icon;' "$MENU" >/dev/null
 grep -F 'icon-source: root.new-ssh-connection-icon;' "$MENU" >/dev/null
+
+grep -F 'ThemeTokens.control-hover-surface' "$BUTTON" >/dev/null
+grep -F 'ThemeTokens.control-active-surface' "$BUTTON" >/dev/null
+grep -F 'ThemeTokens.control-hover-surface' "$ROW" >/dev/null
+grep -F 'ThemeTokens.control-active-surface' "$ROW" >/dev/null
+grep -F 'background: ThemeTokens.inspector-surface;' "$MENU" >/dev/null
+grep -F 'background: ThemeTokens.inspector-surface;' "$SEARCH" >/dev/null
+grep -F 'border-color: ThemeTokens.divider-strong;' "$MENU" >/dev/null
+grep -F 'border-color: ThemeTokens.divider-subtle;' "$SEARCH" >/dev/null

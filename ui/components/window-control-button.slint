@@ -15,9 +15,9 @@ export component WindowControlButton inherits Rectangle {
     width: 46px;
     height: 36px;
     background: touch.pressed
-        ? (root.danger ? #9f1239 : ThemeTokens.panel-tint)
+        ? (root.danger ? #9f1239 : ThemeTokens.control-active-surface)
         : touch.has-hover
-            ? (root.danger ? #be123c : ThemeTokens.shell-surface)
+            ? (root.danger ? #be123c : ThemeTokens.control-hover-surface)
             : transparent;
 
     if (root.icon-source.width > 0 && root.icon-source.height > 0) : Image {

@@ -19,13 +19,13 @@ export component SidebarToolbarIconButton inherits Rectangle {
     height: 28px;
     border-radius: 6px;
     border-width: root.active ? 1px : 0px;
-    border-color: ThemeTokens.shell-stroke;
+    border-color: ThemeTokens.divider-subtle;
     background: !root.enabled
         ? transparent
         : touch.pressed
-            ? ThemeTokens.panel-tint
+            ? ThemeTokens.control-active-surface
             : (touch.has-hover || root.active)
-                ? ThemeTokens.command-tint
+                ? ThemeTokens.control-hover-surface
                 : transparent;
 
     if (root.displayed-icon.width > 0 && root.displayed-icon.height > 0) : Image {
