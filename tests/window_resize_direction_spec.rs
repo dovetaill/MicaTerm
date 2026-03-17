@@ -1,3 +1,5 @@
+//! Parsing coverage for resize direction identifiers coming from Slint callbacks.
+
 use mica_term::app::windowing::{WindowResizeDirection, parse_resize_direction};
 
 #[test]

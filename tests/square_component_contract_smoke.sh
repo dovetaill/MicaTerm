@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Preserves the intentionally square shell component styling contract.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"

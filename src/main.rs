@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Binary entrypoint that selects the runtime profile, initializes logging, and launches the UI.
+
 use mica_term::app::runtime_profile::AppRuntimeProfile;
 
 fn select_runtime_profile() -> AppRuntimeProfile {
@@ -11,6 +13,8 @@ fn apply_renderer_selector(_profile: AppRuntimeProfile) -> anyhow::Result<()> {
 
     #[cfg(target_os = "windows")]
     let wgpu_configuration = {
+        // Prefer DX12 on Windows because the shell is validated against that backend in this
+        // repository's build and smoke-test matrix.
         let mut settings = slint::wgpu_28::WGPUSettings::default();
         settings.backends = slint::wgpu_28::wgpu::Backends::DX12;
         WGPUConfiguration::Automatic(settings)
@@ -36,6 +40,8 @@ fn apply_renderer_selector(_profile: AppRuntimeProfile) -> anyhow::Result<()> {
 
 fn main() -> anyhow::Result<()> {
     let profile = select_runtime_profile();
+    // Logging starts before UI initialization so startup failures and panic hooks always have a
+    // stable place to write diagnostics.
     let logging = match mica_term::app::logging::runtime::try_init_global_logging() {
         Ok(runtime) => {
             if let Err(err) =
@@ -59,6 +65,8 @@ fn main() -> anyhow::Result<()> {
     apply_renderer_selector(profile)?;
 
     if let Err(err) = mica_term::app::bootstrap::run_with_profile(profile) {
+        // Mirror fatal startup errors to stderr and the crash directory so failures remain visible
+        // in both interactive and packaged launches.
         if let Some(message) =
             mica_term::app::bootstrap::startup_failure_message(profile, &err.to_string())
         {

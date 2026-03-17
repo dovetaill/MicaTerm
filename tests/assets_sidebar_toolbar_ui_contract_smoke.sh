@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Guards the assets sidebar UI contract that other layout tests depend on.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

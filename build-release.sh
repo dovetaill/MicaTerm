@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Aggregates release builds across supported desktop targets and reports failures consistently.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

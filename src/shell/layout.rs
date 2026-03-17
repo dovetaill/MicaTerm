@@ -1,3 +1,5 @@
+//! Responsive layout policy for deciding when auxiliary shell panels may remain visible.
+
 use crate::shell::metrics::ShellMetrics;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,3 +1,5 @@
+//! Stateful shell view-model coverage for toolbar, sidebar, and window toggles.
+
 use mica_term::app::window_state::WindowPlacementKind;
 use mica_term::shell::assets::AssetViewMode;
 use mica_term::shell::sidebar::SidebarDestination;

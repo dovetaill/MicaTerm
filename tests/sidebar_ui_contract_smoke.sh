@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Guards the sidebar and assets panel UI contract used by smoke tests.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

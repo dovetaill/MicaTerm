@@ -1,3 +1,5 @@
+//! Native window appearance request coverage.
+
 use mica_term::app::window_effects::{
     BackdropApplyStatus, BackdropPreference, NativeWindowCornerPreference, NativeWindowTheme,
     WindowAppearanceSyncReport, build_native_window_appearance_request,

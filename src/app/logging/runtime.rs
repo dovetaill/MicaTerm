@@ -1,3 +1,5 @@
+//! Creates the tracing runtime, log writer guard, and startup metadata emission helpers.
+
 use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;

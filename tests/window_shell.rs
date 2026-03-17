@@ -1,3 +1,5 @@
+//! Cross-module shell/window contract tests for appearance and command specifications.
+
 use mica_term::app::window_effects::{BackdropPreference, build_native_window_appearance_request};
 use mica_term::app::windowing::{
     MaterialKind, next_maximize_state, window_appearance, window_command_spec,

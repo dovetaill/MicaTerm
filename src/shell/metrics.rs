@@ -1,3 +1,5 @@
+//! Shared geometry constants that keep Rust layout rules and Slint sizing aligned.
+
 pub struct ShellMetrics;
 
 impl ShellMetrics {

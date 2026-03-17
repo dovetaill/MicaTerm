@@ -1,3 +1,5 @@
+//! Environment-driven logging configuration shared by the binary and test harnesses.
+
 use std::env;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

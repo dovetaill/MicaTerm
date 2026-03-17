@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Thin wrapper around the Windows x64 build variants used by CI and manual packaging.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

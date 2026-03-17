@@ -1,3 +1,5 @@
+//! Shell state, layout, and navigation modules for the desktop workspace surface.
+
 pub mod assets;
 pub mod layout;
 pub mod metrics;

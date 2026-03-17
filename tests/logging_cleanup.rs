@@ -1,3 +1,5 @@
+//! Retention-policy coverage for log cleanup behavior.
+
 use std::fs;
 use std::time::{Duration, SystemTime};
 

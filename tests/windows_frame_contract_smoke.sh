@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Guards Windows-specific frame interop hooks and exported maximize geometry.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

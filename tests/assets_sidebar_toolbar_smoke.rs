@@ -1,3 +1,5 @@
+//! Smoke coverage for the assets sidebar toolbar defaults exposed during bootstrap.
+
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store;
 

@@ -1,3 +1,5 @@
+// Root desktop window that composes chrome, sidebars, workspace content, overlays, and resize grips.
+
 import { AssetsCreateMenu } from "components/assets-create-menu.slint";
 import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
@@ -93,6 +95,7 @@ export component AppWindow inherits Window {
         root.shell-body-height-cache = max(0px, root.height - titlebar.height);
     }
 
+    // Keep the exported layout measurements synchronized whenever the outer window changes size.
     changed width => {
         root.sync-shell-body-height();
         root.shell-layout-invalidated(self.width, self.height);
@@ -109,6 +112,8 @@ export component AppWindow inherits Window {
         }
     }
 
+    // The shell frame owns the full frameless surface so Rust can query a single set of geometry
+    // exports for titlebar hit-testing and responsive panel layout.
     shell-frame := Rectangle {
         width: root.width;
         height: root.height;

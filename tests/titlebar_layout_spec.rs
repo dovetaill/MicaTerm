@@ -1,3 +1,5 @@
+//! Titlebar metric contracts that keep Slint geometry and Rust layout math aligned.
+
 use mica_term::shell::metrics::ShellMetrics;
 
 #[test]

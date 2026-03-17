@@ -1,3 +1,5 @@
+//! Smoke coverage for titlebar bindings, theme sync, and auxiliary actions.
+
 use std::cell::RefCell;
 use std::fs;
 use std::rc::Rc;

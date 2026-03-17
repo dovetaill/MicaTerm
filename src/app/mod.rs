@@ -1,3 +1,5 @@
+//! Application-layer orchestration for startup, native window integration, and persisted settings.
+
 pub mod bootstrap;
 pub mod logging;
 pub mod runtime_profile;

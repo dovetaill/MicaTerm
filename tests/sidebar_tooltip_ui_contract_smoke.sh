@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Verifies sidebar tooltip plumbing stays wired across button and shell components.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

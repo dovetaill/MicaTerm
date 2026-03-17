@@ -1,3 +1,5 @@
+//! Bridges shell theme state into native window backdrop, corner, and activation preferences.
+
 use std::rc::Rc;
 
 use crate::AppWindow;

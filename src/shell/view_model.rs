@@ -1,3 +1,5 @@
+//! Central shell state mirrored into Slint properties and mutated by UI callbacks.
+
 use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::AssetViewMode;
 use crate::shell::sidebar::SidebarDestination;
@@ -118,6 +120,8 @@ impl ShellViewModel {
     }
 
     pub fn collapse_asset_search_if_empty(&mut self) {
+        // Keep the inline search visible while text is present so dismiss taps do not hide an
+        // active filter unexpectedly.
         if self.asset_search_query.is_empty() {
             self.asset_search_expanded = false;
         }
@@ -133,6 +137,8 @@ impl ShellViewModel {
         if self.asset_create_menu_open {
             self.asset_create_menu_open = false;
         } else {
+            // The create menu and inline search share the same narrow header row, so opening one
+            // closes the other to avoid overlapping interactive states.
             self.asset_create_menu_open = true;
             self.asset_search_expanded = false;
         }

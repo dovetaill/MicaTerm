@@ -1,3 +1,5 @@
+//! Wires the Slint window to runtime state, persisted preferences, and native window hooks during startup.
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -78,6 +80,8 @@ fn bind_windows_window_state_tracking(
     window
         .window()
         .on_winit_window_event(move |_slint_window, event| {
+            // Win32 snap/maximize state can drift from declarative UI state, so re-sample it when
+            // the platform reports geometry-affecting events.
             if matches!(
                 event,
                 winit::event::WindowEvent::Moved(_)
@@ -175,6 +179,8 @@ fn sync_shell_layout(
     logical_width: u32,
     logical_height: u32,
 ) {
+    // Rust owns the responsive policy so Slint can consume stable booleans instead of repeating
+    // width-threshold logic in multiple components.
     let layout = resolve_shell_layout(ShellLayoutInput {
         window_width: logical_width.max(ShellMetrics::WINDOW_MIN_WIDTH),
         request_assets_sidebar: state.requested_assets_sidebar(),
@@ -200,6 +206,8 @@ const WINDOW_FRAME_RESERVED_RESIZE_BAND: i32 = 10;
 fn install_windows_frame_adapter(window: &AppWindow) {
     use slint::winit_030::WinitWindowAccessor;
 
+    // The native subclass needs the live maximize-button geometry from Slint so Windows snap
+    // layouts still target the custom titlebar button.
     let placement = query_true_window_placement_from_app(window);
     let maximize_button = CaptionButtonGeometry {
         x: window.get_layout_titlebar_maximize_button_x() as i32,

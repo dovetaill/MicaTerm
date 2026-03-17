@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Validates the desktop packaging wrapper interface and required commands.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

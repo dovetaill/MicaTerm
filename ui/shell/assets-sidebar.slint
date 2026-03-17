@@ -1,3 +1,5 @@
+// Secondary sidebar hosting asset navigation, inline search, and creation affordances.
+
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AssetsSearchPopover } from "../components/assets-search-popover.slint";
 import { SidebarToolbarIconButton } from "../components/sidebar-toolbar-icon-button.slint";
@@ -50,6 +52,8 @@ export component AssetsSidebar inherits Rectangle {
                 height: parent.height;
                 enabled: root.asset-search-expanded && root.assets-search-query == "";
 
+                // Only collapse an empty search session; typed filters should remain visible until
+                // the user explicitly clears or closes them.
                 clicked => {
                     root.collapse-assets-search-requested();
                 }
@@ -143,6 +147,8 @@ export component AssetsSidebar inherits Rectangle {
                 height: parent.height;
                 enabled: root.asset-search-expanded && root.assets-search-query == "";
 
+                // Mirror the header behavior so clicks in empty panel space can dismiss the search
+                // affordance without stealing focus from populated filters.
                 clicked => {
                     root.collapse-assets-search-requested();
                 }

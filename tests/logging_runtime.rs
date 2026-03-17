@@ -1,3 +1,5 @@
+//! Tracing runtime coverage for log writer setup and metadata emission.
+
 use std::fs;
 
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};

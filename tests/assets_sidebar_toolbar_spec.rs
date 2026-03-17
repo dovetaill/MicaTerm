@@ -1,3 +1,5 @@
+//! View-model contract tests for asset toolbar toggles and default modes.
+
 use mica_term::shell::assets::AssetViewMode;
 use mica_term::shell::view_model::ShellViewModel;
 

@@ -1,3 +1,5 @@
+//! Resolves the effective logging directories across portable, override, and standard app roots.
+
 use std::fs;
 use std::path::PathBuf;
 

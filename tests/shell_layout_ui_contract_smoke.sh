@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Verifies the exported Slint layout hooks used by Rust shell layout logic.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Ensures required Fluent titlebar icons remain present in the asset bundle.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

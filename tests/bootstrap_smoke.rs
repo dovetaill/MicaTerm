@@ -1,3 +1,5 @@
+//! Basic bootstrap helper coverage for the binary entrypoint.
+
 use mica_term::app::bootstrap::{app_title, default_window_size};
 use mica_term::shell::metrics::ShellMetrics;
 

@@ -1,3 +1,5 @@
+//! Sidebar destination identifiers and helpers exposed to the Slint navigation list.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarDestination {
     Console,

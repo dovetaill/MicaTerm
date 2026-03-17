@@ -1,3 +1,5 @@
+//! Retention policy helpers that keep log and crash directories bounded over time.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};

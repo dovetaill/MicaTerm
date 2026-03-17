@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Verifies the documented APT inventory stays aligned with the installer script.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

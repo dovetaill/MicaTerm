@@ -1,3 +1,5 @@
+//! Panic hook installation and crash-record formatting for post-mortem diagnostics.
+
 use std::backtrace::Backtrace;
 use std::fs;
 use std::path::{Path, PathBuf};

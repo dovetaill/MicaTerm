@@ -1,3 +1,5 @@
+//! End-to-end smoke coverage for sidebar navigation bindings in the Slint window.
+
 use std::fs;
 
 use mica_term::AppWindow;

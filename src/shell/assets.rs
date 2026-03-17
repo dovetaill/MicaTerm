@@ -1,3 +1,5 @@
+//! Asset sidebar view-mode identifiers shared between Rust state and Slint properties.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssetViewMode {
     Tree,

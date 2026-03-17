@@ -1,3 +1,5 @@
+//! Path resolution coverage for portable, override, and standard logging roots.
+
 use std::fs;
 
 use mica_term::app::logging::paths::{LoggingPathInputs, LoggingRootSource, resolve_logging_paths};

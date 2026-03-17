@@ -1,3 +1,5 @@
+//! Persistence coverage for saved UI preferences.
+
 use mica_term::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use mica_term::theme::ThemeMode;
 

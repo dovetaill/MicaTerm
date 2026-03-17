@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Confirms the project remains locked to the femtovg-wgpu renderer stack.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

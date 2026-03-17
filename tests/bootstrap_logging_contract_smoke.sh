@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Confirms the binary entrypoint still initializes logging before startup.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

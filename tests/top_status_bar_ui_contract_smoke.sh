@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Verifies titlebar UI contract details expected by Rust window integration.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

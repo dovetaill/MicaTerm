@@ -1,3 +1,5 @@
+//! Windows frame helper coverage for hit-testing and reserved resize bands.
+
 use mica_term::app::window_state::WindowPlacementKind;
 use mica_term::app::windows_frame::{
     CaptionButtonGeometry, point_hits_outer_resize_band, uses_native_maximize_button_hit_test,

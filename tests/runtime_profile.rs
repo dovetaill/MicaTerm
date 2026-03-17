@@ -1,3 +1,5 @@
+//! Runtime profile coverage for build flavor and renderer selection invariants.
+
 use std::fs;
 
 use mica_term::app::runtime_profile::{AppBuildFlavor, AppRuntimeProfile, RendererMode};

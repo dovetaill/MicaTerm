@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Exercises icon export script inputs and generated asset expectations.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -1,3 +1,5 @@
+//! Supported theme modes for the shell and native window appearance synchronization.
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

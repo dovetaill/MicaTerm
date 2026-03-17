@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Guards frameless window chrome invariants across Rust and Slint.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"

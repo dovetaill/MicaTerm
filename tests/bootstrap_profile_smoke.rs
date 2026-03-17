@@ -1,3 +1,5 @@
+//! Smoke coverage for the selected runtime profile contract.
+
 use mica_term::app::runtime_profile::AppRuntimeProfile;
 
 #[test]

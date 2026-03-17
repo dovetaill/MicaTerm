@@ -1,3 +1,5 @@
+//! Sidebar destination ordering and activation contracts.
+
 use mica_term::shell::sidebar::{SidebarDestination, sidebar_destinations};
 use mica_term::shell::view_model::ShellViewModel;
 

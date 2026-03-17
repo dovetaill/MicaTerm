@@ -1,3 +1,5 @@
+// Custom frameless titlebar that owns drag affordances, tooltips, and window controls.
+
 import { ThemeTokens } from "../theme/tokens.slint";
 import { TitlebarIconButton } from "../components/titlebar-icon-button.slint";
 import { TitlebarMenu } from "../components/titlebar-menu.slint";
@@ -60,6 +62,8 @@ export component Titlebar inherits Rectangle {
     border-width: 0px;
     border-color: ThemeTokens.shell-stroke;
 
+    // Slint popups need explicit open/close orchestration so their visibility stays consistent
+    // with the Rust-side view-model toggle state.
     changed show-global-menu => {
         close-tooltip("");
         if root.show-global-menu {
@@ -73,6 +77,8 @@ export component Titlebar inherits Rectangle {
         root.tooltip-anchor-x-value = anchor-x;
         root.tooltip-anchor-y-value = anchor-y;
 
+        // Reopening the same tooltip should feel instant, while switching sources restarts the
+        // delay so hover transitions do not flash between neighboring controls.
         if root.tooltip-source-id-value == source-id && root.tooltip-text-value == text {
             tooltip-close-delay.stop();
             root.tooltip-close-source-id-value = "";

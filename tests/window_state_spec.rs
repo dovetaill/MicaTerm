@@ -1,3 +1,5 @@
+//! Window placement classification coverage for restored, maximized, and snapped states.
+
 use mica_term::app::window_state::{Rect, WindowPlacementKind, classify_window_placement};
 
 #[test]

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Packages the current target binary into dist/ with icon and archive metadata.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -178,6 +180,8 @@ cargo build "${CARGO_BUILD_ARGS[@]}"
 [[ -f "$BIN_PATH" ]] || fail "expected binary not found: $BIN_PATH"
 
 echo "==> Staging package in $STAGE_DIR"
+# Stage a minimal distributable layout first, then archive that directory so downstream release
+# tooling can inspect the unpacked tree or the final artifact interchangeably.
 mkdir -p "$DIST_DIR"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"

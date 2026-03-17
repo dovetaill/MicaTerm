@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Verifies theme propagation stays aligned between state, native effects, and UI.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"

@@ -1,3 +1,5 @@
+//! Windows-specific non-client frame interop for hit-testing, snap layouts, and placement queries.
+
 use crate::app::window_state::WindowPlacementKind;
 #[cfg(target_os = "windows")]
 use crate::app::window_state::{Rect, classify_window_placement};
@@ -103,6 +105,8 @@ unsafe extern "system" fn window_frame_subclass_proc(
         GetPropW, GetWindowRect, HTCLIENT, HTMAXBUTTON, RemovePropW, WM_NCDESTROY, WM_NCHITTEST,
     };
 
+    // Intercept non-client hit testing so the custom maximize button still triggers Windows-native
+    // maximize behavior and snap layouts.
     if umsg == WM_NCHITTEST {
         let result = unsafe { DefSubclassProc(hwnd, umsg, wparam, lparam) };
         if result != HTCLIENT as LRESULT {
@@ -252,6 +256,8 @@ pub fn install_window_frame_adapter(
     };
 
     unsafe {
+        // Reuse the same property-backed state across updates so geometry changes do not require
+        // re-registering the subclass each time the titlebar layout shifts.
         let property_name = window_frame_property_name();
         let frame_state = GetPropW(hwnd, property_name.as_ptr()) as *mut WindowFrameState;
         let created_geometry = if let Some(frame_state) = frame_state.as_mut() {

@@ -1,3 +1,5 @@
+//! Persists the small set of user-facing window and theme preferences between launches.
+
 use std::fs;
 use std::path::PathBuf;
 

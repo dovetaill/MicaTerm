@@ -1,3 +1,5 @@
+//! Layout policy coverage for sidebar and right-panel visibility decisions.
+
 use mica_term::shell::layout::{ShellLayoutInput, resolve_shell_layout};
 use mica_term::shell::metrics::ShellMetrics;
 

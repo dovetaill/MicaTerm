@@ -1,3 +1,5 @@
+//! Cross-platform window helpers for resize commands, appearance defaults, and shell metrics.
+
 use anyhow::{Result, anyhow};
 use slint::{ComponentHandle, PhysicalSize, Window};
 

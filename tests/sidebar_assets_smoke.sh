@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Ensures sidebar asset files needed by the current shell exist.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Verifies resize-drag callbacks remain wired between Slint and Rust.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

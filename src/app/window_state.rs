@@ -1,3 +1,5 @@
+//! Geometry primitives and placement classification used by the custom window chrome.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowPlacementKind {
     Restored,

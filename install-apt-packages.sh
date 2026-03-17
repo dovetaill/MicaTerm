@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Installs the native toolchain packages expected by Linux and Windows cross-build workflows.
+
 set -euo pipefail
 
 APT_PACKAGES=(
@@ -11,6 +13,8 @@ APT_PACKAGES=(
 )
 
 describe_package() {
+  # Keep the human-readable inventory next to the machine-readable package list so contributors can
+  # understand why each dependency exists before installing the full build toolchain.
   case "$1" in
     gcc-mingw-w64-x86-64-posix)
       echo "provides x86_64-w64-mingw32-gcc for Windows GNU builds"

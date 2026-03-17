@@ -1,3 +1,5 @@
+//! Window geometry coverage for titlebar and shell body layout exports.
+
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store;
 use mica_term::shell::metrics::ShellMetrics;

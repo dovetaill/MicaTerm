@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Renders SVG application icons into PNG and ICO assets consumed by packaging.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,6 +34,7 @@ require_cmd magick
 
 mkdir -p "$PNG_DIR" "$WINDOWS_DIR"
 
+# Small taskbar sizes use the simplified taskbar mark, while larger sizes use the app artwork.
 for size in 16 20 24 32 40 48 64 128 256; do
   input_svg="$APP_SVG"
   if [[ "$size" -le 32 ]]; then

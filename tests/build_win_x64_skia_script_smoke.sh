@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Preserves the legacy Skia wrapper contract until it is fully retired.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

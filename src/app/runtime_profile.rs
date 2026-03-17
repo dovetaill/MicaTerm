@@ -1,3 +1,5 @@
+//! Runtime profile descriptors for the supported build flavor and renderer stack.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppBuildFlavor {
     Mainline,

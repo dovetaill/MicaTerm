@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Verifies drag-to-restore and maximize interactions remain exposed in both layers.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

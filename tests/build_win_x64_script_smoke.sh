@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Confirms the Windows x64 wrapper exposes the current supported entrypoint.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

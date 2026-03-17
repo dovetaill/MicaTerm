@@ -1,3 +1,5 @@
+//! Panic-hook coverage for crash record creation and startup failure messaging.
+
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;

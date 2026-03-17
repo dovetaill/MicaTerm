@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Confirms Windows icon resource integration remains configured.
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
