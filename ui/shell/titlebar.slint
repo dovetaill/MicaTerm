@@ -57,10 +57,10 @@ export component Titlebar inherits Rectangle {
     callback close-requested;
 
     height: 48px;
-    background: ThemeTokens.command-tint;
+    background: ThemeTokens.titlebar-surface;
     border-radius: 0px;
     border-width: 0px;
-    border-color: ThemeTokens.shell-stroke;
+    border-color: ThemeTokens.divider-subtle;
 
     // Slint popups need explicit open/close orchestration so their visibility stays consistent
     // with the Rust-side view-model toggle state.
@@ -238,7 +238,7 @@ export component Titlebar inherits Rectangle {
                 width: 1px;
                 height: 20px;
                 border-radius: 0px;
-                background: ThemeTokens.shell-stroke;
+                background: ThemeTokens.divider-subtle;
             }
 
             pin-button := TitlebarIconButton {

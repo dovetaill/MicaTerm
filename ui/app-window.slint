@@ -119,8 +119,8 @@ export component AppWindow inherits Window {
         height: root.height;
         border-radius: 0px;
         border-width: 1px;
-        border-color: ThemeTokens.shell-stroke;
-        background: ThemeTokens.shell-surface;
+        border-color: ThemeTokens.divider-subtle;
+        background: ThemeTokens.window-surface;
 
         chrome-host := Rectangle {
             width: parent.width;
@@ -250,7 +250,7 @@ export component AppWindow inherits Window {
 
                     main-workspace := Rectangle {
                         horizontal-stretch: 1;
-                        background: ThemeTokens.terminal-surface;
+                        background: ThemeTokens.workspace-surface;
 
                         VerticalLayout {
                             spacing: 0px;

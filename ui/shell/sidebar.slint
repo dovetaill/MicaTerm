@@ -94,9 +94,9 @@ export component Sidebar inherits Rectangle {
 
         activity-bar := Rectangle {
             width: 48px;
-            background: ThemeTokens.shell-surface;
+            background: ThemeTokens.activity-surface;
             border-width: 1px;
-            border-color: ThemeTokens.shell-stroke;
+            border-color: ThemeTokens.divider-subtle;
 
             VerticalLayout {
                 padding-top: 6px;
@@ -126,7 +126,7 @@ export component Sidebar inherits Rectangle {
                 divider-line := Rectangle {
                     width: parent.width - 12px;
                     height: 1px;
-                    background: ThemeTokens.shell-stroke;
+                    background: ThemeTokens.divider-subtle;
                 }
 
                 for item in root.items : SidebarNavButton {

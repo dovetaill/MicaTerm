@@ -3,11 +3,23 @@
 export global ThemeTokens {
     in property <bool> dark-mode: true;
 
-    out property <brush> shell-surface: dark-mode ? #181a20 : #f5f7fb;
-    out property <brush> shell-stroke: dark-mode ? #ffffff12 : #0f172a12;
-    out property <brush> command-tint: dark-mode ? #1c2430ee : #eef5ffea;
-    out property <brush> panel-tint: dark-mode ? #1a2230ee : #f2f7ffee;
-    out property <brush> terminal-surface: dark-mode ? #14161b : #f8f8f9;
+    out property <brush> window-surface: dark-mode ? #171a20 : #f4f6fa;
+    out property <brush> titlebar-surface: dark-mode ? #202734ee : #edf3fbea;
+    out property <brush> activity-surface: dark-mode ? #14181f : #eef2f7;
+    out property <brush> assets-surface: dark-mode ? #1a2029 : #f7f9fc;
+    out property <brush> workspace-surface: dark-mode ? #101419 : #ffffff;
+    out property <brush> inspector-surface: dark-mode ? #1e2632 : #e9eef7;
+    out property <brush> divider-subtle: dark-mode ? #ffffff14 : #0f172a12;
+    out property <brush> divider-strong: dark-mode ? #ffffff22 : #0f172a1e;
+    out property <brush> control-hover-surface: dark-mode ? #232c39 : #eef3fb;
+    out property <brush> control-active-surface: dark-mode ? #283240 : #e7edf7;
+
+    // Preserve the old token aliases until the shared-control migration is complete.
+    out property <brush> shell-surface: assets-surface;
+    out property <brush> shell-stroke: divider-subtle;
+    out property <brush> command-tint: titlebar-surface;
+    out property <brush> panel-tint: inspector-surface;
+    out property <brush> terminal-surface: workspace-surface;
     out property <brush> accent: #4ea1ff;
     out property <brush> text-primary: dark-mode ? #f5f7fb : #101418;
 }
