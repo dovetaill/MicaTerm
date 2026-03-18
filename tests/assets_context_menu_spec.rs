@@ -1,6 +1,6 @@
 use mica_term::shell::context_menu::{
     ContextMenuActionState, ContextTargetKind, MenuPlacementInput, Rect, SelectionContext,
-    resolve_action_tree, resolve_root_menu_origin, should_keep_corridor_open,
+    context_menu_column_height, resolve_action_tree, resolve_root_menu_origin, should_keep_corridor_open,
     visible_columns_for_path,
 };
 use mica_term::shell::view_model::ShellViewModel;
@@ -18,6 +18,40 @@ fn blank_area_scene_only_exposes_minimal_create_actions() {
     let ids: Vec<_> = roots.iter().map(|node| node.id).collect();
 
     assert_eq!(ids, vec!["new-folder", "new-ssh-connection"]);
+}
+
+#[test]
+fn blank_area_actions_expose_label_and_icon_metadata() {
+    let roots = resolve_action_tree(
+        ContextTargetKind::BlankArea,
+        &SelectionContext {
+            selected_ids: Vec::new(),
+            clipboard_has_asset_payload: false,
+            target_mutable: true,
+            target_has_active_connection: false,
+        },
+    );
+
+    assert_eq!(roots[0].label, "New Folder");
+    assert_eq!(roots[0].icon_id, "folder");
+    assert_eq!(roots[1].label, "New SSH Connection");
+    assert_eq!(roots[1].icon_id, "window-console");
+}
+
+#[test]
+fn blank_area_menu_height_is_compact() {
+    let roots = resolve_action_tree(
+        ContextTargetKind::BlankArea,
+        &SelectionContext {
+            selected_ids: Vec::new(),
+            clipboard_has_asset_payload: false,
+            target_mutable: true,
+            target_has_active_connection: false,
+        },
+    );
+
+    let height = context_menu_column_height(&roots);
+    assert!(height < 160.0);
 }
 
 #[test]

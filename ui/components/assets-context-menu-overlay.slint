@@ -1,11 +1,8 @@
 import { AssetsContextMenuColumn, AssetsContextMenuItem } from "assets-context-menu-column.slint";
 
 export component AssetsContextMenuOverlay inherits Rectangle {
-    in property <string> primary-title: "操作";
     in property <[AssetsContextMenuItem]> primary-items: [];
-    in property <string> secondary-title: "";
     in property <[AssetsContextMenuItem]> secondary-items: [];
-    in property <string> tertiary-title: "";
     in property <[AssetsContextMenuItem]> tertiary-items: [];
     in property <bool> flow-left: false;
     property <int> pending-hover-column: -1;
@@ -19,7 +16,13 @@ export component AssetsContextMenuOverlay inherits Rectangle {
     width: primary-column.width
         + (secondary-column.visible ? secondary-column.width + 8px : 0px)
         + (tertiary-column.visible ? tertiary-column.width + 8px : 0px);
-    height: 320px;
+    height: max(
+        primary-column.height,
+        max(
+            secondary-column.visible ? secondary-column.height : 0px,
+            tertiary-column.visible ? tertiary-column.height : 0px,
+        ),
+    );
     background: transparent;
 
     public function focus-menu() {
@@ -51,8 +54,6 @@ export component AssetsContextMenuOverlay inherits Rectangle {
         primary-column := AssetsContextMenuColumn {
             x: root.flow-left ? root.width - self.width : 0px;
             y: 0px;
-            height: parent.height;
-            title: root.primary-title;
             items: root.primary-items;
 
             item-invoked(action-id) => {
@@ -73,9 +74,7 @@ export component AssetsContextMenuOverlay inherits Rectangle {
                 ? primary-column.x - self.width - 8px
                 : primary-column.x + primary-column.width + 8px;
             y: 0px;
-            height: parent.height;
             visible: root.secondary-items.length > 0;
-            title: root.secondary-title;
             items: root.secondary-items;
 
             item-invoked(action-id) => {
@@ -96,9 +95,7 @@ export component AssetsContextMenuOverlay inherits Rectangle {
                 ? secondary-column.x - self.width - 8px
                 : secondary-column.x + secondary-column.width + 8px;
             y: 0px;
-            height: parent.height;
             visible: root.tertiary-items.length > 0;
-            title: root.tertiary-title;
             items: root.tertiary-items;
 
             item-invoked(action-id) => {

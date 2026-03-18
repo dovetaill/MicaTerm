@@ -9,6 +9,13 @@ for file in \
   assets/icons/fluent/folder-20-regular.svg \
   assets/icons/fluent/folder-open-20-regular.svg \
   assets/icons/fluent/window-console-20-regular.svg \
+  assets/icons/fluent/delete-20-regular.svg \
+  assets/icons/fluent/edit-20-regular.svg \
+  assets/icons/fluent/copy-20-regular.svg \
+  assets/icons/fluent/cut-20-regular.svg \
+  assets/icons/fluent/arrow-clockwise-20-regular.svg \
+  assets/icons/fluent/arrow-upload-20-regular.svg \
+  assets/icons/fluent/arrow-download-20-regular.svg \
   assets/icons/fluent/document-code-16-regular.svg \
   assets/icons/fluent/key-multiple-20-regular.svg \
   assets/icons/fluent/search-20-regular.svg \

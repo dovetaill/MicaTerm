@@ -83,7 +83,6 @@ fn shell_view_model_starts_with_assets_toolbar_defaults() {
     assert_eq!(view_model.asset_view_mode, AssetViewMode::Tree);
     assert!(!view_model.asset_search_expanded);
     assert!(view_model.asset_search_query.is_empty());
-    assert!(!view_model.asset_create_menu_open);
 }
 
 #[test]
@@ -163,22 +162,21 @@ fn closing_context_menu_clears_open_path_but_keeps_selection() {
 }
 
 #[test]
-fn toolbar_create_action_inserts_ssh_placeholder_and_starts_rename() {
+fn toolbar_create_action_uses_first_missing_ssh_connection_name() {
     let mut view_model = ShellViewModel::default();
 
     view_model.handle_assets_create_action("new-ssh-connection");
+    view_model.commit_active_asset_rename();
+    view_model.handle_assets_create_action("new-ssh-connection");
+    view_model.commit_active_asset_rename();
 
-    assert_eq!(view_model.console_asset_items.len(), 1);
+    assert_eq!(view_model.console_asset_items.len(), 2);
     assert_eq!(
         view_model.console_asset_items[0].kind,
         ConsoleAssetKind::SshConnection
     );
-    assert_eq!(view_model.console_asset_items[0].label, "New SSH Connection");
-    assert_eq!(
-        view_model.renaming_asset_id.as_deref(),
-        Some(view_model.console_asset_items[0].id.as_str())
-    );
-    assert_eq!(view_model.renaming_asset_text, "New SSH Connection");
+    assert_eq!(view_model.console_asset_items[0].label, "SSH Connection 1");
+    assert_eq!(view_model.console_asset_items[1].label, "SSH Connection 2");
 }
 
 #[test]
@@ -194,27 +192,79 @@ fn context_menu_create_action_inserts_folder_placeholder_and_closes_menu() {
 }
 
 #[test]
-fn committing_inline_rename_updates_label_and_clears_editing_state() {
+fn folder_default_name_uses_smallest_missing_positive_index() {
     let mut view_model = ShellViewModel::default();
-    view_model.handle_assets_create_action("new-ssh-connection");
-    let asset_id = view_model.console_asset_items[0].id.clone();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 2");
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 3");
 
-    view_model.update_asset_rename_draft(&asset_id, "Prod Bastion".into());
-    view_model.commit_asset_rename(&asset_id, "Prod Bastion".into());
+    view_model.handle_assets_create_action("new-folder");
 
-    assert_eq!(view_model.console_asset_items[0].label, "Prod Bastion");
+    assert_eq!(view_model.renaming_asset_text, "Folder 1");
+}
+
+#[test]
+fn dismissing_active_rename_commits_current_draft() {
+    let mut view_model = ShellViewModel::default();
+    view_model.handle_assets_create_action("new-folder");
+    view_model.update_active_asset_rename_draft("Prod".into());
+
+    view_model.commit_active_asset_rename();
+
+    assert_eq!(view_model.console_asset_items[0].label, "Prod");
     assert_eq!(view_model.renaming_asset_id, None);
-    assert!(view_model.renaming_asset_text.is_empty());
+}
+
+#[test]
+fn renaming_to_existing_same_type_default_name_uses_next_missing_index() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 1");
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 2");
+    view_model.handle_assets_create_action("new-folder");
+    let asset_id = view_model.renaming_asset_id.clone().unwrap();
+
+    view_model.update_asset_rename_draft(&asset_id, "Folder 1".into());
+    view_model.commit_asset_rename(&asset_id, "Folder 1".into());
+
+    assert_eq!(view_model.console_asset_items[2].label, "Folder 3");
+}
+
+#[test]
+fn blank_rename_fallback_ignores_non_strict_numbered_labels() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 01");
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 2");
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod");
+    let asset_id = view_model.console_asset_items[2].id.clone();
+    view_model.begin_asset_rename_session(asset_id.clone(), "Prod".into());
+
+    view_model.update_asset_rename_draft(&asset_id, "   ".into());
+    view_model.commit_asset_rename(&asset_id, "   ".into());
+
+    assert_eq!(view_model.console_asset_items[2].label, "Folder 1");
+}
+
+#[test]
+fn renaming_to_existing_custom_name_uses_smallest_missing_numeric_suffix() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod");
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod 1");
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod 3");
+    view_model.handle_assets_create_action("new-folder");
+    let asset_id = view_model.renaming_asset_id.clone().unwrap();
+
+    view_model.update_asset_rename_draft(&asset_id, "Prod".into());
+    view_model.commit_asset_rename(&asset_id, "Prod".into());
+
+    assert_eq!(view_model.console_asset_items[3].label, "Prod 2");
 }
 
 #[test]
 fn cancelling_inline_rename_keeps_default_label_and_exits_editing() {
     let mut view_model = ShellViewModel::default();
     view_model.handle_assets_create_action("new-folder");
-    let asset_id = view_model.console_asset_items[0].id.clone();
 
-    view_model.cancel_asset_rename(&asset_id);
+    view_model.cancel_active_asset_rename();
 
-    assert_eq!(view_model.console_asset_items[0].label, "New Folder");
+    assert_eq!(view_model.console_asset_items[0].label, "Folder 1");
     assert_eq!(view_model.renaming_asset_id, None);
 }

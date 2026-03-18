@@ -1,10 +1,26 @@
-//! Sidebar destination identifiers and helpers exposed to the Slint navigation list.
+//! Sidebar destination identifiers, navigation items, and toolbar descriptors.
+
+use slint::SharedString;
+
+use crate::SidebarNavItem;
+use crate::shell::assets::AssetViewMode;
+use crate::shell::view_model::ShellViewModel;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarDestination {
     Console,
     Snippets,
     Keychain,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssetsToolbarDescriptor {
+    pub primary_create_action_id: Option<&'static str>,
+    pub primary_create_tooltip: &'static str,
+    pub search_tooltip: &'static str,
+    pub view_mode_tooltip: &'static str,
+    pub tree_expansion_tooltip: &'static str,
+    pub show_tree_controls: bool,
 }
 
 impl SidebarDestination {
@@ -52,7 +68,43 @@ pub fn sidebar_items_for(state: &ShellViewModel) -> Vec<SidebarNavItem> {
         })
         .collect()
 }
-use slint::SharedString;
 
-use crate::SidebarNavItem;
-use crate::shell::view_model::ShellViewModel;
+pub fn toolbar_descriptor_for(
+    destination: SidebarDestination,
+    view_model: &ShellViewModel,
+) -> AssetsToolbarDescriptor {
+    let (primary_create_action_id, primary_create_tooltip, search_tooltip, show_tree_controls) =
+        match destination {
+            SidebarDestination::Console => (
+                Some("new-ssh-connection"),
+                "New SSH Connection",
+                "Search Console Assets",
+                true,
+            ),
+            SidebarDestination::Snippets => {
+                (Some("new-snippet"), "New Snippet", "Search Snippets", false)
+            }
+            SidebarDestination::Keychain => {
+                (Some("new-keychain"), "New Keychain", "Search Keychain", false)
+            }
+        };
+
+    let view_mode_tooltip = match view_model.asset_view_mode {
+        AssetViewMode::Tree => "Switch to Flat List",
+        AssetViewMode::Flat => "Switch to Tree View",
+    };
+    let tree_expansion_tooltip = if view_model.asset_tree_fully_expanded {
+        "Collapse Tree"
+    } else {
+        "Expand Tree"
+    };
+
+    AssetsToolbarDescriptor {
+        primary_create_action_id,
+        primary_create_tooltip,
+        search_tooltip,
+        view_mode_tooltip,
+        tree_expansion_tooltip,
+        show_tree_controls,
+    }
+}

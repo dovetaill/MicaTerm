@@ -16,9 +16,14 @@ export component Sidebar inherits Rectangle {
     in property <string> active-sidebar-destination: "console";
     in property <string> assets-search-query: "";
     in property <bool> asset-search-expanded: false;
-    in property <bool> asset-create-menu-open: false;
     in property <bool> asset-tree-fully-expanded: false;
     in property <string> asset-view-mode: "tree";
+    in property <string> asset-primary-create-action-id: "";
+    in property <string> asset-primary-create-tooltip: "";
+    in property <string> asset-search-tooltip: "";
+    in property <string> asset-view-mode-tooltip: "";
+    in property <string> asset-tree-expansion-tooltip: "";
+    in property <bool> asset-show-tree-controls: true;
     in property <[ConsoleAssetItem]> console-asset-items: [];
     private property <string> tooltip-text-value: "";
     private property <bool> tooltip-visible-value: false;
@@ -33,10 +38,6 @@ export component Sidebar inherits Rectangle {
     out property <length> tooltip-anchor-y <=> root.tooltip-anchor-y-value;
     out property <length> tooltip-anchor-width <=> root.tooltip-anchor-width-value;
     out property <length> search-row-height: assets-sidebar.search-row-height;
-    out property <length> create-menu-anchor-x: assets-sidebar.create-menu-anchor-x;
-    out property <length> create-menu-anchor-y: assets-sidebar.create-menu-anchor-y;
-    out property <length> create-menu-anchor-width: assets-sidebar.create-menu-anchor-width;
-    out property <length> create-menu-anchor-height: assets-sidebar.create-menu-anchor-height;
     out property <length> activity-bar-width: activity-bar.width;
     out property <length> assets-sidebar-width: assets-sidebar.width;
     callback toggle-assets-sidebar-requested();
@@ -47,13 +48,12 @@ export component Sidebar inherits Rectangle {
     callback collapse-assets-search-requested();
     callback toggle-assets-view-mode-requested();
     callback toggle-assets-tree-expansion-requested();
-    callback toggle-assets-create-menu-requested();
-    callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
     callback asset-context-menu-requested(string, string, length, length);
     callback asset-rename-text-changed(string, string);
     callback asset-rename-commit-requested(string, string);
     callback asset-rename-cancel-requested(string);
+    callback shell-interaction-requested();
 
     width: 48px + (root.show-assets-sidebar ? 288px : 0px);
     background: transparent;
@@ -119,6 +119,10 @@ export component Sidebar inherits Rectangle {
                         root.toggle-assets-sidebar-requested();
                     }
 
+                    pointer-activity-requested => {
+                        root.shell-interaction-requested();
+                    }
+
                     tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
                         root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
                     }
@@ -145,6 +149,10 @@ export component Sidebar inherits Rectangle {
                         root.destination-selected(clicked-id);
                     }
 
+                    pointer-activity-requested => {
+                        root.shell-interaction-requested();
+                    }
+
                     tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
                         root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
                     }
@@ -161,9 +169,14 @@ export component Sidebar inherits Rectangle {
             active-panel: root.active-sidebar-destination;
             assets-search-query: root.assets-search-query;
             asset-search-expanded: root.asset-search-expanded;
-            asset-create-menu-open: root.asset-create-menu-open;
             asset-tree-fully-expanded: root.asset-tree-fully-expanded;
             asset-view-mode: root.asset-view-mode;
+            asset-primary-create-action-id: root.asset-primary-create-action-id;
+            asset-primary-create-tooltip: root.asset-primary-create-tooltip;
+            asset-search-tooltip: root.asset-search-tooltip;
+            asset-view-mode-tooltip: root.asset-view-mode-tooltip;
+            asset-tree-expansion-tooltip: root.asset-tree-expansion-tooltip;
+            asset-show-tree-controls: root.asset-show-tree-controls;
             console-asset-items: root.console-asset-items;
 
             toggle-assets-search-requested => {
@@ -190,14 +203,6 @@ export component Sidebar inherits Rectangle {
                 root.toggle-assets-tree-expansion-requested();
             }
 
-            toggle-assets-create-menu-requested => {
-                root.toggle-assets-create-menu-requested();
-            }
-
-            close-assets-create-menu-requested => {
-                root.close-assets-create-menu-requested();
-            }
-
             assets-create-action-selected(action-id) => {
                 root.assets-create-action-selected(action-id);
             }
@@ -216,6 +221,18 @@ export component Sidebar inherits Rectangle {
 
             asset-rename-cancel-requested(item-id) => {
                 root.asset-rename-cancel-requested(item-id);
+            }
+
+            shell-interaction-requested => {
+                root.shell-interaction-requested();
+            }
+
+            tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+            }
+
+            tooltip-close-requested(source-id) => {
+                root.queue-tooltip-close(source-id);
             }
         }
     }

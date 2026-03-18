@@ -553,3 +553,35 @@ Date: 2026-03-16 10:38:06 CST
 
 - Task 6 期间 `cargo clippy --all-targets --all-features -- -D warnings` 初次失败，根因是 `tests/titlebar_render_spec.rs` 仍依赖 `slint::platform::software_renderer`，而当前包特性固定为 `slint-renderer-femtovg-wgpu`，且仓库已有约束明确不再暴露 software renderer feature toggle；因此将该测试文件按当前 feature 条件编译排除，避免验证矩阵与既定 renderer 策略互相矛盾。
 - 当前实现仍然只覆盖 shell contract、交互和 placeholder，不包含真实资产树、搜索过滤、创建向导、SSH/SFTP 运行时或 Tokio channel 数据流。
+
+## 2026-03-18 - Windows Console assets context menu bugfix2
+
+### Commands Executed
+
+- [x] `cargo test --test assets_context_menu_spec --test assets_context_menu_smoke --test assets_sidebar_toolbar_spec --test assets_sidebar_toolbar_smoke --test shell_view_model -- --nocapture`
+- [x] `bash tests/assets_context_menu_ui_contract_smoke.sh`
+- [x] `bash tests/assets_sidebar_toolbar_ui_contract_smoke.sh`
+- [x] `bash tests/sidebar_tooltip_ui_contract_smoke.sh`
+- [x] `bash tests/sidebar_assets_smoke.sh`
+- [x] `cargo check`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+
+### Automated Results
+
+- `cargo test --test assets_context_menu_spec --test assets_context_menu_smoke --test assets_sidebar_toolbar_spec --test assets_sidebar_toolbar_smoke --test shell_view_model -- --nocapture`: passed
+- `bash tests/assets_context_menu_ui_contract_smoke.sh`: passed
+- `bash tests/assets_sidebar_toolbar_ui_contract_smoke.sh`: passed
+- `bash tests/sidebar_tooltip_ui_contract_smoke.sh`: passed
+- `bash tests/sidebar_assets_smoke.sh`: passed
+- `cargo check`: passed
+- `cargo check --workspace`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+
+### Coverage Notes
+
+- Context menu action metadata is now flat, English, iconized, and projected through the compact Slint surface.
+- Assets toolbar behavior is panel-aware, with Rust-owned descriptor copy for `console`, `snippets`, and `keychain`.
+- Empty-query search dismiss is unified at shell level instead of split across local touch layers.
+- Inline rename is explicit-session based and no longer depends on implicit `has-focus` blur commit.
+- Default asset names now use same-type smallest-missing numbering for `Folder {n}` and `SSH Connection {n}`.
