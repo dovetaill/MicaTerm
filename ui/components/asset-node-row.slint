@@ -4,28 +4,83 @@ export component AssetNodeRow inherits Rectangle {
     in property <string> item-id;
     in property <string> item-kind;
     in property <string> label;
+    in property <int> depth: 0;
+    in property <bool> has-children: false;
+    in property <bool> expanded: false;
     in property <bool> selected: false;
+    in property <bool> focused: false;
     in property <bool> renaming: false;
     in property <string> rename-text: "";
-    callback clicked(string);
+    callback selected-requested(string);
+    callback toggle-expanded-requested(string);
     callback pointer-activity-requested();
     callback context-menu-requested(string, string, length, length);
     callback rename-text-changed(string, string);
     callback rename-commit-requested(string, string);
     callback rename-cancel-requested(string);
 
+    private property <length> indent: 12px + (root.depth * 14px);
+    private property <length> icon-x: root.indent + (root.has-children ? 18px : 0px);
+    private property <length> content-x: root.icon-x + 24px;
+    private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
+    private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
+    private property <image> ssh-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
+    private property <image> kind-icon: root.item-kind == "folder"
+        ? (root.expanded ? root.folder-open-icon : root.folder-icon)
+        : root.ssh-icon;
+
     height: 32px;
     border-radius: 6px;
+    border-width: root.focused ? 1px : 0px;
+    border-color: root.focused ? ThemeTokens.divider-strong : transparent;
     background: touch.pressed
         ? ThemeTokens.control-active-surface
         : (touch.has-hover || root.selected)
             ? ThemeTokens.control-hover-surface
             : transparent;
 
-    if !root.renaming : Text {
-        x: 12px;
+    if root.has-children : Rectangle {
+        x: root.indent;
         y: 0px;
-        width: parent.width - 24px;
+        width: 14px;
+        height: parent.height;
+        background: transparent;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.expanded ? "v" : ">";
+            color: ThemeTokens.text-primary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        chevron-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            enabled: !root.renaming;
+
+            clicked => {
+                root.pointer-activity-requested();
+                root.toggle-expanded-requested(root.item-id);
+            }
+        }
+    }
+
+    Image {
+        x: root.icon-x;
+        y: 6px;
+        width: 20px;
+        height: 20px;
+        source: root.kind-icon;
+        image-fit: contain;
+        colorize: ThemeTokens.text-primary;
+    }
+
+    if !root.renaming : Text {
+        x: root.content-x;
+        y: 0px;
+        width: parent.width - self.x - 12px;
         height: parent.height;
         text: root.label;
         color: ThemeTokens.text-primary;
@@ -39,9 +94,9 @@ export component AssetNodeRow inherits Rectangle {
         background: transparent;
 
         rename-input := TextInput {
-            x: 8px;
+            x: root.content-x - 4px;
             y: 4px;
-            width: parent.width - 16px;
+            width: parent.width - self.x - 8px;
             height: parent.height - 8px;
             visible: root.renaming;
             enabled: root.renaming;
@@ -87,7 +142,7 @@ export component AssetNodeRow inherits Rectangle {
 
         clicked => {
             root.pointer-activity-requested();
-            root.clicked(root.item-id);
+            root.selected-requested(root.item-id);
         }
     }
 

@@ -31,3 +31,8 @@ do
     exit 1
   }
 done
+
+[[ -f "$ROOT_DIR/ui/components/asset-node-row.slint" ]] || {
+  echo "missing ui/components/asset-node-row.slint" >&2
+  exit 1
+}

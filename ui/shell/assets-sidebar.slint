@@ -1,15 +1,19 @@
 // Secondary sidebar hosting asset navigation, inline search, and creation affordances.
 
 import { ThemeTokens } from "../theme/tokens.slint";
-import { AssetsSearchPopover } from "../components/assets-search-popover.slint";
 import { AssetNodeRow } from "../components/asset-node-row.slint";
+import { AssetsSearchPopover } from "../components/assets-search-popover.slint";
 import { SidebarToolbarIconButton } from "../components/sidebar-toolbar-icon-button.slint";
 
 export struct ConsoleAssetItem {
     id: string,
     kind: string,
     label: string,
+    depth: int,
+    has_children: bool,
+    expanded: bool,
     selected: bool,
+    focused: bool,
     renaming: bool,
     rename_text: string,
 }
@@ -19,6 +23,8 @@ export component AssetsSidebar inherits Rectangle {
     in property <string> active-panel: "console";
     in property <string> assets-search-query: "";
     in property <bool> asset-search-expanded: false;
+    in property <bool> asset-create-menu-open: false;
+    in property <bool> asset-uses-create-popover: false;
     in property <bool> asset-tree-fully-expanded: false;
     in property <string> asset-view-mode: "tree";
     in property <string> asset-primary-create-action-id: "";
@@ -29,13 +35,21 @@ export component AssetsSidebar inherits Rectangle {
     in property <bool> asset-show-tree-controls: true;
     in property <[ConsoleAssetItem]> console-asset-items: [];
     out property <length> search-row-height: search-row-host.height;
+    out property <length> create-menu-anchor-x: create-button.absolute-position.x;
+    out property <length> create-menu-anchor-y: create-button.absolute-position.y;
+    out property <length> create-menu-anchor-width: create-button.width;
+    out property <length> create-menu-anchor-height: create-button.height;
     callback toggle-assets-search-requested();
     callback assets-search-query-changed(string);
     callback close-assets-search-requested();
     callback collapse-assets-search-requested();
     callback toggle-assets-view-mode-requested();
     callback toggle-assets-tree-expansion-requested();
+    callback toggle-assets-create-menu-requested();
+    callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
+    callback asset-selected(string);
+    callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
     callback asset-rename-text-changed(string, string);
     callback asset-rename-commit-requested(string, string);
@@ -140,10 +154,13 @@ export component AssetsSidebar inherits Rectangle {
 
                 create-button := SidebarToolbarIconButton {
                     icon-source: root.create-add-icon;
+                    active: root.asset-create-menu-open;
                     tooltip-text: root.asset-primary-create-tooltip;
                     tooltip-source-id: "assets-primary-create";
                     clicked => {
-                        if root.asset-primary-create-action-id != "" {
+                        if root.asset-uses-create-popover {
+                            root.toggle-assets-create-menu-requested();
+                        } else if root.asset-primary-create-action-id != "" {
                             root.assets-create-action-selected(root.asset-primary-create-action-id);
                         }
                     }
@@ -228,7 +245,7 @@ export component AssetsSidebar inherits Rectangle {
 
                     Text {
                         width: parent.width;
-                        text: "Right-click or use Create to add a folder or SSH connection."; 
+                        text: "Right-click or use Create to add a folder or SSH connection.";
                         color: ThemeTokens.text-primary;
                         horizontal-alignment: center;
                         wrap: word-wrap;
@@ -245,9 +262,21 @@ export component AssetsSidebar inherits Rectangle {
                     item-id: item.id;
                     item-kind: item.kind;
                     label: item.label;
+                    depth: item.depth;
+                    has-children: item.has_children;
+                    expanded: item.expanded;
                     selected: item.selected;
+                    focused: item.focused;
                     renaming: item.renaming;
                     rename-text: item.rename_text;
+
+                    selected-requested(item-id) => {
+                        root.asset-selected(item-id);
+                    }
+
+                    toggle-expanded-requested(item-id) => {
+                        root.toggle-expanded-requested(item-id);
+                    }
 
                     context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
                         root.asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
@@ -328,5 +357,4 @@ export component AssetsSidebar inherits Rectangle {
             }
         }
     }
-
 }

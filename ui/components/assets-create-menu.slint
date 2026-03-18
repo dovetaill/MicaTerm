@@ -1,0 +1,61 @@
+import { AssetsToolbarMenuRow } from "assets-toolbar-menu-row.slint";
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component AssetsCreateMenu inherits Rectangle {
+    callback new-folder-selected;
+    callback new-ssh-connection-selected;
+    callback close-requested;
+    private property <image> new-folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
+    private property <image> new-ssh-connection-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
+
+    width: 216px;
+    height: 88px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: ThemeTokens.divider-strong;
+    background: ThemeTokens.assets-surface;
+    z: 110;
+
+    public function focus-menu() {
+        menu-focus.focus();
+    }
+
+    menu-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-requested();
+                accept
+            } else {
+                reject
+            }
+        }
+
+        VerticalLayout {
+            padding: 8px;
+            spacing: 4px;
+
+            AssetsToolbarMenuRow {
+                label: "New Folder";
+                icon-source: root.new-folder-icon;
+
+                invoked => {
+                    root.new-folder-selected();
+                    root.close-requested();
+                }
+            }
+
+            AssetsToolbarMenuRow {
+                label: "New SSH Connection";
+                icon-source: root.new-ssh-connection-icon;
+
+                invoked => {
+                    root.new-ssh-connection-selected();
+                    root.close-requested();
+                }
+            }
+        }
+    }
+}

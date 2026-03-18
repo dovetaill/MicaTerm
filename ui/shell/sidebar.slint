@@ -16,6 +16,8 @@ export component Sidebar inherits Rectangle {
     in property <string> active-sidebar-destination: "console";
     in property <string> assets-search-query: "";
     in property <bool> asset-search-expanded: false;
+    in property <bool> asset-create-menu-open: false;
+    in property <bool> asset-uses-create-popover: false;
     in property <bool> asset-tree-fully-expanded: false;
     in property <string> asset-view-mode: "tree";
     in property <string> asset-primary-create-action-id: "";
@@ -38,6 +40,10 @@ export component Sidebar inherits Rectangle {
     out property <length> tooltip-anchor-y <=> root.tooltip-anchor-y-value;
     out property <length> tooltip-anchor-width <=> root.tooltip-anchor-width-value;
     out property <length> search-row-height: assets-sidebar.search-row-height;
+    out property <length> create-menu-anchor-x: assets-sidebar.create-menu-anchor-x;
+    out property <length> create-menu-anchor-y: assets-sidebar.create-menu-anchor-y;
+    out property <length> create-menu-anchor-width: assets-sidebar.create-menu-anchor-width;
+    out property <length> create-menu-anchor-height: assets-sidebar.create-menu-anchor-height;
     out property <length> activity-bar-width: activity-bar.width;
     out property <length> assets-sidebar-width: assets-sidebar.width;
     callback toggle-assets-sidebar-requested();
@@ -48,7 +54,11 @@ export component Sidebar inherits Rectangle {
     callback collapse-assets-search-requested();
     callback toggle-assets-view-mode-requested();
     callback toggle-assets-tree-expansion-requested();
+    callback toggle-assets-create-menu-requested();
+    callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
+    callback asset-selected(string);
+    callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
     callback asset-rename-text-changed(string, string);
     callback asset-rename-commit-requested(string, string);
@@ -169,6 +179,8 @@ export component Sidebar inherits Rectangle {
             active-panel: root.active-sidebar-destination;
             assets-search-query: root.assets-search-query;
             asset-search-expanded: root.asset-search-expanded;
+            asset-create-menu-open: root.asset-create-menu-open;
+            asset-uses-create-popover: root.asset-uses-create-popover;
             asset-tree-fully-expanded: root.asset-tree-fully-expanded;
             asset-view-mode: root.asset-view-mode;
             asset-primary-create-action-id: root.asset-primary-create-action-id;
@@ -203,8 +215,24 @@ export component Sidebar inherits Rectangle {
                 root.toggle-assets-tree-expansion-requested();
             }
 
+            toggle-assets-create-menu-requested => {
+                root.toggle-assets-create-menu-requested();
+            }
+
+            close-assets-create-menu-requested => {
+                root.close-assets-create-menu-requested();
+            }
+
             assets-create-action-selected(action-id) => {
                 root.assets-create-action-selected(action-id);
+            }
+
+            asset-selected(item-id) => {
+                root.asset-selected(item-id);
+            }
+
+            toggle-expanded-requested(item-id) => {
+                root.toggle-expanded-requested(item-id);
             }
 
             asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {

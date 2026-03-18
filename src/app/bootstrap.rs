@@ -22,7 +22,6 @@ use crate::app::windowing::{
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
 };
-use crate::shell::assets::MockConsoleAssetItem;
 use crate::shell::context_menu::{
     CONTEXT_MENU_COLUMN_GAP, CONTEXT_MENU_COLUMN_WIDTH, ContextMenuActionNode,
     ContextMenuActionState, ContextTargetKind, MenuPlacementInput, SelectionContext,
@@ -162,16 +161,18 @@ fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_show_assets_sidebar(state.show_assets_sidebar);
     window.set_active_sidebar_destination(state.active_sidebar_destination.id().into());
     window.set_sidebar_items(ModelRc::new(VecModel::from(sidebar_items_for(state))));
-    window.set_console_asset_items(ModelRc::new(VecModel::from(console_asset_items_for(state))));
     sync_assets_toolbar_state(window, state);
+    sync_console_assets(window, state);
 }
 
 fn sync_assets_toolbar_state(window: &AppWindow, state: &ShellViewModel) {
     let descriptor = toolbar_descriptor_for(state.active_sidebar_destination, state);
     window.set_asset_view_mode(state.asset_view_mode.id().into());
-    window.set_asset_rename_active(state.renaming_asset_id.is_some());
+    window.set_asset_rename_active(state.editing_asset_id.is_some());
     window.set_asset_search_expanded(state.asset_search_expanded);
     window.set_assets_search_query(state.asset_search_query.clone().into());
+    window.set_asset_create_menu_open(state.asset_create_menu_open);
+    window.set_asset_uses_create_popover(descriptor.uses_create_popover);
     window.set_asset_tree_fully_expanded(state.asset_tree_fully_expanded);
     window.set_asset_primary_create_action_id(
         descriptor.primary_create_action_id.unwrap_or("").into(),
@@ -208,32 +209,6 @@ fn parse_context_target_kind(value: &str) -> ContextTargetKind {
         "folder" => ContextTargetKind::Folder,
         _ => ContextTargetKind::BlankArea,
     }
-}
-
-fn default_console_asset_items() -> Vec<MockConsoleAssetItem> {
-    Vec::new()
-}
-
-fn console_asset_items_for(state: &ShellViewModel) -> Vec<ConsoleAssetItem> {
-    state
-        .console_asset_items
-        .iter()
-        .map(|item| {
-            let renaming = state.renaming_asset_id.as_deref() == Some(item.id.as_str());
-            ConsoleAssetItem {
-                id: item.id.clone().into(),
-                kind: item.kind.id().into(),
-                label: item.label.clone().into(),
-                selected: state.selected_asset_ids.iter().any(|selected| selected == &item.id),
-                renaming,
-                rename_text: if renaming {
-                    state.renaming_asset_text.clone().into()
-                } else {
-                    item.label.clone().into()
-                },
-            }
-        })
-        .collect()
 }
 
 fn selection_context_for(state: &ShellViewModel) -> SelectionContext {
@@ -401,6 +376,31 @@ fn update_context_menu_placement(window: &AppWindow, state: &mut ShellViewModel)
     state.set_context_menu_placement(origin_x, origin_y, child_flows_left);
 }
 
+fn sync_console_assets(window: &AppWindow, state: &ShellViewModel) {
+    let rows = state
+        .visible_console_asset_rows()
+        .into_iter()
+        .map(|row| ConsoleAssetItem {
+            id: row.id.clone().into(),
+            kind: row.kind.id().into(),
+            label: row.label.clone().into(),
+            depth: row.depth as i32,
+            has_children: row.has_children,
+            expanded: row.expanded,
+            selected: state.selected_asset_ids.iter().any(|id| id == &row.id),
+            focused: state.focused_asset_id.as_deref() == Some(row.id.as_str()),
+            renaming: state.editing_asset_id.as_deref() == Some(row.id.as_str()),
+            rename_text: if state.editing_asset_id.as_deref() == Some(row.id.as_str()) {
+                state.editing_asset_text.clone().into()
+            } else {
+                "".into()
+            },
+        })
+        .collect::<Vec<_>>();
+
+    window.set_console_asset_items(ModelRc::new(VecModel::from(rows)));
+}
+
 fn sync_shell_state(
     window: &AppWindow,
     state: &ShellViewModel,
@@ -533,7 +533,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     let mut initial_view_model = ShellViewModel::default();
     initial_view_model.theme_mode = prefs.theme_mode;
     initial_view_model.is_always_on_top = prefs.always_on_top;
-    initial_view_model.console_asset_items = default_console_asset_items();
     let view_model = Rc::new(RefCell::new(initial_view_model));
     let controller = Rc::new(WindowController::new(window));
 
@@ -659,7 +658,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let mut state = state.borrow_mut();
         state.dismiss_active_asset_rename();
         state.activate_asset_search();
-        sync_sidebar_state(&window, &state);
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -669,6 +669,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let mut state = state.borrow_mut();
         state.set_asset_search_query(query.to_string());
         sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -678,7 +679,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let mut state = state.borrow_mut();
         state.dismiss_active_asset_rename();
         state.close_asset_search();
-        sync_sidebar_state(&window, &state);
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -688,7 +690,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let mut state = state.borrow_mut();
         state.dismiss_active_asset_rename();
         state.collapse_asset_search_if_empty();
-        sync_sidebar_state(&window, &state);
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -699,7 +702,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         state.dismiss_active_asset_rename();
         state.dismiss_empty_asset_search_on_shell_interaction();
         state.toggle_asset_view_mode();
-        sync_sidebar_state(&window, &state);
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -710,7 +714,28 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         state.dismiss_active_asset_rename();
         state.dismiss_empty_asset_search_on_shell_interaction();
         state.toggle_asset_tree_expansion();
-        sync_sidebar_state(&window, &state);
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
+    });
+
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_toggle_assets_create_menu_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.dismiss_active_asset_rename();
+        state.toggle_asset_create_menu();
+        sync_assets_toolbar_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_close_assets_create_menu_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_asset_create_menu();
+        sync_assets_toolbar_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -721,7 +746,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         state.dismiss_active_asset_rename();
         state.dismiss_empty_asset_search_on_shell_interaction();
         state.handle_assets_create_action(action_id.as_str());
-        sync_sidebar_state(&window, &state);
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -730,7 +756,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.update_asset_rename_draft(asset_id.as_str(), text.to_string());
-        sync_sidebar_state(&window, &state);
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -739,7 +766,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.commit_asset_rename(asset_id.as_str(), text.to_string());
-        sync_sidebar_state(&window, &state);
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -748,7 +776,28 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.cancel_asset_rename(asset_id.as_str());
-        sync_sidebar_state(&window, &state);
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_asset_selected(move |item_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.select_asset(item_id.as_str());
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_toggle_expanded_requested(move |item_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_folder_expanded(item_id.as_str());
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -768,7 +817,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
             anchor_x,
             anchor_y,
         );
-        sync_sidebar_state(&window, &state);
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
     });
@@ -778,11 +828,13 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_shell_interaction_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        if state.renaming_asset_id.is_some() {
+        if state.editing_asset_id.is_some() {
             state.dismiss_active_asset_rename();
-            sync_sidebar_state(&window, &state);
+            sync_assets_toolbar_state(&window, &state);
+            sync_console_assets(&window, &state);
         } else if state.dismiss_empty_asset_search_on_shell_interaction() {
-            sync_sidebar_state(&window, &state);
+            sync_assets_toolbar_state(&window, &state);
+            sync_console_assets(&window, &state);
         }
     });
 
@@ -791,9 +843,10 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_dismiss_active_asset_rename_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        if state.renaming_asset_id.is_some() {
+        if state.editing_asset_id.is_some() {
             state.dismiss_active_asset_rename();
-            sync_sidebar_state(&window, &state);
+            sync_assets_toolbar_state(&window, &state);
+            sync_console_assets(&window, &state);
         }
     });
 
@@ -811,7 +864,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
             }
         }
 
-        sync_sidebar_state(&window, &state);
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
     });
@@ -830,6 +884,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
             _ => {}
         }
 
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
     });

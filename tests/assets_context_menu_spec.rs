@@ -1,20 +1,22 @@
 use mica_term::shell::context_menu::{
     ContextMenuActionState, ContextTargetKind, MenuPlacementInput, Rect, SelectionContext,
-    context_menu_column_height, resolve_action_tree, resolve_root_menu_origin, should_keep_corridor_open,
-    visible_columns_for_path,
+    context_menu_column_height, resolve_action_tree, resolve_root_menu_origin,
+    should_keep_corridor_open, visible_columns_for_path,
 };
 use mica_term::shell::view_model::ShellViewModel;
 
-#[test]
-fn blank_area_scene_only_exposes_minimal_create_actions() {
-    let selection = SelectionContext {
+fn blank_selection() -> SelectionContext {
+    SelectionContext {
         selected_ids: Vec::new(),
         clipboard_has_asset_payload: false,
         target_mutable: true,
         target_has_active_connection: false,
-    };
+    }
+}
 
-    let roots = resolve_action_tree(ContextTargetKind::BlankArea, &selection);
+#[test]
+fn blank_area_scene_only_exposes_minimal_create_actions() {
+    let roots = resolve_action_tree(ContextTargetKind::BlankArea, &blank_selection());
     let ids: Vec<_> = roots.iter().map(|node| node.id).collect();
 
     assert_eq!(ids, vec!["new-folder", "new-ssh-connection"]);
@@ -22,15 +24,7 @@ fn blank_area_scene_only_exposes_minimal_create_actions() {
 
 #[test]
 fn blank_area_actions_expose_label_and_icon_metadata() {
-    let roots = resolve_action_tree(
-        ContextTargetKind::BlankArea,
-        &SelectionContext {
-            selected_ids: Vec::new(),
-            clipboard_has_asset_payload: false,
-            target_mutable: true,
-            target_has_active_connection: false,
-        },
-    );
+    let roots = resolve_action_tree(ContextTargetKind::BlankArea, &blank_selection());
 
     assert_eq!(roots[0].label, "New Folder");
     assert_eq!(roots[0].icon_id, "folder");
@@ -40,15 +34,7 @@ fn blank_area_actions_expose_label_and_icon_metadata() {
 
 #[test]
 fn blank_area_menu_height_is_compact() {
-    let roots = resolve_action_tree(
-        ContextTargetKind::BlankArea,
-        &SelectionContext {
-            selected_ids: Vec::new(),
-            clipboard_has_asset_payload: false,
-            target_mutable: true,
-            target_has_active_connection: false,
-        },
-    );
+    let roots = resolve_action_tree(ContextTargetKind::BlankArea, &blank_selection());
 
     let height = context_menu_column_height(&roots);
     assert!(height < 160.0);
@@ -56,17 +42,16 @@ fn blank_area_menu_height_is_compact() {
 
 #[test]
 fn blank_area_scene_omits_paste_and_other_legacy_actions() {
-    let selection = SelectionContext {
-        selected_ids: Vec::new(),
-        clipboard_has_asset_payload: true,
-        target_mutable: true,
-        target_has_active_connection: false,
-    };
-
-    let ids: Vec<_> = resolve_action_tree(ContextTargetKind::BlankArea, &selection)
-        .into_iter()
-        .map(|node| node.id)
-        .collect();
+    let ids: Vec<_> = resolve_action_tree(
+        ContextTargetKind::BlankArea,
+        &SelectionContext {
+            clipboard_has_asset_payload: true,
+            ..blank_selection()
+        },
+    )
+    .into_iter()
+    .map(|node| node.id)
+    .collect();
 
     assert!(!ids.contains(&"new-connection"));
     assert!(!ids.contains(&"paste-asset"));
@@ -94,14 +79,13 @@ fn resolver_returns_ssh_actions_with_planned_proxy_tools() {
 
 #[test]
 fn blank_area_visible_columns_stay_flat_for_primary_leaf_selection() {
-    let selection = SelectionContext {
-        selected_ids: Vec::new(),
-        clipboard_has_asset_payload: true,
-        target_mutable: true,
-        target_has_active_connection: false,
-    };
-
-    let roots = resolve_action_tree(ContextTargetKind::BlankArea, &selection);
+    let roots = resolve_action_tree(
+        ContextTargetKind::BlankArea,
+        &SelectionContext {
+            clipboard_has_asset_payload: true,
+            ..blank_selection()
+        },
+    );
     let open_index = roots
         .iter()
         .position(|node| node.id == "new-folder")
@@ -148,6 +132,31 @@ fn ssh_scene_marks_proxy_chrome_as_planned_but_clickable() {
         .expect("ssh menu should expose the proxy chrome action");
 
     assert_eq!(proxy.state, ContextMenuActionState::Planned);
+}
+
+#[test]
+fn folder_target_exposes_flat_create_actions() {
+    let actions = resolve_action_tree(
+        ContextTargetKind::Folder,
+        &SelectionContext {
+            selected_ids: vec!["folder-1".into()],
+            clipboard_has_asset_payload: false,
+            target_mutable: true,
+            target_has_active_connection: false,
+        },
+    );
+
+    let new_folder = actions
+        .iter()
+        .find(|action| action.id == "new-folder")
+        .expect("folder target should expose new-folder");
+    let new_ssh = actions
+        .iter()
+        .find(|action| action.id == "new-ssh-connection")
+        .expect("folder target should expose new-ssh-connection");
+
+    assert!(new_folder.children.is_empty());
+    assert!(new_ssh.children.is_empty());
 }
 
 #[test]

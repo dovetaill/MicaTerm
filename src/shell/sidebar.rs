@@ -15,6 +15,7 @@ pub enum SidebarDestination {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AssetsToolbarDescriptor {
+    pub uses_create_popover: bool,
     pub primary_create_action_id: Option<&'static str>,
     pub primary_create_tooltip: &'static str,
     pub search_tooltip: &'static str,
@@ -73,21 +74,35 @@ pub fn toolbar_descriptor_for(
     destination: SidebarDestination,
     view_model: &ShellViewModel,
 ) -> AssetsToolbarDescriptor {
-    let (primary_create_action_id, primary_create_tooltip, search_tooltip, show_tree_controls) =
-        match destination {
-            SidebarDestination::Console => (
-                Some("new-ssh-connection"),
-                "New SSH Connection",
-                "Search Console Assets",
-                true,
-            ),
-            SidebarDestination::Snippets => {
-                (Some("new-snippet"), "New Snippet", "Search Snippets", false)
-            }
-            SidebarDestination::Keychain => {
-                (Some("new-keychain"), "New Keychain", "Search Keychain", false)
-            }
-        };
+    let (
+        uses_create_popover,
+        primary_create_action_id,
+        primary_create_tooltip,
+        search_tooltip,
+        show_tree_controls,
+    ) = match destination {
+        SidebarDestination::Console => (
+            true,
+            None,
+            "Create Asset",
+            "Search Console Assets",
+            true,
+        ),
+        SidebarDestination::Snippets => (
+            false,
+            Some("new-snippet"),
+            "New Snippet",
+            "Search Snippets",
+            false,
+        ),
+        SidebarDestination::Keychain => (
+            false,
+            Some("new-keychain"),
+            "New Keychain",
+            "Search Keychain",
+            false,
+        ),
+    };
 
     let view_mode_tooltip = match view_model.asset_view_mode {
         AssetViewMode::Tree => "Switch to Flat List",
@@ -100,6 +115,7 @@ pub fn toolbar_descriptor_for(
     };
 
     AssetsToolbarDescriptor {
+        uses_create_popover,
         primary_create_action_id,
         primary_create_tooltip,
         search_tooltip,

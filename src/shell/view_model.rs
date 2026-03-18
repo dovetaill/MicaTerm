@@ -2,8 +2,7 @@
 
 use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::{
-    AssetViewMode, ConsoleAssetKind, MockConsoleAssetItem, next_default_name,
-    resolve_committed_name,
+    AssetTree, AssetViewMode, ConsoleAssetKind, VisibleAssetRow, resolve_committed_name,
 };
 use crate::shell::context_menu::{
     ContextMenuActionNode, ContextMenuActionState, ContextTargetKind, SelectionContext,
@@ -11,6 +10,14 @@ use crate::shell::context_menu::{
 };
 use crate::shell::sidebar::SidebarDestination;
 use crate::theme::ThemeMode;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WelcomeAction {
+    NewConnection,
+    OpenRecent,
+    Snippets,
+    Sftp,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellViewModel {
@@ -25,13 +32,15 @@ pub struct ShellViewModel {
     pub asset_view_mode: AssetViewMode,
     pub asset_search_expanded: bool,
     pub asset_search_query: String,
+    pub asset_create_menu_open: bool,
     pub asset_tree_fully_expanded: bool,
-    pub console_asset_items: Vec<MockConsoleAssetItem>,
     pub selected_asset_ids: Vec<String>,
-    pub renaming_asset_id: Option<String>,
-    pub renaming_asset_text: String,
+    pub focused_asset_id: Option<String>,
+    pub editing_asset_id: Option<String>,
+    pub editing_asset_text: String,
     pub context_menu_open: bool,
     pub context_menu_target_kind: Option<ContextTargetKind>,
+    pub context_target_asset_id: Option<String>,
     pub context_menu_anchor_x: f32,
     pub context_menu_anchor_y: f32,
     pub context_menu_origin_x: f32,
@@ -39,7 +48,7 @@ pub struct ShellViewModel {
     pub context_menu_child_flows_left: bool,
     pub context_menu_open_path: Vec<usize>,
     pub context_menu_feedback_text: String,
-    next_console_asset_serial: u64,
+    console_asset_tree: AssetTree,
     window_placement: WindowPlacementKind,
 }
 
@@ -57,13 +66,15 @@ impl Default for ShellViewModel {
             asset_view_mode: AssetViewMode::Tree,
             asset_search_expanded: false,
             asset_search_query: String::new(),
+            asset_create_menu_open: false,
             asset_tree_fully_expanded: false,
-            console_asset_items: Vec::new(),
             selected_asset_ids: Vec::new(),
-            renaming_asset_id: None,
-            renaming_asset_text: String::new(),
+            focused_asset_id: None,
+            editing_asset_id: None,
+            editing_asset_text: String::new(),
             context_menu_open: false,
             context_menu_target_kind: None,
+            context_target_asset_id: None,
             context_menu_anchor_x: 0.0,
             context_menu_anchor_y: 0.0,
             context_menu_origin_x: 0.0,
@@ -71,7 +82,7 @@ impl Default for ShellViewModel {
             context_menu_child_flows_left: false,
             context_menu_open_path: Vec::new(),
             context_menu_feedback_text: String::new(),
-            next_console_asset_serial: 0,
+            console_asset_tree: AssetTree::new(),
             window_placement: WindowPlacementKind::Restored,
         }
     }
@@ -105,6 +116,9 @@ impl ShellViewModel {
     pub fn select_sidebar_destination(&mut self, destination: SidebarDestination) {
         self.active_sidebar_destination = destination;
         self.show_assets_sidebar = true;
+        if destination != SidebarDestination::Console {
+            self.asset_create_menu_open = false;
+        }
     }
 
     pub fn window_placement(&self) -> WindowPlacementKind {
@@ -141,6 +155,7 @@ impl ShellViewModel {
 
     pub fn activate_asset_search(&mut self) {
         self.asset_search_expanded = true;
+        self.asset_create_menu_open = false;
     }
 
     pub fn close_asset_search(&mut self) {
@@ -152,8 +167,6 @@ impl ShellViewModel {
     }
 
     pub fn collapse_asset_search_if_empty(&mut self) {
-        // Keep the inline search visible while text is present so dismiss taps do not hide an
-        // active filter unexpectedly.
         if self.asset_search_query.is_empty() {
             self.asset_search_expanded = false;
         }
@@ -169,15 +182,139 @@ impl ShellViewModel {
     }
 
     pub fn toggle_asset_tree_expansion(&mut self) {
-        if self.asset_view_mode == AssetViewMode::Tree {
-            self.asset_tree_fully_expanded = !self.asset_tree_fully_expanded;
+        if self.asset_view_mode != AssetViewMode::Tree {
+            return;
+        }
+
+        self.asset_tree_fully_expanded = !self.asset_tree_fully_expanded;
+        self.console_asset_tree
+            .set_all_expanded(self.asset_tree_fully_expanded);
+    }
+
+    pub fn toggle_asset_create_menu(&mut self) {
+        if self.asset_create_menu_open {
+            self.asset_create_menu_open = false;
+        } else {
+            self.asset_create_menu_open = true;
+            self.asset_search_expanded = false;
         }
     }
 
+    pub fn close_asset_create_menu(&mut self) {
+        self.asset_create_menu_open = false;
+    }
+
+    pub fn visible_console_asset_rows(&self) -> Vec<VisibleAssetRow> {
+        self.console_asset_tree
+            .project_visible_rows(self.asset_view_mode, &self.asset_search_query)
+    }
+
     pub fn handle_assets_create_action(&mut self, action_id: &str) {
-        if let Some(kind) = ConsoleAssetKind::from_create_action_id(action_id) {
-            self.create_placeholder_asset(kind);
+        let Some(kind) = ConsoleAssetKind::from_create_action_id(action_id) else {
+            return;
+        };
+
+        self.asset_create_menu_open = false;
+        self.context_target_asset_id = None;
+
+        let label = self.console_asset_tree.next_default_name_for_parent(None, kind);
+        let asset_id = self.console_asset_tree.insert_root(kind, label.clone());
+        self.selected_asset_ids = vec![asset_id.clone()];
+        self.focused_asset_id = Some(asset_id.clone());
+        self.editing_asset_id = Some(asset_id);
+        self.editing_asset_text = label;
+    }
+
+    pub fn begin_asset_rename_session(&mut self, asset_id: String, initial_text: String) {
+        if !self.console_asset_tree.contains(&asset_id) {
+            return;
         }
+
+        self.focused_asset_id = Some(asset_id.clone());
+        self.selected_asset_ids = vec![asset_id.clone()];
+        self.editing_asset_id = Some(asset_id);
+        self.editing_asset_text = initial_text;
+    }
+
+    pub fn update_active_asset_rename_draft(&mut self, text: String) {
+        if self.editing_asset_id.is_some() {
+            self.editing_asset_text = text;
+        }
+    }
+
+    pub fn commit_active_asset_rename(&mut self) {
+        let Some(asset_id) = self.editing_asset_id.clone() else {
+            return;
+        };
+
+        let Some(kind) = self.console_asset_tree.kind(&asset_id) else {
+            self.clear_active_asset_rename_session();
+            return;
+        };
+        let parent_id = self.console_asset_tree.parent_id(&asset_id).flatten();
+        let sibling_items = self
+            .console_asset_tree
+            .sibling_items_for_parent(parent_id, Some(asset_id.as_str()));
+        let next_label = resolve_committed_name(kind, &self.editing_asset_text, &sibling_items);
+
+        self.console_asset_tree.set_title(&asset_id, next_label);
+        self.clear_active_asset_rename_session();
+    }
+
+    pub fn cancel_active_asset_rename(&mut self) {
+        self.clear_active_asset_rename_session();
+    }
+
+    pub fn dismiss_active_asset_rename(&mut self) {
+        self.commit_active_asset_rename();
+    }
+
+    pub fn update_asset_rename_draft(&mut self, asset_id: &str, text: String) {
+        if self.editing_asset_id.as_deref() == Some(asset_id) {
+            self.update_active_asset_rename_draft(text);
+        }
+    }
+
+    pub fn commit_asset_rename(&mut self, asset_id: &str, text: String) {
+        if self.editing_asset_id.as_deref() == Some(asset_id) {
+            self.update_active_asset_rename_draft(text);
+            self.commit_active_asset_rename();
+        }
+    }
+
+    pub fn cancel_asset_rename(&mut self, asset_id: &str) {
+        if self.editing_asset_id.as_deref() == Some(asset_id) {
+            self.cancel_active_asset_rename();
+        }
+    }
+
+    pub fn handle_blank_area_click(&mut self) {
+        self.commit_active_asset_rename();
+        self.selected_asset_ids.clear();
+        self.focused_asset_id = None;
+        self.close_context_menu();
+        self.context_target_asset_id = None;
+    }
+
+    pub fn select_asset(&mut self, asset_id: &str) {
+        if !self.console_asset_tree.contains(asset_id) {
+            return;
+        }
+
+        self.selected_asset_ids = vec![asset_id.to_string()];
+        self.focused_asset_id = Some(asset_id.to_string());
+        self.context_target_asset_id = Some(asset_id.to_string());
+        self.asset_create_menu_open = false;
+    }
+
+    pub fn toggle_folder_expanded(&mut self, asset_id: &str) {
+        if self.console_asset_tree.kind(asset_id) != Some(ConsoleAssetKind::Folder) {
+            return;
+        }
+
+        let next = !self.console_asset_tree.is_expanded(asset_id).unwrap_or(false);
+        self.console_asset_tree.set_expanded(asset_id, next);
+        self.asset_tree_fully_expanded = self.asset_tree_fully_expanded && next;
     }
 
     pub fn open_context_menu_for_target(
@@ -189,6 +326,7 @@ impl ShellViewModel {
     ) {
         self.context_menu_open = true;
         self.context_menu_target_kind = Some(target_kind);
+        self.context_target_asset_id = target_id.clone();
         self.context_menu_anchor_x = anchor_x;
         self.context_menu_anchor_y = anchor_y;
         self.context_menu_origin_x = anchor_x;
@@ -196,16 +334,21 @@ impl ShellViewModel {
         self.context_menu_child_flows_left = false;
         self.context_menu_open_path.clear();
         self.context_menu_feedback_text.clear();
+        self.asset_create_menu_open = false;
 
         match target_id {
             Some(target_id) => {
                 if self.selected_asset_ids.is_empty()
                     || !self.selected_asset_ids.iter().any(|id| id == &target_id)
                 {
-                    self.selected_asset_ids = vec![target_id];
+                    self.selected_asset_ids = vec![target_id.clone()];
                 }
+                self.focused_asset_id = Some(target_id);
             }
-            None => self.selected_asset_ids.clear(),
+            None => {
+                self.selected_asset_ids.clear();
+                self.focused_asset_id = None;
+            }
         }
     }
 
@@ -260,19 +403,51 @@ impl ShellViewModel {
             return;
         };
 
-        match current.state {
-            ContextMenuActionState::Planned => {
-                self.set_context_menu_feedback(format!("{} is not wired yet.", current.label));
-            }
-            ContextMenuActionState::Enabled => self.close_context_menu(),
-            ContextMenuActionState::Disabled => {}
+        if current.state == ContextMenuActionState::Disabled {
+            return;
+        }
+
+        if current.children.is_empty() {
+            self.handle_context_menu_leaf_action(current.id);
+        } else if current.state == ContextMenuActionState::Planned {
+            self.set_context_menu_feedback(format!("{} is not wired yet.", current.label));
         }
     }
 
     pub fn handle_context_menu_leaf_action(&mut self, action_id: &str) {
         if let Some(kind) = ConsoleAssetKind::from_create_action_id(action_id) {
-            self.create_placeholder_asset(kind);
+            let parent_id = match (
+                self.context_menu_target_kind,
+                self.context_target_asset_id.as_deref(),
+            ) {
+                (Some(ContextTargetKind::Folder), Some(asset_id))
+                    if self.console_asset_tree.contains(asset_id) =>
+                {
+                    Some(asset_id.to_string())
+                }
+                _ => None,
+            };
+
+            if let Some(parent_id) = parent_id.as_deref() {
+                self.console_asset_tree.set_expanded(parent_id, true);
+            }
+
+            let label = self
+                .console_asset_tree
+                .next_default_name_for_parent(parent_id.as_deref(), kind);
+            let asset_id = if let Some(parent_id) = parent_id.as_deref() {
+                self.console_asset_tree
+                    .insert_child(parent_id, kind, label.clone())
+            } else {
+                self.console_asset_tree.insert_root(kind, label.clone())
+            };
+
+            self.selected_asset_ids = vec![asset_id.clone()];
+            self.focused_asset_id = Some(asset_id.clone());
+            self.editing_asset_id = Some(asset_id);
+            self.editing_asset_text = label;
             self.close_context_menu();
+            self.context_target_asset_id = None;
             return;
         }
 
@@ -290,72 +465,6 @@ impl ShellViewModel {
         }
     }
 
-    pub fn begin_asset_rename_session(&mut self, asset_id: String, initial_text: String) {
-        self.renaming_asset_id = Some(asset_id);
-        self.renaming_asset_text = initial_text;
-    }
-
-    pub fn update_active_asset_rename_draft(&mut self, text: String) {
-        if self.renaming_asset_id.is_some() {
-            self.renaming_asset_text = text;
-        }
-    }
-
-    pub fn commit_active_asset_rename(&mut self) {
-        let Some(asset_id) = self.renaming_asset_id.clone() else {
-            return;
-        };
-        let Some(asset_index) = self
-            .console_asset_items
-            .iter()
-            .position(|item| item.id == asset_id)
-        else {
-            self.clear_active_asset_rename_session();
-            return;
-        };
-
-        let kind = self.console_asset_items[asset_index].kind;
-        let fallback_items = self
-            .console_asset_items
-            .iter()
-            .enumerate()
-            .filter_map(|(index, item)| (index != asset_index).then_some(item.clone()))
-            .collect::<Vec<_>>();
-        let next_label = resolve_committed_name(kind, &self.renaming_asset_text, &fallback_items);
-
-        if let Some(item) = self.console_asset_items.get_mut(asset_index) {
-            item.label = next_label;
-        }
-        self.clear_active_asset_rename_session();
-    }
-
-    pub fn cancel_active_asset_rename(&mut self) {
-        self.clear_active_asset_rename_session();
-    }
-
-    pub fn dismiss_active_asset_rename(&mut self) {
-        self.commit_active_asset_rename();
-    }
-
-    pub fn update_asset_rename_draft(&mut self, asset_id: &str, text: String) {
-        if self.renaming_asset_id.as_deref() == Some(asset_id) {
-            self.update_active_asset_rename_draft(text);
-        }
-    }
-
-    pub fn commit_asset_rename(&mut self, asset_id: &str, text: String) {
-        if self.renaming_asset_id.as_deref() == Some(asset_id) {
-            self.update_active_asset_rename_draft(text);
-            self.commit_active_asset_rename();
-        }
-    }
-
-    pub fn cancel_asset_rename(&mut self, asset_id: &str) {
-        if self.renaming_asset_id.as_deref() == Some(asset_id) {
-            self.cancel_active_asset_rename();
-        }
-    }
-
     pub fn set_context_menu_feedback(&mut self, text: impl Into<String>) {
         self.context_menu_feedback_text = text.into();
     }
@@ -369,6 +478,10 @@ impl ShellViewModel {
         self.context_menu_origin_x = origin_x;
         self.context_menu_origin_y = origin_y;
         self.context_menu_child_flows_left = child_flows_left;
+    }
+
+    pub fn seed_test_asset(&mut self, kind: ConsoleAssetKind, label: impl Into<String>) {
+        self.console_asset_tree.insert_root(kind, label);
     }
 
     fn context_menu_roots(&self) -> Vec<ContextMenuActionNode> {
@@ -388,28 +501,19 @@ impl ShellViewModel {
         }
     }
 
-    fn create_placeholder_asset(&mut self, kind: ConsoleAssetKind) {
-        let id = format!("draft-asset-{}", self.next_console_asset_serial);
-        self.next_console_asset_serial += 1;
-
-        let label = next_default_name(kind, &self.console_asset_items);
-        self.console_asset_items
-            .push(MockConsoleAssetItem::new(id.clone(), kind, label.clone()));
-        self.selected_asset_ids = vec![id.clone()];
-        self.begin_asset_rename_session(id, label);
-    }
-
     fn clear_active_asset_rename_session(&mut self) {
-        self.renaming_asset_id = None;
-        self.renaming_asset_text.clear();
+        self.editing_asset_id = None;
+        self.editing_asset_text.clear();
     }
+}
 
-    pub fn seed_test_asset(&mut self, kind: ConsoleAssetKind, label: impl Into<String>) {
-        let id = format!("seed-asset-{}", self.next_console_asset_serial);
-        self.next_console_asset_serial += 1;
-        self.console_asset_items
-            .push(MockConsoleAssetItem::new(id, kind, label));
-    }
+pub fn welcome_actions() -> &'static [WelcomeAction] {
+    &[
+        WelcomeAction::NewConnection,
+        WelcomeAction::OpenRecent,
+        WelcomeAction::Snippets,
+        WelcomeAction::Sftp,
+    ]
 }
 
 fn current_action_node<'a>(

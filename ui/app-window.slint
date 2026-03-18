@@ -1,5 +1,6 @@
 // Root desktop window that composes chrome, sidebars, workspace content, overlays, and resize grips.
 
+import { AssetsCreateMenu } from "components/assets-create-menu.slint";
 import { AssetsContextMenuItem } from "components/assets-context-menu-column.slint";
 import { AssetsContextMenuOverlay } from "components/assets-context-menu-overlay.slint";
 import { StatusPill } from "components/status-pill.slint";
@@ -26,6 +27,8 @@ export component AppWindow inherits Window {
     in-out property <string> active-sidebar-destination: "console";
     in-out property <string> assets-search-query: "";
     in-out property <bool> asset-search-expanded: false;
+    in-out property <bool> asset-create-menu-open: false;
+    in-out property <bool> asset-uses-create-popover: false;
     in-out property <bool> asset-tree-fully-expanded: false;
     in-out property <string> asset-view-mode: "tree";
     in-out property <string> asset-primary-create-action-id: "";
@@ -70,6 +73,10 @@ export component AppWindow inherits Window {
     out property <length> layout-activity-bar-width: sidebar.activity-bar-width;
     out property <length> layout-assets-sidebar-width: sidebar.assets-sidebar-width;
     out property <length> layout-assets-search-row-height: sidebar.search-row-height;
+    out property <length> layout-assets-create-menu-anchor-x: sidebar.create-menu-anchor-x;
+    out property <length> layout-assets-create-menu-anchor-y: sidebar.create-menu-anchor-y;
+    out property <length> layout-assets-create-menu-anchor-width: sidebar.create-menu-anchor-width;
+    out property <length> layout-assets-create-menu-anchor-height: sidebar.create-menu-anchor-height;
     out property <length> layout-assets-context-menu-origin-x: assets-context-menu-overlay.x;
     out property <length> layout-assets-context-menu-origin-y: assets-context-menu-overlay.y;
     out property <length> layout-assets-context-menu-width: assets-context-menu-overlay.width;
@@ -94,7 +101,11 @@ export component AppWindow inherits Window {
     callback collapse-assets-search-requested();
     callback toggle-assets-view-mode-requested();
     callback toggle-assets-tree-expansion-requested();
+    callback toggle-assets-create-menu-requested();
+    callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
+    callback asset-selected(string);
+    callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
     callback asset-rename-text-changed(string, string);
     callback asset-rename-commit-requested(string, string);
@@ -124,7 +135,6 @@ export component AppWindow inherits Window {
         root.shell-body-height-cache = max(0px, root.height - titlebar.height);
     }
 
-    // Keep the exported layout measurements synchronized whenever the outer window changes size.
     changed width => {
         root.sync-shell-body-height();
         root.shell-layout-invalidated(self.width, self.height);
@@ -133,6 +143,12 @@ export component AppWindow inherits Window {
     changed height => {
         root.sync-shell-body-height();
         root.shell-layout-invalidated(self.width, self.height);
+    }
+
+    changed asset-create-menu-open => {
+        if root.asset-create-menu-open {
+            assets-create-menu-overlay.focus-menu();
+        }
     }
 
     changed assets-context-menu-open => {
@@ -228,6 +244,8 @@ export component AppWindow inherits Window {
                         active-sidebar-destination: root.active-sidebar-destination;
                         assets-search-query: root.assets-search-query;
                         asset-search-expanded: root.asset-search-expanded;
+                        asset-create-menu-open: root.asset-create-menu-open;
+                        asset-uses-create-popover: root.asset-uses-create-popover;
                         asset-tree-fully-expanded: root.asset-tree-fully-expanded;
                         asset-view-mode: root.asset-view-mode;
                         asset-primary-create-action-id: root.asset-primary-create-action-id;
@@ -270,8 +288,24 @@ export component AppWindow inherits Window {
                             root.toggle-assets-tree-expansion-requested();
                         }
 
+                        toggle-assets-create-menu-requested => {
+                            root.toggle-assets-create-menu-requested();
+                        }
+
+                        close-assets-create-menu-requested => {
+                            root.close-assets-create-menu-requested();
+                        }
+
                         assets-create-action-selected(action-id) => {
                             root.assets-create-action-selected(action-id);
+                        }
+
+                        asset-selected(item-id) => {
+                            root.asset-selected(item-id);
+                        }
+
+                        toggle-expanded-requested(item-id) => {
+                            root.toggle-expanded-requested(item-id);
                         }
 
                         asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
@@ -370,6 +404,36 @@ export component AppWindow inherits Window {
 
         clicked => {
             root.collapse-assets-search-requested();
+        }
+    }
+
+    assets-create-menu-dismiss-layer := TouchArea {
+        x: 0px;
+        y: titlebar.height;
+        width: root.width;
+        height: root.height - titlebar.height;
+        enabled: root.asset-create-menu-open;
+
+        clicked => {
+            root.close-assets-create-menu-requested();
+        }
+    }
+
+    assets-create-menu-overlay := AssetsCreateMenu {
+        visible: root.asset-create-menu-open;
+        x: sidebar.create-menu-anchor-x + sidebar.create-menu-anchor-width - self.width;
+        y: sidebar.create-menu-anchor-y + sidebar.create-menu-anchor-height + 6px;
+
+        close-requested => {
+            root.close-assets-create-menu-requested();
+        }
+
+        new-folder-selected => {
+            root.assets-create-action-selected("new-folder");
+        }
+
+        new-ssh-connection-selected => {
+            root.assets-create-action-selected("new-ssh-connection");
         }
     }
 

@@ -173,12 +173,7 @@ fn right_click_near_edge_still_keeps_overlay_within_window_bounds() {
     app.window().set_size(PhysicalSize::new(760, 640));
     app.invoke_shell_layout_invalidated(760.0, 640.0);
 
-    app.invoke_asset_context_menu_requested(
-        "".into(),
-        "blank".into(),
-        748.0,
-        632.0,
-    );
+    app.invoke_asset_context_menu_requested("".into(), "blank".into(), 748.0, 632.0);
 
     let size = app.window().size();
     let origin_x = app.get_layout_assets_context_menu_origin_x();
@@ -232,4 +227,22 @@ fn closing_context_menu_clears_planned_action_feedback() {
 
     assert!(!app.get_assets_context_menu_open());
     assert_eq!(app.get_context_menu_feedback_text().as_str(), "");
+}
+
+#[test]
+fn folder_target_create_action_projects_child_row_into_window_model() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    let folder_id = app.get_console_asset_items().row_data(0).unwrap().id.to_string();
+    app.invoke_asset_context_menu_requested(folder_id.into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("new-ssh-connection".into());
+
+    let rows = app.get_console_asset_items();
+    assert_eq!(rows.row_count(), 2);
+    assert_eq!(rows.row_data(1).unwrap().depth, 1);
+    assert_eq!(rows.row_data(1).unwrap().kind.as_str(), "ssh");
 }
