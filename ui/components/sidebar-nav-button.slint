@@ -10,6 +10,7 @@ export component SidebarNavButton inherits Rectangle {
     in property <string> tooltip-text;
     in property <string> tooltip-source-id;
     callback clicked(string);
+    callback pointer-activity-requested();
     callback tooltip-open-requested(string, string, length, length, length);
     callback tooltip-close-requested(string);
 
@@ -66,6 +67,7 @@ export component SidebarNavButton inherits Rectangle {
 
     touch := TouchArea {
         clicked => {
+            root.pointer-activity-requested();
             root.tooltip-close-requested(root.tooltip-source-id);
             root.clicked(root.item-id);
         }

@@ -3,7 +3,8 @@ import { AssetsContextMenuRow } from "assets-context-menu-row.slint";
 
 export struct AssetsContextMenuItem {
     id: string,
-    title: string,
+    label: string,
+    icon_id: string,
     enabled: bool,
     planned: bool,
     has_children: bool,
@@ -11,34 +12,65 @@ export struct AssetsContextMenuItem {
 }
 
 export component AssetsContextMenuColumn inherits Rectangle {
-    in property <string> title: "操作";
     in property <[AssetsContextMenuItem]> items: [];
+    private property <image> add-icon: @image-url("../../assets/icons/fluent/add-20-regular.svg");
+    private property <image> arrow-clockwise-icon: @image-url("../../assets/icons/fluent/arrow-clockwise-20-regular.svg");
+    private property <image> arrow-download-icon: @image-url("../../assets/icons/fluent/arrow-download-20-regular.svg");
+    private property <image> arrow-upload-icon: @image-url("../../assets/icons/fluent/arrow-upload-20-regular.svg");
+    private property <image> branch-icon: @image-url("../../assets/icons/fluent/branch-20-regular.svg");
+    private property <image> copy-icon: @image-url("../../assets/icons/fluent/copy-20-regular.svg");
+    private property <image> cut-icon: @image-url("../../assets/icons/fluent/cut-20-regular.svg");
+    private property <image> delete-icon: @image-url("../../assets/icons/fluent/delete-20-regular.svg");
+    private property <image> dismiss-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
+    private property <image> edit-icon: @image-url("../../assets/icons/fluent/edit-20-regular.svg");
+    private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
+    private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
+    private property <image> window-console-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
     callback item-invoked(string);
     callback item-hovered(int);
 
     width: 224px;
+    height: 16px + menu-body.preferred-height;
     border-radius: 8px;
     border-width: 1px;
     border-color: ThemeTokens.divider-strong;
     background: ThemeTokens.inspector-surface;
 
-    VerticalLayout {
-        padding: 8px;
+    menu-body := VerticalLayout {
+        x: 8px;
+        y: 8px;
+        width: parent.width - 16px;
         spacing: 4px;
-
-        if root.title == "操作" : Text { text: "操作"; color: ThemeTokens.text-primary; }
-        if root.title != "操作" : Text { text: root.title; color: ThemeTokens.text-primary; }
-
-        Rectangle {
-            width: parent.width;
-            height: 1px;
-            background: ThemeTokens.divider-subtle;
-        }
 
         for item[index] in root.items : AssetsContextMenuRow {
             width: parent.width;
             action-id: item.id;
-            label: item.title;
+            label: item.label;
+            icon-source: item.icon_id == "add"
+                ? root.add-icon
+                : item.icon_id == "arrow-clockwise"
+                    ? root.arrow-clockwise-icon
+                    : item.icon_id == "arrow-download"
+                        ? root.arrow-download-icon
+                        : item.icon_id == "arrow-upload"
+                            ? root.arrow-upload-icon
+                            : item.icon_id == "branch"
+                                ? root.branch-icon
+                                : item.icon_id == "copy"
+                                    ? root.copy-icon
+                                    : item.icon_id == "cut"
+                                        ? root.cut-icon
+                                        : item.icon_id == "delete"
+                                            ? root.delete-icon
+                                            : item.icon_id == "dismiss"
+                                                ? root.dismiss-icon
+                                                : item.icon_id == "edit"
+                                                    ? root.edit-icon
+                                                    : item.icon_id == "folder-open"
+                                                        ? root.folder-open-icon
+                                                        : item.icon_id == "window-console"
+                                                            ? root.window-console-icon
+                                                            : root.folder-icon;
             enabled: item.enabled;
             planned: item.planned;
             has-children: item.has_children;

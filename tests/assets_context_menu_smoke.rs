@@ -49,21 +49,17 @@ fn bootstrap_starts_with_empty_console_assets() {
 }
 
 #[test]
-fn right_click_request_populates_primary_menu_title() {
+fn blank_area_menu_projects_compact_overlay_height() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
-    app.invoke_asset_context_menu_requested(
-        "ssh-prod-01".into(),
-        "ssh".into(),
-        144.0,
-        188.0,
-    );
+    app.invoke_asset_context_menu_requested("".into(), "blank".into(), 96.0, 160.0);
 
-    assert!(app.get_assets_context_menu_open());
-    assert_eq!(app.get_assets_context_menu_primary_title().as_str(), "操作");
+    let overlay_height = app.get_layout_assets_context_menu_height();
+    assert!(overlay_height > 0.0);
+    assert!(overlay_height < 160.0);
     assert!(app.get_assets_context_menu_primary_items().row_count() > 0);
 }
 
@@ -97,7 +93,7 @@ fn create_menu_action_projects_placeholder_item_into_window_model() {
 
     let items = app.get_console_asset_items();
     assert_eq!(items.row_count(), 1);
-    assert_eq!(items.row_data(0).unwrap().label.as_str(), "New Folder");
+    assert_eq!(items.row_data(0).unwrap().label.as_str(), "Folder 1");
 }
 
 #[test]
@@ -122,6 +118,49 @@ fn rename_commit_round_trips_through_window_callbacks() {
         app.get_console_asset_items().row_data(0).unwrap().label.as_str(),
         "Prod Bastion"
     );
+}
+
+#[test]
+fn dismiss_active_asset_rename_commits_through_window_callback() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    let asset_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string();
+
+    app.invoke_asset_rename_text_changed(asset_id.into(), "Infra".into());
+    app.invoke_dismiss_active_asset_rename_requested();
+
+    assert_eq!(app.get_console_asset_items().row_data(0).unwrap().label.as_str(), "Infra");
+}
+
+#[test]
+fn toggling_assets_sidebar_commits_active_rename_before_collapsing_shell() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    let asset_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string();
+
+    app.invoke_asset_rename_text_changed(asset_id.into(), "Infra".into());
+    app.invoke_toggle_assets_sidebar_requested();
+
+    assert_eq!(app.get_console_asset_items().row_data(0).unwrap().label.as_str(), "Infra");
+    assert!(!app.get_show_assets_sidebar());
 }
 
 #[test]
@@ -173,4 +212,24 @@ fn invoking_planned_action_shows_status_pill_feedback() {
         app.get_context_menu_feedback_text().as_str(),
         "Proxy Chrome via Server is not wired yet."
     );
+}
+
+#[test]
+fn closing_context_menu_clears_planned_action_feedback() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_asset_context_menu_requested(
+        "ssh-prod-01".into(),
+        "ssh".into(),
+        144.0,
+        188.0,
+    );
+    app.invoke_assets_context_menu_action_invoked("proxy-chrome-via-server".into());
+    app.invoke_close_assets_context_menu_requested();
+
+    assert!(!app.get_assets_context_menu_open());
+    assert_eq!(app.get_context_menu_feedback_text().as_str(), "");
 }

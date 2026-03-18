@@ -17,7 +17,8 @@ pub enum ContextMenuActionState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextMenuActionNode {
     pub id: &'static str,
-    pub title: &'static str,
+    pub label: &'static str,
+    pub icon_id: &'static str,
     pub state: ContextMenuActionState,
     pub children: Vec<ContextMenuActionNode>,
     pub divider_before: bool,
@@ -39,7 +40,10 @@ impl SelectionContext {
 
 pub const CONTEXT_MENU_COLUMN_WIDTH: f32 = 224.0;
 pub const CONTEXT_MENU_COLUMN_GAP: f32 = 8.0;
-pub const CONTEXT_MENU_HEIGHT: f32 = 320.0;
+pub const CONTEXT_MENU_ROW_HEIGHT: f32 = 32.0;
+pub const CONTEXT_MENU_ROW_GAP: f32 = 4.0;
+pub const CONTEXT_MENU_VERTICAL_PADDING: f32 = 8.0;
+pub const CONTEXT_MENU_DIVIDER_HEIGHT: f32 = 1.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MenuPlacementInput {
@@ -113,6 +117,20 @@ pub fn visible_columns_for_path(
     }
 
     columns
+}
+
+pub fn context_menu_column_height(items: &[ContextMenuActionNode]) -> f32 {
+    if items.is_empty() {
+        return 0.0;
+    }
+
+    let dividers = items.iter().filter(|item| item.divider_before).count() as f32;
+    let rows = items.len() as f32;
+
+    CONTEXT_MENU_VERTICAL_PADDING * 2.0
+        + rows * CONTEXT_MENU_ROW_HEIGHT
+        + (rows - 1.0).max(0.0) * CONTEXT_MENU_ROW_GAP
+        + dividers * CONTEXT_MENU_DIVIDER_HEIGHT
 }
 
 pub fn resolve_root_menu_origin(input: MenuPlacementInput) -> (f32, f32, bool) {
@@ -200,6 +218,7 @@ fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNod
         action_with_state(
             "close-connection",
             "Close",
+            "dismiss",
             if selection.target_has_active_connection {
                 ContextMenuActionState::Enabled
             } else {
@@ -210,43 +229,66 @@ fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNod
         action_with_state(
             "open-in-new-tab",
             "Open in New Tab",
+            "window-console",
             selection_state(selection),
             false,
         ),
     ];
     actions.extend(create_actions(true));
     actions.extend([
-        action_with_state("edit-connection", "Edit", selection_state(selection), true),
-        action_with_state("batch-edit", "Batch Edit", selection_state(selection), false),
-        action_with_state("clone-connection", "Clone", selection_state(selection), false),
-        action_with_state("copy-host", "Copy Host", selection_state(selection), false),
+        action_with_state("edit-connection", "Edit", "edit", selection_state(selection), true),
+        action_with_state("batch-edit", "Batch Edit", "edit", selection_state(selection), false),
+        action_with_state("clone-connection", "Clone", "copy", selection_state(selection), false),
+        action_with_state("copy-host", "Copy Host", "copy", selection_state(selection), false),
         action_with_state(
             "proxy-chrome-via-server",
             "Proxy Chrome via Server",
+            "branch",
             ContextMenuActionState::Planned,
             true,
         ),
         action_with_state(
             "upload-ssh-public-key",
             "Upload SSH Public Key (ssh-copy-id)",
+            "arrow-upload",
             ContextMenuActionState::Planned,
             false,
         ),
         action_with_state(
             "delete-asset",
             "Delete",
+            "delete",
             mutable_selection_state(selection),
             true,
         ),
         action_with_state(
             "rename-asset",
             "Rename",
+            "edit",
             mutable_selection_state(selection),
             false,
         ),
-        action_with_state("refresh-assets", "Refresh", ContextMenuActionState::Enabled, true),
-        action_with_state("import-assets", "Import", ContextMenuActionState::Enabled, false),
-        action_with_state("export-assets", "Export", ContextMenuActionState::Enabled, false),
+        action_with_state(
+            "refresh-assets",
+            "Refresh",
+            "arrow-clockwise",
+            ContextMenuActionState::Enabled,
+            true,
+        ),
+        action_with_state(
+            "import-assets",
+            "Import",
+            "arrow-upload",
+            ContextMenuActionState::Enabled,
+            false,
+        ),
+        action_with_state(
+            "export-assets",
+            "Export",
+            "arrow-download",
+            ContextMenuActionState::Enabled,
+            false,
+        ),
     ]);
     actions
 }
@@ -259,6 +301,7 @@ fn resolve_folder_actions(selection: &SelectionContext) -> Vec<ContextMenuAction
         action_with_state(
             "batch-open",
             "Batch Open",
+            "folder-open",
             if has_selection {
                 ContextMenuActionState::Enabled
             } else {
@@ -269,20 +312,23 @@ fn resolve_folder_actions(selection: &SelectionContext) -> Vec<ContextMenuAction
         action_with_state(
             "delete-asset",
             "Delete",
+            "delete",
             mutable_selection_state(selection),
             true,
         ),
         action_with_state(
             "rename-asset",
             "Rename",
+            "edit",
             mutable_selection_state(selection),
             false,
         ),
-        action_with_state("copy-asset", "Copy", selection_state(selection), false),
-        action_with_state("cut-asset", "Cut", mutable_selection_state(selection), false),
+        action_with_state("copy-asset", "Copy", "copy", selection_state(selection), false),
+        action_with_state("cut-asset", "Cut", "cut", mutable_selection_state(selection), false),
         action_with_state(
             "paste-asset",
             "Paste",
+            "add",
             if selection.clipboard_has_asset_payload {
                 ContextMenuActionState::Enabled
             } else {
@@ -290,9 +336,27 @@ fn resolve_folder_actions(selection: &SelectionContext) -> Vec<ContextMenuAction
             },
             false,
         ),
-        action_with_state("refresh-assets", "Refresh", ContextMenuActionState::Enabled, true),
-        action_with_state("import-assets", "Import", ContextMenuActionState::Enabled, false),
-        action_with_state("export-assets", "Export", ContextMenuActionState::Enabled, false),
+        action_with_state(
+            "refresh-assets",
+            "Refresh",
+            "arrow-clockwise",
+            ContextMenuActionState::Enabled,
+            true,
+        ),
+        action_with_state(
+            "import-assets",
+            "Import",
+            "arrow-upload",
+            ContextMenuActionState::Enabled,
+            false,
+        ),
+        action_with_state(
+            "export-assets",
+            "Export",
+            "arrow-download",
+            ContextMenuActionState::Enabled,
+            false,
+        ),
     ]);
     actions
 }
@@ -302,12 +366,14 @@ fn create_actions(divider_before: bool) -> Vec<ContextMenuActionNode> {
         action_with_state(
             "new-folder",
             "New Folder",
+            "folder",
             ContextMenuActionState::Enabled,
             divider_before,
         ),
         action_with_state(
             "new-ssh-connection",
             "New SSH Connection",
+            "window-console",
             ContextMenuActionState::Enabled,
             false,
         ),
@@ -332,13 +398,15 @@ fn mutable_selection_state(selection: &SelectionContext) -> ContextMenuActionSta
 
 fn action_with_state(
     id: &'static str,
-    title: &'static str,
+    label: &'static str,
+    icon_id: &'static str,
     state: ContextMenuActionState,
     divider_before: bool,
 ) -> ContextMenuActionNode {
     ContextMenuActionNode {
         id,
-        title,
+        label,
+        icon_id,
         state,
         children: Vec::new(),
         divider_before,

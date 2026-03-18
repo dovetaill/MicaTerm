@@ -30,7 +30,14 @@ grep -F 'callback asset-rename-text-changed(string, string);' "$APP_WINDOW" >/de
 grep -F 'callback asset-rename-commit-requested(string, string);' "$APP_WINDOW" >/dev/null
 grep -F 'callback asset-rename-cancel-requested(string);' "$APP_WINDOW" >/dev/null
 grep -F 'rename-input := TextInput {' "$ROW" >/dev/null
-grep -F 'Text { text: "操作";' "$MENU_COLUMN" >/dev/null
+! grep -F 'changed has-focus => {' "$ROW" >/dev/null
+grep -F 'callback dismiss-active-asset-rename-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'in property <image> icon-source;' "$MENU_ROW" >/dev/null
+grep -F 'icon-slot := Rectangle {' "$MENU_ROW" >/dev/null
+! grep -F 'Text { text: "操作";' "$MENU_COLUMN" >/dev/null
+! grep -F 'in property <string> title: "操作";' "$MENU_COLUMN" >/dev/null
+! grep -F 'height: 320px;' "$MENU_OVERLAY" >/dev/null
+! grep -F 'height: parent.height;' "$MENU_COLUMN" >/dev/null
 grep -F 'hover-open-delay := Timer {' "$MENU_OVERLAY" >/dev/null
 grep -F 'corridor-close-delay := Timer {' "$MENU_OVERLAY" >/dev/null
 grep -F 'callback row-hovered(int, int);' "$MENU_OVERLAY" >/dev/null

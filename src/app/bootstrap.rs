@@ -24,13 +24,14 @@ use crate::app::windows_frame::{
 };
 use crate::shell::assets::MockConsoleAssetItem;
 use crate::shell::context_menu::{
-    CONTEXT_MENU_COLUMN_GAP, CONTEXT_MENU_COLUMN_WIDTH, CONTEXT_MENU_HEIGHT,
-    ContextMenuActionNode, ContextMenuActionState, ContextTargetKind, MenuPlacementInput,
-    SelectionContext, resolve_action_tree, resolve_root_menu_origin, visible_columns_for_path,
+    CONTEXT_MENU_COLUMN_GAP, CONTEXT_MENU_COLUMN_WIDTH, ContextMenuActionNode,
+    ContextMenuActionState, ContextTargetKind, MenuPlacementInput, SelectionContext,
+    context_menu_column_height, resolve_action_tree, resolve_root_menu_origin,
+    visible_columns_for_path,
 };
 use crate::shell::layout::{ShellLayoutInput, resolve_shell_layout};
 use crate::shell::metrics::ShellMetrics;
-use crate::shell::sidebar::{SidebarDestination, sidebar_items_for};
+use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descriptor_for};
 use crate::shell::view_model::ShellViewModel;
 use crate::theme::ThemeMode;
 
@@ -166,11 +167,20 @@ fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
 }
 
 fn sync_assets_toolbar_state(window: &AppWindow, state: &ShellViewModel) {
+    let descriptor = toolbar_descriptor_for(state.active_sidebar_destination, state);
     window.set_asset_view_mode(state.asset_view_mode.id().into());
+    window.set_asset_rename_active(state.renaming_asset_id.is_some());
     window.set_asset_search_expanded(state.asset_search_expanded);
     window.set_assets_search_query(state.asset_search_query.clone().into());
-    window.set_asset_create_menu_open(state.asset_create_menu_open);
     window.set_asset_tree_fully_expanded(state.asset_tree_fully_expanded);
+    window.set_asset_primary_create_action_id(
+        descriptor.primary_create_action_id.unwrap_or("").into(),
+    );
+    window.set_asset_primary_create_tooltip(descriptor.primary_create_tooltip.into());
+    window.set_asset_search_tooltip(descriptor.search_tooltip.into());
+    window.set_asset_view_mode_tooltip(descriptor.view_mode_tooltip.into());
+    window.set_asset_tree_expansion_tooltip(descriptor.tree_expansion_tooltip.into());
+    window.set_asset_show_tree_controls(descriptor.show_tree_controls);
 }
 
 fn sync_assets_context_menu_state(window: &AppWindow, state: &ShellViewModel) {
@@ -180,15 +190,12 @@ fn sync_assets_context_menu_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_assets_context_menu_origin_x(state.context_menu_origin_x);
     window.set_assets_context_menu_origin_y(state.context_menu_origin_y);
     window.set_assets_context_menu_child_flows_left(state.context_menu_child_flows_left);
-    window.set_assets_context_menu_primary_title(context_menu_primary_title_for(state).into());
     window.set_assets_context_menu_primary_items(ModelRc::new(VecModel::from(
         context_menu_primary_items_for(state),
     )));
-    window.set_assets_context_menu_secondary_title(context_menu_secondary_title_for(state).into());
     window.set_assets_context_menu_secondary_items(ModelRc::new(VecModel::from(
         context_menu_secondary_items_for(state),
     )));
-    window.set_assets_context_menu_tertiary_title(context_menu_tertiary_title_for(state).into());
     window.set_assets_context_menu_tertiary_items(ModelRc::new(VecModel::from(
         context_menu_tertiary_items_for(state),
     )));
@@ -255,48 +262,12 @@ fn context_menu_columns_for(state: &ShellViewModel) -> [Vec<ContextMenuActionNod
     visible_columns_for_path(&roots, &state.context_menu_open_path)
 }
 
-fn context_menu_primary_title_for(state: &ShellViewModel) -> &'static str {
-    if !state.context_menu_open {
-        ""
-    } else {
-        "操作"
-    }
-}
-
-fn context_menu_secondary_title_for(state: &ShellViewModel) -> &'static str {
-    match context_menu_roots_for(state).get(state.context_menu_open_path.first().copied().unwrap_or(usize::MAX)) {
-        Some(node) if !node.children.is_empty() => node.title,
-        _ => "",
-    }
-}
-
-fn context_menu_tertiary_title_for(state: &ShellViewModel) -> &'static str {
-    let roots = context_menu_roots_for(state);
-    let Some(first_index) = state.context_menu_open_path.first().copied() else {
-        return "";
-    };
-    let Some(second_index) = state.context_menu_open_path.get(1).copied() else {
-        return "";
-    };
-    let Some(first_node) = roots.get(first_index) else {
-        return "";
-    };
-    let Some(second_node) = first_node.children.get(second_index) else {
-        return "";
-    };
-
-    if second_node.children.is_empty() {
-        ""
-    } else {
-        second_node.title
-    }
-}
-
 fn context_menu_items_to_model(items: Vec<ContextMenuActionNode>) -> Vec<AssetsContextMenuItem> {
     items.into_iter()
         .map(|item| AssetsContextMenuItem {
             id: item.id.into(),
-            title: item.title.into(),
+            label: item.label.into(),
+            icon_id: item.icon_id.into(),
             enabled: item.state != ContextMenuActionState::Disabled,
             planned: item.state == ContextMenuActionState::Planned,
             has_children: !item.children.is_empty(),
@@ -393,6 +364,14 @@ fn context_menu_visible_column_count(state: &ShellViewModel) -> usize {
         .count()
 }
 
+fn context_menu_overlay_height_for(state: &ShellViewModel) -> f32 {
+    context_menu_columns_for(state)
+        .into_iter()
+        .filter(|column| !column.is_empty())
+        .map(|column| context_menu_column_height(column.as_slice()))
+        .fold(0.0, f32::max)
+}
+
 fn context_menu_child_width_for(state: &ShellViewModel) -> f32 {
     let child_count = context_menu_visible_column_count(state).saturating_sub(1) as f32;
     if child_count <= 0.0 {
@@ -415,7 +394,7 @@ fn update_context_menu_placement(window: &AppWindow, state: &mut ShellViewModel)
         anchor_x: state.context_menu_anchor_x,
         anchor_y: state.context_menu_anchor_y,
         root_width: CONTEXT_MENU_COLUMN_WIDTH,
-        root_height: CONTEXT_MENU_HEIGHT,
+        root_height: context_menu_overlay_height_for(state),
         child_width: context_menu_child_width_for(state),
     });
 
@@ -651,6 +630,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_toggle_assets_sidebar_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        state.dismiss_active_asset_rename();
         state.toggle_assets_sidebar();
         sync_sidebar_state(&window, &state);
         let (width, height) = current_window_size(&window);
@@ -662,6 +642,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_sidebar_destination_selected(move |destination_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        state.dismiss_active_asset_rename();
+        state.dismiss_empty_asset_search_on_shell_interaction();
         let destination = SidebarDestination::from_id(destination_id.as_str())
             .unwrap_or(SidebarDestination::Console);
         state.select_sidebar_destination(destination);
@@ -675,8 +657,9 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_toggle_assets_search_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        state.dismiss_active_asset_rename();
         state.activate_asset_search();
-        sync_assets_toolbar_state(&window, &state);
+        sync_sidebar_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -693,8 +676,9 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_close_assets_search_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        state.dismiss_active_asset_rename();
         state.close_asset_search();
-        sync_assets_toolbar_state(&window, &state);
+        sync_sidebar_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -702,8 +686,9 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_collapse_assets_search_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        state.dismiss_active_asset_rename();
         state.collapse_asset_search_if_empty();
-        sync_assets_toolbar_state(&window, &state);
+        sync_sidebar_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -711,8 +696,10 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_toggle_assets_view_mode_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        state.dismiss_active_asset_rename();
+        state.dismiss_empty_asset_search_on_shell_interaction();
         state.toggle_asset_view_mode();
-        sync_assets_toolbar_state(&window, &state);
+        sync_sidebar_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -720,26 +707,10 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_toggle_assets_tree_expansion_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        state.dismiss_active_asset_rename();
+        state.dismiss_empty_asset_search_on_shell_interaction();
         state.toggle_asset_tree_expansion();
-        sync_assets_toolbar_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_toggle_assets_create_menu_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.toggle_asset_create_menu();
-        sync_assets_toolbar_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_close_assets_create_menu_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.close_asset_create_menu();
-        sync_assets_toolbar_state(&window, &state);
+        sync_sidebar_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -747,6 +718,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_assets_create_action_selected(move |action_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        state.dismiss_active_asset_rename();
+        state.dismiss_empty_asset_search_on_shell_interaction();
         state.handle_assets_create_action(action_id.as_str());
         sync_sidebar_state(&window, &state);
     });
@@ -783,6 +756,8 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_asset_context_menu_requested(move |target_id, target_kind, anchor_x, anchor_y| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        state.dismiss_active_asset_rename();
+        state.dismiss_empty_asset_search_on_shell_interaction();
         state.open_context_menu_for_target(
             parse_context_target_kind(target_kind.as_str()),
             if target_id.is_empty() {
@@ -796,6 +771,30 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         sync_sidebar_state(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_shell_interaction_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.renaming_asset_id.is_some() {
+            state.dismiss_active_asset_rename();
+            sync_sidebar_state(&window, &state);
+        } else if state.dismiss_empty_asset_search_on_shell_interaction() {
+            sync_sidebar_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_dismiss_active_asset_rename_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.renaming_asset_id.is_some() {
+            state.dismiss_active_asset_rename();
+            sync_sidebar_state(&window, &state);
+        }
     });
 
     let state = Rc::clone(&view_model);
