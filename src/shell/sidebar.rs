@@ -1,8 +1,20 @@
+use slint::SharedString;
+
+use crate::SidebarNavItem;
+use crate::shell::view_model::ShellViewModel;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarDestination {
     Console,
     Snippets,
     Keychain,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssetsToolbarDescriptor {
+    pub uses_create_popover: bool,
+    pub primary_create_action_id: Option<&'static str>,
+    pub primary_create_tooltip: &'static str,
 }
 
 impl SidebarDestination {
@@ -50,7 +62,26 @@ pub fn sidebar_items_for(state: &ShellViewModel) -> Vec<SidebarNavItem> {
         })
         .collect()
 }
-use slint::SharedString;
 
-use crate::SidebarNavItem;
-use crate::shell::view_model::ShellViewModel;
+pub fn toolbar_descriptor_for(
+    destination: SidebarDestination,
+    _view_model: &ShellViewModel,
+) -> AssetsToolbarDescriptor {
+    match destination {
+        SidebarDestination::Console => AssetsToolbarDescriptor {
+            uses_create_popover: true,
+            primary_create_action_id: None,
+            primary_create_tooltip: "Create Asset",
+        },
+        SidebarDestination::Snippets => AssetsToolbarDescriptor {
+            uses_create_popover: false,
+            primary_create_action_id: Some("new-snippet"),
+            primary_create_tooltip: "New Snippet",
+        },
+        SidebarDestination::Keychain => AssetsToolbarDescriptor {
+            uses_create_popover: false,
+            primary_create_action_id: Some("new-keychain"),
+            primary_create_tooltip: "New Keychain",
+        },
+    }
+}

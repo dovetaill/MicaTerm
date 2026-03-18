@@ -1,5 +1,6 @@
 use mica_term::app::window_state::WindowPlacementKind;
-use mica_term::shell::assets::AssetViewMode;
+use mica_term::shell::assets::{AssetViewMode, ConsoleAssetKind};
+use mica_term::shell::context_menu::ContextTargetKind;
 use mica_term::shell::sidebar::SidebarDestination;
 use mica_term::shell::view_model::{ShellViewModel, WelcomeAction, welcome_actions};
 use mica_term::theme::ThemeMode;
@@ -92,4 +93,54 @@ fn shell_view_model_starts_with_assets_toolbar_defaults() {
     assert!(!view_model.asset_search_expanded);
     assert!(view_model.asset_search_query.is_empty());
     assert!(!view_model.asset_create_menu_open);
+}
+
+#[test]
+fn blank_area_click_commits_rename_and_clears_selection_and_focus() {
+    let mut view_model = ShellViewModel::default();
+    view_model.handle_assets_create_action("new-folder");
+    view_model.update_active_asset_rename_draft("Infra".into());
+
+    view_model.handle_blank_area_click();
+
+    assert!(view_model.selected_asset_ids.is_empty());
+    assert_eq!(view_model.focused_asset_id, None);
+    assert_eq!(view_model.editing_asset_id, None);
+    assert_eq!(view_model.visible_console_asset_rows()[0].label, "Infra");
+}
+
+#[test]
+fn selecting_an_asset_updates_focus_without_opening_context_menu() {
+    let mut view_model = ShellViewModel::default();
+    view_model.handle_assets_create_action("new-folder");
+    view_model.commit_active_asset_rename();
+    let asset_id = view_model.visible_console_asset_rows()[0].id.clone();
+
+    view_model.select_asset(&asset_id);
+
+    assert_eq!(view_model.focused_asset_id.as_deref(), Some(asset_id.as_str()));
+    assert_eq!(view_model.selected_asset_ids, vec![asset_id]);
+    assert!(!view_model.asset_create_menu_open);
+}
+
+#[test]
+fn folder_context_create_inserts_child_and_expands_parent() {
+    let mut view_model = ShellViewModel::default();
+    view_model.handle_assets_create_action("new-folder");
+    view_model.commit_active_asset_rename();
+    let folder_id = view_model.visible_console_asset_rows()[0].id.clone();
+
+    view_model.open_context_menu_for_target(
+        ContextTargetKind::Folder,
+        Some(folder_id.clone()),
+        48.0,
+        64.0,
+    );
+    view_model.handle_context_menu_leaf_action("new-ssh-connection");
+
+    let rows = view_model.visible_console_asset_rows();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].id, folder_id);
+    assert_eq!(rows[1].depth, 1);
+    assert_eq!(rows[1].kind, ConsoleAssetKind::SshConnection);
 }

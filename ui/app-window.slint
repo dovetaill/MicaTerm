@@ -3,6 +3,7 @@ import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
 import { WindowResizeGrips } from "components/window-resize-grips.slint";
 import { RightPanel } from "shell/right-panel.slint";
+import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
 import { TabBar } from "shell/tabbar.slint";
 import { Titlebar } from "shell/titlebar.slint";
@@ -22,8 +23,11 @@ export component AppWindow inherits Window {
     in-out property <string> assets-search-query: "";
     in-out property <bool> asset-search-expanded: false;
     in-out property <bool> asset-create-menu-open: false;
+    in-out property <bool> asset-uses-create-popover: false;
+    in-out property <string> asset-primary-create-action-id: "";
     in-out property <bool> asset-tree-fully-expanded: false;
     in-out property <string> asset-view-mode: "tree";
+    in-out property <[ConsoleAssetItem]> console-asset-items: [];
     in-out property <[SidebarNavItem]> sidebar-items: [];
     in-out property <length> shell-body-height-cache: 852px;
     out property <length> layout-titlebar-content-width: titlebar.layout-content-width;
@@ -75,6 +79,10 @@ export component AppWindow inherits Window {
     callback toggle-assets-create-menu-requested();
     callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
+    callback asset-selected(string);
+    callback toggle-expanded-requested(string);
+    callback asset-context-menu-requested(string, string, length, length);
+    callback assets-context-menu-action-invoked(string);
     callback shell-layout-invalidated(length, length);
 
     in property <string> window-title: "Mica Term";
@@ -195,8 +203,11 @@ export component AppWindow inherits Window {
                         assets-search-query: root.assets-search-query;
                         asset-search-expanded: root.asset-search-expanded;
                         asset-create-menu-open: root.asset-create-menu-open;
+                        asset-uses-create-popover: root.asset-uses-create-popover;
+                        asset-primary-create-action-id: root.asset-primary-create-action-id;
                         asset-tree-fully-expanded: root.asset-tree-fully-expanded;
                         asset-view-mode: root.asset-view-mode;
+                        console-asset-items: root.console-asset-items;
 
                         toggle-assets-sidebar-requested => {
                             root.toggle-assets-sidebar-requested();
@@ -240,6 +251,18 @@ export component AppWindow inherits Window {
 
                         assets-create-action-selected(action-id) => {
                             root.assets-create-action-selected(action-id);
+                        }
+
+                        asset-selected(item-id) => {
+                            root.asset-selected(item-id);
+                        }
+
+                        toggle-expanded-requested(item-id) => {
+                            root.toggle-expanded-requested(item-id);
+                        }
+
+                        asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
+                            root.asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
                         }
                     }
 

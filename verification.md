@@ -238,6 +238,45 @@ Date: 2026-03-16
 ### Commands Executed
 
 - [x] `bash tests/window_chrome_contract_smoke.sh`
+
+## 2026-03-18 - Windows Console assets explorer bugfix3
+
+Date: 2026-03-18
+
+### Source Documents
+
+- Design: `docs/plans/2026-03-18-windows-console-assets-explorer-bugfix3-design.md`
+- Implementation Plan: `docs/plans/2026-03-18-windows-console-assets-explorer-bugfix3-implementation-plan.md`
+- TDD Handoff: `docs/plans/2026-03-18-windows-console-assets-explorer-bugfix3-tdd-spec.md`
+
+### Commands Executed
+
+- [x] `cargo test --test assets_explorer_projection --test shell_view_model --test assets_context_menu_spec --test assets_context_menu_smoke --test assets_sidebar_toolbar_spec --test assets_sidebar_toolbar_smoke --test assets_explorer_smoke -- --nocapture`
+- [x] `bash tests/assets_context_menu_ui_contract_smoke.sh`
+- [x] `bash tests/assets_sidebar_toolbar_ui_contract_smoke.sh`
+- [x] `bash tests/assets_explorer_ui_contract_smoke.sh`
+- [x] `bash tests/sidebar_assets_smoke.sh`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+
+### Automated Results
+
+- `cargo test --test assets_explorer_projection --test shell_view_model --test assets_context_menu_spec --test assets_context_menu_smoke --test assets_sidebar_toolbar_spec --test assets_sidebar_toolbar_smoke --test assets_explorer_smoke -- --nocapture`: passed
+- `bash tests/assets_context_menu_ui_contract_smoke.sh`: passed
+- `bash tests/assets_sidebar_toolbar_ui_contract_smoke.sh`: passed
+- `bash tests/assets_explorer_ui_contract_smoke.sh`: passed
+- `bash tests/sidebar_assets_smoke.sh`: passed
+- `cargo check --workspace`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+
+### Verification Conclusions
+
+- [x] `AssetTree` tree/flat/search projection contracts are covered
+- [x] blank-area click commits rename and clears selection/focus
+- [x] Console toolbar create still writes root-level nodes
+- [x] folder-target context create writes child nodes and auto-expands parent
+- [x] Slint window model now projects `depth / has_children / expanded / focused / selected / renaming`
+- [x] create popover, Explorer row, and context-menu callback contracts are covered by shell smoke scripts
 - [x] `bash tests/square_component_contract_smoke.sh`
 - [x] `bash tests/top_status_bar_ui_contract_smoke.sh`
 - [x] `bash tests/window_theme_contract_smoke.sh`

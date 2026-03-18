@@ -28,6 +28,8 @@ grep -F 'label: "New SSH Connection"' "$MENU" >/dev/null
 ! grep -F 'close-policy:' "$MENU" >/dev/null
 grep -F 'public function focus-menu()' "$MENU" >/dev/null
 grep -F 'Text { text: "Assets";' "$ASSETS" >/dev/null
+grep -F 'callback toggle-assets-create-menu-requested();' "$ASSETS" >/dev/null
+grep -F 'asset-create-menu-open' "$ASSETS" >/dev/null
 grep -F 'toolbar-content := HorizontalLayout {' "$ASSETS" >/dev/null
 grep -F 'search-button := SidebarToolbarIconButton' "$ASSETS" >/dev/null
 grep -F 'tree-expansion-button := SidebarToolbarIconButton' "$ASSETS" >/dev/null
@@ -103,6 +105,7 @@ grep -F 'out property <length> create-menu-anchor-y' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-width' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-height' "$SIDEBAR" >/dev/null
 grep -F 'assets-create-menu-overlay := AssetsCreateMenu {' "$APP_WINDOW" >/dev/null
+grep -F 'AssetsCreateMenu' "$APP_WINDOW" >/dev/null
 grep -F 'visible: root.asset-create-menu-open;' "$APP_WINDOW" >/dev/null
 grep -F 'x: sidebar.create-menu-anchor-x + sidebar.create-menu-anchor-width - self.width;' "$APP_WINDOW" >/dev/null
 grep -F 'y: sidebar.create-menu-anchor-y + sidebar.create-menu-anchor-height + 6px;' "$APP_WINDOW" >/dev/null

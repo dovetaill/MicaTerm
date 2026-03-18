@@ -1,5 +1,6 @@
 use crate::app::window_state::WindowPlacementKind;
-use crate::shell::assets::AssetViewMode;
+use crate::shell::assets::{AssetTree, AssetViewMode, ConsoleAssetKind, VisibleAssetRow};
+use crate::shell::context_menu::ContextTargetKind;
 use crate::shell::sidebar::SidebarDestination;
 use crate::theme::ThemeMode;
 
@@ -26,6 +27,14 @@ pub struct ShellViewModel {
     pub asset_search_query: String,
     pub asset_create_menu_open: bool,
     pub asset_tree_fully_expanded: bool,
+    pub selected_asset_ids: Vec<String>,
+    pub focused_asset_id: Option<String>,
+    pub editing_asset_id: Option<String>,
+    pub editing_asset_text: String,
+    pub context_menu_open: bool,
+    pub context_target_kind: Option<ContextTargetKind>,
+    pub context_target_asset_id: Option<String>,
+    console_asset_tree: AssetTree,
     window_placement: WindowPlacementKind,
 }
 
@@ -45,6 +54,14 @@ impl Default for ShellViewModel {
             asset_search_query: String::new(),
             asset_create_menu_open: false,
             asset_tree_fully_expanded: false,
+            selected_asset_ids: Vec::new(),
+            focused_asset_id: None,
+            editing_asset_id: None,
+            editing_asset_text: String::new(),
+            context_menu_open: false,
+            context_target_kind: None,
+            context_target_asset_id: None,
+            console_asset_tree: AssetTree::new(),
             window_placement: WindowPlacementKind::Restored,
         }
     }
@@ -78,6 +95,9 @@ impl ShellViewModel {
     pub fn select_sidebar_destination(&mut self, destination: SidebarDestination) {
         self.active_sidebar_destination = destination;
         self.show_assets_sidebar = true;
+        if destination != SidebarDestination::Console {
+            self.asset_create_menu_open = false;
+        }
     }
 
     pub fn window_placement(&self) -> WindowPlacementKind {
@@ -148,6 +168,143 @@ impl ShellViewModel {
 
     pub fn close_asset_create_menu(&mut self) {
         self.asset_create_menu_open = false;
+    }
+
+    pub fn visible_console_asset_rows(&self) -> Vec<VisibleAssetRow> {
+        self.console_asset_tree
+            .project_visible_rows(self.asset_view_mode, &self.asset_search_query)
+    }
+
+    pub fn handle_assets_create_action(&mut self, action_id: &str) {
+        let Some(kind) = ConsoleAssetKind::from_create_action_id(action_id) else {
+            return;
+        };
+
+        self.asset_create_menu_open = false;
+        self.context_target_asset_id = None;
+
+        let label = self.console_asset_tree.next_default_name_for_parent(None, kind);
+        let asset_id = self.console_asset_tree.insert_root(kind, label.clone());
+        self.selected_asset_ids = vec![asset_id.clone()];
+        self.focused_asset_id = Some(asset_id.clone());
+        self.editing_asset_id = Some(asset_id);
+        self.editing_asset_text = label;
+    }
+
+    pub fn update_active_asset_rename_draft(&mut self, text: String) {
+        if self.editing_asset_id.is_some() {
+            self.editing_asset_text = text;
+        }
+    }
+
+    pub fn commit_active_asset_rename(&mut self) {
+        let Some(asset_id) = self.editing_asset_id.clone() else {
+            return;
+        };
+
+        let next_label = if self.editing_asset_text.trim().is_empty() {
+            self.console_asset_tree
+                .title(&asset_id)
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            self.editing_asset_text.trim().to_string()
+        };
+
+        self.console_asset_tree.set_title(&asset_id, next_label);
+        self.editing_asset_id = None;
+        self.editing_asset_text.clear();
+    }
+
+    pub fn handle_blank_area_click(&mut self) {
+        self.commit_active_asset_rename();
+        self.selected_asset_ids.clear();
+        self.focused_asset_id = None;
+        self.context_menu_open = false;
+        self.context_target_kind = None;
+        self.context_target_asset_id = None;
+    }
+
+    pub fn select_asset(&mut self, asset_id: &str) {
+        if !self.console_asset_tree.contains(asset_id) {
+            return;
+        }
+
+        self.selected_asset_ids = vec![asset_id.to_string()];
+        self.focused_asset_id = Some(asset_id.to_string());
+        self.context_target_asset_id = Some(asset_id.to_string());
+    }
+
+    pub fn toggle_folder_expanded(&mut self, asset_id: &str) {
+        if self.console_asset_tree.kind(asset_id) != Some(ConsoleAssetKind::Folder) {
+            return;
+        }
+
+        let next = !self.console_asset_tree.is_expanded(asset_id).unwrap_or(false);
+        self.console_asset_tree.set_expanded(asset_id, next);
+    }
+
+    pub fn open_context_menu_for_target(
+        &mut self,
+        target_kind: ContextTargetKind,
+        target_id: Option<String>,
+        _anchor_x: f32,
+        _anchor_y: f32,
+    ) {
+        self.context_menu_open = true;
+        self.context_target_kind = Some(target_kind);
+        self.context_target_asset_id = target_id.clone();
+
+        if let Some(target_id) = target_id {
+            self.selected_asset_ids = vec![target_id.clone()];
+            self.focused_asset_id = Some(target_id);
+        } else {
+            self.selected_asset_ids.clear();
+            self.focused_asset_id = None;
+        }
+    }
+
+    pub fn handle_context_menu_leaf_action(&mut self, action_id: &str) {
+        let Some(kind) = ConsoleAssetKind::from_create_action_id(action_id) else {
+            self.context_menu_open = false;
+            self.context_target_kind = None;
+            self.context_target_asset_id = None;
+            return;
+        };
+
+        let parent_id = match (
+            self.context_target_kind,
+            self.context_target_asset_id.as_deref(),
+        ) {
+            (Some(ContextTargetKind::Folder), Some(asset_id))
+                if self.console_asset_tree.contains(asset_id) =>
+            {
+                Some(asset_id.to_string())
+            }
+            _ => None,
+        };
+
+        if let Some(parent_id) = parent_id.as_deref() {
+            self.console_asset_tree.set_expanded(parent_id, true);
+        }
+
+        let label = self
+            .console_asset_tree
+            .next_default_name_for_parent(parent_id.as_deref(), kind);
+        let asset_id = if let Some(parent_id) = parent_id.as_deref() {
+            self.console_asset_tree
+                .insert_child(parent_id, kind, label.clone())
+        } else {
+            self.console_asset_tree.insert_root(kind, label.clone())
+        };
+
+        self.selected_asset_ids = vec![asset_id.clone()];
+        self.focused_asset_id = Some(asset_id.clone());
+        self.editing_asset_id = Some(asset_id);
+        self.editing_asset_text = label;
+        self.context_menu_open = false;
+        self.context_target_kind = None;
+        self.context_target_asset_id = None;
     }
 }
 

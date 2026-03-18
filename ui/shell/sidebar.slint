@@ -1,5 +1,5 @@
 import { ThemeTokens } from "../theme/tokens.slint";
-import { AssetsSidebar } from "assets-sidebar.slint";
+import { AssetsSidebar, ConsoleAssetItem } from "assets-sidebar.slint";
 import { SidebarNavButton } from "../components/sidebar-nav-button.slint";
 
 export struct SidebarNavItem {
@@ -15,8 +15,11 @@ export component Sidebar inherits Rectangle {
     in property <string> assets-search-query: "";
     in property <bool> asset-search-expanded: false;
     in property <bool> asset-create-menu-open: false;
+    in property <bool> asset-uses-create-popover: false;
+    in property <string> asset-primary-create-action-id: "";
     in property <bool> asset-tree-fully-expanded: false;
     in property <string> asset-view-mode: "tree";
+    in property <[ConsoleAssetItem]> console-asset-items: [];
     private property <string> tooltip-text-value: "";
     private property <bool> tooltip-visible-value: false;
     private property <string> tooltip-source-id-value: "";
@@ -47,6 +50,9 @@ export component Sidebar inherits Rectangle {
     callback toggle-assets-create-menu-requested();
     callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
+    callback asset-selected(string);
+    callback toggle-expanded-requested(string);
+    callback asset-context-menu-requested(string, string, length, length);
 
     width: 48px + (root.show-assets-sidebar ? 288px : 0px);
     background: transparent;
@@ -155,8 +161,11 @@ export component Sidebar inherits Rectangle {
             assets-search-query: root.assets-search-query;
             asset-search-expanded: root.asset-search-expanded;
             asset-create-menu-open: root.asset-create-menu-open;
+            asset-uses-create-popover: root.asset-uses-create-popover;
+            asset-primary-create-action-id: root.asset-primary-create-action-id;
             asset-tree-fully-expanded: root.asset-tree-fully-expanded;
             asset-view-mode: root.asset-view-mode;
+            console-asset-items: root.console-asset-items;
 
             toggle-assets-search-requested => {
                 root.toggle-assets-search-requested();
@@ -192,6 +201,18 @@ export component Sidebar inherits Rectangle {
 
             assets-create-action-selected(action-id) => {
                 root.assets-create-action-selected(action-id);
+            }
+
+            asset-selected(item-id) => {
+                root.asset-selected(item-id);
+            }
+
+            toggle-expanded-requested(item-id) => {
+                root.toggle-expanded-requested(item-id);
+            }
+
+            asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
+                root.asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
             }
         }
     }

@@ -1,0 +1,102 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component AssetNodeRow inherits Rectangle {
+    in property <string> item-id;
+    in property <string> item-kind;
+    in property <string> label;
+    in property <int> depth;
+    in property <bool> has-children;
+    in property <bool> expanded;
+    in property <bool> is-selected: false;
+    in property <bool> focused: false;
+    callback selected-requested(string);
+    callback toggle-expanded-requested(string);
+    callback context-menu-requested(string, string, length, length);
+
+    private property <length> indent: 12px + (root.depth * 14px);
+    private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
+    private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
+    private property <image> ssh-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
+    private property <image> kind-icon: root.item-kind == "folder"
+        ? (root.expanded ? root.folder-open-icon : root.folder-icon)
+        : root.ssh-icon;
+
+    height: 32px;
+    border-radius: 6px;
+    border-width: root.focused ? 1px : 0px;
+    border-color: root.focused ? ThemeTokens.shell-stroke : transparent;
+    background: touch.pressed
+        ? ThemeTokens.panel-tint
+        : (touch.has-hover || root.is-selected)
+            ? ThemeTokens.command-tint
+            : transparent;
+
+    if root.has-children : Rectangle {
+        x: root.indent;
+        y: 0px;
+        width: 14px;
+        height: parent.height;
+        background: transparent;
+
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            text: root.expanded ? "v" : ">";
+            color: ThemeTokens.text-primary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        chevron-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            clicked => {
+                root.toggle-expanded-requested(root.item-id);
+            }
+        }
+    }
+
+    Image {
+        x: root.indent + (root.has-children ? 18px : 0px);
+        y: 6px;
+        width: 20px;
+        height: 20px;
+        source: root.kind-icon;
+        image-fit: contain;
+        colorize: ThemeTokens.text-primary;
+    }
+
+    Text {
+        x: root.indent + (root.has-children ? 42px : 24px);
+        y: 0px;
+        width: parent.width - self.x - 12px;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                root.context-menu-requested(
+                    root.item-id,
+                    root.item-kind,
+                    self.mouse-x + self.absolute-position.x,
+                    self.mouse-y + self.absolute-position.y,
+                );
+            }
+        }
+
+        clicked => {
+            root.selected-requested(root.item-id);
+        }
+    }
+}

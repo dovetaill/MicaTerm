@@ -5,6 +5,7 @@ use anyhow::Result;
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::AppWindow;
+use crate::ConsoleAssetItem;
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::window_effects::{
@@ -14,13 +15,14 @@ use crate::app::window_state::WindowPlacementKind;
 use crate::app::windowing::{
     WindowController, apply_restored_window_size, parse_resize_direction, window_appearance,
 };
+use crate::shell::context_menu::ContextTargetKind;
 #[cfg(target_os = "windows")]
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
 };
 use crate::shell::layout::{ShellLayoutInput, resolve_shell_layout};
 use crate::shell::metrics::ShellMetrics;
-use crate::shell::sidebar::{SidebarDestination, sidebar_items_for};
+use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descriptor_for};
 use crate::shell::view_model::ShellViewModel;
 use crate::theme::ThemeMode;
 
@@ -150,14 +152,45 @@ fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_active_sidebar_destination(state.active_sidebar_destination.id().into());
     window.set_sidebar_items(ModelRc::new(VecModel::from(sidebar_items_for(state))));
     sync_assets_toolbar_state(window, state);
+    sync_console_assets(window, state);
 }
 
 fn sync_assets_toolbar_state(window: &AppWindow, state: &ShellViewModel) {
+    let descriptor = toolbar_descriptor_for(state.active_sidebar_destination, state);
     window.set_asset_view_mode(state.asset_view_mode.id().into());
     window.set_asset_search_expanded(state.asset_search_expanded);
     window.set_assets_search_query(state.asset_search_query.clone().into());
     window.set_asset_create_menu_open(state.asset_create_menu_open);
+    window.set_asset_uses_create_popover(descriptor.uses_create_popover);
+    window.set_asset_primary_create_action_id(
+        descriptor.primary_create_action_id.unwrap_or("").into(),
+    );
     window.set_asset_tree_fully_expanded(state.asset_tree_fully_expanded);
+}
+
+fn sync_console_assets(window: &AppWindow, state: &ShellViewModel) {
+    let rows = state
+        .visible_console_asset_rows()
+        .into_iter()
+        .map(|row| ConsoleAssetItem {
+            id: row.id.clone().into(),
+            kind: row.kind.id().into(),
+            label: row.label.clone().into(),
+            depth: row.depth as i32,
+            has_children: row.has_children,
+            expanded: row.expanded,
+            selected: state.selected_asset_ids.iter().any(|id| id == &row.id),
+            focused: state.focused_asset_id.as_deref() == Some(row.id.as_str()),
+            renaming: state.editing_asset_id.as_deref() == Some(row.id.as_str()),
+            rename_text: if state.editing_asset_id.as_deref() == Some(row.id.as_str()) {
+                state.editing_asset_text.clone().into()
+            } else {
+                "".into()
+            },
+        })
+        .collect::<Vec<_>>();
+
+    window.set_console_asset_items(ModelRc::new(VecModel::from(rows)));
 }
 
 fn sync_shell_state(
@@ -404,6 +437,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let mut state = state.borrow_mut();
         state.activate_asset_search();
         sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -413,6 +447,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let mut state = state.borrow_mut();
         state.set_asset_search_query(query.to_string());
         sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -422,6 +457,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let mut state = state.borrow_mut();
         state.close_asset_search();
         sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -431,6 +467,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let mut state = state.borrow_mut();
         state.collapse_asset_search_if_empty();
         sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -440,6 +477,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let mut state = state.borrow_mut();
         state.toggle_asset_view_mode();
         sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -449,6 +487,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let mut state = state.borrow_mut();
         state.toggle_asset_tree_expansion();
         sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -474,9 +513,62 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_assets_create_action_selected(move |action_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        state.handle_assets_create_action(action_id.as_str());
         state.close_asset_create_menu();
         sync_assets_toolbar_state(&window, &state);
-        tracing::info!(target: "ui.assets", action = %action_id, "assets create action selected");
+        sync_console_assets(&window, &state);
+        tracing::info!(
+            target: "ui.assets",
+            action = %action_id,
+            visible_rows = state.visible_console_asset_rows().len(),
+            "assets create action selected"
+        );
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_asset_selected(move |item_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.select_asset(item_id.as_str());
+        sync_console_assets(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_toggle_expanded_requested(move |item_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_folder_expanded(item_id.as_str());
+        sync_console_assets(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_asset_context_menu_requested(move |item_id, item_kind, anchor_x, anchor_y| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let target_kind = match item_kind.as_str() {
+            "folder" => ContextTargetKind::Folder,
+            "ssh" => ContextTargetKind::SshConnection,
+            _ => ContextTargetKind::BlankArea,
+        };
+        let target_id = if item_id.is_empty() {
+            None
+        } else {
+            Some(item_id.to_string())
+        };
+        state.open_context_menu_for_target(target_kind, target_id, anchor_x, anchor_y);
+        sync_console_assets(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_assets_context_menu_action_invoked(move |action_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.handle_context_menu_leaf_action(action_id.as_str());
+        sync_console_assets(&window, &state);
     });
 
     let state = Rc::clone(&view_model);

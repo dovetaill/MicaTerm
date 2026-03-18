@@ -1,4 +1,5 @@
 use mica_term::shell::assets::{AssetCreateAction, AssetViewMode};
+use mica_term::shell::sidebar::{SidebarDestination, toolbar_descriptor_for};
 use mica_term::shell::view_model::ShellViewModel;
 
 #[test]
@@ -107,4 +108,25 @@ fn create_menu_toggles_and_actions_are_named() {
         AssetCreateAction::NewSshConnection.id(),
         "new-ssh-connection"
     );
+}
+
+#[test]
+fn console_destination_uses_create_popover_instead_of_single_direct_action() {
+    let view_model = ShellViewModel::default();
+    let descriptor = toolbar_descriptor_for(view_model.active_sidebar_destination, &view_model);
+
+    assert!(descriptor.uses_create_popover);
+    assert_eq!(descriptor.primary_create_action_id, None);
+    assert_eq!(descriptor.primary_create_tooltip, "Create Asset");
+}
+
+#[test]
+fn snippets_destination_keeps_direct_create_action() {
+    let mut view_model = ShellViewModel::default();
+    view_model.select_sidebar_destination(SidebarDestination::Snippets);
+
+    let descriptor = toolbar_descriptor_for(view_model.active_sidebar_destination, &view_model);
+
+    assert!(!descriptor.uses_create_popover);
+    assert_eq!(descriptor.primary_create_action_id, Some("new-snippet"));
 }
