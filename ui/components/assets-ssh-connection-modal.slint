@@ -1,0 +1,399 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component AssetsSshConnectionModal inherits Rectangle {
+    in property <string> active-tab: "standard";
+    in property <string> name: "";
+    in property <string> host: "";
+    in property <string> user: "";
+    in property <string> port: "22";
+    in property <string> environment: "";
+    in property <string> proxy-method: "";
+    in property <bool> can-confirm: false;
+    callback close-requested();
+    callback confirm-requested();
+    callback tab-selected(string);
+    callback draft-changed(string, string);
+
+    width: 720px;
+    height: 520px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: ThemeTokens.divider-strong;
+    background: ThemeTokens.assets-surface;
+    z: 145;
+
+    public function focus-primary-field() {}
+
+    modal-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-requested();
+                accept
+            } else {
+                reject
+            }
+        }
+
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: transparent;
+
+            Text {
+                x: 24px;
+                y: 22px;
+                text: "新建 SSH 连接";
+                color: ThemeTokens.text-primary;
+                font-size: 20px;
+                font-weight: 700;
+            }
+
+            close-button := Rectangle {
+                x: parent.width - 56px;
+                y: 18px;
+                width: 32px;
+                height: 32px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.control-hover-surface;
+
+                Text {
+                    text: "×";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    width: parent.width;
+                    height: parent.height;
+                }
+
+                TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        root.close-requested();
+                    }
+                }
+            }
+
+            Rectangle {
+                x: 24px;
+                y: 72px;
+                width: parent.width - 48px;
+                height: 40px;
+                background: transparent;
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    for tab-id in ["standard", "tunnel", "proxy", "environment", "advanced"] : Rectangle {
+                        min-width: 110px;
+                        height: 36px;
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: root.active-tab == tab-id ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+                        background: root.active-tab == tab-id ? ThemeTokens.control-active-surface : ThemeTokens.control-hover-surface;
+
+                        Text {
+                            text: tab-id == "standard" ? "标准" :
+                                  tab-id == "tunnel" ? "隧道" :
+                                  tab-id == "proxy" ? "代理" :
+                                  tab-id == "environment" ? "环境变量" : "高级";
+                            color: ThemeTokens.text-primary;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            width: parent.width;
+                            height: parent.height;
+                        }
+
+                        TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+
+                            clicked => {
+                                root.tab-selected(tab-id);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.active-tab == "standard" : standard-panel := Rectangle {
+                x: 24px;
+                y: 132px;
+                width: parent.width - 48px;
+                height: 284px;
+                background: transparent;
+
+                VerticalLayout {
+                    spacing: 12px;
+
+                    Rectangle {
+                        height: 42px;
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-subtle;
+                        background: ThemeTokens.inspector-surface;
+
+                        name-input := TextInput {
+                            x: 12px;
+                            y: 10px;
+                            width: parent.width - 24px;
+                            height: 22px;
+                            text: root.name;
+                            color: ThemeTokens.text-primary;
+                            selection-background-color: ThemeTokens.accent;
+                            selection-foreground-color: ThemeTokens.text-primary;
+
+                            edited => {
+                                root.draft-changed("name", self.text);
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 42px;
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-subtle;
+                        background: ThemeTokens.inspector-surface;
+
+                        host-input := TextInput {
+                            x: 12px;
+                            y: 10px;
+                            width: parent.width - 24px;
+                            height: 22px;
+                            text: root.host;
+                            color: ThemeTokens.text-primary;
+                            selection-background-color: ThemeTokens.accent;
+                            selection-foreground-color: ThemeTokens.text-primary;
+
+                            edited => {
+                                root.draft-changed("host", self.text);
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 12px;
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            height: 42px;
+                            border-radius: 0px;
+                            border-width: 1px;
+                            border-color: ThemeTokens.divider-subtle;
+                            background: ThemeTokens.inspector-surface;
+
+                            TextInput {
+                                x: 12px;
+                                y: 10px;
+                                width: parent.width - 24px;
+                                height: 22px;
+                                text: root.user;
+                                color: ThemeTokens.text-primary;
+                                selection-background-color: ThemeTokens.accent;
+                                selection-foreground-color: ThemeTokens.text-primary;
+
+                                edited => {
+                                    root.draft-changed("user", self.text);
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: 120px;
+                            height: 42px;
+                            border-radius: 0px;
+                            border-width: 1px;
+                            border-color: ThemeTokens.divider-subtle;
+                            background: ThemeTokens.inspector-surface;
+
+                            TextInput {
+                                x: 12px;
+                                y: 10px;
+                                width: parent.width - 24px;
+                                height: 22px;
+                                text: root.port;
+                                color: ThemeTokens.text-primary;
+                                selection-background-color: ThemeTokens.accent;
+                                selection-foreground-color: ThemeTokens.text-primary;
+
+                                edited => {
+                                    root.draft-changed("port", self.text);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.active-tab == "tunnel" : Rectangle {
+                x: 24px;
+                y: 132px;
+                width: parent.width - 48px;
+                height: 284px;
+                background: ThemeTokens.inspector-surface;
+
+                Text {
+                    text: "隧道配置将在后续任务接入。";
+                    color: ThemeTokens.text-primary;
+                    x: 16px;
+                    y: 16px;
+                }
+            }
+
+            if root.active-tab == "proxy" : Rectangle {
+                x: 24px;
+                y: 132px;
+                width: parent.width - 48px;
+                height: 284px;
+                background: ThemeTokens.inspector-surface;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "代理方式";
+                        color: ThemeTokens.text-primary;
+                    }
+
+                    Rectangle {
+                        height: 42px;
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-subtle;
+                        background: ThemeTokens.assets-surface;
+
+                        TextInput {
+                            x: 12px;
+                            y: 10px;
+                            width: parent.width - 24px;
+                            height: 22px;
+                            text: root.proxy-method;
+                            color: ThemeTokens.text-primary;
+                            selection-background-color: ThemeTokens.accent;
+                            selection-foreground-color: ThemeTokens.text-primary;
+
+                            edited => {
+                                root.draft-changed("proxy_method", self.text);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.active-tab == "environment" : Rectangle {
+                x: 24px;
+                y: 132px;
+                width: parent.width - 48px;
+                height: 284px;
+                background: ThemeTokens.inspector-surface;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    Text {
+                        text: "环境变量";
+                        color: ThemeTokens.text-primary;
+                    }
+
+                    Rectangle {
+                        height: 42px;
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-subtle;
+                        background: ThemeTokens.assets-surface;
+
+                        TextInput {
+                            x: 12px;
+                            y: 10px;
+                            width: parent.width - 24px;
+                            height: 22px;
+                            text: root.environment;
+                            color: ThemeTokens.text-primary;
+                            selection-background-color: ThemeTokens.accent;
+                            selection-foreground-color: ThemeTokens.text-primary;
+
+                            edited => {
+                                root.draft-changed("environment", self.text);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.active-tab == "advanced" : Rectangle {
+                x: 24px;
+                y: 132px;
+                width: parent.width - 48px;
+                height: 284px;
+                background: ThemeTokens.inspector-surface;
+
+                Text {
+                    text: "高级设置壳层已预留。";
+                    color: ThemeTokens.text-primary;
+                    x: 16px;
+                    y: 16px;
+                }
+            }
+
+            test-button := Rectangle {
+                x: parent.width - 216px;
+                y: parent.height - 56px;
+                width: 92px;
+                height: 34px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.control-hover-surface;
+
+                Text {
+                    text: "测试连接";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    width: parent.width;
+                    height: parent.height;
+                }
+            }
+
+            save-button := Rectangle {
+                x: parent.width - 112px;
+                y: parent.height - 56px;
+                width: 88px;
+                height: 34px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: root.can-confirm ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+                background: root.can-confirm ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+                opacity: root.can-confirm ? 1.0 : 0.55;
+
+                Text {
+                    text: "保存";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    width: parent.width;
+                    height: parent.height;
+                }
+
+                TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    enabled: root.can-confirm;
+
+                    clicked => {
+                        root.confirm-requested();
+                    }
+                }
+            }
+        }
+    }
+}

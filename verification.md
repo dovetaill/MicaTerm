@@ -253,6 +253,52 @@ Date: 2026-03-17 18:15:00 CST
 - [ ] Verify planned-action `StatusPill` placement and legibility against the Fluent visual target
 - [ ] Verify rename commit / cancel behavior feels correct with real pointer focus changes and IME input
 
+## Windows Console Assets Context Menu Bugfix4 Verification
+
+Date: 2026-03-19 14:10:00 CST
+
+### Source Documents
+
+- Design: `docs/plans/2026-03-19-windows-console-assets-context-menu-bugfix4-design.md`
+- Implementation Plan: `docs/plans/2026-03-19-windows-console-assets-context-menu-bugfix4-implementation-plan.md`
+
+### Commands Executed
+
+- [x] `cargo test --test shell_view_model --test assets_modal_smoke --test assets_context_menu_smoke --test assets_explorer_projection --test assets_explorer_smoke --test assets_sidebar_toolbar_spec --test assets_sidebar_toolbar_smoke -q`
+- [x] `bash tests/assets_modal_ui_contract_smoke.sh`
+- [x] `bash tests/assets_context_menu_ui_contract_smoke.sh`
+- [x] `bash tests/assets_explorer_ui_contract_smoke.sh`
+- [x] `bash tests/assets_sidebar_toolbar_ui_contract_smoke.sh`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+
+### Automated Results
+
+- `cargo test --test shell_view_model --test assets_modal_smoke --test assets_context_menu_smoke --test assets_explorer_projection --test assets_explorer_smoke --test assets_sidebar_toolbar_spec --test assets_sidebar_toolbar_smoke -q`: passed
+- `bash tests/assets_modal_ui_contract_smoke.sh`: passed
+- `bash tests/assets_context_menu_ui_contract_smoke.sh`: passed
+- `bash tests/assets_explorer_ui_contract_smoke.sh`: passed
+- `bash tests/assets_sidebar_toolbar_ui_contract_smoke.sh`: passed
+- `cargo check --workspace`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+
+### Verification Conclusions
+
+- [x] folder modal opens and saves correctly
+- [x] SSH modal opens and saves correctly
+- [x] create does not insert placeholder nodes before confirm
+- [x] disclosure click expands/collapses reliably
+- [x] `Flat` only shows SSH rows
+- [x] `Flat` path hint is visible for SSH rows
+- [x] context menu / modal / inline rename do not overlap
+
+### Manual Follow-up
+
+- [ ] Run a real desktop session and verify the Explorer row hit targets feel correct
+- [ ] Verify large SSH modal does not close on accidental background click
+- [ ] Verify `Tree` visuals are closer to VS Code Explorer than the previous prototype
+- [ ] Verify `Flat` mode hides folder rows while preserving enough folder context in the hint text
+
 ## 2026-03-16 Remove Rounded Corners
 
 Date: 2026-03-16

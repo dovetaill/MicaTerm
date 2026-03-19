@@ -99,6 +99,15 @@ fn flat_mode_disables_tree_expansion_toggle() {
 }
 
 #[test]
+fn flat_mode_hides_tree_controls_in_toolbar_descriptor() {
+    let mut view_model = ShellViewModel::default();
+    view_model.toggle_asset_view_mode();
+
+    let descriptor = toolbar_descriptor_for(view_model.active_sidebar_destination, &view_model);
+    assert!(!descriptor.show_tree_controls);
+}
+
+#[test]
 fn create_menu_toggles_and_actions_are_named() {
     let mut view_model = ShellViewModel::default();
 

@@ -161,10 +161,19 @@ fn toolbar_create_action_stays_root_level_even_after_folder_context_target() {
     bind_top_status_bar_with_store(&app, None);
 
     app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Prod".into());
+    app.invoke_confirm_asset_modal_requested();
     let folder_id = app.get_console_asset_items().row_data(0).unwrap().id.to_string();
 
     app.invoke_asset_context_menu_requested(folder_id.into(), "folder".into(), 96.0, 160.0);
     app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
+    assert_eq!(app.get_console_asset_items().row_count(), 1);
+
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_confirm_asset_modal_requested();
 
     let rows = app.get_console_asset_items();
     assert_eq!(rows.row_count(), 2);

@@ -56,6 +56,7 @@ grep -F 'tooltip-text: root.asset-primary-create-tooltip;' "$ASSETS" >/dev/null
 grep -F 'tooltip-text: root.asset-search-tooltip;' "$ASSETS" >/dev/null
 grep -F 'tooltip-text: root.asset-view-mode-tooltip;' "$ASSETS" >/dev/null
 grep -F 'tooltip-text: root.asset-tree-expansion-tooltip;' "$ASSETS" >/dev/null
+grep -F 'visible: root.asset-show-tree-controls && root.asset-view-mode == "tree";' "$ASSETS" >/dev/null
 grep -F 'if root.asset-uses-create-popover {' "$ASSETS" >/dev/null
 grep -F 'root.toggle-assets-create-menu-requested();' "$ASSETS" >/dev/null
 grep -F 'root.assets-create-action-selected(root.asset-primary-create-action-id);' "$ASSETS" >/dev/null

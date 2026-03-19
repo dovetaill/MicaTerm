@@ -79,7 +79,7 @@ pub fn toolbar_descriptor_for(
         primary_create_action_id,
         primary_create_tooltip,
         search_tooltip,
-        show_tree_controls,
+        base_show_tree_controls,
     ) = match destination {
         SidebarDestination::Console => (
             true,
@@ -113,6 +113,7 @@ pub fn toolbar_descriptor_for(
     } else {
         "Expand Tree"
     };
+    let show_tree_controls = base_show_tree_controls && view_model.asset_view_mode == AssetViewMode::Tree;
 
     AssetsToolbarDescriptor {
         uses_create_popover,
