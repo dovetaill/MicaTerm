@@ -4,8 +4,11 @@ export component AssetNodeRow inherits Rectangle {
     in property <string> item-id;
     in property <string> item-kind;
     in property <string> label;
+    in property <string> path-hint: "";
     in property <int> depth: 0;
     in property <bool> has-children: false;
+    in property <bool> show-disclosure: false;
+    in property <bool> compact-flat-mode: false;
     in property <bool> expanded: false;
     in property <bool> selected: false;
     in property <bool> focused: false;
@@ -19,9 +22,13 @@ export component AssetNodeRow inherits Rectangle {
     callback rename-commit-requested(string, string);
     callback rename-cancel-requested(string);
 
-    private property <length> indent: 12px + (root.depth * 14px);
-    private property <length> icon-x: root.indent + (root.has-children ? 18px : 0px);
+    private property <length> indent: root.compact-flat-mode ? 12px : 12px + (root.depth * 14px);
+    private property <length> disclosure-width: root.show-disclosure ? 18px : 0px;
+    private property <length> icon-x: root.indent + root.disclosure-width;
     private property <length> content-x: root.icon-x + 24px;
+    private property <length> body-touch-x: root.show-disclosure ? root.indent + root.disclosure-width : 0px;
+    private property <length> row-height: root.path-hint == "" ? 36px : 48px;
+    private property <image> chevron-icon: @image-url("../../assets/icons/fluent/chevron-down-20-regular.svg");
     private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
     private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
     private property <image> ssh-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
@@ -29,8 +36,8 @@ export component AssetNodeRow inherits Rectangle {
         ? (root.expanded ? root.folder-open-icon : root.folder-icon)
         : root.ssh-icon;
 
-    height: 32px;
-    border-radius: 6px;
+    height: root.row-height;
+    border-radius: 0px;
     border-width: root.focused ? 1px : 0px;
     border-color: root.focused ? ThemeTokens.divider-strong : transparent;
     background: touch.pressed
@@ -39,20 +46,22 @@ export component AssetNodeRow inherits Rectangle {
             ? ThemeTokens.control-hover-surface
             : transparent;
 
-    if root.has-children : Rectangle {
+    if root.show-disclosure : Rectangle {
         x: root.indent;
         y: 0px;
         width: 14px;
         height: parent.height;
         background: transparent;
 
-        Text {
-            width: parent.width;
-            height: parent.height;
-            text: root.expanded ? "v" : ">";
-            color: ThemeTokens.text-primary;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+        Image {
+            x: 0px;
+            y: root.path-hint == "" ? 10px : 8px;
+            width: 14px;
+            height: 14px;
+            source: root.chevron-icon;
+            image-fit: contain;
+            colorize: ThemeTokens.text-primary;
+            opacity: root.expanded ? 1.0 : 0.72;
         }
 
         chevron-touch := TouchArea {
@@ -69,7 +78,7 @@ export component AssetNodeRow inherits Rectangle {
 
     Image {
         x: root.icon-x;
-        y: 6px;
+        y: root.path-hint == "" ? 8px : 6px;
         width: 20px;
         height: 20px;
         source: root.kind-icon;
@@ -79,11 +88,23 @@ export component AssetNodeRow inherits Rectangle {
 
     if !root.renaming : Text {
         x: root.content-x;
-        y: 0px;
+        y: root.path-hint == "" ? 0px : 4px;
         width: parent.width - self.x - 12px;
-        height: parent.height;
+        height: root.path-hint == "" ? parent.height : 22px;
         text: root.label;
         color: ThemeTokens.text-primary;
+        vertical-alignment: center;
+    }
+
+    if !root.renaming && root.path-hint != "" : Text {
+        x: root.content-x;
+        y: 22px;
+        width: parent.width - self.x - 12px;
+        height: 18px;
+        text: root.path-hint;
+        color: ThemeTokens.text-primary;
+        opacity: 0.62;
+        font-size: 12px;
         vertical-alignment: center;
     }
 
@@ -95,9 +116,9 @@ export component AssetNodeRow inherits Rectangle {
 
         rename-input := TextInput {
             x: root.content-x - 4px;
-            y: 4px;
+            y: root.path-hint == "" ? 4px : 8px;
             width: parent.width - self.x - 8px;
-            height: parent.height - 8px;
+            height: root.path-hint == "" ? parent.height - 8px : 24px;
             visible: root.renaming;
             enabled: root.renaming;
             text: root.rename-text;
@@ -124,7 +145,8 @@ export component AssetNodeRow inherits Rectangle {
     }
 
     touch := TouchArea {
-        width: parent.width;
+        x: root.body-touch-x;
+        width: parent.width - self.x;
         height: parent.height;
         enabled: !root.renaming;
 

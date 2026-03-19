@@ -31,7 +31,7 @@ use crate::shell::context_menu::{
 use crate::shell::layout::{ShellLayoutInput, resolve_shell_layout};
 use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descriptor_for};
-use crate::shell::view_model::ShellViewModel;
+use crate::shell::view_model::{AssetModalState, ShellViewModel};
 use crate::theme::ThemeMode;
 
 pub fn app_title() -> &'static str {
@@ -201,6 +201,52 @@ fn sync_assets_context_menu_state(window: &AppWindow, state: &ShellViewModel) {
         context_menu_tertiary_items_for(state),
     )));
     window.set_context_menu_feedback_text(state.context_menu_feedback_text.clone().into());
+}
+
+fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
+    match &state.asset_modal_state {
+        Some(AssetModalState::NewFolder { draft_name, .. }) => {
+            window.set_asset_modal_open(true);
+            window.set_asset_modal_kind("new-folder".into());
+            window.set_asset_modal_can_confirm(state.can_confirm_asset_modal());
+            window.set_asset_folder_modal_name(draft_name.clone().into());
+            window.set_asset_ssh_modal_active_tab("standard".into());
+            window.set_asset_ssh_modal_name("".into());
+            window.set_asset_ssh_modal_host("".into());
+            window.set_asset_ssh_modal_user("".into());
+            window.set_asset_ssh_modal_port("22".into());
+            window.set_asset_ssh_modal_environment("".into());
+            window.set_asset_ssh_modal_proxy_method("".into());
+        }
+        Some(AssetModalState::NewSshConnection {
+            active_tab, draft, ..
+        }) => {
+            window.set_asset_modal_open(true);
+            window.set_asset_modal_kind("new-ssh-connection".into());
+            window.set_asset_modal_can_confirm(state.can_confirm_asset_modal());
+            window.set_asset_folder_modal_name("".into());
+            window.set_asset_ssh_modal_active_tab(active_tab.id().into());
+            window.set_asset_ssh_modal_name(draft.name.clone().into());
+            window.set_asset_ssh_modal_host(draft.host.clone().into());
+            window.set_asset_ssh_modal_user(draft.user.clone().into());
+            window.set_asset_ssh_modal_port(draft.port.clone().into());
+            window.set_asset_ssh_modal_environment(draft.environment.clone().into());
+            window.set_asset_ssh_modal_proxy_method(draft.proxy_method.clone().into());
+        }
+        None => {
+            window.set_asset_modal_open(false);
+            window.set_asset_modal_kind("".into());
+            window.set_asset_modal_can_confirm(false);
+            window.set_asset_folder_modal_name("".into());
+            window.set_asset_ssh_modal_active_tab("standard".into());
+            window.set_asset_ssh_modal_name("".into());
+            window.set_asset_ssh_modal_host("".into());
+            window.set_asset_ssh_modal_user("".into());
+            window.set_asset_ssh_modal_port("22".into());
+            window.set_asset_ssh_modal_environment("".into());
+            window.set_asset_ssh_modal_proxy_method("".into());
+        }
+    }
 }
 
 fn parse_context_target_kind(value: &str) -> ContextTargetKind {
@@ -395,6 +441,9 @@ fn sync_console_assets(window: &AppWindow, state: &ShellViewModel) {
             } else {
                 "".into()
             },
+            path_hint: row.path_hint.clone().unwrap_or_default().into(),
+            show_disclosure: row.show_disclosure,
+            compact_flat_mode: state.asset_view_mode.id() == "flat",
         })
         .collect::<Vec<_>>();
 
@@ -409,6 +458,7 @@ fn sync_shell_state(
     sync_top_status_bar_state(window, state, effects);
     sync_sidebar_state(window, state);
     sync_assets_context_menu_state(window, state);
+    sync_asset_modal_state(window, state);
 }
 
 fn sync_shell_layout(
@@ -748,6 +798,56 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         state.handle_assets_create_action(action_id.as_str());
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_close_asset_modal_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.cancel_asset_modal();
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_confirm_asset_modal_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.confirm_asset_modal();
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_asset_folder_modal_name_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.update_new_folder_modal_name(value.to_string());
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_asset_ssh_modal_tab_selected(move |tab| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.select_ssh_modal_tab(tab.as_str());
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_asset_ssh_modal_draft_changed(move |field, value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.update_ssh_modal_field(field.as_str(), value.to_string());
+        sync_asset_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -866,6 +966,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
 
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
+        sync_asset_modal_state(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
     });

@@ -1,5 +1,6 @@
 // Secondary sidebar hosting asset navigation, inline search, and creation affordances.
 
+import { ListView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AssetNodeRow } from "../components/asset-node-row.slint";
 import { AssetsSearchPopover } from "../components/assets-search-popover.slint";
@@ -16,6 +17,9 @@ export struct ConsoleAssetItem {
     focused: bool,
     renaming: bool,
     rename_text: string,
+    path_hint: string,
+    show_disclosure: bool,
+    compact_flat_mode: bool,
 }
 
 export component AssetsSidebar inherits Rectangle {
@@ -118,7 +122,7 @@ export component AssetsSidebar inherits Rectangle {
                     icon-source: root.asset-tree-fully-expanded ? root.tree-collapse-icon : root.tree-expand-icon;
                     active: root.asset-tree-fully-expanded;
                     enabled: root.asset-show-tree-controls && root.asset-view-mode == "tree";
-                    visible: root.asset-show-tree-controls;
+                    visible: root.asset-show-tree-controls && root.asset-view-mode == "tree";
                     tooltip-text: root.asset-tree-expansion-tooltip;
                     tooltip-source-id: "assets-tree-expansion";
                     clicked => {
@@ -253,74 +257,78 @@ export component AssetsSidebar inherits Rectangle {
                 }
             }
 
-            if root.active-panel == "console" && root.console-asset-items.length > 0 : VerticalLayout {
-                padding: 16px;
-                spacing: 8px;
+            if root.active-panel == "console" && root.console-asset-items.length > 0 : Rectangle {
+                vertical-stretch: 1;
+                background: transparent;
 
-                for item in root.console-asset-items : AssetNodeRow {
+                list-blank-fill-context-touch := TouchArea {
                     width: parent.width;
-                    item-id: item.id;
-                    item-kind: item.kind;
-                    label: item.label;
-                    depth: item.depth;
-                    has-children: item.has_children;
-                    expanded: item.expanded;
-                    selected: item.selected;
-                    focused: item.focused;
-                    renaming: item.renaming;
-                    rename-text: item.rename_text;
+                    height: parent.height;
 
-                    selected-requested(item-id) => {
-                        root.asset-selected(item-id);
-                    }
-
-                    toggle-expanded-requested(item-id) => {
-                        root.toggle-expanded-requested(item-id);
-                    }
-
-                    context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
-                        root.asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
-                    }
-
-                    rename-text-changed(item-id, text) => {
-                        root.asset-rename-text-changed(item-id, text);
-                    }
-
-                    rename-commit-requested(item-id, text) => {
-                        root.asset-rename-commit-requested(item-id, text);
-                    }
-
-                    rename-cancel-requested(item-id) => {
-                        root.asset-rename-cancel-requested(item-id);
-                    }
-
-                    pointer-activity-requested => {
+                    clicked => {
                         root.shell-interaction-requested();
+                    }
+
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                            root.asset-context-menu-requested(
+                                "",
+                                "blank",
+                                self.mouse-x + self.absolute-position.x,
+                                self.mouse-y + self.absolute-position.y,
+                            );
+                        }
                     }
                 }
 
-                list-blank-fill := Rectangle {
-                    width: parent.width;
-                    vertical-stretch: 1;
-                    background: transparent;
+                list-host := ListView {
+                    x: 16px;
+                    y: 16px;
+                    width: parent.width - 32px;
+                    height: parent.height - 16px;
 
-                    list-blank-fill-context-touch := TouchArea {
-                        width: parent.width;
-                        height: parent.height;
+                    for item in root.console-asset-items : AssetNodeRow {
+                        width: list-host.width;
+                        item-id: item.id;
+                        item-kind: item.kind;
+                        label: item.label;
+                        depth: item.depth;
+                        has-children: item.has_children;
+                        expanded: item.expanded;
+                        selected: item.selected;
+                        focused: item.focused;
+                        renaming: item.renaming;
+                        rename-text: item.rename_text;
+                        path-hint: item.path_hint;
+                        show-disclosure: item.show_disclosure;
+                        compact-flat-mode: item.compact_flat_mode;
 
-                        clicked => {
-                            root.shell-interaction-requested();
+                        selected-requested(item-id) => {
+                            root.asset-selected(item-id);
                         }
 
-                        pointer-event(event) => {
-                            if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
-                                root.asset-context-menu-requested(
-                                    "",
-                                    "blank",
-                                    self.mouse-x + self.absolute-position.x,
-                                    self.mouse-y + self.absolute-position.y,
-                                );
-                            }
+                        toggle-expanded-requested(item-id) => {
+                            root.toggle-expanded-requested(item-id);
+                        }
+
+                        context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
+                            root.asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
+                        }
+
+                        rename-text-changed(item-id, text) => {
+                            root.asset-rename-text-changed(item-id, text);
+                        }
+
+                        rename-commit-requested(item-id, text) => {
+                            root.asset-rename-commit-requested(item-id, text);
+                        }
+
+                        rename-cancel-requested(item-id) => {
+                            root.asset-rename-cancel-requested(item-id);
+                        }
+
+                        pointer-activity-requested => {
+                            root.shell-interaction-requested();
                         }
                     }
                 }

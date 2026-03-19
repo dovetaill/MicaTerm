@@ -19,6 +19,61 @@ pub enum WelcomeAction {
     Sftp,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssetModalState {
+    NewFolder {
+        parent_id: Option<String>,
+        draft_name: String,
+    },
+    NewSshConnection {
+        parent_id: Option<String>,
+        active_tab: AssetSshModalTab,
+        draft: AssetSshConnectionDraft,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetSshModalTab {
+    Standard,
+    Tunnel,
+    Proxy,
+    Environment,
+    Advanced,
+}
+
+impl AssetSshModalTab {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Tunnel => "tunnel",
+            Self::Proxy => "proxy",
+            Self::Environment => "environment",
+            Self::Advanced => "advanced",
+        }
+    }
+
+    pub fn from_id(value: &str) -> Option<Self> {
+        match value {
+            "standard" => Some(Self::Standard),
+            "tunnel" => Some(Self::Tunnel),
+            "proxy" => Some(Self::Proxy),
+            "environment" => Some(Self::Environment),
+            "advanced" => Some(Self::Advanced),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AssetSshConnectionDraft {
+    pub name: String,
+    pub host: String,
+    pub user: String,
+    pub port: String,
+    pub environment: String,
+    pub proxy_method: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellViewModel {
     pub show_welcome: bool,
@@ -33,6 +88,7 @@ pub struct ShellViewModel {
     pub asset_search_expanded: bool,
     pub asset_search_query: String,
     pub asset_create_menu_open: bool,
+    pub asset_modal_state: Option<AssetModalState>,
     pub asset_tree_fully_expanded: bool,
     pub selected_asset_ids: Vec<String>,
     pub focused_asset_id: Option<String>,
@@ -67,6 +123,7 @@ impl Default for ShellViewModel {
             asset_search_expanded: false,
             asset_search_query: String::new(),
             asset_create_menu_open: false,
+            asset_modal_state: None,
             asset_tree_fully_expanded: false,
             selected_asset_ids: Vec::new(),
             focused_asset_id: None,
@@ -204,25 +261,149 @@ impl ShellViewModel {
         self.asset_create_menu_open = false;
     }
 
+    pub fn open_new_folder_modal(&mut self, parent_id: Option<String>) {
+        let parent_id = self.normalize_folder_parent_id(parent_id);
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.context_target_asset_id = parent_id.clone();
+        self.asset_modal_state = Some(AssetModalState::NewFolder {
+            parent_id,
+            draft_name: String::new(),
+        });
+    }
+
+    pub fn update_new_folder_modal_name(&mut self, value: String) {
+        let Some(AssetModalState::NewFolder { draft_name, .. }) = self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        *draft_name = value;
+    }
+
+    pub fn open_new_ssh_modal(&mut self, parent_id: Option<String>) {
+        let parent_id = self.normalize_folder_parent_id(parent_id);
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.context_target_asset_id = parent_id.clone();
+        self.asset_modal_state = Some(AssetModalState::NewSshConnection {
+            parent_id,
+            active_tab: AssetSshModalTab::Standard,
+            draft: AssetSshConnectionDraft {
+                port: "22".into(),
+                ..AssetSshConnectionDraft::default()
+            },
+        });
+    }
+
+    pub fn update_ssh_modal_field(&mut self, field: &str, value: String) {
+        let Some(AssetModalState::NewSshConnection { draft, .. }) = self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        match field {
+            "name" => draft.name = value,
+            "host" => draft.host = value,
+            "user" => draft.user = value,
+            "port" => draft.port = value,
+            "environment" => draft.environment = value,
+            "proxy_method" => draft.proxy_method = value,
+            _ => {}
+        }
+    }
+
+    pub fn update_ssh_modal_name(&mut self, value: String) {
+        self.update_ssh_modal_field("name", value);
+    }
+
+    pub fn update_ssh_modal_host(&mut self, value: String) {
+        self.update_ssh_modal_field("host", value);
+    }
+
+    pub fn select_ssh_modal_tab(&mut self, tab: &str) {
+        let Some(next_tab) = AssetSshModalTab::from_id(tab) else {
+            return;
+        };
+
+        let Some(AssetModalState::NewSshConnection { active_tab, .. }) =
+            self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        *active_tab = next_tab;
+    }
+
+    pub fn can_confirm_asset_modal(&self) -> bool {
+        match &self.asset_modal_state {
+            Some(AssetModalState::NewFolder { draft_name, .. }) => !draft_name.trim().is_empty(),
+            Some(AssetModalState::NewSshConnection { draft, .. }) => {
+                !draft.name.trim().is_empty() && !draft.host.trim().is_empty()
+            }
+            None => false,
+        }
+    }
+
+    pub fn confirm_asset_modal(&mut self) {
+        let Some(modal_state) = self.asset_modal_state.clone() else {
+            return;
+        };
+
+        let (parent_id, kind, draft_label) = match modal_state {
+            AssetModalState::NewFolder {
+                parent_id,
+                draft_name,
+            } => {
+                if draft_name.trim().is_empty() {
+                    return;
+                }
+                (parent_id, ConsoleAssetKind::Folder, draft_name)
+            }
+            AssetModalState::NewSshConnection { parent_id, draft, .. } => {
+                if draft.name.trim().is_empty() || draft.host.trim().is_empty() {
+                    return;
+                }
+                (parent_id, ConsoleAssetKind::SshConnection, draft.name)
+            }
+        };
+
+        let sibling_items = self
+            .console_asset_tree
+            .sibling_items_for_parent(parent_id.as_deref(), None);
+        let label = resolve_committed_name(kind, &draft_label, &sibling_items);
+        let asset_id = if let Some(parent_id) = parent_id.as_deref() {
+            let asset_id = self.console_asset_tree.insert_child(parent_id, kind, label);
+            self.console_asset_tree.set_expanded(parent_id, true);
+            asset_id
+        } else {
+            self.console_asset_tree.insert_root(kind, label)
+        };
+
+        self.selected_asset_ids = vec![asset_id.clone()];
+        self.focused_asset_id = Some(asset_id.clone());
+        self.context_target_asset_id = Some(asset_id);
+        self.asset_modal_state = None;
+    }
+
+    pub fn cancel_asset_modal(&mut self) {
+        self.asset_modal_state = None;
+        self.context_target_asset_id = None;
+    }
+
     pub fn visible_console_asset_rows(&self) -> Vec<VisibleAssetRow> {
         self.console_asset_tree
             .project_visible_rows(self.asset_view_mode, &self.asset_search_query)
     }
 
     pub fn handle_assets_create_action(&mut self, action_id: &str) {
-        let Some(kind) = ConsoleAssetKind::from_create_action_id(action_id) else {
-            return;
-        };
-
-        self.asset_create_menu_open = false;
-        self.context_target_asset_id = None;
-
-        let label = self.console_asset_tree.next_default_name_for_parent(None, kind);
-        let asset_id = self.console_asset_tree.insert_root(kind, label.clone());
-        self.selected_asset_ids = vec![asset_id.clone()];
-        self.focused_asset_id = Some(asset_id.clone());
-        self.editing_asset_id = Some(asset_id);
-        self.editing_asset_text = label;
+        match action_id {
+            "new-folder" => self.open_new_folder_modal(None),
+            "new-ssh-connection" => self.open_new_ssh_modal(None),
+            _ => {}
+        }
     }
 
     pub fn begin_asset_rename_session(&mut self, asset_id: String, initial_text: String) {
@@ -415,7 +596,7 @@ impl ShellViewModel {
     }
 
     pub fn handle_context_menu_leaf_action(&mut self, action_id: &str) {
-        if let Some(kind) = ConsoleAssetKind::from_create_action_id(action_id) {
+        if ConsoleAssetKind::from_create_action_id(action_id).is_some() {
             let parent_id = match (
                 self.context_menu_target_kind,
                 self.context_target_asset_id.as_deref(),
@@ -428,26 +609,11 @@ impl ShellViewModel {
                 _ => None,
             };
 
-            if let Some(parent_id) = parent_id.as_deref() {
-                self.console_asset_tree.set_expanded(parent_id, true);
+            match action_id {
+                "new-folder" => self.open_new_folder_modal(parent_id),
+                "new-ssh-connection" => self.open_new_ssh_modal(parent_id),
+                _ => {}
             }
-
-            let label = self
-                .console_asset_tree
-                .next_default_name_for_parent(parent_id.as_deref(), kind);
-            let asset_id = if let Some(parent_id) = parent_id.as_deref() {
-                self.console_asset_tree
-                    .insert_child(parent_id, kind, label.clone())
-            } else {
-                self.console_asset_tree.insert_root(kind, label.clone())
-            };
-
-            self.selected_asset_ids = vec![asset_id.clone()];
-            self.focused_asset_id = Some(asset_id.clone());
-            self.editing_asset_id = Some(asset_id);
-            self.editing_asset_text = label;
-            self.close_context_menu();
-            self.context_target_asset_id = None;
             return;
         }
 
@@ -504,6 +670,12 @@ impl ShellViewModel {
     fn clear_active_asset_rename_session(&mut self) {
         self.editing_asset_id = None;
         self.editing_asset_text.clear();
+    }
+
+    fn normalize_folder_parent_id(&self, parent_id: Option<String>) -> Option<String> {
+        parent_id.filter(|asset_id| {
+            self.console_asset_tree.kind(asset_id.as_str()) == Some(ConsoleAssetKind::Folder)
+        })
     }
 }
 

@@ -83,7 +83,7 @@ fn blank_area_right_click_opens_minimal_primary_menu() {
 }
 
 #[test]
-fn create_menu_action_projects_placeholder_item_into_window_model() {
+fn create_menu_action_opens_folder_modal_without_placeholder_item() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -91,43 +91,131 @@ fn create_menu_action_projects_placeholder_item_into_window_model() {
 
     app.invoke_assets_create_action_selected("new-folder".into());
 
-    let items = app.get_console_asset_items();
-    assert_eq!(items.row_count(), 1);
-    assert_eq!(items.row_data(0).unwrap().label.as_str(), "Folder 1");
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-folder");
+    assert_eq!(app.get_console_asset_items().row_count(), 0);
 }
 
 #[test]
-fn rename_commit_round_trips_through_window_callbacks() {
+fn folder_modal_confirm_projects_root_row_into_window_model() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Infra".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    assert_eq!(
+        app.get_console_asset_items().row_data(0).unwrap().label.as_str(),
+        "Infra"
+    );
+}
+
+#[test]
+fn folder_modal_cancel_and_reopen_resets_name_draft() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Infra".into());
+    app.invoke_close_asset_modal_requested();
+
+    assert!(!app.get_asset_modal_open());
+    assert_eq!(app.get_asset_folder_modal_name().as_str(), "");
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-folder");
+    assert_eq!(app.get_asset_folder_modal_name().as_str(), "");
+}
+
+#[test]
+fn closing_folder_modal_resets_kind_and_confirm_state() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Infra".into());
+    assert!(app.get_asset_modal_can_confirm());
+
+    app.invoke_close_asset_modal_requested();
+
+    assert!(!app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "");
+    assert!(!app.get_asset_modal_can_confirm());
+    assert_eq!(app.get_asset_folder_modal_name().as_str(), "");
+}
+
+#[test]
+fn ssh_modal_cancel_and_reopen_resets_tab_and_draft_fields() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
     app.invoke_assets_create_action_selected("new-ssh-connection".into());
-    let asset_id = app
-        .get_console_asset_items()
-        .row_data(0)
-        .unwrap()
-        .id
-        .to_string();
+    app.invoke_asset_ssh_modal_tab_selected("proxy".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("proxy_method".into(), "jump-host".into());
+    app.invoke_close_asset_modal_requested();
 
-    app.invoke_asset_rename_text_changed(asset_id.clone().into(), "Prod Bastion".into());
-    app.invoke_asset_rename_commit_requested(asset_id.into(), "Prod Bastion".into());
+    assert!(!app.get_asset_modal_open());
+    assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "standard");
+    assert_eq!(app.get_asset_ssh_modal_name().as_str(), "");
+    assert_eq!(app.get_asset_ssh_modal_host().as_str(), "");
+    assert_eq!(app.get_asset_ssh_modal_proxy_method().as_str(), "");
 
-    assert_eq!(
-        app.get_console_asset_items().row_data(0).unwrap().label.as_str(),
-        "Prod Bastion"
-    );
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
+    assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "standard");
+    assert_eq!(app.get_asset_ssh_modal_name().as_str(), "");
+    assert_eq!(app.get_asset_ssh_modal_host().as_str(), "");
+    assert_eq!(app.get_asset_ssh_modal_proxy_method().as_str(), "");
+    assert_eq!(app.get_asset_ssh_modal_port().as_str(), "22");
 }
 
 #[test]
-fn dismiss_active_asset_rename_commits_through_window_callback() {
+fn closing_ssh_modal_resets_kind_and_confirm_state() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    assert!(app.get_asset_modal_can_confirm());
+
+    app.invoke_close_asset_modal_requested();
+
+    assert!(!app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "");
+    assert!(!app.get_asset_modal_can_confirm());
+    assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "standard");
+    assert_eq!(app.get_asset_ssh_modal_name().as_str(), "");
+    assert_eq!(app.get_asset_ssh_modal_host().as_str(), "");
+}
+
+#[test]
+fn folder_context_create_opens_child_targeted_ssh_modal() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
     app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Prod".into());
+    app.invoke_confirm_asset_modal_requested();
     let asset_id = app
         .get_console_asset_items()
         .row_data(0)
@@ -135,32 +223,22 @@ fn dismiss_active_asset_rename_commits_through_window_callback() {
         .id
         .to_string();
 
-    app.invoke_asset_rename_text_changed(asset_id.into(), "Infra".into());
-    app.invoke_dismiss_active_asset_rename_requested();
+    app.invoke_asset_context_menu_requested(asset_id.clone().into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("new-ssh-connection".into());
 
-    assert_eq!(app.get_console_asset_items().row_data(0).unwrap().label.as_str(), "Infra");
-}
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
+    assert_eq!(app.get_console_asset_items().row_count(), 1);
 
-#[test]
-fn toggling_assets_sidebar_commits_active_rename_before_collapsing_shell() {
-    i_slint_backend_testing::init_no_event_loop();
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_confirm_asset_modal_requested();
 
-    let app = AppWindow::new().unwrap();
-    bind_top_status_bar_with_store(&app, None);
-
-    app.invoke_assets_create_action_selected("new-folder".into());
-    let asset_id = app
-        .get_console_asset_items()
-        .row_data(0)
-        .unwrap()
-        .id
-        .to_string();
-
-    app.invoke_asset_rename_text_changed(asset_id.into(), "Infra".into());
-    app.invoke_toggle_assets_sidebar_requested();
-
-    assert_eq!(app.get_console_asset_items().row_data(0).unwrap().label.as_str(), "Infra");
-    assert!(!app.get_show_assets_sidebar());
+    let rows = app.get_console_asset_items();
+    assert_eq!(rows.row_count(), 2);
+    assert_eq!(rows.row_data(0).unwrap().id.as_str(), asset_id.as_str());
+    assert_eq!(rows.row_data(1).unwrap().depth, 1);
+    assert_eq!(rows.row_data(1).unwrap().kind.as_str(), "ssh");
 }
 
 #[test]
@@ -227,22 +305,4 @@ fn closing_context_menu_clears_planned_action_feedback() {
 
     assert!(!app.get_assets_context_menu_open());
     assert_eq!(app.get_context_menu_feedback_text().as_str(), "");
-}
-
-#[test]
-fn folder_target_create_action_projects_child_row_into_window_model() {
-    i_slint_backend_testing::init_no_event_loop();
-
-    let app = AppWindow::new().unwrap();
-    bind_top_status_bar_with_store(&app, None);
-
-    app.invoke_assets_create_action_selected("new-folder".into());
-    let folder_id = app.get_console_asset_items().row_data(0).unwrap().id.to_string();
-    app.invoke_asset_context_menu_requested(folder_id.into(), "folder".into(), 96.0, 160.0);
-    app.invoke_assets_context_menu_action_invoked("new-ssh-connection".into());
-
-    let rows = app.get_console_asset_items();
-    assert_eq!(rows.row_count(), 2);
-    assert_eq!(rows.row_data(1).unwrap().depth, 1);
-    assert_eq!(rows.row_data(1).unwrap().kind.as_str(), "ssh");
 }

@@ -6,7 +6,9 @@ use mica_term::shell::context_menu::{
     ContextTargetKind, SelectionContext, resolve_action_tree, visible_columns_for_path,
 };
 use mica_term::shell::sidebar::SidebarDestination;
-use mica_term::shell::view_model::{ShellViewModel, WelcomeAction, welcome_actions};
+use mica_term::shell::view_model::{
+    AssetModalState, AssetSshModalTab, ShellViewModel, WelcomeAction, welcome_actions,
+};
 use mica_term::theme::ThemeMode;
 
 #[test]
@@ -110,6 +112,190 @@ fn shell_view_model_starts_with_context_menu_closed() {
 }
 
 #[test]
+fn opening_new_folder_modal_does_not_insert_placeholder_row() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_new_folder_modal(None);
+
+    assert!(view_model.visible_console_asset_rows().is_empty());
+    assert!(view_model.asset_modal_state.is_some());
+}
+
+#[test]
+fn opening_new_folder_modal_commits_active_rename_and_clears_editing_state() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 1");
+    let asset_id = view_model.visible_console_asset_rows()[0].id.clone();
+    view_model.begin_asset_rename_session(asset_id.clone(), "Folder 1".into());
+    view_model.update_active_asset_rename_draft("Prod".into());
+
+    view_model.open_new_folder_modal(None);
+
+    let rows = view_model.visible_console_asset_rows();
+    assert_eq!(rows[0].id, asset_id);
+    assert_eq!(rows[0].label, "Prod");
+    assert_eq!(view_model.editing_asset_id, None);
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewFolder {
+            parent_id: None,
+            ref draft_name,
+        }) if draft_name.is_empty()
+    ));
+}
+
+#[test]
+fn toolbar_create_action_opens_root_folder_modal_and_closes_overlay_state() {
+    let mut view_model = ShellViewModel::default();
+    let folder_id = {
+        view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod");
+        view_model.visible_console_asset_rows()[0].id.clone()
+    };
+    view_model.toggle_asset_create_menu();
+    view_model.open_context_menu_for_target(ContextTargetKind::Folder, Some(folder_id), 48.0, 64.0);
+
+    view_model.handle_assets_create_action("new-folder");
+
+    assert!(!view_model.asset_create_menu_open);
+    assert!(!view_model.context_menu_open);
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewFolder {
+            parent_id: None,
+            ref draft_name,
+        }) if draft_name.is_empty()
+    ));
+    assert_eq!(view_model.context_target_asset_id, None);
+}
+
+#[test]
+fn confirming_new_folder_modal_inserts_root_node_and_selects_it() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_new_folder_modal(None);
+    view_model.update_new_folder_modal_name("Infra".into());
+
+    view_model.confirm_asset_modal();
+
+    let rows = view_model.visible_console_asset_rows();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].label, "Infra");
+    assert_eq!(
+        view_model.focused_asset_id.as_deref(),
+        Some(rows[0].id.as_str())
+    );
+    assert!(view_model.asset_modal_state.is_none());
+}
+
+#[test]
+fn folder_targeted_create_modal_auto_expands_parent_on_confirm() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod");
+    let folder_id = view_model.visible_console_asset_rows()[0].id.clone();
+
+    view_model.open_new_folder_modal(Some(folder_id.clone()));
+    view_model.update_new_folder_modal_name("Bastions".into());
+    view_model.confirm_asset_modal();
+
+    let rows = view_model.visible_console_asset_rows();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].id, folder_id);
+    assert_eq!(rows[1].label, "Bastions");
+    assert_eq!(rows[1].depth, 1);
+}
+
+#[test]
+fn opening_new_ssh_modal_does_not_insert_placeholder_row() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_new_ssh_modal(None);
+
+    assert!(view_model.visible_console_asset_rows().is_empty());
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { .. })
+    ));
+}
+
+#[test]
+fn opening_new_ssh_modal_commits_active_rename_and_clears_editing_state() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 1");
+    let asset_id = view_model.visible_console_asset_rows()[0].id.clone();
+    view_model.begin_asset_rename_session(asset_id.clone(), "Folder 1".into());
+    view_model.update_active_asset_rename_draft("Prod".into());
+
+    view_model.open_new_ssh_modal(None);
+
+    let rows = view_model.visible_console_asset_rows();
+    assert_eq!(rows[0].id, asset_id);
+    assert_eq!(rows[0].label, "Prod");
+    assert_eq!(view_model.editing_asset_id, None);
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection {
+            parent_id: None,
+            active_tab: AssetSshModalTab::Standard,
+            ref draft,
+        }) if draft.name.is_empty()
+            && draft.host.is_empty()
+            && draft.port == "22"
+    ));
+}
+
+#[test]
+fn confirming_new_ssh_modal_requires_name_and_host() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_new_ssh_modal(None);
+    assert!(!view_model.can_confirm_asset_modal());
+
+    view_model.update_ssh_modal_name("Prod Bastion".into());
+    view_model.update_ssh_modal_host("10.0.0.12".into());
+    assert!(view_model.can_confirm_asset_modal());
+}
+
+#[test]
+fn cancelling_child_targeted_modal_clears_stale_context_target() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod");
+    let folder_id = view_model.visible_console_asset_rows()[0].id.clone();
+
+    view_model.open_new_ssh_modal(Some(folder_id.clone()));
+    assert_eq!(
+        view_model.context_target_asset_id.as_deref(),
+        Some(folder_id.as_str())
+    );
+
+    view_model.cancel_asset_modal();
+
+    assert!(view_model.asset_modal_state.is_none());
+    assert_eq!(view_model.context_target_asset_id, None);
+}
+
+#[test]
+fn stale_missing_folder_context_target_falls_back_to_root_ssh_modal() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_context_menu_for_target(
+        ContextTargetKind::Folder,
+        Some("missing-folder".into()),
+        48.0,
+        64.0,
+    );
+
+    view_model.handle_context_menu_leaf_action("new-ssh-connection");
+
+    assert!(!view_model.context_menu_open);
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection {
+            parent_id: None,
+            active_tab: AssetSshModalTab::Standard,
+            ..
+        })
+    ));
+    assert_eq!(view_model.context_target_asset_id, None);
+}
+
+#[test]
 fn opening_context_menu_tracks_target_anchor_and_resets_open_path() {
     let mut view_model = ShellViewModel::default();
     view_model.context_menu_open_path = vec![1, 2];
@@ -180,13 +366,17 @@ fn closing_context_menu_clears_open_path_but_keeps_selection() {
 }
 
 #[test]
-fn toolbar_create_action_uses_first_missing_ssh_connection_name() {
+fn confirming_duplicate_default_ssh_name_uses_first_missing_positive_index() {
     let mut view_model = ShellViewModel::default();
 
     view_model.handle_assets_create_action("new-ssh-connection");
-    view_model.commit_active_asset_rename();
+    view_model.update_ssh_modal_name("SSH Connection 1".into());
+    view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.confirm_asset_modal();
     view_model.handle_assets_create_action("new-ssh-connection");
-    view_model.commit_active_asset_rename();
+    view_model.update_ssh_modal_name("SSH Connection 1".into());
+    view_model.update_ssh_modal_host("10.0.0.13".into());
+    view_model.confirm_asset_modal();
 
     let rows = view_model.visible_console_asset_rows();
     assert_eq!(rows.len(), 2);
@@ -196,37 +386,44 @@ fn toolbar_create_action_uses_first_missing_ssh_connection_name() {
 }
 
 #[test]
-fn context_menu_create_action_inserts_folder_placeholder_and_closes_menu() {
+fn context_menu_create_action_opens_folder_modal_and_closes_menu() {
     let mut view_model = ShellViewModel::default();
     view_model.open_context_menu_for_target(ContextTargetKind::BlankArea, None, 32.0, 48.0);
 
     view_model.handle_context_menu_leaf_action("new-folder");
 
-    let rows = view_model.visible_console_asset_rows();
     assert!(!view_model.context_menu_open);
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].kind, ConsoleAssetKind::Folder);
-    assert_eq!(view_model.editing_asset_id.as_deref(), Some(rows[0].id.as_str()));
+    assert!(view_model.visible_console_asset_rows().is_empty());
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewFolder { .. })
+    ));
 }
 
 #[test]
-fn folder_default_name_uses_smallest_missing_positive_index() {
+fn confirming_duplicate_default_folder_name_uses_smallest_missing_positive_index() {
     let mut view_model = ShellViewModel::default();
     view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 2");
     view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 3");
 
     view_model.handle_assets_create_action("new-folder");
+    view_model.update_new_folder_modal_name("Folder 2".into());
+    view_model.confirm_asset_modal();
 
-    assert_eq!(view_model.editing_asset_text, "Folder 1");
+    let rows = view_model.visible_console_asset_rows();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[2].label, "Folder 1");
 }
 
 #[test]
 fn dismissing_active_rename_commits_current_draft() {
     let mut view_model = ShellViewModel::default();
-    view_model.handle_assets_create_action("new-folder");
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 1");
+    let asset_id = view_model.visible_console_asset_rows()[0].id.clone();
+    view_model.begin_asset_rename_session(asset_id, "Folder 1".into());
     view_model.update_active_asset_rename_draft("Prod".into());
 
-    view_model.commit_active_asset_rename();
+    view_model.dismiss_active_asset_rename();
 
     assert_eq!(view_model.visible_console_asset_rows()[0].label, "Prod");
     assert_eq!(view_model.editing_asset_id, None);
@@ -237,8 +434,9 @@ fn renaming_to_existing_same_type_default_name_uses_next_missing_index() {
     let mut view_model = ShellViewModel::default();
     view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 1");
     view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 2");
-    view_model.handle_assets_create_action("new-folder");
-    let asset_id = view_model.editing_asset_id.clone().unwrap();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Infra");
+    let asset_id = view_model.visible_console_asset_rows()[2].id.clone();
+    view_model.begin_asset_rename_session(asset_id.clone(), "Infra".into());
 
     view_model.update_asset_rename_draft(&asset_id, "Folder 1".into());
     view_model.commit_asset_rename(&asset_id, "Folder 1".into());
@@ -273,8 +471,9 @@ fn renaming_to_existing_custom_name_uses_smallest_missing_numeric_suffix() {
     view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod");
     view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod 1");
     view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod 3");
-    view_model.handle_assets_create_action("new-folder");
-    let asset_id = view_model.editing_asset_id.clone().unwrap();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Infra");
+    let asset_id = view_model.visible_console_asset_rows()[3].id.clone();
+    view_model.begin_asset_rename_session(asset_id.clone(), "Infra".into());
 
     view_model.update_asset_rename_draft(&asset_id, "Prod".into());
     view_model.commit_asset_rename(&asset_id, "Prod".into());
@@ -286,7 +485,10 @@ fn renaming_to_existing_custom_name_uses_smallest_missing_numeric_suffix() {
 #[test]
 fn cancelling_inline_rename_keeps_default_label_and_exits_editing() {
     let mut view_model = ShellViewModel::default();
-    view_model.handle_assets_create_action("new-folder");
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 1");
+    let asset_id = view_model.visible_console_asset_rows()[0].id.clone();
+    view_model.begin_asset_rename_session(asset_id, "Folder 1".into());
+    view_model.update_active_asset_rename_draft("Prod".into());
 
     view_model.cancel_active_asset_rename();
 
@@ -297,7 +499,9 @@ fn cancelling_inline_rename_keeps_default_label_and_exits_editing() {
 #[test]
 fn blank_area_click_commits_rename_and_clears_selection_and_focus() {
     let mut view_model = ShellViewModel::default();
-    view_model.handle_assets_create_action("new-folder");
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 1");
+    let asset_id = view_model.visible_console_asset_rows()[0].id.clone();
+    view_model.begin_asset_rename_session(asset_id, "Folder 1".into());
     view_model.update_active_asset_rename_draft("Infra".into());
 
     view_model.handle_blank_area_click();
@@ -311,8 +515,7 @@ fn blank_area_click_commits_rename_and_clears_selection_and_focus() {
 #[test]
 fn selecting_an_asset_updates_focus_without_opening_context_menu() {
     let mut view_model = ShellViewModel::default();
-    view_model.handle_assets_create_action("new-folder");
-    view_model.commit_active_asset_rename();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 1");
     let asset_id = view_model.visible_console_asset_rows()[0].id.clone();
 
     view_model.select_asset(&asset_id);
@@ -323,10 +526,9 @@ fn selecting_an_asset_updates_focus_without_opening_context_menu() {
 }
 
 #[test]
-fn folder_context_create_inserts_child_and_expands_parent() {
+fn folder_context_create_confirm_auto_expands_parent_and_projects_child_row() {
     let mut view_model = ShellViewModel::default();
-    view_model.handle_assets_create_action("new-folder");
-    view_model.commit_active_asset_rename();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 1");
     let folder_id = view_model.visible_console_asset_rows()[0].id.clone();
 
     view_model.open_context_menu_for_target(
@@ -336,6 +538,15 @@ fn folder_context_create_inserts_child_and_expands_parent() {
         64.0,
     );
     view_model.handle_context_menu_leaf_action("new-ssh-connection");
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { .. })
+    ));
+    assert_eq!(view_model.visible_console_asset_rows().len(), 1);
+
+    view_model.update_ssh_modal_name("SSH Connection 1".into());
+    view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.confirm_asset_modal();
 
     let rows = view_model.visible_console_asset_rows();
     assert_eq!(rows.len(), 2);

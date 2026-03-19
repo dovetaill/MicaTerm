@@ -123,6 +123,8 @@ pub struct VisibleAssetRow {
     pub depth: usize,
     pub has_children: bool,
     pub expanded: bool,
+    pub path_hint: Option<String>,
+    pub show_disclosure: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -260,10 +262,17 @@ impl AssetTree {
         if normalized_query.is_empty() {
             match view_mode {
                 AssetViewMode::Tree => self.collect_tree_rows(&self.root_ids, 0, &mut rows),
-                AssetViewMode::Flat => self.collect_flat_rows(&self.root_ids, 0, &mut rows),
+                AssetViewMode::Flat => self.collect_flat_rows(&self.root_ids, &mut rows),
             }
         } else {
-            self.collect_search_rows(&self.root_ids, 0, &normalized_query, &mut rows);
+            match view_mode {
+                AssetViewMode::Tree => {
+                    self.collect_search_rows(&self.root_ids, 0, &normalized_query, &mut rows);
+                }
+                AssetViewMode::Flat => {
+                    self.collect_flat_search_rows(&self.root_ids, &normalized_query, &mut rows);
+                }
+            }
         }
 
         rows
@@ -305,7 +314,6 @@ impl AssetTree {
     fn collect_flat_rows(
         &self,
         node_ids: &[String],
-        depth: usize,
         rows: &mut Vec<VisibleAssetRow>,
     ) {
         for node_id in node_ids {
@@ -313,8 +321,39 @@ impl AssetTree {
                 continue;
             };
 
-            rows.push(self.row_from_node(node, depth));
-            self.collect_flat_rows(&node.children, depth + 1, rows);
+            if node.kind == ConsoleAssetKind::SshConnection {
+                rows.push(self.flat_row_from_node(node));
+            }
+            self.collect_flat_rows(&node.children, rows);
+        }
+    }
+
+    fn collect_flat_search_rows(
+        &self,
+        node_ids: &[String],
+        search_query: &str,
+        rows: &mut Vec<VisibleAssetRow>,
+    ) {
+        for node_id in node_ids {
+            let Some(node) = self.nodes.get(node_id) else {
+                continue;
+            };
+
+            if node.kind == ConsoleAssetKind::SshConnection {
+                let row = self.flat_row_from_node(node);
+                let label_match = row.label.to_ascii_lowercase().contains(search_query);
+                let path_hint_match = row
+                    .path_hint
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+                    .contains(search_query);
+                if label_match || path_hint_match {
+                    rows.push(row);
+                }
+            }
+
+            self.collect_flat_search_rows(&node.children, search_query, rows);
         }
     }
 
@@ -355,7 +394,40 @@ impl AssetTree {
             depth,
             has_children: !node.children.is_empty(),
             expanded: node.expanded,
+            path_hint: None,
+            show_disclosure: node.kind == ConsoleAssetKind::Folder && !node.children.is_empty(),
         }
+    }
+
+    fn flat_row_from_node(&self, node: &AssetNode) -> VisibleAssetRow {
+        VisibleAssetRow {
+            id: node.id.clone(),
+            kind: node.kind,
+            label: node.title.clone(),
+            depth: 0,
+            has_children: false,
+            expanded: false,
+            path_hint: self.path_hint_for_node(node),
+            show_disclosure: false,
+        }
+    }
+
+    fn path_hint_for_node(&self, node: &AssetNode) -> Option<String> {
+        let mut ancestors = Vec::new();
+        let mut cursor = node.parent_id.as_deref();
+
+        while let Some(parent_id) = cursor {
+            let Some(parent) = self.nodes.get(parent_id) else {
+                break;
+            };
+            if parent.kind == ConsoleAssetKind::Folder {
+                ancestors.push(parent.title.clone());
+            }
+            cursor = parent.parent_id.as_deref();
+        }
+
+        ancestors.reverse();
+        (!ancestors.is_empty()).then(|| ancestors.join(" / "))
     }
 }
 

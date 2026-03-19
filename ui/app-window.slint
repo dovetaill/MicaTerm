@@ -3,6 +3,8 @@
 import { AssetsCreateMenu } from "components/assets-create-menu.slint";
 import { AssetsContextMenuItem } from "components/assets-context-menu-column.slint";
 import { AssetsContextMenuOverlay } from "components/assets-context-menu-overlay.slint";
+import { AssetsFolderCreateModal } from "components/assets-folder-create-modal.slint";
+import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal.slint";
 import { StatusPill } from "components/status-pill.slint";
 import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
@@ -31,6 +33,17 @@ export component AppWindow inherits Window {
     in-out property <bool> asset-uses-create-popover: false;
     in-out property <bool> asset-tree-fully-expanded: false;
     in-out property <string> asset-view-mode: "tree";
+    in-out property <bool> asset-modal-open: false;
+    in-out property <string> asset-modal-kind: "";
+    in-out property <bool> asset-modal-can-confirm: false;
+    in-out property <string> asset-folder-modal-name: "";
+    in-out property <string> asset-ssh-modal-active-tab: "standard";
+    in-out property <string> asset-ssh-modal-name: "";
+    in-out property <string> asset-ssh-modal-host: "";
+    in-out property <string> asset-ssh-modal-user: "";
+    in-out property <string> asset-ssh-modal-port: "22";
+    in-out property <string> asset-ssh-modal-environment: "";
+    in-out property <string> asset-ssh-modal-proxy-method: "";
     in-out property <string> asset-primary-create-action-id: "";
     in-out property <string> asset-primary-create-tooltip: "";
     in-out property <bool> asset-rename-active: false;
@@ -104,6 +117,11 @@ export component AppWindow inherits Window {
     callback toggle-assets-create-menu-requested();
     callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
+    callback close-asset-modal-requested();
+    callback confirm-asset-modal-requested();
+    callback asset-folder-modal-name-changed(string);
+    callback asset-ssh-modal-tab-selected(string);
+    callback asset-ssh-modal-draft-changed(string, string);
     callback asset-selected(string);
     callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
@@ -476,6 +494,65 @@ export component AppWindow inherits Window {
 
         pointer-moved(pointer-x, pointer-y) => {
             root.assets-context-menu-pointer-moved(pointer-x, pointer-y);
+        }
+    }
+
+    asset-modal-dismiss-layer := TouchArea {
+        x: 0px;
+        y: titlebar.height;
+        width: root.width;
+        height: root.height - titlebar.height;
+        enabled: root.asset-modal-open && root.asset-modal-kind == "new-folder";
+
+        clicked => {
+            root.close-asset-modal-requested();
+        }
+    }
+
+    if root.asset-modal-open && root.asset-modal-kind == "new-folder" : asset-folder-modal-overlay := AssetsFolderCreateModal {
+        x: max(24px, (root.width - self.width) / 2);
+        y: max(titlebar.height + 24px, titlebar.height + (root.height - titlebar.height - self.height) / 2);
+        folder-name: root.asset-folder-modal-name;
+
+        close-requested => {
+            root.close-asset-modal-requested();
+        }
+
+        confirm-requested => {
+            root.confirm-asset-modal-requested();
+        }
+
+        folder-name-changed(value) => {
+            root.asset-folder-modal-name-changed(value);
+        }
+    }
+
+    if root.asset-modal-open && root.asset-modal-kind == "new-ssh-connection" : asset-ssh-modal-overlay := AssetsSshConnectionModal {
+        x: max(24px, (root.width - self.width) / 2);
+        y: max(titlebar.height + 24px, titlebar.height + (root.height - titlebar.height - self.height) / 2);
+        active-tab: root.asset-ssh-modal-active-tab;
+        name: root.asset-ssh-modal-name;
+        host: root.asset-ssh-modal-host;
+        user: root.asset-ssh-modal-user;
+        port: root.asset-ssh-modal-port;
+        environment: root.asset-ssh-modal-environment;
+        proxy-method: root.asset-ssh-modal-proxy-method;
+        can-confirm: root.asset-modal-can-confirm;
+
+        close-requested => {
+            root.close-asset-modal-requested();
+        }
+
+        confirm-requested => {
+            root.confirm-asset-modal-requested();
+        }
+
+        tab-selected(tab-id) => {
+            root.asset-ssh-modal-tab-selected(tab-id);
+        }
+
+        draft-changed(field, value) => {
+            root.asset-ssh-modal-draft-changed(field, value);
         }
     }
 
