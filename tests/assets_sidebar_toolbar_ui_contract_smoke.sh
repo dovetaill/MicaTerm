@@ -41,6 +41,7 @@ grep -F 'callback toggle-assets-create-menu-requested();' "$ASSETS" >/dev/null
 grep -F 'callback close-assets-create-menu-requested();' "$ASSETS" >/dev/null
 grep -F 'in property <bool> asset-create-menu-open: false;' "$ASSETS" >/dev/null
 grep -F 'in property <bool> asset-uses-create-popover: false;' "$ASSETS" >/dev/null
+grep -F 'in property <bool> asset-tree-controls-enabled: true;' "$ASSETS" >/dev/null
 grep -F 'out property <length> create-menu-anchor-x: create-button.absolute-position.x;' "$ASSETS" >/dev/null
 grep -F 'out property <length> create-menu-anchor-y: create-button.absolute-position.y;' "$ASSETS" >/dev/null
 grep -F 'out property <length> create-menu-anchor-width: create-button.width;' "$ASSETS" >/dev/null
@@ -56,20 +57,24 @@ grep -F 'tooltip-text: root.asset-primary-create-tooltip;' "$ASSETS" >/dev/null
 grep -F 'tooltip-text: root.asset-search-tooltip;' "$ASSETS" >/dev/null
 grep -F 'tooltip-text: root.asset-view-mode-tooltip;' "$ASSETS" >/dev/null
 grep -F 'tooltip-text: root.asset-tree-expansion-tooltip;' "$ASSETS" >/dev/null
-grep -F 'visible: root.asset-show-tree-controls && root.asset-view-mode == "tree";' "$ASSETS" >/dev/null
+grep -F 'enabled: root.asset-show-tree-controls && root.asset-tree-controls-enabled;' "$ASSETS" >/dev/null
+! grep -F 'visible: root.asset-show-tree-controls && root.asset-view-mode == "tree";' "$ASSETS" >/dev/null
 grep -F 'if root.asset-uses-create-popover {' "$ASSETS" >/dev/null
 grep -F 'root.toggle-assets-create-menu-requested();' "$ASSETS" >/dev/null
 grep -F 'root.assets-create-action-selected(root.asset-primary-create-action-id);' "$ASSETS" >/dev/null
+grep -F 'width: expanded ? 320px : 0px;' "$ASSETS" >/dev/null
 grep -F 'height: root.asset-search-expanded ? 44px : 0px;' "$ASSETS" >/dev/null
 ! grep -F 'create-menu := AssetsCreateMenu {' "$ASSETS" >/dev/null
 
 grep -F 'in property <bool> asset-create-menu-open: false;' "$SIDEBAR" >/dev/null
+grep -F 'in property <bool> asset-tree-controls-enabled: true;' "$SIDEBAR" >/dev/null
 grep -F 'callback toggle-assets-create-menu-requested();' "$SIDEBAR" >/dev/null
 grep -F 'callback close-assets-create-menu-requested();' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-x: assets-sidebar.create-menu-anchor-x;' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-y: assets-sidebar.create-menu-anchor-y;' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-width: assets-sidebar.create-menu-anchor-width;' "$SIDEBAR" >/dev/null
 grep -F 'out property <length> create-menu-anchor-height: assets-sidebar.create-menu-anchor-height;' "$SIDEBAR" >/dev/null
+grep -F 'width: 44px + (root.show-assets-sidebar ? 320px : 0px);' "$SIDEBAR" >/dev/null
 grep -F 'toggle-assets-create-menu-requested => {' "$SIDEBAR" >/dev/null
 grep -F 'close-assets-create-menu-requested => {' "$SIDEBAR" >/dev/null
 grep -F 'root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);' "$SIDEBAR" >/dev/null

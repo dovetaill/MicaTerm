@@ -37,6 +37,7 @@ export component AssetsSidebar inherits Rectangle {
     in property <string> asset-view-mode-tooltip: "";
     in property <string> asset-tree-expansion-tooltip: "";
     in property <bool> asset-show-tree-controls: true;
+    in property <bool> asset-tree-controls-enabled: true;
     in property <[ConsoleAssetItem]> console-asset-items: [];
     out property <length> search-row-height: search-row-host.height;
     out property <length> create-menu-anchor-x: create-button.absolute-position.x;
@@ -68,7 +69,7 @@ export component AssetsSidebar inherits Rectangle {
     private property <image> list-view-icon: @image-url("../../assets/icons/fluent/list-20-regular.svg");
     private property <image> create-add-icon: @image-url("../../assets/icons/fluent/add-20-regular.svg");
 
-    width: expanded ? 288px : 0px;
+    width: expanded ? 320px : 0px;
     visible: expanded;
     clip: true;
     background: ThemeTokens.assets-surface;
@@ -121,8 +122,8 @@ export component AssetsSidebar inherits Rectangle {
                 tree-expansion-button := SidebarToolbarIconButton {
                     icon-source: root.asset-tree-fully-expanded ? root.tree-collapse-icon : root.tree-expand-icon;
                     active: root.asset-tree-fully-expanded;
-                    enabled: root.asset-show-tree-controls && root.asset-view-mode == "tree";
-                    visible: root.asset-show-tree-controls && root.asset-view-mode == "tree";
+                    enabled: root.asset-show-tree-controls && root.asset-tree-controls-enabled;
+                    visible: root.asset-show-tree-controls;
                     tooltip-text: root.asset-tree-expansion-tooltip;
                     tooltip-source-id: "assets-tree-expansion";
                     clicked => {
@@ -282,10 +283,10 @@ export component AssetsSidebar inherits Rectangle {
                 }
 
                 list-host := ListView {
-                    x: 16px;
-                    y: 16px;
-                    width: parent.width - 32px;
-                    height: parent.height - 16px;
+                    x: 12px;
+                    y: 12px;
+                    width: parent.width - 24px;
+                    height: parent.height - 24px;
 
                     for item in root.console-asset-items : AssetNodeRow {
                         width: list-host.width;

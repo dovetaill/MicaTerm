@@ -1,4 +1,5 @@
 use mica_term::AppWindow;
+use mica_term::app::bootstrap::bind_top_status_bar_with_store;
 
 #[test]
 fn folder_modal_visibility_round_trips_through_window_properties() {
@@ -32,4 +33,21 @@ fn ssh_modal_visibility_round_trips_through_window_properties() {
     assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "proxy");
     assert_eq!(app.get_asset_ssh_modal_name().as_str(), "Prod Bastion");
     assert_eq!(app.get_asset_ssh_modal_host().as_str(), "10.0.0.12");
+}
+
+#[test]
+fn ssh_modal_resets_to_standard_english_shell_when_reopened() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_tab_selected("proxy".into());
+    app.invoke_close_asset_modal_requested();
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
+    assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "standard");
 }

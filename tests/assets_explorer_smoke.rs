@@ -60,18 +60,25 @@ fn search_filters_rows_without_destroying_collapsed_tree_state() {
 }
 
 #[test]
-fn flat_projection_rows_can_surface_path_hints() {
+fn flat_projection_rows_keep_path_hints_without_multiline_row_contract() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
-    let folder_id = create_root_folder(&app, "Folder 1");
-    create_child_ssh_via_context_menu(&app, &folder_id, "SSH Connection 1", "10.0.0.12");
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Prod".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let folder_id = app.get_console_asset_items().row_data(0).unwrap().id.to_string();
+    app.invoke_asset_context_menu_requested(folder_id.into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_confirm_asset_modal_requested();
     app.invoke_toggle_assets_view_mode_requested();
 
-    let rows = app.get_console_asset_items();
-    assert_eq!(rows.row_count(), 1);
-    let row = rows.row_data(0).unwrap();
-    assert_eq!(row.label.as_str(), "SSH Connection 1");
-    assert_eq!(row.path_hint.as_str(), "Folder 1");
+    let row = app.get_console_asset_items().row_data(0).unwrap();
+    assert_eq!(row.label.as_str(), "Prod Bastion");
+    assert_eq!(row.path_hint.as_str(), "Prod");
+    assert!(row.compact_flat_mode);
 }

@@ -9,6 +9,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> environment: "";
     in property <string> proxy-method: "";
     in property <bool> can-confirm: false;
+    in property <int> focus-sequence: 0;
     callback close-requested();
     callback confirm-requested();
     callback tab-selected(string);
@@ -22,7 +23,9 @@ export component AssetsSshConnectionModal inherits Rectangle {
     background: ThemeTokens.assets-surface;
     z: 145;
 
-    public function focus-primary-field() {}
+    public function focus-primary-field() {
+        name-input.focus();
+    }
 
     modal-focus := FocusScope {
         width: parent.width;
@@ -45,7 +48,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
             Text {
                 x: 24px;
                 y: 22px;
-                text: "新建 SSH 连接";
+                text: "New SSH Connection";
                 color: ThemeTokens.text-primary;
                 font-size: 20px;
                 font-weight: 700;
@@ -99,10 +102,10 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         background: root.active-tab == tab-id ? ThemeTokens.control-active-surface : ThemeTokens.control-hover-surface;
 
                         Text {
-                            text: tab-id == "standard" ? "标准" :
-                                  tab-id == "tunnel" ? "隧道" :
-                                  tab-id == "proxy" ? "代理" :
-                                  tab-id == "environment" ? "环境变量" : "高级";
+                            text: tab-id == "standard" ? "Standard" :
+                                  tab-id == "tunnel" ? "Tunnel" :
+                                  tab-id == "proxy" ? "Proxy" :
+                                  tab-id == "environment" ? "Environment" : "Advanced";
                             color: ThemeTokens.text-primary;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -122,11 +125,12 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 }
             }
 
-            if root.active-tab == "standard" : standard-panel := Rectangle {
+            standard-panel := Rectangle {
                 x: 24px;
                 y: 132px;
                 width: parent.width - 48px;
                 height: 284px;
+                visible: root.active-tab == "standard";
                 background: transparent;
 
                 VerticalLayout {
@@ -240,7 +244,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 background: ThemeTokens.inspector-surface;
 
                 Text {
-                    text: "隧道配置将在后续任务接入。";
+                    text: "Tunnel settings will land in a follow-up task.";
                     color: ThemeTokens.text-primary;
                     x: 16px;
                     y: 16px;
@@ -259,7 +263,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     spacing: 12px;
 
                     Text {
-                        text: "代理方式";
+                        text: "Proxy Method";
                         color: ThemeTokens.text-primary;
                     }
 
@@ -300,7 +304,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     spacing: 12px;
 
                     Text {
-                        text: "环境变量";
+                        text: "Environment";
                         color: ThemeTokens.text-primary;
                     }
 
@@ -337,7 +341,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 background: ThemeTokens.inspector-surface;
 
                 Text {
-                    text: "高级设置壳层已预留。";
+                    text: "Advanced settings shell is reserved for a follow-up task.";
                     color: ThemeTokens.text-primary;
                     x: 16px;
                     y: 16px;
@@ -355,7 +359,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 background: ThemeTokens.control-hover-surface;
 
                 Text {
-                    text: "测试连接";
+                    text: "Test Connection";
                     color: ThemeTokens.text-primary;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -376,7 +380,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 opacity: root.can-confirm ? 1.0 : 0.55;
 
                 Text {
-                    text: "保存";
+                    text: "Save";
                     color: ThemeTokens.text-primary;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -395,5 +399,9 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 }
             }
         }
+    }
+
+    changed focus-sequence => {
+        root.focus-primary-field();
     }
 }

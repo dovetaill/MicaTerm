@@ -551,6 +551,10 @@ impl ShellViewModel {
         self.context_menu_open_path = path;
     }
 
+    pub fn truncate_context_menu_open_path(&mut self, len: usize) {
+        self.context_menu_open_path.truncate(len);
+    }
+
     pub fn handle_context_menu_escape(&mut self) {
         self.close_context_menu();
     }

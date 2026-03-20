@@ -22,12 +22,13 @@ export component AssetNodeRow inherits Rectangle {
     callback rename-commit-requested(string, string);
     callback rename-cancel-requested(string);
 
-    private property <length> indent: root.compact-flat-mode ? 12px : 12px + (root.depth * 14px);
-    private property <length> disclosure-width: root.show-disclosure ? 18px : 0px;
+    private property <length> indent: root.compact-flat-mode ? 10px : 10px + (root.depth * 12px);
+    private property <length> disclosure-width: root.show-disclosure ? 14px : 0px;
     private property <length> icon-x: root.indent + root.disclosure-width;
-    private property <length> content-x: root.icon-x + 24px;
+    private property <length> content-x: root.icon-x + 22px;
     private property <length> body-touch-x: root.show-disclosure ? root.indent + root.disclosure-width : 0px;
-    private property <length> row-height: root.path-hint == "" ? 36px : 48px;
+    private property <length> hint-width: root.path-hint == "" ? 0px : 96px;
+    private property <length> row-height: 28px;
     private property <image> chevron-icon: @image-url("../../assets/icons/fluent/chevron-down-20-regular.svg");
     private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
     private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
@@ -41,10 +42,12 @@ export component AssetNodeRow inherits Rectangle {
     border-width: root.focused ? 1px : 0px;
     border-color: root.focused ? ThemeTokens.divider-strong : transparent;
     background: touch.pressed
-        ? ThemeTokens.control-active-surface
-        : (touch.has-hover || root.selected)
-            ? ThemeTokens.control-hover-surface
-            : transparent;
+        ? ThemeTokens.explorer-row-selected-surface
+        : root.selected
+            ? ThemeTokens.explorer-row-selected-surface
+            : touch.has-hover
+                ? ThemeTokens.explorer-row-hover-surface
+                : transparent;
 
     if root.show-disclosure : Rectangle {
         x: root.indent;
@@ -55,9 +58,9 @@ export component AssetNodeRow inherits Rectangle {
 
         Image {
             x: 0px;
-            y: root.path-hint == "" ? 10px : 8px;
-            width: 14px;
-            height: 14px;
+            y: 7px;
+            width: 12px;
+            height: 12px;
             source: root.chevron-icon;
             image-fit: contain;
             colorize: ThemeTokens.text-primary;
@@ -78,9 +81,9 @@ export component AssetNodeRow inherits Rectangle {
 
     Image {
         x: root.icon-x;
-        y: root.path-hint == "" ? 8px : 6px;
-        width: 20px;
-        height: 20px;
+        y: 4px;
+        width: 16px;
+        height: 16px;
         source: root.kind-icon;
         image-fit: contain;
         colorize: ThemeTokens.text-primary;
@@ -88,23 +91,24 @@ export component AssetNodeRow inherits Rectangle {
 
     if !root.renaming : Text {
         x: root.content-x;
-        y: root.path-hint == "" ? 0px : 4px;
-        width: parent.width - self.x - 12px;
-        height: root.path-hint == "" ? parent.height : 22px;
+        y: 0px;
+        width: parent.width - self.x - root.hint-width - 12px;
+        height: parent.height;
         text: root.label;
         color: ThemeTokens.text-primary;
         vertical-alignment: center;
     }
 
     if !root.renaming && root.path-hint != "" : Text {
-        x: root.content-x;
-        y: 22px;
-        width: parent.width - self.x - 12px;
-        height: 18px;
+        x: parent.width - root.hint-width - 12px;
+        y: 0px;
+        width: root.hint-width;
+        height: parent.height;
         text: root.path-hint;
         color: ThemeTokens.text-primary;
         opacity: 0.62;
-        font-size: 12px;
+        font-size: 11px;
+        horizontal-alignment: right;
         vertical-alignment: center;
     }
 
@@ -116,9 +120,9 @@ export component AssetNodeRow inherits Rectangle {
 
         rename-input := TextInput {
             x: root.content-x - 4px;
-            y: root.path-hint == "" ? 4px : 8px;
+            y: 3px;
             width: parent.width - self.x - 8px;
-            height: root.path-hint == "" ? parent.height - 8px : 24px;
+            height: parent.height - 6px;
             visible: root.renaming;
             enabled: root.renaming;
             text: root.rename-text;

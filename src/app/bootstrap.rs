@@ -24,9 +24,9 @@ use crate::app::windows_frame::{
 };
 use crate::shell::context_menu::{
     CONTEXT_MENU_COLUMN_GAP, CONTEXT_MENU_COLUMN_WIDTH, ContextMenuActionNode,
-    ContextMenuActionState, ContextTargetKind, MenuPlacementInput, SelectionContext,
-    context_menu_column_height, resolve_action_tree, resolve_root_menu_origin,
-    visible_columns_for_path,
+    ContextMenuActionState, ContextTargetKind, MenuPlacementInput, Rect, SelectionContext,
+    context_menu_column_height, context_menu_column_offset, resolve_action_tree,
+    resolve_root_menu_origin, should_keep_corridor_open, visible_columns_for_path,
 };
 use crate::shell::layout::{ShellLayoutInput, resolve_shell_layout};
 use crate::shell::metrics::ShellMetrics;
@@ -182,6 +182,7 @@ fn sync_assets_toolbar_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_asset_view_mode_tooltip(descriptor.view_mode_tooltip.into());
     window.set_asset_tree_expansion_tooltip(descriptor.tree_expansion_tooltip.into());
     window.set_asset_show_tree_controls(descriptor.show_tree_controls);
+    window.set_asset_tree_controls_enabled(descriptor.tree_controls_enabled);
 }
 
 fn sync_assets_context_menu_state(window: &AppWindow, state: &ShellViewModel) {
@@ -249,6 +250,16 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
     }
 }
 
+fn schedule_asset_modal_focus(window: &AppWindow) {
+    let handle = window.as_weak();
+    let _ = slint::invoke_from_event_loop(move || {
+        let window = handle.unwrap();
+        if window.get_asset_modal_open() {
+            window.set_asset_modal_focus_sequence(window.get_asset_modal_focus_sequence() + 1);
+        }
+    });
+}
+
 fn parse_context_target_kind(value: &str) -> ContextTargetKind {
     match value {
         "ssh" => ContextTargetKind::SshConnection,
@@ -283,15 +294,20 @@ fn context_menu_columns_for(state: &ShellViewModel) -> [Vec<ContextMenuActionNod
     visible_columns_for_path(&roots, &state.context_menu_open_path)
 }
 
-fn context_menu_items_to_model(items: Vec<ContextMenuActionNode>) -> Vec<AssetsContextMenuItem> {
+fn context_menu_items_to_model(
+    items: Vec<ContextMenuActionNode>,
+    open_index: Option<usize>,
+) -> Vec<AssetsContextMenuItem> {
     items.into_iter()
-        .map(|item| AssetsContextMenuItem {
+        .enumerate()
+        .map(|(index, item)| AssetsContextMenuItem {
             id: item.id.into(),
             label: item.label.into(),
             icon_id: item.icon_id.into(),
             enabled: item.state != ContextMenuActionState::Disabled,
             planned: item.state == ContextMenuActionState::Planned,
             has_children: !item.children.is_empty(),
+            open: open_index == Some(index),
             divider_before: item.divider_before,
         })
         .collect()
@@ -299,17 +315,17 @@ fn context_menu_items_to_model(items: Vec<ContextMenuActionNode>) -> Vec<AssetsC
 
 fn context_menu_primary_items_for(state: &ShellViewModel) -> Vec<AssetsContextMenuItem> {
     let columns = context_menu_columns_for(state);
-    context_menu_items_to_model(columns[0].clone())
+    context_menu_items_to_model(columns[0].clone(), state.context_menu_open_path.first().copied())
 }
 
 fn context_menu_secondary_items_for(state: &ShellViewModel) -> Vec<AssetsContextMenuItem> {
     let columns = context_menu_columns_for(state);
-    context_menu_items_to_model(columns[1].clone())
+    context_menu_items_to_model(columns[1].clone(), state.context_menu_open_path.get(1).copied())
 }
 
 fn context_menu_tertiary_items_for(state: &ShellViewModel) -> Vec<AssetsContextMenuItem> {
     let columns = context_menu_columns_for(state);
-    context_menu_items_to_model(columns[2].clone())
+    context_menu_items_to_model(columns[2].clone(), None)
 }
 
 fn context_menu_hover_path_for(
@@ -400,6 +416,32 @@ fn context_menu_child_width_for(state: &ShellViewModel) -> f32 {
     } else {
         child_count * (CONTEXT_MENU_COLUMN_WIDTH + CONTEXT_MENU_COLUMN_GAP)
     }
+}
+
+fn context_menu_column_rects_for(state: &ShellViewModel) -> [Option<Rect>; 3] {
+    let columns = context_menu_columns_for(state);
+    let visible_column_count = columns
+        .iter()
+        .take_while(|column| !column.is_empty())
+        .count();
+    let mut rects = [None, None, None];
+
+    for column_index in 0..visible_column_count {
+        let height = context_menu_column_height(columns[column_index].as_slice());
+        rects[column_index] = Some(Rect {
+            x: state.context_menu_origin_x
+                + context_menu_column_offset(
+                    column_index,
+                    visible_column_count,
+                    state.context_menu_child_flows_left,
+                ),
+            y: state.context_menu_origin_y,
+            width: CONTEXT_MENU_COLUMN_WIDTH,
+            height,
+        });
+    }
+
+    rects
 }
 
 fn update_context_menu_placement(window: &AppWindow, state: &mut ShellViewModel) {
@@ -793,12 +835,16 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_assets_create_action_selected(move |action_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let was_modal_open = state.asset_modal_state.is_some();
         state.dismiss_active_asset_rename();
         state.dismiss_empty_asset_search_on_shell_interaction();
         state.handle_assets_create_action(action_id.as_str());
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
         sync_asset_modal_state(&window, &state);
+        if !was_modal_open && state.asset_modal_state.is_some() {
+            schedule_asset_modal_focus(&window);
+        }
     });
 
     let state = Rc::clone(&view_model);
@@ -955,6 +1001,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_assets_context_menu_action_invoked(move |action_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let was_modal_open = state.asset_modal_state.is_some();
 
         if let Some((path, action)) = context_menu_action_entry_for(&state, action_id.as_str()) {
             if !action.children.is_empty() {
@@ -969,6 +1016,9 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         sync_asset_modal_state(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
+        if !was_modal_open && state.asset_modal_state.is_some() {
+            schedule_asset_modal_focus(&window);
+        }
     });
 
     let state = Rc::clone(&view_model);
@@ -1001,6 +1051,41 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         state.hover_context_menu_path(next_path);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_assets_context_menu_pointer_moved(move |pointer_x, pointer_y| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if !state.context_menu_open {
+            return;
+        }
+
+        let pointer = (pointer_x, pointer_y);
+        let rects = context_menu_column_rects_for(&state);
+        let original_path = state.context_menu_open_path.clone();
+
+        if state.context_menu_open_path.len() >= 2
+            && let (Some(parent_rect), Some(child_rect)) = (rects[1], rects[2])
+            && !should_keep_corridor_open(pointer, parent_rect, child_rect)
+        {
+            state.truncate_context_menu_open_path(1);
+        }
+
+        if !state.context_menu_open_path.is_empty()
+            && let (Some(parent_rect), Some(child_rect)) = (rects[0], rects[1])
+        {
+            let keep_open = should_keep_corridor_open(pointer, parent_rect, child_rect);
+            if !keep_open {
+                state.truncate_context_menu_open_path(0);
+            }
+        }
+
+        if state.context_menu_open_path != original_path {
+            update_context_menu_placement(&window, &mut state);
+            sync_assets_context_menu_state(&window, &state);
+        }
     });
 
     let state = Rc::clone(&view_model);

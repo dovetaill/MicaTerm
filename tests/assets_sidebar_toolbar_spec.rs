@@ -99,12 +99,26 @@ fn flat_mode_disables_tree_expansion_toggle() {
 }
 
 #[test]
-fn flat_mode_hides_tree_controls_in_toolbar_descriptor() {
+fn flat_mode_keeps_tree_controls_slot_but_disables_interaction() {
     let mut view_model = ShellViewModel::default();
     view_model.toggle_asset_view_mode();
 
     let descriptor = toolbar_descriptor_for(view_model.active_sidebar_destination, &view_model);
-    assert!(!descriptor.show_tree_controls);
+    assert!(descriptor.show_tree_controls);
+    assert!(!descriptor.tree_controls_enabled);
+    assert_eq!(
+        descriptor.tree_expansion_tooltip,
+        "Switch to Tree View to expand folders"
+    );
+}
+
+#[test]
+fn tree_mode_keeps_tree_controls_enabled() {
+    let view_model = ShellViewModel::default();
+
+    let descriptor = toolbar_descriptor_for(view_model.active_sidebar_destination, &view_model);
+    assert!(descriptor.show_tree_controls);
+    assert!(descriptor.tree_controls_enabled);
 }
 
 #[test]

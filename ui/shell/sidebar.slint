@@ -26,6 +26,7 @@ export component Sidebar inherits Rectangle {
     in property <string> asset-view-mode-tooltip: "";
     in property <string> asset-tree-expansion-tooltip: "";
     in property <bool> asset-show-tree-controls: true;
+    in property <bool> asset-tree-controls-enabled: true;
     in property <[ConsoleAssetItem]> console-asset-items: [];
     private property <string> tooltip-text-value: "";
     private property <bool> tooltip-visible-value: false;
@@ -65,7 +66,7 @@ export component Sidebar inherits Rectangle {
     callback asset-rename-cancel-requested(string);
     callback shell-interaction-requested();
 
-    width: 48px + (root.show-assets-sidebar ? 288px : 0px);
+    width: 44px + (root.show-assets-sidebar ? 320px : 0px);
     background: transparent;
 
     function schedule-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length, anchor-width: length) {
@@ -108,7 +109,7 @@ export component Sidebar inherits Rectangle {
         spacing: 0px;
 
         activity-bar := Rectangle {
-            width: 48px;
+            width: 44px;
             background: ThemeTokens.activity-surface;
             border-width: 1px;
             border-color: ThemeTokens.divider-subtle;
@@ -189,6 +190,7 @@ export component Sidebar inherits Rectangle {
             asset-view-mode-tooltip: root.asset-view-mode-tooltip;
             asset-tree-expansion-tooltip: root.asset-tree-expansion-tooltip;
             asset-show-tree-controls: root.asset-show-tree-controls;
+            asset-tree-controls-enabled: root.asset-tree-controls-enabled;
             console-asset-items: root.console-asset-items;
 
             toggle-assets-search-requested => {

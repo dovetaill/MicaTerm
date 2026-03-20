@@ -5,6 +5,8 @@ export component AssetsContextMenuOverlay inherits Rectangle {
     in property <[AssetsContextMenuItem]> secondary-items: [];
     in property <[AssetsContextMenuItem]> tertiary-items: [];
     in property <bool> flow-left: false;
+    property <int> visual-hover-column: -1;
+    property <int> visual-hover-row: -1;
     property <int> pending-hover-column: -1;
     property <int> pending-hover-row: -1;
     callback close-requested();
@@ -33,6 +35,20 @@ export component AssetsContextMenuOverlay inherits Rectangle {
         width: parent.width;
         height: parent.height;
 
+        pointer-tracker := TouchArea {
+            width: parent.width;
+            height: parent.height;
+
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.move {
+                    root.pointer-moved(
+                        self.absolute-position.x + self.mouse-x,
+                        self.absolute-position.y + self.mouse-y,
+                    );
+                }
+            }
+        }
+
         key-pressed(event) => {
             if (event.text == Key.Escape) {
                 root.key-command("escape");
@@ -55,17 +71,26 @@ export component AssetsContextMenuOverlay inherits Rectangle {
             x: root.flow-left ? root.width - self.width : 0px;
             y: 0px;
             items: root.primary-items;
+            visual-hover-row: root.visual-hover-column == 0 ? root.visual-hover-row : -1;
 
             item-invoked(action-id) => {
                 root.item-invoked(action-id);
             }
 
-            item-hovered(index) => {
+            item-hovered(index, has-children) => {
+                root.visual-hover-column = 0;
+                root.visual-hover-row = index;
                 root.pending-hover-column = 0;
                 root.pending-hover-row = index;
                 corridor-close-delay.running = false;
                 hover-open-delay.running = false;
-                hover-open-delay.start();
+                if has-children {
+                    hover-open-delay.start();
+                }
+            }
+
+            item-pointer-moved(pointer-x, pointer-y) => {
+                root.pointer-moved(pointer-x, pointer-y);
             }
         }
 
@@ -76,17 +101,26 @@ export component AssetsContextMenuOverlay inherits Rectangle {
             y: 0px;
             visible: root.secondary-items.length > 0;
             items: root.secondary-items;
+            visual-hover-row: root.visual-hover-column == 1 ? root.visual-hover-row : -1;
 
             item-invoked(action-id) => {
                 root.item-invoked(action-id);
             }
 
-            item-hovered(index) => {
+            item-hovered(index, has-children) => {
+                root.visual-hover-column = 1;
+                root.visual-hover-row = index;
                 root.pending-hover-column = 1;
                 root.pending-hover-row = index;
                 corridor-close-delay.running = false;
                 hover-open-delay.running = false;
-                hover-open-delay.start();
+                if has-children {
+                    hover-open-delay.start();
+                }
+            }
+
+            item-pointer-moved(pointer-x, pointer-y) => {
+                root.pointer-moved(pointer-x, pointer-y);
             }
         }
 
@@ -97,17 +131,26 @@ export component AssetsContextMenuOverlay inherits Rectangle {
             y: 0px;
             visible: root.tertiary-items.length > 0;
             items: root.tertiary-items;
+            visual-hover-row: root.visual-hover-column == 2 ? root.visual-hover-row : -1;
 
             item-invoked(action-id) => {
                 root.item-invoked(action-id);
             }
 
-            item-hovered(index) => {
+            item-hovered(index, has-children) => {
+                root.visual-hover-column = 2;
+                root.visual-hover-row = index;
                 root.pending-hover-column = 2;
                 root.pending-hover-row = index;
                 corridor-close-delay.running = false;
                 hover-open-delay.running = false;
-                hover-open-delay.start();
+                if has-children {
+                    hover-open-delay.start();
+                }
+            }
+
+            item-pointer-moved(pointer-x, pointer-y) => {
+                root.pointer-moved(pointer-x, pointer-y);
             }
         }
     }

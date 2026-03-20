@@ -22,6 +22,7 @@ pub struct AssetsToolbarDescriptor {
     pub view_mode_tooltip: &'static str,
     pub tree_expansion_tooltip: &'static str,
     pub show_tree_controls: bool,
+    pub tree_controls_enabled: bool,
 }
 
 impl SidebarDestination {
@@ -108,12 +109,16 @@ pub fn toolbar_descriptor_for(
         AssetViewMode::Tree => "Switch to Flat List",
         AssetViewMode::Flat => "Switch to Tree View",
     };
-    let tree_expansion_tooltip = if view_model.asset_tree_fully_expanded {
+    let tree_controls_enabled =
+        base_show_tree_controls && view_model.asset_view_mode == AssetViewMode::Tree;
+    let tree_expansion_tooltip = if base_show_tree_controls && !tree_controls_enabled {
+        "Switch to Tree View to expand folders"
+    } else if view_model.asset_tree_fully_expanded {
         "Collapse Tree"
     } else {
         "Expand Tree"
     };
-    let show_tree_controls = base_show_tree_controls && view_model.asset_view_mode == AssetViewMode::Tree;
+    let show_tree_controls = base_show_tree_controls;
 
     AssetsToolbarDescriptor {
         uses_create_popover,
@@ -123,5 +128,6 @@ pub fn toolbar_descriptor_for(
         view_mode_tooltip,
         tree_expansion_tooltip,
         show_tree_controls,
+        tree_controls_enabled,
     }
 }

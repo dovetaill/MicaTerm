@@ -216,6 +216,25 @@ fn corridor_logic_keeps_submenu_open_while_pointer_moves_toward_child_column() {
 }
 
 #[test]
+fn corridor_keeps_pointer_alive_between_parent_and_child_columns() {
+    let parent = Rect {
+        x: 100.0,
+        y: 100.0,
+        width: 224.0,
+        height: 120.0,
+    };
+    let child = Rect {
+        x: 332.0,
+        y: 100.0,
+        width: 224.0,
+        height: 120.0,
+    };
+
+    assert!(should_keep_corridor_open((320.0, 140.0), parent, child));
+    assert!(!should_keep_corridor_open((320.0, 40.0), parent, child));
+}
+
+#[test]
 fn esc_closes_context_menu() {
     let mut view_model = ShellViewModel::default();
     view_model.open_context_menu_for_target(ContextTargetKind::BlankArea, None, 24.0, 36.0);

@@ -36,6 +36,7 @@ export component AppWindow inherits Window {
     in-out property <bool> asset-modal-open: false;
     in-out property <string> asset-modal-kind: "";
     in-out property <bool> asset-modal-can-confirm: false;
+    in-out property <int> asset-modal-focus-sequence: 0;
     in-out property <string> asset-folder-modal-name: "";
     in-out property <string> asset-ssh-modal-active-tab: "standard";
     in-out property <string> asset-ssh-modal-name: "";
@@ -51,6 +52,7 @@ export component AppWindow inherits Window {
     in-out property <string> asset-view-mode-tooltip: "";
     in-out property <string> asset-tree-expansion-tooltip: "";
     in-out property <bool> asset-show-tree-controls: true;
+    in-out property <bool> asset-tree-controls-enabled: true;
     in-out property <[ConsoleAssetItem]> console-asset-items: [];
     in-out property <bool> assets-context-menu-open: false;
     in-out property <length> assets-context-menu-anchor-x: 0px;
@@ -272,6 +274,7 @@ export component AppWindow inherits Window {
                         asset-view-mode-tooltip: root.asset-view-mode-tooltip;
                         asset-tree-expansion-tooltip: root.asset-tree-expansion-tooltip;
                         asset-show-tree-controls: root.asset-show-tree-controls;
+                        asset-tree-controls-enabled: root.asset-tree-controls-enabled;
                         console-asset-items: root.console-asset-items;
 
                         toggle-assets-sidebar-requested => {
@@ -513,6 +516,7 @@ export component AppWindow inherits Window {
         x: max(24px, (root.width - self.width) / 2);
         y: max(titlebar.height + 24px, titlebar.height + (root.height - titlebar.height - self.height) / 2);
         folder-name: root.asset-folder-modal-name;
+        focus-sequence: root.asset-modal-focus-sequence;
 
         close-requested => {
             root.close-asset-modal-requested();
@@ -538,6 +542,7 @@ export component AppWindow inherits Window {
         environment: root.asset-ssh-modal-environment;
         proxy-method: root.asset-ssh-modal-proxy-method;
         can-confirm: root.asset-modal-can-confirm;
+        focus-sequence: root.asset-modal-focus-sequence;
 
         close-requested => {
             root.close-asset-modal-requested();

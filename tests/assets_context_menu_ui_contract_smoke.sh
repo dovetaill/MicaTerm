@@ -10,6 +10,7 @@ MENU_COLUMN="$ROOT_DIR/ui/components/assets-context-menu-column.slint"
 MENU_OVERLAY="$ROOT_DIR/ui/components/assets-context-menu-overlay.slint"
 ASSETS="$ROOT_DIR/ui/shell/assets-sidebar.slint"
 APP_WINDOW="$ROOT_DIR/ui/app-window.slint"
+TOKENS="$ROOT_DIR/ui/theme/tokens.slint"
 
 grep -F 'export component AssetNodeRow inherits Rectangle' "$ROW" >/dev/null
 grep -F 'in property <int> depth: 0;' "$ROW" >/dev/null
@@ -41,6 +42,7 @@ grep -F 'callback asset-rename-text-changed(string, string);' "$APP_WINDOW" >/de
 grep -F 'callback asset-rename-commit-requested(string, string);' "$APP_WINDOW" >/dev/null
 grep -F 'callback asset-rename-cancel-requested(string);' "$APP_WINDOW" >/dev/null
 grep -F 'callback dismiss-active-asset-rename-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback assets-context-menu-pointer-moved(length, length);' "$APP_WINDOW" >/dev/null
 grep -F 'assets-context-menu-overlay := AssetsContextMenuOverlay {' "$APP_WINDOW" >/dev/null
 grep -F 'assets-context-menu-dismiss-layer := TouchArea {' "$APP_WINDOW" >/dev/null
 grep -F 'StatusPill {' "$APP_WINDOW" >/dev/null
@@ -51,9 +53,16 @@ grep -F 'in property <image> icon-source;' "$MENU_ROW" >/dev/null
 grep -F 'icon-slot := Rectangle {' "$MENU_ROW" >/dev/null
 grep -F 'export component AssetsContextMenuColumn inherits Rectangle' "$MENU_COLUMN" >/dev/null
 grep -F 'export component AssetsContextMenuOverlay inherits Rectangle' "$MENU_OVERLAY" >/dev/null
+grep -F 'out property <brush> explorer-row-hover-surface:' "$TOKENS" >/dev/null
+grep -F 'out property <brush> explorer-row-selected-surface:' "$TOKENS" >/dev/null
+grep -F 'out property <brush> menu-row-hover-surface:' "$TOKENS" >/dev/null
+grep -F 'out property <brush> menu-row-open-surface:' "$TOKENS" >/dev/null
+grep -F 'ThemeTokens.menu-row-hover-surface' "$MENU_ROW" >/dev/null
 grep -F 'hover-open-delay := Timer {' "$MENU_OVERLAY" >/dev/null
 grep -F 'corridor-close-delay := Timer {' "$MENU_OVERLAY" >/dev/null
 grep -F 'callback row-hovered(int, int);' "$MENU_OVERLAY" >/dev/null
 grep -F 'callback pointer-moved(length, length);' "$MENU_OVERLAY" >/dev/null
 grep -F 'key-pressed(event) => {' "$MENU_OVERLAY" >/dev/null
 grep -F 'event.text == Key.Escape' "$MENU_OVERLAY" >/dev/null
+grep -F 'window.on_assets_context_menu_pointer_moved(move |pointer_x, pointer_y| {' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
+! grep -F 'ThemeTokens.control-hover-surface' "$MENU_ROW" >/dev/null

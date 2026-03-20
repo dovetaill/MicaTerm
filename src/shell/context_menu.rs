@@ -133,6 +133,19 @@ pub fn context_menu_column_height(items: &[ContextMenuActionNode]) -> f32 {
         + dividers * CONTEXT_MENU_DIVIDER_HEIGHT
 }
 
+pub fn context_menu_column_offset(
+    column_index: usize,
+    visible_column_count: usize,
+    flow_left: bool,
+) -> f32 {
+    let stride = CONTEXT_MENU_COLUMN_WIDTH + CONTEXT_MENU_COLUMN_GAP;
+    if flow_left {
+        visible_column_count.saturating_sub(1 + column_index) as f32 * stride
+    } else {
+        column_index as f32 * stride
+    }
+}
+
 pub fn resolve_root_menu_origin(input: MenuPlacementInput) -> (f32, f32, bool) {
     let total_width = (input.root_width + input.child_width).max(input.root_width);
     let child_flows_left =

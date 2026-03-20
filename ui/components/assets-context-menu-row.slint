@@ -8,16 +8,21 @@ export component AssetsContextMenuRow inherits Rectangle {
     in property <bool> planned: false;
     in property <bool> has-children: false;
     in property <bool> divider-before: false;
+    in property <bool> visual-hover: false;
+    in property <bool> submenu-open: false;
     out property <bool> has-hover: touch.has-hover;
     callback invoked(string);
     callback hovered();
+    callback pointer-moved(length, length);
 
     height: 32px;
     background: touch.pressed
-        ? ThemeTokens.control-active-surface
-        : touch.has-hover
-            ? ThemeTokens.control-hover-surface
-            : transparent;
+        ? ThemeTokens.menu-row-open-surface
+        : root.submenu-open
+            ? ThemeTokens.menu-row-open-surface
+            : (root.visual-hover || touch.has-hover)
+                ? ThemeTokens.menu-row-hover-surface
+                : transparent;
 
     if root.divider-before : Rectangle {
         x: 12px;
@@ -68,6 +73,15 @@ export component AssetsContextMenuRow inherits Rectangle {
 
     touch := TouchArea {
         enabled: root.enabled || root.planned;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.move {
+                root.pointer-moved(
+                    self.absolute-position.x + self.mouse-x,
+                    self.absolute-position.y + self.mouse-y,
+                );
+            }
+        }
 
         clicked => {
             root.invoked(root.action-id);

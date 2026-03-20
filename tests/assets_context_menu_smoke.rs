@@ -306,3 +306,16 @@ fn closing_context_menu_clears_planned_action_feedback() {
     assert!(!app.get_assets_context_menu_open());
     assert_eq!(app.get_context_menu_feedback_text().as_str(), "");
 }
+
+#[test]
+fn pointer_move_callback_exists_for_context_menu_corridor() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_asset_context_menu_requested("".into(), "blank".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_pointer_moved(120.0, 180.0);
+
+    assert!(app.get_assets_context_menu_open());
+}

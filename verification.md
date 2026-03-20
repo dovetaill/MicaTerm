@@ -218,6 +218,59 @@ Date: 2026-03-17 18:15:00 CST
 
 - Design: `docs/plans/2026-03-17-windows-console-assets-context-menu-bugfix-design.md`
 - Implementation Plan: `docs/plans/2026-03-17-windows-console-assets-context-menu-bugfix-implementation-plan.md`
+
+## Windows Console Assets Style Optimization Verification
+
+Date: 2026-03-20 CST
+
+### Source Documents
+
+- 设计文档：`docs/plans/2026-03-19-windows-console-assets-style-optimization-design.md`
+- 实施计划：`docs/plans/2026-03-19-windows-console-assets-style-optimization-implementation-plan.md`
+
+### Commands Executed
+
+- [x] `cargo test --test assets_sidebar_toolbar_spec --test assets_explorer_smoke --test assets_context_menu_spec --test assets_context_menu_smoke --test assets_modal_smoke --test shell_view_model -- --nocapture`
+- [x] `bash tests/assets_sidebar_toolbar_ui_contract_smoke.sh`
+- [x] `bash tests/assets_explorer_ui_contract_smoke.sh`
+- [x] `bash tests/assets_context_menu_ui_contract_smoke.sh`
+- [x] `bash tests/assets_modal_ui_contract_smoke.sh`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+
+### Automated Results
+
+- `cargo test --test assets_sidebar_toolbar_spec --test assets_explorer_smoke --test assets_context_menu_spec --test assets_context_menu_smoke --test assets_modal_smoke --test shell_view_model -- --nocapture`：通过（`16 + 16 + 3 + 3 + 14 + 31` 个测试全部通过）
+- `bash tests/assets_sidebar_toolbar_ui_contract_smoke.sh`：通过
+- `bash tests/assets_explorer_ui_contract_smoke.sh`：通过
+- `bash tests/assets_context_menu_ui_contract_smoke.sh`：通过
+- `bash tests/assets_modal_ui_contract_smoke.sh`：通过
+- `cargo check --workspace`：通过
+- `cargo clippy --workspace -- -D warnings`：通过
+
+### Final Review Gate
+
+- [x] `Flat` 模式下保留 tree controls 槽位，但交互禁用且 tooltip 明确解释
+- [x] explorer pane 宽度与 activity rail 比例已收敛到 `44px + 320px`
+- [x] tree / flat row 已统一为单行高密度契约
+- [x] `path_hint` 仍可见，但已改为单行尾部提示
+- [x] `New Folder` / `New SSH Connection` modal 已全量英文
+- [x] modal 打开后的 focus 通过 `invoke_from_event_loop` + `focus-sequence` 稳定调度
+- [x] context menu 已区分本地 visual hover 与 Rust `open_path`
+- [x] `assets-context-menu-pointer-moved` 已接到 Rust corridor 判定链路
+- [x] explorer/menu 已改用专用 hover / selected / open surface token
+
+### GUI / Visual Risks
+
+- [ ] 未在真实 Windows 11 GUI 会话中完成肉眼验收
+- 当前环境缺少桌面显示能力：
+  - `DISPLAY=`
+  - `WAYLAND_DISPLAY=`
+- 后续仍建议在真实窗口环境下重点检查：
+  - `Flat/Tree` 切换时 toolbar ghost 按钮的视觉对比度
+  - 长 `path_hint` 与长 label 并存时的截断观感
+  - 多列 submenu 横向移动时的 corridor 容错边界
+  - dark / light 两套主题下 hover / open / selected 的主观清晰度
 - Planned Actions: `docs/plans/2026-03-17-windows-console-assets-context-menu-unimplemented-actions.md`
 
 ### Commands Executed

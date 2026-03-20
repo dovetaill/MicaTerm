@@ -2,6 +2,7 @@ import { ThemeTokens } from "../theme/tokens.slint";
 
 export component AssetsFolderCreateModal inherits Rectangle {
     in property <string> folder-name: "";
+    in property <int> focus-sequence: 0;
     callback close-requested();
     callback confirm-requested();
     callback folder-name-changed(string);
@@ -48,7 +49,7 @@ export component AssetsFolderCreateModal inherits Rectangle {
             Text {
                 x: 20px;
                 y: 18px;
-                text: "新建文件夹";
+                text: "New Folder";
                 color: ThemeTokens.text-primary;
                 font-size: 18px;
                 font-weight: 600;
@@ -105,7 +106,7 @@ export component AssetsFolderCreateModal inherits Rectangle {
                 background: ThemeTokens.control-hover-surface;
 
                 Text {
-                    text: "取消";
+                    text: "Cancel";
                     color: ThemeTokens.text-primary;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -135,7 +136,7 @@ export component AssetsFolderCreateModal inherits Rectangle {
                 opacity: root.can-confirm ? 1.0 : 0.55;
 
                 Text {
-                    text: "确定";
+                    text: "Create";
                     color: ThemeTokens.text-primary;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -154,5 +155,9 @@ export component AssetsFolderCreateModal inherits Rectangle {
                 }
             }
         }
+    }
+
+    changed focus-sequence => {
+        root.focus-input();
     }
 }
