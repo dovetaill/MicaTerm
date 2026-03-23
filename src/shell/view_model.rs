@@ -2,8 +2,8 @@
 
 use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::{
-    AssetNameValidation, AssetTree, AssetViewMode, ConsoleAssetKind, VisibleAssetRow,
-    resolve_committed_name,
+    AssetNameValidation, AssetNodePayload, AssetSshConnectionSpec, AssetTree, AssetViewMode,
+    ConsoleAssetKind, VisibleAssetRow, resolve_committed_name,
 };
 use crate::shell::context_menu::{
     ContextMenuActionNode, ContextMenuActionState, ContextTargetKind, SelectionContext,
@@ -157,17 +157,23 @@ impl Default for ShellViewModel {
 }
 
 impl ShellViewModel {
+    fn create_asset_modal_validation(
+        &self,
+        parent_id: Option<&str>,
+        draft_name: &str,
+    ) -> AssetNameValidation {
+        self.console_asset_tree
+            .validate_name_in_parent(parent_id, draft_name, None)
+    }
+
     fn rename_asset_modal_validation(
         &self,
         asset_id: &str,
         draft_name: &str,
     ) -> AssetNameValidation {
         let parent_id = self.console_asset_tree.parent_id(asset_id).flatten();
-        self.console_asset_tree.validate_name_in_parent(
-            parent_id,
-            draft_name,
-            Some(asset_id),
-        )
+        self.console_asset_tree
+            .validate_name_in_parent(parent_id, draft_name, Some(asset_id))
     }
 
     pub fn asset_rename_modal_validation_message(&self) -> String {
@@ -176,14 +182,47 @@ impl ShellViewModel {
                 asset_id,
                 draft_name,
                 ..
-            }) => match self.rename_asset_modal_validation(asset_id, draft_name) {
-                AssetNameValidation::Valid => String::new(),
-                AssetNameValidation::Empty => "Name is required.".into(),
-                AssetNameValidation::Duplicate => {
-                    "Name already exists in this folder.".into()
-                }
-            },
+            }) => asset_name_validation_message(
+                self.rename_asset_modal_validation(asset_id, draft_name),
+            ),
             _ => String::new(),
+        }
+    }
+
+    pub fn asset_create_modal_validation_message(&self) -> String {
+        match &self.asset_modal_state {
+            Some(AssetModalState::NewFolder {
+                parent_id,
+                draft_name,
+            }) => asset_name_validation_message(
+                self.create_asset_modal_validation(parent_id.as_deref(), draft_name),
+            ),
+            Some(AssetModalState::NewSshConnection {
+                parent_id, draft, ..
+            }) => asset_name_validation_message(
+                self.create_asset_modal_validation(parent_id.as_deref(), &draft.name),
+            ),
+            _ => String::new(),
+        }
+    }
+
+    pub fn asset_create_modal_can_confirm(&self) -> bool {
+        match &self.asset_modal_state {
+            Some(AssetModalState::NewFolder {
+                parent_id,
+                draft_name,
+            }) => {
+                self.create_asset_modal_validation(parent_id.as_deref(), draft_name)
+                    == AssetNameValidation::Valid
+            }
+            Some(AssetModalState::NewSshConnection {
+                parent_id, draft, ..
+            }) => {
+                self.create_asset_modal_validation(parent_id.as_deref(), &draft.name)
+                    == AssetNameValidation::Valid
+                    && !draft.host.trim().is_empty()
+            }
+            _ => false,
         }
     }
 
@@ -305,12 +344,15 @@ impl ShellViewModel {
     pub fn open_new_folder_modal(&mut self, parent_id: Option<String>) {
         let parent_id = self.normalize_folder_parent_id(parent_id);
         self.dismiss_active_asset_rename();
+        let draft_name = self
+            .console_asset_tree
+            .next_default_name_for_parent(parent_id.as_deref(), ConsoleAssetKind::Folder);
         self.close_context_menu();
         self.close_asset_create_menu();
         self.context_target_asset_id = parent_id.clone();
         self.asset_modal_state = Some(AssetModalState::NewFolder {
             parent_id,
-            draft_name: String::new(),
+            draft_name,
         });
     }
 
@@ -326,6 +368,9 @@ impl ShellViewModel {
     pub fn open_new_ssh_modal(&mut self, parent_id: Option<String>) {
         let parent_id = self.normalize_folder_parent_id(parent_id);
         self.dismiss_active_asset_rename();
+        let draft_name = self
+            .console_asset_tree
+            .next_default_name_for_parent(parent_id.as_deref(), ConsoleAssetKind::SshConnection);
         self.close_context_menu();
         self.close_asset_create_menu();
         self.context_target_asset_id = parent_id.clone();
@@ -333,6 +378,7 @@ impl ShellViewModel {
             parent_id,
             active_tab: AssetSshModalTab::Standard,
             draft: AssetSshConnectionDraft {
+                name: draft_name,
                 port: "22".into(),
                 ..AssetSshConnectionDraft::default()
             },
@@ -344,10 +390,7 @@ impl ShellViewModel {
             return;
         }
 
-        let Some(original_name) = self
-            .console_asset_tree
-            .title(&asset_id)
-            .map(str::to_string)
+        let Some(original_name) = self.console_asset_tree.title(&asset_id).map(str::to_string)
         else {
             return;
         };
@@ -440,41 +483,57 @@ impl ShellViewModel {
 
     pub fn can_confirm_asset_modal(&self) -> bool {
         match &self.asset_modal_state {
-            Some(AssetModalState::NewFolder { draft_name, .. }) => !draft_name.trim().is_empty(),
-            Some(AssetModalState::NewSshConnection { draft, .. }) => {
-                !draft.name.trim().is_empty() && !draft.host.trim().is_empty()
+            Some(AssetModalState::NewFolder { .. })
+            | Some(AssetModalState::NewSshConnection { .. }) => {
+                self.asset_create_modal_can_confirm()
             }
             Some(AssetModalState::RenameAsset {
                 asset_id,
                 draft_name,
                 ..
-            }) => self.rename_asset_modal_validation(asset_id, draft_name)
-                == AssetNameValidation::Valid,
+            }) => {
+                self.rename_asset_modal_validation(asset_id, draft_name)
+                    == AssetNameValidation::Valid
+            }
             Some(AssetModalState::DeleteAssetConfirm { .. }) => true,
             None => false,
         }
     }
 
-    pub fn confirm_asset_modal(&mut self) {
+    pub fn confirm_asset_modal(&mut self) -> bool {
         let Some(modal_state) = self.asset_modal_state.clone() else {
-            return;
+            return false;
         };
 
-        let (parent_id, kind, draft_label) = match modal_state {
+        let (parent_id, kind, draft_label, payload) = match modal_state {
             AssetModalState::NewFolder {
                 parent_id,
                 draft_name,
+            } => (
+                parent_id,
+                ConsoleAssetKind::Folder,
+                draft_name,
+                AssetNodePayload::Folder,
+            ),
+            AssetModalState::NewSshConnection {
+                parent_id, draft, ..
             } => {
-                if draft_name.trim().is_empty() {
-                    return;
+                if draft.host.trim().is_empty() {
+                    return false;
                 }
-                (parent_id, ConsoleAssetKind::Folder, draft_name)
-            }
-            AssetModalState::NewSshConnection { parent_id, draft, .. } => {
-                if draft.name.trim().is_empty() || draft.host.trim().is_empty() {
-                    return;
-                }
-                (parent_id, ConsoleAssetKind::SshConnection, draft.name)
+                let payload = AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+                    host: draft.host,
+                    user: draft.user,
+                    port: draft.port,
+                    environment: draft.environment,
+                    proxy_method: draft.proxy_method,
+                });
+                (
+                    parent_id,
+                    ConsoleAssetKind::SshConnection,
+                    draft.name,
+                    payload,
+                )
             }
             AssetModalState::RenameAsset {
                 asset_id,
@@ -482,7 +541,7 @@ impl ShellViewModel {
                 ..
             } => {
                 if !self.can_confirm_asset_modal() {
-                    return;
+                    return false;
                 }
 
                 self.console_asset_tree
@@ -491,41 +550,55 @@ impl ShellViewModel {
                 self.selected_asset_ids = vec![asset_id.clone()];
                 self.context_target_asset_id = Some(asset_id);
                 self.asset_modal_state = None;
-                return;
+                return true;
             }
             AssetModalState::DeleteAssetConfirm { .. } => {
-                self.confirm_delete_asset();
-                return;
+                return self.confirm_delete_asset();
             }
         };
 
-        let sibling_items = self
-            .console_asset_tree
-            .sibling_items_for_parent(parent_id.as_deref(), None);
-        let label = resolve_committed_name(kind, &draft_label, &sibling_items);
+        let label = if draft_label.trim().is_empty() {
+            self.console_asset_tree
+                .next_default_name_for_parent(parent_id.as_deref(), kind)
+        } else {
+            if self.create_asset_modal_validation(parent_id.as_deref(), &draft_label)
+                != AssetNameValidation::Valid
+            {
+                return false;
+            }
+            draft_label.trim().to_string()
+        };
         let asset_id = if let Some(parent_id) = parent_id.as_deref() {
-            let asset_id = self.console_asset_tree.insert_child(parent_id, kind, label);
+            let asset_id = self
+                .console_asset_tree
+                .insert_child_with_payload(parent_id, kind, label, payload);
             self.console_asset_tree.set_expanded(parent_id, true);
             asset_id
         } else {
-            self.console_asset_tree.insert_root(kind, label)
+            self.console_asset_tree
+                .insert_root_with_payload(kind, label, payload)
         };
 
         self.selected_asset_ids = vec![asset_id.clone()];
         self.focused_asset_id = Some(asset_id.clone());
         self.context_target_asset_id = Some(asset_id);
         self.asset_modal_state = None;
+        true
     }
 
-    pub fn confirm_delete_asset(&mut self) {
-        let Some(AssetModalState::DeleteAssetConfirm { asset_id, .. }) = self.asset_modal_state.clone()
+    pub fn confirm_delete_asset(&mut self) -> bool {
+        let Some(AssetModalState::DeleteAssetConfirm { asset_id, .. }) =
+            self.asset_modal_state.clone()
         else {
-            return;
+            return false;
         };
 
         if self.remove_asset_subtree(&asset_id) {
             self.asset_modal_state = None;
+            return true;
         }
+
+        false
     }
 
     pub fn cancel_asset_modal(&mut self) {
@@ -624,14 +697,17 @@ impl ShellViewModel {
         };
 
         let removed_ids = removed_summary.removed_ids;
-        self.selected_asset_ids
-            .retain(|selected_id| !removed_ids.iter().any(|removed_id| removed_id == selected_id));
+        self.selected_asset_ids.retain(|selected_id| {
+            !removed_ids
+                .iter()
+                .any(|removed_id| removed_id == selected_id)
+        });
 
-        if self
-            .editing_asset_id
-            .as_deref()
-            .is_some_and(|editing_id| removed_ids.iter().any(|removed_id| removed_id == editing_id))
-        {
+        if self.editing_asset_id.as_deref().is_some_and(|editing_id| {
+            removed_ids
+                .iter()
+                .any(|removed_id| removed_id == editing_id)
+        }) {
             self.clear_active_asset_rename_session();
         }
 
@@ -664,7 +740,10 @@ impl ShellViewModel {
             return;
         }
 
-        let next = !self.console_asset_tree.is_expanded(asset_id).unwrap_or(false);
+        let next = !self
+            .console_asset_tree
+            .is_expanded(asset_id)
+            .unwrap_or(false);
         self.console_asset_tree.set_expanded(asset_id, next);
         self.asset_tree_fully_expanded = self.asset_tree_fully_expanded && next;
     }
@@ -748,7 +827,11 @@ impl ShellViewModel {
             return;
         };
 
-        if current.children.iter().any(|node| !node.children.is_empty()) {
+        if current
+            .children
+            .iter()
+            .any(|node| !node.children.is_empty())
+        {
             self.context_menu_open_path.push(0);
         }
     }
@@ -849,6 +932,20 @@ impl ShellViewModel {
         self.console_asset_tree.insert_root(kind, label);
     }
 
+    pub fn replace_console_asset_tree(&mut self, tree: AssetTree) {
+        self.console_asset_tree = tree;
+        self.asset_tree_fully_expanded = false;
+        self.selected_asset_ids.clear();
+        self.focused_asset_id = None;
+        self.clear_active_asset_rename_session();
+        self.context_target_asset_id = None;
+        self.close_context_menu();
+    }
+
+    pub fn console_asset_tree(&self) -> &AssetTree {
+        &self.console_asset_tree
+    }
+
     fn context_menu_roots(&self) -> Vec<ContextMenuActionNode> {
         let Some(target_kind) = self.context_menu_target_kind else {
             return Vec::new();
@@ -896,6 +993,14 @@ impl ShellViewModel {
         parent_id.filter(|asset_id| {
             self.console_asset_tree.kind(asset_id.as_str()) == Some(ConsoleAssetKind::Folder)
         })
+    }
+}
+
+fn asset_name_validation_message(validation: AssetNameValidation) -> String {
+    match validation {
+        AssetNameValidation::Valid => String::new(),
+        AssetNameValidation::Empty => "Name is required.".into(),
+        AssetNameValidation::Duplicate => "Name already exists in this folder.".into(),
     }
 }
 

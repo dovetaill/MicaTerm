@@ -1,14 +1,22 @@
 //! Wires the Slint window to runtime state, persisted preferences, and native window hooks during startup.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use directories::ProjectDirs;
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::AppWindow;
 use crate::AssetsContextMenuItem;
 use crate::ConsoleAssetItem;
+use crate::app::app_paths::{AppRootPathInputs, resolve_app_root_paths};
+use crate::app::assets_catalog::{
+    ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
+    RedbAssetCatalogStore, asset_tree_to_catalog, catalog_to_asset_tree,
+};
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::window_effects::{
@@ -22,13 +30,13 @@ use crate::app::windowing::{
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
 };
+use crate::shell::assets::AssetDisclosureState;
 use crate::shell::context_menu::{
     CONTEXT_MENU_COLUMN_GAP, CONTEXT_MENU_COLUMN_WIDTH, ContextMenuActionNode,
     ContextMenuActionState, ContextTargetKind, MenuPlacementInput, Rect, SelectionContext,
     context_menu_column_height, context_menu_column_offset, resolve_action_tree,
     resolve_root_menu_origin, should_keep_corridor_open, visible_columns_for_path,
 };
-use crate::shell::assets::AssetDisclosureState;
 use crate::shell::layout::{ShellLayoutInput, resolve_shell_layout};
 use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descriptor_for};
@@ -209,7 +217,10 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
         Some(AssetModalState::NewFolder { draft_name, .. }) => {
             window.set_asset_modal_open(true);
             window.set_asset_modal_kind("new-folder".into());
-            window.set_asset_modal_can_confirm(state.can_confirm_asset_modal());
+            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
+            window.set_asset_modal_validation_message(
+                state.asset_create_modal_validation_message().into(),
+            );
             window.set_asset_folder_modal_name(draft_name.clone().into());
             window.set_asset_rename_modal_open(false);
             window.set_asset_rename_modal_name("".into());
@@ -231,7 +242,10 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
         }) => {
             window.set_asset_modal_open(true);
             window.set_asset_modal_kind("new-ssh-connection".into());
-            window.set_asset_modal_can_confirm(state.can_confirm_asset_modal());
+            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
+            window.set_asset_modal_validation_message(
+                state.asset_create_modal_validation_message().into(),
+            );
             window.set_asset_folder_modal_name("".into());
             window.set_asset_rename_modal_open(false);
             window.set_asset_rename_modal_name("".into());
@@ -252,6 +266,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_modal_open(false);
             window.set_asset_modal_kind("".into());
             window.set_asset_modal_can_confirm(false);
+            window.set_asset_modal_validation_message("".into());
             window.set_asset_folder_modal_name("".into());
             window.set_asset_rename_modal_open(true);
             window.set_asset_rename_modal_name(draft_name.clone().into());
@@ -278,6 +293,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_modal_open(false);
             window.set_asset_modal_kind("".into());
             window.set_asset_modal_can_confirm(false);
+            window.set_asset_modal_validation_message("".into());
             window.set_asset_folder_modal_name("".into());
             window.set_asset_rename_modal_open(false);
             window.set_asset_rename_modal_name("".into());
@@ -298,6 +314,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_modal_open(false);
             window.set_asset_modal_kind("".into());
             window.set_asset_modal_can_confirm(false);
+            window.set_asset_modal_validation_message("".into());
             window.set_asset_folder_modal_name("".into());
             window.set_asset_rename_modal_open(false);
             window.set_asset_rename_modal_name("".into());
@@ -368,7 +385,8 @@ fn context_menu_items_to_model(
     items: Vec<ContextMenuActionNode>,
     open_index: Option<usize>,
 ) -> Vec<AssetsContextMenuItem> {
-    items.into_iter()
+    items
+        .into_iter()
         .enumerate()
         .map(|(index, item)| AssetsContextMenuItem {
             id: item.id.into(),
@@ -385,12 +403,18 @@ fn context_menu_items_to_model(
 
 fn context_menu_primary_items_for(state: &ShellViewModel) -> Vec<AssetsContextMenuItem> {
     let columns = context_menu_columns_for(state);
-    context_menu_items_to_model(columns[0].clone(), state.context_menu_open_path.first().copied())
+    context_menu_items_to_model(
+        columns[0].clone(),
+        state.context_menu_open_path.first().copied(),
+    )
 }
 
 fn context_menu_secondary_items_for(state: &ShellViewModel) -> Vec<AssetsContextMenuItem> {
     let columns = context_menu_columns_for(state);
-    context_menu_items_to_model(columns[1].clone(), state.context_menu_open_path.get(1).copied())
+    context_menu_items_to_model(
+        columns[1].clone(),
+        state.context_menu_open_path.get(1).copied(),
+    )
 }
 
 fn context_menu_tertiary_items_for(state: &ShellViewModel) -> Vec<AssetsContextMenuItem> {
@@ -670,16 +694,85 @@ fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellView
     }
 }
 
+fn empty_asset_catalog() -> PersistedAssetCatalog {
+    PersistedAssetCatalog {
+        schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+        root_ids: Vec::new(),
+        nodes: BTreeMap::new(),
+    }
+}
+
+fn load_asset_catalog(repo: &dyn AssetCatalogRepository) -> PersistedAssetCatalog {
+    match repo.load() {
+        Ok(catalog) => catalog,
+        Err(err) => {
+            tracing::error!(
+                target: "config.assets_catalog",
+                error = %err,
+                "failed to load asset catalog"
+            );
+            empty_asset_catalog()
+        }
+    }
+}
+
+fn save_asset_catalog(repo: &dyn AssetCatalogRepository, state: &ShellViewModel) -> Result<()> {
+    let catalog = asset_tree_to_catalog(state.console_asset_tree());
+    repo.save(&catalog)
+}
+
+fn save_asset_catalog_if_available(
+    repo: &Option<Rc<dyn AssetCatalogRepository>>,
+    state: &ShellViewModel,
+) {
+    if let Some(repo) = repo
+        && let Err(err) = save_asset_catalog(repo.as_ref(), state)
+    {
+        tracing::error!(
+            target: "config.assets_catalog",
+            error = %err,
+            "failed to save asset catalog"
+        );
+    }
+}
+
+fn asset_catalog_repository_for_app() -> Result<Rc<dyn AssetCatalogRepository>> {
+    let project_dirs = ProjectDirs::from("dev", "MicaTerm", "MicaTerm")
+        .context("project directories are unavailable")?;
+    let executable_dir = std::env::current_exe()?
+        .parent()
+        .context("executable directory is unavailable")?
+        .to_path_buf();
+    let app_paths = resolve_app_root_paths(&AppRootPathInputs {
+        env_root_dir: std::env::var_os("MICA_TERM_APP_DIR").map(PathBuf::from),
+        executable_dir,
+        standard_local_data_dir: project_dirs.data_local_dir().join("MicaTerm"),
+        portable_marker_name: ".mica-term-portable",
+    })?;
+
+    Ok(Rc::new(RedbAssetCatalogStore::new(app_paths.data_dir)))
+}
+
 pub fn bind_top_status_bar_with_store_and_effects(
     window: &AppWindow,
     store: Option<UiPreferencesStore>,
     effects: Rc<dyn PlatformWindowEffects>,
+) {
+    bind_top_status_bar_with_store_and_effects_and_asset_repo(window, store, effects, None);
+}
+
+pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    effects: Rc<dyn PlatformWindowEffects>,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
 ) {
     bind_top_status_bar_with_store_and_profile_and_effects(
         window,
         store,
         AppRuntimeProfile::mainline(),
         effects,
+        asset_repo,
     );
 }
 
@@ -688,10 +781,15 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     store: Option<UiPreferencesStore>,
     _profile: AppRuntimeProfile,
     effects: Rc<dyn PlatformWindowEffects>,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
 ) {
     let store = store.map(Rc::new);
     let prefs = load_ui_preferences(&store);
     let mut initial_view_model = ShellViewModel::default();
+    if let Some(repo) = asset_repo.as_ref() {
+        initial_view_model
+            .replace_console_asset_tree(catalog_to_asset_tree(&load_asset_catalog(repo.as_ref())));
+    }
     initial_view_model.theme_mode = prefs.theme_mode;
     initial_view_model.is_always_on_top = prefs.always_on_top;
     let view_model = Rc::new(RefCell::new(initial_view_model));
@@ -872,7 +970,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         sync_console_assets(&window, &state);
     });
 
-
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     window.on_toggle_assets_create_menu_requested(move || {
@@ -920,10 +1017,14 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    let asset_repo_ref = asset_repo.clone();
     window.on_confirm_asset_modal_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.confirm_asset_modal();
+        let did_mutate = state.confirm_asset_modal();
+        if did_mutate {
+            save_asset_catalog_if_available(&asset_repo_ref, &state);
+        }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
         sync_asset_modal_state(&window, &state);
@@ -940,10 +1041,14 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    let asset_repo_ref = asset_repo.clone();
     window.on_confirm_asset_rename_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.confirm_asset_modal();
+        let did_mutate = state.confirm_asset_modal();
+        if did_mutate {
+            save_asset_catalog_if_available(&asset_repo_ref, &state);
+        }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
         sync_asset_modal_state(&window, &state);
@@ -951,10 +1056,14 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    let asset_repo_ref = asset_repo.clone();
     window.on_confirm_delete_asset_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.confirm_delete_asset();
+        let did_mutate = state.confirm_delete_asset();
+        if did_mutate {
+            save_asset_catalog_if_available(&asset_repo_ref, &state);
+        }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
         sync_asset_modal_state(&window, &state);
@@ -1192,6 +1301,7 @@ pub fn bind_top_status_bar_with_store(window: &AppWindow, store: Option<UiPrefer
         store,
         AppRuntimeProfile::mainline(),
         default_platform_window_effects(),
+        None,
     );
 }
 
@@ -1207,12 +1317,24 @@ pub fn bind_top_status_bar_with_profile(window: &AppWindow, profile: AppRuntimeP
             None
         }
     };
+    let asset_repo = match asset_catalog_repository_for_app() {
+        Ok(repo) => Some(repo),
+        Err(err) => {
+            tracing::error!(
+                target: "config.assets_catalog",
+                error = %err,
+                "failed to resolve asset catalog repository"
+            );
+            None
+        }
+    };
 
     bind_top_status_bar_with_store_and_profile_and_effects(
         window,
         store,
         profile,
         default_platform_window_effects(),
+        asset_repo,
     );
 }
 

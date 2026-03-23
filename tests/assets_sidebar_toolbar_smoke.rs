@@ -17,7 +17,10 @@ fn bootstrap_initializes_assets_toolbar_defaults() {
     assert!(!app.get_asset_create_menu_open());
     assert!(app.get_asset_uses_create_popover());
     assert_eq!(app.get_asset_primary_create_action_id().as_str(), "");
-    assert_eq!(app.get_asset_primary_create_tooltip().as_str(), "Create Asset");
+    assert_eq!(
+        app.get_asset_primary_create_tooltip().as_str(),
+        "Create Asset"
+    );
     assert!(!app.get_asset_tree_fully_expanded());
 }
 
@@ -149,8 +152,14 @@ fn snippets_destination_keeps_direct_create_action_projection() {
 
     app.invoke_sidebar_destination_selected("snippets".into());
     assert!(!app.get_asset_uses_create_popover());
-    assert_eq!(app.get_asset_primary_create_action_id().as_str(), "new-snippet");
-    assert_eq!(app.get_asset_primary_create_tooltip().as_str(), "New Snippet");
+    assert_eq!(
+        app.get_asset_primary_create_action_id().as_str(),
+        "new-snippet"
+    );
+    assert_eq!(
+        app.get_asset_primary_create_tooltip().as_str(),
+        "New Snippet"
+    );
 }
 
 #[test]
@@ -163,7 +172,12 @@ fn toolbar_create_action_stays_root_level_even_after_folder_context_target() {
     app.invoke_assets_create_action_selected("new-folder".into());
     app.invoke_asset_folder_modal_name_changed("Prod".into());
     app.invoke_confirm_asset_modal_requested();
-    let folder_id = app.get_console_asset_items().row_data(0).unwrap().id.to_string();
+    let folder_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string();
 
     app.invoke_asset_context_menu_requested(folder_id.into(), "folder".into(), 96.0, 160.0);
     app.invoke_assets_create_action_selected("new-ssh-connection".into());

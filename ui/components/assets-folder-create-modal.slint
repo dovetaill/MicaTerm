@@ -2,15 +2,15 @@ import { ThemeTokens } from "../theme/tokens.slint";
 
 export component AssetsFolderCreateModal inherits Rectangle {
     in property <string> folder-name: "";
+    in property <string> validation-message: "";
+    in property <bool> can-confirm: false;
     in property <int> focus-sequence: 0;
     callback close-requested();
     callback confirm-requested();
     callback folder-name-changed(string);
 
-    private property <bool> can-confirm: root.folder-name != "";
-
     width: 360px;
-    height: 188px;
+    height: 214px;
     border-radius: 0px;
     border-width: 1px;
     border-color: ThemeTokens.divider-strong;
@@ -62,7 +62,7 @@ export component AssetsFolderCreateModal inherits Rectangle {
                 height: 42px;
                 border-radius: 0px;
                 border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
+                border-color: root.validation-message == "" ? ThemeTokens.divider-subtle : ThemeTokens.accent;
                 background: ThemeTokens.inspector-surface;
 
                 name-input := TextInput {
@@ -93,6 +93,17 @@ export component AssetsFolderCreateModal inherits Rectangle {
                         }
                     }
                 }
+            }
+
+            validation-copy := Text {
+                x: 20px;
+                y: 110px;
+                width: parent.width - 40px;
+                text: root.validation-message;
+                color: ThemeTokens.text-primary;
+                opacity: 0.72;
+                visible: root.validation-message != "";
+                wrap: word-wrap;
             }
 
             cancel-button := Rectangle {

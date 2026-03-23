@@ -1,10 +1,11 @@
 //! Resolves the effective logging directories across portable, override, and standard app roots.
 
-use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
+
+use crate::app::app_paths::{AppRootPathInputs, AppRootSource, resolve_app_root_paths};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoggingRootSource {
@@ -30,35 +31,27 @@ pub struct LoggingPathInputs {
 }
 
 pub fn resolve_logging_paths(inputs: &LoggingPathInputs) -> Result<LoggingPaths> {
-    let (root_source, root_dir) = if let Some(path) = &inputs.env_log_dir {
-        (LoggingRootSource::EnvOverride, path.clone())
-    } else if inputs
-        .executable_dir
-        .join(inputs.portable_marker_name)
-        .exists()
-    {
-        (
-            LoggingRootSource::PortableMarker,
-            inputs.executable_dir.clone(),
-        )
-    } else {
-        (
-            LoggingRootSource::StandardLocalData,
-            inputs.standard_local_data_dir.clone(),
-        )
-    };
-
-    let logs_dir = root_dir.join("logs");
-    let crash_dir = root_dir.join("crash");
-    fs::create_dir_all(&logs_dir)?;
-    fs::create_dir_all(&crash_dir)?;
+    let app_paths = resolve_app_root_paths(&AppRootPathInputs {
+        env_root_dir: inputs.env_log_dir.clone(),
+        executable_dir: inputs.executable_dir.clone(),
+        standard_local_data_dir: inputs.standard_local_data_dir.clone(),
+        portable_marker_name: inputs.portable_marker_name,
+    })?;
 
     Ok(LoggingPaths {
-        root_source,
-        root_dir,
-        logs_dir,
-        crash_dir,
+        root_source: map_root_source(app_paths.root_source),
+        root_dir: app_paths.root_dir,
+        logs_dir: app_paths.logs_dir,
+        crash_dir: app_paths.crash_dir,
     })
+}
+
+fn map_root_source(source: AppRootSource) -> LoggingRootSource {
+    match source {
+        AppRootSource::EnvOverride => LoggingRootSource::EnvOverride,
+        AppRootSource::PortableMarker => LoggingRootSource::PortableMarker,
+        AppRootSource::StandardLocalData => LoggingRootSource::StandardLocalData,
+    }
 }
 
 pub fn resolve_logging_paths_for_app() -> Result<LoggingPaths> {

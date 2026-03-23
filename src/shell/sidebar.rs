@@ -82,13 +82,7 @@ pub fn toolbar_descriptor_for(
         search_tooltip,
         base_show_tree_controls,
     ) = match destination {
-        SidebarDestination::Console => (
-            true,
-            None,
-            "Create Asset",
-            "Search Console Assets",
-            true,
-        ),
+        SidebarDestination::Console => (true, None, "Create Asset", "Search Console Assets", true),
         SidebarDestination::Snippets => (
             false,
             Some("new-snippet"),

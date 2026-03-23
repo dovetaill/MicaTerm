@@ -108,3 +108,23 @@ Notes:
 - `MICA_TERM_LOG=debug` enables `ui.theme` and `app.window` diagnostics.
 - Without `MICA_TERM_LOG=debug`, only error-level events are persisted.
 - Windows builds use daily log rotation, so the file name includes the current date.
+
+## Asset Persistence
+
+Asset data does not resolve relative to the working directory. Mica Term uses the same
+application root strategy for logs and persisted console assets, then stores the asset catalog
+under the root `data/` directory as `<root>/data/assets.redb`.
+
+- portable mode with `.mica-term-portable`: both logging and asset data resolve relative to the
+  executable directory, so a packaged Windows app keeps `logs/` and `data/assets.redb` next to
+  `mica-term.exe`
+- standard mode without `.mica-term-portable`: the root moves to the platform local data
+  directory instead of the working directory; on Windows this means
+  `%LOCALAPPDATA%\\MicaTerm\\MicaTerm\\data\\assets.redb` for assets and
+  `%LOCALAPPDATA%\\MicaTerm\\MicaTerm\\logs\\` for logs
+
+Notes:
+
+- `.mica-term-portable` affects the logging root and the asset data root at the same time.
+- Launching the app from a different shell or working directory does not change where
+  `assets.redb` is stored.

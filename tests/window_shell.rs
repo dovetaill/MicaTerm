@@ -97,7 +97,6 @@ fn window_shell_exposes_minimum_window_budget() {
     assert_eq!(spec.min_window_height, ShellMetrics::WINDOW_MIN_HEIGHT);
 }
 
-
 #[test]
 fn semantic_surface_tokens_define_dual_theme_ladder() {
     let content = std::fs::read_to_string("ui/theme/tokens.slint").unwrap();
@@ -121,7 +120,6 @@ fn semantic_surface_tokens_define_dual_theme_ladder() {
     }
 }
 
-
 #[test]
 fn semantic_surface_tokens_lock_the_approved_dual_theme_values() {
     let content = std::fs::read_to_string("ui/theme/tokens.slint").unwrap();
@@ -136,10 +134,12 @@ fn semantic_surface_tokens_lock_the_approved_dual_theme_values() {
         "out property <brush> divider-subtle: dark-mode ? #ffffff14 : #0f172a12;",
         "out property <brush> divider-strong: dark-mode ? #ffffff22 : #0f172a1e;",
     ] {
-        assert!(content.contains(line), "missing approved token value: {line}");
+        assert!(
+            content.contains(line),
+            "missing approved token value: {line}"
+        );
     }
 }
-
 
 #[test]
 fn semantic_surface_tokens_remove_legacy_surface_aliases() {

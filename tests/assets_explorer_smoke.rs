@@ -7,15 +7,14 @@ fn create_root_folder(app: &AppWindow, name: &str) -> String {
     app.invoke_asset_folder_modal_name_changed(name.into());
     app.invoke_confirm_asset_modal_requested();
 
-    app.get_console_asset_items().row_data(0).unwrap().id.to_string()
+    app.get_console_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string()
 }
 
-fn create_child_ssh_via_context_menu(
-    app: &AppWindow,
-    parent_id: &str,
-    name: &str,
-    host: &str,
-) {
+fn create_child_ssh_via_context_menu(app: &AppWindow, parent_id: &str, name: &str, host: &str) {
     app.invoke_asset_context_menu_requested(parent_id.into(), "folder".into(), 96.0, 160.0);
     app.invoke_assets_context_menu_action_invoked("new-ssh-connection".into());
     app.invoke_asset_ssh_modal_draft_changed("name".into(), name.into());
@@ -69,7 +68,12 @@ fn flat_projection_rows_keep_path_hints_without_multiline_row_contract() {
     app.invoke_asset_folder_modal_name_changed("Prod".into());
     app.invoke_confirm_asset_modal_requested();
 
-    let folder_id = app.get_console_asset_items().row_data(0).unwrap().id.to_string();
+    let folder_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string();
     app.invoke_asset_context_menu_requested(folder_id.into(), "folder".into(), 96.0, 160.0);
     app.invoke_assets_context_menu_action_invoked("new-ssh-connection".into());
     app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());

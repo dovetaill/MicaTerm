@@ -8,6 +8,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> port: "22";
     in property <string> environment: "";
     in property <string> proxy-method: "";
+    in property <string> validation-message: "";
     in property <bool> can-confirm: false;
     in property <int> focus-sequence: 0;
     callback close-requested();
@@ -140,7 +141,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         height: 42px;
                         border-radius: 0px;
                         border-width: 1px;
-                        border-color: ThemeTokens.divider-subtle;
+                        border-color: root.validation-message == "" ? ThemeTokens.divider-subtle : ThemeTokens.accent;
                         background: ThemeTokens.inspector-surface;
 
                         name-input := TextInput {
@@ -346,6 +347,17 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     x: 16px;
                     y: 16px;
                 }
+            }
+
+            validation-copy := Text {
+                x: 24px;
+                y: 428px;
+                width: parent.width - 48px;
+                text: root.validation-message;
+                color: ThemeTokens.text-primary;
+                opacity: 0.72;
+                visible: root.validation-message != "";
+                wrap: word-wrap;
             }
 
             test-button := Rectangle {

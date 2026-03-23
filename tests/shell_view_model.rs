@@ -140,7 +140,7 @@ fn opening_new_folder_modal_commits_active_rename_and_clears_editing_state() {
         Some(AssetModalState::NewFolder {
             parent_id: None,
             ref draft_name,
-        }) if draft_name.is_empty()
+        }) if draft_name == "Folder 1"
     ));
 }
 
@@ -163,7 +163,7 @@ fn toolbar_create_action_opens_root_folder_modal_and_closes_overlay_state() {
         Some(AssetModalState::NewFolder {
             parent_id: None,
             ref draft_name,
-        }) if draft_name.is_empty()
+        }) if draft_name == "Folder 1"
     ));
     assert_eq!(view_model.context_target_asset_id, None);
 }
@@ -236,7 +236,7 @@ fn opening_new_ssh_modal_commits_active_rename_and_clears_editing_state() {
             parent_id: None,
             active_tab: AssetSshModalTab::Standard,
             ref draft,
-        }) if draft.name.is_empty()
+        }) if draft.name == "SSH Connection 1"
             && draft.host.is_empty()
             && draft.port == "22"
     ));
@@ -248,7 +248,6 @@ fn confirming_new_ssh_modal_requires_name_and_host() {
     view_model.open_new_ssh_modal(None);
     assert!(!view_model.can_confirm_asset_modal());
 
-    view_model.update_ssh_modal_name("Prod Bastion".into());
     view_model.update_ssh_modal_host("10.0.0.12".into());
     assert!(view_model.can_confirm_asset_modal());
 }
@@ -289,8 +288,9 @@ fn stale_missing_folder_context_target_falls_back_to_root_ssh_modal() {
         Some(AssetModalState::NewSshConnection {
             parent_id: None,
             active_tab: AssetSshModalTab::Standard,
-            ..
+            ref draft,
         })
+            if draft.name == "SSH Connection 1"
     ));
     assert_eq!(view_model.context_target_asset_id, None);
 }
@@ -315,10 +315,7 @@ fn opening_context_menu_tracks_target_anchor_and_resets_open_path() {
     assert_eq!(view_model.context_menu_anchor_x, 128.0);
     assert_eq!(view_model.context_menu_anchor_y, 256.0);
     assert_eq!(view_model.selected_asset_ids, vec!["ssh-prod-01"]);
-    assert_eq!(
-        view_model.focused_asset_id.as_deref(),
-        Some("ssh-prod-01")
-    );
+    assert_eq!(view_model.focused_asset_id.as_deref(), Some("ssh-prod-01"));
     assert!(view_model.context_menu_open_path.is_empty());
 }
 
@@ -366,23 +363,18 @@ fn closing_context_menu_clears_open_path_but_keeps_selection() {
 }
 
 #[test]
-fn confirming_duplicate_default_ssh_name_uses_dash_suffix_after_base_collision() {
+fn new_ssh_modal_prefills_next_dash_suffix_name() {
     let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::SshConnection, "SSH Connection 1");
 
-    view_model.handle_assets_create_action("new-ssh-connection");
-    view_model.update_ssh_modal_name("SSH Connection 1".into());
-    view_model.update_ssh_modal_host("10.0.0.12".into());
-    view_model.confirm_asset_modal();
-    view_model.handle_assets_create_action("new-ssh-connection");
-    view_model.update_ssh_modal_name("SSH Connection 1".into());
-    view_model.update_ssh_modal_host("10.0.0.13".into());
-    view_model.confirm_asset_modal();
+    view_model.open_new_ssh_modal(None);
 
-    let rows = view_model.visible_console_asset_rows();
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].kind, ConsoleAssetKind::SshConnection);
-    assert_eq!(rows[0].label, "SSH Connection 1");
-    assert_eq!(rows[1].label, "SSH Connection 1-1");
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.name == "SSH Connection 1-1"
+    ));
+    assert!(!view_model.can_confirm_asset_modal());
 }
 
 #[test]
@@ -401,29 +393,59 @@ fn context_menu_create_action_opens_folder_modal_and_closes_menu() {
 }
 
 #[test]
-fn confirming_duplicate_default_folder_name_uses_smallest_missing_positive_index() {
+fn new_folder_modal_prefills_next_dash_suffix_name() {
     let mut view_model = ShellViewModel::default();
-    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 2");
-    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 3");
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Folder 1");
 
-    view_model.handle_assets_create_action("new-folder");
-    view_model.update_new_folder_modal_name("Folder 2".into());
-    view_model.confirm_asset_modal();
+    view_model.open_new_folder_modal(None);
 
-    let rows = view_model.visible_console_asset_rows();
-    assert_eq!(rows.len(), 3);
-    assert_eq!(rows[2].label, "Folder 1");
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewFolder { ref draft_name, .. })
+            if draft_name == "Folder 1-1"
+    ));
+    assert!(view_model.can_confirm_asset_modal());
 }
 
 #[test]
-fn create_validation_rejects_duplicate_name_across_kinds_within_same_parent() {
-    let mut tree = AssetTree::new();
-    tree.insert_root(ConsoleAssetKind::Folder, "Prod");
+fn create_validation_rejects_duplicate_name_across_kinds() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod");
+
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_name("Prod".into());
+    view_model.update_ssh_modal_host("10.0.0.12".into());
 
     assert_eq!(
-        tree.validate_name_in_parent(None, "Prod", None),
-        AssetNameValidation::Duplicate
+        view_model.asset_create_modal_validation_message(),
+        "Name already exists in this folder."
     );
+    assert!(!view_model.asset_create_modal_can_confirm());
+}
+
+#[test]
+fn conflicting_manual_input_keeps_user_text_and_disables_confirm() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::SshConnection, "SSH Connection 1");
+
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_name("SSH Connection 1".into());
+    view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.confirm_asset_modal();
+
+    let rows = view_model.visible_console_asset_rows();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].label, "SSH Connection 1");
+    assert_eq!(
+        view_model.asset_create_modal_validation_message(),
+        "Name already exists in this folder."
+    );
+    assert!(!view_model.asset_create_modal_can_confirm());
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.name == "SSH Connection 1"
+    ));
 }
 
 #[test]
@@ -435,6 +457,19 @@ fn unchanged_rename_value_is_treated_as_valid() {
         tree.validate_name_in_parent(None, "Prod", Some(asset_id.as_str())),
         AssetNameValidation::Valid
     );
+}
+
+#[test]
+fn editing_existing_name_to_original_value_remains_valid() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod");
+    let asset_id = view_model.visible_console_asset_rows()[0].id.clone();
+
+    view_model.open_rename_asset_modal(asset_id);
+    view_model.update_rename_asset_modal_name("Prod".into());
+
+    assert!(view_model.can_confirm_asset_modal());
+    assert_eq!(view_model.asset_rename_modal_validation_message(), "");
 }
 
 #[test]
@@ -542,7 +577,10 @@ fn selecting_an_asset_updates_focus_without_opening_context_menu() {
 
     view_model.select_asset(&asset_id);
 
-    assert_eq!(view_model.focused_asset_id.as_deref(), Some(asset_id.as_str()));
+    assert_eq!(
+        view_model.focused_asset_id.as_deref(),
+        Some(asset_id.as_str())
+    );
     assert_eq!(view_model.selected_asset_ids, vec![asset_id]);
     assert!(!view_model.asset_create_menu_open);
 }
@@ -591,12 +629,18 @@ fn deleting_selected_row_focuses_next_sibling_then_previous_then_parent() {
 
     view_model.select_asset(&beta_id);
     assert!(view_model.remove_asset_subtree(&beta_id));
-    assert_eq!(view_model.focused_asset_id.as_deref(), Some(gamma_id.as_str()));
+    assert_eq!(
+        view_model.focused_asset_id.as_deref(),
+        Some(gamma_id.as_str())
+    );
     assert_eq!(view_model.selected_asset_ids, vec![gamma_id.clone()]);
 
     view_model.select_asset(&gamma_id);
     assert!(view_model.remove_asset_subtree(&gamma_id));
-    assert_eq!(view_model.focused_asset_id.as_deref(), Some(alpha_id.as_str()));
+    assert_eq!(
+        view_model.focused_asset_id.as_deref(),
+        Some(alpha_id.as_str())
+    );
     assert_eq!(view_model.selected_asset_ids, vec![alpha_id.clone()]);
 
     view_model.open_new_ssh_modal(Some(alpha_id.clone()));
@@ -612,7 +656,10 @@ fn deleting_selected_row_focuses_next_sibling_then_previous_then_parent() {
 
     view_model.select_asset(&child_id);
     assert!(view_model.remove_asset_subtree(&child_id));
-    assert_eq!(view_model.focused_asset_id.as_deref(), Some(alpha_id.as_str()));
+    assert_eq!(
+        view_model.focused_asset_id.as_deref(),
+        Some(alpha_id.as_str())
+    );
     assert_eq!(view_model.selected_asset_ids, vec![alpha_id]);
 }
 
@@ -743,8 +790,40 @@ fn confirming_folder_delete_removes_descendants_and_restores_focus() {
 
     let rows = view_model.visible_console_asset_rows();
     assert_eq!(rows.len(), 2);
-    assert!(rows.iter().all(|row| row.label != "Beta" && row.label != "Nested SSH"));
-    assert_eq!(view_model.focused_asset_id.as_deref(), Some(gamma_id.as_str()));
+    assert!(
+        rows.iter()
+            .all(|row| row.label != "Beta" && row.label != "Nested SSH")
+    );
+    assert_eq!(
+        view_model.focused_asset_id.as_deref(),
+        Some(gamma_id.as_str())
+    );
     assert_eq!(view_model.selected_asset_ids, vec![gamma_id]);
     assert!(view_model.asset_modal_state.is_none());
+}
+
+#[test]
+fn replacing_console_asset_tree_reprojects_loaded_nodes_and_clears_runtime_session_state() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod");
+    let original_id = view_model.visible_console_asset_rows()[0].id.clone();
+    view_model.select_asset(&original_id);
+    view_model.open_context_menu_for_target(
+        ContextTargetKind::Folder,
+        Some(original_id),
+        96.0,
+        144.0,
+    );
+
+    let mut replacement = AssetTree::new();
+    let imported_id = replacement.insert_root(ConsoleAssetKind::Folder, "Imported");
+
+    view_model.replace_console_asset_tree(replacement);
+
+    assert_eq!(view_model.console_asset_tree().root_ids(), &[imported_id]);
+    assert_eq!(view_model.visible_console_asset_rows()[0].label, "Imported");
+    assert!(view_model.selected_asset_ids.is_empty());
+    assert_eq!(view_model.focused_asset_id, None);
+    assert!(!view_model.context_menu_open);
+    assert_eq!(view_model.context_target_asset_id, None);
 }

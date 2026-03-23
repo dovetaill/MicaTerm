@@ -732,3 +732,44 @@ Date: 2026-03-16 10:38:06 CST
 - recursive delete confirm
 - focus fallback after removal
 - UI contract cleanup for inline rename removal
+
+## Windows Console Assets Persistence Verification
+
+Date: 2026-03-23 11:34:00 CST
+
+### Source Documents
+
+- Design: `docs/plans/2026-03-23-windows-console-assets-persistence-design.md`
+- Implementation Plan: `docs/plans/2026-03-23-windows-console-assets-persistence-implementation-plan.md`
+
+### Commands Executed
+
+- [x] `cargo test --test app_paths --test logging_paths --test assets_catalog_domain --test assets_catalog_store --test shell_view_model --test assets_modal_smoke --test bootstrap_smoke`
+- [x] `bash tests/assets_modal_ui_contract_smoke.sh`
+- [x] `bash tests/assets_persistence_contract_smoke.sh`
+- [x] `cargo fmt --check`
+- [x] `cargo clippy --tests -- -D warnings`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+
+### Automated Results
+
+- `cargo test --test app_paths --test logging_paths --test assets_catalog_domain --test assets_catalog_store --test shell_view_model --test assets_modal_smoke --test bootstrap_smoke`: passed
+- `bash tests/assets_modal_ui_contract_smoke.sh`: passed
+- `bash tests/assets_persistence_contract_smoke.sh`: passed
+- `cargo fmt --check`: passed
+- `cargo clippy --tests -- -D warnings`: passed
+- `cargo check --workspace`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+
+### Verification Conclusions
+
+- [x] `Folder` 与 `SSH Connection` create modal 都预填 dash-suffix 默认名
+- [x] 手动输入重名时 inline error 与 confirm disabled 正常工作
+- [x] 同父级跨类型唯一约束在 create / rename 都生效
+- [x] `redb` 中保存了树结构、顺序、节点类型和 SSH 字段
+- [x] `expanded / search / selection / context-menu` 未进入 persisted catalog
+- [x] portable marker 与标准安装模式都能解析到正确 root
+- [x] `assets.redb` 缺失时能初始化空 catalog
+- [x] `assets.redb` 损坏时会被隔离而不是静默覆盖
+- [x] `readme.md` 已说明 working directory 不影响资产数据位置

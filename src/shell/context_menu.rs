@@ -148,8 +148,8 @@ pub fn context_menu_column_offset(
 
 pub fn resolve_root_menu_origin(input: MenuPlacementInput) -> (f32, f32, bool) {
     let total_width = (input.root_width + input.child_width).max(input.root_width);
-    let child_flows_left =
-        input.child_width > 0.0 && input.anchor_x + input.root_width + input.child_width > input.host_width;
+    let child_flows_left = input.child_width > 0.0
+        && input.anchor_x + input.root_width + input.child_width > input.host_width;
 
     let unclamped_x = if child_flows_left {
         input.anchor_x - input.child_width
@@ -173,11 +173,7 @@ pub fn resolve_root_menu_origin(input: MenuPlacementInput) -> (f32, f32, bool) {
     (origin_x, origin_y, child_flows_left)
 }
 
-pub fn should_keep_corridor_open(
-    pointer: (f32, f32),
-    parent_rect: Rect,
-    child_rect: Rect,
-) -> bool {
+pub fn should_keep_corridor_open(pointer: (f32, f32), parent_rect: Rect, child_rect: Rect) -> bool {
     if parent_rect.contains(pointer) || child_rect.contains(pointer) {
         return true;
     }
@@ -249,10 +245,34 @@ fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNod
     ];
     actions.extend(create_actions(true));
     actions.extend([
-        action_with_state("edit-connection", "Edit", "edit", selection_state(selection), true),
-        action_with_state("batch-edit", "Batch Edit", "edit", selection_state(selection), false),
-        action_with_state("clone-connection", "Clone", "copy", selection_state(selection), false),
-        action_with_state("copy-host", "Copy Host", "copy", selection_state(selection), false),
+        action_with_state(
+            "edit-connection",
+            "Edit",
+            "edit",
+            selection_state(selection),
+            true,
+        ),
+        action_with_state(
+            "batch-edit",
+            "Batch Edit",
+            "edit",
+            selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "clone-connection",
+            "Clone",
+            "copy",
+            selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "copy-host",
+            "Copy Host",
+            "copy",
+            selection_state(selection),
+            false,
+        ),
         action_with_state(
             "proxy-chrome-via-server",
             "Proxy Chrome via Server",
@@ -336,8 +356,20 @@ fn resolve_folder_actions(selection: &SelectionContext) -> Vec<ContextMenuAction
             mutable_selection_state(selection),
             false,
         ),
-        action_with_state("copy-asset", "Copy", "copy", selection_state(selection), false),
-        action_with_state("cut-asset", "Cut", "cut", mutable_selection_state(selection), false),
+        action_with_state(
+            "copy-asset",
+            "Copy",
+            "copy",
+            selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "cut-asset",
+            "Cut",
+            "cut",
+            mutable_selection_state(selection),
+            false,
+        ),
         action_with_state(
             "paste-asset",
             "Paste",

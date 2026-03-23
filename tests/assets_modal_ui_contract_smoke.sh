@@ -26,9 +26,14 @@ grep -F 'callback confirm-asset-rename-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback confirm-delete-asset-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'export component AssetsFolderCreateModal inherits Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsSshConnectionModal inherits Rectangle {' "$SSH_MODAL" >/dev/null
+grep -F 'in-out property <string> asset-modal-validation-message: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in property <string> validation-message: "";' "$FOLDER_MODAL" >/dev/null
+grep -F 'in property <bool> can-confirm: false;' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsRenameModal inherits Rectangle {' "$RENAME_MODAL" >/dev/null
 grep -F 'export component AssetsDeleteConfirmModal inherits Rectangle {' "$DELETE_MODAL" >/dev/null
 grep -F 'in property <string> active-tab: "standard";' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> validation-message: "";' "$SSH_MODAL" >/dev/null
+grep -F 'in property <bool> can-confirm: false;' "$SSH_MODAL" >/dev/null
 grep -F 'callback tab-selected(string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> item-name;' "$RENAME_MODAL" >/dev/null
@@ -51,5 +56,9 @@ grep -F 'text: "Rename";' "$RENAME_MODAL" >/dev/null
 grep -F 'text: "Delete Asset";' "$DELETE_MODAL" >/dev/null
 grep -F 'in property <int> focus-sequence: 0;' "$FOLDER_MODAL" >/dev/null
 grep -F 'in property <int> focus-sequence: 0;' "$SSH_MODAL" >/dev/null
+rg -n "validation-message" "$FOLDER_MODAL" >/dev/null
+rg -n "validation-message" "$SSH_MODAL" >/dev/null
+rg -n "can-confirm" "$FOLDER_MODAL" >/dev/null
+rg -n "can-confirm" "$SSH_MODAL" >/dev/null
 grep -F 'public function focus-primary-field() {' "$SSH_MODAL" >/dev/null
 grep -F 'window.set_asset_modal_focus_sequence(window.get_asset_modal_focus_sequence() + 1);' "$BOOTSTRAP" >/dev/null

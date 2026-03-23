@@ -1,13 +1,18 @@
+use mica_term::app::assets_catalog::{asset_tree_to_catalog, catalog_to_asset_tree};
 use mica_term::shell::assets::{
-    AssetDisclosureState, AssetNameValidation, AssetTree, AssetViewMode, ConsoleAssetKind,
-    next_default_name_from_base,
+    AssetDisclosureState, AssetNameValidation, AssetNodePayload, AssetSshConnectionSpec, AssetTree,
+    AssetViewMode, ConsoleAssetKind, next_default_name_from_base,
 };
 
 #[test]
 fn tree_projection_hides_children_until_folder_is_expanded() {
     let mut tree = AssetTree::new();
     let folder_id = tree.insert_root(ConsoleAssetKind::Folder, "Folder 1");
-    tree.insert_child(&folder_id, ConsoleAssetKind::SshConnection, "SSH Connection 1");
+    tree.insert_child(
+        &folder_id,
+        ConsoleAssetKind::SshConnection,
+        "SSH Connection 1",
+    );
 
     let collapsed = tree.project_visible_rows(AssetViewMode::Tree, "");
     assert_eq!(collapsed.len(), 1);
@@ -99,7 +104,10 @@ fn next_default_folder_name_uses_dash_suffix_after_base_collision() {
         "Folder 1",
     )];
 
-    assert_eq!(next_default_name_from_base("Folder 1", &siblings), "Folder 1-1");
+    assert_eq!(
+        next_default_name_from_base("Folder 1", &siblings),
+        "Folder 1-1"
+    );
 }
 
 #[test]
@@ -107,7 +115,8 @@ fn removing_folder_subtree_removes_all_descendants() {
     let mut tree = AssetTree::new();
     let root_id = tree.insert_root(ConsoleAssetKind::Folder, "Team");
     let child_folder_id = tree.insert_child(&root_id, ConsoleAssetKind::Folder, "Prod");
-    let nested_ssh_id = tree.insert_child(&child_folder_id, ConsoleAssetKind::SshConnection, "Bastion");
+    let nested_ssh_id =
+        tree.insert_child(&child_folder_id, ConsoleAssetKind::SshConnection, "Bastion");
     let sibling_id = tree.insert_root(ConsoleAssetKind::SshConnection, "Standalone");
 
     let removed = tree
@@ -117,7 +126,11 @@ fn removing_folder_subtree_removes_all_descendants() {
     assert_eq!(removed.descendant_count, 2);
     assert_eq!(
         removed.removed_ids,
-        vec![root_id.clone(), child_folder_id.clone(), nested_ssh_id.clone()]
+        vec![
+            root_id.clone(),
+            child_folder_id.clone(),
+            nested_ssh_id.clone()
+        ]
     );
     assert!(!tree.contains(&root_id));
     assert!(!tree.contains(&child_folder_id));
@@ -133,7 +146,8 @@ fn descendant_count_reports_nested_item_total() {
     let mut tree = AssetTree::new();
     let root_id = tree.insert_root(ConsoleAssetKind::Folder, "Team");
     let child_folder_id = tree.insert_child(&root_id, ConsoleAssetKind::Folder, "Prod");
-    let nested_ssh_id = tree.insert_child(&child_folder_id, ConsoleAssetKind::SshConnection, "Bastion");
+    let nested_ssh_id =
+        tree.insert_child(&child_folder_id, ConsoleAssetKind::SshConnection, "Bastion");
     tree.insert_child(&root_id, ConsoleAssetKind::SshConnection, "Ops");
 
     assert_eq!(tree.descendant_count(&root_id), Some(3));
@@ -240,7 +254,11 @@ fn nested_tree_search_clears_back_to_original_collapsed_state() {
 fn search_filters_visible_rows_without_destroying_tree_state() {
     let mut tree = AssetTree::new();
     let folder_id = tree.insert_root(ConsoleAssetKind::Folder, "Folder 1");
-    tree.insert_child(&folder_id, ConsoleAssetKind::SshConnection, "SSH Connection 1");
+    tree.insert_child(
+        &folder_id,
+        ConsoleAssetKind::SshConnection,
+        "SSH Connection 1",
+    );
 
     let collapsed = tree.project_visible_rows(AssetViewMode::Tree, "");
     assert_eq!(collapsed.len(), 1);
@@ -254,4 +272,29 @@ fn search_filters_visible_rows_without_destroying_tree_state() {
     let cleared = tree.project_visible_rows(AssetViewMode::Tree, "");
     assert_eq!(cleared.len(), 1);
     assert_eq!(tree.is_expanded(&folder_id), Some(false));
+}
+
+#[test]
+fn expanded_state_remains_runtime_only_after_catalog_mapping() {
+    let mut tree = AssetTree::new();
+    let folder_id = tree.insert_root(ConsoleAssetKind::Folder, "Team");
+    tree.insert_child_with_payload(
+        &folder_id,
+        ConsoleAssetKind::SshConnection,
+        "Bastion",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "22".into(),
+            environment: "".into(),
+            proxy_method: "".into(),
+        }),
+    );
+    tree.set_expanded(&folder_id, true);
+
+    let catalog = asset_tree_to_catalog(&tree);
+    let round_tripped = catalog_to_asset_tree(&catalog);
+
+    assert_eq!(tree.is_expanded(&folder_id), Some(true));
+    assert_eq!(round_tripped.is_expanded(&folder_id), Some(false));
 }

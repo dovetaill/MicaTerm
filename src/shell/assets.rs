@@ -92,11 +92,7 @@ pub struct MockConsoleAssetItem {
 }
 
 impl MockConsoleAssetItem {
-    pub fn new(
-        id: impl Into<String>,
-        kind: ConsoleAssetKind,
-        label: impl Into<String>,
-    ) -> Self {
+    pub fn new(id: impl Into<String>, kind: ConsoleAssetKind, label: impl Into<String>) -> Self {
         Self {
             id: id.into(),
             kind,
@@ -119,6 +115,40 @@ pub enum AssetNameValidation {
     Duplicate,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AssetSshConnectionSpec {
+    pub host: String,
+    pub user: String,
+    pub port: String,
+    pub environment: String,
+    pub proxy_method: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssetNodePayload {
+    Folder,
+    SshConnection(AssetSshConnectionSpec),
+}
+
+impl AssetNodePayload {
+    fn for_kind(kind: ConsoleAssetKind) -> Self {
+        match kind {
+            ConsoleAssetKind::Folder => Self::Folder,
+            ConsoleAssetKind::SshConnection => {
+                Self::SshConnection(AssetSshConnectionSpec::default())
+            }
+        }
+    }
+
+    fn matches_kind(&self, kind: ConsoleAssetKind) -> bool {
+        matches!(
+            (kind, self),
+            (ConsoleAssetKind::Folder, Self::Folder)
+                | (ConsoleAssetKind::SshConnection, Self::SshConnection(_))
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetNode {
     pub id: String,
@@ -127,6 +157,7 @@ pub struct AssetNode {
     pub parent_id: Option<String>,
     pub children: Vec<String>,
     pub expanded: bool,
+    pub payload: AssetNodePayload,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,11 +191,21 @@ impl AssetTree {
         Self::default()
     }
 
-    pub fn insert_root(
+    pub fn insert_root(&mut self, kind: ConsoleAssetKind, title: impl Into<String>) -> String {
+        self.insert_root_with_payload(kind, title, AssetNodePayload::for_kind(kind))
+    }
+
+    pub fn insert_root_with_payload(
         &mut self,
         kind: ConsoleAssetKind,
         title: impl Into<String>,
+        payload: AssetNodePayload,
     ) -> String {
+        assert!(
+            payload.matches_kind(kind),
+            "payload kind must match runtime node kind"
+        );
+
         let id = self.next_id();
         let node = AssetNode {
             id: id.clone(),
@@ -173,6 +214,7 @@ impl AssetTree {
             parent_id: None,
             children: Vec::new(),
             expanded: false,
+            payload,
         };
         self.root_ids.push(id.clone());
         self.nodes.insert(id.clone(), node);
@@ -185,9 +227,23 @@ impl AssetTree {
         kind: ConsoleAssetKind,
         title: impl Into<String>,
     ) -> String {
+        self.insert_child_with_payload(parent_id, kind, title, AssetNodePayload::for_kind(kind))
+    }
+
+    pub fn insert_child_with_payload(
+        &mut self,
+        parent_id: &str,
+        kind: ConsoleAssetKind,
+        title: impl Into<String>,
+        payload: AssetNodePayload,
+    ) -> String {
         assert!(
             self.nodes.contains_key(parent_id),
             "parent node `{parent_id}` must exist before inserting a child"
+        );
+        assert!(
+            payload.matches_kind(kind),
+            "payload kind must match runtime node kind"
         );
 
         let id = self.next_id();
@@ -198,6 +254,7 @@ impl AssetTree {
             parent_id: Some(parent_id.to_string()),
             children: Vec::new(),
             expanded: false,
+            payload,
         };
         self.nodes.insert(id.clone(), node);
         self.nodes
@@ -206,6 +263,14 @@ impl AssetTree {
             .children
             .push(id.clone());
         id
+    }
+
+    pub fn from_parts(root_ids: Vec<String>, nodes: HashMap<String, AssetNode>) -> Self {
+        Self {
+            next_serial: next_serial_from_nodes(&nodes),
+            nodes,
+            root_ids,
+        }
     }
 
     pub fn set_expanded(&mut self, node_id: &str, expanded: bool) {
@@ -224,6 +289,14 @@ impl AssetTree {
 
     pub fn title(&self, node_id: &str) -> Option<&str> {
         self.nodes.get(node_id).map(|node| node.title.as_str())
+    }
+
+    pub fn node(&self, node_id: &str) -> Option<&AssetNode> {
+        self.nodes.get(node_id)
+    }
+
+    pub fn root_ids(&self) -> &[String] {
+        &self.root_ids
     }
 
     pub fn kind(&self, node_id: &str) -> Option<ConsoleAssetKind> {
@@ -248,6 +321,13 @@ impl AssetTree {
 
     pub fn is_expanded(&self, node_id: &str) -> Option<bool> {
         self.nodes.get(node_id).map(|node| node.expanded)
+    }
+
+    pub fn ssh_connection_spec(&self, node_id: &str) -> Option<&AssetSshConnectionSpec> {
+        match &self.nodes.get(node_id)?.payload {
+            AssetNodePayload::Folder => None,
+            AssetNodePayload::SshConnection(spec) => Some(spec),
+        }
     }
 
     pub fn sibling_items_for_parent(
@@ -363,9 +443,13 @@ impl AssetTree {
     }
 
     fn next_id(&mut self) -> String {
-        let id = format!("asset-{}", self.next_serial);
-        self.next_serial += 1;
-        id
+        loop {
+            let id = format!("asset-{}", self.next_serial);
+            self.next_serial += 1;
+            if !self.nodes.contains_key(&id) {
+                return id;
+            }
+        }
     }
 
     fn collect_tree_rows(
@@ -386,11 +470,7 @@ impl AssetTree {
         }
     }
 
-    fn collect_flat_rows(
-        &self,
-        node_ids: &[String],
-        rows: &mut Vec<VisibleAssetRow>,
-    ) {
+    fn collect_flat_rows(&self, node_ids: &[String], rows: &mut Vec<VisibleAssetRow>) {
         for node_id in node_ids {
             let Some(node) = self.nodes.get(node_id) else {
                 continue;
@@ -523,6 +603,16 @@ impl AssetTree {
     }
 }
 
+fn next_serial_from_nodes(nodes: &HashMap<String, AssetNode>) -> u64 {
+    nodes
+        .keys()
+        .filter_map(|id| id.strip_prefix("asset-"))
+        .filter_map(|suffix| suffix.parse::<u64>().ok())
+        .max()
+        .map(|serial| serial + 1)
+        .unwrap_or(0)
+}
+
 fn parse_default_name_index(kind: ConsoleAssetKind, label: &str) -> Option<u32> {
     let trimmed = label.trim();
     let prefix = kind.default_name_prefix();
@@ -596,9 +686,7 @@ pub fn resolve_committed_name(
         return next_default_name(kind, items);
     }
 
-    let conflicts_existing_name = items
-        .iter()
-        .any(|item| item.label.trim() == trimmed);
+    let conflicts_existing_name = items.iter().any(|item| item.label.trim() == trimmed);
     if conflicts_existing_name && parse_default_name_index(kind, trimmed).is_some() {
         return next_default_name(kind, items);
     }

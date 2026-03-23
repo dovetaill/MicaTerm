@@ -26,12 +26,7 @@ fn right_click_request_opens_context_menu_and_sets_anchor() {
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
-    app.invoke_asset_context_menu_requested(
-        "ssh-prod-01".into(),
-        "ssh".into(),
-        144.0,
-        188.0,
-    );
+    app.invoke_asset_context_menu_requested("ssh-prod-01".into(), "ssh".into(), 144.0, 188.0);
 
     assert!(app.get_assets_context_menu_open());
     assert_eq!(app.get_assets_context_menu_anchor_x(), 144.0);
@@ -108,7 +103,11 @@ fn folder_modal_confirm_projects_root_row_into_window_model() {
     app.invoke_confirm_asset_modal_requested();
 
     assert_eq!(
-        app.get_console_asset_items().row_data(0).unwrap().label.as_str(),
+        app.get_console_asset_items()
+            .row_data(0)
+            .unwrap()
+            .label
+            .as_str(),
         "Infra"
     );
 }
@@ -131,7 +130,7 @@ fn folder_modal_cancel_and_reopen_resets_name_draft() {
 
     assert!(app.get_asset_modal_open());
     assert_eq!(app.get_asset_modal_kind().as_str(), "new-folder");
-    assert_eq!(app.get_asset_folder_modal_name().as_str(), "");
+    assert_eq!(app.get_asset_folder_modal_name().as_str(), "Folder 1");
 }
 
 #[test]
@@ -178,7 +177,7 @@ fn ssh_modal_cancel_and_reopen_resets_tab_and_draft_fields() {
     assert!(app.get_asset_modal_open());
     assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
     assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "standard");
-    assert_eq!(app.get_asset_ssh_modal_name().as_str(), "");
+    assert_eq!(app.get_asset_ssh_modal_name().as_str(), "SSH Connection 1");
     assert_eq!(app.get_asset_ssh_modal_host().as_str(), "");
     assert_eq!(app.get_asset_ssh_modal_proxy_method().as_str(), "");
     assert_eq!(app.get_asset_ssh_modal_port().as_str(), "22");
@@ -272,12 +271,7 @@ fn invoking_planned_action_shows_status_pill_feedback() {
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
-    app.invoke_asset_context_menu_requested(
-        "ssh-prod-01".into(),
-        "ssh".into(),
-        144.0,
-        188.0,
-    );
+    app.invoke_asset_context_menu_requested("ssh-prod-01".into(), "ssh".into(), 144.0, 188.0);
     app.invoke_assets_context_menu_action_invoked("proxy-chrome-via-server".into());
 
     assert!(app.get_assets_context_menu_open());
@@ -294,12 +288,7 @@ fn closing_context_menu_clears_planned_action_feedback() {
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
-    app.invoke_asset_context_menu_requested(
-        "ssh-prod-01".into(),
-        "ssh".into(),
-        144.0,
-        188.0,
-    );
+    app.invoke_asset_context_menu_requested("ssh-prod-01".into(), "ssh".into(), 144.0, 188.0);
     app.invoke_assets_context_menu_action_invoked("proxy-chrome-via-server".into());
     app.invoke_close_assets_context_menu_requested();
 
@@ -370,7 +359,11 @@ fn rename_modal_confirm_round_trips_through_window_properties() {
 
     assert!(!app.get_asset_rename_modal_open());
     assert_eq!(
-        app.get_console_asset_items().row_data(0).unwrap().label.as_str(),
+        app.get_console_asset_items()
+            .row_data(0)
+            .unwrap()
+            .label
+            .as_str(),
         "Infra"
     );
 }
