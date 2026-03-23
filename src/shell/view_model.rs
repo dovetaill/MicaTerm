@@ -2,7 +2,8 @@
 
 use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::{
-    AssetTree, AssetViewMode, ConsoleAssetKind, VisibleAssetRow, resolve_committed_name,
+    AssetNameValidation, AssetTree, AssetViewMode, ConsoleAssetKind, VisibleAssetRow,
+    resolve_committed_name,
 };
 use crate::shell::context_menu::{
     ContextMenuActionNode, ContextMenuActionState, ContextTargetKind, SelectionContext,
@@ -29,6 +30,16 @@ pub enum AssetModalState {
         parent_id: Option<String>,
         active_tab: AssetSshModalTab,
         draft: AssetSshConnectionDraft,
+    },
+    RenameAsset {
+        asset_id: String,
+        original_name: String,
+        draft_name: String,
+    },
+    DeleteAssetConfirm {
+        asset_id: String,
+        label: String,
+        descendant_count: usize,
     },
 }
 
@@ -146,6 +157,36 @@ impl Default for ShellViewModel {
 }
 
 impl ShellViewModel {
+    fn rename_asset_modal_validation(
+        &self,
+        asset_id: &str,
+        draft_name: &str,
+    ) -> AssetNameValidation {
+        let parent_id = self.console_asset_tree.parent_id(asset_id).flatten();
+        self.console_asset_tree.validate_name_in_parent(
+            parent_id,
+            draft_name,
+            Some(asset_id),
+        )
+    }
+
+    pub fn asset_rename_modal_validation_message(&self) -> String {
+        match &self.asset_modal_state {
+            Some(AssetModalState::RenameAsset {
+                asset_id,
+                draft_name,
+                ..
+            }) => match self.rename_asset_modal_validation(asset_id, draft_name) {
+                AssetNameValidation::Valid => String::new(),
+                AssetNameValidation::Empty => "Name is required.".into(),
+                AssetNameValidation::Duplicate => {
+                    "Name already exists in this folder.".into()
+                }
+            },
+            _ => String::new(),
+        }
+    }
+
     pub fn requested_assets_sidebar(&self) -> bool {
         self.show_assets_sidebar
     }
@@ -298,6 +339,66 @@ impl ShellViewModel {
         });
     }
 
+    pub fn open_rename_asset_modal(&mut self, asset_id: String) {
+        if !self.console_asset_tree.contains(&asset_id) {
+            return;
+        }
+
+        let Some(original_name) = self
+            .console_asset_tree
+            .title(&asset_id)
+            .map(str::to_string)
+        else {
+            return;
+        };
+
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.focused_asset_id = Some(asset_id.clone());
+        self.selected_asset_ids = vec![asset_id.clone()];
+        self.context_target_asset_id = Some(asset_id.clone());
+        self.asset_modal_state = Some(AssetModalState::RenameAsset {
+            asset_id,
+            original_name: original_name.clone(),
+            draft_name: original_name,
+        });
+    }
+
+    pub fn update_rename_asset_modal_name(&mut self, value: String) {
+        let Some(AssetModalState::RenameAsset { draft_name, .. }) = self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        *draft_name = value;
+    }
+
+    pub fn open_delete_asset_confirm(&mut self, asset_id: String) {
+        if !self.console_asset_tree.contains(&asset_id) {
+            return;
+        }
+
+        let Some(label) = self.console_asset_tree.title(&asset_id).map(str::to_string) else {
+            return;
+        };
+        let Some(descendant_count) = self.console_asset_tree.descendant_count(&asset_id) else {
+            return;
+        };
+
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.focused_asset_id = Some(asset_id.clone());
+        self.selected_asset_ids = vec![asset_id.clone()];
+        self.context_target_asset_id = Some(asset_id.clone());
+        self.asset_modal_state = Some(AssetModalState::DeleteAssetConfirm {
+            asset_id,
+            label,
+            descendant_count,
+        });
+    }
+
     pub fn update_ssh_modal_field(&mut self, field: &str, value: String) {
         let Some(AssetModalState::NewSshConnection { draft, .. }) = self.asset_modal_state.as_mut()
         else {
@@ -343,6 +444,13 @@ impl ShellViewModel {
             Some(AssetModalState::NewSshConnection { draft, .. }) => {
                 !draft.name.trim().is_empty() && !draft.host.trim().is_empty()
             }
+            Some(AssetModalState::RenameAsset {
+                asset_id,
+                draft_name,
+                ..
+            }) => self.rename_asset_modal_validation(asset_id, draft_name)
+                == AssetNameValidation::Valid,
+            Some(AssetModalState::DeleteAssetConfirm { .. }) => true,
             None => false,
         }
     }
@@ -368,6 +476,27 @@ impl ShellViewModel {
                 }
                 (parent_id, ConsoleAssetKind::SshConnection, draft.name)
             }
+            AssetModalState::RenameAsset {
+                asset_id,
+                draft_name,
+                ..
+            } => {
+                if !self.can_confirm_asset_modal() {
+                    return;
+                }
+
+                self.console_asset_tree
+                    .set_title(&asset_id, draft_name.trim().to_string());
+                self.focused_asset_id = Some(asset_id.clone());
+                self.selected_asset_ids = vec![asset_id.clone()];
+                self.context_target_asset_id = Some(asset_id);
+                self.asset_modal_state = None;
+                return;
+            }
+            AssetModalState::DeleteAssetConfirm { .. } => {
+                self.confirm_delete_asset();
+                return;
+            }
         };
 
         let sibling_items = self
@@ -386,6 +515,17 @@ impl ShellViewModel {
         self.focused_asset_id = Some(asset_id.clone());
         self.context_target_asset_id = Some(asset_id);
         self.asset_modal_state = None;
+    }
+
+    pub fn confirm_delete_asset(&mut self) {
+        let Some(AssetModalState::DeleteAssetConfirm { asset_id, .. }) = self.asset_modal_state.clone()
+        else {
+            return;
+        };
+
+        if self.remove_asset_subtree(&asset_id) {
+            self.asset_modal_state = None;
+        }
     }
 
     pub fn cancel_asset_modal(&mut self) {
@@ -475,6 +615,37 @@ impl ShellViewModel {
         self.focused_asset_id = None;
         self.close_context_menu();
         self.context_target_asset_id = None;
+    }
+
+    pub fn remove_asset_subtree(&mut self, asset_id: &str) -> bool {
+        let next_focus_target = self.next_focus_target_after_removal(asset_id);
+        let Some(removed_summary) = self.console_asset_tree.remove_subtree(asset_id) else {
+            return false;
+        };
+
+        let removed_ids = removed_summary.removed_ids;
+        self.selected_asset_ids
+            .retain(|selected_id| !removed_ids.iter().any(|removed_id| removed_id == selected_id));
+
+        if self
+            .editing_asset_id
+            .as_deref()
+            .is_some_and(|editing_id| removed_ids.iter().any(|removed_id| removed_id == editing_id))
+        {
+            self.clear_active_asset_rename_session();
+        }
+
+        if let Some(next_focus_target) = next_focus_target {
+            self.focused_asset_id = Some(next_focus_target.clone());
+            self.selected_asset_ids = vec![next_focus_target.clone()];
+            self.context_target_asset_id = Some(next_focus_target);
+        } else {
+            self.focused_asset_id = None;
+            self.selected_asset_ids.clear();
+            self.context_target_asset_id = None;
+        }
+
+        true
     }
 
     pub fn select_asset(&mut self, asset_id: &str) {
@@ -630,7 +801,31 @@ impl ShellViewModel {
             ContextMenuActionState::Planned => {
                 self.set_context_menu_feedback(format!("{} is not wired yet.", action.label));
             }
-            ContextMenuActionState::Enabled => self.close_context_menu(),
+            ContextMenuActionState::Enabled => match action_id {
+                "rename-asset" => {
+                    if let Some(asset_id) = self
+                        .context_target_asset_id
+                        .clone()
+                        .filter(|asset_id| self.console_asset_tree.contains(asset_id))
+                    {
+                        self.open_rename_asset_modal(asset_id);
+                    } else {
+                        self.close_context_menu();
+                    }
+                }
+                "delete-asset" => {
+                    if let Some(asset_id) = self
+                        .context_target_asset_id
+                        .clone()
+                        .filter(|asset_id| self.console_asset_tree.contains(asset_id))
+                    {
+                        self.open_delete_asset_confirm(asset_id);
+                    } else {
+                        self.close_context_menu();
+                    }
+                }
+                _ => self.close_context_menu(),
+            },
             ContextMenuActionState::Disabled => {}
         }
     }
@@ -669,6 +864,27 @@ impl ShellViewModel {
             target_mutable: true,
             target_has_active_connection: true,
         }
+    }
+
+    fn next_focus_target_after_removal(&self, removed_root_id: &str) -> Option<String> {
+        let rows = self.visible_console_asset_rows();
+        let removed_index = rows.iter().position(|row| row.id == removed_root_id)?;
+        let removed_parent_id = self.console_asset_tree.parent_id(removed_root_id).flatten();
+
+        rows.iter()
+            .skip(removed_index + 1)
+            .find(|row| self.console_asset_tree.parent_id(&row.id).flatten() == removed_parent_id)
+            .map(|row| row.id.clone())
+            .or_else(|| {
+                rows[..removed_index]
+                    .iter()
+                    .rev()
+                    .find(|row| {
+                        self.console_asset_tree.parent_id(&row.id).flatten() == removed_parent_id
+                    })
+                    .map(|row| row.id.clone())
+            })
+            .or_else(|| removed_parent_id.map(ToOwned::to_owned))
     }
 
     fn clear_active_asset_rename_session(&mut self) {

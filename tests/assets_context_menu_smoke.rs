@@ -319,3 +319,130 @@ fn pointer_move_callback_exists_for_context_menu_corridor() {
 
     assert!(app.get_assets_context_menu_open());
 }
+
+#[test]
+fn rename_action_opens_rename_modal_with_existing_name() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Prod".into());
+    app.invoke_confirm_asset_modal_requested();
+    let asset_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(asset_id.into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("rename-asset".into());
+
+    assert!(app.get_asset_rename_modal_open());
+    assert_eq!(app.get_asset_rename_modal_name().as_str(), "Prod");
+    assert_eq!(app.get_asset_rename_modal_validation_message().as_str(), "");
+    assert!(app.get_asset_rename_modal_can_confirm());
+}
+
+#[test]
+fn rename_modal_confirm_round_trips_through_window_properties() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Prod".into());
+    app.invoke_confirm_asset_modal_requested();
+    let asset_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(asset_id.into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("rename-asset".into());
+    app.invoke_asset_rename_modal_name_changed("Infra".into());
+    app.invoke_confirm_asset_rename_requested();
+
+    assert!(!app.get_asset_rename_modal_open());
+    assert_eq!(
+        app.get_console_asset_items().row_data(0).unwrap().label.as_str(),
+        "Infra"
+    );
+}
+
+#[test]
+fn delete_action_opens_delete_confirm_modal_with_nested_count() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Prod".into());
+    app.invoke_confirm_asset_modal_requested();
+    let asset_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(asset_id.clone().into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    app.invoke_asset_context_menu_requested(asset_id.into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("delete-asset".into());
+
+    assert!(app.get_asset_delete_confirm_modal_open());
+    assert_eq!(app.get_asset_delete_confirm_target_label().as_str(), "Prod");
+    assert_eq!(app.get_asset_delete_confirm_descendant_count(), 1);
+}
+
+#[test]
+fn delete_confirm_round_trips_and_removes_window_rows() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Alpha".into());
+    app.invoke_confirm_asset_modal_requested();
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Beta".into());
+    app.invoke_confirm_asset_modal_requested();
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Gamma".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let beta_id = app
+        .get_console_asset_items()
+        .row_data(1)
+        .unwrap()
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(beta_id.clone().into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Nested SSH".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.13".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    app.invoke_asset_context_menu_requested(beta_id.into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("delete-asset".into());
+    app.invoke_confirm_delete_asset_requested();
+
+    let rows = app.get_console_asset_items();
+    assert!(!app.get_asset_delete_confirm_modal_open());
+    assert_eq!(rows.row_count(), 2);
+    assert_eq!(rows.row_data(0).unwrap().label.as_str(), "Alpha");
+    assert_eq!(rows.row_data(1).unwrap().label.as_str(), "Gamma");
+}

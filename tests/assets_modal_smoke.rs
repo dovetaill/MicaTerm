@@ -51,3 +51,38 @@ fn ssh_modal_resets_to_standard_english_shell_when_reopened() {
     assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
     assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "standard");
 }
+
+#[test]
+fn rename_modal_visibility_round_trips_through_window_properties() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+
+    app.set_asset_rename_modal_open(true);
+    app.set_asset_rename_modal_name("Prod".into());
+    app.set_asset_rename_modal_validation_message("Duplicate name".into());
+    app.set_asset_rename_modal_can_confirm(false);
+
+    assert!(app.get_asset_rename_modal_open());
+    assert_eq!(app.get_asset_rename_modal_name().as_str(), "Prod");
+    assert_eq!(
+        app.get_asset_rename_modal_validation_message().as_str(),
+        "Duplicate name"
+    );
+    assert!(!app.get_asset_rename_modal_can_confirm());
+}
+
+#[test]
+fn delete_modal_visibility_round_trips_through_window_properties() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+
+    app.set_asset_delete_confirm_modal_open(true);
+    app.set_asset_delete_confirm_target_label("Prod".into());
+    app.set_asset_delete_confirm_descendant_count(3);
+
+    assert!(app.get_asset_delete_confirm_modal_open());
+    assert_eq!(app.get_asset_delete_confirm_target_label().as_str(), "Prod");
+    assert_eq!(app.get_asset_delete_confirm_descendant_count(), 3);
+}

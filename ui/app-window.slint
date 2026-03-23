@@ -3,7 +3,9 @@
 import { AssetsCreateMenu } from "components/assets-create-menu.slint";
 import { AssetsContextMenuItem } from "components/assets-context-menu-column.slint";
 import { AssetsContextMenuOverlay } from "components/assets-context-menu-overlay.slint";
+import { AssetsDeleteConfirmModal } from "components/assets-delete-confirm-modal.slint";
 import { AssetsFolderCreateModal } from "components/assets-folder-create-modal.slint";
+import { AssetsRenameModal } from "components/assets-rename-modal.slint";
 import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal.slint";
 import { StatusPill } from "components/status-pill.slint";
 import { ThemeTokens } from "theme/tokens.slint";
@@ -38,6 +40,13 @@ export component AppWindow inherits Window {
     in-out property <bool> asset-modal-can-confirm: false;
     in-out property <int> asset-modal-focus-sequence: 0;
     in-out property <string> asset-folder-modal-name: "";
+    in-out property <bool> asset-rename-modal-open: false;
+    in-out property <string> asset-rename-modal-name: "";
+    in-out property <string> asset-rename-modal-validation-message: "";
+    in-out property <bool> asset-rename-modal-can-confirm: false;
+    in-out property <bool> asset-delete-confirm-modal-open: false;
+    in-out property <string> asset-delete-confirm-target-label: "";
+    in-out property <int> asset-delete-confirm-descendant-count: 0;
     in-out property <string> asset-ssh-modal-active-tab: "standard";
     in-out property <string> asset-ssh-modal-name: "";
     in-out property <string> asset-ssh-modal-host: "";
@@ -47,7 +56,6 @@ export component AppWindow inherits Window {
     in-out property <string> asset-ssh-modal-proxy-method: "";
     in-out property <string> asset-primary-create-action-id: "";
     in-out property <string> asset-primary-create-tooltip: "";
-    in-out property <bool> asset-rename-active: false;
     in-out property <string> asset-search-tooltip: "";
     in-out property <string> asset-view-mode-tooltip: "";
     in-out property <string> asset-tree-expansion-tooltip: "";
@@ -121,16 +129,15 @@ export component AppWindow inherits Window {
     callback assets-create-action-selected(string);
     callback close-asset-modal-requested();
     callback confirm-asset-modal-requested();
+    callback asset-rename-modal-name-changed(string);
+    callback confirm-asset-rename-requested();
+    callback confirm-delete-asset-requested();
     callback asset-folder-modal-name-changed(string);
     callback asset-ssh-modal-tab-selected(string);
     callback asset-ssh-modal-draft-changed(string, string);
     callback asset-selected(string);
     callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
-    callback asset-rename-text-changed(string, string);
-    callback asset-rename-commit-requested(string, string);
-    callback asset-rename-cancel-requested(string);
-    callback dismiss-active-asset-rename-requested();
     callback shell-interaction-requested();
     callback assets-context-menu-action-invoked(string);
     callback assets-context-menu-key-pressed(string);
@@ -333,18 +340,6 @@ export component AppWindow inherits Window {
                             root.asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
                         }
 
-                        asset-rename-text-changed(item-id, text) => {
-                            root.asset-rename-text-changed(item-id, text);
-                        }
-
-                        asset-rename-commit-requested(item-id, text) => {
-                            root.asset-rename-commit-requested(item-id, text);
-                        }
-
-                        asset-rename-cancel-requested(item-id) => {
-                            root.asset-rename-cancel-requested(item-id);
-                        }
-
                         shell-interaction-requested => {
                             root.shell-interaction-requested();
                         }
@@ -402,18 +397,6 @@ export component AppWindow inherits Window {
         host-width: root.width;
         host-height: root.height;
         place-right: true;
-    }
-
-    shell-body-rename-dismiss-layer := TouchArea {
-        x: sidebar.width;
-        y: titlebar.height;
-        width: root.width - sidebar.width;
-        height: root.height - titlebar.height;
-        enabled: root.asset-rename-active;
-
-        clicked => {
-            root.dismiss-active-asset-rename-requested();
-        }
     }
 
     shell-body-empty-search-dismiss-layer := TouchArea {
@@ -505,7 +488,7 @@ export component AppWindow inherits Window {
         y: titlebar.height;
         width: root.width;
         height: root.height - titlebar.height;
-        enabled: root.asset-modal-open && root.asset-modal-kind == "new-folder";
+        enabled: root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open;
 
         clicked => {
             root.close-asset-modal-requested();
@@ -558,6 +541,41 @@ export component AppWindow inherits Window {
 
         draft-changed(field, value) => {
             root.asset-ssh-modal-draft-changed(field, value);
+        }
+    }
+
+    if root.asset-rename-modal-open : asset-rename-modal-overlay := AssetsRenameModal {
+        x: max(24px, (root.width - self.width) / 2);
+        y: max(titlebar.height + 24px, titlebar.height + (root.height - titlebar.height - self.height) / 2);
+        item-name: root.asset-rename-modal-name;
+        validation-message: root.asset-rename-modal-validation-message;
+        can-confirm: root.asset-rename-modal-can-confirm;
+
+        close-requested => {
+            root.close-asset-modal-requested();
+        }
+
+        confirm-requested => {
+            root.confirm-asset-rename-requested();
+        }
+
+        name-changed(value) => {
+            root.asset-rename-modal-name-changed(value);
+        }
+    }
+
+    if root.asset-delete-confirm-modal-open : asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {
+        x: max(24px, (root.width - self.width) / 2);
+        y: max(titlebar.height + 24px, titlebar.height + (root.height - titlebar.height - self.height) / 2);
+        target-label: root.asset-delete-confirm-target-label;
+        descendant-count: root.asset-delete-confirm-descendant-count;
+
+        close-requested => {
+            root.close-asset-modal-requested();
+        }
+
+        confirm-requested => {
+            root.confirm-delete-asset-requested();
         }
     }
 

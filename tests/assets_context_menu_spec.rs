@@ -160,6 +160,44 @@ fn folder_target_exposes_flat_create_actions() {
 }
 
 #[test]
+fn folder_and_ssh_context_menus_keep_rename_and_delete_as_enabled_leaf_actions() {
+    let folder_actions = resolve_action_tree(
+        ContextTargetKind::Folder,
+        &SelectionContext {
+            selected_ids: vec!["folder-1".into()],
+            clipboard_has_asset_payload: false,
+            target_mutable: true,
+            target_has_active_connection: false,
+        },
+    );
+    let ssh_actions = resolve_action_tree(
+        ContextTargetKind::SshConnection,
+        &SelectionContext {
+            selected_ids: vec!["ssh-1".into()],
+            clipboard_has_asset_payload: false,
+            target_mutable: true,
+            target_has_active_connection: true,
+        },
+    );
+
+    for actions in [&folder_actions, &ssh_actions] {
+        let rename = actions
+            .iter()
+            .find(|action| action.id == "rename-asset")
+            .expect("rename action should exist");
+        let delete = actions
+            .iter()
+            .find(|action| action.id == "delete-asset")
+            .expect("delete action should exist");
+
+        assert_eq!(rename.state, ContextMenuActionState::Enabled);
+        assert!(rename.children.is_empty());
+        assert_eq!(delete.state, ContextMenuActionState::Enabled);
+        assert!(delete.children.is_empty());
+    }
+}
+
+#[test]
 fn root_menu_flips_left_when_anchor_is_near_right_edge() {
     let (origin_x, origin_y, child_flows_left) = resolve_root_menu_origin(MenuPlacementInput {
         host_width: 760.0,

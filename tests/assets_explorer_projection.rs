@@ -1,4 +1,7 @@
-use mica_term::shell::assets::{AssetTree, AssetViewMode, ConsoleAssetKind};
+use mica_term::shell::assets::{
+    AssetDisclosureState, AssetNameValidation, AssetTree, AssetViewMode, ConsoleAssetKind,
+    next_default_name_from_base,
+};
 
 #[test]
 fn tree_projection_hides_children_until_folder_is_expanded() {
@@ -17,6 +20,50 @@ fn tree_projection_hides_children_until_folder_is_expanded() {
 }
 
 #[test]
+fn tree_projection_exposes_disclosure_state_for_folder_rows() {
+    let mut tree = AssetTree::new();
+    let collapsed_folder_id = tree.insert_root(ConsoleAssetKind::Folder, "Collapsed");
+    tree.insert_child(
+        &collapsed_folder_id,
+        ConsoleAssetKind::SshConnection,
+        "Collapsed Bastion",
+    );
+    let expanded_folder_id = tree.insert_root(ConsoleAssetKind::Folder, "Expanded");
+    tree.insert_child(
+        &expanded_folder_id,
+        ConsoleAssetKind::SshConnection,
+        "Expanded Bastion",
+    );
+    let ssh_id = tree.insert_root(ConsoleAssetKind::SshConnection, "Leaf SSH");
+    tree.set_expanded(&expanded_folder_id, true);
+
+    let rows = tree.project_visible_rows(AssetViewMode::Tree, "");
+
+    let collapsed_folder = rows
+        .iter()
+        .find(|row| row.id == collapsed_folder_id)
+        .expect("collapsed folder row should be projected");
+    let expanded_folder = rows
+        .iter()
+        .find(|row| row.id == expanded_folder_id)
+        .expect("expanded folder row should be projected");
+    let ssh_row = rows
+        .iter()
+        .find(|row| row.id == ssh_id)
+        .expect("ssh row should be projected");
+
+    assert_eq!(
+        collapsed_folder.disclosure_state,
+        AssetDisclosureState::Collapsed
+    );
+    assert_eq!(
+        expanded_folder.disclosure_state,
+        AssetDisclosureState::Expanded
+    );
+    assert_eq!(ssh_row.disclosure_state, AssetDisclosureState::None);
+}
+
+#[test]
 fn default_names_are_unique_within_parent_scope() {
     let mut tree = AssetTree::new();
     let root_folder = tree.insert_root(ConsoleAssetKind::Folder, "Folder 1");
@@ -25,12 +72,73 @@ fn default_names_are_unique_within_parent_scope() {
 
     assert_eq!(
         tree.next_default_name_for_parent(None, ConsoleAssetKind::Folder),
-        "Folder 3"
+        "Folder 1-1"
     );
     assert_eq!(
         tree.next_default_name_for_parent(Some(&root_folder), ConsoleAssetKind::Folder),
-        "Folder 2"
+        "Folder 1-1"
     );
+}
+
+#[test]
+fn parent_scope_uniqueness_blocks_cross_kind_duplicates() {
+    let mut tree = AssetTree::new();
+    tree.insert_root(ConsoleAssetKind::Folder, "Prod");
+
+    assert_eq!(
+        tree.validate_name_in_parent(None, "Prod", None),
+        AssetNameValidation::Duplicate
+    );
+}
+
+#[test]
+fn next_default_folder_name_uses_dash_suffix_after_base_collision() {
+    let siblings = [mica_term::shell::assets::MockConsoleAssetItem::new(
+        "folder-1",
+        ConsoleAssetKind::Folder,
+        "Folder 1",
+    )];
+
+    assert_eq!(next_default_name_from_base("Folder 1", &siblings), "Folder 1-1");
+}
+
+#[test]
+fn removing_folder_subtree_removes_all_descendants() {
+    let mut tree = AssetTree::new();
+    let root_id = tree.insert_root(ConsoleAssetKind::Folder, "Team");
+    let child_folder_id = tree.insert_child(&root_id, ConsoleAssetKind::Folder, "Prod");
+    let nested_ssh_id = tree.insert_child(&child_folder_id, ConsoleAssetKind::SshConnection, "Bastion");
+    let sibling_id = tree.insert_root(ConsoleAssetKind::SshConnection, "Standalone");
+
+    let removed = tree
+        .remove_subtree(&root_id)
+        .expect("folder subtree should be removed");
+
+    assert_eq!(removed.descendant_count, 2);
+    assert_eq!(
+        removed.removed_ids,
+        vec![root_id.clone(), child_folder_id.clone(), nested_ssh_id.clone()]
+    );
+    assert!(!tree.contains(&root_id));
+    assert!(!tree.contains(&child_folder_id));
+    assert!(!tree.contains(&nested_ssh_id));
+
+    let rows = tree.project_visible_rows(AssetViewMode::Tree, "");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, sibling_id);
+}
+
+#[test]
+fn descendant_count_reports_nested_item_total() {
+    let mut tree = AssetTree::new();
+    let root_id = tree.insert_root(ConsoleAssetKind::Folder, "Team");
+    let child_folder_id = tree.insert_child(&root_id, ConsoleAssetKind::Folder, "Prod");
+    let nested_ssh_id = tree.insert_child(&child_folder_id, ConsoleAssetKind::SshConnection, "Bastion");
+    tree.insert_child(&root_id, ConsoleAssetKind::SshConnection, "Ops");
+
+    assert_eq!(tree.descendant_count(&root_id), Some(3));
+    assert_eq!(tree.descendant_count(&child_folder_id), Some(1));
+    assert_eq!(tree.descendant_count(&nested_ssh_id), Some(0));
 }
 
 #[test]

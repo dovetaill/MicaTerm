@@ -723,3 +723,12 @@ Date: 2026-03-16 10:38:06 CST
 - Empty-query search dismiss is unified at shell level instead of split across local touch layers.
 - Inline rename is explicit-session based and no longer depends on implicit `has-focus` blur commit.
 - Default asset names now use same-type smallest-missing numbering for `Folder {n}` and `SSH Connection {n}`.
+
+## 2026-03-20 Windows Console Assets Explorer Behavior
+
+- disclosure state projection
+- parent-scope uniqueness
+- rename modal workflow
+- recursive delete confirm
+- focus fallback after removal
+- UI contract cleanup for inline rename removal

@@ -11,6 +11,8 @@ MENU_OVERLAY="$ROOT_DIR/ui/components/assets-context-menu-overlay.slint"
 ASSETS="$ROOT_DIR/ui/shell/assets-sidebar.slint"
 APP_WINDOW="$ROOT_DIR/ui/app-window.slint"
 TOKENS="$ROOT_DIR/ui/theme/tokens.slint"
+RENAME_MODAL="$ROOT_DIR/ui/components/assets-rename-modal.slint"
+DELETE_MODAL="$ROOT_DIR/ui/components/assets-delete-confirm-modal.slint"
 
 grep -F 'export component AssetNodeRow inherits Rectangle' "$ROW" >/dev/null
 grep -F 'in property <int> depth: 0;' "$ROW" >/dev/null
@@ -19,34 +21,38 @@ grep -F 'in property <bool> focused: false;' "$ROW" >/dev/null
 grep -F 'callback selected-requested(string);' "$ROW" >/dev/null
 grep -F 'callback toggle-expanded-requested(string);' "$ROW" >/dev/null
 grep -F 'callback context-menu-requested(string, string, length, length);' "$ROW" >/dev/null
-grep -F 'rename-input := TextInput {' "$ROW" >/dev/null
+! grep -F 'rename-input := TextInput {' "$ROW" >/dev/null
 grep -F 'pointer-event(event) => {' "$ROW" >/dev/null
 grep -F 'event.button == PointerEventButton.right' "$ROW" >/dev/null
 
 grep -F 'depth: int,' "$ASSETS" >/dev/null
 grep -F 'has_children: bool,' "$ASSETS" >/dev/null
 grep -F 'focused: bool,' "$ASSETS" >/dev/null
-grep -F 'renaming: bool,' "$ASSETS" >/dev/null
-grep -F 'rename_text: string,' "$ASSETS" >/dev/null
+grep -F 'disclosure_state: string,' "$ASSETS" >/dev/null
 grep -F 'callback asset-context-menu-requested(string, string, length, length);' "$ASSETS" >/dev/null
-grep -F 'callback asset-rename-text-changed(string, string);' "$ASSETS" >/dev/null
-grep -F 'callback asset-rename-commit-requested(string, string);' "$ASSETS" >/dev/null
-grep -F 'callback asset-rename-cancel-requested(string);' "$ASSETS" >/dev/null
+! grep -F 'callback asset-rename-text-changed(string, string);' "$ASSETS" >/dev/null
+! grep -F 'callback asset-rename-commit-requested(string, string);' "$ASSETS" >/dev/null
+! grep -F 'callback asset-rename-cancel-requested(string);' "$ASSETS" >/dev/null
 grep -F 'empty-state-context-touch := TouchArea {' "$ASSETS" >/dev/null
 grep -F 'list-blank-fill-context-touch := TouchArea {' "$ASSETS" >/dev/null
 grep -F 'selected-requested(item-id) => {' "$ASSETS" >/dev/null
 grep -F 'toggle-expanded-requested(item-id) => {' "$ASSETS" >/dev/null
 
 grep -F 'callback asset-context-menu-requested(string, string, length, length);' "$APP_WINDOW" >/dev/null
-grep -F 'callback asset-rename-text-changed(string, string);' "$APP_WINDOW" >/dev/null
-grep -F 'callback asset-rename-commit-requested(string, string);' "$APP_WINDOW" >/dev/null
-grep -F 'callback asset-rename-cancel-requested(string);' "$APP_WINDOW" >/dev/null
-grep -F 'callback dismiss-active-asset-rename-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback asset-rename-modal-name-changed(string);' "$APP_WINDOW" >/dev/null
+grep -F 'callback confirm-asset-rename-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback confirm-delete-asset-requested();' "$APP_WINDOW" >/dev/null
+! grep -F 'callback asset-rename-text-changed(string, string);' "$APP_WINDOW" >/dev/null
+! grep -F 'callback asset-rename-commit-requested(string, string);' "$APP_WINDOW" >/dev/null
+! grep -F 'callback asset-rename-cancel-requested(string);' "$APP_WINDOW" >/dev/null
+! grep -F 'callback dismiss-active-asset-rename-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback assets-context-menu-pointer-moved(length, length);' "$APP_WINDOW" >/dev/null
 grep -F 'assets-context-menu-overlay := AssetsContextMenuOverlay {' "$APP_WINDOW" >/dev/null
 grep -F 'assets-context-menu-dismiss-layer := TouchArea {' "$APP_WINDOW" >/dev/null
 grep -F 'StatusPill {' "$APP_WINDOW" >/dev/null
 grep -F 'root.context-menu-feedback-text' "$APP_WINDOW" >/dev/null
+grep -F 'export component AssetsRenameModal inherits Rectangle {' "$RENAME_MODAL" >/dev/null
+grep -F 'export component AssetsDeleteConfirmModal inherits Rectangle {' "$DELETE_MODAL" >/dev/null
 
 grep -F 'export component AssetsContextMenuRow inherits Rectangle' "$MENU_ROW" >/dev/null
 grep -F 'in property <image> icon-source;' "$MENU_ROW" >/dev/null

@@ -28,6 +28,7 @@ use crate::shell::context_menu::{
     context_menu_column_height, context_menu_column_offset, resolve_action_tree,
     resolve_root_menu_origin, should_keep_corridor_open, visible_columns_for_path,
 };
+use crate::shell::assets::AssetDisclosureState;
 use crate::shell::layout::{ShellLayoutInput, resolve_shell_layout};
 use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descriptor_for};
@@ -168,7 +169,6 @@ fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
 fn sync_assets_toolbar_state(window: &AppWindow, state: &ShellViewModel) {
     let descriptor = toolbar_descriptor_for(state.active_sidebar_destination, state);
     window.set_asset_view_mode(state.asset_view_mode.id().into());
-    window.set_asset_rename_active(state.editing_asset_id.is_some());
     window.set_asset_search_expanded(state.asset_search_expanded);
     window.set_assets_search_query(state.asset_search_query.clone().into());
     window.set_asset_create_menu_open(state.asset_create_menu_open);
@@ -211,6 +211,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_modal_kind("new-folder".into());
             window.set_asset_modal_can_confirm(state.can_confirm_asset_modal());
             window.set_asset_folder_modal_name(draft_name.clone().into());
+            window.set_asset_rename_modal_open(false);
+            window.set_asset_rename_modal_name("".into());
+            window.set_asset_rename_modal_validation_message("".into());
+            window.set_asset_rename_modal_can_confirm(false);
+            window.set_asset_delete_confirm_modal_open(false);
+            window.set_asset_delete_confirm_target_label("".into());
+            window.set_asset_delete_confirm_descendant_count(0);
             window.set_asset_ssh_modal_active_tab("standard".into());
             window.set_asset_ssh_modal_name("".into());
             window.set_asset_ssh_modal_host("".into());
@@ -226,6 +233,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_modal_kind("new-ssh-connection".into());
             window.set_asset_modal_can_confirm(state.can_confirm_asset_modal());
             window.set_asset_folder_modal_name("".into());
+            window.set_asset_rename_modal_open(false);
+            window.set_asset_rename_modal_name("".into());
+            window.set_asset_rename_modal_validation_message("".into());
+            window.set_asset_rename_modal_can_confirm(false);
+            window.set_asset_delete_confirm_modal_open(false);
+            window.set_asset_delete_confirm_target_label("".into());
+            window.set_asset_delete_confirm_descendant_count(0);
             window.set_asset_ssh_modal_active_tab(active_tab.id().into());
             window.set_asset_ssh_modal_name(draft.name.clone().into());
             window.set_asset_ssh_modal_host(draft.host.clone().into());
@@ -234,11 +248,64 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_environment(draft.environment.clone().into());
             window.set_asset_ssh_modal_proxy_method(draft.proxy_method.clone().into());
         }
+        Some(AssetModalState::RenameAsset { draft_name, .. }) => {
+            window.set_asset_modal_open(false);
+            window.set_asset_modal_kind("".into());
+            window.set_asset_modal_can_confirm(false);
+            window.set_asset_folder_modal_name("".into());
+            window.set_asset_rename_modal_open(true);
+            window.set_asset_rename_modal_name(draft_name.clone().into());
+            window.set_asset_rename_modal_validation_message(
+                state.asset_rename_modal_validation_message().into(),
+            );
+            window.set_asset_rename_modal_can_confirm(state.can_confirm_asset_modal());
+            window.set_asset_delete_confirm_modal_open(false);
+            window.set_asset_delete_confirm_target_label("".into());
+            window.set_asset_delete_confirm_descendant_count(0);
+            window.set_asset_ssh_modal_active_tab("standard".into());
+            window.set_asset_ssh_modal_name("".into());
+            window.set_asset_ssh_modal_host("".into());
+            window.set_asset_ssh_modal_user("".into());
+            window.set_asset_ssh_modal_port("22".into());
+            window.set_asset_ssh_modal_environment("".into());
+            window.set_asset_ssh_modal_proxy_method("".into());
+        }
+        Some(AssetModalState::DeleteAssetConfirm {
+            label,
+            descendant_count,
+            ..
+        }) => {
+            window.set_asset_modal_open(false);
+            window.set_asset_modal_kind("".into());
+            window.set_asset_modal_can_confirm(false);
+            window.set_asset_folder_modal_name("".into());
+            window.set_asset_rename_modal_open(false);
+            window.set_asset_rename_modal_name("".into());
+            window.set_asset_rename_modal_validation_message("".into());
+            window.set_asset_rename_modal_can_confirm(false);
+            window.set_asset_delete_confirm_modal_open(true);
+            window.set_asset_delete_confirm_target_label(label.clone().into());
+            window.set_asset_delete_confirm_descendant_count(*descendant_count as i32);
+            window.set_asset_ssh_modal_active_tab("standard".into());
+            window.set_asset_ssh_modal_name("".into());
+            window.set_asset_ssh_modal_host("".into());
+            window.set_asset_ssh_modal_user("".into());
+            window.set_asset_ssh_modal_port("22".into());
+            window.set_asset_ssh_modal_environment("".into());
+            window.set_asset_ssh_modal_proxy_method("".into());
+        }
         None => {
             window.set_asset_modal_open(false);
             window.set_asset_modal_kind("".into());
             window.set_asset_modal_can_confirm(false);
             window.set_asset_folder_modal_name("".into());
+            window.set_asset_rename_modal_open(false);
+            window.set_asset_rename_modal_name("".into());
+            window.set_asset_rename_modal_validation_message("".into());
+            window.set_asset_rename_modal_can_confirm(false);
+            window.set_asset_delete_confirm_modal_open(false);
+            window.set_asset_delete_confirm_target_label("".into());
+            window.set_asset_delete_confirm_descendant_count(0);
             window.set_asset_ssh_modal_active_tab("standard".into());
             window.set_asset_ssh_modal_name("".into());
             window.set_asset_ssh_modal_host("".into());
@@ -254,7 +321,10 @@ fn schedule_asset_modal_focus(window: &AppWindow) {
     let handle = window.as_weak();
     let _ = slint::invoke_from_event_loop(move || {
         let window = handle.unwrap();
-        if window.get_asset_modal_open() {
+        if window.get_asset_modal_open()
+            || window.get_asset_rename_modal_open()
+            || window.get_asset_delete_confirm_modal_open()
+        {
             window.set_asset_modal_focus_sequence(window.get_asset_modal_focus_sequence() + 1);
         }
     });
@@ -477,14 +547,13 @@ fn sync_console_assets(window: &AppWindow, state: &ShellViewModel) {
             expanded: row.expanded,
             selected: state.selected_asset_ids.iter().any(|id| id == &row.id),
             focused: state.focused_asset_id.as_deref() == Some(row.id.as_str()),
-            renaming: state.editing_asset_id.as_deref() == Some(row.id.as_str()),
-            rename_text: if state.editing_asset_id.as_deref() == Some(row.id.as_str()) {
-                state.editing_asset_text.clone().into()
-            } else {
-                "".into()
-            },
+            disclosure_state: match row.disclosure_state {
+                AssetDisclosureState::None => "none",
+                AssetDisclosureState::Collapsed => "collapsed",
+                AssetDisclosureState::Expanded => "expanded",
+            }
+            .into(),
             path_hint: row.path_hint.clone().unwrap_or_default().into(),
-            show_disclosure: row.show_disclosure,
             compact_flat_mode: state.asset_view_mode.id() == "flat",
         })
         .collect::<Vec<_>>();
@@ -721,7 +790,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_toggle_assets_sidebar_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.dismiss_active_asset_rename();
         state.toggle_assets_sidebar();
         sync_sidebar_state(&window, &state);
         let (width, height) = current_window_size(&window);
@@ -733,7 +801,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_sidebar_destination_selected(move |destination_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.dismiss_active_asset_rename();
         state.dismiss_empty_asset_search_on_shell_interaction();
         let destination = SidebarDestination::from_id(destination_id.as_str())
             .unwrap_or(SidebarDestination::Console);
@@ -748,7 +815,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_toggle_assets_search_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.dismiss_active_asset_rename();
         state.activate_asset_search();
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
@@ -769,7 +835,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_close_assets_search_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.dismiss_active_asset_rename();
         state.close_asset_search();
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
@@ -780,7 +845,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_collapse_assets_search_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.dismiss_active_asset_rename();
         state.collapse_asset_search_if_empty();
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
@@ -791,7 +855,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_toggle_assets_view_mode_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.dismiss_active_asset_rename();
         state.dismiss_empty_asset_search_on_shell_interaction();
         state.toggle_asset_view_mode();
         sync_assets_toolbar_state(&window, &state);
@@ -803,7 +866,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_toggle_assets_tree_expansion_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.dismiss_active_asset_rename();
         state.dismiss_empty_asset_search_on_shell_interaction();
         state.toggle_asset_tree_expansion();
         sync_assets_toolbar_state(&window, &state);
@@ -816,7 +878,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_toggle_assets_create_menu_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.dismiss_active_asset_rename();
         state.toggle_asset_create_menu();
         sync_assets_toolbar_state(&window, &state);
     });
@@ -836,7 +897,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let was_modal_open = state.asset_modal_state.is_some();
-        state.dismiss_active_asset_rename();
         state.dismiss_empty_asset_search_on_shell_interaction();
         state.handle_assets_create_action(action_id.as_str());
         sync_assets_toolbar_state(&window, &state);
@@ -871,6 +931,37 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    window.on_asset_rename_modal_name_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.update_rename_asset_modal_name(value.to_string());
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_confirm_asset_rename_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.confirm_asset_modal();
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_confirm_delete_asset_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.confirm_delete_asset();
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
     window.on_asset_folder_modal_name_changed(move |value| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -898,36 +989,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
-    window.on_asset_rename_text_changed(move |asset_id, text| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.update_asset_rename_draft(asset_id.as_str(), text.to_string());
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_asset_rename_commit_requested(move |asset_id, text| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.commit_asset_rename(asset_id.as_str(), text.to_string());
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_asset_rename_cancel_requested(move |asset_id| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.cancel_asset_rename(asset_id.as_str());
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
     window.on_asset_selected(move |item_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -951,7 +1012,6 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_asset_context_menu_requested(move |target_id, target_kind, anchor_x, anchor_y| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        state.dismiss_active_asset_rename();
         state.dismiss_empty_asset_search_on_shell_interaction();
         state.open_context_menu_for_target(
             parse_context_target_kind(target_kind.as_str()),
@@ -974,23 +1034,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window.on_shell_interaction_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        if state.editing_asset_id.is_some() {
-            state.dismiss_active_asset_rename();
-            sync_assets_toolbar_state(&window, &state);
-            sync_console_assets(&window, &state);
-        } else if state.dismiss_empty_asset_search_on_shell_interaction() {
-            sync_assets_toolbar_state(&window, &state);
-            sync_console_assets(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_dismiss_active_asset_rename_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if state.editing_asset_id.is_some() {
-            state.dismiss_active_asset_rename();
+        if state.dismiss_empty_asset_search_on_shell_interaction() {
             sync_assets_toolbar_state(&window, &state);
             sync_console_assets(&window, &state);
         }

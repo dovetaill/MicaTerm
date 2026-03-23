@@ -105,6 +105,20 @@ impl MockConsoleAssetItem {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetDisclosureState {
+    None,
+    Collapsed,
+    Expanded,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetNameValidation {
+    Valid,
+    Empty,
+    Duplicate,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetNode {
     pub id: String,
@@ -123,8 +137,15 @@ pub struct VisibleAssetRow {
     pub depth: usize,
     pub has_children: bool,
     pub expanded: bool,
+    pub disclosure_state: AssetDisclosureState,
     pub path_hint: Option<String>,
     pub show_disclosure: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemovedAssetSummary {
+    pub removed_ids: Vec<String>,
+    pub descendant_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -287,6 +308,60 @@ impl AssetTree {
         next_default_name(kind, &sibling_items)
     }
 
+    pub fn validate_name_in_parent(
+        &self,
+        parent_id: Option<&str>,
+        candidate: &str,
+        exclude_id: Option<&str>,
+    ) -> AssetNameValidation {
+        let trimmed = candidate.trim();
+        if trimmed.is_empty() {
+            return AssetNameValidation::Empty;
+        }
+
+        let sibling_items = self.sibling_items_for_parent(parent_id, exclude_id);
+        if sibling_items
+            .iter()
+            .any(|item| item.label.trim() == trimmed)
+        {
+            AssetNameValidation::Duplicate
+        } else {
+            AssetNameValidation::Valid
+        }
+    }
+
+    pub fn descendant_count(&self, node_id: &str) -> Option<usize> {
+        let mut subtree_ids = Vec::new();
+        self.collect_subtree_ids(node_id, &mut subtree_ids)?;
+        Some(subtree_ids.len().saturating_sub(1))
+    }
+
+    pub fn remove_subtree(&mut self, node_id: &str) -> Option<RemovedAssetSummary> {
+        let parent_id = self.nodes.get(node_id)?.parent_id.clone();
+        let mut removed_ids = Vec::new();
+        self.collect_subtree_ids(node_id, &mut removed_ids)?;
+
+        match parent_id {
+            Some(parent_id) => {
+                if let Some(parent) = self.nodes.get_mut(&parent_id) {
+                    parent.children.retain(|child_id| child_id != node_id);
+                }
+            }
+            None => {
+                self.root_ids.retain(|root_id| root_id != node_id);
+            }
+        }
+
+        for removed_id in &removed_ids {
+            self.nodes.remove(removed_id);
+        }
+
+        Some(RemovedAssetSummary {
+            descendant_count: removed_ids.len().saturating_sub(1),
+            removed_ids,
+        })
+    }
+
     fn next_id(&mut self) -> String {
         let id = format!("asset-{}", self.next_serial);
         self.next_serial += 1;
@@ -387,6 +462,12 @@ impl AssetTree {
     }
 
     fn row_from_node(&self, node: &AssetNode, depth: usize) -> VisibleAssetRow {
+        let disclosure_state = match (node.kind, node.children.is_empty(), node.expanded) {
+            (ConsoleAssetKind::Folder, false, false) => AssetDisclosureState::Collapsed,
+            (ConsoleAssetKind::Folder, false, true) => AssetDisclosureState::Expanded,
+            _ => AssetDisclosureState::None,
+        };
+
         VisibleAssetRow {
             id: node.id.clone(),
             kind: node.kind,
@@ -394,6 +475,7 @@ impl AssetTree {
             depth,
             has_children: !node.children.is_empty(),
             expanded: node.expanded,
+            disclosure_state,
             path_hint: None,
             show_disclosure: node.kind == ConsoleAssetKind::Folder && !node.children.is_empty(),
         }
@@ -407,6 +489,7 @@ impl AssetTree {
             depth: 0,
             has_children: false,
             expanded: false,
+            disclosure_state: AssetDisclosureState::None,
             path_hint: self.path_hint_for_node(node),
             show_disclosure: false,
         }
@@ -428,6 +511,15 @@ impl AssetTree {
 
         ancestors.reverse();
         (!ancestors.is_empty()).then(|| ancestors.join(" / "))
+    }
+
+    fn collect_subtree_ids(&self, node_id: &str, output: &mut Vec<String>) -> Option<()> {
+        let node = self.nodes.get(node_id)?;
+        output.push(node.id.clone());
+        for child_id in &node.children {
+            self.collect_subtree_ids(child_id, output)?;
+        }
+        Some(())
     }
 }
 
@@ -458,17 +550,40 @@ fn parse_custom_name_suffix(base: &str, label: &str) -> Option<u32> {
     (index > 0).then_some(index)
 }
 
-pub fn next_default_name(kind: ConsoleAssetKind, items: &[MockConsoleAssetItem]) -> String {
-    let used = items
+fn parse_dashed_name_suffix(base: &str, label: &str) -> Option<u32> {
+    let trimmed = label.trim();
+    if trimmed == base {
+        return Some(0);
+    }
+
+    let suffix = trimmed.strip_prefix(base)?.strip_prefix('-')?;
+    if suffix.len() > 1 && suffix.starts_with('0') {
+        return None;
+    }
+
+    let index = suffix.parse::<u32>().ok()?;
+    (index > 0).then_some(index)
+}
+
+pub fn next_default_name_from_base(base: &str, siblings: &[MockConsoleAssetItem]) -> String {
+    let used = siblings
         .iter()
-        .filter(|item| item.kind == kind)
-        .filter_map(|item| parse_default_name_index(kind, &item.label))
+        .filter_map(|item| parse_dashed_name_suffix(base, &item.label))
         .collect::<BTreeSet<_>>();
 
-    let next_index = (1..)
-        .find(|index| !used.contains(index))
+    if !used.contains(&0) {
+        return base.to_string();
+    }
+
+    let next_suffix = (1..)
+        .find(|suffix| !used.contains(suffix))
         .expect("positive integers are unbounded");
-    format!("{} {}", kind.default_name_prefix(), next_index)
+    format!("{base}-{next_suffix}")
+}
+
+pub fn next_default_name(kind: ConsoleAssetKind, items: &[MockConsoleAssetItem]) -> String {
+    let base = format!("{} 1", kind.default_name_prefix());
+    next_default_name_from_base(&base, items)
 }
 
 pub fn resolve_committed_name(
@@ -483,7 +598,6 @@ pub fn resolve_committed_name(
 
     let conflicts_existing_name = items
         .iter()
-        .filter(|item| item.kind == kind)
         .any(|item| item.label.trim() == trimmed);
     if conflicts_existing_name && parse_default_name_index(kind, trimmed).is_some() {
         return next_default_name(kind, items);
@@ -491,7 +605,6 @@ pub fn resolve_committed_name(
     if conflicts_existing_name {
         let used = items
             .iter()
-            .filter(|item| item.kind == kind)
             .filter_map(|item| parse_custom_name_suffix(trimmed, &item.label))
             .collect::<BTreeSet<_>>();
         let next_index = (1..)

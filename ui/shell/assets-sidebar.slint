@@ -15,10 +15,8 @@ export struct ConsoleAssetItem {
     expanded: bool,
     selected: bool,
     focused: bool,
-    renaming: bool,
-    rename_text: string,
+    disclosure_state: string,
     path_hint: string,
-    show_disclosure: bool,
     compact_flat_mode: bool,
 }
 
@@ -56,9 +54,6 @@ export component AssetsSidebar inherits Rectangle {
     callback asset-selected(string);
     callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
-    callback asset-rename-text-changed(string, string);
-    callback asset-rename-commit-requested(string, string);
-    callback asset-rename-cancel-requested(string);
     callback shell-interaction-requested();
     callback tooltip-open-requested(string, string, length, length, length);
     callback tooltip-close-requested(string);
@@ -298,10 +293,8 @@ export component AssetsSidebar inherits Rectangle {
                         expanded: item.expanded;
                         selected: item.selected;
                         focused: item.focused;
-                        renaming: item.renaming;
-                        rename-text: item.rename_text;
+                        disclosure-state: item.disclosure_state;
                         path-hint: item.path_hint;
-                        show-disclosure: item.show_disclosure;
                         compact-flat-mode: item.compact_flat_mode;
 
                         selected-requested(item-id) => {
@@ -314,18 +307,6 @@ export component AssetsSidebar inherits Rectangle {
 
                         context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
                             root.asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
-                        }
-
-                        rename-text-changed(item-id, text) => {
-                            root.asset-rename-text-changed(item-id, text);
-                        }
-
-                        rename-commit-requested(item-id, text) => {
-                            root.asset-rename-commit-requested(item-id, text);
-                        }
-
-                        rename-cancel-requested(item-id) => {
-                            root.asset-rename-cancel-requested(item-id);
                         }
 
                         pointer-activity-requested => {
