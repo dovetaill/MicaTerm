@@ -733,6 +733,14 @@ Date: 2026-03-16 10:38:06 CST
 - focus fallback after removal
 - UI contract cleanup for inline rename removal
 
+### 2026-03-23 Re-Verification
+
+- [x] `cargo test --test assets_explorer_projection --test shell_view_model --test assets_context_menu_spec --test assets_context_menu_smoke --test assets_modal_smoke`
+- [x] `bash tests/assets_explorer_ui_contract_smoke.sh`
+- [x] `bash tests/assets_context_menu_ui_contract_smoke.sh`
+- [x] `bash tests/assets_modal_ui_contract_smoke.sh`
+- [x] `cargo test --test assets_explorer_smoke --test assets_sidebar_toolbar_smoke`
+
 ## Windows Console Assets Persistence Verification
 
 Date: 2026-03-23 11:34:00 CST
