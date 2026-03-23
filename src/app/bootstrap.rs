@@ -234,6 +234,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_host("".into());
             window.set_asset_ssh_modal_user("".into());
             window.set_asset_ssh_modal_port("22".into());
+            window.set_asset_ssh_modal_auth_method("password".into());
+            window.set_asset_ssh_modal_private_key_source("content".into());
+            window.set_asset_ssh_modal_password("".into());
+            window.set_asset_ssh_modal_private_key_content("".into());
+            window.set_asset_ssh_modal_private_key_path("".into());
+            window.set_asset_ssh_modal_passphrase("".into());
+            window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
@@ -259,6 +266,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_host(draft.host.clone().into());
             window.set_asset_ssh_modal_user(draft.user.clone().into());
             window.set_asset_ssh_modal_port(draft.port.clone().into());
+            window.set_asset_ssh_modal_auth_method(draft.auth_method.clone().into());
+            window.set_asset_ssh_modal_private_key_source(draft.private_key_source.clone().into());
+            window.set_asset_ssh_modal_password(draft.password.clone().into());
+            window.set_asset_ssh_modal_private_key_content(draft.private_key_content.clone().into());
+            window.set_asset_ssh_modal_private_key_path(draft.private_key_path.clone().into());
+            window.set_asset_ssh_modal_passphrase(draft.passphrase.clone().into());
+            window.set_asset_ssh_modal_remark(draft.remark.clone().into());
             window.set_asset_ssh_modal_environment(draft.environment.clone().into());
             window.set_asset_ssh_modal_proxy_method(draft.proxy_method.clone().into());
         }
@@ -282,6 +296,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_host("".into());
             window.set_asset_ssh_modal_user("".into());
             window.set_asset_ssh_modal_port("22".into());
+            window.set_asset_ssh_modal_auth_method("password".into());
+            window.set_asset_ssh_modal_private_key_source("content".into());
+            window.set_asset_ssh_modal_password("".into());
+            window.set_asset_ssh_modal_private_key_content("".into());
+            window.set_asset_ssh_modal_private_key_path("".into());
+            window.set_asset_ssh_modal_passphrase("".into());
+            window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
@@ -307,6 +328,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_host("".into());
             window.set_asset_ssh_modal_user("".into());
             window.set_asset_ssh_modal_port("22".into());
+            window.set_asset_ssh_modal_auth_method("password".into());
+            window.set_asset_ssh_modal_private_key_source("content".into());
+            window.set_asset_ssh_modal_password("".into());
+            window.set_asset_ssh_modal_private_key_content("".into());
+            window.set_asset_ssh_modal_private_key_path("".into());
+            window.set_asset_ssh_modal_passphrase("".into());
+            window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
@@ -328,6 +356,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_host("".into());
             window.set_asset_ssh_modal_user("".into());
             window.set_asset_ssh_modal_port("22".into());
+            window.set_asset_ssh_modal_auth_method("password".into());
+            window.set_asset_ssh_modal_private_key_source("content".into());
+            window.set_asset_ssh_modal_password("".into());
+            window.set_asset_ssh_modal_private_key_content("".into());
+            window.set_asset_ssh_modal_private_key_path("".into());
+            window.set_asset_ssh_modal_passphrase("".into());
+            window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
@@ -1093,6 +1128,21 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.update_ssh_modal_field(field.as_str(), value.to_string());
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let asset_repo_ref = asset_repo.clone();
+    window.on_asset_ssh_modal_action_requested(move |action| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let did_mutate = state.begin_ssh_modal_action(action.as_str());
+        if did_mutate {
+            save_asset_catalog_if_available(&asset_repo_ref, &state);
+        }
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
         sync_asset_modal_state(&window, &state);
     });
 

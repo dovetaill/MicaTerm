@@ -20,6 +20,7 @@ pub enum WelcomeAction {
     Sftp,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetModalState {
     NewFolder {
@@ -75,14 +76,43 @@ impl AssetSshModalTab {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetSshConnectionDraft {
     pub name: String,
     pub host: String,
     pub user: String,
     pub port: String,
+    pub auth_method: String,
+    pub private_key_source: String,
+    pub password: String,
+    pub private_key_content: String,
+    pub private_key_path: String,
+    pub passphrase: String,
+    pub remark: String,
     pub environment: String,
     pub proxy_method: String,
+    pub validation_message: String,
+}
+
+impl Default for AssetSshConnectionDraft {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            host: String::new(),
+            user: String::new(),
+            port: "22".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            password: String::new(),
+            private_key_content: String::new(),
+            private_key_path: String::new(),
+            passphrase: String::new(),
+            remark: String::new(),
+            environment: String::new(),
+            proxy_method: String::new(),
+            validation_message: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,9 +229,7 @@ impl ShellViewModel {
             ),
             Some(AssetModalState::NewSshConnection {
                 parent_id, draft, ..
-            }) => asset_name_validation_message(
-                self.create_asset_modal_validation(parent_id.as_deref(), &draft.name),
-            ),
+            }) => self.ssh_modal_validation_message(parent_id.as_deref(), draft),
             _ => String::new(),
         }
     }
@@ -217,11 +245,7 @@ impl ShellViewModel {
             }
             Some(AssetModalState::NewSshConnection {
                 parent_id, draft, ..
-            }) => {
-                self.create_asset_modal_validation(parent_id.as_deref(), &draft.name)
-                    == AssetNameValidation::Valid
-                    && !draft.host.trim().is_empty()
-            }
+            }) => self.ssh_modal_can_confirm(parent_id.as_deref(), draft),
             _ => false,
         }
     }
@@ -379,7 +403,6 @@ impl ShellViewModel {
             active_tab: AssetSshModalTab::Standard,
             draft: AssetSshConnectionDraft {
                 name: draft_name,
-                port: "22".into(),
                 ..AssetSshConnectionDraft::default()
             },
         });
@@ -453,10 +476,27 @@ impl ShellViewModel {
             "host" => draft.host = value,
             "user" => draft.user = value,
             "port" => draft.port = value,
+            "auth_method" => {
+                if matches!(value.as_str(), "password" | "private-key") {
+                    draft.auth_method = value;
+                }
+            }
+            "private_key_source" => {
+                if matches!(value.as_str(), "content" | "path") {
+                    draft.private_key_source = value;
+                }
+            }
+            "password" => draft.password = value,
+            "private_key_content" => draft.private_key_content = value,
+            "private_key_path" => draft.private_key_path = value,
+            "passphrase" => draft.passphrase = value,
+            "remark" => draft.remark = value,
             "environment" => draft.environment = value,
             "proxy_method" => draft.proxy_method = value,
             _ => {}
         }
+
+        draft.validation_message.clear();
     }
 
     pub fn update_ssh_modal_name(&mut self, value: String) {
@@ -479,6 +519,38 @@ impl ShellViewModel {
         };
 
         *active_tab = next_tab;
+    }
+
+    pub fn begin_ssh_modal_action(&mut self, action_id: &str) -> bool {
+        let Some(AssetModalState::NewSshConnection { parent_id, draft, .. }) =
+            self.asset_modal_state.as_ref()
+        else {
+            return false;
+        };
+
+        let validation_message =
+            self.ssh_modal_submit_validation_message(parent_id.as_deref(), draft);
+
+        if let Some(AssetModalState::NewSshConnection { draft, .. }) = self.asset_modal_state.as_mut()
+        {
+            draft.validation_message = validation_message.unwrap_or_default();
+        }
+
+        if self.asset_create_modal_validation_message().is_empty() {
+            match action_id {
+                "save" => return self.confirm_asset_modal(),
+                "connect" => self.set_ssh_modal_feedback("Connect is not wired in this phase."),
+                "test" => {
+                    self.set_ssh_modal_feedback("Test Connection is not wired in this phase.")
+                }
+                "save-and-connect" => {
+                    self.set_ssh_modal_feedback("Save and Connect is not wired in this phase.")
+                }
+                _ => self.set_ssh_modal_feedback("Unsupported SSH action."),
+            }
+        }
+
+        false
     }
 
     pub fn can_confirm_asset_modal(&self) -> bool {
@@ -518,7 +590,10 @@ impl ShellViewModel {
             AssetModalState::NewSshConnection {
                 parent_id, draft, ..
             } => {
-                if draft.host.trim().is_empty() {
+                if self
+                    .ssh_modal_submit_validation_message(parent_id.as_deref(), &draft)
+                    .is_some()
+                {
                     return false;
                 }
                 let payload = AssetNodePayload::SshConnection(AssetSshConnectionSpec {
@@ -1001,6 +1076,86 @@ fn asset_name_validation_message(validation: AssetNameValidation) -> String {
         AssetNameValidation::Valid => String::new(),
         AssetNameValidation::Empty => "Name is required.".into(),
         AssetNameValidation::Duplicate => "Name already exists in this folder.".into(),
+    }
+}
+
+impl ShellViewModel {
+    fn ssh_modal_validation_message(
+        &self,
+        parent_id: Option<&str>,
+        draft: &AssetSshConnectionDraft,
+    ) -> String {
+        let name_message = asset_name_validation_message(
+            self.create_asset_modal_validation(parent_id, &draft.name),
+        );
+        if !name_message.is_empty() {
+            return name_message;
+        }
+
+        draft.validation_message.clone()
+    }
+
+    fn ssh_modal_can_confirm(
+        &self,
+        parent_id: Option<&str>,
+        draft: &AssetSshConnectionDraft,
+    ) -> bool {
+        self.create_asset_modal_validation(parent_id, &draft.name) == AssetNameValidation::Valid
+            && self.ssh_modal_submit_validation_message(parent_id, draft).is_none()
+    }
+
+    fn ssh_modal_submit_validation_message(
+        &self,
+        parent_id: Option<&str>,
+        draft: &AssetSshConnectionDraft,
+    ) -> Option<String> {
+        let name_message = asset_name_validation_message(
+            self.create_asset_modal_validation(parent_id, &draft.name),
+        );
+        if !name_message.is_empty() {
+            return Some(name_message);
+        }
+
+        if draft.host.trim().is_empty() {
+            return Some("Host is required.".into());
+        }
+
+        if draft.user.trim().is_empty() {
+            return Some("User is required.".into());
+        }
+
+        match draft.auth_method.as_str() {
+            "password" => {
+                if draft.password.trim().is_empty() {
+                    return Some("Password is required.".into());
+                }
+            }
+            "private-key" => match draft.private_key_source.as_str() {
+                "path" => {
+                    if draft.private_key_path.trim().is_empty() {
+                        return Some("Private key path is required.".into());
+                    }
+                }
+                "content" => {
+                    if draft.private_key_content.trim().is_empty() {
+                        return Some("Private key content is required.".into());
+                    }
+                }
+                _ => return Some("Private key source is required.".into()),
+            },
+            _ => return Some("Authentication method is required.".into()),
+        }
+
+        None
+    }
+
+    fn set_ssh_modal_feedback(&mut self, message: &str) {
+        let Some(AssetModalState::NewSshConnection { draft, .. }) = self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        draft.validation_message = message.into();
     }
 }
 

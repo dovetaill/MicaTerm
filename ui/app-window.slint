@@ -53,6 +53,13 @@ export component AppWindow inherits Window {
     in-out property <string> asset-ssh-modal-host: "";
     in-out property <string> asset-ssh-modal-user: "";
     in-out property <string> asset-ssh-modal-port: "22";
+    in-out property <string> asset-ssh-modal-auth-method: "password";
+    in-out property <string> asset-ssh-modal-private-key-source: "content";
+    in-out property <string> asset-ssh-modal-password: "";
+    in-out property <string> asset-ssh-modal-private-key-content: "";
+    in-out property <string> asset-ssh-modal-private-key-path: "";
+    in-out property <string> asset-ssh-modal-passphrase: "";
+    in-out property <string> asset-ssh-modal-remark: "";
     in-out property <string> asset-ssh-modal-environment: "";
     in-out property <string> asset-ssh-modal-proxy-method: "";
     in-out property <string> asset-primary-create-action-id: "";
@@ -136,6 +143,7 @@ export component AppWindow inherits Window {
     callback asset-folder-modal-name-changed(string);
     callback asset-ssh-modal-tab-selected(string);
     callback asset-ssh-modal-draft-changed(string, string);
+    callback asset-ssh-modal-action-requested(string);
     callback asset-selected(string);
     callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
@@ -525,6 +533,13 @@ export component AppWindow inherits Window {
         host: root.asset-ssh-modal-host;
         user: root.asset-ssh-modal-user;
         port: root.asset-ssh-modal-port;
+        auth-method: root.asset-ssh-modal-auth-method;
+        private-key-source: root.asset-ssh-modal-private-key-source;
+        password: root.asset-ssh-modal-password;
+        private-key-content: root.asset-ssh-modal-private-key-content;
+        private-key-path: root.asset-ssh-modal-private-key-path;
+        passphrase: root.asset-ssh-modal-passphrase;
+        remark: root.asset-ssh-modal-remark;
         environment: root.asset-ssh-modal-environment;
         proxy-method: root.asset-ssh-modal-proxy-method;
         validation-message: root.asset-modal-validation-message;
@@ -545,6 +560,10 @@ export component AppWindow inherits Window {
 
         draft-changed(field, value) => {
             root.asset-ssh-modal-draft-changed(field, value);
+        }
+
+        action-requested(action-id) => {
+            root.asset-ssh-modal-action-requested(action-id);
         }
     }
 

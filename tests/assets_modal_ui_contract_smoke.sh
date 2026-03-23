@@ -34,8 +34,13 @@ grep -F 'export component AssetsDeleteConfirmModal inherits Rectangle {' "$DELET
 grep -F 'in property <string> active-tab: "standard";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> validation-message: "";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm: false;' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> auth-method:' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> private-key-source:' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> password:' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> remark:' "$SSH_MODAL" >/dev/null
 grep -F 'callback tab-selected(string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SSH_MODAL" >/dev/null
+grep -F 'callback action-requested(string);' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> item-name;' "$RENAME_MODAL" >/dev/null
 grep -F 'in property <string> validation-message;' "$RENAME_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm;' "$RENAME_MODAL" >/dev/null

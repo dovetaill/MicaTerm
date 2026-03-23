@@ -243,12 +243,80 @@ fn opening_new_ssh_modal_commits_active_rename_and_clears_editing_state() {
 }
 
 #[test]
-fn confirming_new_ssh_modal_requires_name_and_host() {
+fn confirming_new_ssh_modal_requires_host_user_and_password_by_default() {
     let mut view_model = ShellViewModel::default();
     view_model.open_new_ssh_modal(None);
     assert!(!view_model.can_confirm_asset_modal());
 
     view_model.update_ssh_modal_host("10.0.0.12".into());
+    assert!(!view_model.can_confirm_asset_modal());
+
+    view_model.update_ssh_modal_field("user", "ops".into());
+    assert!(!view_model.can_confirm_asset_modal());
+
+    view_model.update_ssh_modal_field("password", "secret".into());
+    assert!(view_model.can_confirm_asset_modal());
+}
+
+#[test]
+fn ssh_modal_default_draft_starts_with_password_auth_and_port_22() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_new_ssh_modal(None);
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection {
+            active_tab: AssetSshModalTab::Standard,
+            ref draft,
+            ..
+        }) if draft.auth_method == "password"
+            && draft.port == "22"
+            && draft.private_key_source == "content"
+    ));
+}
+
+#[test]
+fn ssh_modal_validation_requires_name_host_user_and_active_auth_payload() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_new_ssh_modal(None);
+
+    view_model.update_ssh_modal_field("host", "10.0.0.12".into());
+    assert!(!view_model.can_confirm_asset_modal());
+
+    view_model.update_ssh_modal_field("user", "ops".into());
+    assert!(!view_model.can_confirm_asset_modal());
+
+    view_model.update_ssh_modal_field("password", "secret".into());
+    assert!(view_model.can_confirm_asset_modal());
+
+    view_model.update_ssh_modal_field("auth_method", "private-key".into());
+    view_model.update_ssh_modal_field("password", "".into());
+    assert!(!view_model.can_confirm_asset_modal());
+
+    view_model.update_ssh_modal_field("private_key_source", "path".into());
+    view_model.update_ssh_modal_field("private_key_path", "/tmp/id_ed25519".into());
+    assert!(view_model.can_confirm_asset_modal());
+}
+
+#[test]
+fn switching_auth_method_clears_irrelevant_validation_errors() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_field("host", "10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+
+    view_model.update_ssh_modal_field("auth_method", "private-key".into());
+    view_model.update_ssh_modal_field("private_key_source", "content".into());
+    assert!(!view_model.can_confirm_asset_modal());
+
+    view_model.update_ssh_modal_field("password", "stale-password".into());
+    assert!(!view_model.can_confirm_asset_modal());
+
+    view_model.update_ssh_modal_field(
+        "private_key_content",
+        "-----BEGIN OPENSSH PRIVATE KEY-----".into(),
+    );
     assert!(view_model.can_confirm_asset_modal());
 }
 
@@ -431,6 +499,8 @@ fn conflicting_manual_input_keeps_user_text_and_disables_confirm() {
     view_model.open_new_ssh_modal(None);
     view_model.update_ssh_modal_name("SSH Connection 1".into());
     view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("password", "secret".into());
     view_model.confirm_asset_modal();
 
     let rows = view_model.visible_console_asset_rows();
@@ -606,6 +676,8 @@ fn folder_context_create_confirm_auto_expands_parent_and_projects_child_row() {
 
     view_model.update_ssh_modal_name("SSH Connection 1".into());
     view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("password", "secret".into());
     view_model.confirm_asset_modal();
 
     let rows = view_model.visible_console_asset_rows();
@@ -646,6 +718,8 @@ fn deleting_selected_row_focuses_next_sibling_then_previous_then_parent() {
     view_model.open_new_ssh_modal(Some(alpha_id.clone()));
     view_model.update_ssh_modal_name("Child".into());
     view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("password", "secret".into());
     view_model.confirm_asset_modal();
     let child_id = view_model
         .visible_console_asset_rows()
@@ -745,6 +819,8 @@ fn delete_context_action_opens_destructive_confirm_modal() {
     view_model.open_new_ssh_modal(Some(folder_id.clone()));
     view_model.update_ssh_modal_name("Bastion".into());
     view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("password", "secret".into());
     view_model.confirm_asset_modal();
 
     view_model.open_context_menu_for_target(
@@ -782,6 +858,8 @@ fn confirming_folder_delete_removes_descendants_and_restores_focus() {
     view_model.open_new_ssh_modal(Some(beta_id.clone()));
     view_model.update_ssh_modal_name("Nested SSH".into());
     view_model.update_ssh_modal_host("10.0.0.13".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("password", "secret".into());
     view_model.confirm_asset_modal();
 
     view_model.select_asset(&beta_id);
