@@ -13,6 +13,7 @@ use crate::AppWindow;
 use crate::AssetsContextMenuItem;
 use crate::ConsoleAssetItem;
 use crate::app::app_paths::{AppRootPathInputs, resolve_app_root_paths};
+use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
     RedbAssetCatalogStore, asset_tree_to_catalog, catalog_to_asset_tree,
@@ -1393,10 +1394,14 @@ pub fn bind_top_status_bar(window: &AppWindow) {
 }
 
 pub fn run() -> Result<()> {
-    run_with_profile(AppRuntimeProfile::mainline())
+    let async_runtime = AppAsyncRuntime::new()?;
+    run_with_profile(AppRuntimeProfile::mainline(), async_runtime.handle())
 }
 
-pub fn run_with_profile(profile: AppRuntimeProfile) -> Result<()> {
+pub fn run_with_profile(
+    profile: AppRuntimeProfile,
+    _async_runtime_handle: tokio::runtime::Handle,
+) -> Result<()> {
     let window = AppWindow::new()?;
     window.set_window_title(runtime_window_title(profile).into());
     bind_top_status_bar_with_profile(&window, profile);

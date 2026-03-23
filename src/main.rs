@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // Binary entrypoint that selects the runtime profile, initializes logging, and launches the UI.
 
-use mica_term::app::runtime_profile::AppRuntimeProfile;
+use mica_term::app::{async_runtime::AppAsyncRuntime, runtime_profile::AppRuntimeProfile};
 
 fn select_runtime_profile() -> AppRuntimeProfile {
     AppRuntimeProfile::mainline()
@@ -40,6 +40,7 @@ fn apply_renderer_selector(_profile: AppRuntimeProfile) -> anyhow::Result<()> {
 
 fn main() -> anyhow::Result<()> {
     let profile = select_runtime_profile();
+    let async_runtime = AppAsyncRuntime::new()?;
     // Logging starts before UI initialization so startup failures and panic hooks always have a
     // stable place to write diagnostics.
     let logging = match mica_term::app::logging::runtime::try_init_global_logging() {
@@ -64,7 +65,7 @@ fn main() -> anyhow::Result<()> {
     mica_term::app::logging::runtime::emit_runtime_profile_metadata(profile);
     apply_renderer_selector(profile)?;
 
-    if let Err(err) = mica_term::app::bootstrap::run_with_profile(profile) {
+    if let Err(err) = mica_term::app::bootstrap::run_with_profile(profile, async_runtime.handle()) {
         // Mirror fatal startup errors to stderr and the crash directory so failures remain visible
         // in both interactive and packaged launches.
         if let Some(message) =
