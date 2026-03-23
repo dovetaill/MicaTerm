@@ -90,6 +90,15 @@ fn window_shell_exposes_resize_border_for_frameless_resize() {
 }
 
 #[test]
+fn tab_bar_contract_requires_workspace_tab_model_instead_of_single_placeholder() {
+    let content = std::fs::read_to_string("ui/shell/tabbar.slint").unwrap();
+
+    assert!(content.contains("export struct WorkspaceTabItem {"));
+    assert!(content.contains("in property <[WorkspaceTabItem]> items: [];"));
+    assert!(content.contains("for item in root.items : ActiveTab {"));
+}
+
+#[test]
 fn window_shell_exposes_minimum_window_budget() {
     let spec = window_command_spec();
 

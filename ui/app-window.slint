@@ -7,6 +7,7 @@ import { AssetsDeleteConfirmModal } from "components/assets-delete-confirm-modal
 import { AssetsFolderCreateModal } from "components/assets-folder-create-modal.slint";
 import { AssetsRenameModal } from "components/assets-rename-modal.slint";
 import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal.slint";
+import { SshHostKeyConfirmModal } from "components/ssh-host-key-confirm-modal.slint";
 import { StatusPill } from "components/status-pill.slint";
 import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
@@ -14,9 +15,9 @@ import { WindowResizeGrips } from "components/window-resize-grips.slint";
 import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { RightPanel } from "shell/right-panel.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
-import { TabBar } from "shell/tabbar.slint";
+import { TabBar, WorkspaceTabItem } from "shell/tabbar.slint";
+import { TerminalSessionHost } from "shell/terminal-session-host.slint";
 import { Titlebar } from "shell/titlebar.slint";
-import { WelcomeView } from "welcome/welcome-view.slint";
 
 export component AppWindow inherits Window {
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
@@ -48,6 +49,9 @@ export component AppWindow inherits Window {
     in-out property <bool> asset-delete-confirm-modal-open: false;
     in-out property <string> asset-delete-confirm-target-label: "";
     in-out property <int> asset-delete-confirm-descendant-count: 0;
+    in-out property <bool> ssh-host-key-modal-open: false;
+    in-out property <string> ssh-host-key-modal-host: "";
+    in-out property <string> ssh-host-key-modal-fingerprint: "";
     in-out property <string> asset-ssh-modal-active-tab: "standard";
     in-out property <string> asset-ssh-modal-name: "";
     in-out property <string> asset-ssh-modal-host: "";
@@ -70,6 +74,13 @@ export component AppWindow inherits Window {
     in-out property <bool> asset-show-tree-controls: true;
     in-out property <bool> asset-tree-controls-enabled: true;
     in-out property <[ConsoleAssetItem]> console-asset-items: [];
+    in-out property <[WorkspaceTabItem]> workspace-tab-items: [];
+    in-out property <string> active-workspace-session-id: "";
+    in-out property <string> workspace-session-host-mode: "welcome";
+    in-out property <string> workspace-session-title: "";
+    in-out property <string> workspace-session-subtitle: "";
+    in-out property <string> workspace-session-state: "";
+    in-out property <bool> workspace-session-can-reconnect: false;
     in-out property <bool> assets-context-menu-open: false;
     in-out property <length> assets-context-menu-anchor-x: 0px;
     in-out property <length> assets-context-menu-anchor-y: 0px;
@@ -144,6 +155,10 @@ export component AppWindow inherits Window {
     callback asset-ssh-modal-tab-selected(string);
     callback asset-ssh-modal-draft-changed(string, string);
     callback asset-ssh-modal-action-requested(string);
+    callback ssh-host-key-modal-accept-requested();
+    callback ssh-host-key-modal-reject-requested();
+    callback workspace-tab-selected(string);
+    callback workspace-tab-close-requested(string);
     callback asset-selected(string);
     callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
@@ -361,13 +376,31 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             spacing: 0px;
 
-                            TabBar {}
+                            TabBar {
+                                items: root.workspace-tab-items;
+
+                                tab-selected(session-id) => {
+                                    root.workspace-tab-selected(session-id);
+                                }
+
+                                tab-close-requested(session-id) => {
+                                    root.workspace-tab-close-requested(session-id);
+                                }
+                            }
 
                             content-host := Rectangle {
                                 vertical-stretch: 1;
                                 background: transparent;
 
-                                WelcomeView {}
+                                TerminalSessionHost {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    mode: root.workspace-session-host-mode;
+                                    session-title: root.workspace-session-title;
+                                    session-subtitle: root.workspace-session-subtitle;
+                                    session-state: root.workspace-session-state;
+                                    can-reconnect: root.workspace-session-can-reconnect;
+                                }
                             }
                         }
                     }
@@ -497,10 +530,14 @@ export component AppWindow inherits Window {
         y: titlebar.height;
         width: root.width;
         height: root.height - titlebar.height;
-        enabled: root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open;
+        enabled: root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open;
 
         clicked => {
-            root.close-asset-modal-requested();
+            if root.ssh-host-key-modal-open {
+                root.ssh-host-key-modal-reject-requested();
+            } else {
+                root.close-asset-modal-requested();
+            }
         }
     }
 
@@ -599,6 +636,21 @@ export component AppWindow inherits Window {
 
         confirm-requested => {
             root.confirm-delete-asset-requested();
+        }
+    }
+
+    if root.ssh-host-key-modal-open : ssh-host-key-modal-overlay := SshHostKeyConfirmModal {
+        x: max(24px, (root.width - self.width) / 2);
+        y: max(titlebar.height + 24px, titlebar.height + (root.height - titlebar.height - self.height) / 2);
+        host: root.ssh-host-key-modal-host;
+        fingerprint: root.ssh-host-key-modal-fingerprint;
+
+        accept-requested => {
+            root.ssh-host-key-modal-accept-requested();
+        }
+
+        reject-requested => {
+            root.ssh-host-key-modal-reject-requested();
         }
     }
 

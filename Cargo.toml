@@ -30,7 +30,8 @@ tokio = { version = "1.50.0", features = ["rt-multi-thread", "sync", "time", "ma
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
-uuid = "1.22.0"
+uuid = { version = "1.22.0", features = ["v4"] }
+wezterm-term = { package = "tattoy-wezterm-term", version = "0.1.0-fork.5" }
 window-vibrancy = "0.7.1"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",

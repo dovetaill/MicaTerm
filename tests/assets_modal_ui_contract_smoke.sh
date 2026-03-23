@@ -41,6 +41,8 @@ grep -F 'in property <string> remark:' "$SSH_MODAL" >/dev/null
 grep -F 'callback tab-selected(string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback action-requested(string);' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Test Connection";' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Save and Connect";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> item-name;' "$RENAME_MODAL" >/dev/null
 grep -F 'in property <string> validation-message;' "$RENAME_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm;' "$RENAME_MODAL" >/dev/null

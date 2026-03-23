@@ -19,6 +19,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
+name = "adler"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f26201604c87b1e01bd3d98f8d5d9a8fcbb815e8cedb41ffccbeb4bf593a35fe"
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1512,6 +1518,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
 name = "ecdsa"
 version = "0.16.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1697,7 +1709,7 @@ dependencies = [
  "bit_field",
  "half",
  "lebe",
- "miniz_oxide",
+ "miniz_oxide 0.8.9",
  "rayon-core",
  "smallvec",
  "zune-inflate",
@@ -1711,6 +1723,17 @@ checksum = "b95f7c0680e4142284cf8b22c14a476e87d61b004a3a0861872b32ef7ead40a2"
 dependencies = [
  "bit-set 0.5.3",
  "regex",
+]
+
+[[package]]
+name = "fancy-regex"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
+dependencies = [
+ "bit-set 0.8.0",
+ "regex-automata",
+ "regex-syntax",
 ]
 
 [[package]]
@@ -1843,7 +1866,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
- "miniz_oxide",
+ "miniz_oxide 0.8.9",
 ]
 
 [[package]]
@@ -2449,6 +2472,15 @@ name = "htmlparser"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48ce8546b993eaf241d69ded33b1be6d205dd9857ec879d9d18bd05d3676e144"
+
+[[package]]
+name = "humansize"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cb51c9a029ddc91b07a787f1d86b53ccfa49b0e86688c946ebe8d3555685dd7"
+dependencies = [
+ "libm",
+]
 
 [[package]]
 name = "hybrid-array"
@@ -3327,6 +3359,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.12.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
+dependencies = [
+ "hashbrown 0.15.5",
+]
+
+[[package]]
 name = "lyon_algorithms"
 version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3487,6 +3528,7 @@ dependencies = [
  "serde_json",
  "slint",
  "slint-build",
+ "tattoy-wezterm-term",
  "termwiz",
  "tokio",
  "tracing",
@@ -3503,6 +3545,15 @@ name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+
+[[package]]
+name = "miniz_oxide"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8a240ddb74feaf34a79a7add65a741f3167852fba007066dcac1ca548d89c08"
+dependencies = [
+ "adler",
+]
 
 [[package]]
 name = "miniz_oxide"
@@ -4605,7 +4656,7 @@ dependencies = [
  "crc32fast",
  "fdeflate",
  "flate2",
- "miniz_oxide",
+ "miniz_oxide 0.8.9",
 ]
 
 [[package]]
@@ -4618,7 +4669,7 @@ dependencies = [
  "crc32fast",
  "fdeflate",
  "flate2",
- "miniz_oxide",
+ "miniz_oxide 0.8.9",
 ]
 
 [[package]]
@@ -5072,6 +5123,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "ref-cast"
+version = "1.0.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f354300ae66f76f1c85c5f84693f0ce81d747e2c3f21a45fef496d89c960bf7d"
+dependencies = [
+ "ref-cast-impl",
+]
+
+[[package]]
+name = "ref-cast-impl"
+version = "1.0.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7186006dcb21920990093f30e3dea63b7d6e977bf1256be20c3563a5db070da"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "regex"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5370,6 +5441,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "schemars"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
+dependencies = [
+ "dyn-clone",
+ "ref-cast",
+ "schemars_derive",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "schemars_derive"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d115b50f4aaeea07e79c1912f645c7513d81715d0420f8bc77a18c6260b307f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_derive_internals",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5455,6 +5551,17 @@ name = "serde_derive"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "serde_derive_internals"
+version = "0.29.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6090,6 +6197,201 @@ dependencies = [
 ]
 
 [[package]]
+name = "tattoy-termwiz"
+version = "0.24.0-fork.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4baa577b33d8e5f1fc6efce63ea148f2e668f097294d39140c5de08e18e9c9c"
+dependencies = [
+ "anyhow",
+ "bitflags 2.11.0",
+ "fancy-regex 0.14.0",
+ "filedescriptor",
+ "finl_unicode",
+ "fixedbitset",
+ "image",
+ "libc",
+ "log",
+ "memmem",
+ "nix",
+ "num-derive",
+ "num-traits",
+ "ordered-float 4.6.0",
+ "pest",
+ "pest_derive",
+ "phf",
+ "sha2 0.10.9",
+ "signal-hook",
+ "siphasher",
+ "tattoy-wezterm-cell",
+ "tattoy-wezterm-char-props",
+ "tattoy-wezterm-color-types",
+ "tattoy-wezterm-dynamic",
+ "tattoy-wezterm-escape-parser",
+ "tattoy-wezterm-input-types",
+ "tattoy-wezterm-surface",
+ "terminfo",
+ "termios",
+ "thiserror 1.0.69",
+ "ucd-trie",
+ "unicode-segmentation",
+ "vtparse 0.7.0",
+ "wezterm-bidi",
+ "wezterm-blob-leases",
+ "winapi",
+]
+
+[[package]]
+name = "tattoy-wezterm-cell"
+version = "0.1.0-1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db5ac261e627d60b003c5ee85f9954b532fc7107f5297576029b85189441e7c4"
+dependencies = [
+ "finl_unicode",
+ "image",
+ "log",
+ "ordered-float 4.6.0",
+ "serde",
+ "sha2 0.10.9",
+ "tattoy-wezterm-char-props",
+ "tattoy-wezterm-color-types",
+ "tattoy-wezterm-dynamic",
+ "tattoy-wezterm-escape-parser",
+ "thiserror 1.0.69",
+ "wezterm-blob-leases",
+]
+
+[[package]]
+name = "tattoy-wezterm-char-props"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3319a329d4f5aef9a951e336facfcdc3ee5d3f16d8cc45ba407631427ca89d6d"
+dependencies = [
+ "phf",
+ "serde",
+ "ucd-trie",
+]
+
+[[package]]
+name = "tattoy-wezterm-color-types"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2216e4c01c3d4705136d0c28b4c3eef57d48f5544a9478242bd8d247e1a595da"
+dependencies = [
+ "csscolorparser",
+ "deltae",
+ "num-traits",
+ "serde",
+ "tattoy-wezterm-dynamic",
+]
+
+[[package]]
+name = "tattoy-wezterm-dynamic"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5a0d2ef7c9cc9ffe305d36860f910cb0860b55be54bc97f1952f28f5ed3a9bd"
+dependencies = [
+ "log",
+ "ordered-float 4.6.0",
+ "strsim",
+ "thiserror 2.0.18",
+ "wezterm-dynamic-derive",
+]
+
+[[package]]
+name = "tattoy-wezterm-escape-parser"
+version = "0.1.0-1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ca89ed38092d6718a03e97b0c1101fcf2203c2e6f2757a91c465f393d11d98b"
+dependencies = [
+ "base64",
+ "bitflags 2.11.0",
+ "hex",
+ "image",
+ "log",
+ "nix",
+ "num-derive",
+ "num-traits",
+ "ordered-float 4.6.0",
+ "pest",
+ "pest_derive",
+ "sha2 0.10.9",
+ "tattoy-wezterm-color-types",
+ "tattoy-wezterm-dynamic",
+ "tattoy-wezterm-input-types",
+ "thiserror 2.0.18",
+ "vtparse 0.7.0",
+ "wezterm-blob-leases",
+ "winapi",
+]
+
+[[package]]
+name = "tattoy-wezterm-input-types"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d579284b14ddcf2d8de405d3cc763fdc47dffae436d80353b184aab4652c0b5"
+dependencies = [
+ "bitflags 1.3.2",
+ "euclid",
+ "serde",
+ "tattoy-wezterm-dynamic",
+]
+
+[[package]]
+name = "tattoy-wezterm-surface"
+version = "0.1.0-fork.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e37ba079e943bb37ca1ca6e179674113aa29b68341d2421922c02962bac81fdb"
+dependencies = [
+ "bitflags 2.11.0",
+ "fancy-regex 0.14.0",
+ "finl_unicode",
+ "fixedbitset",
+ "ordered-float 4.6.0",
+ "schemars",
+ "siphasher",
+ "tattoy-wezterm-cell",
+ "tattoy-wezterm-char-props",
+ "tattoy-wezterm-color-types",
+ "tattoy-wezterm-dynamic",
+ "tattoy-wezterm-escape-parser",
+ "tattoy-wezterm-input-types",
+ "unicode-segmentation",
+ "wezterm-bidi",
+]
+
+[[package]]
+name = "tattoy-wezterm-term"
+version = "0.1.0-fork.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f3678674adc87f210ec01e2134e1972d6b0bd194bf82242f7e7beee3ae9dbd8"
+dependencies = [
+ "anyhow",
+ "bitflags 1.3.2",
+ "csscolorparser",
+ "downcast-rs",
+ "finl_unicode",
+ "hex",
+ "humansize",
+ "image",
+ "lazy_static",
+ "log",
+ "lru",
+ "miniz_oxide 0.7.4",
+ "num-traits",
+ "ordered-float 4.6.0",
+ "serde",
+ "tattoy-termwiz",
+ "tattoy-wezterm-cell",
+ "tattoy-wezterm-dynamic",
+ "tattoy-wezterm-escape-parser",
+ "tattoy-wezterm-surface",
+ "terminfo",
+ "unicode-normalization",
+ "url",
+ "wezterm-bidi",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6141,7 +6443,7 @@ dependencies = [
  "anyhow",
  "base64",
  "bitflags 2.11.0",
- "fancy-regex",
+ "fancy-regex 0.11.0",
  "filedescriptor",
  "finl_unicode",
  "fixedbitset",
@@ -6165,7 +6467,7 @@ dependencies = [
  "thiserror 1.0.69",
  "ucd-trie",
  "unicode-segmentation",
- "vtparse",
+ "vtparse 0.6.2",
  "wezterm-bidi",
  "wezterm-blob-leases",
  "wezterm-color-types",
@@ -6618,6 +6920,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
 
 [[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
+
+[[package]]
 name = "unicode-properties"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6790,6 +7101,15 @@ name = "vtparse"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d9b2acfb050df409c972a37d3b8e08cdea3bddb0c09db9d53137e504cfabed0"
+dependencies = [
+ "utf8parse",
+]
+
+[[package]]
+name = "vtparse"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1726b5dabcf18909219a11c1ae3b85fff931b6e5ccf7321d998fc7665f52661b"
 dependencies = [
  "utf8parse",
 ]

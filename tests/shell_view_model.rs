@@ -7,7 +7,8 @@ use mica_term::shell::context_menu::{
 };
 use mica_term::shell::sidebar::SidebarDestination;
 use mica_term::shell::view_model::{
-    AssetModalState, AssetSshModalTab, ShellViewModel, WelcomeAction, welcome_actions,
+    AssetModalState, AssetSshModalTab, ShellViewModel, SshModalAction, WelcomeAction,
+    welcome_actions,
 };
 use mica_term::theme::ThemeMode;
 
@@ -516,6 +517,65 @@ fn conflicting_manual_input_keeps_user_text_and_disables_confirm() {
         Some(AssetModalState::NewSshConnection { ref draft, .. })
             if draft.name == "SSH Connection 1"
     ));
+}
+
+#[test]
+fn connect_action_records_session_open_request_without_creating_asset() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_name("Prod Bastion".into());
+    view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("password", "secret".into());
+
+    assert!(view_model.begin_ssh_modal_action("connect"));
+    assert!(view_model.visible_console_asset_rows().is_empty());
+    assert!(matches!(
+        view_model.pending_ssh_modal_action(),
+        Some(request) if request.action == SshModalAction::Connect
+            && request.draft.name == "Prod Bastion"
+            && request.draft.host == "10.0.0.12"
+    ));
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { .. })
+    ));
+}
+
+#[test]
+fn test_connection_action_does_not_create_workspace_tab() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_name("Prod Bastion".into());
+    view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("password", "secret".into());
+
+    assert!(view_model.begin_ssh_modal_action("test"));
+    assert!(matches!(
+        view_model.pending_ssh_modal_action(),
+        Some(request) if request.action == SshModalAction::TestConnection
+    ));
+    assert!(view_model.workspace_tabs().is_empty());
+}
+
+#[test]
+fn save_action_creates_asset_without_workspace_tab_or_pending_session_request() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_name("Prod Bastion".into());
+    view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("password", "secret".into());
+
+    assert!(view_model.begin_ssh_modal_action("save"));
+
+    let rows = view_model.visible_console_asset_rows();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].label, "Prod Bastion");
+    assert!(view_model.workspace_tabs().is_empty());
+    assert!(view_model.pending_ssh_modal_action().is_none());
+    assert!(view_model.asset_modal_state.is_none());
 }
 
 #[test]

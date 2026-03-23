@@ -6,10 +6,16 @@ use mica_term::app::assets_catalog::{
 use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store, bind_top_status_bar_with_store_and_effects_and_asset_repo,
 };
+use mica_term::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService};
 use mica_term::app::window_effects::default_platform_window_effects;
+use mica_term::WorkspaceTabItem;
+use russh::keys::{HashAlg, PublicKey};
 use slint::Model;
+use slint::{ModelRc, VecModel};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use anyhow::Result;
@@ -42,6 +48,23 @@ impl AssetCatalogRepository for RecordingModalAssetRepo {
         self.state.borrow_mut().save_attempts.push(catalog.clone());
         Ok(())
     }
+}
+
+fn sample_known_hosts_path(label: &str) -> PathBuf {
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "mica-term-assets-modal-known-hosts-{}-{}.txt",
+        label,
+        std::process::id()
+    ));
+    path
+}
+
+fn sample_public_key() -> PublicKey {
+    PublicKey::from_openssh(
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILM+rvN+ot98qgEN796jTiQfZfG1KaT0PtFDJ/XFSqti test-1@example.com",
+    )
+    .expect("parse public key")
 }
 
 #[test]
@@ -130,6 +153,100 @@ fn ssh_modal_exposes_action_buttons_for_save_connect_test_and_save_connect() {
         actions.borrow().as_slice(),
         ["save", "connect", "test", "save-and-connect"]
     );
+}
+
+#[test]
+fn app_window_round_trips_workspace_tab_items_and_active_session() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    app.set_workspace_tab_items(ModelRc::new(VecModel::from(vec![
+        WorkspaceTabItem {
+            session_id: "session-1".into(),
+            title: "Prod Bastion".into(),
+            subtitle: "ops@example.com:22".into(),
+            state: "connected".into(),
+            active: false,
+        },
+        WorkspaceTabItem {
+            session_id: "session-2".into(),
+            title: "Staging Bastion".into(),
+            subtitle: "ops@staging.example.com:22".into(),
+            state: "error".into(),
+            active: true,
+        },
+    ])));
+    app.set_active_workspace_session_id("session-2".into());
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+    assert_eq!(
+        app.get_workspace_tab_items()
+            .row_data(1)
+            .expect("workspace tab item")
+            .title
+            .as_str(),
+        "Staging Bastion"
+    );
+    assert_eq!(app.get_active_workspace_session_id().as_str(), "session-2");
+}
+
+#[test]
+fn host_key_confirm_modal_round_trips_target_host_and_fingerprint() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+
+    app.set_ssh_host_key_modal_open(true);
+    app.set_ssh_host_key_modal_host("example.com".into());
+    app.set_ssh_host_key_modal_fingerprint("SHA256:abc123".into());
+
+    assert!(app.get_ssh_host_key_modal_open());
+    assert_eq!(app.get_ssh_host_key_modal_host().as_str(), "example.com");
+    assert_eq!(
+        app.get_ssh_host_key_modal_fingerprint().as_str(),
+        "SHA256:abc123"
+    );
+}
+
+#[test]
+fn unknown_host_key_prompts_once_then_reconnect_uses_trusted_key() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let path = sample_known_hosts_path("trusted-once");
+    let _ = fs::remove_file(&path);
+    let service = KnownHostsService::new(&path);
+    let key = sample_public_key();
+
+    let first_check = service
+        .check("example.com", 22, &key)
+        .expect("check unknown host");
+    let fingerprint = match first_check {
+        KnownHostCheck::Unknown { fingerprint } => fingerprint,
+        other => panic!("expected unknown host result, got {other:?}"),
+    };
+
+    let app = AppWindow::new().unwrap();
+    app.set_ssh_host_key_modal_open(true);
+    app.set_ssh_host_key_modal_host("example.com".into());
+    app.set_ssh_host_key_modal_fingerprint(fingerprint.clone().into());
+
+    assert!(app.get_ssh_host_key_modal_open());
+    assert_eq!(app.get_ssh_host_key_modal_host().as_str(), "example.com");
+    assert_eq!(
+        app.get_ssh_host_key_modal_fingerprint().as_str(),
+        key.fingerprint(HashAlg::Sha256).to_string()
+    );
+
+    service
+        .accept_unknown("example.com", 22, &key)
+        .expect("accept trusted host key");
+
+    let second_check = service
+        .check("example.com", 22, &key)
+        .expect("recheck trusted host");
+    assert!(matches!(second_check, KnownHostCheck::Trusted));
+
+    let _ = fs::remove_file(&path);
 }
 
 #[test]

@@ -101,6 +101,15 @@ fn loaded_catalog_for_bootstrap() -> PersistedAssetCatalog {
     }
 }
 
+fn context_menu_item_enabled(app: &AppWindow, action_id: &str) -> bool {
+    let items = app.get_assets_context_menu_primary_items();
+    (0..items.row_count())
+        .filter_map(|index| items.row_data(index))
+        .find(|item| item.id.as_str() == action_id)
+        .map(|item| item.enabled)
+        .unwrap_or(false)
+}
+
 #[test]
 fn bootstrap_exposes_shell_default_window_budget() {
     assert_eq!(app_title(), "Mica Term");
@@ -189,6 +198,8 @@ fn create_rename_delete_and_ssh_edit_trigger_repository_save() {
     app.invoke_assets_context_menu_action_invoked("new-ssh-connection".into());
     app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
     app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     app.invoke_asset_ssh_modal_draft_changed("proxy_method".into(), "jump-host".into());
     app.invoke_confirm_asset_modal_requested();
     assert_eq!(repo_state.borrow().save_attempts.len(), 2);
@@ -290,4 +301,79 @@ fn save_failure_logs_error_without_persisting_ui_session_state() {
     assert_eq!(persisted_tree.is_expanded("folder-root"), Some(false));
 
     let _ = fs::remove_dir_all(temp_root);
+}
+
+#[test]
+fn connect_action_saves_asset_and_opens_workspace_tab() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store_and_effects_and_asset_repo(
+        &app,
+        None,
+        default_platform_window_effects(),
+        None,
+    );
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+    app.invoke_asset_ssh_modal_action_requested("connect".into());
+
+    assert!(!app.get_asset_modal_open());
+    assert_eq!(app.get_console_asset_items().row_count(), 1);
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert!(!app.get_active_workspace_session_id().is_empty());
+}
+
+#[test]
+fn close_connection_context_action_tracks_live_workspace_session_state() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store_and_effects_and_asset_repo(
+        &app,
+        None,
+        default_platform_window_effects(),
+        None,
+    );
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("saved ssh asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.clone().into(), "ssh".into(), 96.0, 160.0);
+    assert!(!context_menu_item_enabled(&app, "close-connection"));
+
+    app.invoke_close_assets_context_menu_requested();
+    app.invoke_asset_selected(ssh_id.clone().into());
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    assert!(context_menu_item_enabled(&app, "close-connection"));
+
+    app.invoke_assets_context_menu_action_invoked("close-connection".into());
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(
+        app.get_workspace_tab_items()
+            .row_data(0)
+            .expect("disconnected tab")
+            .state
+            .as_str(),
+        "disconnected"
+    );
+    assert!(app.get_workspace_session_can_reconnect());
 }

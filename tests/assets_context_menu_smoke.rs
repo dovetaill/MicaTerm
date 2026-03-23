@@ -193,6 +193,8 @@ fn closing_ssh_modal_resets_kind_and_confirm_state() {
     app.invoke_assets_create_action_selected("new-ssh-connection".into());
     app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
     app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     assert!(app.get_asset_modal_can_confirm());
 
     app.invoke_close_asset_modal_requested();
@@ -231,6 +233,8 @@ fn folder_context_create_opens_child_targeted_ssh_modal() {
 
     app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
     app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     app.invoke_confirm_asset_modal_requested();
 
     let rows = app.get_console_asset_items();
@@ -389,6 +393,8 @@ fn delete_action_opens_delete_confirm_modal_with_nested_count() {
     app.invoke_assets_context_menu_action_invoked("new-ssh-connection".into());
     app.invoke_asset_ssh_modal_draft_changed("name".into(), "Bastion".into());
     app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     app.invoke_confirm_asset_modal_requested();
 
     app.invoke_asset_context_menu_requested(asset_id.into(), "folder".into(), 96.0, 160.0);
@@ -427,6 +433,8 @@ fn delete_confirm_round_trips_and_removes_window_rows() {
     app.invoke_assets_context_menu_action_invoked("new-ssh-connection".into());
     app.invoke_asset_ssh_modal_draft_changed("name".into(), "Nested SSH".into());
     app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.13".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     app.invoke_confirm_asset_modal_requested();
 
     app.invoke_asset_context_menu_requested(beta_id.into(), "folder".into(), 96.0, 160.0);

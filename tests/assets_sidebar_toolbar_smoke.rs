@@ -187,6 +187,8 @@ fn toolbar_create_action_stays_root_level_even_after_folder_context_target() {
 
     app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
     app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     app.invoke_confirm_asset_modal_requested();
 
     let rows = app.get_console_asset_items();

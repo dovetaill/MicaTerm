@@ -135,6 +135,60 @@ fn ssh_scene_marks_proxy_chrome_as_planned_but_clickable() {
 }
 
 #[test]
+fn close_connection_is_disabled_without_live_session_and_enabled_with_live_session() {
+    let disabled = resolve_action_tree(
+        ContextTargetKind::SshConnection,
+        &SelectionContext {
+            selected_ids: vec!["ssh-prod-01".into()],
+            clipboard_has_asset_payload: false,
+            target_mutable: true,
+            target_has_active_connection: false,
+        },
+    );
+    let enabled = resolve_action_tree(
+        ContextTargetKind::SshConnection,
+        &SelectionContext {
+            selected_ids: vec!["ssh-prod-01".into()],
+            clipboard_has_asset_payload: false,
+            target_mutable: true,
+            target_has_active_connection: true,
+        },
+    );
+
+    let close_disabled = disabled
+        .iter()
+        .find(|node| node.id == "close-connection")
+        .expect("close action should exist");
+    let close_enabled = enabled
+        .iter()
+        .find(|node| node.id == "close-connection")
+        .expect("close action should exist");
+
+    assert_eq!(close_disabled.state, ContextMenuActionState::Disabled);
+    assert_eq!(close_enabled.state, ContextMenuActionState::Enabled);
+}
+
+#[test]
+fn open_in_new_tab_stays_enabled_for_ssh_assets() {
+    let actions = resolve_action_tree(
+        ContextTargetKind::SshConnection,
+        &SelectionContext {
+            selected_ids: vec!["ssh-prod-01".into()],
+            clipboard_has_asset_payload: false,
+            target_mutable: true,
+            target_has_active_connection: false,
+        },
+    );
+
+    let open_in_new_tab = actions
+        .iter()
+        .find(|node| node.id == "open-in-new-tab")
+        .expect("open in new tab action should exist");
+
+    assert_eq!(open_in_new_tab.state, ContextMenuActionState::Enabled);
+}
+
+#[test]
 fn folder_target_exposes_flat_create_actions() {
     let actions = resolve_action_tree(
         ContextTargetKind::Folder,

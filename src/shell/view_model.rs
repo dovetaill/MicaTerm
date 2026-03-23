@@ -10,6 +10,7 @@ use crate::shell::context_menu::{
     resolve_action_tree,
 };
 use crate::shell::sidebar::SidebarDestination;
+use crate::shell::tabs::WorkspaceTab;
 use crate::theme::ThemeMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +116,25 @@ impl Default for AssetSshConnectionDraft {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SshHostKeyPromptState {
+    pub host: String,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SshModalAction {
+    Connect,
+    TestConnection,
+    SaveAndConnect,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingSshModalAction {
+    pub action: SshModalAction,
+    pub draft: AssetSshConnectionDraft,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellViewModel {
     pub show_welcome: bool,
@@ -130,9 +150,13 @@ pub struct ShellViewModel {
     pub asset_search_query: String,
     pub asset_create_menu_open: bool,
     pub asset_modal_state: Option<AssetModalState>,
+    pub ssh_host_key_prompt_state: Option<SshHostKeyPromptState>,
     pub asset_tree_fully_expanded: bool,
     pub selected_asset_ids: Vec<String>,
     pub focused_asset_id: Option<String>,
+    workspace_tabs: Vec<WorkspaceTab>,
+    active_workspace_session_id: Option<String>,
+    pending_ssh_modal_action: Option<PendingSshModalAction>,
     pub editing_asset_id: Option<String>,
     pub editing_asset_text: String,
     pub context_menu_open: bool,
@@ -165,9 +189,13 @@ impl Default for ShellViewModel {
             asset_search_query: String::new(),
             asset_create_menu_open: false,
             asset_modal_state: None,
+            ssh_host_key_prompt_state: None,
             asset_tree_fully_expanded: false,
             selected_asset_ids: Vec::new(),
             focused_asset_id: None,
+            workspace_tabs: Vec::new(),
+            active_workspace_session_id: None,
+            pending_ssh_modal_action: None,
             editing_asset_id: None,
             editing_asset_text: String::new(),
             context_menu_open: false,
@@ -256,6 +284,81 @@ impl ShellViewModel {
 
     pub fn requested_right_panel(&self) -> bool {
         self.show_right_panel
+    }
+
+    pub fn workspace_tabs(&self) -> &[WorkspaceTab] {
+        &self.workspace_tabs
+    }
+
+    pub fn set_workspace_tabs(&mut self, tabs: Vec<WorkspaceTab>) {
+        self.workspace_tabs = tabs;
+        self.normalize_workspace_tabs();
+    }
+
+    pub fn active_workspace_session_id(&self) -> Option<&str> {
+        self.active_workspace_session_id.as_deref()
+    }
+
+    pub fn pending_ssh_modal_action(&self) -> Option<&PendingSshModalAction> {
+        self.pending_ssh_modal_action.as_ref()
+    }
+
+    pub fn take_pending_ssh_modal_action(&mut self) -> Option<PendingSshModalAction> {
+        self.pending_ssh_modal_action.take()
+    }
+
+    pub fn active_workspace_tab(&self) -> Option<&WorkspaceTab> {
+        let active_id = self.active_workspace_session_id.as_deref()?;
+        self.workspace_tabs
+            .iter()
+            .find(|tab| tab.session_id == active_id)
+    }
+
+    pub fn activate_workspace_session(&mut self, session_id: &str) -> bool {
+        if !self
+            .workspace_tabs
+            .iter()
+            .any(|tab| tab.session_id == session_id)
+        {
+            return false;
+        }
+
+        self.active_workspace_session_id = Some(session_id.to_string());
+        self.normalize_workspace_tabs();
+        true
+    }
+
+    pub fn close_workspace_session(&mut self, session_id: &str) -> bool {
+        let original_len = self.workspace_tabs.len();
+        self.workspace_tabs.retain(|tab| tab.session_id != session_id);
+        if self.workspace_tabs.len() == original_len {
+            return false;
+        }
+
+        if self.active_workspace_session_id.as_deref() == Some(session_id) {
+            self.active_workspace_session_id = None;
+        }
+
+        self.normalize_workspace_tabs();
+        true
+    }
+
+    pub fn active_workspace_session_can_close(&self) -> bool {
+        self.active_workspace_tab().is_some()
+    }
+
+    pub fn active_workspace_session_can_reconnect(&self) -> bool {
+        self.active_workspace_tab()
+            .map(WorkspaceTab::can_reconnect)
+            .unwrap_or(false)
+    }
+
+    pub fn workspace_session_host_mode(&self) -> &'static str {
+        match self.active_workspace_tab() {
+            None => "welcome",
+            Some(tab) if tab.uses_terminal_surface() => "terminal",
+            Some(_) => "session-error",
+        }
     }
 
     pub fn toggle_right_panel(&mut self) {
@@ -528,29 +631,48 @@ impl ShellViewModel {
             return false;
         };
 
+        let draft = draft.clone();
         let validation_message =
-            self.ssh_modal_submit_validation_message(parent_id.as_deref(), draft);
+            self.ssh_modal_submit_validation_message(parent_id.as_deref(), &draft);
 
         if let Some(AssetModalState::NewSshConnection { draft, .. }) = self.asset_modal_state.as_mut()
         {
-            draft.validation_message = validation_message.unwrap_or_default();
+            draft.validation_message = validation_message.clone().unwrap_or_default();
         }
 
-        if self.asset_create_modal_validation_message().is_empty() {
-            match action_id {
-                "save" => return self.confirm_asset_modal(),
-                "connect" => self.set_ssh_modal_feedback("Connect is not wired in this phase."),
-                "test" => {
-                    self.set_ssh_modal_feedback("Test Connection is not wired in this phase.")
-                }
-                "save-and-connect" => {
-                    self.set_ssh_modal_feedback("Save and Connect is not wired in this phase.")
-                }
-                _ => self.set_ssh_modal_feedback("Unsupported SSH action."),
+        self.pending_ssh_modal_action = None;
+        if validation_message.is_some() {
+            return false;
+        }
+
+        match action_id {
+            "save" => self.confirm_asset_modal(),
+            "connect" => {
+                self.pending_ssh_modal_action = Some(PendingSshModalAction {
+                    action: SshModalAction::Connect,
+                    draft,
+                });
+                true
+            }
+            "test" => {
+                self.pending_ssh_modal_action = Some(PendingSshModalAction {
+                    action: SshModalAction::TestConnection,
+                    draft,
+                });
+                true
+            }
+            "save-and-connect" => {
+                self.pending_ssh_modal_action = Some(PendingSshModalAction {
+                    action: SshModalAction::SaveAndConnect,
+                    draft,
+                });
+                true
+            }
+            _ => {
+                self.set_ssh_modal_feedback("Unsupported SSH action.");
+                false
             }
         }
-
-        false
     }
 
     pub fn can_confirm_asset_modal(&self) -> bool {
@@ -658,6 +780,7 @@ impl ShellViewModel {
         self.focused_asset_id = Some(asset_id.clone());
         self.context_target_asset_id = Some(asset_id);
         self.asset_modal_state = None;
+        self.pending_ssh_modal_action = None;
         true
     }
 
@@ -677,8 +800,30 @@ impl ShellViewModel {
     }
 
     pub fn cancel_asset_modal(&mut self) {
+        self.pending_ssh_modal_action = None;
         self.asset_modal_state = None;
         self.context_target_asset_id = None;
+    }
+
+    pub fn open_ssh_host_key_prompt(
+        &mut self,
+        host: impl Into<String>,
+        fingerprint: impl Into<String>,
+    ) {
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.ssh_host_key_prompt_state = Some(SshHostKeyPromptState {
+            host: host.into(),
+            fingerprint: fingerprint.into(),
+        });
+    }
+
+    pub fn accept_ssh_host_key_prompt(&mut self) -> bool {
+        self.clear_ssh_host_key_prompt()
+    }
+
+    pub fn reject_ssh_host_key_prompt(&mut self) -> bool {
+        self.clear_ssh_host_key_prompt()
     }
 
     pub fn visible_console_asset_rows(&self) -> Vec<VisibleAssetRow> {
@@ -1029,12 +1174,19 @@ impl ShellViewModel {
         resolve_action_tree(target_kind, &self.context_menu_selection())
     }
 
-    fn context_menu_selection(&self) -> SelectionContext {
+    pub fn context_menu_selection(&self) -> SelectionContext {
         SelectionContext {
             selected_ids: self.selected_asset_ids.clone(),
             clipboard_has_asset_payload: false,
             target_mutable: true,
-            target_has_active_connection: true,
+            target_has_active_connection: matches!(
+                self.context_menu_target_kind,
+                Some(ContextTargetKind::SshConnection)
+            ) && self
+                .context_target_asset_id
+                .as_deref()
+                .map(|asset_id| self.asset_has_live_workspace_session(asset_id))
+                .unwrap_or(false),
         }
     }
 
@@ -1062,6 +1214,38 @@ impl ShellViewModel {
     fn clear_active_asset_rename_session(&mut self) {
         self.editing_asset_id = None;
         self.editing_asset_text.clear();
+    }
+
+    fn clear_ssh_host_key_prompt(&mut self) -> bool {
+        self.ssh_host_key_prompt_state.take().is_some()
+    }
+
+    fn normalize_workspace_tabs(&mut self) {
+        let active_id = self
+            .active_workspace_session_id
+            .as_deref()
+            .filter(|candidate| self.workspace_tabs.iter().any(|tab| tab.session_id == *candidate))
+            .map(str::to_string)
+            .or_else(|| {
+                self.workspace_tabs
+                    .iter()
+                    .find(|tab| tab.active)
+                    .map(|tab| tab.session_id.clone())
+            })
+            .or_else(|| self.workspace_tabs.first().map(|tab| tab.session_id.clone()));
+
+        for tab in &mut self.workspace_tabs {
+            tab.active = active_id.as_deref() == Some(tab.session_id.as_str());
+        }
+
+        self.active_workspace_session_id = active_id;
+        self.show_welcome = self.workspace_tabs.is_empty();
+    }
+
+    fn asset_has_live_workspace_session(&self, asset_id: &str) -> bool {
+        self.workspace_tabs.iter().any(|tab| {
+            tab.asset_id == asset_id && matches!(tab.state.as_str(), "connecting" | "connected")
+        })
     }
 
     fn normalize_folder_parent_id(&self, parent_id: Option<String>) -> Option<String> {
@@ -1149,7 +1333,7 @@ impl ShellViewModel {
         None
     }
 
-    fn set_ssh_modal_feedback(&mut self, message: &str) {
+    pub fn set_ssh_modal_feedback(&mut self, message: impl Into<String>) {
         let Some(AssetModalState::NewSshConnection { draft, .. }) = self.asset_modal_state.as_mut()
         else {
             return;

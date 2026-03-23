@@ -5,4 +5,5 @@ pub mod context_menu;
 pub mod layout;
 pub mod metrics;
 pub mod sidebar;
+pub mod tabs;
 pub mod view_model;

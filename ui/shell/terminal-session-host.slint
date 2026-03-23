@@ -1,0 +1,96 @@
+// Workspace content host that switches between welcome, terminal, and error states.
+
+import { ThemeTokens } from "../theme/tokens.slint";
+import { WelcomeView } from "../welcome/welcome-view.slint";
+
+export component TerminalSessionHost inherits Rectangle {
+    in property <string> mode: "welcome";
+    in property <string> session-title: "";
+    in property <string> session-subtitle: "";
+    in property <string> session-state: "";
+    in property <bool> can-reconnect: false;
+
+    background: transparent;
+
+    if root.mode == "welcome" : WelcomeView {
+        width: parent.width;
+        height: parent.height;
+    }
+
+    if root.mode == "terminal" : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        VerticalLayout {
+            padding-left: 24px;
+            padding-top: 24px;
+            spacing: 8px;
+
+            Text {
+                text: root.session-title != "" ? root.session-title : "Terminal Session";
+                color: ThemeTokens.text-primary;
+                font-size: 20px;
+                font-weight: 700;
+            }
+
+            Text {
+                text: root.session-subtitle;
+                color: ThemeTokens.dark-mode ? #aeb8c7 : #516174;
+                font-size: 13px;
+            }
+
+            Rectangle {
+                height: 1px;
+                width: parent.width - 48px;
+                background: ThemeTokens.divider-subtle;
+            }
+
+            Text {
+                text: "Renderer host is reserved for the terminal surface.";
+                color: ThemeTokens.dark-mode ? #aeb8c7 : #516174;
+                font-size: 13px;
+            }
+        }
+    }
+
+    if root.mode == "session-error" : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        VerticalLayout {
+            padding-left: 24px;
+            padding-top: 24px;
+            spacing: 8px;
+
+            Text {
+                text: root.session-title != "" ? root.session-title : "Session Issue";
+                color: ThemeTokens.text-primary;
+                font-size: 20px;
+                font-weight: 700;
+            }
+
+            Text {
+                text: root.session-subtitle;
+                color: ThemeTokens.dark-mode ? #aeb8c7 : #516174;
+                font-size: 13px;
+            }
+
+            Text {
+                text: root.session-state == "disconnected" ? "Connection dropped. The tab remains available for reconnect." :
+                      root.session-state == "error" ? "Connection failed. Review credentials, host key, or network reachability." :
+                      "Session is unavailable.";
+                color: ThemeTokens.text-primary;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+
+            if root.can-reconnect : Text {
+                text: "Reconnect is available once session lifecycle wiring is completed.";
+                color: ThemeTokens.dark-mode ? #aeb8c7 : #516174;
+                font-size: 12px;
+            }
+        }
+    }
+}

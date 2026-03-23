@@ -1,18 +1,47 @@
-// Placeholder workspace tab strip sized to the current desktop shell specification.
+// Workspace tab strip backed by a real session-tab model.
 
 import { ThemeTokens } from "../theme/tokens.slint";
 import { ActiveTab } from "../components/active-tab.slint";
 
+export struct WorkspaceTabItem {
+    session_id: string,
+    title: string,
+    subtitle: string,
+    state: string,
+    active: bool,
+}
+
 export component TabBar inherits Rectangle {
+    in property <[WorkspaceTabItem]> items: [];
+    callback tab-selected(string);
+    callback tab-close-requested(string);
+
     height: 38px;
     background: transparent;
     border-width: 1px;
     border-color: ThemeTokens.divider-subtle;
 
-    ActiveTab {
-        x: 12px;
-        y: 5px;
-        width: 140px;
-        height: 28px;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 5px;
+        padding-bottom: 5px;
+        spacing: 8px;
+
+        for item in root.items : ActiveTab {
+            width: 216px;
+            title: item.title;
+            subtitle: item.subtitle;
+            state: item.state;
+            active: item.active;
+
+            selected => {
+                root.tab-selected(item.session_id);
+            }
+
+            close-requested => {
+                root.tab-close-requested(item.session_id);
+            }
+        }
     }
 }
