@@ -28,7 +28,7 @@ Supported targets:
   aarch64-unknown-linux-gnu  Linux ARM64 build on Linux hosts with a GNU cross-linker
   x86_64-apple-darwin        macOS Intel build on macOS hosts
   aarch64-apple-darwin       macOS Apple Silicon build on macOS hosts
-  x86_64-pc-windows-gnu      Windows x64 GNU build with MinGW-w64
+  x86_64-pc-windows-gnu      Windows x64 GNU build with MinGW-w64 and nasm
   x86_64-pc-windows-msvc     Windows x64 MSVC build on Windows MSVC hosts
   aarch64-pc-windows-msvc    Windows ARM64 MSVC build on Windows MSVC hosts
 
@@ -42,6 +42,10 @@ Environment overrides:
   CARGO_NO_DEFAULT_FEATURES=1
   CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=<gnu linker path>
   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=<linux arm64 linker path>
+
+Windows GNU prerequisites on Linux hosts:
+  x86_64-w64-mingw32-gcc
+  nasm
 
 Output:
   dist/<app>-<target>-<profile>.tar.gz
@@ -142,6 +146,7 @@ case "$TARGET" in
     ;;
   x86_64-pc-windows-gnu)
     require_cmd zip
+    require_cmd nasm
     GNU_LINKER="${CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER:-x86_64-w64-mingw32-gcc}"
     command -v "$GNU_LINKER" >/dev/null 2>&1 || fail \
       "Windows GNU target requires linker '$GNU_LINKER'. Install MinGW-w64 or set CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER."

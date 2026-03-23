@@ -19,6 +19,8 @@ These are the apt-managed packages that are currently useful for the active loca
 
 - `gcc-mingw-w64-x86-64-posix`
   - Required for `./build-win-x64.sh` when targeting `x86_64-pc-windows-gnu`.
+- `nasm`
+  - Required by `aws-lc-sys` on the `x86_64-pc-windows-gnu` cross-build path used by `./build-win-x64.sh`.
 - `zip`
   - Required by `build-desktop.sh` for Windows archive packaging.
 - `libwayland-dev`

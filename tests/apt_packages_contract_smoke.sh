@@ -21,6 +21,7 @@ bash -n "$SCRIPT_PATH"
 
 HELP_OUTPUT="$("$SCRIPT_PATH" --help)"
 grep -F 'gcc-mingw-w64-x86-64-posix' <<<"$HELP_OUTPUT" >/dev/null
+grep -F 'nasm' <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'llvm-19' <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'clang-19' <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'zip' <<<"$HELP_OUTPUT" >/dev/null
@@ -35,6 +36,7 @@ grep -F '## APT Packages Installed During This Windows Build Work' "$INVENTORY_P
 grep -F '## Current APT Prerequisites For The Build Chain' "$INVENTORY_PATH" >/dev/null
 grep -F '## Current Cargo-Managed Project Dependencies' "$INVENTORY_PATH" >/dev/null
 grep -F '`gcc-mingw-w64-x86-64-posix`' "$INVENTORY_PATH" >/dev/null
+grep -F '`nasm`' "$INVENTORY_PATH" >/dev/null
 grep -F '`llvm-19`' "$INVENTORY_PATH" >/dev/null
 grep -F '`clang-19`' "$INVENTORY_PATH" >/dev/null
 grep -F '`zip`' "$INVENTORY_PATH" >/dev/null

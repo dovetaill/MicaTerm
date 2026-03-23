@@ -13,6 +13,7 @@ Single Windows x64 wrapper.
 
 Default target:
   x86_64-pc-windows-gnu
+  requires Linux host tools: x86_64-w64-mingw32-gcc and nasm
 
 Override example:
   TARGET=x86_64-pc-windows-msvc ./build-win-x64.sh

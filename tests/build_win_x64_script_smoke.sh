@@ -7,6 +7,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_PATH="$ROOT_DIR/build-win-x64.sh"
 LEGACY_MSVC_WRAPPER="$ROOT_DIR/build-win-x64-femtovg-wgpu.sh"
 LEGACY_GNU_WRAPPER="$ROOT_DIR/build-win-x64-gnu-femtovg-wgpu.sh"
+README_PATH="$ROOT_DIR/readme.md"
 
 if [[ ! -f "$SCRIPT_PATH" ]]; then
   echo "missing build script: $SCRIPT_PATH" >&2
@@ -19,6 +20,7 @@ HELP_OUTPUT="$("$SCRIPT_PATH" --help)"
 
 grep -F "./build-win-x64.sh" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "x86_64-pc-windows-gnu" <<<"$HELP_OUTPUT" >/dev/null
+grep -F "nasm" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "x86_64-pc-windows-msvc" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "TARGET=x86_64-pc-windows-msvc ./build-win-x64.sh" <<<"$HELP_OUTPUT" >/dev/null
 grep -F ".zip" <<<"$HELP_OUTPUT" >/dev/null
@@ -39,3 +41,6 @@ if [[ -e "$LEGACY_GNU_WRAPPER" ]]; then
   echo "legacy windows gnu wrapper should have been removed" >&2
   exit 1
 fi
+
+grep -F 'Windows GNU x64:' "$README_PATH" >/dev/null
+grep -F 'available assembler: `nasm`' "$README_PATH" >/dev/null

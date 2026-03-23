@@ -79,6 +79,7 @@ Prerequisites by target:
 - Windows GNU x64:
   - installed Rust target: `rustup target add x86_64-pc-windows-gnu`
   - available linker: `x86_64-w64-mingw32-gcc`
+  - available assembler: `nasm`
   - override supported via `CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER`
 - Windows MSVC x64 / ARM64:
   - installed Rust target: `rustup target add x86_64-pc-windows-msvc` or `rustup target add aarch64-pc-windows-msvc`

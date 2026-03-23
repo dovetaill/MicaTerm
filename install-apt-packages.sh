@@ -5,6 +5,7 @@ set -euo pipefail
 
 APT_PACKAGES=(
   gcc-mingw-w64-x86-64-posix
+  nasm
   llvm-19
   clang-19
   zip
@@ -18,6 +19,9 @@ describe_package() {
   case "$1" in
     gcc-mingw-w64-x86-64-posix)
       echo "provides x86_64-w64-mingw32-gcc for Windows GNU builds"
+      ;;
+    nasm)
+      echo "provides the assembler required by aws-lc-sys on the Windows GNU build path"
       ;;
     llvm-19)
       echo "provides llvm resource compiler tooling for Windows MSVC validation"
@@ -48,6 +52,7 @@ Interactive apt installer for the current Mica Term Windows build chain.
 
 Packages that will be offered for installation:
   - gcc-mingw-w64-x86-64-posix
+  - nasm
   - llvm-19
   - clang-19
   - zip
@@ -118,6 +123,7 @@ print_command_probes() {
   echo
   echo "Command probes:"
   probe_command "MinGW linker" x86_64-w64-mingw32-gcc
+  probe_command "NASM" nasm
   probe_command "Clang" clang-19 clang
   probe_command "LLVM resource compiler" llvm-rc-19 llvm-rc
   probe_command "zip" zip
