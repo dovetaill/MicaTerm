@@ -1,4 +1,5 @@
 use mica_term::AppWindow;
+use mica_term::WorkspaceTabItem;
 use mica_term::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
     PersistedAssetPayload,
@@ -8,7 +9,6 @@ use mica_term::app::bootstrap::{
 };
 use mica_term::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService};
 use mica_term::app::window_effects::default_platform_window_effects;
-use mica_term::WorkspaceTabItem;
 use russh::keys::{HashAlg, PublicKey};
 use slint::Model;
 use slint::{ModelRc, VecModel};
@@ -123,13 +123,19 @@ fn ssh_modal_round_trips_standard_fields_and_auth_fields() {
     assert_eq!(app.get_asset_ssh_modal_host().as_str(), "10.0.0.12");
     assert_eq!(app.get_asset_ssh_modal_user().as_str(), "ops");
     assert_eq!(app.get_asset_ssh_modal_port().as_str(), "2222");
-    assert_eq!(app.get_asset_ssh_modal_auth_method().as_str(), "private-key");
+    assert_eq!(
+        app.get_asset_ssh_modal_auth_method().as_str(),
+        "private-key"
+    );
     assert_eq!(
         app.get_asset_ssh_modal_private_key_source().as_str(),
         "path"
     );
     assert_eq!(app.get_asset_ssh_modal_password().as_str(), "secret");
-    assert_eq!(app.get_asset_ssh_modal_remark().as_str(), "Primary entry point");
+    assert_eq!(
+        app.get_asset_ssh_modal_remark().as_str(),
+        "Primary entry point"
+    );
 }
 
 #[test]
@@ -152,6 +158,35 @@ fn ssh_modal_exposes_action_buttons_for_save_connect_test_and_save_connect() {
     assert_eq!(
         actions.borrow().as_slice(),
         ["save", "connect", "test", "save-and-connect"]
+    );
+}
+
+#[test]
+fn ssh_modal_contract_round_trips_button_state_and_inline_feedback() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    app.set_asset_modal_can_confirm(true);
+    app.set_asset_modal_validation_message("Host is required.".into());
+    app.set_asset_ssh_modal_connect_family_enabled(false);
+    app.set_asset_ssh_modal_feedback_state("busy".into());
+    app.set_asset_ssh_modal_feedback_message("Testing connection...".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
+    assert!(app.get_asset_modal_can_confirm());
+    assert_eq!(
+        app.get_asset_modal_validation_message().as_str(),
+        "Host is required."
+    );
+    assert!(!app.get_asset_ssh_modal_connect_family_enabled());
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "busy");
+    assert_eq!(
+        app.get_asset_ssh_modal_feedback_message().as_str(),
+        "Testing connection..."
     );
 }
 
@@ -299,6 +334,29 @@ fn delete_modal_visibility_round_trips_through_window_properties() {
     assert!(app.get_asset_delete_confirm_modal_open());
     assert_eq!(app.get_asset_delete_confirm_target_label().as_str(), "Prod");
     assert_eq!(app.get_asset_delete_confirm_descendant_count(), 3);
+}
+
+#[test]
+fn blocking_modal_shell_exposes_drag_callbacks_and_focus_restore_hooks() {
+    let modal_shell = fs::read_to_string("ui/components/blocking-modal-shell.slint")
+        .expect("read blocking modal shell");
+
+    assert!(
+        modal_shell.contains("export component BlockingModalShell inherits Rectangle"),
+        "blocking modal shell component should exist"
+    );
+    assert!(
+        modal_shell.contains("callback drag-requested(length, length);"),
+        "blocking modal shell should expose drag start callbacks"
+    );
+    assert!(
+        modal_shell.contains("callback drag-moved(length, length);"),
+        "blocking modal shell should expose drag move callbacks"
+    );
+    assert!(
+        modal_shell.contains("callback focus-restore-requested();"),
+        "blocking modal shell should expose focus restore hooks"
+    );
 }
 
 #[test]

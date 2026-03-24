@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-pub const ASSET_CATALOG_SCHEMA_VERSION: u32 = 1;
+pub const ASSET_CATALOG_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistedAssetCatalog {
@@ -27,6 +27,7 @@ pub enum PersistedAssetKind {
     SshConnection,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PersistedAssetPayload {
     Folder,
@@ -38,6 +39,11 @@ pub struct PersistedSshConnectionSpec {
     pub host: String,
     pub user: String,
     pub port: String,
+    pub auth_method: String,
+    pub private_key_source: String,
+    pub private_key_path: String,
     pub environment: String,
     pub proxy_method: String,
+    pub remark: String,
+    pub credential_ref: Option<String>,
 }

@@ -7,6 +7,7 @@ import { AssetsDeleteConfirmModal } from "components/assets-delete-confirm-modal
 import { AssetsFolderCreateModal } from "components/assets-folder-create-modal.slint";
 import { AssetsRenameModal } from "components/assets-rename-modal.slint";
 import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal.slint";
+import { BlockingModalShell } from "components/blocking-modal-shell.slint";
 import { SshHostKeyConfirmModal } from "components/ssh-host-key-confirm-modal.slint";
 import { StatusPill } from "components/status-pill.slint";
 import { ThemeTokens } from "theme/tokens.slint";
@@ -15,9 +16,9 @@ import { WindowResizeGrips } from "components/window-resize-grips.slint";
 import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { RightPanel } from "shell/right-panel.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
-import { TabBar, WorkspaceTabItem } from "shell/tabbar.slint";
-import { TerminalSessionHost } from "shell/terminal-session-host.slint";
+import { WorkspaceTabItem } from "shell/tabbar.slint";
 import { Titlebar } from "shell/titlebar.slint";
+import { WorkspacePane } from "shell/workspace-pane.slint";
 
 export component AppWindow inherits Window {
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
@@ -66,6 +67,9 @@ export component AppWindow inherits Window {
     in-out property <string> asset-ssh-modal-remark: "";
     in-out property <string> asset-ssh-modal-environment: "";
     in-out property <string> asset-ssh-modal-proxy-method: "";
+    in-out property <bool> asset-ssh-modal-connect-family-enabled: false;
+    in-out property <string> asset-ssh-modal-feedback-state: "idle";
+    in-out property <string> asset-ssh-modal-feedback-message: "";
     in-out property <string> asset-primary-create-action-id: "";
     in-out property <string> asset-primary-create-tooltip: "";
     in-out property <string> asset-search-tooltip: "";
@@ -73,6 +77,8 @@ export component AppWindow inherits Window {
     in-out property <string> asset-tree-expansion-tooltip: "";
     in-out property <bool> asset-show-tree-controls: true;
     in-out property <bool> asset-tree-controls-enabled: true;
+    in-out property <length> blocking-modal-offset-x: 0px;
+    in-out property <length> blocking-modal-offset-y: 0px;
     in-out property <[ConsoleAssetItem]> console-asset-items: [];
     in-out property <[WorkspaceTabItem]> workspace-tab-items: [];
     in-out property <string> active-workspace-session-id: "";
@@ -81,6 +87,8 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-session-subtitle: "";
     in-out property <string> workspace-session-state: "";
     in-out property <bool> workspace-session-can-reconnect: false;
+    in-out property <string> workspace-session-screen-text: "";
+    in-out property <int> workspace-session-surface-seqno: 0;
     in-out property <bool> assets-context-menu-open: false;
     in-out property <length> assets-context-menu-anchor-x: 0px;
     in-out property <length> assets-context-menu-anchor-y: 0px;
@@ -157,6 +165,10 @@ export component AppWindow inherits Window {
     callback asset-ssh-modal-action-requested(string);
     callback ssh-host-key-modal-accept-requested();
     callback ssh-host-key-modal-reject-requested();
+    callback blocking-modal-drag-requested(length, length);
+    callback blocking-modal-drag-moved(length, length);
+    callback blocking-modal-drag-ended();
+    callback blocking-modal-focus-restore-requested();
     callback workspace-tab-selected(string);
     callback workspace-tab-close-requested(string);
     callback asset-selected(string);
@@ -199,6 +211,34 @@ export component AppWindow inherits Window {
     changed asset-create-menu-open => {
         if root.asset-create-menu-open {
             assets-create-menu-overlay.focus-menu();
+        }
+    }
+
+    changed asset-modal-open => {
+        if root.asset-modal-open {
+            root.blocking-modal-offset-x = 0px;
+            root.blocking-modal-offset-y = 0px;
+        }
+    }
+
+    changed asset-rename-modal-open => {
+        if root.asset-rename-modal-open {
+            root.blocking-modal-offset-x = 0px;
+            root.blocking-modal-offset-y = 0px;
+        }
+    }
+
+    changed asset-delete-confirm-modal-open => {
+        if root.asset-delete-confirm-modal-open {
+            root.blocking-modal-offset-x = 0px;
+            root.blocking-modal-offset-y = 0px;
+        }
+    }
+
+    changed ssh-host-key-modal-open => {
+        if root.ssh-host-key-modal-open {
+            root.blocking-modal-offset-x = 0px;
+            root.blocking-modal-offset-y = 0px;
         }
     }
 
@@ -369,39 +409,23 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    main-workspace := Rectangle {
-                        horizontal-stretch: 1;
-                        background: ThemeTokens.workspace-surface;
+                    main-workspace := WorkspacePane {
+                        vertical-stretch: 1;
+                        workspace-tab-items: root.workspace-tab-items;
+                        workspace-session-host-mode: root.workspace-session-host-mode;
+                        workspace-session-title: root.workspace-session-title;
+                        workspace-session-subtitle: root.workspace-session-subtitle;
+                        workspace-session-state: root.workspace-session-state;
+                        workspace-session-can-reconnect: root.workspace-session-can-reconnect;
+                        workspace-session-screen-text: root.workspace-session-screen-text;
+                        workspace-session-surface-seqno: root.workspace-session-surface-seqno;
 
-                        VerticalLayout {
-                            spacing: 0px;
+                        workspace-tab-selected(session-id) => {
+                            root.workspace-tab-selected(session-id);
+                        }
 
-                            TabBar {
-                                items: root.workspace-tab-items;
-
-                                tab-selected(session-id) => {
-                                    root.workspace-tab-selected(session-id);
-                                }
-
-                                tab-close-requested(session-id) => {
-                                    root.workspace-tab-close-requested(session-id);
-                                }
-                            }
-
-                            content-host := Rectangle {
-                                vertical-stretch: 1;
-                                background: transparent;
-
-                                TerminalSessionHost {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    mode: root.workspace-session-host-mode;
-                                    session-title: root.workspace-session-title;
-                                    session-subtitle: root.workspace-session-subtitle;
-                                    session-state: root.workspace-session-state;
-                                    can-reconnect: root.workspace-session-can-reconnect;
-                                }
-                            }
+                        workspace-tab-close-requested(session-id) => {
+                            root.workspace-tab-close-requested(session-id);
                         }
                     }
 
@@ -532,125 +556,287 @@ export component AppWindow inherits Window {
         height: root.height - titlebar.height;
         enabled: root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open;
 
-        clicked => {
-            if root.ssh-host-key-modal-open {
-                root.ssh-host-key-modal-reject-requested();
-            } else {
+        clicked => { }
+    }
+
+    if root.asset-modal-open && root.asset-modal-kind == "new-folder" : asset-folder-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 360px;
+        modal-height: 214px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+        title: "New Folder";
+        show-close-button: true;
+
+        close-requested => {
+            root.close-asset-modal-requested();
+        }
+
+        drag-requested(pointer-x, pointer-y) => {
+            root.blocking-modal-drag-requested(pointer-x, pointer-y);
+        }
+
+        drag-moved(pointer-x, pointer-y) => {
+            root.blocking-modal-drag-moved(pointer-x, pointer-y);
+        }
+
+        drag-ended => {
+            root.blocking-modal-drag-ended();
+        }
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        asset-folder-modal-overlay := AssetsFolderCreateModal {
+            x: 0px;
+            y: 0px;
+            folder-name: root.asset-folder-modal-name;
+            validation-message: root.asset-modal-validation-message;
+            can-confirm: root.asset-modal-can-confirm;
+            focus-sequence: root.asset-modal-focus-sequence;
+
+            close-requested => {
                 root.close-asset-modal-requested();
+            }
+
+            confirm-requested => {
+                root.confirm-asset-modal-requested();
+            }
+
+            folder-name-changed(value) => {
+                root.asset-folder-modal-name-changed(value);
             }
         }
     }
 
-    if root.asset-modal-open && root.asset-modal-kind == "new-folder" : asset-folder-modal-overlay := AssetsFolderCreateModal {
-        x: max(24px, (root.width - self.width) / 2);
-        y: max(titlebar.height + 24px, titlebar.height + (root.height - titlebar.height - self.height) / 2);
-        folder-name: root.asset-folder-modal-name;
-        validation-message: root.asset-modal-validation-message;
-        can-confirm: root.asset-modal-can-confirm;
-        focus-sequence: root.asset-modal-focus-sequence;
+    if root.asset-modal-open && root.asset-modal-kind == "new-ssh-connection" : asset-ssh-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 760px;
+        modal-height: 720px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+        title: "New SSH Connection";
+        show-close-button: true;
 
         close-requested => {
             root.close-asset-modal-requested();
         }
 
-        confirm-requested => {
-            root.confirm-asset-modal-requested();
+        drag-requested(pointer-x, pointer-y) => {
+            root.blocking-modal-drag-requested(pointer-x, pointer-y);
         }
 
-        folder-name-changed(value) => {
-            root.asset-folder-modal-name-changed(value);
+        drag-moved(pointer-x, pointer-y) => {
+            root.blocking-modal-drag-moved(pointer-x, pointer-y);
+        }
+
+        drag-ended => {
+            root.blocking-modal-drag-ended();
+        }
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        asset-ssh-modal-overlay := AssetsSshConnectionModal {
+            x: 0px;
+            y: 0px;
+            active-tab: root.asset-ssh-modal-active-tab;
+            name: root.asset-ssh-modal-name;
+            host: root.asset-ssh-modal-host;
+            user: root.asset-ssh-modal-user;
+            port: root.asset-ssh-modal-port;
+            auth-method: root.asset-ssh-modal-auth-method;
+            private-key-source: root.asset-ssh-modal-private-key-source;
+            password: root.asset-ssh-modal-password;
+            private-key-content: root.asset-ssh-modal-private-key-content;
+            private-key-path: root.asset-ssh-modal-private-key-path;
+            passphrase: root.asset-ssh-modal-passphrase;
+            remark: root.asset-ssh-modal-remark;
+            environment: root.asset-ssh-modal-environment;
+            proxy-method: root.asset-ssh-modal-proxy-method;
+            connect-family-enabled: root.asset-ssh-modal-connect-family-enabled;
+            feedback-state: root.asset-ssh-modal-feedback-state;
+            feedback-message: root.asset-ssh-modal-feedback-message;
+            validation-message: root.asset-modal-validation-message;
+            can-confirm: root.asset-modal-can-confirm;
+            focus-sequence: root.asset-modal-focus-sequence;
+
+            close-requested => {
+                root.close-asset-modal-requested();
+            }
+
+            confirm-requested => {
+                root.confirm-asset-modal-requested();
+            }
+
+            tab-selected(tab-id) => {
+                root.asset-ssh-modal-tab-selected(tab-id);
+            }
+
+            draft-changed(field, value) => {
+                root.asset-ssh-modal-draft-changed(field, value);
+            }
+
+            action-requested(action-id) => {
+                root.asset-ssh-modal-action-requested(action-id);
+            }
         }
     }
 
-    if root.asset-modal-open && root.asset-modal-kind == "new-ssh-connection" : asset-ssh-modal-overlay := AssetsSshConnectionModal {
-        x: max(24px, (root.width - self.width) / 2);
-        y: max(titlebar.height + 24px, titlebar.height + (root.height - titlebar.height - self.height) / 2);
-        active-tab: root.asset-ssh-modal-active-tab;
-        name: root.asset-ssh-modal-name;
-        host: root.asset-ssh-modal-host;
-        user: root.asset-ssh-modal-user;
-        port: root.asset-ssh-modal-port;
-        auth-method: root.asset-ssh-modal-auth-method;
-        private-key-source: root.asset-ssh-modal-private-key-source;
-        password: root.asset-ssh-modal-password;
-        private-key-content: root.asset-ssh-modal-private-key-content;
-        private-key-path: root.asset-ssh-modal-private-key-path;
-        passphrase: root.asset-ssh-modal-passphrase;
-        remark: root.asset-ssh-modal-remark;
-        environment: root.asset-ssh-modal-environment;
-        proxy-method: root.asset-ssh-modal-proxy-method;
-        validation-message: root.asset-modal-validation-message;
-        can-confirm: root.asset-modal-can-confirm;
-        focus-sequence: root.asset-modal-focus-sequence;
+    if root.asset-rename-modal-open : asset-rename-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 360px;
+        modal-height: 214px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+        title: "Rename";
+        show-close-button: true;
 
         close-requested => {
             root.close-asset-modal-requested();
         }
 
-        confirm-requested => {
-            root.confirm-asset-modal-requested();
+        drag-requested(pointer-x, pointer-y) => {
+            root.blocking-modal-drag-requested(pointer-x, pointer-y);
         }
 
-        tab-selected(tab-id) => {
-            root.asset-ssh-modal-tab-selected(tab-id);
+        drag-moved(pointer-x, pointer-y) => {
+            root.blocking-modal-drag-moved(pointer-x, pointer-y);
         }
 
-        draft-changed(field, value) => {
-            root.asset-ssh-modal-draft-changed(field, value);
+        drag-ended => {
+            root.blocking-modal-drag-ended();
         }
 
-        action-requested(action-id) => {
-            root.asset-ssh-modal-action-requested(action-id);
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        asset-rename-modal-overlay := AssetsRenameModal {
+            x: 0px;
+            y: 0px;
+            item-name: root.asset-rename-modal-name;
+            validation-message: root.asset-rename-modal-validation-message;
+            can-confirm: root.asset-rename-modal-can-confirm;
+
+            close-requested => {
+                root.close-asset-modal-requested();
+            }
+
+            confirm-requested => {
+                root.confirm-asset-rename-requested();
+            }
+
+            name-changed(value) => {
+                root.asset-rename-modal-name-changed(value);
+            }
         }
     }
 
-    if root.asset-rename-modal-open : asset-rename-modal-overlay := AssetsRenameModal {
-        x: max(24px, (root.width - self.width) / 2);
-        y: max(titlebar.height + 24px, titlebar.height + (root.height - titlebar.height - self.height) / 2);
-        item-name: root.asset-rename-modal-name;
-        validation-message: root.asset-rename-modal-validation-message;
-        can-confirm: root.asset-rename-modal-can-confirm;
+    if root.asset-delete-confirm-modal-open : asset-delete-confirm-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 392px;
+        modal-height: 228px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+        title: "Delete Asset";
+        show-close-button: true;
 
         close-requested => {
             root.close-asset-modal-requested();
         }
 
-        confirm-requested => {
-            root.confirm-asset-rename-requested();
+        drag-requested(pointer-x, pointer-y) => {
+            root.blocking-modal-drag-requested(pointer-x, pointer-y);
         }
 
-        name-changed(value) => {
-            root.asset-rename-modal-name-changed(value);
+        drag-moved(pointer-x, pointer-y) => {
+            root.blocking-modal-drag-moved(pointer-x, pointer-y);
+        }
+
+        drag-ended => {
+            root.blocking-modal-drag-ended();
+        }
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {
+            x: 0px;
+            y: 0px;
+            target-label: root.asset-delete-confirm-target-label;
+            descendant-count: root.asset-delete-confirm-descendant-count;
+
+            close-requested => {
+                root.close-asset-modal-requested();
+            }
+
+            confirm-requested => {
+                root.confirm-delete-asset-requested();
+            }
         }
     }
 
-    if root.asset-delete-confirm-modal-open : asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {
-        x: max(24px, (root.width - self.width) / 2);
-        y: max(titlebar.height + 24px, titlebar.height + (root.height - titlebar.height - self.height) / 2);
-        target-label: root.asset-delete-confirm-target-label;
-        descendant-count: root.asset-delete-confirm-descendant-count;
+    if root.ssh-host-key-modal-open : ssh-host-key-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 420px;
+        modal-height: 244px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+        title: "Verify Host Key";
+        show-close-button: false;
 
         close-requested => {
-            root.close-asset-modal-requested();
-        }
-
-        confirm-requested => {
-            root.confirm-delete-asset-requested();
-        }
-    }
-
-    if root.ssh-host-key-modal-open : ssh-host-key-modal-overlay := SshHostKeyConfirmModal {
-        x: max(24px, (root.width - self.width) / 2);
-        y: max(titlebar.height + 24px, titlebar.height + (root.height - titlebar.height - self.height) / 2);
-        host: root.ssh-host-key-modal-host;
-        fingerprint: root.ssh-host-key-modal-fingerprint;
-
-        accept-requested => {
-            root.ssh-host-key-modal-accept-requested();
-        }
-
-        reject-requested => {
             root.ssh-host-key-modal-reject-requested();
+        }
+
+        drag-requested(pointer-x, pointer-y) => {
+            root.blocking-modal-drag-requested(pointer-x, pointer-y);
+        }
+
+        drag-moved(pointer-x, pointer-y) => {
+            root.blocking-modal-drag-moved(pointer-x, pointer-y);
+        }
+
+        drag-ended => {
+            root.blocking-modal-drag-ended();
+        }
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        ssh-host-key-modal-overlay := SshHostKeyConfirmModal {
+            x: 0px;
+            y: 0px;
+            host: root.ssh-host-key-modal-host;
+            fingerprint: root.ssh-host-key-modal-fingerprint;
+
+            accept-requested => {
+                root.ssh-host-key-modal-accept-requested();
+            }
+
+            reject-requested => {
+                root.ssh-host-key-modal-reject-requested();
+            }
         }
     }
 

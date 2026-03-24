@@ -11,9 +11,13 @@ pub struct AppAsyncRuntime {
 
 impl AppAsyncRuntime {
     pub fn new() -> anyhow::Result<Self> {
+        let worker_threads = std::thread::available_parallelism()
+            .map(|value| value.get().min(2))
+            .unwrap_or(2);
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .thread_name("mica-term-bg")
+            .worker_threads(worker_threads)
             .build()?;
 
         Ok(Self {

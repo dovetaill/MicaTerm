@@ -120,10 +120,16 @@ pub struct AssetSshConnectionSpec {
     pub host: String,
     pub user: String,
     pub port: String,
+    pub auth_method: String,
+    pub private_key_source: String,
+    pub private_key_path: String,
     pub environment: String,
     pub proxy_method: String,
+    pub remark: String,
+    pub credential_ref: Option<String>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetNodePayload {
     Folder,
@@ -327,6 +333,20 @@ impl AssetTree {
         match &self.nodes.get(node_id)?.payload {
             AssetNodePayload::Folder => None,
             AssetNodePayload::SshConnection(spec) => Some(spec),
+        }
+    }
+
+    pub fn set_ssh_connection_spec(&mut self, node_id: &str, spec: AssetSshConnectionSpec) -> bool {
+        let Some(node) = self.nodes.get_mut(node_id) else {
+            return false;
+        };
+
+        match &mut node.payload {
+            AssetNodePayload::Folder => false,
+            AssetNodePayload::SshConnection(current) => {
+                *current = spec;
+                true
+            }
         }
     }
 

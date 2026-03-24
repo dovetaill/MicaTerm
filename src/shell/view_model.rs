@@ -1,5 +1,7 @@
 //! Central shell state mirrored into Slint properties and mutated by UI callbacks.
 
+use crate::app::ssh::credentials::{SshCredentialKind, ssh_credential_ref};
+use crate::app::ssh::runtime::TerminalSurfaceState;
 use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::{
     AssetNameValidation, AssetNodePayload, AssetSshConnectionSpec, AssetTree, AssetViewMode,
@@ -30,6 +32,7 @@ pub enum AssetModalState {
     },
     NewSshConnection {
         parent_id: Option<String>,
+        editing_asset_id: Option<String>,
         active_tab: AssetSshModalTab,
         draft: AssetSshConnectionDraft,
     },
@@ -124,9 +127,18 @@ pub struct SshHostKeyPromptState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SshModalAction {
+    Save,
     Connect,
     TestConnection,
     SaveAndConnect,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SshModalActionState {
+    Idle,
+    Busy(SshModalAction),
+    Success(String),
+    Error(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,7 +168,9 @@ pub struct ShellViewModel {
     pub focused_asset_id: Option<String>,
     workspace_tabs: Vec<WorkspaceTab>,
     active_workspace_session_id: Option<String>,
+    active_workspace_terminal_surface: Option<TerminalSurfaceState>,
     pending_ssh_modal_action: Option<PendingSshModalAction>,
+    ssh_modal_action_state: SshModalActionState,
     pub editing_asset_id: Option<String>,
     pub editing_asset_text: String,
     pub context_menu_open: bool,
@@ -195,7 +209,9 @@ impl Default for ShellViewModel {
             focused_asset_id: None,
             workspace_tabs: Vec::new(),
             active_workspace_session_id: None,
+            active_workspace_terminal_surface: None,
             pending_ssh_modal_action: None,
+            ssh_modal_action_state: SshModalActionState::Idle,
             editing_asset_id: None,
             editing_asset_text: String::new(),
             context_menu_open: false,
@@ -256,8 +272,15 @@ impl ShellViewModel {
                 self.create_asset_modal_validation(parent_id.as_deref(), draft_name),
             ),
             Some(AssetModalState::NewSshConnection {
-                parent_id, draft, ..
-            }) => self.ssh_modal_validation_message(parent_id.as_deref(), draft),
+                parent_id,
+                editing_asset_id,
+                draft,
+                ..
+            }) => self.ssh_modal_validation_message(
+                parent_id.as_deref(),
+                editing_asset_id.as_deref(),
+                draft,
+            ),
             _ => String::new(),
         }
     }
@@ -272,8 +295,15 @@ impl ShellViewModel {
                     == AssetNameValidation::Valid
             }
             Some(AssetModalState::NewSshConnection {
-                parent_id, draft, ..
-            }) => self.ssh_modal_can_confirm(parent_id.as_deref(), draft),
+                parent_id,
+                editing_asset_id,
+                draft,
+                ..
+            }) => self.ssh_modal_can_confirm(
+                parent_id.as_deref(),
+                editing_asset_id.as_deref(),
+                draft,
+            ),
             _ => false,
         }
     }
@@ -299,12 +329,92 @@ impl ShellViewModel {
         self.active_workspace_session_id.as_deref()
     }
 
+    pub fn active_workspace_terminal_surface(&self) -> Option<&TerminalSurfaceState> {
+        let active_id = self.active_workspace_session_id.as_deref()?;
+        self.active_workspace_terminal_surface
+            .as_ref()
+            .filter(|surface| surface.session_id.to_string() == active_id)
+    }
+
+    pub fn set_active_workspace_terminal_surface(
+        &mut self,
+        surface: Option<TerminalSurfaceState>,
+    ) {
+        self.active_workspace_terminal_surface = surface;
+    }
+
     pub fn pending_ssh_modal_action(&self) -> Option<&PendingSshModalAction> {
         self.pending_ssh_modal_action.as_ref()
     }
 
     pub fn take_pending_ssh_modal_action(&mut self) -> Option<PendingSshModalAction> {
         self.pending_ssh_modal_action.take()
+    }
+
+    pub fn ssh_modal_action_state(&self) -> &SshModalActionState {
+        &self.ssh_modal_action_state
+    }
+
+    pub fn ssh_modal_feedback_state_id(&self) -> &'static str {
+        match self.ssh_modal_action_state {
+            SshModalActionState::Idle => "idle",
+            SshModalActionState::Busy(_) => "busy",
+            SshModalActionState::Success(_) => "success",
+            SshModalActionState::Error(_) => "error",
+        }
+    }
+
+    pub fn ssh_modal_feedback_message(&self) -> String {
+        match &self.ssh_modal_action_state {
+            SshModalActionState::Idle => String::new(),
+            SshModalActionState::Busy(action) => match action {
+                SshModalAction::Save => "Saving connection...".into(),
+                SshModalAction::Connect => "Opening temporary session...".into(),
+                SshModalAction::TestConnection => "Testing connection...".into(),
+                SshModalAction::SaveAndConnect => "Saving connection and opening session...".into(),
+            },
+            SshModalActionState::Success(message) | SshModalActionState::Error(message) => {
+                message.clone()
+            }
+        }
+    }
+
+    pub fn ssh_modal_connect_family_enabled(&self) -> bool {
+        match &self.asset_modal_state {
+            Some(AssetModalState::NewSshConnection {
+                parent_id,
+                editing_asset_id,
+                draft,
+                ..
+            }) => {
+                self.ssh_modal_submit_validation_message(
+                    parent_id.as_deref(),
+                    editing_asset_id.as_deref(),
+                    draft,
+                )
+                .is_none()
+                    && !self.ssh_modal_is_busy()
+            }
+            _ => false,
+        }
+    }
+
+    pub fn ssh_modal_save_enabled(&self) -> bool {
+        matches!(
+            self.asset_modal_state,
+            Some(AssetModalState::NewSshConnection { .. })
+        ) && self.asset_create_modal_can_confirm()
+            && !self.ssh_modal_is_busy()
+    }
+
+    pub fn finish_ssh_modal_action_success(&mut self, message: impl Into<String>) {
+        self.pending_ssh_modal_action = None;
+        self.ssh_modal_action_state = SshModalActionState::Success(message.into());
+    }
+
+    pub fn finish_ssh_modal_action_error(&mut self, message: impl Into<String>) {
+        self.pending_ssh_modal_action = None;
+        self.ssh_modal_action_state = SshModalActionState::Error(message.into());
     }
 
     pub fn active_workspace_tab(&self) -> Option<&WorkspaceTab> {
@@ -329,14 +439,31 @@ impl ShellViewModel {
     }
 
     pub fn close_workspace_session(&mut self, session_id: &str) -> bool {
-        let original_len = self.workspace_tabs.len();
-        self.workspace_tabs.retain(|tab| tab.session_id != session_id);
-        if self.workspace_tabs.len() == original_len {
-            return false;
-        }
+        self.close_workspace_session_with_fallback(session_id)
+    }
 
-        if self.active_workspace_session_id.as_deref() == Some(session_id) {
-            self.active_workspace_session_id = None;
+    pub fn close_workspace_session_with_fallback(&mut self, session_id: &str) -> bool {
+        let Some(removed_index) = self
+            .workspace_tabs
+            .iter()
+            .position(|tab| tab.session_id == session_id)
+        else {
+            return false;
+        };
+
+        let removed_was_active = self.active_workspace_session_id.as_deref() == Some(session_id);
+        self.workspace_tabs.remove(removed_index);
+
+        if removed_was_active {
+            self.active_workspace_session_id = self
+                .workspace_tabs
+                .get(removed_index)
+                .or_else(|| {
+                    removed_index
+                        .checked_sub(1)
+                        .and_then(|index| self.workspace_tabs.get(index))
+                })
+                .map(|tab| tab.session_id.clone());
         }
 
         self.normalize_workspace_tabs();
@@ -351,6 +478,22 @@ impl ShellViewModel {
         self.active_workspace_tab()
             .map(WorkspaceTab::can_reconnect)
             .unwrap_or(false)
+    }
+
+    pub fn workspace_terminal_surface_ready(&self) -> bool {
+        self.active_workspace_terminal_surface().is_some()
+    }
+
+    pub fn workspace_terminal_surface_seqno(&self) -> usize {
+        self.active_workspace_terminal_surface()
+            .map(|surface| surface.seqno)
+            .unwrap_or_default()
+    }
+
+    pub fn workspace_terminal_screen_text(&self) -> &str {
+        self.active_workspace_terminal_surface()
+            .map(|surface| surface.screen_text.as_str())
+            .unwrap_or("")
     }
 
     pub fn workspace_session_host_mode(&self) -> &'static str {
@@ -501,12 +644,54 @@ impl ShellViewModel {
         self.close_context_menu();
         self.close_asset_create_menu();
         self.context_target_asset_id = parent_id.clone();
+        self.pending_ssh_modal_action = None;
+        self.ssh_modal_action_state = SshModalActionState::Idle;
         self.asset_modal_state = Some(AssetModalState::NewSshConnection {
             parent_id,
+            editing_asset_id: None,
             active_tab: AssetSshModalTab::Standard,
             draft: AssetSshConnectionDraft {
                 name: draft_name,
                 ..AssetSshConnectionDraft::default()
+            },
+        });
+    }
+
+    pub fn open_edit_ssh_modal(&mut self, asset_id: String) {
+        let Some(node) = self.console_asset_tree.node(&asset_id).cloned() else {
+            return;
+        };
+        let AssetNodePayload::SshConnection(spec) = node.payload else {
+            return;
+        };
+
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.focused_asset_id = Some(asset_id.clone());
+        self.selected_asset_ids = vec![asset_id.clone()];
+        self.context_target_asset_id = Some(asset_id.clone());
+        self.pending_ssh_modal_action = None;
+        self.ssh_modal_action_state = SshModalActionState::Idle;
+        self.asset_modal_state = Some(AssetModalState::NewSshConnection {
+            parent_id: node.parent_id,
+            editing_asset_id: Some(asset_id),
+            active_tab: AssetSshModalTab::Standard,
+            draft: AssetSshConnectionDraft {
+                name: node.title,
+                host: spec.host,
+                user: spec.user,
+                port: spec.port,
+                auth_method: spec.auth_method,
+                private_key_source: spec.private_key_source,
+                password: String::new(),
+                private_key_content: String::new(),
+                private_key_path: spec.private_key_path,
+                passphrase: String::new(),
+                remark: spec.remark,
+                environment: spec.environment,
+                proxy_method: spec.proxy_method,
+                validation_message: String::new(),
             },
         });
     }
@@ -600,6 +785,7 @@ impl ShellViewModel {
         }
 
         draft.validation_message.clear();
+        self.ssh_modal_action_state = SshModalActionState::Idle;
     }
 
     pub fn update_ssh_modal_name(&mut self, value: String) {
@@ -625,54 +811,57 @@ impl ShellViewModel {
     }
 
     pub fn begin_ssh_modal_action(&mut self, action_id: &str) -> bool {
-        let Some(AssetModalState::NewSshConnection { parent_id, draft, .. }) =
-            self.asset_modal_state.as_ref()
+        if self.ssh_modal_is_busy() {
+            return false;
+        }
+
+        let Some(AssetModalState::NewSshConnection {
+            parent_id,
+            editing_asset_id,
+            draft,
+            ..
+        }) = self.asset_modal_state.as_ref()
         else {
             return false;
         };
 
         let draft = draft.clone();
-        let validation_message =
-            self.ssh_modal_submit_validation_message(parent_id.as_deref(), &draft);
+        let validation_message = self.ssh_modal_submit_validation_message(
+            parent_id.as_deref(),
+            editing_asset_id.as_deref(),
+            &draft,
+        );
 
-        if let Some(AssetModalState::NewSshConnection { draft, .. }) = self.asset_modal_state.as_mut()
+        if let Some(AssetModalState::NewSshConnection { draft, .. }) =
+            self.asset_modal_state.as_mut()
         {
             draft.validation_message = validation_message.clone().unwrap_or_default();
         }
 
         self.pending_ssh_modal_action = None;
+        self.ssh_modal_action_state = SshModalActionState::Idle;
         if validation_message.is_some() {
             return false;
         }
 
-        match action_id {
-            "save" => self.confirm_asset_modal(),
-            "connect" => {
-                self.pending_ssh_modal_action = Some(PendingSshModalAction {
-                    action: SshModalAction::Connect,
-                    draft,
-                });
-                true
-            }
-            "test" => {
-                self.pending_ssh_modal_action = Some(PendingSshModalAction {
-                    action: SshModalAction::TestConnection,
-                    draft,
-                });
-                true
-            }
-            "save-and-connect" => {
-                self.pending_ssh_modal_action = Some(PendingSshModalAction {
-                    action: SshModalAction::SaveAndConnect,
-                    draft,
-                });
-                true
-            }
+        let action = match action_id {
+            "save" => SshModalAction::Save,
+            "connect" => SshModalAction::Connect,
+            "test" => SshModalAction::TestConnection,
+            "save-and-connect" => SshModalAction::SaveAndConnect,
             _ => {
-                self.set_ssh_modal_feedback("Unsupported SSH action.");
-                false
+                self.finish_ssh_modal_action_error("Unsupported SSH action.");
+                return false;
             }
+        };
+
+        if action_id != "save" && !self.ssh_modal_connect_family_enabled() {
+            return false;
         }
+
+        self.pending_ssh_modal_action = Some(PendingSshModalAction { action, draft });
+        self.ssh_modal_action_state = SshModalActionState::Busy(action);
+        true
     }
 
     pub fn can_confirm_asset_modal(&self) -> bool {
@@ -710,27 +899,57 @@ impl ShellViewModel {
                 AssetNodePayload::Folder,
             ),
             AssetModalState::NewSshConnection {
-                parent_id, draft, ..
+                parent_id,
+                editing_asset_id,
+                draft,
+                ..
             } => {
                 if self
-                    .ssh_modal_submit_validation_message(parent_id.as_deref(), &draft)
+                    .ssh_modal_submit_validation_message(
+                        parent_id.as_deref(),
+                        editing_asset_id.as_deref(),
+                        &draft,
+                    )
                     .is_some()
                 {
                     return false;
                 }
+
+                let label = draft.name.trim().to_string();
+                if let Some(asset_id) = editing_asset_id {
+                    let existing_spec = self.console_asset_tree.ssh_connection_spec(&asset_id);
+                    let payload = build_saved_ssh_connection_spec(&asset_id, &draft, existing_spec);
+
+                    self.console_asset_tree
+                        .set_title(&asset_id, label.trim().to_string());
+                    if !self
+                        .console_asset_tree
+                        .set_ssh_connection_spec(&asset_id, payload)
+                    {
+                        return false;
+                    }
+                    self.selected_asset_ids = vec![asset_id.clone()];
+                    self.focused_asset_id = Some(asset_id.clone());
+                    self.context_target_asset_id = Some(asset_id);
+                    self.asset_modal_state = None;
+                    self.pending_ssh_modal_action = None;
+                    self.ssh_modal_action_state = SshModalActionState::Idle;
+                    return true;
+                }
+
                 let payload = AssetNodePayload::SshConnection(AssetSshConnectionSpec {
                     host: draft.host,
                     user: draft.user,
                     port: draft.port,
+                    auth_method: draft.auth_method,
+                    private_key_source: draft.private_key_source,
+                    private_key_path: draft.private_key_path,
                     environment: draft.environment,
                     proxy_method: draft.proxy_method,
+                    remark: draft.remark,
+                    credential_ref: None,
                 });
-                (
-                    parent_id,
-                    ConsoleAssetKind::SshConnection,
-                    draft.name,
-                    payload,
-                )
+                (parent_id, ConsoleAssetKind::SshConnection, label, payload)
             }
             AssetModalState::RenameAsset {
                 asset_id,
@@ -776,11 +995,19 @@ impl ShellViewModel {
                 .insert_root_with_payload(kind, label, payload)
         };
 
+        if let Some(AssetModalState::NewSshConnection { draft, .. }) = &self.asset_modal_state {
+            let payload = build_saved_ssh_connection_spec(&asset_id, draft, None);
+            let _ = self
+                .console_asset_tree
+                .set_ssh_connection_spec(&asset_id, payload);
+        }
+
         self.selected_asset_ids = vec![asset_id.clone()];
         self.focused_asset_id = Some(asset_id.clone());
         self.context_target_asset_id = Some(asset_id);
         self.asset_modal_state = None;
         self.pending_ssh_modal_action = None;
+        self.ssh_modal_action_state = SshModalActionState::Idle;
         true
     }
 
@@ -801,6 +1028,7 @@ impl ShellViewModel {
 
     pub fn cancel_asset_modal(&mut self) {
         self.pending_ssh_modal_action = None;
+        self.ssh_modal_action_state = SshModalActionState::Idle;
         self.asset_modal_state = None;
         self.context_target_asset_id = None;
     }
@@ -1111,7 +1339,13 @@ impl ShellViewModel {
                         .clone()
                         .filter(|asset_id| self.console_asset_tree.contains(asset_id))
                     {
-                        self.open_rename_asset_modal(asset_id);
+                        if self.console_asset_tree.kind(&asset_id)
+                            == Some(ConsoleAssetKind::SshConnection)
+                        {
+                            self.open_edit_ssh_modal(asset_id);
+                        } else {
+                            self.open_rename_asset_modal(asset_id);
+                        }
                     } else {
                         self.close_context_menu();
                     }
@@ -1224,7 +1458,11 @@ impl ShellViewModel {
         let active_id = self
             .active_workspace_session_id
             .as_deref()
-            .filter(|candidate| self.workspace_tabs.iter().any(|tab| tab.session_id == *candidate))
+            .filter(|candidate| {
+                self.workspace_tabs
+                    .iter()
+                    .any(|tab| tab.session_id == *candidate)
+            })
             .map(str::to_string)
             .or_else(|| {
                 self.workspace_tabs
@@ -1232,13 +1470,20 @@ impl ShellViewModel {
                     .find(|tab| tab.active)
                     .map(|tab| tab.session_id.clone())
             })
-            .or_else(|| self.workspace_tabs.first().map(|tab| tab.session_id.clone()));
+            .or_else(|| {
+                self.workspace_tabs
+                    .first()
+                    .map(|tab| tab.session_id.clone())
+            });
 
         for tab in &mut self.workspace_tabs {
             tab.active = active_id.as_deref() == Some(tab.session_id.as_str());
         }
 
         self.active_workspace_session_id = active_id;
+        if self.active_workspace_terminal_surface().is_none() {
+            self.active_workspace_terminal_surface = None;
+        }
         self.show_welcome = self.workspace_tabs.is_empty();
     }
 
@@ -1267,10 +1512,12 @@ impl ShellViewModel {
     fn ssh_modal_validation_message(
         &self,
         parent_id: Option<&str>,
+        editing_asset_id: Option<&str>,
         draft: &AssetSshConnectionDraft,
     ) -> String {
         let name_message = asset_name_validation_message(
-            self.create_asset_modal_validation(parent_id, &draft.name),
+            self.console_asset_tree
+                .validate_name_in_parent(parent_id, &draft.name, editing_asset_id),
         );
         if !name_message.is_empty() {
             return name_message;
@@ -1282,19 +1529,28 @@ impl ShellViewModel {
     fn ssh_modal_can_confirm(
         &self,
         parent_id: Option<&str>,
+        editing_asset_id: Option<&str>,
         draft: &AssetSshConnectionDraft,
     ) -> bool {
-        self.create_asset_modal_validation(parent_id, &draft.name) == AssetNameValidation::Valid
-            && self.ssh_modal_submit_validation_message(parent_id, draft).is_none()
+        self.console_asset_tree.validate_name_in_parent(
+            parent_id,
+            &draft.name,
+            editing_asset_id,
+        ) == AssetNameValidation::Valid
+            && self
+                .ssh_modal_submit_validation_message(parent_id, editing_asset_id, draft)
+                .is_none()
     }
 
     fn ssh_modal_submit_validation_message(
         &self,
         parent_id: Option<&str>,
+        editing_asset_id: Option<&str>,
         draft: &AssetSshConnectionDraft,
     ) -> Option<String> {
         let name_message = asset_name_validation_message(
-            self.create_asset_modal_validation(parent_id, &draft.name),
+            self.console_asset_tree
+                .validate_name_in_parent(parent_id, &draft.name, editing_asset_id),
         );
         if !name_message.is_empty() {
             return Some(name_message);
@@ -1308,9 +1564,11 @@ impl ShellViewModel {
             return Some("User is required.".into());
         }
 
+        let can_reuse_saved_secret =
+            self.ssh_modal_can_reuse_saved_secret(editing_asset_id, draft);
         match draft.auth_method.as_str() {
             "password" => {
-                if draft.password.trim().is_empty() {
+                if draft.password.trim().is_empty() && !can_reuse_saved_secret {
                     return Some("Password is required.".into());
                 }
             }
@@ -1321,7 +1579,7 @@ impl ShellViewModel {
                     }
                 }
                 "content" => {
-                    if draft.private_key_content.trim().is_empty() {
+                    if draft.private_key_content.trim().is_empty() && !can_reuse_saved_secret {
                         return Some("Private key content is required.".into());
                     }
                 }
@@ -1334,13 +1592,71 @@ impl ShellViewModel {
     }
 
     pub fn set_ssh_modal_feedback(&mut self, message: impl Into<String>) {
-        let Some(AssetModalState::NewSshConnection { draft, .. }) = self.asset_modal_state.as_mut()
-        else {
-            return;
+        self.finish_ssh_modal_action_error(message);
+    }
+
+    fn ssh_modal_is_busy(&self) -> bool {
+        matches!(self.ssh_modal_action_state, SshModalActionState::Busy(_))
+    }
+
+    fn ssh_modal_can_reuse_saved_secret(
+        &self,
+        editing_asset_id: Option<&str>,
+        draft: &AssetSshConnectionDraft,
+    ) -> bool {
+        let Some(asset_id) = editing_asset_id else {
+            return false;
+        };
+        let Some(spec) = self.console_asset_tree.ssh_connection_spec(asset_id) else {
+            return false;
         };
 
-        draft.validation_message = message.into();
+        if spec.credential_ref.is_none() || spec.auth_method != draft.auth_method {
+            return false;
+        }
+
+        if draft.auth_method == "private-key" {
+            spec.private_key_source == draft.private_key_source
+        } else {
+            true
+        }
     }
+}
+
+fn build_saved_ssh_connection_spec(
+    asset_id: &str,
+    draft: &AssetSshConnectionDraft,
+    existing_spec: Option<&AssetSshConnectionSpec>,
+) -> AssetSshConnectionSpec {
+    let credential_ref = match draft.auth_method.as_str() {
+        "password" => Some(saved_ssh_credential_ref(asset_id, existing_spec)),
+        "private-key" if draft.private_key_source == "content" => {
+            Some(saved_ssh_credential_ref(asset_id, existing_spec))
+        }
+        _ => None,
+    };
+
+    AssetSshConnectionSpec {
+        host: draft.host.clone(),
+        user: draft.user.clone(),
+        port: draft.port.clone(),
+        auth_method: draft.auth_method.clone(),
+        private_key_source: draft.private_key_source.clone(),
+        private_key_path: draft.private_key_path.clone(),
+        environment: draft.environment.clone(),
+        proxy_method: draft.proxy_method.clone(),
+        remark: draft.remark.clone(),
+        credential_ref,
+    }
+}
+
+fn saved_ssh_credential_ref(
+    asset_id: &str,
+    existing_spec: Option<&AssetSshConnectionSpec>,
+) -> String {
+    existing_spec
+        .and_then(|spec| spec.credential_ref.clone())
+        .unwrap_or_else(|| ssh_credential_ref(asset_id, SshCredentialKind::SavedSecrets))
 }
 
 pub fn welcome_actions() -> &'static [WelcomeAction] {

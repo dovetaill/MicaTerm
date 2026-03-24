@@ -7,6 +7,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_WINDOW="$ROOT_DIR/ui/app-window.slint"
 SIDEBAR="$ROOT_DIR/ui/shell/sidebar.slint"
 RIGHT_PANEL="$ROOT_DIR/ui/shell/right-panel.slint"
+WORKSPACE_PANE="$ROOT_DIR/ui/shell/workspace-pane.slint"
 WELCOME="$ROOT_DIR/ui/welcome/welcome-view.slint"
 
 grep -F 'shell-frame := Rectangle' "$APP_WINDOW" >/dev/null
@@ -16,8 +17,12 @@ grep -F 'border-radius: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'clip: true;' "$APP_WINDOW" >/dev/null
 grep -F 'vertical-stretch: 1;' "$APP_WINDOW" >/dev/null
 grep -F 'shell-body := HorizontalLayout' "$APP_WINDOW" >/dev/null
+grep -F 'WorkspacePane' "$APP_WINDOW" >/dev/null
 grep -F 'show-assets-sidebar: root.effective-show-assets-sidebar;' "$APP_WINDOW" >/dev/null
 grep -F 'expanded: root.effective-show-right-panel;' "$APP_WINDOW" >/dev/null
+grep -F 'horizontal-stretch: 1;' "$WORKSPACE_PANE" >/dev/null
+grep -F 'min-width: 0px;' "$WORKSPACE_PANE" >/dev/null
+grep -F 'width: 100%;' "$WORKSPACE_PANE" >/dev/null
 grep -F 'left-divider := Rectangle {' "$RIGHT_PANEL" >/dev/null
 grep -F 'visible: root.expanded;' "$RIGHT_PANEL" >/dev/null
 grep -F 'border-radius: 0px;' "$RIGHT_PANEL" >/dev/null

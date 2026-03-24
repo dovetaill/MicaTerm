@@ -1,4 +1,5 @@
 use mica_term::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
+use mica_term::shell::assets::AssetSshConnectionSpec;
 use mica_term::shell::view_model::AssetSshConnectionDraft;
 
 fn base_draft() -> AssetSshConnectionDraft {
@@ -58,6 +59,40 @@ fn ssh_profile_normalizes_private_key_content_mode_from_modal_draft() {
 
     assert_eq!(profile.auth_method, SshAuthMethod::PrivateKeyContent);
     assert!(profile.credential_ref.is_some());
+    assert_eq!(profile.private_key_path, None);
+    assert_eq!(profile.remark, "Primary entry point");
+}
+
+#[test]
+fn ssh_profile_can_be_built_from_saved_asset_and_credential_reference() {
+    let profile = ConnectionProfile::from_saved_asset(
+        "asset-prod",
+        "Prod Bastion",
+        &AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "2022".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: "".into(),
+            environment: "prod".into(),
+            proxy_method: "jump-host".into(),
+            remark: "Primary entry point".into(),
+            credential_ref: Some("ssh/password/asset-prod".into()),
+        },
+    )
+    .expect("build saved ssh profile");
+
+    assert_eq!(profile.asset_id.as_deref(), Some("asset-prod"));
+    assert_eq!(profile.name, "Prod Bastion");
+    assert_eq!(profile.host, "10.0.0.12");
+    assert_eq!(profile.user, "ops");
+    assert_eq!(profile.port, 2022);
+    assert_eq!(profile.auth_method, SshAuthMethod::Password);
+    assert_eq!(
+        profile.credential_ref.as_deref(),
+        Some("ssh/password/asset-prod")
+    );
     assert_eq!(profile.private_key_path, None);
     assert_eq!(profile.remark, "Primary entry point");
 }

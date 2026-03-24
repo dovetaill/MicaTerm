@@ -17,8 +17,13 @@ fn persisted_catalog_round_trips_tree_order_and_node_kind() {
             host: "10.0.0.12".into(),
             user: "ops".into(),
             port: "22".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
             environment: "prod".into(),
             proxy_method: "none".into(),
+            remark: String::new(),
+            credential_ref: None,
         }),
     );
     let child_id = tree.insert_child_with_payload(
@@ -29,8 +34,13 @@ fn persisted_catalog_round_trips_tree_order_and_node_kind() {
             host: "10.0.0.13".into(),
             user: "root".into(),
             port: "2222".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
             environment: "ops".into(),
             proxy_method: "jump".into(),
+            remark: String::new(),
+            credential_ref: None,
         }),
     );
 
@@ -80,8 +90,13 @@ fn persisted_catalog_preserves_ssh_connection_fields() {
             host: "gateway.example.com".into(),
             user: "mica".into(),
             port: "2022".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
             environment: "prod".into(),
             proxy_method: "jump-host".into(),
+            remark: String::new(),
+            credential_ref: None,
         }),
     );
 
@@ -94,8 +109,13 @@ fn persisted_catalog_preserves_ssh_connection_fields() {
             host: "gateway.example.com".into(),
             user: "mica".into(),
             port: "2022".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
             environment: "prod".into(),
             proxy_method: "jump-host".into(),
+            remark: String::new(),
+            credential_ref: None,
         })
     );
 
@@ -106,8 +126,70 @@ fn persisted_catalog_preserves_ssh_connection_fields() {
             host: "gateway.example.com".into(),
             user: "mica".into(),
             port: "2022".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
             environment: "prod".into(),
             proxy_method: "jump-host".into(),
+            remark: String::new(),
+            credential_ref: None,
+        })
+    );
+}
+
+#[test]
+fn persisted_ssh_connection_spec_round_trips_extended_non_secret_fields() {
+    let mut tree = AssetTree::new();
+    let ssh_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Gateway",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "gateway.example.com".into(),
+            user: "mica".into(),
+            port: "2022".into(),
+            auth_method: "private-key".into(),
+            private_key_source: "path".into(),
+            private_key_path: "/tmp/id_ed25519".into(),
+            environment: "prod".into(),
+            proxy_method: "jump-host".into(),
+            remark: "Primary entry point".into(),
+            credential_ref: Some("ssh/private-key/asset-gateway".into()),
+        }),
+    );
+
+    let catalog = asset_tree_to_catalog(&tree);
+    let persisted = catalog.nodes.get(&ssh_id).expect("persisted ssh node");
+
+    assert_eq!(
+        persisted.payload,
+        PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+            host: "gateway.example.com".into(),
+            user: "mica".into(),
+            port: "2022".into(),
+            auth_method: "private-key".into(),
+            private_key_source: "path".into(),
+            private_key_path: "/tmp/id_ed25519".into(),
+            environment: "prod".into(),
+            proxy_method: "jump-host".into(),
+            remark: "Primary entry point".into(),
+            credential_ref: Some("ssh/private-key/asset-gateway".into()),
+        })
+    );
+
+    let round_tripped = catalog_to_asset_tree(&catalog);
+    assert_eq!(
+        round_tripped.ssh_connection_spec(&ssh_id),
+        Some(&AssetSshConnectionSpec {
+            host: "gateway.example.com".into(),
+            user: "mica".into(),
+            port: "2022".into(),
+            auth_method: "private-key".into(),
+            private_key_source: "path".into(),
+            private_key_path: "/tmp/id_ed25519".into(),
+            environment: "prod".into(),
+            proxy_method: "jump-host".into(),
+            remark: "Primary entry point".into(),
+            credential_ref: Some("ssh/private-key/asset-gateway".into()),
         })
     );
 }
@@ -124,8 +206,13 @@ fn persisted_catalog_excludes_ui_session_state() {
             host: "10.0.0.12".into(),
             user: "ops".into(),
             port: "22".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
             environment: "".into(),
             proxy_method: "".into(),
+            remark: String::new(),
+            credential_ref: None,
         }),
     );
     tree.set_expanded(&folder_id, true);

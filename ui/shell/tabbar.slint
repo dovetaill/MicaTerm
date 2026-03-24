@@ -15,13 +15,18 @@ export component TabBar inherits Rectangle {
     in property <[WorkspaceTabItem]> items: [];
     callback tab-selected(string);
     callback tab-close-requested(string);
+    // State contract forwarded from Rust projections: connecting / connected / disconnected / error.
 
+    width: 100%;
+    min-width: 0px;
     height: 38px;
     background: transparent;
     border-width: 1px;
     border-color: ThemeTokens.divider-subtle;
 
     HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
         padding-left: 12px;
         padding-right: 12px;
         padding-top: 5px;

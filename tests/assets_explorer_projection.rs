@@ -286,8 +286,13 @@ fn expanded_state_remains_runtime_only_after_catalog_mapping() {
             host: "10.0.0.12".into(),
             user: "ops".into(),
             port: "22".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
             environment: "".into(),
             proxy_method: "".into(),
+            remark: String::new(),
+            credential_ref: None,
         }),
     );
     tree.set_expanded(&folder_id, true);

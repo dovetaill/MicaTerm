@@ -1,0 +1,121 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component BlockingModalShell inherits Rectangle {
+    in property <string> title: "";
+    in property <length> host-titlebar-height: 0px;
+    in property <length> modal-width: 360px;
+    in property <length> modal-height: 240px;
+    in-out property <length> offset-x: 0px;
+    in-out property <length> offset-y: 0px;
+    in property <bool> show-close-button: true;
+    callback close-requested();
+    callback drag-requested(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended();
+    callback focus-restore-requested();
+    callback consume-event();
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
+
+    backdrop := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.consume-event();
+        }
+    }
+
+    modal-frame := Rectangle {
+        x: max(24px, (root.width - root.modal-width) / 2 + root.offset-x);
+        y: max(
+            root.host-titlebar-height + 24px,
+            root.host-titlebar-height
+                + (root.height - root.host-titlebar-height - root.modal-height) / 2
+                + root.offset-y
+        );
+        width: root.modal-width;
+        height: root.modal-height;
+        background: transparent;
+
+        modal-content := Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: transparent;
+
+            @children
+        }
+
+        header-overlay := Rectangle {
+            width: parent.width;
+            height: 52px;
+            background: ThemeTokens.assets-surface;
+
+            Text {
+                x: 20px;
+                y: 16px;
+                width: parent.width - (root.show-close-button ? 72px : 40px);
+                text: root.title;
+                color: ThemeTokens.text-primary;
+                font-size: 18px;
+                font-weight: 600;
+                overflow: elide;
+            }
+
+            drag-touch := TouchArea {
+                width: parent.width - (root.show-close-button ? 48px : 0px);
+                height: parent.height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down
+                        && event.button == PointerEventButton.left
+                    {
+                        root.drag-requested(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.move {
+                        root.drag-moved(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.up {
+                        root.drag-ended();
+                    }
+                }
+            }
+
+            if root.show-close-button : close-button := Rectangle {
+                x: parent.width - 44px;
+                y: 10px;
+                width: 28px;
+                height: 28px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.control-hover-surface;
+
+                Text {
+                    text: "×";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    width: parent.width;
+                    height: parent.height;
+                }
+
+                TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.close-requested();
+                    }
+                }
+            }
+        }
+    }
+}

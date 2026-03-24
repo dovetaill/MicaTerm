@@ -16,6 +16,9 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> environment: "";
     in property <string> proxy-method: "";
     in property <string> validation-message: "";
+    in property <bool> connect-family-enabled: false;
+    in property <string> feedback-state: "idle";
+    in property <string> feedback-message: "";
     in property <bool> can-confirm: false;
     in property <int> focus-sequence: 0;
     callback close-requested();
@@ -30,7 +33,6 @@ export component AssetsSshConnectionModal inherits Rectangle {
     border-width: 1px;
     border-color: ThemeTokens.divider-strong;
     background: ThemeTokens.assets-surface;
-    z: 145;
 
     public function focus-primary-field() {
     }
@@ -647,6 +649,33 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 }
             }
 
+            feedback-panel := Rectangle {
+                x: 24px;
+                y: 596px;
+                width: parent.width - 48px;
+                height: 28px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: root.feedback-state == "busy" ? ThemeTokens.accent
+                    : root.feedback-state == "success" ? ThemeTokens.divider-strong
+                    : root.feedback-state == "error" ? ThemeTokens.divider-strong
+                    : transparent;
+                background: root.feedback-state == "busy" ? ThemeTokens.status-busy-surface
+                    : root.feedback-state == "success" ? ThemeTokens.status-success-surface
+                    : root.feedback-state == "error" ? ThemeTokens.status-error-surface
+                    : transparent;
+                visible: root.feedback-message != "";
+
+                Text {
+                    x: 10px;
+                    y: 5px;
+                    width: parent.width - 20px;
+                    text: root.feedback-message;
+                    color: ThemeTokens.text-primary;
+                    overflow: elide;
+                }
+            }
+
             validation-copy := Text {
                 x: 24px;
                 y: 632px;
@@ -665,8 +694,12 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 height: 34px;
                 border-radius: 0px;
                 border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.control-hover-surface;
+                border-color: root.connect-family-enabled ? ThemeTokens.divider-subtle : ThemeTokens.divider-subtle;
+                background: !root.connect-family-enabled ? ThemeTokens.control-disabled-surface
+                    : test-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : test-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.control-active-surface;
+                opacity: root.connect-family-enabled ? 1.0 : 0.64;
 
                 Text {
                     text: "Test Connection";
@@ -677,12 +710,14 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     height: parent.height;
                 }
 
-                TouchArea {
+                test-touch := TouchArea {
                     width: parent.width;
                     height: parent.height;
 
                     clicked => {
-                        root.action-requested("test");
+                        if root.connect-family-enabled {
+                            root.action-requested("test");
+                        }
                     }
                 }
             }
@@ -695,7 +730,11 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 border-radius: 0px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.control-hover-surface;
+                background: !root.connect-family-enabled ? ThemeTokens.control-disabled-surface
+                    : connect-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : connect-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.control-active-surface;
+                opacity: root.connect-family-enabled ? 1.0 : 0.64;
 
                 Text {
                     text: "Connect";
@@ -706,12 +745,14 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     height: parent.height;
                 }
 
-                TouchArea {
+                connect-touch := TouchArea {
                     width: parent.width;
                     height: parent.height;
 
                     clicked => {
-                        root.action-requested("connect");
+                        if root.connect-family-enabled {
+                            root.action-requested("connect");
+                        }
                     }
                 }
             }
@@ -724,8 +765,11 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 border-radius: 0px;
                 border-width: 1px;
                 border-color: root.can-confirm ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-                background: root.can-confirm ? ThemeTokens.accent : ThemeTokens.control-active-surface;
-                opacity: root.can-confirm ? 1.0 : 0.7;
+                background: !root.can-confirm ? ThemeTokens.control-disabled-surface
+                    : save-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : save-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.accent;
+                opacity: root.can-confirm ? 1.0 : 0.64;
 
                 Text {
                     text: "Save";
@@ -736,12 +780,14 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     height: parent.height;
                 }
 
-                TouchArea {
+                save-touch := TouchArea {
                     width: parent.width;
                     height: parent.height;
 
                     clicked => {
-                        root.action-requested("save");
+                        if root.can-confirm {
+                            root.action-requested("save");
+                        }
                     }
                 }
             }
@@ -754,7 +800,11 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 border-radius: 0px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.control-hover-surface;
+                background: !root.connect-family-enabled ? ThemeTokens.control-disabled-surface
+                    : save-connect-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : save-connect-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.control-active-surface;
+                opacity: root.connect-family-enabled ? 1.0 : 0.64;
 
                 Text {
                     text: "Save and Connect";
@@ -765,12 +815,14 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     height: parent.height;
                 }
 
-                TouchArea {
+                save-connect-touch := TouchArea {
                     width: parent.width;
                     height: parent.height;
 
                     clicked => {
-                        root.action-requested("save-and-connect");
+                        if root.connect-family-enabled {
+                            root.action-requested("save-and-connect");
+                        }
                     }
                 }
             }

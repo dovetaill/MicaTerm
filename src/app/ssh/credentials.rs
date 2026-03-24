@@ -7,6 +7,17 @@ use anyhow::{Context, Result, anyhow};
 
 const CREDENTIAL_SERVICE_NAME: &str = "mica-term";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SshCredentialKind {
+    SavedSecrets,
+}
+
+pub fn ssh_credential_ref(asset_id: &str, kind: SshCredentialKind) -> String {
+    match kind {
+        SshCredentialKind::SavedSecrets => format!("ssh/saved-secrets/{asset_id}"),
+    }
+}
+
 pub trait CredentialStore: Send + Sync {
     fn put_secret(&self, key: &str, value: &str) -> Result<()>;
     fn get_secret(&self, key: &str) -> Result<Option<String>>;

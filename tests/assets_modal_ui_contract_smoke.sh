@@ -7,7 +7,9 @@ FOLDER_MODAL="$ROOT_DIR/ui/components/assets-folder-create-modal.slint"
 SSH_MODAL="$ROOT_DIR/ui/components/assets-ssh-connection-modal.slint"
 RENAME_MODAL="$ROOT_DIR/ui/components/assets-rename-modal.slint"
 DELETE_MODAL="$ROOT_DIR/ui/components/assets-delete-confirm-modal.slint"
+MODAL_SHELL="$ROOT_DIR/ui/components/blocking-modal-shell.slint"
 BOOTSTRAP="$ROOT_DIR/src/app/bootstrap.rs"
+TOKENS="$ROOT_DIR/ui/theme/tokens.slint"
 
 grep -F 'in-out property <bool> asset-modal-open: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-modal-kind: "";' "$APP_WINDOW" >/dev/null
@@ -19,6 +21,9 @@ grep -F 'in-out property <bool> asset-rename-modal-can-confirm: false;' "$APP_WI
 grep -F 'in-out property <bool> asset-delete-confirm-modal-open: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-delete-confirm-target-label: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <int> asset-delete-confirm-descendant-count: 0;' "$APP_WINDOW" >/dev/null
+grep -F 'callback drag-requested(length, length);' "$MODAL_SHELL" >/dev/null
+grep -F 'clicked => { }' "$APP_WINDOW" >/dev/null
+grep -F 'consume-event' "$MODAL_SHELL" >/dev/null
 grep -F 'callback close-asset-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback confirm-asset-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback asset-rename-modal-name-changed(string);' "$APP_WINDOW" >/dev/null
@@ -43,6 +48,10 @@ grep -F 'callback draft-changed(string, string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback action-requested(string);' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Test Connection";' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Save and Connect";' "$SSH_MODAL" >/dev/null
+grep -F 'save-and-connect' "$SSH_MODAL" >/dev/null
+grep -F 'busy' "$SSH_MODAL" >/dev/null
+grep -F 'hover' "$TOKENS" >/dev/null
+grep -F 'pressed' "$TOKENS" >/dev/null
 grep -F 'in property <string> item-name;' "$RENAME_MODAL" >/dev/null
 grep -F 'in property <string> validation-message;' "$RENAME_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm;' "$RENAME_MODAL" >/dev/null
