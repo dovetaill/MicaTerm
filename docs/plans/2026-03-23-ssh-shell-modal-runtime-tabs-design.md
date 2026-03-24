@@ -445,3 +445,27 @@
 - `russh::Channel`
 - `termwiz` 文档
 - `wgpu` DX12 memory hints 与 Slint WGPU 28 配置默认值
+
+## Implementation Status
+
+日期: 2026-03-24
+状态: 计划内 Task 1 到 Task 10 已完成；自动化回归通过
+
+实现结果：
+
+- `WorkspacePane`、tab strip、terminal host 的宽高契约已落地
+- blocking modal contract、drag callback、focus restore hook 已接线
+- `Save / Connect / TestConnection / SaveAndConnect` 已按设计分流
+- `SessionManager -> SshSessionRuntime -> TerminalSurfaceState -> ShellViewModel -> Slint` 链路已闭环
+- `known_hosts` TOFU、真实 SSH transport、PTY shell、surface snapshot 已落地
+- 默认同资产复用 session，`Open in New Tab` 才强制新建第二个 session
+
+文档产物：
+
+- 验证记录：`docs/plans/2026-03-23-ssh-shell-modal-runtime-tabs-verification.md`
+- TDD 交接：`docs/plans/2026-03-24-ssh-shell-modal-runtime-tabs-tdd-spec.md`
+
+说明：
+
+- 自动化验证已完成，包含聚焦测试集、3 个 UI contract smoke、全量 `cargo test`
+- Win11 真机视觉/交互与内存基线仍需人工补充确认，详见 verification 文档
