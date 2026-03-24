@@ -568,6 +568,23 @@ fn profile_for_saved_asset(state: &ShellViewModel, asset_id: &str) -> anyhow::Re
     ConnectionProfile::from_saved_asset(asset_id, &node.title, spec)
 }
 
+fn profile_for_modal_action(
+    state: &ShellViewModel,
+    draft: &AssetSshConnectionDraft,
+) -> anyhow::Result<ConnectionProfile> {
+    let Some(AssetModalState::NewSshConnection {
+        editing_asset_id: Some(asset_id),
+        ..
+    }) = &state.asset_modal_state
+    else {
+        return ConnectionProfile::from_draft(draft);
+    };
+    let spec = state.console_asset_tree().ssh_connection_spec(asset_id).with_context(|| {
+        format!("saved ssh asset `{asset_id}` is missing its connection payload")
+    })?;
+    ConnectionProfile::from_modal_draft(asset_id, spec, draft)
+}
+
 fn temporary_session_asset_id_for_draft(_draft: &AssetSshConnectionDraft) -> String {
     format!("session:{}", Uuid::new_v4())
 }
@@ -2204,7 +2221,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     }
                 }
                 SshModalAction::TestConnection => {
-                    match ConnectionProfile::from_draft(&request.draft) {
+                    match profile_for_modal_action(&state, &request.draft) {
                         Ok(profile) => {
                             if let Some(session_bridge) = session_bridge_ref.as_ref() {
                                 attempt_test_connection(
@@ -2222,7 +2239,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         Err(err) => state.finish_ssh_modal_action_error(err.to_string()),
                     }
                 }
-                SshModalAction::Connect => match ConnectionProfile::from_draft(&request.draft) {
+                SshModalAction::Connect => match profile_for_modal_action(&state, &request.draft) {
                     Ok(mut profile) => {
                         profile.asset_id =
                             Some(temporary_session_asset_id_for_draft(&request.draft));

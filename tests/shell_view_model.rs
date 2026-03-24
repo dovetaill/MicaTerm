@@ -937,6 +937,39 @@ fn editing_saved_ssh_modal_exposes_leave_blank_helper_copy() {
 }
 
 #[test]
+fn editing_legacy_saved_ssh_modal_uses_fallback_saved_secret_binding() {
+    let mut view_model = ShellViewModel::default();
+    let mut tree = AssetTree::new();
+    let asset_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Legacy Gateway",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "legacy.example.com".into(),
+            user: "ops".into(),
+            port: "22".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: String::new(),
+            proxy_method: String::new(),
+            remark: "Legacy saved credential".into(),
+            credential_ref: None,
+        }),
+    );
+    view_model.replace_console_asset_tree(tree);
+
+    view_model.open_edit_ssh_modal(asset_id);
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.secret_retention_message
+                == "Leave password / private key / passphrase blank to keep the saved secret."
+                && draft.can_clear_saved_secret
+    ));
+}
+
+#[test]
 fn editing_saved_ssh_modal_allows_explicit_clear_saved_secret_action() {
     let mut view_model = ShellViewModel::default();
     let mut tree = AssetTree::new();

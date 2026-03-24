@@ -24,7 +24,8 @@ use mica_term::app::bootstrap::{
     default_window_size,
 };
 use mica_term::app::ssh::credentials::{
-    CredentialStore, MemoryCredentialStore, load_secret_bundle,
+    CredentialStore, MemoryCredentialStore, SshCredentialKind, StoredSshSecretBundle,
+    load_secret_bundle, persist_secret_bundle, ssh_credential_ref,
 };
 use mica_term::app::ssh::known_hosts::{
     KnownHostCheck, KnownHostsService, default_known_hosts_path,
@@ -608,6 +609,61 @@ fn activating_legacy_saved_ssh_asset_defaults_missing_auth_fields_and_opens_sess
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
     assert_eq!(app.get_workspace_session_state().as_str(), "connecting");
+}
+
+#[test]
+fn editing_legacy_saved_ssh_asset_reuses_fallback_saved_secret_for_test_connection() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_legacy_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    persist_secret_bundle(
+        credential_store.as_ref(),
+        &ssh_credential_ref("ssh-legacy", SshCredentialKind::SavedSecrets),
+        &StoredSshSecretBundle {
+            password: Some("secret".into()),
+            private_key_content: None,
+            passphrase: None,
+        },
+    )
+    .expect("persist legacy saved ssh secret");
+    bind_with_launcher_and_credential_store(
+        &app,
+        Some(asset_repo),
+        Arc::new(StoredSecretProbeLauncher {
+            store: Arc::clone(&credential_store),
+            message: "missing SSH password secret for `Legacy Gateway`",
+        }),
+        Arc::clone(&credential_store),
+    );
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("legacy ssh asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_ssh_modal_dialog_title().as_str(), "Edit SSH Connection");
+    assert_eq!(app.get_asset_ssh_modal_password().as_str(), "");
+
+    app.invoke_asset_ssh_modal_action_requested("test".into());
+
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "success");
+    assert_eq!(
+        app.get_asset_ssh_modal_feedback_message().as_str(),
+        "Connection test succeeded."
+    );
 }
 
 #[test]

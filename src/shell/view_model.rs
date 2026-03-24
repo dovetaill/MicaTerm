@@ -643,6 +643,21 @@ impl ShellViewModel {
         let AssetNodePayload::SshConnection(spec) = node.payload else {
             return;
         };
+        let auth_method = if spec.auth_method.trim().is_empty() {
+            "password".to_string()
+        } else {
+            spec.auth_method.clone()
+        };
+        let private_key_source = if spec.private_key_source.trim().is_empty() {
+            "content".to_string()
+        } else {
+            spec.private_key_source.clone()
+        };
+        let supports_saved_secret_binding = ssh_modal_supports_saved_secret_binding(
+            &auth_method,
+            &private_key_source,
+            spec.credential_ref.is_some(),
+        );
 
         self.dismiss_active_asset_rename();
         self.close_context_menu();
@@ -660,8 +675,8 @@ impl ShellViewModel {
                 host: spec.host,
                 user: spec.user,
                 port: spec.port,
-                auth_method: spec.auth_method,
-                private_key_source: spec.private_key_source,
+                auth_method,
+                private_key_source,
                 password: String::new(),
                 private_key_content: String::new(),
                 private_key_path: spec.private_key_path,
@@ -670,12 +685,12 @@ impl ShellViewModel {
                 remark: spec.remark,
                 environment: spec.environment,
                 proxy_method: spec.proxy_method,
-                secret_retention_message: if spec.credential_ref.is_some() {
+                secret_retention_message: if supports_saved_secret_binding {
                     SSH_MODAL_SECRET_RETENTION_MESSAGE.into()
                 } else {
                     String::new()
                 },
-                can_clear_saved_secret: spec.credential_ref.is_some(),
+                can_clear_saved_secret: supports_saved_secret_binding,
                 clear_saved_secret_requested: false,
                 validation_message: String::new(),
             },
@@ -1614,16 +1629,51 @@ impl ShellViewModel {
         let Some(spec) = self.console_asset_tree.ssh_connection_spec(asset_id) else {
             return false;
         };
+        let spec_auth_method = normalized_ssh_auth_method(&spec.auth_method);
+        let spec_private_key_source = normalized_ssh_private_key_source(&spec.private_key_source);
 
-        if spec.credential_ref.is_none() || spec.auth_method != draft.auth_method {
+        if spec_auth_method != draft.auth_method {
             return false;
         }
 
-        if draft.auth_method == "private-key" {
-            spec.private_key_source == draft.private_key_source
-        } else {
-            true
+        if draft.auth_method == "private-key" && spec_private_key_source != draft.private_key_source {
+            return false;
         }
+
+        ssh_modal_supports_saved_secret_binding(
+            spec_auth_method,
+            spec_private_key_source,
+            spec.credential_ref.is_some(),
+        )
+    }
+}
+
+fn normalized_ssh_auth_method(value: &str) -> &str {
+    if value.trim().is_empty() {
+        "password"
+    } else {
+        value
+    }
+}
+
+fn normalized_ssh_private_key_source(value: &str) -> &str {
+    if value.trim().is_empty() {
+        "content"
+    } else {
+        value
+    }
+}
+
+fn ssh_modal_supports_saved_secret_binding(
+    auth_method: &str,
+    private_key_source: &str,
+    has_saved_credential_ref: bool,
+) -> bool {
+    match auth_method {
+        "password" => true,
+        "private-key" if private_key_source == "content" => true,
+        "private-key" if private_key_source == "path" => has_saved_credential_ref,
+        _ => false,
     }
 }
 
