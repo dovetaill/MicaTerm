@@ -12,8 +12,8 @@ use mica_term::shell::context_menu::{
 };
 use mica_term::shell::sidebar::SidebarDestination;
 use mica_term::shell::view_model::{
-    AssetModalState, AssetSshModalTab, ShellViewModel, SshModalAction, SshModalActionState,
-    WelcomeAction, welcome_actions,
+    AssetModalState, ShellViewModel, SshModalAction, SshModalActionState, WelcomeAction,
+    welcome_actions,
 };
 use mica_term::theme::ThemeMode;
 
@@ -129,6 +129,48 @@ fn asset_modal_backdrop_click_does_not_dismiss_blocking_modal() {
         app_window.contains("clicked => {\n        }") || app_window.contains("clicked => { }"),
         "blocking modal backdrop should intercept clicks without dismissing the modal"
     );
+}
+
+#[test]
+fn new_ssh_modal_state_no_longer_tracks_top_level_tab_enum() {
+    let view_model = fs::read_to_string("src/shell/view_model.rs").expect("read shell view model");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(
+        !view_model.contains("pub enum AssetSshModalTab"),
+        "ssh modal state should stop exposing a top-level tab enum"
+    );
+    assert!(
+        !view_model.contains("active_tab: AssetSshModalTab"),
+        "new ssh modal state should no longer carry active tab state"
+    );
+    assert!(
+        !app_window.contains("asset-ssh-modal-active-tab"),
+        "window state bridge should not project a top-level ssh modal tab property"
+    );
+    assert!(
+        !app_window.contains("callback asset-ssh-modal-tab-selected(string);"),
+        "window callback bridge should not expose top-level ssh modal tab selection"
+    );
+}
+
+#[test]
+fn new_ssh_modal_exposes_connection_authentication_metadata_and_more_settings_groups() {
+    let ssh_modal =
+        fs::read_to_string("ui/components/assets-ssh-connection-modal.slint").expect("read ssh modal");
+
+    assert!(
+        !ssh_modal.contains("in property <string> active-tab:"),
+        "ssh modal should not expose an active-tab property once the grouped form lands"
+    );
+    assert!(
+        !ssh_modal.contains("callback tab-selected(string);"),
+        "ssh modal should not expose a top-level tab-selected callback once grouped"
+    );
+    assert!(ssh_modal.contains("text: \"Connection\""));
+    assert!(ssh_modal.contains("text: \"Authentication\""));
+    assert!(ssh_modal.contains("text: \"Metadata\""));
+    assert!(ssh_modal.contains("text: \"More Settings\""));
 }
 
 #[test]
@@ -272,7 +314,6 @@ fn opening_new_ssh_modal_commits_active_rename_and_clears_editing_state() {
         view_model.asset_modal_state,
         Some(AssetModalState::NewSshConnection {
             parent_id: None,
-            active_tab: AssetSshModalTab::Standard,
             ref draft,
             ..
         }) if draft.name == "SSH Connection 1"
@@ -305,11 +346,8 @@ fn ssh_modal_default_draft_starts_with_password_auth_and_port_22() {
 
     assert!(matches!(
         view_model.asset_modal_state,
-        Some(AssetModalState::NewSshConnection {
-            active_tab: AssetSshModalTab::Standard,
-            ref draft,
-            ..
-        }) if draft.auth_method == "password"
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.auth_method == "password"
             && draft.port == "22"
             && draft.private_key_source == "content"
     ));
@@ -394,7 +432,6 @@ fn stale_missing_folder_context_target_falls_back_to_root_ssh_modal() {
         view_model.asset_modal_state,
         Some(AssetModalState::NewSshConnection {
             parent_id: None,
-            active_tab: AssetSshModalTab::Standard,
             ref draft,
             ..
         })
@@ -559,7 +596,7 @@ fn conflicting_manual_input_keeps_user_text_and_disables_confirm() {
 }
 
 #[test]
-fn connect_action_records_session_open_request_without_creating_asset() {
+fn connect_action_creates_temporary_session_request_without_persisting_asset() {
     let mut view_model = ShellViewModel::default();
     view_model.open_new_ssh_modal(None);
     view_model.update_ssh_modal_name("Prod Bastion".into());
@@ -568,12 +605,11 @@ fn connect_action_records_session_open_request_without_creating_asset() {
     view_model.update_ssh_modal_field("password", "secret".into());
 
     assert!(view_model.begin_ssh_modal_action("connect"));
+
     assert!(view_model.visible_console_asset_rows().is_empty());
     assert!(matches!(
         view_model.pending_ssh_modal_action(),
         Some(request) if request.action == SshModalAction::Connect
-            && request.draft.name == "Prod Bastion"
-            && request.draft.host == "10.0.0.12"
     ));
     assert!(matches!(
         view_model.asset_modal_state,
@@ -634,7 +670,37 @@ fn save_action_records_save_request_without_creating_asset_or_workspace_tab() {
 }
 
 #[test]
-fn ssh_modal_exposes_save_connect_test_and_save_connect_actions() {
+fn saving_private_key_path_with_passphrase_assigns_saved_credential_ref() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_name("Prod Bastion".into());
+    view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("auth_method", "private-key".into());
+    view_model.update_ssh_modal_field("private_key_source", "path".into());
+    view_model.update_ssh_modal_field("private_key_path", "/tmp/id_ed25519".into());
+    view_model.update_ssh_modal_field("passphrase", "hunter2".into());
+
+    assert!(view_model.confirm_asset_modal());
+
+    let rows = view_model.visible_console_asset_rows();
+    let asset_id = rows[0].id.clone();
+    let spec = view_model
+        .console_asset_tree()
+        .ssh_connection_spec(asset_id.as_str())
+        .expect("saved ssh spec");
+
+    assert_eq!(spec.auth_method, "private-key");
+    assert_eq!(spec.private_key_source, "path");
+    assert_eq!(spec.private_key_path, "/tmp/id_ed25519");
+    assert_eq!(
+        spec.credential_ref.as_deref(),
+        Some(format!("ssh/saved-secrets/{asset_id}").as_str())
+    );
+}
+
+#[test]
+fn ssh_modal_accepts_full_connect_action_family() {
     let mut view_model = ShellViewModel::default();
     view_model.open_new_ssh_modal(None);
     view_model.update_ssh_modal_name("Prod Bastion".into());
@@ -667,8 +733,8 @@ fn invalid_draft_disables_connect_family_actions() {
     view_model.open_new_ssh_modal(None);
 
     assert!(!view_model.ssh_modal_connect_family_enabled());
-    assert!(!view_model.begin_ssh_modal_action("connect"));
     assert!(!view_model.begin_ssh_modal_action("test"));
+    assert!(!view_model.begin_ssh_modal_action("connect"));
     assert!(!view_model.begin_ssh_modal_action("save-and-connect"));
     assert!(matches!(
         view_model.ssh_modal_action_state(),
@@ -678,6 +744,47 @@ fn invalid_draft_disables_connect_family_actions() {
         view_model.asset_create_modal_validation_message(),
         "Host is required."
     );
+}
+
+#[test]
+fn connect_family_enablement_depends_on_connection_minimum_fields() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_new_ssh_modal(None);
+
+    assert!(!view_model.ssh_modal_connect_family_enabled());
+
+    view_model.update_ssh_modal_field("host", "10.0.0.12".into());
+    assert!(!view_model.ssh_modal_connect_family_enabled());
+
+    view_model.update_ssh_modal_field("user", "ops".into());
+    assert!(!view_model.ssh_modal_connect_family_enabled());
+
+    view_model.update_ssh_modal_field("password", "secret".into());
+    assert!(view_model.ssh_modal_connect_family_enabled());
+
+    view_model.begin_ssh_modal_action("test");
+    assert!(!view_model.ssh_modal_connect_family_enabled());
+}
+
+#[test]
+fn busy_action_blocks_duplicate_ssh_modal_submissions() {
+    let mut view_model = ShellViewModel::default();
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_name("Prod Bastion".into());
+    view_model.update_ssh_modal_host("10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("password", "secret".into());
+
+    assert!(view_model.begin_ssh_modal_action("connect"));
+    assert!(!view_model.begin_ssh_modal_action("save-and-connect"));
+    assert!(matches!(
+        view_model.pending_ssh_modal_action(),
+        Some(request) if request.action == SshModalAction::Connect
+    ));
+    assert!(matches!(
+        view_model.ssh_modal_action_state(),
+        SshModalActionState::Busy(SshModalAction::Connect)
+    ));
 }
 
 #[test]
@@ -794,6 +901,109 @@ fn edit_connection_opens_modal_with_prefilled_non_secret_fields() {
             && draft.password.is_empty()
             && draft.private_key_content.is_empty()
             && draft.passphrase.is_empty()
+    ));
+}
+
+#[test]
+fn editing_saved_ssh_modal_exposes_leave_blank_helper_copy() {
+    let mut view_model = ShellViewModel::default();
+    let mut tree = AssetTree::new();
+    let asset_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Prod Bastion",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "22".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: String::new(),
+            proxy_method: String::new(),
+            remark: "Saved credential".into(),
+            credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+        }),
+    );
+    view_model.replace_console_asset_tree(tree);
+
+    view_model.open_edit_ssh_modal(asset_id);
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.secret_retention_message
+                == "Leave password / private key / passphrase blank to keep the saved secret."
+    ));
+}
+
+#[test]
+fn editing_saved_ssh_modal_allows_explicit_clear_saved_secret_action() {
+    let mut view_model = ShellViewModel::default();
+    let mut tree = AssetTree::new();
+    let asset_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Prod Bastion",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "22".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: String::new(),
+            proxy_method: String::new(),
+            remark: "Saved credential".into(),
+            credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+        }),
+    );
+    view_model.replace_console_asset_tree(tree);
+
+    view_model.open_edit_ssh_modal(asset_id);
+    view_model.update_ssh_modal_field("clear_saved_secret", "true".into());
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.can_clear_saved_secret && draft.clear_saved_secret_requested
+    ));
+}
+
+#[test]
+fn edit_connection_context_action_routes_to_ssh_edit_modal() {
+    let mut view_model = ShellViewModel::default();
+    let mut tree = AssetTree::new();
+    let asset_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Prod Bastion",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "2022".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: "prod".into(),
+            proxy_method: "jump-host".into(),
+            remark: "Primary entry point".into(),
+            credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+        }),
+    );
+    view_model.replace_console_asset_tree(tree);
+    view_model.open_context_menu_for_target(
+        ContextTargetKind::SshConnection,
+        Some(asset_id.clone()),
+        96.0,
+        160.0,
+    );
+
+    view_model.handle_context_menu_leaf_action("edit-connection");
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection {
+            editing_asset_id: Some(ref editing_asset_id),
+            ..
+        }) if editing_asset_id == &asset_id
     ));
 }
 

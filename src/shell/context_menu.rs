@@ -236,6 +236,13 @@ fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNod
             false,
         ),
         action_with_state(
+            "open-connection",
+            "Open",
+            "window-console",
+            selection_state(selection),
+            false,
+        ),
+        action_with_state(
             "open-in-new-tab",
             "Open in New Tab",
             "window-console",

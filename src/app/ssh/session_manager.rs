@@ -1,11 +1,11 @@
 //! Session manager for SSH tabs and runtime event projection.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -36,18 +36,24 @@ pub struct SessionHandle {
     pub can_reconnect: bool,
 }
 
+pub trait SessionRuntimeControl: Send {
+    fn disconnect(&self) -> Result<()>;
+    fn send_input(&self, bytes: Vec<u8>) -> Result<()>;
+    fn resize(&self, rows: u32, cols: u32) -> Result<()>;
+}
+
+type LaunchFuture = Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>;
+type ProbeFuture = Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
+
 pub trait SessionRuntimeLauncher: Send + Sync {
     fn launch(
         &self,
         profile: ConnectionProfile,
         session_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
+    ) -> LaunchFuture;
 
-    fn probe(
-        &self,
-        profile: ConnectionProfile,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
+    fn probe(&self, profile: ConnectionProfile) -> ProbeFuture;
 }
 
 #[derive(Clone)]
@@ -84,6 +90,13 @@ impl SessionManager {
             if let Some(existing_id) = registry.asset_sessions.get(&asset_id)
                 && let Some(existing) = registry.sessions.get(existing_id)
             {
+                tracing::info!(
+                    target: "app.ssh",
+                    session_id = existing.session_id.to_string(),
+                    asset_id = asset_id.as_str(),
+                    mode = ?mode,
+                    "session manager reused existing session handle"
+                );
                 return Ok(existing.clone());
             }
         }
@@ -105,6 +118,17 @@ impl SessionManager {
             registry.open_order.push(session_id);
         }
 
+        tracing::info!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            asset_id = handle.asset_id.as_str(),
+            host = profile.host.as_str(),
+            user = profile.user.as_str(),
+            port = profile.port,
+            mode = ?mode,
+            "session manager registered new session handle"
+        );
+
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let registry_for_events = Arc::clone(&self.registry);
         self.runtime_handle.spawn(async move {
@@ -116,13 +140,18 @@ impl SessionManager {
         let launcher = Arc::clone(&self.launcher);
         let registry_for_launch = Arc::clone(&self.registry);
         self.runtime_handle.spawn(async move {
-            if let Err(error) = launcher.launch(profile, session_id, event_tx).await {
-                update_session(
-                    &registry_for_launch,
-                    session_id,
-                    SessionState::Error(error.to_string()),
-                    true,
-                );
+            match launcher.launch(profile, session_id, event_tx).await {
+                Ok(runtime_control) => {
+                    attach_runtime_control(&registry_for_launch, session_id, runtime_control);
+                }
+                Err(error) => {
+                    update_session(
+                        &registry_for_launch,
+                        session_id,
+                        SessionState::Error(error.to_string()),
+                        true,
+                    );
+                }
             }
         });
 
@@ -157,54 +186,115 @@ impl SessionManager {
     }
 
     pub fn probe_connection(&self, profile: ConnectionProfile) -> Result<()> {
-        self.runtime_handle.block_on(self.launcher.probe(profile))
+        tracing::info!(
+            target: "app.ssh",
+            asset_id = profile.asset_id.as_deref().unwrap_or(""),
+            profile_name = profile.name.as_str(),
+            host = profile.host.as_str(),
+            user = profile.user.as_str(),
+            port = profile.port,
+            "session manager probing ssh connection"
+        );
+        let result = self.runtime_handle.block_on(self.launcher.probe(profile));
+        match &result {
+            Ok(()) => tracing::info!(target: "app.ssh", "session manager probe completed"),
+            Err(error) => tracing::error!(
+                target: "app.ssh",
+                error = %error,
+                "session manager probe failed"
+            ),
+        }
+        result
     }
 
     pub fn disconnect_session(&self, session_id: Uuid) -> Option<SessionHandle> {
-        let mut registry = self.registry.lock().expect("lock session registry");
-        let session = registry.sessions.get_mut(&session_id)?;
-        session.state = SessionState::Disconnected;
-        session.can_reconnect = true;
-        Some(session.clone())
+        let (updated, runtime_control) = {
+            let mut registry = self.registry.lock().expect("lock session registry");
+            let session = registry.sessions.get_mut(&session_id)?;
+            session.state = SessionState::Disconnected;
+            session.can_reconnect = true;
+            let updated = session.clone();
+            let runtime_control = registry.runtime_controls.remove(&session_id);
+            if runtime_control.is_none() {
+                registry.pending_disconnects.insert(session_id);
+            }
+            (updated, runtime_control)
+        };
+
+        if let Some(runtime_control) = runtime_control {
+            let _ = runtime_control.disconnect();
+        }
+
+        Some(updated)
+    }
+
+    pub fn send_session_input(&self, session_id: Uuid, bytes: Vec<u8>) -> Result<()> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        runtime_control.send_input(bytes)
+    }
+
+    pub fn resize_session(&self, session_id: Uuid, rows: u32, cols: u32) -> Result<()> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        runtime_control.resize(rows, cols)
     }
 
     pub fn close_session(&self, session_id: Uuid) -> Option<SessionHandle> {
-        let mut registry = self.registry.lock().expect("lock session registry");
-        let removed = registry.sessions.remove(&session_id)?;
-        registry.open_order.retain(|existing_id| *existing_id != session_id);
-        registry.terminal_surfaces.remove(&session_id);
-        if registry.asset_sessions.get(&removed.asset_id) == Some(&session_id) {
-            let replacement = registry
-                .open_order
-                .iter()
-                .rev()
-                .copied()
-                .find(|existing_id| {
-                    registry
-                        .sessions
-                        .get(existing_id)
-                        .map(|session| session.asset_id == removed.asset_id)
-                        .unwrap_or(false)
-                });
+        let (removed, runtime_control) = {
+            let mut registry = self.registry.lock().expect("lock session registry");
+            let removed = registry.sessions.remove(&session_id)?;
+            registry.open_order.retain(|existing_id| *existing_id != session_id);
+            registry.terminal_surfaces.remove(&session_id);
+            registry.pending_disconnects.remove(&session_id);
+            let runtime_control = registry.runtime_controls.remove(&session_id);
+            if registry.asset_sessions.get(&removed.asset_id) == Some(&session_id) {
+                let replacement = registry
+                    .open_order
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|existing_id| {
+                        registry
+                            .sessions
+                            .get(existing_id)
+                            .map(|session| session.asset_id == removed.asset_id)
+                            .unwrap_or(false)
+                    });
 
-            if let Some(existing_id) = replacement {
-                registry
-                    .asset_sessions
-                    .insert(removed.asset_id.clone(), existing_id);
-            } else {
-                registry.asset_sessions.remove(&removed.asset_id);
+                if let Some(existing_id) = replacement {
+                    registry
+                        .asset_sessions
+                        .insert(removed.asset_id.clone(), existing_id);
+                } else {
+                    registry.asset_sessions.remove(&removed.asset_id);
+                }
             }
+            (removed, runtime_control)
+        };
+
+        if let Some(runtime_control) = runtime_control {
+            let _ = runtime_control.disconnect();
         }
+
         Some(removed)
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct SessionRegistry {
     sessions: HashMap<Uuid, SessionHandle>,
     asset_sessions: HashMap<String, Uuid>,
     open_order: Vec<Uuid>,
     terminal_surfaces: HashMap<Uuid, TerminalSurfaceState>,
+    runtime_controls: HashMap<Uuid, Box<dyn SessionRuntimeControl>>,
+    pending_disconnects: HashSet<Uuid>,
 }
 
 fn apply_runtime_event(
@@ -214,15 +304,39 @@ fn apply_runtime_event(
 ) {
     match event {
         SessionRuntimeEvent::Connected => {
+            tracing::info!(
+                target: "app.ssh",
+                session_id = session_id.to_string(),
+                "session manager received connected event"
+            );
             update_session(registry, session_id, SessionState::Connected, false);
         }
         SessionRuntimeEvent::Disconnected => {
+            tracing::info!(
+                target: "app.ssh",
+                session_id = session_id.to_string(),
+                "session manager received disconnected event"
+            );
+            clear_runtime_control(registry, session_id);
             update_session(registry, session_id, SessionState::Disconnected, true);
         }
         SessionRuntimeEvent::Error(message) => {
+            tracing::error!(
+                target: "app.ssh",
+                session_id = session_id.to_string(),
+                error = message.as_str(),
+                "session manager received runtime error event"
+            );
+            clear_runtime_control(registry, session_id);
             update_session(registry, session_id, SessionState::Error(message), true);
         }
         SessionRuntimeEvent::SurfaceChanged(surface) => {
+            tracing::info!(
+                target: "app.ssh",
+                session_id = session_id.to_string(),
+                seqno = surface.seqno,
+                "session manager received terminal surface update"
+            );
             update_terminal_surface(registry, session_id, surface);
         }
     }
@@ -254,4 +368,36 @@ fn update_terminal_surface(
     if registry.sessions.contains_key(&session_id) {
         registry.terminal_surfaces.insert(session_id, surface);
     }
+}
+
+fn attach_runtime_control(
+    registry: &Arc<Mutex<SessionRegistry>>,
+    session_id: Uuid,
+    runtime_control: Box<dyn SessionRuntimeControl>,
+) {
+    let mut runtime_control = Some(runtime_control);
+    let should_disconnect = {
+        let mut registry = registry.lock().expect("lock session registry");
+        if !registry.sessions.contains_key(&session_id)
+            || registry.pending_disconnects.remove(&session_id)
+        {
+            true
+        } else {
+            registry.runtime_controls.insert(
+                session_id,
+                runtime_control.take().expect("runtime control available"),
+            );
+            false
+        }
+    };
+
+    if should_disconnect && let Some(runtime_control) = runtime_control {
+        let _ = runtime_control.disconnect();
+    }
+}
+
+fn clear_runtime_control(registry: &Arc<Mutex<SessionRegistry>>, session_id: Uuid) {
+    let mut registry = registry.lock().expect("lock session registry");
+    registry.runtime_controls.remove(&session_id);
+    registry.pending_disconnects.remove(&session_id);
 }

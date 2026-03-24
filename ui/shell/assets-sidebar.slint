@@ -52,6 +52,7 @@ export component AssetsSidebar inherits Rectangle {
     callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
     callback asset-selected(string);
+    callback asset-activated(string);
     callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
     callback shell-interaction-requested();
@@ -257,31 +258,11 @@ export component AssetsSidebar inherits Rectangle {
                 vertical-stretch: 1;
                 background: transparent;
 
-                list-blank-fill-context-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        root.shell-interaction-requested();
-                    }
-
-                    pointer-event(event) => {
-                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
-                            root.asset-context-menu-requested(
-                                "",
-                                "blank",
-                                self.mouse-x + self.absolute-position.x,
-                                self.mouse-y + self.absolute-position.y,
-                            );
-                        }
-                    }
-                }
-
                 list-host := ListView {
                     x: 12px;
                     y: 12px;
                     width: parent.width - 24px;
-                    height: parent.height - 24px;
+                    height: min(parent.height - 24px, root.console-asset-items.length * 28px);
 
                     for item in root.console-asset-items : AssetNodeRow {
                         width: list-host.width;
@@ -301,6 +282,10 @@ export component AssetsSidebar inherits Rectangle {
                             root.asset-selected(item-id);
                         }
 
+                        activated-requested(item-id) => {
+                            root.asset-activated(item-id);
+                        }
+
                         toggle-expanded-requested(item-id) => {
                             root.toggle-expanded-requested(item-id);
                         }
@@ -311,6 +296,28 @@ export component AssetsSidebar inherits Rectangle {
 
                         pointer-activity-requested => {
                             root.shell-interaction-requested();
+                        }
+                    }
+                }
+
+                list-blank-fill-context-touch := TouchArea {
+                    x: 12px;
+                    y: 12px + list-host.height;
+                    width: parent.width - 24px;
+                    height: max(0px, parent.height - 24px - list-host.height);
+
+                    clicked => {
+                        root.shell-interaction-requested();
+                    }
+
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                            root.asset-context-menu-requested(
+                                "",
+                                "blank",
+                                self.mouse-x + self.absolute-position.x,
+                                self.mouse-y + self.absolute-position.y,
+                            );
                         }
                     }
                 }

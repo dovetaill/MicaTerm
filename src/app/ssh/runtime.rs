@@ -3,6 +3,7 @@
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::{error::Error as StdError, fmt};
 
 use anyhow::{Context, Result, anyhow, bail};
 use russh::Channel;
@@ -11,16 +12,18 @@ use russh::Disconnect;
 use russh::client;
 use russh::client::AuthResult;
 use russh::keys::{self, PrivateKeyWithHashAlg};
-use serde::Deserialize;
 use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 use wezterm_term::color::ColorPalette;
 use wezterm_term::{Terminal, TerminalConfiguration, TerminalSize};
 
-use crate::app::ssh::credentials::{CredentialStore, SystemCredentialStore};
-use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
+use crate::app::ssh::credentials::{
+    StoredSshSecretBundle, SystemCredentialStore, load_secret_bundle,
+};
+use crate::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
+use crate::app::ssh::session_manager::SessionRuntimeControl;
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
 const DEFAULT_TERMINAL_COLS: usize = 80;
@@ -29,7 +32,9 @@ const DEFAULT_TERMINAL_COLS: usize = 80;
 pub struct TerminalSurfaceState {
     pub session_id: Uuid,
     pub seqno: usize,
-    pub screen_text: String,
+    pub rows: u32,
+    pub cols: u32,
+    pub visible_lines: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,18 +53,31 @@ pub struct SshSessionRuntime {
     command_tx: mpsc::UnboundedSender<RuntimeCommand>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownHostKeyError {
+    pub host: String,
+    pub port: u16,
+    pub fingerprint: String,
+    pub public_key_openssh: String,
+}
+
+impl fmt::Display for UnknownHostKeyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "unknown SSH host key for `{}`:{} ({})",
+            self.host, self.port, self.fingerprint
+        )
+    }
+}
+
+impl StdError for UnknownHostKeyError {}
+
 #[derive(Debug)]
 enum RuntimeCommand {
     Input(Vec<u8>),
     Resize { rows: u32, cols: u32 },
     Disconnect,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct StoredSshSecretBundle {
-    password: Option<String>,
-    private_key_content: Option<String>,
-    passphrase: Option<String>,
 }
 
 struct RuntimeClientHandler {
@@ -75,9 +93,28 @@ impl client::Handler for RuntimeClientHandler {
         &mut self,
         server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
-        self.known_hosts
-            .ensure_trusted(&self.host, self.port, server_public_key)?;
-        Ok(true)
+        match self
+            .known_hosts
+            .check(&self.host, self.port, server_public_key)?
+        {
+            KnownHostCheck::Trusted => Ok(true),
+            KnownHostCheck::Unknown { fingerprint } => Err(UnknownHostKeyError {
+                host: self.host.clone(),
+                port: self.port,
+                fingerprint,
+                public_key_openssh: server_public_key
+                    .to_openssh()
+                    .context("failed to encode unknown SSH host key")?,
+            }
+            .into()),
+            KnownHostCheck::Changed { expected, actual } => bail!(
+                "SSH host key changed for `{}`:{} (expected {}, got {})",
+                self.host,
+                self.port,
+                expected,
+                actual
+            ),
+        }
     }
 }
 
@@ -87,6 +124,17 @@ impl SshSessionRuntime {
         session_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Result<Self> {
+        tracing::info!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            asset_id = profile.asset_id.as_deref().unwrap_or(""),
+            profile_name = profile.name.as_str(),
+            host = profile.host.as_str(),
+            user = profile.user.as_str(),
+            port = profile.port,
+            auth_method = ?profile.auth_method,
+            "starting ssh runtime connection"
+        );
         let terminal = Arc::new(Mutex::new(TerminalSession::new(
             DEFAULT_TERMINAL_ROWS,
             DEFAULT_TERMINAL_COLS,
@@ -112,13 +160,28 @@ impl SshSessionRuntime {
                     profile.host, profile.port
                 )
             })?;
+        tracing::info!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            "ssh runtime established transport connection"
+        );
 
         authenticate_client(&mut handle, &profile).await?;
+        tracing::info!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            "ssh runtime completed authentication"
+        );
 
         let mut channel = handle
             .channel_open_session()
             .await
             .context("failed to open SSH session channel")?;
+        tracing::info!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            "ssh runtime opened session channel"
+        );
         channel
             .request_pty(
                 true,
@@ -134,19 +197,29 @@ impl SshSessionRuntime {
 
         let mut pending_output = Vec::new();
         await_channel_success(&mut channel, "pty", &mut pending_output).await?;
+        tracing::info!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            "ssh runtime negotiated pty"
+        );
 
         channel
             .request_shell(true)
             .await
             .context("failed to request remote shell")?;
         await_channel_success(&mut channel, "shell", &mut pending_output).await?;
+        tracing::info!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            "ssh runtime requested remote shell"
+        );
 
         let _ = event_tx.send(SessionRuntimeEvent::Connected);
         if !pending_output.is_empty() {
             apply_remote_output(&terminal, &pending_output);
-            if let Some(surface) = snapshot_terminal_surface(&terminal, session_id) {
-                let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
-            }
+        }
+        if let Some(surface) = snapshot_terminal_surface(&terminal, session_id) {
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
         }
 
         let runtime = Self {
@@ -190,11 +263,38 @@ impl SshSessionRuntime {
     }
 }
 
+impl SessionRuntimeControl for SshSessionRuntime {
+    fn disconnect(&self) -> Result<()> {
+        SshSessionRuntime::disconnect(self)
+    }
+
+    fn send_input(&self, bytes: Vec<u8>) -> Result<()> {
+        SshSessionRuntime::send_input(self, bytes)
+    }
+
+    fn resize(&self, rows: u32, cols: u32) -> Result<()> {
+        SshSessionRuntime::resize(self, rows, cols)
+    }
+}
+
 async fn authenticate_client(
     handle: &mut client::Handle<RuntimeClientHandler>,
     profile: &ConnectionProfile,
 ) -> Result<()> {
     let stored_bundle = load_stored_secret_bundle(profile)?;
+    tracing::info!(
+        target: "app.ssh",
+        asset_id = profile.asset_id.as_deref().unwrap_or(""),
+        profile_name = profile.name.as_str(),
+        auth_method = ?profile.auth_method,
+        has_password_secret = profile.password.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false)
+            || stored_bundle.password.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
+        has_inline_key_secret = profile.private_key_content.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false)
+            || stored_bundle.private_key_content.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
+        has_passphrase_secret = profile.passphrase.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false)
+            || stored_bundle.passphrase.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
+        "authenticating ssh client"
+    );
 
     match profile.auth_method {
         SshAuthMethod::Password => {
@@ -270,30 +370,33 @@ fn ensure_auth_success(result: AuthResult, method: &str) -> Result<()> {
 
 fn load_stored_secret_bundle(profile: &ConnectionProfile) -> Result<StoredSshSecretBundle> {
     let Some(credential_ref) = profile.credential_ref.as_deref() else {
+        tracing::info!(
+            target: "app.ssh",
+            asset_id = profile.asset_id.as_deref().unwrap_or(""),
+            profile_name = profile.name.as_str(),
+            "no credential reference attached to ssh profile"
+        );
         return Ok(StoredSshSecretBundle::default());
     };
 
     let store = SystemCredentialStore;
-    let raw = store
-        .get_secret(credential_ref)
-        .with_context(|| format!("failed to load SSH secret bundle `{credential_ref}`"))?;
-    let Some(raw) = raw else {
-        return Ok(StoredSshSecretBundle::default());
-    };
-
-    Ok(match serde_json::from_str::<StoredSshSecretBundle>(&raw) {
-        Ok(bundle) => bundle,
-        Err(_) => match profile.auth_method {
-            SshAuthMethod::Password => StoredSshSecretBundle {
-                password: Some(raw),
-                ..StoredSshSecretBundle::default()
-            },
-            SshAuthMethod::PrivateKeyContent => StoredSshSecretBundle {
-                private_key_content: Some(raw),
-                ..StoredSshSecretBundle::default()
-            },
-            SshAuthMethod::PrivateKeyPath => StoredSshSecretBundle::default(),
+    tracing::info!(
+        target: "app.ssh",
+        asset_id = profile.asset_id.as_deref().unwrap_or(""),
+        profile_name = profile.name.as_str(),
+        credential_ref = credential_ref,
+        "loading stored ssh secret bundle"
+    );
+    let bundle = load_secret_bundle(&store, credential_ref)?;
+    Ok(match profile.auth_method {
+        SshAuthMethod::Password => bundle,
+        SshAuthMethod::PrivateKeyContent if bundle.private_key_content.is_some() => bundle,
+        SshAuthMethod::PrivateKeyContent => StoredSshSecretBundle {
+            private_key_content: bundle.password,
+            passphrase: bundle.passphrase,
+            ..StoredSshSecretBundle::default()
         },
+        SshAuthMethod::PrivateKeyPath => bundle,
     })
 }
 
@@ -345,6 +448,12 @@ async fn run_channel_pump(
                         }
                     }
                     Some(RuntimeCommand::Resize { rows, cols }) => {
+                        if let Ok(mut terminal) = terminal.lock() {
+                            terminal.resize(rows as usize, cols as usize);
+                        }
+                        if let Some(surface) = snapshot_terminal_surface(&terminal, session_id) {
+                            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+                        }
                         if let Err(err) = channel
                             .window_change(cols, rows, cols.saturating_mul(8), rows.saturating_mul(16))
                             .await
@@ -356,6 +465,11 @@ async fn run_channel_pump(
                         }
                     }
                     Some(RuntimeCommand::Disconnect) => {
+                        tracing::info!(
+                            target: "app.ssh",
+                            session_id = session_id.to_string(),
+                            "runtime disconnect requested"
+                        );
                         let _ = channel.eof().await;
                         let _ = channel.close().await;
                         let _ = handle
@@ -378,6 +492,11 @@ async fn run_channel_pump(
                         }
                     }
                     Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => {
+                        tracing::info!(
+                            target: "app.ssh",
+                            session_id = session_id.to_string(),
+                            "runtime channel closed"
+                        );
                         let _ = event_tx.send(SessionRuntimeEvent::Disconnected);
                         break;
                     }
@@ -444,18 +563,45 @@ impl TerminalSession {
     }
 
     pub fn screen_text(&self) -> String {
+        self.visible_lines().join("\n")
+    }
+
+    pub fn visible_lines(&self) -> Vec<String> {
         let mut lines = Vec::new();
+        let rows = self.terminal.get_size().rows.max(1);
         self.terminal.screen().for_each_phys_line(|_, line| {
+            if lines.len() == rows {
+                let _ = lines.remove(0);
+            }
             lines.push(line.as_str().trim_end().to_string());
         });
-        lines.join("\n")
+        while lines.first().is_some_and(String::is_empty) {
+            let _ = lines.remove(0);
+        }
+        while lines.last().is_some_and(String::is_empty) {
+            let _ = lines.pop();
+        }
+        lines
+    }
+
+    pub fn resize(&mut self, rows: usize, cols: usize) {
+        self.terminal.resize(TerminalSize {
+            rows: rows.max(1),
+            cols: cols.max(1),
+            pixel_width: cols.max(1) * 8,
+            pixel_height: rows.max(1) * 16,
+            dpi: 96,
+        });
     }
 
     pub fn surface_state(&self, session_id: Uuid) -> TerminalSurfaceState {
+        let size = self.terminal.get_size();
         TerminalSurfaceState {
             session_id,
             seqno: self.sequence_number(),
-            screen_text: self.screen_text(),
+            rows: size.rows as u32,
+            cols: size.cols as u32,
+            visible_lines: self.visible_lines(),
         }
     }
 
@@ -478,6 +624,45 @@ impl TerminalSession {
 
         Ok(self.writer.take())
     }
+}
+
+pub fn encode_named_key_input(
+    key_name: &str,
+    alt: bool,
+    ctrl: bool,
+    shift: bool,
+) -> Result<Option<Vec<u8>>> {
+    let key = match key_name {
+        "enter" => KeyCode::Enter,
+        "tab" => KeyCode::Tab,
+        "escape" => KeyCode::Escape,
+        "backspace" => KeyCode::Backspace,
+        "delete" => KeyCode::Delete,
+        "up" => KeyCode::UpArrow,
+        "down" => KeyCode::DownArrow,
+        "left" => KeyCode::LeftArrow,
+        "right" => KeyCode::RightArrow,
+        "home" => KeyCode::Home,
+        "end" => KeyCode::End,
+        "page-up" => KeyCode::PageUp,
+        "page-down" => KeyCode::PageDown,
+        _ => return Ok(None),
+    };
+
+    let mut modifiers = Modifiers::NONE;
+    if alt {
+        modifiers |= Modifiers::ALT;
+    }
+    if ctrl {
+        modifiers |= Modifiers::CTRL;
+    }
+    if shift {
+        modifiers |= Modifiers::SHIFT;
+    }
+
+    let mut session = TerminalSession::new(DEFAULT_TERMINAL_ROWS, DEFAULT_TERMINAL_COLS);
+    let bytes = session.send_key_down(key, modifiers)?;
+    Ok(Some(bytes))
 }
 
 #[derive(Debug, Default)]

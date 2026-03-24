@@ -10,7 +10,7 @@ export component ActiveTab inherits Rectangle {
     callback selected();
     callback close-requested();
 
-    min-width: 176px;
+    min-width: 0px;
     height: 28px;
     border-radius: 0px;
     border-width: 1px;
@@ -33,6 +33,7 @@ export component ActiveTab inherits Rectangle {
 
         Rectangle {
             horizontal-stretch: 1;
+            min-width: 0px;
             background: transparent;
 
             VerticalLayout {
@@ -56,9 +57,9 @@ export component ActiveTab inherits Rectangle {
         }
 
         close-button := Rectangle {
-            width: 16px;
-            height: 16px;
-            y: 6px;
+            width: 24px;
+            height: 24px;
+            y: 2px;
             background: transparent;
 
             Text {

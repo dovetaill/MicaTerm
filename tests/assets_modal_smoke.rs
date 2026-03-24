@@ -83,22 +83,24 @@ fn folder_modal_visibility_round_trips_through_window_properties() {
 }
 
 #[test]
-fn ssh_modal_visibility_round_trips_through_window_properties() {
+fn ssh_modal_round_trips_grouped_form_fields_without_top_level_tab_state() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
 
     app.set_asset_modal_open(true);
     app.set_asset_modal_kind("new-ssh-connection".into());
-    app.set_asset_ssh_modal_active_tab("proxy".into());
     app.set_asset_ssh_modal_name("Prod Bastion".into());
     app.set_asset_ssh_modal_host("10.0.0.12".into());
+    app.set_asset_ssh_modal_user("ops".into());
+    app.set_asset_ssh_modal_port("22".into());
 
     assert!(app.get_asset_modal_open());
     assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
-    assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "proxy");
     assert_eq!(app.get_asset_ssh_modal_name().as_str(), "Prod Bastion");
     assert_eq!(app.get_asset_ssh_modal_host().as_str(), "10.0.0.12");
+    assert_eq!(app.get_asset_ssh_modal_user().as_str(), "ops");
+    assert_eq!(app.get_asset_ssh_modal_port().as_str(), "22");
 }
 
 #[test]
@@ -139,7 +141,7 @@ fn ssh_modal_round_trips_standard_fields_and_auth_fields() {
 }
 
 #[test]
-fn ssh_modal_exposes_action_buttons_for_save_connect_test_and_save_connect() {
+fn ssh_modal_action_callback_contract_exposes_full_connect_family() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -188,6 +190,29 @@ fn ssh_modal_contract_round_trips_button_state_and_inline_feedback() {
         app.get_asset_ssh_modal_feedback_message().as_str(),
         "Testing connection..."
     );
+}
+
+#[test]
+fn ssh_modal_round_trips_secret_retention_copy_and_clear_affordance() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    app.set_asset_ssh_modal_secret_retention_message(
+        "Leave password / private key / passphrase blank to keep the saved secret.".into(),
+    );
+    app.set_asset_ssh_modal_can_clear_saved_secret(true);
+    app.set_asset_ssh_modal_clear_saved_secret_requested(false);
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(
+        app.get_asset_ssh_modal_secret_retention_message().as_str(),
+        "Leave password / private key / passphrase blank to keep the saved secret."
+    );
+    assert!(app.get_asset_ssh_modal_can_clear_saved_secret());
+    assert!(!app.get_asset_ssh_modal_clear_saved_secret_requested());
 }
 
 #[test]
@@ -285,20 +310,21 @@ fn unknown_host_key_prompts_once_then_reconnect_uses_trusted_key() {
 }
 
 #[test]
-fn ssh_modal_resets_to_standard_english_shell_when_reopened() {
+fn ssh_modal_reopens_with_default_authentication_fields() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
     app.invoke_assets_create_action_selected("new-ssh-connection".into());
-    app.invoke_asset_ssh_modal_tab_selected("proxy".into());
+    app.invoke_asset_ssh_modal_draft_changed("auth_method".into(), "private-key".into());
     app.invoke_close_asset_modal_requested();
     app.invoke_assets_create_action_selected("new-ssh-connection".into());
 
     assert!(app.get_asset_modal_open());
     assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
-    assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "standard");
+    assert_eq!(app.get_asset_ssh_modal_auth_method().as_str(), "password");
+    assert_eq!(app.get_asset_ssh_modal_dialog_title().as_str(), "New SSH Connection");
 }
 
 #[test]
@@ -337,26 +363,20 @@ fn delete_modal_visibility_round_trips_through_window_properties() {
 }
 
 #[test]
-fn blocking_modal_shell_exposes_drag_callbacks_and_focus_restore_hooks() {
-    let modal_shell = fs::read_to_string("ui/components/blocking-modal-shell.slint")
+fn blocking_modal_shell_owns_shared_asset_modal_chrome_contract() {
+    let shell = fs::read_to_string("ui/components/blocking-modal-shell.slint")
         .expect("read blocking modal shell");
+    let folder = fs::read_to_string("ui/components/assets-folder-create-modal.slint")
+        .expect("read folder modal");
+    let ssh = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
 
-    assert!(
-        modal_shell.contains("export component BlockingModalShell inherits Rectangle"),
-        "blocking modal shell component should exist"
-    );
-    assert!(
-        modal_shell.contains("callback drag-requested(length, length);"),
-        "blocking modal shell should expose drag start callbacks"
-    );
-    assert!(
-        modal_shell.contains("callback drag-moved(length, length);"),
-        "blocking modal shell should expose drag move callbacks"
-    );
-    assert!(
-        modal_shell.contains("callback focus-restore-requested();"),
-        "blocking modal shell should expose focus restore hooks"
-    );
+    assert!(shell.contains("in property <string> dialog-title"));
+    assert!(shell.contains("callback close-requested();"));
+    assert!(shell.contains("header := Rectangle {"));
+    assert!(shell.contains("close-button := Rectangle {"));
+    assert!(!folder.contains("drag-touch := TouchArea {"));
+    assert!(!ssh.contains("drag-touch := TouchArea {"));
 }
 
 #[test]

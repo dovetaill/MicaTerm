@@ -1,6 +1,8 @@
 use mica_term::app::ssh::credentials::{
-    CredentialStore, MemoryCredentialStore, SshCredentialKind, ssh_credential_ref,
+    CredentialStore, MemoryCredentialStore, SshCredentialKind, StoredSshSecretBundle,
+    load_secret_bundle, merge_edit_bundle, persist_secret_bundle, ssh_credential_ref,
 };
+use mica_term::shell::view_model::AssetSshConnectionDraft;
 
 #[test]
 fn credential_store_round_trips_password_secret() {
@@ -68,4 +70,107 @@ fn system_credential_store_can_replace_existing_secret_for_same_reference() {
             .as_deref(),
         Some("second-secret")
     );
+}
+
+#[test]
+fn persist_secret_bundle_stores_password_as_json_payload() {
+    let store = MemoryCredentialStore::default();
+    let credential_ref = ssh_credential_ref("asset-prod", SshCredentialKind::SavedSecrets);
+
+    persist_secret_bundle(
+        &store,
+        credential_ref.as_str(),
+        &StoredSshSecretBundle {
+            password: Some("super-secret".into()),
+            private_key_content: None,
+            passphrase: None,
+        },
+    )
+    .expect("persist password bundle");
+
+    assert_eq!(
+        load_secret_bundle(&store, credential_ref.as_str())
+            .expect("load password bundle")
+            .password
+            .as_deref(),
+        Some("super-secret")
+    );
+}
+
+#[test]
+fn persist_secret_bundle_replaces_previous_secret_material_for_same_ref() {
+    let store = MemoryCredentialStore::default();
+    let credential_ref = ssh_credential_ref("asset-prod", SshCredentialKind::SavedSecrets);
+
+    persist_secret_bundle(
+        &store,
+        credential_ref.as_str(),
+        &StoredSshSecretBundle {
+            password: Some("first-password".into()),
+            private_key_content: None,
+            passphrase: None,
+        },
+    )
+    .expect("persist initial bundle");
+
+    persist_secret_bundle(
+        &store,
+        credential_ref.as_str(),
+        &StoredSshSecretBundle {
+            password: None,
+            private_key_content: Some("-----BEGIN OPENSSH PRIVATE KEY-----".into()),
+            passphrase: Some("hunter2".into()),
+        },
+    )
+    .expect("replace bundle");
+
+    let bundle = load_secret_bundle(&store, credential_ref.as_str()).expect("load latest bundle");
+    assert_eq!(bundle.password, None);
+    assert_eq!(
+        bundle.private_key_content.as_deref(),
+        Some("-----BEGIN OPENSSH PRIVATE KEY-----")
+    );
+    assert_eq!(bundle.passphrase.as_deref(), Some("hunter2"));
+}
+
+#[test]
+fn editing_saved_secret_fields_blank_keeps_existing_bundle() {
+    let existing = StoredSshSecretBundle {
+        password: None,
+        private_key_content: Some("-----BEGIN OPENSSH PRIVATE KEY-----".into()),
+        passphrase: Some("hunter2".into()),
+    };
+    let draft = AssetSshConnectionDraft {
+        auth_method: "private-key".into(),
+        private_key_source: "content".into(),
+        private_key_content: String::new(),
+        passphrase: String::new(),
+        ..AssetSshConnectionDraft::default()
+    };
+
+    let merged = merge_edit_bundle(existing, &draft);
+
+    assert_eq!(
+        merged.private_key_content.as_deref(),
+        Some("-----BEGIN OPENSSH PRIVATE KEY-----")
+    );
+    assert_eq!(merged.passphrase.as_deref(), Some("hunter2"));
+}
+
+#[test]
+fn explicit_clear_saved_secret_deletes_bundle() {
+    let existing = StoredSshSecretBundle {
+        password: Some("super-secret".into()),
+        private_key_content: None,
+        passphrase: None,
+    };
+    let draft = AssetSshConnectionDraft {
+        auth_method: "password".into(),
+        clear_saved_secret_requested: true,
+        ..AssetSshConnectionDraft::default()
+    };
+
+    let merged = merge_edit_bundle(existing, &draft);
+
+    assert!(merged.is_empty());
 }

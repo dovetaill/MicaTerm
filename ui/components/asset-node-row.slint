@@ -13,6 +13,7 @@ export component AssetNodeRow inherits Rectangle {
     in property <bool> selected: false;
     in property <bool> focused: false;
     callback selected-requested(string);
+    callback activated-requested(string);
     callback toggle-expanded-requested(string);
     callback pointer-activity-requested();
     callback context-menu-requested(string, string, length, length);
@@ -133,6 +134,11 @@ export component AssetNodeRow inherits Rectangle {
         clicked => {
             root.pointer-activity-requested();
             root.selected-requested(root.item-id);
+        }
+
+        double-clicked => {
+            root.pointer-activity-requested();
+            root.activated-requested(root.item-id);
         }
     }
 }

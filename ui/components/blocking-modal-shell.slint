@@ -1,13 +1,12 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 
 export component BlockingModalShell inherits Rectangle {
-    in property <string> title: "";
+    in property <string> dialog-title: "";
     in property <length> host-titlebar-height: 0px;
     in property <length> modal-width: 360px;
     in property <length> modal-height: 240px;
     in-out property <length> offset-x: 0px;
     in-out property <length> offset-y: 0px;
-    in property <bool> show-close-button: true;
     callback close-requested();
     callback drag-requested(length, length);
     callback drag-moved(length, length);
@@ -19,6 +18,16 @@ export component BlockingModalShell inherits Rectangle {
     height: 100%;
     background: transparent;
 
+    private property <length> viewport-margin: 24px;
+    private property <length> available-width: max(280px, root.width - (root.viewport-margin * 2));
+    private property <length> available-height: max(
+        220px,
+        root.height - root.host-titlebar-height - (root.viewport-margin * 2)
+    );
+    private property <length> header-height: 56px;
+    private property <length> resolved-modal-width: min(root.modal-width, root.available-width);
+    private property <length> resolved-modal-height: min(root.modal-height, root.available-height);
+
     backdrop := TouchArea {
         width: parent.width;
         height: parent.height;
@@ -29,43 +38,41 @@ export component BlockingModalShell inherits Rectangle {
     }
 
     modal-frame := Rectangle {
-        x: max(24px, (root.width - root.modal-width) / 2 + root.offset-x);
+        x: max(root.viewport-margin, (root.width - root.resolved-modal-width) / 2 + root.offset-x);
         y: max(
-            root.host-titlebar-height + 24px,
+            root.host-titlebar-height + root.viewport-margin,
             root.host-titlebar-height
-                + (root.height - root.host-titlebar-height - root.modal-height) / 2
+                + (root.height - root.host-titlebar-height - root.resolved-modal-height) / 2
                 + root.offset-y
         );
-        width: root.modal-width;
-        height: root.modal-height;
-        background: transparent;
+        width: root.resolved-modal-width;
+        height: root.resolved-modal-height;
+        clip: true;
+        border-radius: 0px;
+        border-width: 1px;
+        border-color: ThemeTokens.divider-strong;
+        background: ThemeTokens.assets-surface;
 
-        modal-content := Rectangle {
+        header := Rectangle {
             width: parent.width;
-            height: parent.height;
-            background: transparent;
-
-            @children
-        }
-
-        header-overlay := Rectangle {
-            width: parent.width;
-            height: 52px;
+            height: root.header-height;
             background: ThemeTokens.assets-surface;
 
             Text {
                 x: 20px;
-                y: 16px;
-                width: parent.width - (root.show-close-button ? 72px : 40px);
-                text: root.title;
+                y: 0px;
+                width: parent.width - 72px;
+                height: parent.height;
+                text: root.dialog-title;
                 color: ThemeTokens.text-primary;
                 font-size: 18px;
                 font-weight: 600;
+                vertical-alignment: center;
                 overflow: elide;
             }
 
             drag-touch := TouchArea {
-                width: parent.width - (root.show-close-button ? 48px : 0px);
+                width: parent.width - 48px;
                 height: parent.height;
 
                 pointer-event(event) => {
@@ -87,26 +94,28 @@ export component BlockingModalShell inherits Rectangle {
                 }
             }
 
-            if root.show-close-button : close-button := Rectangle {
-                x: parent.width - 44px;
-                y: 10px;
+            close-button := Rectangle {
+                x: parent.width - 40px;
+                y: 12px;
                 width: 28px;
                 height: 28px;
                 border-radius: 0px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.control-hover-surface;
+                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.control-active-surface;
 
                 Text {
+                    width: parent.width;
+                    height: parent.height;
                     text: "×";
                     color: ThemeTokens.text-primary;
                     horizontal-alignment: center;
                     vertical-alignment: center;
-                    width: parent.width;
-                    height: parent.height;
                 }
 
-                TouchArea {
+                close-touch := TouchArea {
                     width: parent.width;
                     height: parent.height;
 
@@ -116,6 +125,22 @@ export component BlockingModalShell inherits Rectangle {
                     }
                 }
             }
+
+            divider := Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
+            }
+        }
+
+        content-host := Rectangle {
+            y: header.height;
+            width: parent.width;
+            height: parent.height - header.height;
+            background: transparent;
+
+            @children
         }
     }
 }

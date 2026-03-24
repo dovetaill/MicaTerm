@@ -1,13 +1,68 @@
 use std::fs;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 
+use anyhow::Result;
 use mica_term::AppWindow;
-use mica_term::app::bootstrap::bind_top_status_bar_with_store;
+use mica_term::app::bootstrap::bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher;
+use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::session_manager::{SessionHandle, SessionState};
-use mica_term::app::ssh::runtime::TerminalSurfaceState;
+use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalSurfaceState};
+use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
+use mica_term::app::window_effects::default_platform_window_effects;
 use mica_term::shell::tabs::WorkspaceTab;
 use mica_term::shell::view_model::ShellViewModel;
 use slint::Model;
+use tokio::sync::mpsc;
 use uuid::Uuid;
+
+#[derive(Clone, Default)]
+struct FakeLauncher;
+
+struct NoopRuntimeControl;
+
+impl SessionRuntimeControl for NoopRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_input(&self, _bytes: Vec<u8>) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl SessionRuntimeLauncher for FakeLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: Uuid,
+        _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+        Box::pin(async move { Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>) })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+fn bind_with_fake_sessions(app: &AppWindow) {
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
+        app,
+        None,
+        default_platform_window_effects(),
+        None,
+        Arc::new(FakeLauncher),
+    );
+}
 
 fn sample_handle(title: &str, subtitle: &str, state: SessionState) -> SessionHandle {
     SessionHandle {
@@ -186,6 +241,30 @@ fn close_affordance_is_modeled_separately_from_select_action() {
 }
 
 #[test]
+fn active_tab_layout_preserves_close_hit_target_and_elides_text() {
+    let active_tab =
+        fs::read_to_string("ui/components/active-tab.slint").expect("read active tab component");
+    let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
+
+    assert!(
+        active_tab.contains("min-width: 0px;"),
+        "title/subtitle container should opt into shrink-safe layout"
+    );
+    assert!(
+        active_tab.contains("overflow: elide;"),
+        "tab text should elide instead of overflowing into the close hit target"
+    );
+    assert!(
+        !active_tab.contains("width: 16px;"),
+        "close affordance should expose a larger hit target than the old 16px box"
+    );
+    assert!(
+        !tabbar.contains("width: 216px;"),
+        "tab strip should not hard-code a fixed tab width"
+    );
+}
+
+#[test]
 fn connected_session_projects_terminal_surface_state_without_placeholder_copy() {
     let handle = sample_handle(
         "Prod Bastion",
@@ -198,7 +277,9 @@ fn connected_session_projects_terminal_surface_state_without_placeholder_copy() 
     view_model.set_active_workspace_terminal_surface(Some(TerminalSurfaceState {
         session_id: handle.session_id,
         seqno: 3,
-        screen_text: "last login: Tue Mar 24".into(),
+        rows: 24,
+        cols: 80,
+        visible_lines: vec!["last login: Tue Mar 24".into(), "pwd".into()],
     }));
 
     let terminal_host =
@@ -209,16 +290,67 @@ fn connected_session_projects_terminal_surface_state_without_placeholder_copy() 
     assert_eq!(view_model.workspace_terminal_surface_seqno(), 3);
     assert!(
         view_model
-            .workspace_terminal_screen_text()
-            .contains("last login")
+            .workspace_terminal_visible_lines()
+            .iter()
+            .any(|line| line.contains("last login"))
     );
     assert!(
-        terminal_host.contains("terminal-surface-ready"),
-        "terminal host should expose a ready-state marker once a terminal snapshot exists"
+        terminal_host.contains("Interactive terminal ready."),
+        "terminal host should present an interactive-ready state once a terminal snapshot exists"
     );
     assert!(
-        !terminal_host.contains("Renderer host is reserved for the terminal surface."),
+        !terminal_host.contains("Remote shell is ready but has not produced output yet."),
         "terminal host should stop rendering placeholder copy once a real terminal surface contract exists"
+    );
+}
+
+#[test]
+fn terminal_session_host_exposes_text_key_and_resize_callbacks() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        app_window.contains("callback workspace-session-text-input(string);"),
+        "AppWindow should expose a workspace text-input callback for the active terminal session"
+    );
+    assert!(
+        app_window.contains("callback workspace-session-key-input(string, bool, bool, bool);"),
+        "AppWindow should expose a workspace key-input callback for non-printable terminal keys"
+    );
+    assert!(
+        app_window.contains("callback workspace-session-resize-requested(int, int);"),
+        "AppWindow should expose a workspace resize callback for terminal surfaces"
+    );
+    assert!(
+        workspace_pane.contains("text-input(text) =>"),
+        "WorkspacePane should forward printable terminal input back to the app shell"
+    );
+    assert!(
+        workspace_pane.contains("key-input(key, alt, ctrl, shift) =>"),
+        "WorkspacePane should forward named key input back to the app shell"
+    );
+    assert!(
+        workspace_pane.contains("surface-resize-requested(rows, cols) =>"),
+        "WorkspacePane should forward terminal resize events back to the app shell"
+    );
+    assert!(
+        terminal_host.contains("callback text-input(string);"),
+        "TerminalSessionHost should emit printable text input"
+    );
+    assert!(
+        terminal_host.contains("callback key-input(string, bool, bool, bool);"),
+        "TerminalSessionHost should emit named key input with modifier state"
+    );
+    assert!(
+        terminal_host.contains("callback surface-resize-requested(int, int);"),
+        "TerminalSessionHost should emit resize requests with terminal rows/cols"
+    );
+    assert!(
+        !terminal_host.contains("Remote shell is ready but has not produced output yet."),
+        "interactive terminal host should stop rendering the old placeholder copy"
     );
 }
 
@@ -256,36 +388,32 @@ fn disconnected_and_error_tabs_remain_reconnectable() {
 }
 
 #[test]
-fn reopening_same_asset_activates_existing_session_by_default() {
+fn single_click_only_selects_saved_asset_without_opening_session() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
-    bind_top_status_bar_with_store(&app, None);
+    bind_with_fake_sessions(&app);
 
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
     app.invoke_asset_selected(ssh_id.clone().into());
-    let first_session_id = app
-        .get_workspace_tab_items()
-        .row_data(0)
-        .expect("first workspace tab")
-        .session_id
-        .to_string();
-
-    app.invoke_asset_selected(ssh_id.into());
-
-    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), first_session_id);
+    assert_eq!(app.get_workspace_tab_items().row_count(), 0);
+    assert!(
+        app.get_console_asset_items()
+            .row_data(0)
+            .expect("selected ssh row")
+            .selected
+    );
 }
 
 #[test]
-fn explicit_open_in_new_tab_creates_second_session() {
+fn double_click_and_open_in_new_tab_create_distinct_sessions() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
-    bind_top_status_bar_with_store(&app, None);
+    bind_with_fake_sessions(&app);
 
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-    app.invoke_asset_selected(ssh_id.clone().into());
+    app.invoke_asset_activated(ssh_id.clone().into());
     let first_session_id = app
         .get_workspace_tab_items()
         .row_data(0)

@@ -1,7 +1,192 @@
+import { ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 
+component ModalTabButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> active: false;
+    callback clicked();
+
+    min-width: 0px;
+    horizontal-stretch: 1;
+    height: 34px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: root.active ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    background: tab-touch.pressed ? ThemeTokens.control-pressed-surface
+        : tab-touch.has-hover ? ThemeTokens.control-hover-surface
+        : root.active ? ThemeTokens.control-active-surface : ThemeTokens.assets-surface;
+
+    Text {
+        width: parent.width - 16px;
+        height: parent.height;
+        x: 8px;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    tab-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component DialogActionButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> primary: false;
+    in property <bool> action-enabled: true;
+    callback clicked();
+
+    min-width: 0px;
+    horizontal-stretch: 1;
+    height: 34px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: root.primary && root.action-enabled ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    background: !root.action-enabled ? ThemeTokens.control-disabled-surface
+        : action-touch.pressed ? ThemeTokens.control-pressed-surface
+        : action-touch.has-hover ? ThemeTokens.control-hover-surface
+        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+    opacity: root.action-enabled ? 1.0 : 0.56;
+
+    Text {
+        width: parent.width - 16px;
+        height: parent.height;
+        x: 8px;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    action-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.action-enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component FormField inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "";
+    in property <bool> required: false;
+    in property <bool> password-mode: false;
+    in property <bool> multiline: false;
+    in property <string> trailing-action-text: "";
+    callback value-changed(string);
+    callback trailing-action-requested();
+
+    private property <length> field-height: root.multiline ? 120px : 40px;
+
+    height: root.multiline ? 154px : 72px;
+    background: transparent;
+
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: 6px;
+
+        Text {
+            text: root.required ? root.label + " *" : root.label;
+            color: ThemeTokens.text-primary;
+            opacity: 0.8;
+        }
+
+        Rectangle {
+            height: root.field-height;
+            border-radius: 0px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.inspector-surface;
+
+            field-input := TextInput {
+                x: 12px;
+                y: root.multiline ? 8px : 9px;
+                width: parent.width - 24px - (root.trailing-action-text != "" ? 70px : 0px);
+                height: parent.height - (root.multiline ? 16px : 18px);
+                text: root.value;
+                color: ThemeTokens.text-primary;
+                single-line: !root.multiline;
+                input-type: root.password-mode ? InputType.password : InputType.text;
+                selection-background-color: ThemeTokens.accent;
+                selection-foreground-color: ThemeTokens.text-primary;
+
+                edited => {
+                    root.value-changed(self.text);
+                }
+            }
+
+            if root.trailing-action-text != "" : trailing-action := Rectangle {
+                x: parent.width - 62px;
+                y: 6px;
+                width: 50px;
+                height: 28px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: trailing-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : trailing-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.control-active-surface;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.trailing-action-text;
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    font-size: 11px;
+                }
+
+                trailing-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        root.trailing-action-requested();
+                    }
+                }
+            }
+        }
+    }
+}
+
+component FeedbackBanner inherits Rectangle {
+    in property <string> state: "idle";
+    in property <string> message: "";
+
+    height: root.message == "" ? 0px : 28px;
+    visible: root.message != "";
+    border-radius: 0px;
+    border-width: root.message == "" ? 0px : 1px;
+    border-color: root.state == "busy" ? ThemeTokens.accent : ThemeTokens.divider-strong;
+    background: root.state == "busy" ? ThemeTokens.status-busy-surface
+        : root.state == "success" ? ThemeTokens.status-success-surface
+        : root.state == "error" ? ThemeTokens.status-error-surface
+        : transparent;
+
+    Text {
+        x: 10px;
+        y: 5px;
+        width: parent.width - 20px;
+        text: root.message;
+        color: ThemeTokens.text-primary;
+        overflow: elide;
+    }
+}
+
 export component AssetsSshConnectionModal inherits Rectangle {
-    in property <string> active-tab: "standard";
     in property <string> name: "";
     in property <string> host: "";
     in property <string> user: "";
@@ -12,6 +197,10 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> private-key-content: "";
     in property <string> private-key-path: "";
     in property <string> passphrase: "";
+    in property <bool> password-visible: false;
+    in property <string> secret-retention-message: "";
+    in property <bool> can-clear-saved-secret: false;
+    in property <bool> clear-saved-secret-requested: false;
     in property <string> remark: "";
     in property <string> environment: "";
     in property <string> proxy-method: "";
@@ -23,16 +212,17 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <int> focus-sequence: 0;
     callback close-requested();
     callback confirm-requested();
-    callback tab-selected(string);
     callback draft-changed(string, string);
     callback action-requested(string);
+    callback focus-restore-requested();
 
-    width: 760px;
-    height: 720px;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: ThemeTokens.divider-strong;
-    background: ThemeTokens.assets-surface;
+    private property <bool> compact-layout: root.width < 780px;
+    private property <length> footer-height: root.compact-layout ? 120px : 92px;
+    private property <length> body-height: max(0px, root.height - root.footer-height);
+
+    width: 100%;
+    height: 100%;
+    background: transparent;
 
     public function focus-primary-field() {
     }
@@ -43,6 +233,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
         key-pressed(event) => {
             if (event.text == Key.Escape) {
+                root.focus-restore-requested();
                 root.close-requested();
                 accept
             } else {
@@ -50,777 +241,552 @@ export component AssetsSshConnectionModal inherits Rectangle {
             }
         }
 
-        Rectangle {
+        body-scroll := ScrollView {
+            y: 0px;
             width: parent.width;
-            height: parent.height;
-            background: transparent;
+            height: root.body-height;
+            viewport-width: scroll-body.width;
+            viewport-height: scroll-body.height;
 
-            Text {
-                x: 24px;
-                y: 22px;
-                text: "New SSH Connection";
-                color: ThemeTokens.text-primary;
-                font-size: 20px;
-                font-weight: 700;
-            }
-
-            close-button := Rectangle {
-                x: parent.width - 56px;
-                y: 18px;
-                width: 32px;
-                height: 32px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.control-hover-surface;
-
-                Text {
-                    text: "×";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    width: parent.width;
-                    height: parent.height;
-                }
-
-                TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        root.close-requested();
-                    }
-                }
-            }
-
-            Rectangle {
-                x: 24px;
-                y: 72px;
-                width: parent.width - 48px;
-                height: 40px;
+            scroll-body := Rectangle {
+                width: body-scroll.visible-width;
+                height: max(body-scroll.visible-height, body-column.preferred-height + 24px);
                 background: transparent;
 
-                HorizontalLayout {
-                    spacing: 8px;
-
-                    for tab-id in ["standard", "tunnel", "proxy", "environment", "advanced"] : Rectangle {
-                        min-width: 110px;
-                        height: 36px;
-                        border-radius: 0px;
-                        border-width: 1px;
-                        border-color: root.active-tab == tab-id ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-                        background: root.active-tab == tab-id ? ThemeTokens.control-active-surface : ThemeTokens.control-hover-surface;
-
-                        Text {
-                            text: tab-id == "standard" ? "Standard" :
-                                  tab-id == "tunnel" ? "Tunnel" :
-                                  tab-id == "proxy" ? "Proxy" :
-                                  tab-id == "environment" ? "Environment" : "Advanced";
-                            color: ThemeTokens.text-primary;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            width: parent.width;
-                            height: parent.height;
-                        }
-
-                        TouchArea {
-                            width: parent.width;
-                            height: parent.height;
-
-                            clicked => {
-                                root.tab-selected(tab-id);
-                            }
-                        }
-                    }
-                }
-            }
-
-            if root.active-tab == "standard" : Rectangle {
-                x: 24px;
-                y: 132px;
-                width: parent.width - 48px;
-                height: 484px;
-                background: transparent;
-
-                VerticalLayout {
-                    spacing: 14px;
-
-                    Text {
-                        text: "Connection";
-                        color: ThemeTokens.text-primary;
-                        font-size: 16px;
-                        font-weight: 700;
-                    }
-
-                    HorizontalLayout {
-                        spacing: 12px;
-
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            background: transparent;
-
-                            VerticalLayout {
-                                spacing: 6px;
-
-                                Text {
-                                    text: "Name *";
-                                    color: ThemeTokens.text-primary;
-                                }
-
-                                Rectangle {
-                                    height: 40px;
-                                    border-radius: 0px;
-                                    border-width: 1px;
-                                    border-color: ThemeTokens.divider-subtle;
-                                    background: ThemeTokens.inspector-surface;
-
-                                    name_input := TextInput {
-                                        x: 12px;
-                                        y: 10px;
-                                        width: parent.width - 24px;
-                                        height: 20px;
-                                        text: root.name;
-                                        color: ThemeTokens.text-primary;
-                                        selection-background-color: ThemeTokens.accent;
-                                        selection-foreground-color: ThemeTokens.text-primary;
-
-                                        edited => {
-                                            root.draft-changed("name", self.text);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            background: transparent;
-
-                            VerticalLayout {
-                                spacing: 6px;
-
-                                Text {
-                                    text: "Host *";
-                                    color: ThemeTokens.text-primary;
-                                }
-
-                                Rectangle {
-                                    height: 40px;
-                                    border-radius: 0px;
-                                    border-width: 1px;
-                                    border-color: ThemeTokens.divider-subtle;
-                                    background: ThemeTokens.inspector-surface;
-
-                                    TextInput {
-                                        x: 12px;
-                                        y: 10px;
-                                        width: parent.width - 24px;
-                                        height: 20px;
-                                        text: root.host;
-                                        color: ThemeTokens.text-primary;
-                                        selection-background-color: ThemeTokens.accent;
-                                        selection-foreground-color: ThemeTokens.text-primary;
-
-                                        edited => {
-                                            root.draft-changed("host", self.text);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 12px;
-
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            background: transparent;
-
-                            VerticalLayout {
-                                spacing: 6px;
-
-                                Text {
-                                    text: "User *";
-                                    color: ThemeTokens.text-primary;
-                                }
-
-                                Rectangle {
-                                    height: 40px;
-                                    border-radius: 0px;
-                                    border-width: 1px;
-                                    border-color: ThemeTokens.divider-subtle;
-                                    background: ThemeTokens.inspector-surface;
-
-                                    TextInput {
-                                        x: 12px;
-                                        y: 10px;
-                                        width: parent.width - 24px;
-                                        height: 20px;
-                                        text: root.user;
-                                        color: ThemeTokens.text-primary;
-                                        selection-background-color: ThemeTokens.accent;
-                                        selection-foreground-color: ThemeTokens.text-primary;
-
-                                        edited => {
-                                            root.draft-changed("user", self.text);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            width: 140px;
-                            background: transparent;
-
-                            VerticalLayout {
-                                spacing: 6px;
-
-                                Text {
-                                    text: "Port";
-                                    color: ThemeTokens.text-primary;
-                                }
-
-                                Rectangle {
-                                    height: 40px;
-                                    border-radius: 0px;
-                                    border-width: 1px;
-                                    border-color: ThemeTokens.divider-subtle;
-                                    background: ThemeTokens.inspector-surface;
-
-                                    TextInput {
-                                        x: 12px;
-                                        y: 10px;
-                                        width: parent.width - 24px;
-                                        height: 20px;
-                                        text: root.port;
-                                        color: ThemeTokens.text-primary;
-                                        selection-background-color: ThemeTokens.accent;
-                                        selection-foreground-color: ThemeTokens.text-primary;
-
-                                        edited => {
-                                            root.draft-changed("port", self.text);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Text {
-                        text: "Authentication";
-                        color: ThemeTokens.text-primary;
-                        font-size: 16px;
-                        font-weight: 700;
-                    }
+                body-column := VerticalLayout {
+                    x: 20px;
+                    y: 20px;
+                    width: parent.width - 40px;
+                    spacing: 24px;
 
                     Rectangle {
-                        height: 38px;
-                        background: transparent;
-
-                        HorizontalLayout {
-                            spacing: 8px;
-
-                            for auth-option in ["password", "private-key"] : Rectangle {
-                                min-width: 140px;
-                                height: 34px;
-                                border-radius: 0px;
-                                border-width: 1px;
-                                border-color: root.auth-method == auth-option ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-                                background: root.auth-method == auth-option ? ThemeTokens.control-active-surface : ThemeTokens.control-hover-surface;
-
-                                Text {
-                                    text: auth-option == "password" ? "Password" : "Private Key";
-                                    color: ThemeTokens.text-primary;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                    width: parent.width;
-                                    height: parent.height;
-                                }
-
-                                TouchArea {
-                                    width: parent.width;
-                                    height: parent.height;
-
-                                    clicked => {
-                                        root.draft-changed("auth_method", auth-option);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if root.auth-method == "password" : Rectangle {
+                        width: parent.width;
                         background: transparent;
 
                         VerticalLayout {
-                            spacing: 6px;
+                            width: parent.width;
+                            spacing: 16px;
 
                             Text {
-                                text: "Password *";
+                                text: "Connection";
                                 color: ThemeTokens.text-primary;
+                                font-size: 15px;
+                                font-weight: 700;
                             }
 
-                            Rectangle {
-                                height: 40px;
-                                border-radius: 0px;
-                                border-width: 1px;
-                                border-color: ThemeTokens.divider-subtle;
-                                background: ThemeTokens.inspector-surface;
+                            Text {
+                                width: parent.width;
+                                text: "Define the saved SSH endpoint and default identity for this profile.";
+                                color: ThemeTokens.text-primary;
+                                opacity: 0.72;
+                                wrap: word-wrap;
+                            }
 
-                                TextInput {
-                                    x: 12px;
-                                    y: 10px;
-                                    width: parent.width - 24px;
-                                    height: 20px;
-                                    text: root.password;
-                                    color: ThemeTokens.text-primary;
-                                    selection-background-color: ThemeTokens.accent;
-                                    selection-foreground-color: ThemeTokens.text-primary;
+                            if root.compact-layout : VerticalLayout {
+                                width: parent.width;
+                                spacing: 12px;
 
-                                    edited => {
-                                        root.draft-changed("password", self.text);
+                                FormField {
+                                    width: parent.width;
+                                    label: "Name";
+                                    required: true;
+                                    value: root.name;
+
+                                    value-changed(value) => {
+                                        root.draft-changed("name", value);
+                                    }
+                                }
+
+                                FormField {
+                                    width: parent.width;
+                                    label: "Host";
+                                    required: true;
+                                    value: root.host;
+
+                                    value-changed(value) => {
+                                        root.draft-changed("host", value);
+                                    }
+                                }
+
+                                FormField {
+                                    width: parent.width;
+                                    label: "User";
+                                    required: true;
+                                    value: root.user;
+
+                                    value-changed(value) => {
+                                        root.draft-changed("user", value);
+                                    }
+                                }
+
+                                FormField {
+                                    width: parent.width;
+                                    label: "Port";
+                                    value: root.port;
+
+                                    value-changed(value) => {
+                                        root.draft-changed("port", value);
                                     }
                                 }
                             }
-                        }
-                    }
 
-                    if root.auth-method == "private-key" : Rectangle {
-                        background: transparent;
-
-                        VerticalLayout {
-                            spacing: 12px;
-
-                            Text {
-                                text: "Private Key Source";
-                                color: ThemeTokens.text-primary;
-                            }
-
-                            Rectangle {
-                                height: 38px;
+                            if !root.compact-layout : Rectangle {
+                                width: parent.width;
+                                height: 72px;
                                 background: transparent;
 
                                 HorizontalLayout {
-                                    spacing: 8px;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    spacing: 12px;
 
-                                    for key-option in ["content", "path"] : Rectangle {
-                                        min-width: 140px;
-                                        height: 34px;
-                                        border-radius: 0px;
-                                        border-width: 1px;
-                                        border-color: root.private-key-source == key-option ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-                                        background: root.private-key-source == key-option ? ThemeTokens.control-active-surface : ThemeTokens.control-hover-surface;
+                                    FormField {
+                                        horizontal-stretch: 1;
+                                        height: parent.height;
+                                        label: "Name";
+                                        required: true;
+                                        value: root.name;
 
-                                        Text {
-                                            text: key-option == "content" ? "Inline Content" : "File Path";
-                                            color: ThemeTokens.text-primary;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                            width: parent.width;
-                                            height: parent.height;
+                                        value-changed(value) => {
+                                            root.draft-changed("name", value);
                                         }
+                                    }
 
-                                        TouchArea {
-                                            width: parent.width;
-                                            height: parent.height;
+                                    FormField {
+                                        horizontal-stretch: 1;
+                                        height: parent.height;
+                                        label: "Host";
+                                        required: true;
+                                        value: root.host;
 
-                                            clicked => {
-                                                root.draft-changed("private_key_source", key-option);
-                                            }
+                                        value-changed(value) => {
+                                            root.draft-changed("host", value);
                                         }
                                     }
                                 }
                             }
 
-                            if root.private-key-source == "content" : Rectangle {
+                            if !root.compact-layout : Rectangle {
+                                width: parent.width;
+                                height: 72px;
                                 background: transparent;
 
-                                VerticalLayout {
-                                    spacing: 6px;
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    spacing: 12px;
 
-                                    Text {
-                                        text: "Private Key Content *";
-                                        color: ThemeTokens.text-primary;
+                                    FormField {
+                                        horizontal-stretch: 1;
+                                        height: parent.height;
+                                        label: "User";
+                                        required: true;
+                                        value: root.user;
+
+                                        value-changed(value) => {
+                                            root.draft-changed("user", value);
+                                        }
                                     }
 
-                                    Rectangle {
-                                        height: 40px;
-                                        border-radius: 0px;
-                                        border-width: 1px;
-                                        border-color: ThemeTokens.divider-subtle;
-                                        background: ThemeTokens.inspector-surface;
+                                    FormField {
+                                        width: 148px;
+                                        height: parent.height;
+                                        label: "Port";
+                                        value: root.port;
 
-                                        TextInput {
-                                            x: 12px;
-                                            y: 10px;
-                                            width: parent.width - 24px;
-                                            height: 20px;
-                                            text: root.private-key-content;
-                                            color: ThemeTokens.text-primary;
-                                            selection-background-color: ThemeTokens.accent;
-                                            selection-foreground-color: ThemeTokens.text-primary;
-
-                                            edited => {
-                                                root.draft-changed("private_key_content", self.text);
-                                            }
+                                        value-changed(value) => {
+                                            root.draft-changed("port", value);
                                         }
                                     }
                                 }
                             }
 
-                            if root.private-key-source == "path" : Rectangle {
-                                background: transparent;
-
-                                VerticalLayout {
-                                    spacing: 6px;
-
-                                    Text {
-                                        text: "Private Key Path *";
-                                        color: ThemeTokens.text-primary;
-                                    }
-
-                                    Rectangle {
-                                        height: 40px;
-                                        border-radius: 0px;
-                                        border-width: 1px;
-                                        border-color: ThemeTokens.divider-subtle;
-                                        background: ThemeTokens.inspector-surface;
-
-                                        TextInput {
-                                            x: 12px;
-                                            y: 10px;
-                                            width: parent.width - 24px;
-                                            height: 20px;
-                                            text: root.private-key-path;
-                                            color: ThemeTokens.text-primary;
-                                            selection-background-color: ThemeTokens.accent;
-                                            selection-foreground-color: ThemeTokens.text-primary;
-
-                                            edited => {
-                                                root.draft-changed("private_key_path", self.text);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                background: transparent;
-
-                                VerticalLayout {
-                                    spacing: 6px;
-
-                                    Text {
-                                        text: "Passphrase";
-                                        color: ThemeTokens.text-primary;
-                                    }
-
-                                    Rectangle {
-                                        height: 40px;
-                                        border-radius: 0px;
-                                        border-width: 1px;
-                                        border-color: ThemeTokens.divider-subtle;
-                                        background: ThemeTokens.inspector-surface;
-
-                                        TextInput {
-                                            x: 12px;
-                                            y: 10px;
-                                            width: parent.width - 24px;
-                                            height: 20px;
-                                            text: root.passphrase;
-                                            color: ThemeTokens.text-primary;
-                                            selection-background-color: ThemeTokens.accent;
-                                            selection-foreground-color: ThemeTokens.text-primary;
-
-                                            edited => {
-                                                root.draft-changed("passphrase", self.text);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
-                    }
-
-                    Text {
-                        text: "Metadata";
-                        color: ThemeTokens.text-primary;
-                        font-size: 16px;
-                        font-weight: 700;
                     }
 
                     Rectangle {
+                        width: parent.width;
                         background: transparent;
 
                         VerticalLayout {
-                            spacing: 6px;
+                            width: parent.width;
+                            spacing: 16px;
 
                             Text {
-                                text: "Remark";
+                                text: "Authentication";
                                 color: ThemeTokens.text-primary;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+
+                            Text {
+                                width: parent.width;
+                                text: "Pick how the session authenticates and keep sensitive values inside the same dialog.";
+                                color: ThemeTokens.text-primary;
+                                opacity: 0.72;
+                                wrap: word-wrap;
                             }
 
                             Rectangle {
-                                height: 40px;
-                                border-radius: 0px;
-                                border-width: 1px;
-                                border-color: ThemeTokens.divider-subtle;
-                                background: ThemeTokens.inspector-surface;
+                                height: 34px;
+                                background: transparent;
 
-                                TextInput {
-                                    x: 12px;
-                                    y: 10px;
-                                    width: parent.width - 24px;
-                                    height: 20px;
-                                    text: root.remark;
-                                    color: ThemeTokens.text-primary;
-                                    selection-background-color: ThemeTokens.accent;
-                                    selection-foreground-color: ThemeTokens.text-primary;
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    spacing: 8px;
 
-                                    edited => {
-                                        root.draft-changed("remark", self.text);
+                                    for auth-option in ["password", "private-key"] : ModalTabButton {
+                                        label: auth-option == "password" ? "Password" : "Private Key";
+                                        active: root.auth-method == auth-option;
+
+                                        clicked => {
+                                            root.draft-changed("auth_method", auth-option);
+                                        }
                                     }
+                                }
+                            }
+
+                            if root.secret-retention-message != "" : VerticalLayout {
+                                width: parent.width;
+                                spacing: 8px;
+
+                                Text {
+                                    width: parent.width;
+                                    text: root.secret-retention-message;
+                                    color: ThemeTokens.text-primary;
+                                    opacity: 0.72;
+                                    wrap: word-wrap;
+                                }
+
+                                if root.can-clear-saved-secret : Rectangle {
+                                    width: parent.width;
+                                    height: root.clear-saved-secret-requested ? 56px : 34px;
+                                    background: transparent;
+
+                                    VerticalLayout {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        spacing: 6px;
+
+                                        ModalTabButton {
+                                            width: 180px;
+                                            horizontal-stretch: 0;
+                                            label: root.clear-saved-secret-requested ? "Keep Saved Secret" : "Clear Saved Secret";
+                                            active: root.clear-saved-secret-requested;
+
+                                            clicked => {
+                                                root.draft-changed(
+                                                    "clear_saved_secret",
+                                                    root.clear-saved-secret-requested ? "false" : "true"
+                                                );
+                                            }
+                                        }
+
+                                        if root.clear-saved-secret-requested : Text {
+                                            width: parent.width;
+                                            text: "Saved secret will be removed on Save.";
+                                            color: ThemeTokens.text-primary;
+                                            opacity: 0.72;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.auth-method == "password" : FormField {
+                                width: parent.width;
+                                label: "Password";
+                                required: true;
+                                value: root.password;
+                                password-mode: !root.password-visible;
+                                trailing-action-text: root.password-visible ? "Hide" : "Show";
+
+                                value-changed(value) => {
+                                    root.draft-changed("password", value);
+                                }
+
+                                trailing-action-requested => {
+                                    root.draft-changed(
+                                        "password_visibility",
+                                        root.password-visible ? "hidden" : "visible"
+                                    );
+                                }
+                            }
+
+                            if root.auth-method == "private-key" : Rectangle {
+                                width: parent.width;
+                                background: transparent;
+
+                                VerticalLayout {
+                                    width: parent.width;
+                                    spacing: 12px;
+
+                                    Rectangle {
+                                        height: 34px;
+                                        background: transparent;
+
+                                        HorizontalLayout {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            spacing: 8px;
+
+                                            for key-option in ["content", "path"] : ModalTabButton {
+                                                label: key-option == "content" ? "Inline Content" : "File Path";
+                                                active: root.private-key-source == key-option;
+
+                                                clicked => {
+                                                    root.draft-changed("private_key_source", key-option);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if root.private-key-source == "content" : FormField {
+                                        width: parent.width;
+                                        label: "Private Key Content";
+                                        required: true;
+                                        multiline: true;
+                                        value: root.private-key-content;
+
+                                        value-changed(value) => {
+                                            root.draft-changed("private_key_content", value);
+                                        }
+                                    }
+
+                                    if root.private-key-source == "path" : FormField {
+                                        width: parent.width;
+                                        label: "Private Key Path";
+                                        required: true;
+                                        value: root.private-key-path;
+
+                                        value-changed(value) => {
+                                            root.draft-changed("private_key_path", value);
+                                        }
+                                    }
+
+                                    FormField {
+                                        width: parent.width;
+                                        label: "Passphrase";
+                                        value: root.passphrase;
+                                        password-mode: true;
+
+                                        value-changed(value) => {
+                                            root.draft-changed("passphrase", value);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: parent.width;
+                        background: transparent;
+
+                        VerticalLayout {
+                            width: parent.width;
+                            spacing: 16px;
+
+                            Text {
+                                text: "Metadata";
+                                color: ThemeTokens.text-primary;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+
+                            Text {
+                                width: parent.width;
+                                text: "Capture operator notes and profile context without leaving the dialog.";
+                                color: ThemeTokens.text-primary;
+                                opacity: 0.72;
+                                wrap: word-wrap;
+                            }
+
+                            FormField {
+                                width: parent.width;
+                                label: "Remark";
+                                value: root.remark;
+                                multiline: true;
+
+                                value-changed(value) => {
+                                    root.draft-changed("remark", value);
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: parent.width;
+                        background: transparent;
+
+                        VerticalLayout {
+                            width: parent.width;
+                            spacing: 16px;
+
+                            Text {
+                                text: "More Settings";
+                                color: ThemeTokens.text-primary;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+
+                            Text {
+                                width: parent.width;
+                                text: "Keep environment overrides and proxy hints attached to the same SSH profile.";
+                                color: ThemeTokens.text-primary;
+                                opacity: 0.72;
+                                wrap: word-wrap;
+                            }
+
+                            FormField {
+                                width: parent.width;
+                                label: "Environment";
+                                value: root.environment;
+                                multiline: true;
+
+                                value-changed(value) => {
+                                    root.draft-changed("environment", value);
+                                }
+                            }
+
+                            FormField {
+                                width: parent.width;
+                                label: "Proxy Method";
+                                value: root.proxy-method;
+
+                                value-changed(value) => {
+                                    root.draft-changed("proxy_method", value);
                                 }
                             }
                         }
                     }
                 }
             }
+        }
 
-            if root.active-tab == "tunnel" : Rectangle {
-                x: 24px;
-                y: 132px;
-                width: parent.width - 48px;
-                height: 484px;
-                background: ThemeTokens.inspector-surface;
+        footer := Rectangle {
+            y: parent.height - root.footer-height;
+            width: parent.width;
+            height: root.footer-height;
+            background: ThemeTokens.assets-surface;
 
-                Text {
-                    text: "Tunnel settings are not wired in this phase.";
-                    color: ThemeTokens.text-primary;
-                    x: 16px;
-                    y: 16px;
-                }
+            footer-divider := Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
             }
 
-            if root.active-tab == "proxy" : Rectangle {
-                x: 24px;
-                y: 132px;
-                width: parent.width - 48px;
-                height: 484px;
-                background: ThemeTokens.inspector-surface;
+            footer-column := VerticalLayout {
+                x: 20px;
+                y: 12px;
+                width: parent.width - 40px;
+                height: parent.height - 24px;
+                spacing: 8px;
 
-                Text {
-                    text: "Proxy settings are not wired in this phase.";
-                    color: ThemeTokens.text-primary;
-                    x: 16px;
-                    y: 16px;
-                }
-            }
-
-            if root.active-tab == "environment" : Rectangle {
-                x: 24px;
-                y: 132px;
-                width: parent.width - 48px;
-                height: 484px;
-                background: ThemeTokens.inspector-surface;
-
-                Text {
-                    text: "Environment settings are not wired in this phase.";
-                    color: ThemeTokens.text-primary;
-                    x: 16px;
-                    y: 16px;
-                }
-            }
-
-            if root.active-tab == "advanced" : Rectangle {
-                x: 24px;
-                y: 132px;
-                width: parent.width - 48px;
-                height: 484px;
-                background: ThemeTokens.inspector-surface;
-
-                Text {
-                    text: "Advanced settings are not wired in this phase.";
-                    color: ThemeTokens.text-primary;
-                    x: 16px;
-                    y: 16px;
-                }
-            }
-
-            feedback-panel := Rectangle {
-                x: 24px;
-                y: 596px;
-                width: parent.width - 48px;
-                height: 28px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: root.feedback-state == "busy" ? ThemeTokens.accent
-                    : root.feedback-state == "success" ? ThemeTokens.divider-strong
-                    : root.feedback-state == "error" ? ThemeTokens.divider-strong
-                    : transparent;
-                background: root.feedback-state == "busy" ? ThemeTokens.status-busy-surface
-                    : root.feedback-state == "success" ? ThemeTokens.status-success-surface
-                    : root.feedback-state == "error" ? ThemeTokens.status-error-surface
-                    : transparent;
-                visible: root.feedback-message != "";
-
-                Text {
-                    x: 10px;
-                    y: 5px;
-                    width: parent.width - 20px;
-                    text: root.feedback-message;
-                    color: ThemeTokens.text-primary;
-                    overflow: elide;
-                }
-            }
-
-            validation-copy := Text {
-                x: 24px;
-                y: 632px;
-                width: parent.width - 48px;
-                text: root.validation-message;
-                color: ThemeTokens.text-primary;
-                opacity: 0.72;
-                visible: root.validation-message != "";
-                wrap: word-wrap;
-            }
-
-            test-button := Rectangle {
-                x: parent.width - 492px;
-                y: parent.height - 56px;
-                width: 132px;
-                height: 34px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: root.connect-family-enabled ? ThemeTokens.divider-subtle : ThemeTokens.divider-subtle;
-                background: !root.connect-family-enabled ? ThemeTokens.control-disabled-surface
-                    : test-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : test-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
-                opacity: root.connect-family-enabled ? 1.0 : 0.64;
-
-                Text {
-                    text: "Test Connection";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                FeedbackBanner {
                     width: parent.width;
-                    height: parent.height;
+                    state: root.feedback-state;
+                    message: root.feedback-message;
                 }
 
-                test-touch := TouchArea {
+                if root.validation-message != "" : Text {
                     width: parent.width;
-                    height: parent.height;
+                    text: root.validation-message;
+                    color: ThemeTokens.text-primary;
+                    opacity: 0.72;
+                    wrap: word-wrap;
+                }
 
-                    clicked => {
-                        if root.connect-family-enabled {
+                if root.compact-layout : VerticalLayout {
+                    width: parent.width;
+                    spacing: 8px;
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        spacing: 8px;
+
+                        DialogActionButton {
+                            label: "Test Connection";
+                            action-enabled: root.connect-family-enabled;
+
+                            clicked => {
+                                root.action-requested("test");
+                            }
+                        }
+
+                        DialogActionButton {
+                            label: "Connect";
+                            action-enabled: root.connect-family-enabled;
+
+                            clicked => {
+                                root.action-requested("connect");
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        spacing: 8px;
+
+                        DialogActionButton {
+                            label: "Save";
+                            primary: true;
+                            action-enabled: root.can-confirm;
+
+                            clicked => {
+                                root.action-requested("save");
+                            }
+                        }
+
+                        DialogActionButton {
+                            label: "Save and Connect";
+                            action-enabled: root.connect-family-enabled;
+
+                            clicked => {
+                                root.action-requested("save-and-connect");
+                            }
+                        }
+                    }
+                }
+
+                if !root.compact-layout : HorizontalLayout {
+                    width: parent.width;
+                    spacing: 8px;
+
+                    DialogActionButton {
+                        label: "Test Connection";
+                        action-enabled: root.connect-family-enabled;
+
+                        clicked => {
                             root.action-requested("test");
                         }
                     }
-                }
-            }
 
-            connect-button := Rectangle {
-                x: parent.width - 348px;
-                y: parent.height - 56px;
-                width: 100px;
-                height: 34px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: !root.connect-family-enabled ? ThemeTokens.control-disabled-surface
-                    : connect-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : connect-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
-                opacity: root.connect-family-enabled ? 1.0 : 0.64;
+                    DialogActionButton {
+                        label: "Connect";
+                        action-enabled: root.connect-family-enabled;
 
-                Text {
-                    text: "Connect";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    width: parent.width;
-                    height: parent.height;
-                }
-
-                connect-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        if root.connect-family-enabled {
+                        clicked => {
                             root.action-requested("connect");
                         }
                     }
-                }
-            }
 
-            save-button := Rectangle {
-                x: parent.width - 236px;
-                y: parent.height - 56px;
-                width: 88px;
-                height: 34px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: root.can-confirm ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-                background: !root.can-confirm ? ThemeTokens.control-disabled-surface
-                    : save-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : save-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.accent;
-                opacity: root.can-confirm ? 1.0 : 0.64;
+                    DialogActionButton {
+                        label: "Save";
+                        primary: true;
+                        action-enabled: root.can-confirm;
 
-                Text {
-                    text: "Save";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    width: parent.width;
-                    height: parent.height;
-                }
-
-                save-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        if root.can-confirm {
+                        clicked => {
                             root.action-requested("save");
                         }
                     }
-                }
-            }
 
-            save-connect-button := Rectangle {
-                x: parent.width - 136px;
-                y: parent.height - 56px;
-                width: 112px;
-                height: 34px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: !root.connect-family-enabled ? ThemeTokens.control-disabled-surface
-                    : save-connect-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : save-connect-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
-                opacity: root.connect-family-enabled ? 1.0 : 0.64;
+                    DialogActionButton {
+                        label: "Save and Connect";
+                        action-enabled: root.connect-family-enabled;
 
-                Text {
-                    text: "Save and Connect";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    width: parent.width;
-                    height: parent.height;
-                }
-
-                save-connect-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        if root.connect-family-enabled {
+                        clicked => {
                             root.action-requested("save-and-connect");
                         }
                     }

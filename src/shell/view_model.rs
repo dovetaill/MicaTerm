@@ -33,7 +33,6 @@ pub enum AssetModalState {
     NewSshConnection {
         parent_id: Option<String>,
         editing_asset_id: Option<String>,
-        active_tab: AssetSshModalTab,
         draft: AssetSshConnectionDraft,
     },
     RenameAsset {
@@ -48,38 +47,6 @@ pub enum AssetModalState {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AssetSshModalTab {
-    Standard,
-    Tunnel,
-    Proxy,
-    Environment,
-    Advanced,
-}
-
-impl AssetSshModalTab {
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Standard => "standard",
-            Self::Tunnel => "tunnel",
-            Self::Proxy => "proxy",
-            Self::Environment => "environment",
-            Self::Advanced => "advanced",
-        }
-    }
-
-    pub fn from_id(value: &str) -> Option<Self> {
-        match value {
-            "standard" => Some(Self::Standard),
-            "tunnel" => Some(Self::Tunnel),
-            "proxy" => Some(Self::Proxy),
-            "environment" => Some(Self::Environment),
-            "advanced" => Some(Self::Advanced),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetSshConnectionDraft {
     pub name: String,
@@ -92,9 +59,13 @@ pub struct AssetSshConnectionDraft {
     pub private_key_content: String,
     pub private_key_path: String,
     pub passphrase: String,
+    pub password_visible: bool,
     pub remark: String,
     pub environment: String,
     pub proxy_method: String,
+    pub secret_retention_message: String,
+    pub can_clear_saved_secret: bool,
+    pub clear_saved_secret_requested: bool,
     pub validation_message: String,
 }
 
@@ -111,13 +82,20 @@ impl Default for AssetSshConnectionDraft {
             private_key_content: String::new(),
             private_key_path: String::new(),
             passphrase: String::new(),
+            password_visible: false,
             remark: String::new(),
             environment: String::new(),
             proxy_method: String::new(),
+            secret_retention_message: String::new(),
+            can_clear_saved_secret: false,
+            clear_saved_secret_requested: false,
             validation_message: String::new(),
         }
     }
 }
+
+const SSH_MODAL_SECRET_RETENTION_MESSAGE: &str =
+    "Leave password / private key / passphrase blank to keep the saved secret.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SshHostKeyPromptState {
@@ -369,9 +347,11 @@ impl ShellViewModel {
             SshModalActionState::Idle => String::new(),
             SshModalActionState::Busy(action) => match action {
                 SshModalAction::Save => "Saving connection...".into(),
-                SshModalAction::Connect => "Opening temporary session...".into(),
                 SshModalAction::TestConnection => "Testing connection...".into(),
-                SshModalAction::SaveAndConnect => "Saving connection and opening session...".into(),
+                SshModalAction::Connect => "Opening temporary session...".into(),
+                SshModalAction::SaveAndConnect => {
+                    "Saving connection and opening session...".into()
+                }
             },
             SshModalActionState::Success(message) | SshModalActionState::Error(message) => {
                 message.clone()
@@ -490,10 +470,10 @@ impl ShellViewModel {
             .unwrap_or_default()
     }
 
-    pub fn workspace_terminal_screen_text(&self) -> &str {
+    pub fn workspace_terminal_visible_lines(&self) -> Vec<String> {
         self.active_workspace_terminal_surface()
-            .map(|surface| surface.screen_text.as_str())
-            .unwrap_or("")
+            .map(|surface| surface.visible_lines.clone())
+            .unwrap_or_default()
     }
 
     pub fn workspace_session_host_mode(&self) -> &'static str {
@@ -649,7 +629,6 @@ impl ShellViewModel {
         self.asset_modal_state = Some(AssetModalState::NewSshConnection {
             parent_id,
             editing_asset_id: None,
-            active_tab: AssetSshModalTab::Standard,
             draft: AssetSshConnectionDraft {
                 name: draft_name,
                 ..AssetSshConnectionDraft::default()
@@ -676,7 +655,6 @@ impl ShellViewModel {
         self.asset_modal_state = Some(AssetModalState::NewSshConnection {
             parent_id: node.parent_id,
             editing_asset_id: Some(asset_id),
-            active_tab: AssetSshModalTab::Standard,
             draft: AssetSshConnectionDraft {
                 name: node.title,
                 host: spec.host,
@@ -688,9 +666,17 @@ impl ShellViewModel {
                 private_key_content: String::new(),
                 private_key_path: spec.private_key_path,
                 passphrase: String::new(),
+                password_visible: false,
                 remark: spec.remark,
                 environment: spec.environment,
                 proxy_method: spec.proxy_method,
+                secret_retention_message: if spec.credential_ref.is_some() {
+                    SSH_MODAL_SECRET_RETENTION_MESSAGE.into()
+                } else {
+                    String::new()
+                },
+                can_clear_saved_secret: spec.credential_ref.is_some(),
+                clear_saved_secret_requested: false,
                 validation_message: String::new(),
             },
         });
@@ -758,6 +744,7 @@ impl ShellViewModel {
         else {
             return;
         };
+        let has_secret_input = !value.trim().is_empty();
 
         match field {
             "name" => draft.name = value,
@@ -778,10 +765,25 @@ impl ShellViewModel {
             "private_key_content" => draft.private_key_content = value,
             "private_key_path" => draft.private_key_path = value,
             "passphrase" => draft.passphrase = value,
+            "password_visibility" => {
+                draft.password_visible = matches!(value.as_str(), "visible" | "show" | "true");
+            }
+            "clear_saved_secret" => {
+                draft.clear_saved_secret_requested = draft.can_clear_saved_secret
+                    && matches!(value.as_str(), "true" | "clear" | "1" | "yes");
+            }
             "remark" => draft.remark = value,
             "environment" => draft.environment = value,
             "proxy_method" => draft.proxy_method = value,
             _ => {}
+        }
+
+        if matches!(field, "auth_method" | "private_key_source") {
+            draft.clear_saved_secret_requested = false;
+        }
+
+        if matches!(field, "password" | "private_key_content" | "passphrase") && has_secret_input {
+            draft.clear_saved_secret_requested = false;
         }
 
         draft.validation_message.clear();
@@ -794,20 +796,6 @@ impl ShellViewModel {
 
     pub fn update_ssh_modal_host(&mut self, value: String) {
         self.update_ssh_modal_field("host", value);
-    }
-
-    pub fn select_ssh_modal_tab(&mut self, tab: &str) {
-        let Some(next_tab) = AssetSshModalTab::from_id(tab) else {
-            return;
-        };
-
-        let Some(AssetModalState::NewSshConnection { active_tab, .. }) =
-            self.asset_modal_state.as_mut()
-        else {
-            return;
-        };
-
-        *active_tab = next_tab;
     }
 
     pub fn begin_ssh_modal_action(&mut self, action_id: &str) -> bool {
@@ -850,12 +838,17 @@ impl ShellViewModel {
             "test" => SshModalAction::TestConnection,
             "save-and-connect" => SshModalAction::SaveAndConnect,
             _ => {
-                self.finish_ssh_modal_action_error("Unsupported SSH action.");
                 return false;
             }
         };
 
-        if action_id != "save" && !self.ssh_modal_connect_family_enabled() {
+        if matches!(
+            action,
+            SshModalAction::Connect
+                | SshModalAction::TestConnection
+                | SshModalAction::SaveAndConnect
+        ) && !self.ssh_modal_connect_family_enabled()
+        {
             return false;
         }
 
@@ -1333,6 +1326,17 @@ impl ShellViewModel {
                 self.set_context_menu_feedback(format!("{} is not wired yet.", action.label));
             }
             ContextMenuActionState::Enabled => match action_id {
+                "edit-connection" => {
+                    if let Some(asset_id) = self
+                        .context_target_asset_id
+                        .clone()
+                        .filter(|asset_id| self.console_asset_tree.contains(asset_id))
+                    {
+                        self.open_edit_ssh_modal(asset_id);
+                    } else {
+                        self.close_context_menu();
+                    }
+                }
                 "rename-asset" => {
                     if let Some(asset_id) = self
                         .context_target_asset_id
@@ -1628,9 +1632,23 @@ fn build_saved_ssh_connection_spec(
     draft: &AssetSshConnectionDraft,
     existing_spec: Option<&AssetSshConnectionSpec>,
 ) -> AssetSshConnectionSpec {
+    let uses_saved_secret = if draft.clear_saved_secret_requested {
+        false
+    } else {
+        match draft.auth_method.as_str() {
+            "password" => true,
+            "private-key" if draft.private_key_source == "content" => true,
+            "private-key" if draft.private_key_source == "path" => {
+                !draft.passphrase.trim().is_empty()
+                    || existing_spec
+                        .and_then(|spec| spec.credential_ref.as_ref())
+                        .is_some()
+            }
+            _ => false,
+        }
+    };
     let credential_ref = match draft.auth_method.as_str() {
-        "password" => Some(saved_ssh_credential_ref(asset_id, existing_spec)),
-        "private-key" if draft.private_key_source == "content" => {
+        "password" | "private-key" if uses_saved_secret => {
             Some(saved_ssh_credential_ref(asset_id, existing_spec))
         }
         _ => None,

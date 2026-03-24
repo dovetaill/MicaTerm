@@ -1,17 +1,17 @@
 //! Wires the Slint window to runtime state, persisted preferences, and native window hooks during startup.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
-use slint::{ComponentHandle, ModelRc, Timer, TimerMode, VecModel};
+use slint::{ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -26,10 +26,18 @@ use crate::app::assets_catalog::{
 };
 use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::runtime_profile::AppRuntimeProfile;
+use crate::app::ssh::credentials::{
+    CredentialStore, StoredSshSecretBundle, SystemCredentialStore, load_secret_bundle,
+    merge_edit_bundle, persist_secret_bundle,
+};
+use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::ConnectionProfile;
-use crate::app::ssh::runtime::{SessionRuntimeEvent, SshSessionRuntime};
+use crate::app::ssh::runtime::{
+    SessionRuntimeEvent, SshSessionRuntime, UnknownHostKeyError, encode_named_key_input,
+};
 use crate::app::ssh::session_manager::{
-    OpenSessionMode, SessionHandle, SessionManager, SessionRuntimeLauncher,
+    OpenSessionMode, SessionHandle, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
+    SessionState,
 };
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::window_effects::{
@@ -44,7 +52,7 @@ use crate::app::windowing::{
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
 };
-use crate::shell::assets::AssetDisclosureState;
+use crate::shell::assets::{AssetDisclosureState, AssetSshConnectionSpec};
 use crate::shell::context_menu::{
     CONTEXT_MENU_COLUMN_GAP, CONTEXT_MENU_COLUMN_WIDTH, ContextMenuActionNode,
     ContextMenuActionState, ContextTargetKind, MenuPlacementInput, Rect, SelectionContext,
@@ -59,10 +67,30 @@ use crate::shell::view_model::{
     AssetModalState, AssetSshConnectionDraft, ShellViewModel, SshModalAction,
 };
 use crate::theme::ThemeMode;
+use russh::keys::PublicKey;
 
 #[derive(Clone)]
 struct ShellSessionBridge {
     manager: SessionManager,
+}
+
+#[derive(Clone)]
+struct PendingHostKeyApproval {
+    profile: ConnectionProfile,
+    public_key_openssh: String,
+    intent: HostKeyApprovalIntent,
+}
+
+#[derive(Clone)]
+struct PendingAssetClick {
+    asset_id: String,
+    clicked_at: Instant,
+}
+
+#[derive(Clone, Copy)]
+enum HostKeyApprovalIntent {
+    ModalTestConnection,
+    OpenSession(OpenSessionMode),
 }
 
 #[derive(Clone, Default)]
@@ -74,10 +102,11 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
         profile: ConnectionProfile,
         session_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         Box::pin(async move {
-            let _session = SshSessionRuntime::connect(profile, session_id, event_tx).await?;
-            Ok(())
+            let session = SshSessionRuntime::connect(profile, session_id, event_tx).await?;
+            Ok(Box::new(session) as Box<dyn SessionRuntimeControl>)
         })
     }
 
@@ -268,6 +297,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
         Some(AssetModalState::NewFolder { draft_name, .. }) => {
             window.set_asset_modal_open(true);
             window.set_asset_modal_kind("new-folder".into());
+            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
             window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
             window.set_asset_modal_validation_message(
                 state.asset_create_modal_validation_message().into(),
@@ -283,7 +313,6 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_delete_confirm_modal_open(false);
             window.set_asset_delete_confirm_target_label("".into());
             window.set_asset_delete_confirm_descendant_count(0);
-            window.set_asset_ssh_modal_active_tab("standard".into());
             window.set_asset_ssh_modal_name("".into());
             window.set_asset_ssh_modal_host("".into());
             window.set_asset_ssh_modal_user("".into());
@@ -294,15 +323,29 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_private_key_content("".into());
             window.set_asset_ssh_modal_private_key_path("".into());
             window.set_asset_ssh_modal_passphrase("".into());
+            window.set_asset_ssh_modal_password_visible(false);
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
+            window.set_asset_ssh_modal_secret_retention_message("".into());
+            window.set_asset_ssh_modal_can_clear_saved_secret(false);
+            window.set_asset_ssh_modal_clear_saved_secret_requested(false);
         }
         Some(AssetModalState::NewSshConnection {
-            active_tab, draft, ..
+            draft,
+            editing_asset_id,
+            ..
         }) => {
             window.set_asset_modal_open(true);
             window.set_asset_modal_kind("new-ssh-connection".into());
+            window.set_asset_ssh_modal_dialog_title(
+                if editing_asset_id.is_some() {
+                    "Edit SSH Connection"
+                } else {
+                    "New SSH Connection"
+                }
+                .into(),
+            );
             window.set_asset_modal_can_confirm(state.ssh_modal_save_enabled());
             window.set_asset_modal_validation_message(
                 state.asset_create_modal_validation_message().into(),
@@ -315,7 +358,6 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_delete_confirm_modal_open(false);
             window.set_asset_delete_confirm_target_label("".into());
             window.set_asset_delete_confirm_descendant_count(0);
-            window.set_asset_ssh_modal_active_tab(active_tab.id().into());
             window.set_asset_ssh_modal_name(draft.name.clone().into());
             window.set_asset_ssh_modal_host(draft.host.clone().into());
             window.set_asset_ssh_modal_user(draft.user.clone().into());
@@ -327,9 +369,16 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
                 .set_asset_ssh_modal_private_key_content(draft.private_key_content.clone().into());
             window.set_asset_ssh_modal_private_key_path(draft.private_key_path.clone().into());
             window.set_asset_ssh_modal_passphrase(draft.passphrase.clone().into());
+            window.set_asset_ssh_modal_password_visible(draft.password_visible);
             window.set_asset_ssh_modal_remark(draft.remark.clone().into());
             window.set_asset_ssh_modal_environment(draft.environment.clone().into());
             window.set_asset_ssh_modal_proxy_method(draft.proxy_method.clone().into());
+            window.set_asset_ssh_modal_secret_retention_message(
+                draft.secret_retention_message.clone().into(),
+            );
+            window.set_asset_ssh_modal_can_clear_saved_secret(draft.can_clear_saved_secret);
+            window
+                .set_asset_ssh_modal_clear_saved_secret_requested(draft.clear_saved_secret_requested);
             window.set_asset_ssh_modal_connect_family_enabled(
                 state.ssh_modal_connect_family_enabled(),
             );
@@ -339,6 +388,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
         Some(AssetModalState::RenameAsset { draft_name, .. }) => {
             window.set_asset_modal_open(false);
             window.set_asset_modal_kind("".into());
+            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
             window.set_asset_modal_can_confirm(false);
             window.set_asset_modal_validation_message("".into());
             window.set_asset_ssh_modal_connect_family_enabled(false);
@@ -354,7 +404,6 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_delete_confirm_modal_open(false);
             window.set_asset_delete_confirm_target_label("".into());
             window.set_asset_delete_confirm_descendant_count(0);
-            window.set_asset_ssh_modal_active_tab("standard".into());
             window.set_asset_ssh_modal_name("".into());
             window.set_asset_ssh_modal_host("".into());
             window.set_asset_ssh_modal_user("".into());
@@ -365,9 +414,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_private_key_content("".into());
             window.set_asset_ssh_modal_private_key_path("".into());
             window.set_asset_ssh_modal_passphrase("".into());
+            window.set_asset_ssh_modal_password_visible(false);
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
+            window.set_asset_ssh_modal_secret_retention_message("".into());
+            window.set_asset_ssh_modal_can_clear_saved_secret(false);
+            window.set_asset_ssh_modal_clear_saved_secret_requested(false);
         }
         Some(AssetModalState::DeleteAssetConfirm {
             label,
@@ -376,6 +429,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
         }) => {
             window.set_asset_modal_open(false);
             window.set_asset_modal_kind("".into());
+            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
             window.set_asset_modal_can_confirm(false);
             window.set_asset_modal_validation_message("".into());
             window.set_asset_ssh_modal_connect_family_enabled(false);
@@ -389,7 +443,6 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_delete_confirm_modal_open(true);
             window.set_asset_delete_confirm_target_label(label.clone().into());
             window.set_asset_delete_confirm_descendant_count(*descendant_count as i32);
-            window.set_asset_ssh_modal_active_tab("standard".into());
             window.set_asset_ssh_modal_name("".into());
             window.set_asset_ssh_modal_host("".into());
             window.set_asset_ssh_modal_user("".into());
@@ -400,13 +453,18 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_private_key_content("".into());
             window.set_asset_ssh_modal_private_key_path("".into());
             window.set_asset_ssh_modal_passphrase("".into());
+            window.set_asset_ssh_modal_password_visible(false);
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
+            window.set_asset_ssh_modal_secret_retention_message("".into());
+            window.set_asset_ssh_modal_can_clear_saved_secret(false);
+            window.set_asset_ssh_modal_clear_saved_secret_requested(false);
         }
         None => {
             window.set_asset_modal_open(false);
             window.set_asset_modal_kind("".into());
+            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
             window.set_asset_modal_can_confirm(false);
             window.set_asset_modal_validation_message("".into());
             window.set_asset_ssh_modal_connect_family_enabled(false);
@@ -420,7 +478,6 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_delete_confirm_modal_open(false);
             window.set_asset_delete_confirm_target_label("".into());
             window.set_asset_delete_confirm_descendant_count(0);
-            window.set_asset_ssh_modal_active_tab("standard".into());
             window.set_asset_ssh_modal_name("".into());
             window.set_asset_ssh_modal_host("".into());
             window.set_asset_ssh_modal_user("".into());
@@ -431,9 +488,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_private_key_content("".into());
             window.set_asset_ssh_modal_private_key_path("".into());
             window.set_asset_ssh_modal_passphrase("".into());
+            window.set_asset_ssh_modal_password_visible(false);
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
+            window.set_asset_ssh_modal_secret_retention_message("".into());
+            window.set_asset_ssh_modal_can_clear_saved_secret(false);
+            window.set_asset_ssh_modal_clear_saved_secret_requested(false);
         }
     }
 }
@@ -487,14 +548,87 @@ fn selection_context_for(state: &ShellViewModel) -> SelectionContext {
     state.context_menu_selection()
 }
 
-fn profile_for_saved_asset(state: &ShellViewModel, asset_id: &str) -> Option<ConnectionProfile> {
-    let node = state.console_asset_tree().node(asset_id)?;
-    let spec = state.console_asset_tree().ssh_connection_spec(asset_id)?;
-    ConnectionProfile::from_saved_asset(asset_id, &node.title, spec).ok()
+fn profile_for_saved_asset(state: &ShellViewModel, asset_id: &str) -> anyhow::Result<ConnectionProfile> {
+    let node = state
+        .console_asset_tree()
+        .node(asset_id)
+        .with_context(|| format!("saved ssh asset `{asset_id}` is missing from the asset tree"))?;
+    let spec = state
+        .console_asset_tree()
+        .ssh_connection_spec(asset_id)
+        .with_context(|| format!("saved ssh asset `{asset_id}` is missing its connection payload"))?;
+    tracing::info!(
+        target: "app.ssh",
+        asset_id = asset_id,
+        title = node.title.as_str(),
+        host = spec.host.as_str(),
+        user = spec.user.as_str(),
+        "resolved saved ssh asset profile inputs"
+    );
+    ConnectionProfile::from_saved_asset(asset_id, &node.title, spec)
 }
 
 fn temporary_session_asset_id_for_draft(_draft: &AssetSshConnectionDraft) -> String {
     format!("session:{}", Uuid::new_v4())
+}
+
+fn saved_secret_bundle_for_draft(draft: &AssetSshConnectionDraft) -> StoredSshSecretBundle {
+    match draft.auth_method.as_str() {
+        "password" => StoredSshSecretBundle {
+            password: (!draft.password.trim().is_empty()).then(|| draft.password.clone()),
+            private_key_content: None,
+            passphrase: None,
+        },
+        "private-key" if draft.private_key_source == "content" => StoredSshSecretBundle {
+            password: None,
+            private_key_content: (!draft.private_key_content.trim().is_empty())
+                .then(|| draft.private_key_content.clone()),
+            passphrase: (!draft.passphrase.trim().is_empty()).then(|| draft.passphrase.clone()),
+        },
+        "private-key" if draft.private_key_source == "path" => StoredSshSecretBundle {
+            password: None,
+            private_key_content: None,
+            passphrase: (!draft.passphrase.trim().is_empty()).then(|| draft.passphrase.clone()),
+        },
+        _ => StoredSshSecretBundle::default(),
+    }
+}
+
+fn sync_saved_ssh_secrets(
+    store: &dyn CredentialStore,
+    draft: &AssetSshConnectionDraft,
+    existing_spec: Option<&AssetSshConnectionSpec>,
+    saved_spec: &AssetSshConnectionSpec,
+) -> Result<()> {
+    let previous_ref = existing_spec.and_then(|spec| spec.credential_ref.as_deref());
+    let next_ref = saved_spec.credential_ref.as_deref();
+
+    if next_ref.is_none() {
+        if let Some(previous_ref) = previous_ref {
+            store.delete_secret(previous_ref)?;
+        }
+        return Ok(());
+    }
+
+    let next_ref = next_ref.expect("checked credential ref");
+    let next_bundle = if existing_spec.is_some() {
+        let existing_bundle = previous_ref
+            .map(|credential_ref| load_secret_bundle(store, credential_ref))
+            .transpose()?
+            .unwrap_or_default();
+        merge_edit_bundle(existing_bundle, draft)
+    } else {
+        saved_secret_bundle_for_draft(draft)
+    };
+    persist_secret_bundle(store, next_ref, &next_bundle)?;
+
+    if let Some(previous_ref) = previous_ref
+        && previous_ref != next_ref
+    {
+        store.delete_secret(previous_ref)?;
+    }
+
+    Ok(())
 }
 
 fn merge_session_handle_into_tabs(state: &mut ShellViewModel, handle: &SessionHandle) {
@@ -518,11 +652,31 @@ fn sync_workspace_projection_from_manager(
     state: &mut ShellViewModel,
     manager: &SessionManager,
 ) -> bool {
-    let next_tabs = manager
+    let mut next_tabs = manager
         .ordered_sessions()
         .into_iter()
         .map(|handle| WorkspaceTab::from_session(&handle))
         .collect::<Vec<_>>();
+    let manager_session_ids = next_tabs
+        .iter()
+        .map(|tab| tab.session_id.clone())
+        .collect::<HashSet<_>>();
+    let manager_asset_ids = next_tabs
+        .iter()
+        .map(|tab| tab.asset_id.clone())
+        .collect::<HashSet<_>>();
+    let preserved_error_tabs = state
+        .workspace_tabs()
+        .iter()
+        .filter(|tab| {
+            tab.state == "error"
+                && !manager_session_ids.contains(&tab.session_id)
+                && !manager_asset_ids.contains(&tab.asset_id)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let preserved_error_tab_count = preserved_error_tabs.len();
+    next_tabs.extend(preserved_error_tabs);
     let next_surface = state
         .active_workspace_session_id()
         .and_then(|session_id| Uuid::parse_str(session_id).ok())
@@ -538,7 +692,118 @@ fn sync_workspace_projection_from_manager(
         state.set_active_workspace_terminal_surface(next_surface);
     }
 
+    if tabs_changed || surface_changed {
+        tracing::info!(
+            target: "app.ssh",
+            tab_count = state.workspace_tabs().len(),
+            active_session_id = state.active_workspace_session_id().unwrap_or(""),
+            tabs_changed,
+            surface_changed,
+            preserved_error_tab_count,
+            "synchronized workspace projection from session manager"
+        );
+    }
+
     tabs_changed || surface_changed
+}
+
+fn active_workspace_session_uuid(state: &ShellViewModel) -> Option<Uuid> {
+    state
+        .active_workspace_session_id()
+        .and_then(|session_id| Uuid::parse_str(session_id).ok())
+}
+
+fn forward_active_workspace_text_input(
+    state: &ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    text: &str,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return;
+    };
+    if text.is_empty() {
+        return;
+    }
+
+    if let Err(err) = bridge.manager.send_session_input(session_id, text.as_bytes().to_vec()) {
+        tracing::error!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            error = %err,
+            "failed to forward workspace terminal text input"
+        );
+    }
+}
+
+fn forward_active_workspace_key_input(
+    state: &ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    key_name: &str,
+    alt: bool,
+    ctrl: bool,
+    shift: bool,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return;
+    };
+
+    let bytes = match encode_named_key_input(key_name, alt, ctrl, shift) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return,
+        Err(err) => {
+            tracing::error!(
+                target: "app.ssh",
+                session_id = session_id.to_string(),
+                key = key_name,
+                error = %err,
+                "failed to encode workspace terminal key input"
+            );
+            return;
+        }
+    };
+
+    if let Err(err) = bridge.manager.send_session_input(session_id, bytes) {
+        tracing::error!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            key = key_name,
+            error = %err,
+            "failed to forward workspace terminal key input"
+        );
+    }
+}
+
+fn forward_active_workspace_resize(
+    state: &ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    rows: i32,
+    cols: i32,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return;
+    };
+
+    let rows = rows.max(1) as u32;
+    let cols = cols.max(1) as u32;
+    if let Err(err) = bridge.manager.resize_session(session_id, rows, cols) {
+        tracing::error!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            rows,
+            cols,
+            error = %err,
+            "failed to forward workspace terminal resize"
+        );
+    }
 }
 
 fn open_session_with_profile(
@@ -547,11 +812,388 @@ fn open_session_with_profile(
     profile: ConnectionProfile,
     mode: OpenSessionMode,
 ) -> anyhow::Result<()> {
+    tracing::info!(
+        target: "app.ssh",
+        asset_id = profile.asset_id.as_deref().unwrap_or(""),
+        profile_name = profile.name.as_str(),
+        host = profile.host.as_str(),
+        user = profile.user.as_str(),
+        port = profile.port,
+        mode = ?mode,
+        "opening ssh session with normalized profile"
+    );
     let handle = bridge.manager.open_session(profile, mode)?;
     let resolved = bridge.manager.session(handle.session_id).unwrap_or(handle);
     merge_session_handle_into_tabs(state, &resolved);
     let _ = sync_workspace_projection_from_manager(state, &bridge.manager);
+    tracing::info!(
+        target: "app.ssh",
+        session_id = resolved.session_id.to_string(),
+        asset_id = resolved.asset_id.as_str(),
+        state = ?resolved.state,
+        "workspace tab merged for ssh session"
+    );
     Ok(())
+}
+
+fn show_failed_session_tab(
+    state: &mut ShellViewModel,
+    profile: &ConnectionProfile,
+    message: impl Into<String>,
+) {
+    let asset_id = profile
+        .asset_id
+        .clone()
+        .unwrap_or_else(|| format!("session-error:{}", Uuid::new_v4()));
+    let handle = SessionHandle {
+        session_id: Uuid::new_v4(),
+        asset_id,
+        title: profile.name.clone(),
+        subtitle: format!("{}@{}:{}", profile.user, profile.host, profile.port),
+        state: SessionState::Error(message.into()),
+        can_reconnect: true,
+    };
+    merge_session_handle_into_tabs(state, &handle);
+}
+
+fn show_failed_saved_asset_tab(
+    state: &mut ShellViewModel,
+    asset_id: &str,
+    message: impl Into<String>,
+) {
+    let (title, subtitle) = match (
+        state.console_asset_tree().node(asset_id),
+        state.console_asset_tree().ssh_connection_spec(asset_id),
+    ) {
+        (Some(node), Some(spec)) => {
+            let port = if spec.port.trim().is_empty() {
+                "22"
+            } else {
+                spec.port.trim()
+            };
+            (
+                node.title.clone(),
+                format!("{}@{}:{}", spec.user.trim(), spec.host.trim(), port),
+            )
+        }
+        (Some(node), None) => (node.title.clone(), String::new()),
+        _ => ("SSH Connection".into(), String::new()),
+    };
+
+    let handle = SessionHandle {
+        session_id: Uuid::new_v4(),
+        asset_id: asset_id.to_string(),
+        title,
+        subtitle,
+        state: SessionState::Error(message.into()),
+        can_reconnect: true,
+    };
+    merge_session_handle_into_tabs(state, &handle);
+}
+
+fn prompt_unknown_host_key(
+    state: &mut ShellViewModel,
+    pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    profile: ConnectionProfile,
+    error: &UnknownHostKeyError,
+    intent: HostKeyApprovalIntent,
+) {
+    pending_host_key_approval
+        .borrow_mut()
+        .replace(PendingHostKeyApproval {
+            profile,
+            public_key_openssh: error.public_key_openssh.clone(),
+            intent,
+        });
+    state.open_ssh_host_key_prompt(
+        format!("{}:{}", error.host, error.port),
+        error.fingerprint.clone(),
+    );
+}
+
+fn attempt_test_connection(
+    state: &mut ShellViewModel,
+    bridge: &ShellSessionBridge,
+    pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    profile: ConnectionProfile,
+) {
+    tracing::info!(
+        target: "app.ssh",
+        asset_id = profile.asset_id.as_deref().unwrap_or(""),
+        profile_name = profile.name.as_str(),
+        host = profile.host.as_str(),
+        user = profile.user.as_str(),
+        port = profile.port,
+        "probing ssh connection from modal action"
+    );
+    match bridge.manager.probe_connection(profile.clone()) {
+        Ok(()) => state.finish_ssh_modal_action_success("Connection test succeeded."),
+        Err(err) => {
+            if let Some(unknown) = err.downcast_ref::<UnknownHostKeyError>() {
+                tracing::info!(
+                    target: "app.ssh",
+                    host = unknown.host.as_str(),
+                    port = unknown.port,
+                    fingerprint = unknown.fingerprint.as_str(),
+                    "ssh probe requires host key confirmation"
+                );
+                prompt_unknown_host_key(
+                    state,
+                    pending_host_key_approval,
+                    profile,
+                    unknown,
+                    HostKeyApprovalIntent::ModalTestConnection,
+                );
+            } else {
+                tracing::error!(
+                    target: "app.ssh",
+                    error = %err,
+                    "ssh probe failed"
+                );
+                state.finish_ssh_modal_action_error(err.to_string());
+            }
+        }
+    }
+}
+
+fn attempt_open_session_with_profile(
+    state: &mut ShellViewModel,
+    bridge: &ShellSessionBridge,
+    pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    profile: ConnectionProfile,
+    mode: OpenSessionMode,
+) -> anyhow::Result<()> {
+    tracing::info!(
+        target: "app.ssh",
+        asset_id = profile.asset_id.as_deref().unwrap_or(""),
+        profile_name = profile.name.as_str(),
+        host = profile.host.as_str(),
+        user = profile.user.as_str(),
+        port = profile.port,
+        mode = ?mode,
+        "attempting to open ssh session after probe gate"
+    );
+    if matches!(mode, OpenSessionMode::ActivateExisting)
+        && let Some(asset_id) = profile.asset_id.as_deref()
+        && target_session_id_for_asset(state, asset_id).is_some()
+    {
+        tracing::info!(
+            target: "app.ssh",
+            asset_id = asset_id,
+            "reusing existing workspace tab for activated ssh asset"
+        );
+        return open_session_with_profile(state, bridge, profile, mode);
+    }
+
+    match bridge.manager.probe_connection(profile.clone()) {
+        Ok(()) => {
+            tracing::info!(
+                target: "app.ssh",
+                asset_id = profile.asset_id.as_deref().unwrap_or(""),
+                host = profile.host.as_str(),
+                port = profile.port,
+                "ssh probe succeeded, opening workspace session"
+            );
+            open_session_with_profile(state, bridge, profile.clone(), mode).inspect_err(|err| {
+                show_failed_session_tab(state, &profile, err.to_string());
+            })
+        }
+        Err(err) => {
+            if let Some(unknown) = err.downcast_ref::<UnknownHostKeyError>() {
+                tracing::info!(
+                    target: "app.ssh",
+                    host = unknown.host.as_str(),
+                    port = unknown.port,
+                    fingerprint = unknown.fingerprint.as_str(),
+                    "ssh open requires host key confirmation"
+                );
+                prompt_unknown_host_key(
+                    state,
+                    pending_host_key_approval,
+                    profile,
+                    unknown,
+                    HostKeyApprovalIntent::OpenSession(mode),
+                );
+                Ok(())
+            } else {
+                tracing::error!(
+                    target: "app.ssh",
+                    error = %err,
+                    "ssh probe failed before opening workspace session"
+                );
+                show_failed_session_tab(state, &profile, err.to_string());
+                Err(err)
+            }
+        }
+    }
+}
+
+fn register_asset_click(
+    tracker: &Rc<RefCell<Option<PendingAssetClick>>>,
+    asset_id: &str,
+    now: Instant,
+) -> bool {
+    const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(350);
+
+    let should_activate = tracker
+        .borrow()
+        .as_ref()
+        .map(|pending| {
+            pending.asset_id == asset_id
+                && now.duration_since(pending.clicked_at) <= DOUBLE_CLICK_WINDOW
+        })
+        .unwrap_or(false);
+
+    if should_activate {
+        tracker.borrow_mut().take();
+    } else {
+        tracker.borrow_mut().replace(PendingAssetClick {
+            asset_id: asset_id.to_string(),
+            clicked_at: now,
+        });
+    }
+
+    should_activate
+}
+
+fn activate_asset(
+    state: &mut ShellViewModel,
+    session_bridge: Option<&ShellSessionBridge>,
+    pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    asset_id: &str,
+) {
+    tracing::info!(
+        target: "app.ssh",
+        asset_id = asset_id,
+        asset_kind = ?state.console_asset_tree().kind(asset_id),
+        "activating asset"
+    );
+    match state.console_asset_tree().kind(asset_id) {
+        Some(crate::shell::assets::ConsoleAssetKind::Folder) => {
+            state.toggle_folder_expanded(asset_id);
+        }
+        Some(crate::shell::assets::ConsoleAssetKind::SshConnection) => {
+            match profile_for_saved_asset(state, asset_id) {
+                Ok(profile) => {
+                    if let Some(session_bridge) = session_bridge {
+                        if let Err(err) = attempt_open_session_with_profile(
+                            state,
+                            session_bridge,
+                            pending_host_key_approval,
+                            profile,
+                            OpenSessionMode::ActivateExisting,
+                        ) {
+                            tracing::error!(
+                                target: "app.ssh",
+                                asset_id = asset_id,
+                                error = %err,
+                                "failed to open ssh session for activated asset"
+                            );
+                        }
+                    } else {
+                        let message = "SSH session bridge is unavailable.";
+                        show_failed_saved_asset_tab(state, asset_id, message);
+                        tracing::error!(
+                            target: "app.ssh",
+                            asset_id = asset_id,
+                            error = message,
+                            "failed to open ssh session for activated asset"
+                        );
+                    }
+                }
+                Err(err) => {
+                    show_failed_saved_asset_tab(state, asset_id, err.to_string());
+                    tracing::error!(
+                        target: "app.ssh",
+                        asset_id = asset_id,
+                        error = %err,
+                        "failed to resolve saved ssh profile for activated asset"
+                    );
+                }
+            }
+        }
+        None => {}
+    }
+}
+
+fn resolve_pending_host_key(
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    accept: bool,
+) {
+    let Some(pending) = pending_host_key_approval.borrow_mut().take() else {
+        return;
+    };
+
+    let host = pending.profile.host.clone();
+    let port = pending.profile.port;
+
+    if accept {
+        let result = (|| -> Result<()> {
+            let public_key = PublicKey::from_openssh(pending.public_key_openssh.as_str())
+                .context("failed to parse accepted SSH host key")?;
+            let known_hosts = KnownHostsService::new(default_known_hosts_path()?);
+            known_hosts.accept_unknown(host.as_str(), port, &public_key)
+        })();
+
+        if let Err(err) = result {
+            match pending.intent {
+                HostKeyApprovalIntent::ModalTestConnection => {
+                    state.finish_ssh_modal_action_error(err.to_string());
+                }
+                HostKeyApprovalIntent::OpenSession(_) => {
+                    show_failed_session_tab(state, &pending.profile, err.to_string());
+                }
+            }
+            return;
+        }
+
+        let Some(bridge) = bridge else {
+            let message = "SSH session bridge is unavailable.".to_string();
+            match pending.intent {
+                HostKeyApprovalIntent::ModalTestConnection => {
+                    state.finish_ssh_modal_action_error(message);
+                }
+                HostKeyApprovalIntent::OpenSession(_) => {
+                    show_failed_session_tab(state, &pending.profile, message);
+                }
+            }
+            return;
+        };
+
+        match pending.intent {
+            HostKeyApprovalIntent::ModalTestConnection => {
+                attempt_test_connection(state, bridge, pending_host_key_approval, pending.profile);
+            }
+            HostKeyApprovalIntent::OpenSession(mode) => {
+                if let Err(err) = attempt_open_session_with_profile(
+                    state,
+                    bridge,
+                    pending_host_key_approval,
+                    pending.profile,
+                    mode,
+                ) {
+                    tracing::error!(
+                        target: "app.ssh",
+                        error = %err,
+                        "failed to open ssh session after host key acceptance"
+                    );
+                }
+            }
+        }
+        return;
+    }
+
+    let message = format!("Rejected unknown SSH host key for `{}`:{}.", host, port);
+    match pending.intent {
+        HostKeyApprovalIntent::ModalTestConnection => {
+            state.finish_ssh_modal_action_error(message);
+        }
+        HostKeyApprovalIntent::OpenSession(_) => {
+            show_failed_session_tab(state, &pending.profile, message);
+        }
+    }
 }
 
 fn target_session_id_for_asset(state: &ShellViewModel, asset_id: &str) -> Option<String> {
@@ -838,13 +1480,19 @@ fn sync_workspace_tabs(window: &AppWindow, state: &ShellViewModel) {
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
     window.set_workspace_session_host_mode(state.workspace_session_host_mode().into());
+    let visible_lines = state
+        .workspace_terminal_visible_lines()
+        .into_iter()
+        .map(SharedString::from)
+        .collect::<Vec<_>>();
+    window.set_workspace_session_visible_lines(ModelRc::new(VecModel::from(visible_lines)));
 
     if let Some(active_tab) = state.active_workspace_tab() {
         window.set_workspace_session_title(active_tab.title.clone().into());
         window.set_workspace_session_subtitle(active_tab.subtitle.clone().into());
         window.set_workspace_session_state(active_tab.state.clone().into());
+        window.set_workspace_session_error_detail(active_tab.error_detail.clone().into());
         window.set_workspace_session_can_reconnect(active_tab.can_reconnect());
-        window.set_workspace_session_screen_text(state.workspace_terminal_screen_text().into());
         window.set_workspace_session_surface_seqno(
             i32::try_from(state.workspace_terminal_surface_seqno()).unwrap_or(i32::MAX),
         );
@@ -852,8 +1500,8 @@ fn sync_workspace_tabs(window: &AppWindow, state: &ShellViewModel) {
         window.set_workspace_session_title("".into());
         window.set_workspace_session_subtitle("".into());
         window.set_workspace_session_state("".into());
+        window.set_workspace_session_error_detail("".into());
         window.set_workspace_session_can_reconnect(false);
-        window.set_workspace_session_screen_text("".into());
         window.set_workspace_session_surface_seqno(0);
     }
 }
@@ -1051,6 +1699,79 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo(
     );
 }
 
+pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    effects: Rc<dyn PlatformWindowEffects>,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+) {
+    let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
+        Ok(runtime) => {
+            let session_bridge = Rc::new(ShellSessionBridge {
+                manager: SessionManager::new_with_launcher(runtime.handle(), launcher),
+            });
+            (Some(runtime), Some(session_bridge))
+        }
+        Err(err) => {
+            tracing::error!(
+                target: "app.ssh",
+                error = %err,
+                "failed to create app async runtime for injected shell session launcher"
+            );
+            (None, None)
+        }
+    };
+
+    bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
+        window,
+        store,
+        AppRuntimeProfile::mainline(),
+        effects,
+        asset_repo,
+        session_bridge,
+        session_runtime_guard,
+        Arc::new(SystemCredentialStore),
+    );
+}
+
+pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    effects: Rc<dyn PlatformWindowEffects>,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+    credential_store: Arc<dyn CredentialStore>,
+) {
+    let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
+        Ok(runtime) => {
+            let session_bridge = Rc::new(ShellSessionBridge {
+                manager: SessionManager::new_with_launcher(runtime.handle(), launcher),
+            });
+            (Some(runtime), Some(session_bridge))
+        }
+        Err(err) => {
+            tracing::error!(
+                target: "app.ssh",
+                error = %err,
+                "failed to create app async runtime for injected shell services"
+            );
+            (None, None)
+        }
+    };
+
+    bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
+        window,
+        store,
+        AppRuntimeProfile::mainline(),
+        effects,
+        asset_repo,
+        session_bridge,
+        session_runtime_guard,
+        credential_store,
+    );
+}
+
 pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     window: &AppWindow,
     store: Option<UiPreferencesStore>,
@@ -1080,9 +1801,11 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
         asset_repo,
         session_bridge,
         session_runtime_guard,
+        Arc::new(SystemCredentialStore),
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window: &AppWindow,
     store: Option<UiPreferencesStore>,
@@ -1091,6 +1814,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
     session_bridge: Option<Rc<ShellSessionBridge>>,
     session_runtime_guard: Option<AppAsyncRuntime>,
+    credential_store: Arc<dyn CredentialStore>,
 ) {
     let store = store.map(Rc::new);
     let prefs = load_ui_preferences(&store);
@@ -1104,6 +1828,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let view_model = Rc::new(RefCell::new(initial_view_model));
     let controller = Rc::new(WindowController::new(window));
     let modal_drag_state = Rc::new(RefCell::new(None::<ModalDragState>));
+    let pending_host_key_approval = Rc::new(RefCell::new(None::<PendingHostKeyApproval>));
+    let asset_click_tracker = Rc::new(RefCell::new(None::<PendingAssetClick>));
+    let pending_double_click_activation = Rc::new(RefCell::new(None::<String>));
 
     apply_restored_window_size(window, default_window_size());
     bind_windows_window_state_tracking(window, Rc::clone(&view_model), Rc::clone(&effects));
@@ -1123,20 +1850,16 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let state = Rc::clone(&view_model);
         let handle = window.as_weak();
         let manager = session_bridge_ref.manager.clone();
-        session_projection_timer.start(
-            TimerMode::Repeated,
-            Duration::from_millis(50),
-            move || {
-                let Some(window) = handle.upgrade() else {
-                    return;
-                };
-                let mut state = state.borrow_mut();
-                if sync_workspace_projection_from_manager(&mut state, &manager) {
-                    sync_workspace_tabs(&window, &state);
-                    sync_assets_context_menu_state(&window, &state);
-                }
-            },
-        );
+        session_projection_timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
+            let Some(window) = handle.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            if sync_workspace_projection_from_manager(&mut state, &manager) {
+                sync_workspace_tabs(&window, &state);
+                sync_assets_context_menu_state(&window, &state);
+            }
+        });
     }
 
     let state = Rc::clone(&view_model);
@@ -1416,15 +2139,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
-    window.on_asset_ssh_modal_tab_selected(move |tab| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.select_ssh_modal_tab(tab.as_str());
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
     window.on_asset_ssh_modal_draft_changed(move |field, value| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -1437,32 +2151,68 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let asset_repo_ref = asset_repo.clone();
     let session_bridge_ref = session_bridge.clone();
     let session_runtime_guard_ref = session_runtime_guard.clone();
+    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    let credential_store_ref = Arc::clone(&credential_store);
     window.on_asset_ssh_modal_action_requested(move |action| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        tracing::info!(
+            target: "app.ssh",
+            action = action.as_str(),
+            "received ssh modal action request"
+        );
         let accepted = state.begin_ssh_modal_action(action.as_str());
         let pending_action = state.take_pending_ssh_modal_action();
         let mut did_mutate = false;
+        let mut catalog_persisted_in_action = false;
 
         if let Some(request) = pending_action {
             match request.action {
                 SshModalAction::Save => {
+                    let previous_state = (*state).clone();
+                    let existing_saved_spec = match &state.asset_modal_state {
+                        Some(AssetModalState::NewSshConnection {
+                            editing_asset_id: Some(asset_id),
+                            ..
+                        }) => state
+                            .console_asset_tree()
+                            .ssh_connection_spec(asset_id)
+                            .cloned(),
+                        _ => None,
+                    };
                     did_mutate = state.confirm_asset_modal();
                     if !did_mutate {
                         state.finish_ssh_modal_action_error("Failed to save connection.");
+                    } else if let Some(saved_spec) =
+                        state.focused_asset_id.clone().and_then(|asset_id| {
+                            state
+                                .console_asset_tree()
+                                .ssh_connection_spec(&asset_id)
+                                .cloned()
+                        })
+                        && let Err(err) = sync_saved_ssh_secrets(
+                            credential_store_ref.as_ref(),
+                            &request.draft,
+                            existing_saved_spec.as_ref(),
+                            &saved_spec,
+                        )
+                    {
+                        *state = previous_state;
+                        did_mutate = false;
+                        state.finish_ssh_modal_action_error(err.to_string());
                     }
                 }
                 SshModalAction::TestConnection => {
                     match ConnectionProfile::from_draft(&request.draft) {
                         Ok(profile) => {
                             if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                                match session_bridge.manager.probe_connection(profile) {
-                                    Ok(()) => state.finish_ssh_modal_action_success(
-                                        "Connection test succeeded.",
-                                    ),
-                                    Err(err) => state.finish_ssh_modal_action_error(err.to_string()),
-                                }
+                                attempt_test_connection(
+                                    &mut state,
+                                    session_bridge.as_ref(),
+                                    &pending_host_key_approval_ref,
+                                    profile,
+                                );
                             } else {
                                 state.finish_ssh_modal_action_error(
                                     "SSH session bridge is unavailable.",
@@ -1477,9 +2227,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         profile.asset_id =
                             Some(temporary_session_asset_id_for_draft(&request.draft));
                         if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                            if let Err(err) = open_session_with_profile(
+                            if let Err(err) = attempt_open_session_with_profile(
                                 &mut state,
                                 session_bridge.as_ref(),
+                                &pending_host_key_approval_ref,
                                 profile,
                                 OpenSessionMode::ActivateExisting,
                             ) {
@@ -1501,26 +2252,75 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     Err(err) => state.finish_ssh_modal_action_error(err.to_string()),
                 },
                 SshModalAction::SaveAndConnect => {
+                    let previous_state = (*state).clone();
+                    let existing_saved_spec = match &state.asset_modal_state {
+                        Some(AssetModalState::NewSshConnection {
+                            editing_asset_id: Some(asset_id),
+                            ..
+                        }) => state
+                            .console_asset_tree()
+                            .ssh_connection_spec(asset_id)
+                            .cloned(),
+                        _ => None,
+                    };
                     did_mutate = state.confirm_asset_modal();
                     if did_mutate {
-                        let profile = state
-                            .focused_asset_id
-                            .clone()
-                            .and_then(|asset_id| profile_for_saved_asset(&state, &asset_id));
-
-                        if let Some(profile) = profile {
-                            if let Some(session_bridge) = session_bridge_ref.as_ref()
-                                && let Err(err) = open_session_with_profile(
-                                    &mut state,
-                                    session_bridge.as_ref(),
-                                    profile,
-                                    OpenSessionMode::ActivateExisting,
-                                )
+                        if let Some(asset_id) = state.focused_asset_id.clone() {
+                            if let Some(saved_spec) = state
+                                .console_asset_tree()
+                                .ssh_connection_spec(&asset_id)
+                                .cloned()
                             {
-                                tracing::error!(
-                                    target: "app.ssh",
-                                    error = %err,
-                                    "failed to open ssh session from modal action"
+                                if let Err(err) = sync_saved_ssh_secrets(
+                                    credential_store_ref.as_ref(),
+                                    &request.draft,
+                                    existing_saved_spec.as_ref(),
+                                    &saved_spec,
+                                ) {
+                                    *state = previous_state;
+                                    did_mutate = false;
+                                    state.finish_ssh_modal_action_error(err.to_string());
+                                } else {
+                                    if let Some(repo) = asset_repo_ref.as_ref()
+                                        && let Err(err) = save_asset_catalog(repo.as_ref(), &state)
+                                    {
+                                        *state = previous_state;
+                                        did_mutate = false;
+                                        state.finish_ssh_modal_action_error(err.to_string());
+                                    } else {
+                                        catalog_persisted_in_action = asset_repo_ref.is_some();
+                                        match profile_for_saved_asset(&state, &asset_id) {
+                                            Ok(profile) => {
+                                                if let Some(session_bridge) = session_bridge_ref.as_ref()
+                                                    && let Err(err) = attempt_open_session_with_profile(
+                                                        &mut state,
+                                                        session_bridge.as_ref(),
+                                                        &pending_host_key_approval_ref,
+                                                        profile,
+                                                        OpenSessionMode::ActivateExisting,
+                                                    )
+                                                {
+                                                    tracing::error!(
+                                                        target: "app.ssh",
+                                                        error = %err,
+                                                        "failed to open ssh session from modal action"
+                                                    );
+                                                    state.finish_ssh_modal_action_error(err.to_string());
+                                                } else {
+                                                    state.cancel_asset_modal();
+                                                }
+                                            }
+                                            Err(err) => {
+                                                state.finish_ssh_modal_action_error(err.to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                *state = previous_state;
+                                did_mutate = false;
+                                state.finish_ssh_modal_action_error(
+                                    "Failed to resolve saved secret target after saving connection.",
                                 );
                             }
                         } else {
@@ -1537,9 +2337,16 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             }
         } else if accepted {
             state.finish_ssh_modal_action_error("SSH modal action did not produce a request.");
+        } else {
+            tracing::info!(
+                target: "app.ssh",
+                action = action.as_str(),
+                validation_message = state.asset_create_modal_validation_message().as_str(),
+                "ssh modal action was rejected before request creation"
+            );
         }
 
-        if did_mutate {
+        if did_mutate && !catalog_persisted_in_action {
             save_asset_catalog_if_available(&asset_repo_ref, &state);
         }
         sync_assets_toolbar_state(&window, &state);
@@ -1547,32 +2354,47 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sync_workspace_tabs(&window, &state);
         sync_assets_context_menu_state(&window, &state);
         sync_asset_modal_state(&window, &state);
+        sync_ssh_host_key_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let modal_drag_state_ref = Rc::clone(&modal_drag_state);
+    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    let session_bridge_ref = session_bridge.clone();
     window.on_ssh_host_key_modal_accept_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         modal_drag_state_ref.borrow_mut().take();
         state.accept_ssh_host_key_prompt();
+        resolve_pending_host_key(
+            &mut state,
+            session_bridge_ref.as_deref(),
+            &pending_host_key_approval_ref,
+            true,
+        );
         window.set_blocking_modal_offset_x(0.0);
         window.set_blocking_modal_offset_y(0.0);
+        sync_workspace_tabs(&window, &state);
         sync_ssh_host_key_modal_state(&window, &state);
+        sync_asset_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let modal_drag_state_ref = Rc::clone(&modal_drag_state);
+    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     window.on_ssh_host_key_modal_reject_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         modal_drag_state_ref.borrow_mut().take();
         state.reject_ssh_host_key_prompt();
+        resolve_pending_host_key(&mut state, None, &pending_host_key_approval_ref, false);
         window.set_blocking_modal_offset_x(0.0);
         window.set_blocking_modal_offset_y(0.0);
+        sync_workspace_tabs(&window, &state);
         sync_ssh_host_key_modal_state(&window, &state);
+        sync_asset_modal_state(&window, &state);
     });
 
     let handle = window.as_weak();
@@ -1618,6 +2440,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         if state.activate_workspace_session(session_id.as_str()) {
             if let Some(session_bridge) = session_bridge_ref.as_ref() {
                 let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let (rows, cols) = state
+                    .active_workspace_terminal_surface()
+                    .map(|surface| (surface.rows as i32, surface.cols as i32))
+                    .unwrap_or((24, 80));
+                forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
             }
             sync_workspace_tabs(&window, &state);
             sync_assets_context_menu_state(&window, &state);
@@ -1639,6 +2466,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         ) {
             if let Some(session_bridge) = session_bridge_ref.as_ref() {
                 let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let (rows, cols) = state
+                    .active_workspace_terminal_surface()
+                    .map(|surface| (surface.rows as i32, surface.cols as i32))
+                    .unwrap_or((24, 80));
+                forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
             }
             sync_workspace_tabs(&window, &state);
             sync_assets_context_menu_state(&window, &state);
@@ -1646,34 +2478,107 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     let state = Rc::clone(&view_model);
+    let session_bridge_ref = session_bridge.clone();
+    window.on_workspace_session_text_input(move |text| {
+        let state = state.borrow();
+        forward_active_workspace_text_input(&state, session_bridge_ref.as_deref(), text.as_str());
+    });
+
+    let state = Rc::clone(&view_model);
+    let session_bridge_ref = session_bridge.clone();
+    window.on_workspace_session_key_input(move |key, alt, ctrl, shift| {
+        let state = state.borrow();
+        forward_active_workspace_key_input(
+            &state,
+            session_bridge_ref.as_deref(),
+            key.as_str(),
+            alt,
+            ctrl,
+            shift,
+        );
+    });
+
+    let state = Rc::clone(&view_model);
+    let session_bridge_ref = session_bridge.clone();
+    window.on_workspace_session_resize_requested(move |rows, cols| {
+        let state = state.borrow();
+        forward_active_workspace_resize(&state, session_bridge_ref.as_deref(), rows, cols);
+    });
+
+    let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
-    let session_runtime_guard_ref = session_runtime_guard.clone();
+    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    let asset_click_tracker_ref = Rc::clone(&asset_click_tracker);
+    let pending_double_click_activation_ref = Rc::clone(&pending_double_click_activation);
     window.on_asset_selected(move |item_id| {
-        let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.select_asset(item_id.as_str());
-        if let Some(profile) = profile_for_saved_asset(&state, item_id.as_str())
-            && let Some(session_bridge) = session_bridge_ref.as_ref()
-            && let Err(err) = open_session_with_profile(
+        let should_activate =
+            register_asset_click(&asset_click_tracker_ref, item_id.as_str(), Instant::now());
+        tracing::info!(
+            target: "app.ssh",
+            asset_id = item_id.as_str(),
+            should_activate,
+            "asset selected from explorer"
+        );
+        if should_activate {
+            pending_double_click_activation_ref
+                .borrow_mut()
+                .replace(item_id.to_string());
+            activate_asset(
                 &mut state,
-                session_bridge.as_ref(),
-                profile,
-                OpenSessionMode::ActivateExisting,
-            )
-        {
-            tracing::error!(
-                target: "app.ssh",
-                asset_id = item_id.as_str(),
-                error = %err,
-                "failed to open ssh session for selected asset"
+                session_bridge_ref.as_deref(),
+                &pending_host_key_approval_ref,
+                item_id.as_str(),
             );
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
         sync_workspace_tabs(&window, &state);
         sync_assets_context_menu_state(&window, &state);
+        sync_ssh_host_key_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let session_runtime_guard_ref = session_runtime_guard.clone();
+    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    let asset_click_tracker_ref = Rc::clone(&asset_click_tracker);
+    let pending_double_click_activation_ref = Rc::clone(&pending_double_click_activation);
+    window.on_asset_activated(move |item_id| {
+        let _keep_runtime_alive = &session_runtime_guard_ref;
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        asset_click_tracker_ref.borrow_mut().take();
+        state.select_asset(item_id.as_str());
+        let skip_duplicate = pending_double_click_activation_ref
+            .borrow()
+            .as_ref()
+            .map(|asset_id| asset_id == item_id.as_str())
+            .unwrap_or(false);
+        tracing::info!(
+            target: "app.ssh",
+            asset_id = item_id.as_str(),
+            skip_duplicate,
+            "asset activated from explorer"
+        );
+        pending_double_click_activation_ref.borrow_mut().take();
+        if !skip_duplicate {
+            activate_asset(
+                &mut state,
+                session_bridge_ref.as_deref(),
+                &pending_host_key_approval_ref,
+                item_id.as_str(),
+            );
+        }
+        sync_assets_toolbar_state(&window, &state);
+        sync_console_assets(&window, &state);
+        sync_workspace_tabs(&window, &state);
+        sync_assets_context_menu_state(&window, &state);
+        sync_ssh_host_key_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -1723,6 +2628,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let session_runtime_guard_ref = session_runtime_guard.clone();
+    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     window.on_assets_context_menu_action_invoked(move |action_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -1734,25 +2640,75 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 state.set_context_menu_open_path(path);
             } else if action.state == ContextMenuActionState::Enabled {
                 match action_id.as_str() {
+                    "open-connection" => {
+                        let target_asset_id = state.context_target_asset_id.clone();
+                        tracing::info!(
+                            target: "app.ssh",
+                            asset_id = target_asset_id.as_deref().unwrap_or(""),
+                            "opening ssh asset from context menu"
+                        );
+                        state.close_context_menu();
+                        if let Some(asset_id) = target_asset_id {
+                            activate_asset(
+                                &mut state,
+                                session_bridge_ref.as_deref(),
+                                &pending_host_key_approval_ref,
+                                &asset_id,
+                            );
+                        }
+                    }
                     "open-in-new-tab" => {
                         let target_asset_id = state.context_target_asset_id.clone();
+                        tracing::info!(
+                            target: "app.ssh",
+                            asset_id = target_asset_id.as_deref().unwrap_or(""),
+                            "opening ssh asset in a new tab from context menu"
+                        );
                         state.close_context_menu();
                         if let Some(asset_id) = target_asset_id
-                            && let Some(profile) = profile_for_saved_asset(&state, &asset_id)
-                            && let Some(session_bridge) = session_bridge_ref.as_ref()
-                            && let Err(err) = open_session_with_profile(
-                                &mut state,
-                                session_bridge.as_ref(),
-                                profile,
-                                OpenSessionMode::ForceNewTab,
-                            )
                         {
-                            tracing::error!(
-                                target: "app.ssh",
-                                asset_id = asset_id.as_str(),
-                                error = %err,
-                                "failed to open ssh session in a new tab"
-                            );
+                            match profile_for_saved_asset(&state, &asset_id) {
+                                Ok(profile) => {
+                                    if let Some(session_bridge) = session_bridge_ref.as_ref() {
+                                        if let Err(err) = attempt_open_session_with_profile(
+                                            &mut state,
+                                            session_bridge.as_ref(),
+                                            &pending_host_key_approval_ref,
+                                            profile,
+                                            OpenSessionMode::ForceNewTab,
+                                        ) {
+                                            tracing::error!(
+                                                target: "app.ssh",
+                                                asset_id = asset_id.as_str(),
+                                                error = %err,
+                                                "failed to open ssh session in a new tab"
+                                            );
+                                        }
+                                    } else {
+                                        let message = "SSH session bridge is unavailable.";
+                                        show_failed_saved_asset_tab(&mut state, &asset_id, message);
+                                        tracing::error!(
+                                            target: "app.ssh",
+                                            asset_id = asset_id.as_str(),
+                                            error = message,
+                                            "failed to open ssh session in a new tab"
+                                        );
+                                    }
+                                }
+                                Err(err) => {
+                                    show_failed_saved_asset_tab(
+                                        &mut state,
+                                        &asset_id,
+                                        err.to_string(),
+                                    );
+                                    tracing::error!(
+                                        target: "app.ssh",
+                                        asset_id = asset_id.as_str(),
+                                        error = %err,
+                                        "failed to resolve saved ssh profile for context menu open"
+                                    );
+                                }
+                            }
                         }
                     }
                     "close-connection" => {
@@ -1778,6 +2734,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sync_asset_modal_state(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
+        sync_ssh_host_key_modal_state(&window, &state);
         if !was_modal_open && state.asset_modal_state.is_some() {
             schedule_asset_modal_focus(&window);
         }
@@ -1958,6 +2915,7 @@ fn bind_top_status_bar_with_profile_and_async_handle(
                 asset_repo,
                 Some(session_bridge),
                 None,
+                Arc::new(SystemCredentialStore),
             );
         }
         None => {

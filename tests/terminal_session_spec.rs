@@ -39,5 +39,12 @@ fn terminal_runtime_snapshot_can_be_polled_without_exposing_transport_objects() 
 
     assert_eq!(snapshot.session_id, session_id);
     assert!(snapshot.seqno > 0);
-    assert!(snapshot.screen_text.contains("welcome to mica-term"));
+    assert_eq!(snapshot.rows, 24);
+    assert_eq!(snapshot.cols, 80);
+    assert!(
+        snapshot
+            .visible_lines
+            .iter()
+            .any(|line| line.contains("welcome to mica-term"))
+    );
 }

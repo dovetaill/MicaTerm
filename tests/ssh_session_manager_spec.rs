@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::fs;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -8,9 +9,11 @@ use anyhow::{Result, anyhow};
 use mica_term::app::async_runtime::AppAsyncRuntime;
 use mica_term::app::ssh::known_hosts::KnownHostsService;
 use mica_term::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
-use mica_term::app::ssh::runtime::{SessionRuntimeEvent, SshSessionRuntime};
+use mica_term::app::ssh::runtime::{
+    SessionRuntimeEvent, SshSessionRuntime, TerminalSession, UnknownHostKeyError,
+};
 use mica_term::app::ssh::session_manager::{
-    OpenSessionMode, SessionManager, SessionRuntimeLauncher, SessionState,
+    OpenSessionMode, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher, SessionState,
 };
 use russh::keys::PrivateKey;
 use russh::keys::ssh_key::rand_core::OsRng;
@@ -29,6 +32,38 @@ struct FakeLauncher {
 
 #[derive(Clone, Default)]
 struct RuntimeBackedLauncher;
+
+#[derive(Clone)]
+struct TrackingLauncher {
+    disconnects: Arc<AtomicUsize>,
+}
+
+#[derive(Clone, Default)]
+struct InteractiveTrackingState {
+    sent_inputs: Arc<Mutex<Vec<Vec<u8>>>>,
+    resizes: Arc<Mutex<Vec<(u32, u32)>>>,
+}
+
+#[derive(Clone)]
+struct InteractiveTrackingLauncher {
+    state: InteractiveTrackingState,
+}
+
+#[derive(Clone)]
+struct DelayedTrackingLauncher {
+    disconnects: Arc<AtomicUsize>,
+    ready_delay: Duration,
+}
+
+#[derive(Clone)]
+struct TrackingRuntimeControl {
+    disconnects: Arc<AtomicUsize>,
+}
+
+#[derive(Clone)]
+struct InteractiveTrackingRuntimeControl {
+    state: InteractiveTrackingState,
+}
 
 #[derive(Clone, Copy)]
 enum FakeLauncherBehavior {
@@ -50,19 +85,42 @@ impl FakeLauncher {
     }
 }
 
+impl TrackingLauncher {
+    fn new(disconnects: Arc<AtomicUsize>) -> Self {
+        Self { disconnects }
+    }
+}
+
+impl InteractiveTrackingLauncher {
+    fn new(state: InteractiveTrackingState) -> Self {
+        Self { state }
+    }
+}
+
+impl DelayedTrackingLauncher {
+    fn new(disconnects: Arc<AtomicUsize>, ready_delay: Duration) -> Self {
+        Self {
+            disconnects,
+            ready_delay,
+        }
+    }
+}
+
 impl SessionRuntimeLauncher for FakeLauncher {
     fn launch(
         &self,
         _profile: ConnectionProfile,
         _session_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
         let behavior = self.behavior;
         Box::pin(async move {
             match behavior {
                 FakeLauncherBehavior::StayConnecting => {
                     tokio::time::sleep(Duration::from_millis(25)).await;
-                    Ok(())
+                    Ok(Box::new(TrackingRuntimeControl {
+                        disconnects: Arc::new(AtomicUsize::new(0)),
+                    }) as Box<dyn SessionRuntimeControl>)
                 }
                 FakeLauncherBehavior::FailImmediately => {
                     event_tx
@@ -94,10 +152,10 @@ impl SessionRuntimeLauncher for RuntimeBackedLauncher {
         profile: ConnectionProfile,
         session_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
         Box::pin(async move {
-            let _runtime = SshSessionRuntime::connect(profile, session_id, event_tx).await?;
-            Ok(())
+            let runtime = SshSessionRuntime::connect(profile, session_id, event_tx).await?;
+            Ok(Box::new(runtime) as Box<dyn SessionRuntimeControl>)
         })
     }
 
@@ -111,6 +169,110 @@ impl SessionRuntimeLauncher for RuntimeBackedLauncher {
             runtime.disconnect()?;
             Ok(())
         })
+    }
+}
+
+impl SessionRuntimeLauncher for TrackingLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: Uuid,
+        _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+        let disconnects = Arc::clone(&self.disconnects);
+        Box::pin(async move {
+            Ok(Box::new(TrackingRuntimeControl { disconnects }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for InteractiveTrackingLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: Uuid,
+        _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+        let state = self.state.clone();
+        Box::pin(async move {
+            Ok(Box::new(InteractiveTrackingRuntimeControl { state }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for DelayedTrackingLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: Uuid,
+        _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+        let disconnects = Arc::clone(&self.disconnects);
+        let ready_delay = self.ready_delay;
+        Box::pin(async move {
+            tokio::time::sleep(ready_delay).await;
+            Ok(Box::new(TrackingRuntimeControl { disconnects }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeControl for TrackingRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        self.disconnects.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn send_input(&self, _bytes: Vec<u8>) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl SessionRuntimeControl for InteractiveTrackingRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_input(&self, bytes: Vec<u8>) -> Result<()> {
+        self.state
+            .sent_inputs
+            .lock()
+            .expect("lock sent inputs")
+            .push(bytes);
+        Ok(())
+    }
+
+    fn resize(&self, rows: u32, cols: u32) -> Result<()> {
+        self.state
+            .resizes
+            .lock()
+            .expect("lock resize events")
+            .push((rows, cols));
+        Ok(())
     }
 }
 
@@ -349,7 +511,52 @@ fn session_manager_reuses_existing_session_for_same_asset_by_default() {
 }
 
 #[test]
+fn reopening_same_saved_asset_activates_existing_session_by_default() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(FakeLauncher::stay_connecting()),
+    );
+
+    let first = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open first session");
+    let reopened = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("reopen existing session");
+
+    assert_eq!(reopened.session_id, first.session_id);
+}
+
+#[test]
 fn session_manager_can_force_new_tab_session_for_same_asset() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(FakeLauncher::stay_connecting()),
+    );
+
+    let first = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open first session");
+    let second = manager
+        .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+        .expect("force second session");
+
+    assert_ne!(first.session_id, second.session_id);
+}
+
+#[test]
+fn force_new_tab_creates_parallel_session_for_same_asset() {
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let manager = SessionManager::new_with_launcher(
         runtime.handle(),
@@ -456,6 +663,47 @@ fn session_manager_marks_connected_only_after_runtime_connected_event() {
 }
 
 #[test]
+fn runtime_probe_surfaces_unknown_host_key_as_typed_error() {
+    let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, addr, private_key_path, _server_public_key) = runtime.block_on(async {
+        spawn_publickey_shell_server(Duration::from_millis(10)).await
+    });
+    let known_hosts_path = temp_known_hosts_path("runtime-unknown");
+    let _ = fs::remove_file(&known_hosts_path);
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+    let manager =
+        SessionManager::new_with_launcher(runtime.handle(), Arc::new(RuntimeBackedLauncher));
+
+    let err = manager
+        .probe_connection(sample_publickey_profile(
+            "asset-prod",
+            addr.ip().to_string(),
+            addr.port(),
+            private_key_path.display().to_string(),
+        ))
+        .expect_err("unknown host key should block probe");
+
+    let typed = err
+        .downcast_ref::<UnknownHostKeyError>()
+        .expect("typed unknown host key error");
+    assert_eq!(typed.host, addr.ip().to_string());
+    assert_eq!(typed.port, addr.port());
+    assert!(!typed.fingerprint.is_empty());
+
+    runtime.block_on(async {
+        server_task.abort();
+    });
+    let _ = fs::remove_file(private_key_path);
+    let _ = fs::remove_file(known_hosts_path);
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+}
+
+#[test]
 fn runtime_error_marks_session_reconnectable() {
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let manager =
@@ -483,6 +731,151 @@ fn runtime_error_marks_session_reconnectable() {
 
     assert!(matches!(updated.state, SessionState::Error(_)));
     assert!(updated.can_reconnect);
+}
+
+#[test]
+fn disconnect_session_issues_runtime_disconnect() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let disconnects = Arc::new(AtomicUsize::new(0));
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(TrackingLauncher::new(Arc::clone(&disconnects))),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    manager
+        .disconnect_session(handle.session_id)
+        .expect("disconnect session");
+
+    assert_eq!(disconnects.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn session_manager_forwards_text_input_and_resize_to_runtime_control() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let state = InteractiveTrackingState::default();
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(InteractiveTrackingLauncher::new(state.clone())),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    manager
+        .send_session_input(handle.session_id, b"pwd\n".to_vec())
+        .expect("forward text input");
+    manager
+        .resize_session(handle.session_id, 48, 132)
+        .expect("forward terminal resize");
+
+    assert_eq!(
+        state.sent_inputs.lock().expect("lock sent inputs").as_slice(),
+        &[b"pwd\n".to_vec()]
+    );
+    assert_eq!(
+        state.resizes.lock().expect("lock resize events").as_slice(),
+        &[(48, 132)]
+    );
+}
+
+#[test]
+fn runtime_surface_snapshot_tracks_visible_rows_instead_of_single_placeholder_copy() {
+    let session_id = Uuid::new_v4();
+    let mut terminal = TerminalSession::new(4, 12);
+    terminal.apply_remote_bytes(b"line 1\r\nline 2\r\nline 3");
+
+    let surface = terminal.surface_state(session_id);
+
+    assert_eq!(surface.session_id, session_id);
+    assert_eq!(surface.rows, 4);
+    assert_eq!(surface.cols, 12);
+    assert_eq!(
+        surface.visible_lines,
+        vec![
+            "line 1".to_string(),
+            "line 2".to_string(),
+            "line 3".to_string()
+        ]
+    );
+    assert!(surface.seqno > 0);
+}
+
+#[test]
+fn close_session_issues_runtime_disconnect_before_removal() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let disconnects = Arc::new(AtomicUsize::new(0));
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(TrackingLauncher::new(Arc::clone(&disconnects))),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    manager
+        .close_session(handle.session_id)
+        .expect("close session");
+
+    assert_eq!(disconnects.load(Ordering::SeqCst), 1);
+    assert!(manager.session(handle.session_id).is_none());
+}
+
+#[test]
+fn close_session_before_runtime_ready_disconnects_when_control_arrives() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let disconnects = Arc::new(AtomicUsize::new(0));
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(DelayedTrackingLauncher::new(
+            Arc::clone(&disconnects),
+            Duration::from_millis(25),
+        )),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    manager
+        .close_session(handle.session_id)
+        .expect("close session before runtime ready");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    });
+
+    assert_eq!(disconnects.load(Ordering::SeqCst), 1);
+    assert!(manager.session(handle.session_id).is_none());
 }
 
 #[test]

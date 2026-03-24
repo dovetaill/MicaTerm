@@ -4,6 +4,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use anyhow::{Context, Result, anyhow};
+use serde::{Deserialize, Serialize};
+
+use crate::shell::view_model::AssetSshConnectionDraft;
 
 const CREDENTIAL_SERVICE_NAME: &str = "mica-term";
 
@@ -22,6 +25,95 @@ pub trait CredentialStore: Send + Sync {
     fn put_secret(&self, key: &str, value: &str) -> Result<()>;
     fn get_secret(&self, key: &str) -> Result<Option<String>>;
     fn delete_secret(&self, key: &str) -> Result<()>;
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredSshSecretBundle {
+    pub password: Option<String>,
+    pub private_key_content: Option<String>,
+    pub passphrase: Option<String>,
+}
+
+impl StoredSshSecretBundle {
+    pub fn is_empty(&self) -> bool {
+        self.password
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+            && self
+                .private_key_content
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+            && self
+                .passphrase
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+    }
+}
+
+pub fn persist_secret_bundle(
+    store: &dyn CredentialStore,
+    credential_ref: &str,
+    bundle: &StoredSshSecretBundle,
+) -> Result<()> {
+    if bundle.is_empty() {
+        return store.delete_secret(credential_ref);
+    }
+
+    let payload = serde_json::to_string(bundle)
+        .with_context(|| format!("failed to serialize SSH secret bundle `{credential_ref}`"))?;
+    store.put_secret(credential_ref, payload.as_str())
+}
+
+pub fn load_secret_bundle(
+    store: &dyn CredentialStore,
+    credential_ref: &str,
+) -> Result<StoredSshSecretBundle> {
+    let raw = store
+        .get_secret(credential_ref)
+        .with_context(|| format!("failed to load SSH secret bundle `{credential_ref}`"))?;
+    let Some(raw) = raw else {
+        return Ok(StoredSshSecretBundle::default());
+    };
+
+    Ok(serde_json::from_str::<StoredSshSecretBundle>(&raw).unwrap_or_else(|_| {
+        StoredSshSecretBundle {
+            password: Some(raw),
+            ..StoredSshSecretBundle::default()
+        }
+    }))
+}
+
+pub fn merge_edit_bundle(
+    existing: StoredSshSecretBundle,
+    draft: &AssetSshConnectionDraft,
+) -> StoredSshSecretBundle {
+    if draft.clear_saved_secret_requested {
+        return StoredSshSecretBundle::default();
+    }
+
+    match draft.auth_method.as_str() {
+        "password" => StoredSshSecretBundle {
+            password: non_empty_secret(&draft.password).or(existing.password),
+            private_key_content: None,
+            passphrase: None,
+        },
+        "private-key" if draft.private_key_source == "content" => StoredSshSecretBundle {
+            password: None,
+            private_key_content: non_empty_secret(&draft.private_key_content)
+                .or(existing.private_key_content),
+            passphrase: non_empty_secret(&draft.passphrase).or(existing.passphrase),
+        },
+        "private-key" if draft.private_key_source == "path" => StoredSshSecretBundle {
+            password: None,
+            private_key_content: None,
+            passphrase: non_empty_secret(&draft.passphrase).or(existing.passphrase),
+        },
+        _ => StoredSshSecretBundle::default(),
+    }
+}
+
+fn non_empty_secret(value: &str) -> Option<String> {
+    (!value.trim().is_empty()).then(|| value.to_string())
 }
 
 #[derive(Debug, Default)]

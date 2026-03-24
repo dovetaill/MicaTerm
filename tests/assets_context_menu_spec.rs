@@ -73,6 +73,7 @@ fn resolver_returns_ssh_actions_with_planned_proxy_tools() {
         .collect();
 
     assert!(ids.contains(&"close-connection"));
+    assert!(ids.contains(&"open-connection"));
     assert!(ids.contains(&"open-in-new-tab"));
     assert!(ids.contains(&"proxy-chrome-via-server"));
 }
@@ -169,7 +170,7 @@ fn close_connection_is_disabled_without_live_session_and_enabled_with_live_sessi
 }
 
 #[test]
-fn open_in_new_tab_stays_enabled_for_ssh_assets() {
+fn open_actions_stay_enabled_for_ssh_assets() {
     let actions = resolve_action_tree(
         ContextTargetKind::SshConnection,
         &SelectionContext {
@@ -180,11 +181,16 @@ fn open_in_new_tab_stays_enabled_for_ssh_assets() {
         },
     );
 
+    let open = actions
+        .iter()
+        .find(|node| node.id == "open-connection")
+        .expect("open action should exist");
     let open_in_new_tab = actions
         .iter()
         .find(|node| node.id == "open-in-new-tab")
         .expect("open in new tab action should exist");
 
+    assert_eq!(open.state, ContextMenuActionState::Enabled);
     assert_eq!(open_in_new_tab.state, ContextMenuActionState::Enabled);
 }
 

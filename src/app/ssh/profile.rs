@@ -141,9 +141,16 @@ impl ConnectionProfile {
             .clone()
             .or_else(|| Some(ssh_credential_ref(asset_id, SshCredentialKind::SavedSecrets)));
 
-        let (auth_method, credential_ref, private_key_path) = match spec.auth_method.as_str() {
-            "password" => (SshAuthMethod::Password, saved_credential_ref, None),
-            "private-key" => match spec.private_key_source.as_str() {
+        let auth_method_id = spec.auth_method.trim();
+        let private_key_source_id = if spec.private_key_source.trim().is_empty() {
+            "content"
+        } else {
+            spec.private_key_source.trim()
+        };
+
+        let (auth_method, credential_ref, private_key_path) = match auth_method_id {
+            "" | "password" => (SshAuthMethod::Password, saved_credential_ref, None),
+            "private-key" => match private_key_source_id {
                 "path" => {
                     let private_key_path = spec.private_key_path.trim();
                     if private_key_path.is_empty() {

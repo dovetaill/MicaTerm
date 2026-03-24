@@ -53,7 +53,6 @@ export component AppWindow inherits Window {
     in-out property <bool> ssh-host-key-modal-open: false;
     in-out property <string> ssh-host-key-modal-host: "";
     in-out property <string> ssh-host-key-modal-fingerprint: "";
-    in-out property <string> asset-ssh-modal-active-tab: "standard";
     in-out property <string> asset-ssh-modal-name: "";
     in-out property <string> asset-ssh-modal-host: "";
     in-out property <string> asset-ssh-modal-user: "";
@@ -64,12 +63,17 @@ export component AppWindow inherits Window {
     in-out property <string> asset-ssh-modal-private-key-content: "";
     in-out property <string> asset-ssh-modal-private-key-path: "";
     in-out property <string> asset-ssh-modal-passphrase: "";
+    in-out property <bool> asset-ssh-modal-password-visible: false;
+    in-out property <string> asset-ssh-modal-secret-retention-message: "";
+    in-out property <bool> asset-ssh-modal-can-clear-saved-secret: false;
+    in-out property <bool> asset-ssh-modal-clear-saved-secret-requested: false;
     in-out property <string> asset-ssh-modal-remark: "";
     in-out property <string> asset-ssh-modal-environment: "";
     in-out property <string> asset-ssh-modal-proxy-method: "";
     in-out property <bool> asset-ssh-modal-connect-family-enabled: false;
     in-out property <string> asset-ssh-modal-feedback-state: "idle";
     in-out property <string> asset-ssh-modal-feedback-message: "";
+    in-out property <string> asset-ssh-modal-dialog-title: "New SSH Connection";
     in-out property <string> asset-primary-create-action-id: "";
     in-out property <string> asset-primary-create-tooltip: "";
     in-out property <string> asset-search-tooltip: "";
@@ -86,8 +90,9 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-session-title: "";
     in-out property <string> workspace-session-subtitle: "";
     in-out property <string> workspace-session-state: "";
+    in-out property <string> workspace-session-error-detail: "";
     in-out property <bool> workspace-session-can-reconnect: false;
-    in-out property <string> workspace-session-screen-text: "";
+    in-out property <[string]> workspace-session-visible-lines: [];
     in-out property <int> workspace-session-surface-seqno: 0;
     in-out property <bool> assets-context-menu-open: false;
     in-out property <length> assets-context-menu-anchor-x: 0px;
@@ -160,7 +165,6 @@ export component AppWindow inherits Window {
     callback confirm-asset-rename-requested();
     callback confirm-delete-asset-requested();
     callback asset-folder-modal-name-changed(string);
-    callback asset-ssh-modal-tab-selected(string);
     callback asset-ssh-modal-draft-changed(string, string);
     callback asset-ssh-modal-action-requested(string);
     callback ssh-host-key-modal-accept-requested();
@@ -171,7 +175,11 @@ export component AppWindow inherits Window {
     callback blocking-modal-focus-restore-requested();
     callback workspace-tab-selected(string);
     callback workspace-tab-close-requested(string);
+    callback workspace-session-text-input(string);
+    callback workspace-session-key-input(string, bool, bool, bool);
+    callback workspace-session-resize-requested(int, int);
     callback asset-selected(string);
+    callback asset-activated(string);
     callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
     callback shell-interaction-requested();
@@ -270,7 +278,7 @@ export component AppWindow inherits Window {
                 y: 0px;
                 width: parent.width;
                 dark-mode: root.dark-mode;
-                show-right-panel: root.show-right-panel;
+                show-right-panel: root.effective-show-right-panel;
                 show-global-menu: root.show-global-menu;
                 is-window-maximized: root.is-window-maximized;
                 is-window-active: root.is-window-active;
@@ -396,6 +404,10 @@ export component AppWindow inherits Window {
                             root.asset-selected(item-id);
                         }
 
+                        asset-activated(item-id) => {
+                            root.asset-activated(item-id);
+                        }
+
                         toggle-expanded-requested(item-id) => {
                             root.toggle-expanded-requested(item-id);
                         }
@@ -412,12 +424,14 @@ export component AppWindow inherits Window {
                     main-workspace := WorkspacePane {
                         vertical-stretch: 1;
                         workspace-tab-items: root.workspace-tab-items;
+                        active-workspace-session-id: root.active-workspace-session-id;
                         workspace-session-host-mode: root.workspace-session-host-mode;
                         workspace-session-title: root.workspace-session-title;
                         workspace-session-subtitle: root.workspace-session-subtitle;
                         workspace-session-state: root.workspace-session-state;
+                        workspace-session-error-detail: root.workspace-session-error-detail;
                         workspace-session-can-reconnect: root.workspace-session-can-reconnect;
-                        workspace-session-screen-text: root.workspace-session-screen-text;
+                        workspace-session-visible-lines: root.workspace-session-visible-lines;
                         workspace-session-surface-seqno: root.workspace-session-surface-seqno;
 
                         workspace-tab-selected(session-id) => {
@@ -426,6 +440,18 @@ export component AppWindow inherits Window {
 
                         workspace-tab-close-requested(session-id) => {
                             root.workspace-tab-close-requested(session-id);
+                        }
+
+                        text-input(text) => {
+                            root.workspace-session-text-input(text);
+                        }
+
+                        key-input(key, alt, ctrl, shift) => {
+                            root.workspace-session-key-input(key, alt, ctrl, shift);
+                        }
+
+                        surface-resize-requested(rows, cols) => {
+                            root.workspace-session-resize-requested(rows, cols);
                         }
                     }
 
@@ -561,12 +587,11 @@ export component AppWindow inherits Window {
 
     if root.asset-modal-open && root.asset-modal-kind == "new-folder" : asset-folder-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
-        modal-width: 360px;
+        modal-width: 420px;
         modal-height: 214px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
-        title: "New Folder";
-        show-close-button: true;
+        dialog-title: "New Folder";
 
         close-requested => {
             root.close-asset-modal-requested();
@@ -594,6 +619,8 @@ export component AppWindow inherits Window {
         asset-folder-modal-overlay := AssetsFolderCreateModal {
             x: 0px;
             y: 0px;
+            width: parent.width;
+            height: parent.height;
             folder-name: root.asset-folder-modal-name;
             validation-message: root.asset-modal-validation-message;
             can-confirm: root.asset-modal-can-confirm;
@@ -610,17 +637,20 @@ export component AppWindow inherits Window {
             folder-name-changed(value) => {
                 root.asset-folder-modal-name-changed(value);
             }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
         }
     }
 
     if root.asset-modal-open && root.asset-modal-kind == "new-ssh-connection" : asset-ssh-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
-        modal-width: 760px;
-        modal-height: 720px;
+        modal-width: 860px;
+        modal-height: 700px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
-        title: "New SSH Connection";
-        show-close-button: true;
+        dialog-title: root.asset-ssh-modal-dialog-title;
 
         close-requested => {
             root.close-asset-modal-requested();
@@ -648,7 +678,8 @@ export component AppWindow inherits Window {
         asset-ssh-modal-overlay := AssetsSshConnectionModal {
             x: 0px;
             y: 0px;
-            active-tab: root.asset-ssh-modal-active-tab;
+            width: parent.width;
+            height: parent.height;
             name: root.asset-ssh-modal-name;
             host: root.asset-ssh-modal-host;
             user: root.asset-ssh-modal-user;
@@ -659,6 +690,10 @@ export component AppWindow inherits Window {
             private-key-content: root.asset-ssh-modal-private-key-content;
             private-key-path: root.asset-ssh-modal-private-key-path;
             passphrase: root.asset-ssh-modal-passphrase;
+            password-visible: root.asset-ssh-modal-password-visible;
+            secret-retention-message: root.asset-ssh-modal-secret-retention-message;
+            can-clear-saved-secret: root.asset-ssh-modal-can-clear-saved-secret;
+            clear-saved-secret-requested: root.asset-ssh-modal-clear-saved-secret-requested;
             remark: root.asset-ssh-modal-remark;
             environment: root.asset-ssh-modal-environment;
             proxy-method: root.asset-ssh-modal-proxy-method;
@@ -677,10 +712,6 @@ export component AppWindow inherits Window {
                 root.confirm-asset-modal-requested();
             }
 
-            tab-selected(tab-id) => {
-                root.asset-ssh-modal-tab-selected(tab-id);
-            }
-
             draft-changed(field, value) => {
                 root.asset-ssh-modal-draft-changed(field, value);
             }
@@ -688,17 +719,20 @@ export component AppWindow inherits Window {
             action-requested(action-id) => {
                 root.asset-ssh-modal-action-requested(action-id);
             }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
         }
     }
 
     if root.asset-rename-modal-open : asset-rename-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
-        modal-width: 360px;
+        modal-width: 420px;
         modal-height: 214px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
-        title: "Rename";
-        show-close-button: true;
+        dialog-title: "Rename Asset";
 
         close-requested => {
             root.close-asset-modal-requested();
@@ -726,6 +760,8 @@ export component AppWindow inherits Window {
         asset-rename-modal-overlay := AssetsRenameModal {
             x: 0px;
             y: 0px;
+            width: parent.width;
+            height: parent.height;
             item-name: root.asset-rename-modal-name;
             validation-message: root.asset-rename-modal-validation-message;
             can-confirm: root.asset-rename-modal-can-confirm;
@@ -741,17 +777,20 @@ export component AppWindow inherits Window {
             name-changed(value) => {
                 root.asset-rename-modal-name-changed(value);
             }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
         }
     }
 
     if root.asset-delete-confirm-modal-open : asset-delete-confirm-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
-        modal-width: 392px;
-        modal-height: 228px;
+        modal-width: 440px;
+        modal-height: 268px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
-        title: "Delete Asset";
-        show-close-button: true;
+        dialog-title: "Delete Asset";
 
         close-requested => {
             root.close-asset-modal-requested();
@@ -779,6 +818,8 @@ export component AppWindow inherits Window {
         asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {
             x: 0px;
             y: 0px;
+            width: parent.width;
+            height: parent.height;
             target-label: root.asset-delete-confirm-target-label;
             descendant-count: root.asset-delete-confirm-descendant-count;
 
@@ -789,17 +830,20 @@ export component AppWindow inherits Window {
             confirm-requested => {
                 root.confirm-delete-asset-requested();
             }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
         }
     }
 
     if root.ssh-host-key-modal-open : ssh-host-key-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 420px;
-        modal-height: 244px;
+        modal-height: 332px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
-        title: "Verify Host Key";
-        show-close-button: false;
+        dialog-title: "Verify Host Key";
 
         close-requested => {
             root.ssh-host-key-modal-reject-requested();
@@ -827,6 +871,8 @@ export component AppWindow inherits Window {
         ssh-host-key-modal-overlay := SshHostKeyConfirmModal {
             x: 0px;
             y: 0px;
+            width: parent.width;
+            height: parent.height;
             host: root.ssh-host-key-modal-host;
             fingerprint: root.ssh-host-key-modal-fingerprint;
 
@@ -836,6 +882,10 @@ export component AppWindow inherits Window {
 
             reject-requested => {
                 root.ssh-host-key-modal-reject-requested();
+            }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
             }
         }
     }

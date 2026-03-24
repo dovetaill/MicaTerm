@@ -59,6 +59,7 @@ export component Sidebar inherits Rectangle {
     callback close-assets-create-menu-requested();
     callback assets-create-action-selected(string);
     callback asset-selected(string);
+    callback asset-activated(string);
     callback toggle-expanded-requested(string);
     callback asset-context-menu-requested(string, string, length, length);
     callback shell-interaction-requested();
@@ -228,6 +229,10 @@ export component Sidebar inherits Rectangle {
 
             asset-selected(item-id) => {
                 root.asset-selected(item-id);
+            }
+
+            asset-activated(item-id) => {
+                root.asset-activated(item-id);
             }
 
             toggle-expanded-requested(item-id) => {

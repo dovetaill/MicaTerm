@@ -1,17 +1,47 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 
+component DialogButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> primary: false;
+    callback clicked();
+
+    height: 34px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: root.primary ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    background: button-touch.pressed ? ThemeTokens.control-pressed-surface
+        : button-touch.has-hover ? ThemeTokens.control-hover-surface
+        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    button-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
 export component SshHostKeyConfirmModal inherits Rectangle {
     in property <string> host: "";
     in property <string> fingerprint: "";
     callback accept-requested();
     callback reject-requested();
+    callback focus-restore-requested();
 
-    width: 420px;
-    height: 244px;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: ThemeTokens.divider-strong;
-    background: ThemeTokens.assets-surface;
+    width: 100%;
+    height: 100%;
+    background: transparent;
 
     modal-focus := FocusScope {
         width: parent.width;
@@ -19,6 +49,7 @@ export component SshHostKeyConfirmModal inherits Rectangle {
 
         key-pressed(event) => {
             if (event.text == Key.Escape) {
+                root.focus-restore-requested();
                 root.reject-requested();
                 accept
             } else if (event.text == Key.Return) {
@@ -29,7 +60,8 @@ export component SshHostKeyConfirmModal inherits Rectangle {
             }
         }
 
-        Rectangle {
+        body := Rectangle {
+            y: 0px;
             width: parent.width;
             height: parent.height;
             background: transparent;
@@ -37,33 +69,37 @@ export component SshHostKeyConfirmModal inherits Rectangle {
             Text {
                 x: 20px;
                 y: 18px;
-                text: "Verify Host Key";
-                color: ThemeTokens.text-primary;
-                font-size: 18px;
-                font-weight: 600;
-            }
-
-            Text {
-                x: 20px;
-                y: 56px;
                 width: parent.width - 40px;
                 text: "Trust the SSH host key for " + root.host + "?";
                 color: ThemeTokens.text-primary;
+                font-size: 16px;
+                font-weight: 600;
                 wrap: word-wrap;
             }
 
-            Text {
+            fingerprint-panel := Rectangle {
                 x: 20px;
-                y: 102px;
+                y: 62px;
                 width: parent.width - 40px;
-                text: root.fingerprint;
-                color: ThemeTokens.text-primary;
-                wrap: word-wrap;
+                height: 72px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.inspector-surface;
+
+                Text {
+                    x: 12px;
+                    y: 12px;
+                    width: parent.width - 24px;
+                    text: root.fingerprint;
+                    color: ThemeTokens.text-primary;
+                    wrap: word-wrap;
+                }
             }
 
             Text {
                 x: 20px;
-                y: 154px;
+                y: 146px;
                 width: parent.width - 40px;
                 text: "Accept to store this host key using TOFU, or reject to cancel the connection attempt.";
                 color: ThemeTokens.text-primary;
@@ -71,61 +107,34 @@ export component SshHostKeyConfirmModal inherits Rectangle {
                 wrap: word-wrap;
             }
 
-            reject-button := Rectangle {
-                x: parent.width - 196px;
-                y: parent.height - 54px;
-                width: 84px;
-                height: 34px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.control-hover-surface;
+            footer-divider := Rectangle {
+                y: parent.height - 66px;
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
+            }
 
-                Text {
-                    text: "Reject";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    width: parent.width;
-                    height: parent.height;
-                }
+            reject-button := DialogButton {
+                x: parent.width - 204px;
+                y: parent.height - 50px;
+                width: 88px;
+                label: "Reject";
 
-                TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        root.reject-requested();
-                    }
+                clicked => {
+                    root.focus-restore-requested();
+                    root.reject-requested();
                 }
             }
 
-            accept-button := Rectangle {
+            accept-button := DialogButton {
                 x: parent.width - 104px;
-                y: parent.height - 54px;
+                y: parent.height - 50px;
                 width: 84px;
-                height: 34px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.accent;
-                background: ThemeTokens.control-active-surface;
+                label: "Accept";
+                primary: true;
 
-                Text {
-                    text: "Accept";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    width: parent.width;
-                    height: parent.height;
-                }
-
-                TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        root.accept-requested();
-                    }
+                clicked => {
+                    root.accept-requested();
                 }
             }
         }

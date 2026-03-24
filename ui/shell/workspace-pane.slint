@@ -6,15 +6,20 @@ import { TerminalSessionHost } from "./terminal-session-host.slint";
 
 export component WorkspacePane inherits Rectangle {
     in property <[WorkspaceTabItem]> workspace-tab-items: [];
+    in property <string> active-workspace-session-id: "";
     in property <string> workspace-session-host-mode: "welcome";
     in property <string> workspace-session-title: "";
     in property <string> workspace-session-subtitle: "";
     in property <string> workspace-session-state: "";
+    in property <string> workspace-session-error-detail: "";
     in property <bool> workspace-session-can-reconnect: false;
-    in property <string> workspace-session-screen-text: "";
+    in property <[string]> workspace-session-visible-lines: [];
     in property <int> workspace-session-surface-seqno: 0;
     callback workspace-tab-selected(string);
     callback workspace-tab-close-requested(string);
+    callback text-input(string);
+    callback key-input(string, bool, bool, bool);
+    callback surface-resize-requested(int, int);
 
     horizontal-stretch: 1;
     min-width: 0px;
@@ -48,13 +53,27 @@ export component WorkspacePane inherits Rectangle {
             TerminalSessionHost {
                 width: 100%;
                 height: 100%;
+                session-id: root.active-workspace-session-id;
                 mode: root.workspace-session-host-mode;
                 session-title: root.workspace-session-title;
                 session-subtitle: root.workspace-session-subtitle;
                 session-state: root.workspace-session-state;
+                session-error-detail: root.workspace-session-error-detail;
                 can-reconnect: root.workspace-session-can-reconnect;
-                session-screen-text: root.workspace-session-screen-text;
+                session-visible-lines: root.workspace-session-visible-lines;
                 session-surface-seqno: root.workspace-session-surface-seqno;
+
+                text-input(text) => {
+                    root.text-input(text);
+                }
+
+                key-input(key, alt, ctrl, shift) => {
+                    root.key-input(key, alt, ctrl, shift);
+                }
+
+                surface-resize-requested(rows, cols) => {
+                    root.surface-resize-requested(rows, cols);
+                }
             }
         }
     }

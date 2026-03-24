@@ -9,6 +9,7 @@ pub struct WorkspaceTab {
     pub title: String,
     pub subtitle: String,
     pub state: String,
+    pub error_detail: String,
     pub active: bool,
 }
 
@@ -20,6 +21,7 @@ impl WorkspaceTab {
             title: resolve_title(&handle.title, &handle.subtitle),
             subtitle: handle.subtitle.clone(),
             state: session_state_id(&handle.state).into(),
+            error_detail: session_error_detail(&handle.state).into(),
             active: false,
         }
     }
@@ -30,6 +32,13 @@ impl WorkspaceTab {
 
     pub fn uses_terminal_surface(&self) -> bool {
         matches!(self.state.as_str(), "connecting" | "connected")
+    }
+}
+
+fn session_error_detail(state: &SessionState) -> &str {
+    match state {
+        SessionState::Error(message) => message.as_str(),
+        _ => "",
     }
 }
 
