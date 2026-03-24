@@ -213,6 +213,7 @@ enum StoredPersistedAssetKind {
     SshConnection,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 enum StoredPersistedAssetPayload {
     Folder,
@@ -224,8 +225,18 @@ struct StoredPersistedSshConnectionSpec {
     host: String,
     user: String,
     port: String,
+    #[serde(default)]
+    auth_method: String,
+    #[serde(default)]
+    private_key_source: String,
+    #[serde(default)]
+    private_key_path: String,
     environment: String,
     proxy_method: String,
+    #[serde(default)]
+    remark: String,
+    #[serde(default)]
+    credential_ref: Option<String>,
 }
 
 fn encode_schema_version(schema_version: u32) -> [u8; 4] {
@@ -281,8 +292,13 @@ impl From<&PersistedAssetNode> for StoredPersistedAssetNode {
                         host: spec.host.clone(),
                         user: spec.user.clone(),
                         port: spec.port.clone(),
+                        auth_method: spec.auth_method.clone(),
+                        private_key_source: spec.private_key_source.clone(),
+                        private_key_path: spec.private_key_path.clone(),
                         environment: spec.environment.clone(),
                         proxy_method: spec.proxy_method.clone(),
+                        remark: spec.remark.clone(),
+                        credential_ref: spec.credential_ref.clone(),
                     })
                 }
             },
@@ -308,11 +324,32 @@ impl From<StoredPersistedAssetNode> for PersistedAssetNode {
                         host: spec.host,
                         user: spec.user,
                         port: spec.port,
+                        auth_method: default_ssh_auth_method(spec.auth_method),
+                        private_key_source: default_private_key_source(spec.private_key_source),
+                        private_key_path: spec.private_key_path,
                         environment: spec.environment,
                         proxy_method: spec.proxy_method,
+                        remark: spec.remark,
+                        credential_ref: spec.credential_ref,
                     })
                 }
             },
         }
+    }
+}
+
+fn default_ssh_auth_method(value: String) -> String {
+    if value.trim().is_empty() {
+        "password".into()
+    } else {
+        value
+    }
+}
+
+fn default_private_key_source(value: String) -> String {
+    if value.trim().is_empty() {
+        "content".into()
+    } else {
+        value
     }
 }

@@ -92,8 +92,13 @@ fn runtime_payload(payload: &PersistedAssetPayload) -> AssetNodePayload {
                 host: spec.host.clone(),
                 user: spec.user.clone(),
                 port: spec.port.clone(),
+                auth_method: spec.auth_method.clone(),
+                private_key_source: spec.private_key_source.clone(),
+                private_key_path: spec.private_key_path.clone(),
                 environment: spec.environment.clone(),
                 proxy_method: spec.proxy_method.clone(),
+                remark: spec.remark.clone(),
+                credential_ref: spec.credential_ref.clone(),
             })
         }
     }
@@ -107,8 +112,13 @@ fn persisted_payload(node: &AssetNode) -> PersistedAssetPayload {
                 host: spec.host.clone(),
                 user: spec.user.clone(),
                 port: spec.port.clone(),
+                auth_method: spec.auth_method.clone(),
+                private_key_source: spec.private_key_source.clone(),
+                private_key_path: spec.private_key_path.clone(),
                 environment: spec.environment.clone(),
                 proxy_method: spec.proxy_method.clone(),
+                remark: spec.remark.clone(),
+                credential_ref: spec.credential_ref.clone(),
             })
         }
         (ConsoleAssetKind::SshConnection, AssetNodePayload::Folder) => {

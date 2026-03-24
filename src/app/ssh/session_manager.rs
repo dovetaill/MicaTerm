@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::app::ssh::profile::ConnectionProfile;
-use crate::app::ssh::runtime::SessionRuntimeEvent;
+use crate::app::ssh::runtime::{SessionRuntimeEvent, TerminalSurfaceState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenSessionMode {
@@ -42,6 +42,11 @@ pub trait SessionRuntimeLauncher: Send + Sync {
         profile: ConnectionProfile,
         session_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
+
+    fn probe(
+        &self,
+        profile: ConnectionProfile,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
 }
 
@@ -97,6 +102,7 @@ impl SessionManager {
             let mut registry = self.registry.lock().expect("lock session registry");
             registry.asset_sessions.insert(asset_id, session_id);
             registry.sessions.insert(session_id, handle.clone());
+            registry.open_order.push(session_id);
         }
 
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
@@ -132,6 +138,28 @@ impl SessionManager {
             .cloned()
     }
 
+    pub fn ordered_sessions(&self) -> Vec<SessionHandle> {
+        let registry = self.registry.lock().expect("lock session registry");
+        registry
+            .open_order
+            .iter()
+            .filter_map(|session_id| registry.sessions.get(session_id).cloned())
+            .collect()
+    }
+
+    pub fn terminal_surface(&self, session_id: Uuid) -> Option<TerminalSurfaceState> {
+        self.registry
+            .lock()
+            .expect("lock session registry")
+            .terminal_surfaces
+            .get(&session_id)
+            .cloned()
+    }
+
+    pub fn probe_connection(&self, profile: ConnectionProfile) -> Result<()> {
+        self.runtime_handle.block_on(self.launcher.probe(profile))
+    }
+
     pub fn disconnect_session(&self, session_id: Uuid) -> Option<SessionHandle> {
         let mut registry = self.registry.lock().expect("lock session registry");
         let session = registry.sessions.get_mut(&session_id)?;
@@ -143,8 +171,29 @@ impl SessionManager {
     pub fn close_session(&self, session_id: Uuid) -> Option<SessionHandle> {
         let mut registry = self.registry.lock().expect("lock session registry");
         let removed = registry.sessions.remove(&session_id)?;
+        registry.open_order.retain(|existing_id| *existing_id != session_id);
+        registry.terminal_surfaces.remove(&session_id);
         if registry.asset_sessions.get(&removed.asset_id) == Some(&session_id) {
-            registry.asset_sessions.remove(&removed.asset_id);
+            let replacement = registry
+                .open_order
+                .iter()
+                .rev()
+                .copied()
+                .find(|existing_id| {
+                    registry
+                        .sessions
+                        .get(existing_id)
+                        .map(|session| session.asset_id == removed.asset_id)
+                        .unwrap_or(false)
+                });
+
+            if let Some(existing_id) = replacement {
+                registry
+                    .asset_sessions
+                    .insert(removed.asset_id.clone(), existing_id);
+            } else {
+                registry.asset_sessions.remove(&removed.asset_id);
+            }
         }
         Some(removed)
     }
@@ -154,6 +203,8 @@ impl SessionManager {
 struct SessionRegistry {
     sessions: HashMap<Uuid, SessionHandle>,
     asset_sessions: HashMap<String, Uuid>,
+    open_order: Vec<Uuid>,
+    terminal_surfaces: HashMap<Uuid, TerminalSurfaceState>,
 }
 
 fn apply_runtime_event(
@@ -171,7 +222,9 @@ fn apply_runtime_event(
         SessionRuntimeEvent::Error(message) => {
             update_session(registry, session_id, SessionState::Error(message), true);
         }
-        SessionRuntimeEvent::Output(_) => {}
+        SessionRuntimeEvent::SurfaceChanged(surface) => {
+            update_terminal_surface(registry, session_id, surface);
+        }
     }
 }
 
@@ -189,5 +242,16 @@ fn update_session(
     {
         session.state = state;
         session.can_reconnect = can_reconnect;
+    }
+}
+
+fn update_terminal_surface(
+    registry: &Arc<Mutex<SessionRegistry>>,
+    session_id: Uuid,
+    surface: TerminalSurfaceState,
+) {
+    let mut registry = registry.lock().expect("lock session registry");
+    if registry.sessions.contains_key(&session_id) {
+        registry.terminal_surfaces.insert(session_id, surface);
     }
 }

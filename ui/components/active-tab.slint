@@ -73,20 +73,14 @@ export component ActiveTab inherits Rectangle {
             TouchArea {
                 width: parent.width;
                 height: parent.height;
-
-                clicked => {
-                    root.close-requested();
-                }
+                clicked => { root.close-requested(); }
             }
         }
     }
 
     TouchArea {
-        width: parent.width;
+        width: close-button.x;
         height: parent.height;
-
-        clicked => {
-            root.selected();
-        }
+        clicked => { root.selected(); }
     }
 }

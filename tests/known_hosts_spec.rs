@@ -91,3 +91,22 @@ fn known_hosts_service_rejects_changed_host_key() {
         other => panic!("expected changed host key result, got {other:?}"),
     }
 }
+
+#[test]
+fn unknown_host_requires_explicit_accept_before_connect_can_continue() {
+    let path = sample_key_path("ensure-trusted");
+    let _ = fs::remove_file(&path);
+    let service = KnownHostsService::new(&path);
+    let key = sample_public_key(1);
+
+    let initial = service.ensure_trusted("example.com", 22, &key);
+    assert!(initial.is_err(), "unknown host should block connect");
+
+    service
+        .accept_unknown("example.com", 22, &key)
+        .expect("accept unknown host");
+
+    service
+        .ensure_trusted("example.com", 22, &key)
+        .expect("trusted host should continue after explicit accept");
+}

@@ -1,0 +1,61 @@
+// Workspace pane that owns the tab strip and content host width contract.
+
+import { ThemeTokens } from "../theme/tokens.slint";
+import { TabBar, WorkspaceTabItem } from "./tabbar.slint";
+import { TerminalSessionHost } from "./terminal-session-host.slint";
+
+export component WorkspacePane inherits Rectangle {
+    in property <[WorkspaceTabItem]> workspace-tab-items: [];
+    in property <string> workspace-session-host-mode: "welcome";
+    in property <string> workspace-session-title: "";
+    in property <string> workspace-session-subtitle: "";
+    in property <string> workspace-session-state: "";
+    in property <bool> workspace-session-can-reconnect: false;
+    in property <string> workspace-session-screen-text: "";
+    in property <int> workspace-session-surface-seqno: 0;
+    callback workspace-tab-selected(string);
+    callback workspace-tab-close-requested(string);
+
+    horizontal-stretch: 1;
+    min-width: 0px;
+    background: ThemeTokens.workspace-surface;
+
+    VerticalLayout {
+        width: 100%;
+        height: 100%;
+        spacing: 0px;
+
+        tab-strip := TabBar {
+            width: 100%;
+            min-width: 0px;
+            items: root.workspace-tab-items;
+
+            tab-selected(session-id) => {
+                root.workspace-tab-selected(session-id);
+            }
+
+            tab-close-requested(session-id) => {
+                root.workspace-tab-close-requested(session-id);
+            }
+        }
+
+        content-host := Rectangle {
+            width: 100%;
+            min-width: 0px;
+            vertical-stretch: 1;
+            background: transparent;
+
+            TerminalSessionHost {
+                width: 100%;
+                height: 100%;
+                mode: root.workspace-session-host-mode;
+                session-title: root.workspace-session-title;
+                session-subtitle: root.workspace-session-subtitle;
+                session-state: root.workspace-session-state;
+                can-reconnect: root.workspace-session-can-reconnect;
+                session-screen-text: root.workspace-session-screen-text;
+                session-surface-seqno: root.workspace-session-surface-seqno;
+            }
+        }
+    }
+}

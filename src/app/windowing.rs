@@ -88,6 +88,38 @@ pub fn apply_restored_window_size<C: ComponentHandle>(component: &C, size: (u32,
         .set_size(PhysicalSize::new(size.0, size.1));
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModalOffset {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModalDragState {
+    anchor_x: f32,
+    anchor_y: f32,
+    origin: ModalOffset,
+}
+
+pub fn begin_modal_drag(
+    pointer_x: f32,
+    pointer_y: f32,
+    current_offset: ModalOffset,
+) -> ModalDragState {
+    ModalDragState {
+        anchor_x: pointer_x,
+        anchor_y: pointer_y,
+        origin: current_offset,
+    }
+}
+
+pub fn update_modal_drag(state: ModalDragState, pointer_x: f32, pointer_y: f32) -> ModalOffset {
+    ModalOffset {
+        x: state.origin.x + (pointer_x - state.anchor_x),
+        y: state.origin.y + (pointer_y - state.anchor_y),
+    }
+}
+
 pub struct WindowController<C: ComponentHandle> {
     component: slint::Weak<C>,
 }

@@ -92,8 +92,13 @@ fn loaded_catalog_for_bootstrap() -> PersistedAssetCatalog {
                         host: "gateway.example.com".into(),
                         user: "ops".into(),
                         port: "2022".into(),
+                        auth_method: "password".into(),
+                        private_key_source: "content".into(),
+                        private_key_path: String::new(),
                         environment: "prod".into(),
                         proxy_method: "jump-host".into(),
+                        remark: String::new(),
+                        credential_ref: None,
                     }),
                 },
             ),
@@ -304,7 +309,7 @@ fn save_failure_logs_error_without_persisting_ui_session_state() {
 }
 
 #[test]
-fn connect_action_saves_asset_and_opens_workspace_tab() {
+fn save_action_persists_asset_without_opening_session() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -320,7 +325,59 @@ fn connect_action_saves_asset_and_opens_workspace_tab() {
     app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
     app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
     app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
-    app.invoke_asset_ssh_modal_action_requested("connect".into());
+    app.invoke_asset_ssh_modal_action_requested("save".into());
+
+    assert!(!app.get_asset_modal_open());
+    assert_eq!(app.get_console_asset_items().row_count(), 1);
+    assert_eq!(app.get_workspace_tab_items().row_count(), 0);
+    assert!(app.get_active_workspace_session_id().is_empty());
+}
+
+#[test]
+fn connect_action_opens_temporary_session_without_persisting_asset() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store_and_effects_and_asset_repo(
+        &app,
+        None,
+        default_platform_window_effects(),
+        None,
+    );
+
+    for _ in 0..2 {
+        app.invoke_assets_create_action_selected("new-ssh-connection".into());
+        app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+        app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+        app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+        app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+        app.invoke_asset_ssh_modal_action_requested("connect".into());
+    }
+
+    assert!(!app.get_asset_modal_open());
+    assert_eq!(app.get_console_asset_items().row_count(), 0);
+    assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+    assert!(!app.get_active_workspace_session_id().is_empty());
+}
+
+#[test]
+fn save_and_connect_persists_then_opens_session() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store_and_effects_and_asset_repo(
+        &app,
+        None,
+        default_platform_window_effects(),
+        None,
+    );
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+    app.invoke_asset_ssh_modal_action_requested("save-and-connect".into());
 
     assert!(!app.get_asset_modal_open());
     assert_eq!(app.get_console_asset_items().row_count(), 1);

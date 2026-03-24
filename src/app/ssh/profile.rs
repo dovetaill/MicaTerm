@@ -2,6 +2,8 @@
 
 use anyhow::{Context, bail};
 
+use crate::app::ssh::credentials::{SshCredentialKind, ssh_credential_ref};
+use crate::shell::assets::AssetSshConnectionSpec;
 use crate::shell::view_model::AssetSshConnectionDraft;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +23,9 @@ pub struct ConnectionProfile {
     pub auth_method: SshAuthMethod,
     pub credential_ref: Option<String>,
     pub private_key_path: Option<String>,
+    pub password: Option<String>,
+    pub private_key_content: Option<String>,
+    pub passphrase: Option<String>,
     pub remark: String,
 }
 
@@ -96,7 +101,79 @@ impl ConnectionProfile {
             auth_method,
             credential_ref,
             private_key_path,
+            password: (!draft.password.trim().is_empty()).then(|| draft.password.clone()),
+            private_key_content: (!draft.private_key_content.trim().is_empty())
+                .then(|| draft.private_key_content.clone()),
+            passphrase: (!draft.passphrase.trim().is_empty()).then(|| draft.passphrase.clone()),
             remark: draft.remark.trim().to_string(),
+        })
+    }
+
+    pub fn from_saved_asset(
+        asset_id: &str,
+        title: &str,
+        spec: &AssetSshConnectionSpec,
+    ) -> anyhow::Result<Self> {
+        let host = spec.host.trim().to_string();
+        let user = spec.user.trim().to_string();
+        let name = title.trim().to_string();
+        let port = if spec.port.trim().is_empty() {
+            22
+        } else {
+            spec.port
+                .trim()
+                .parse::<u16>()
+                .with_context(|| format!("invalid ssh port: {}", spec.port.trim()))?
+        };
+
+        if name.is_empty() {
+            bail!("ssh profile name is required");
+        }
+        if host.is_empty() {
+            bail!("ssh profile host is required");
+        }
+        if user.is_empty() {
+            bail!("ssh profile user is required");
+        }
+
+        let saved_credential_ref = spec
+            .credential_ref
+            .clone()
+            .or_else(|| Some(ssh_credential_ref(asset_id, SshCredentialKind::SavedSecrets)));
+
+        let (auth_method, credential_ref, private_key_path) = match spec.auth_method.as_str() {
+            "password" => (SshAuthMethod::Password, saved_credential_ref, None),
+            "private-key" => match spec.private_key_source.as_str() {
+                "path" => {
+                    let private_key_path = spec.private_key_path.trim();
+                    if private_key_path.is_empty() {
+                        bail!("private key path authentication requires a file path");
+                    }
+                    (
+                        SshAuthMethod::PrivateKeyPath,
+                        None,
+                        Some(private_key_path.to_string()),
+                    )
+                }
+                "content" => (SshAuthMethod::PrivateKeyContent, saved_credential_ref, None),
+                other => bail!("unsupported private key source: {other}"),
+            },
+            other => bail!("unsupported ssh auth method: {other}"),
+        };
+
+        Ok(Self {
+            asset_id: Some(asset_id.to_string()),
+            name,
+            host,
+            user,
+            port,
+            auth_method,
+            credential_ref,
+            private_key_path,
+            password: None,
+            private_key_content: None,
+            passphrase: None,
+            remark: spec.remark.trim().to_string(),
         })
     }
 }

@@ -1,5 +1,7 @@
 //! Layout policy coverage for sidebar and right-panel visibility decisions.
 
+use std::fs;
+
 use mica_term::shell::layout::{ShellLayoutInput, resolve_shell_layout};
 use mica_term::shell::metrics::ShellMetrics;
 
@@ -45,4 +47,23 @@ fn layout_policy_preserves_requested_state_when_regions_are_not_requested() {
 
     assert!(!layout.show_assets_sidebar);
     assert!(!layout.show_right_panel);
+}
+
+#[test]
+fn workspace_pane_requires_fill_width_contract_for_tab_strip_and_content_host() {
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+
+    assert!(
+        workspace_pane.contains("horizontal-stretch: 1;"),
+        "WorkspacePane should claim horizontal stretch for the workspace surface"
+    );
+    assert!(
+        workspace_pane.contains("min-width: 0px;"),
+        "WorkspacePane should clamp tab strip and content host min-width to zero"
+    );
+    assert!(
+        workspace_pane.contains("width: 100%;"),
+        "WorkspacePane should keep both tab strip and content host on a fill-width contract"
+    );
 }
