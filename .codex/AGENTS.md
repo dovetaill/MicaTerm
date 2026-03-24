@@ -250,6 +250,26 @@
 | 全程遵循行业最佳实践 | |
 | 编码前分析上下文和相似实现，确认依赖、输入输出与测试约定 | 基于研究文档 |
 
+## 4.5 UI / 状态一致性强约束
+
+| instruction | notes |
+| --- | --- |
+| 禁止为了通过 `cargo check`、`cargo clippy`、smoke test 或字符串契约测试，擅自修改 Slint 组件的布局职责、父子层级、尺寸绑定或事件命中关系 | 编译通过不代表 UI 正确 |
+| 涉及 modal、titlebar、sidebar、workspace 等核心 UI 结构时，必须先确认“谁负责外壳、谁负责 header、谁负责 content、谁负责 footer”，不得在未证明根因前重组组件职责 | 先查 root cause，再动结构 |
+| 对 Slint 布局问题，测试只能作为最低门槛；若用户报告运行时几何、命中区、显隐状态异常，必须以实际运行效果、截图、已知正常提交对比为准，不得以“测试已过”宣称问题解决 | 运行时表现优先 |
+| 修改 UI 前必须对比最近已知正常版本或 working pattern，明确列出差异；禁止在未完成差异分析前做结构性替换 | 避免猜测式修复 |
+| 禁止通过删除显式 `width` / `height`、改写 `parent` 绑定、移动 `@children` 容器、替换 overlay / content-host 结构等方式做试错式修补，除非已有证据证明该层就是根因 | 防止引入级联回归 |
+| 若一次修复涉及布局契约变化，必须补充对应的运行时验证步骤与失败回滚点，确保可以定位是结构问题还是样式问题 | 保持可诊断性 |
+
+## 4.6 SSH Modal / Secret 处理约束
+
+| instruction | notes |
+| --- | --- |
+| SSH 新建、编辑、测试连接、保存、连接等流程必须共享同一套 secret 可用性规则，禁止出现“校验允许 / 运行时报缺失”或“测试可用 / 保存不可用”的分叉行为 | 校验与运行时必须一致 |
+| 编辑已保存 SSH 资产时，password / inline private key / passphrase 的“可复用已保存 secret”判断必须与运行时加载逻辑一致，必须覆盖 legacy 数据缺失 `credential_ref` 的兼容路径 | 避免编辑 modal 误报缺少密钥 |
+| 对 SSH 凭据相关改动，禁止仅修改 UI 层提示文案或按钮状态而不核对 Rust 侧 `view_model`、profile 构造、credential store、runtime auth 四层数据流 | 必须全链路核对 |
+| 若 secret 复用、清除、保存、回填任一规则发生变更，必须先补 failing test，再修实现，并验证新建与编辑两个场景 | 防止只修一半 |
+
 ## 5. 测试与验证
 
 | instruction | notes |
