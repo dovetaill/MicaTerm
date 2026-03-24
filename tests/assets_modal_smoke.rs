@@ -380,6 +380,27 @@ fn blocking_modal_shell_owns_shared_asset_modal_chrome_contract() {
 }
 
 #[test]
+fn blocking_modal_children_bind_overlay_parent_dimensions() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(app_window.contains(
+        "asset-folder-modal-overlay := AssetsFolderCreateModal {\n            x: 0px;\n            y: 0px;\n            width: parent.width;"
+    ));
+    assert!(app_window.contains(
+        "asset-ssh-modal-overlay := AssetsSshConnectionModal {\n            x: 0px;\n            y: 0px;\n            width: parent.width;"
+    ));
+    assert!(app_window.contains(
+        "asset-rename-modal-overlay := AssetsRenameModal {\n            x: 0px;\n            y: 0px;\n            width: parent.width;"
+    ));
+    assert!(app_window.contains(
+        "asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {\n            x: 0px;\n            y: 0px;\n            width: parent.width;"
+    ));
+    assert!(app_window.contains(
+        "ssh-host-key-modal-overlay := SshHostKeyConfirmModal {\n            x: 0px;\n            y: 0px;\n            width: parent.width;"
+    ));
+}
+
+#[test]
 fn create_modals_project_inline_validation_message_and_confirm_state() {
     i_slint_backend_testing::init_no_event_loop();
 

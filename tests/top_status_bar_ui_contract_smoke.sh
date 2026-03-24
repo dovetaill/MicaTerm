@@ -47,6 +47,7 @@ grep -F 'nav-button.absolute-position.x' "$TITLEBAR" >/dev/null
 grep -F 'nav-button.absolute-position.y' "$TITLEBAR" >/dev/null
 grep -F 'chrome-host := Rectangle' "$APP_WINDOW" >/dev/null
 grep -F 'titlebar := Titlebar {' "$APP_WINDOW" >/dev/null
+grep -F 'show-right-panel: root.effective-show-right-panel;' "$APP_WINDOW" >/dev/null
 grep -F 'tooltip-overlay := TitlebarTooltip {' "$APP_WINDOW" >/dev/null
 grep -F 'text: titlebar.tooltip-text;' "$APP_WINDOW" >/dev/null
 grep -F 'anchor-x: titlebar.tooltip-anchor-x;' "$APP_WINDOW" >/dev/null

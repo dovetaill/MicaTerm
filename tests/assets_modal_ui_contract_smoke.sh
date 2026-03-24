@@ -42,6 +42,16 @@ grep -F 'asset-ssh-modal-overlay := AssetsSshConnectionModal {' "$APP_WINDOW" >/
 grep -F 'asset-rename-modal-overlay := AssetsRenameModal {' "$APP_WINDOW" >/dev/null
 grep -F 'asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {' "$APP_WINDOW" >/dev/null
 grep -F 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDOW" >/dev/null
+grep -F -A4 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" | grep -F 'width: parent.width;' >/dev/null
+grep -F -A5 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" | grep -F 'height: parent.height;' >/dev/null
+grep -F -A4 'asset-ssh-modal-overlay := AssetsSshConnectionModal {' "$APP_WINDOW" | grep -F 'width: parent.width;' >/dev/null
+grep -F -A5 'asset-ssh-modal-overlay := AssetsSshConnectionModal {' "$APP_WINDOW" | grep -F 'height: parent.height;' >/dev/null
+grep -F -A4 'asset-rename-modal-overlay := AssetsRenameModal {' "$APP_WINDOW" | grep -F 'width: parent.width;' >/dev/null
+grep -F -A5 'asset-rename-modal-overlay := AssetsRenameModal {' "$APP_WINDOW" | grep -F 'height: parent.height;' >/dev/null
+grep -F -A4 'asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {' "$APP_WINDOW" | grep -F 'width: parent.width;' >/dev/null
+grep -F -A5 'asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {' "$APP_WINDOW" | grep -F 'height: parent.height;' >/dev/null
+grep -F -A4 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDOW" | grep -F 'width: parent.width;' >/dev/null
+grep -F -A5 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDOW" | grep -F 'height: parent.height;' >/dev/null
 grep -F 'dialog-title: root.asset-ssh-modal-dialog-title;' "$APP_WINDOW" >/dev/null
 grep -F 'x: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'y: 0px;' "$APP_WINDOW" >/dev/null
