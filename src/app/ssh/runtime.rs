@@ -19,7 +19,7 @@ use wezterm_term::color::ColorPalette;
 use wezterm_term::{Terminal, TerminalConfiguration, TerminalSize};
 
 use crate::app::ssh::credentials::{
-    StoredSshSecretBundle, SystemCredentialStore, load_secret_bundle,
+    CredentialStore, StoredSshSecretBundle, SystemCredentialStore, load_secret_bundle,
 };
 use crate::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
@@ -124,6 +124,21 @@ impl SshSessionRuntime {
         session_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Result<Self> {
+        Self::connect_with_credential_store(
+            profile,
+            session_id,
+            event_tx,
+            Arc::new(SystemCredentialStore),
+        )
+        .await
+    }
+
+    pub async fn connect_with_credential_store(
+        profile: ConnectionProfile,
+        session_id: Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+        credential_store: Arc<dyn CredentialStore>,
+    ) -> Result<Self> {
         tracing::info!(
             target: "app.ssh",
             session_id = session_id.to_string(),
@@ -166,7 +181,7 @@ impl SshSessionRuntime {
             "ssh runtime established transport connection"
         );
 
-        authenticate_client(&mut handle, &profile).await?;
+        authenticate_client(&mut handle, &profile, credential_store.as_ref()).await?;
         tracing::info!(
             target: "app.ssh",
             session_id = session_id.to_string(),
@@ -280,8 +295,9 @@ impl SessionRuntimeControl for SshSessionRuntime {
 async fn authenticate_client(
     handle: &mut client::Handle<RuntimeClientHandler>,
     profile: &ConnectionProfile,
+    credential_store: &dyn CredentialStore,
 ) -> Result<()> {
-    let stored_bundle = load_stored_secret_bundle(profile)?;
+    let stored_bundle = load_stored_secret_bundle(profile, credential_store)?;
     tracing::info!(
         target: "app.ssh",
         asset_id = profile.asset_id.as_deref().unwrap_or(""),
@@ -339,7 +355,12 @@ async fn authenticate_client(
                 .clone()
                 .or(stored_bundle.private_key_content)
                 .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| anyhow!("missing inline SSH private key secret for `{}`", profile.name))?;
+                .ok_or_else(|| {
+                    anyhow!(
+                        "missing inline SSH private key secret for `{}`",
+                        profile.name
+                    )
+                })?;
             let passphrase = profile.passphrase.clone().or(stored_bundle.passphrase);
             let private_key = keys::decode_secret_key(&private_key_content, passphrase.as_deref())
                 .context("failed to decode inline SSH private key")?;
@@ -368,7 +389,10 @@ fn ensure_auth_success(result: AuthResult, method: &str) -> Result<()> {
     }
 }
 
-fn load_stored_secret_bundle(profile: &ConnectionProfile) -> Result<StoredSshSecretBundle> {
+fn load_stored_secret_bundle(
+    profile: &ConnectionProfile,
+    credential_store: &dyn CredentialStore,
+) -> Result<StoredSshSecretBundle> {
     let Some(credential_ref) = profile.credential_ref.as_deref() else {
         tracing::info!(
             target: "app.ssh",
@@ -379,7 +403,6 @@ fn load_stored_secret_bundle(profile: &ConnectionProfile) -> Result<StoredSshSec
         return Ok(StoredSshSecretBundle::default());
     };
 
-    let store = SystemCredentialStore;
     tracing::info!(
         target: "app.ssh",
         asset_id = profile.asset_id.as_deref().unwrap_or(""),
@@ -387,7 +410,7 @@ fn load_stored_secret_bundle(profile: &ConnectionProfile) -> Result<StoredSshSec
         credential_ref = credential_ref,
         "loading stored ssh secret bundle"
     );
-    let bundle = load_secret_bundle(&store, credential_ref)?;
+    let bundle = load_secret_bundle(credential_store, credential_ref)?;
     Ok(match profile.auth_method {
         SshAuthMethod::Password => bundle,
         SshAuthMethod::PrivateKeyContent if bundle.private_key_content.is_some() => bundle,

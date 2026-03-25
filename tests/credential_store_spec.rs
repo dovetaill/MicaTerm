@@ -1,8 +1,10 @@
 use mica_term::app::ssh::credentials::{
-    CredentialStore, MemoryCredentialStore, SshCredentialKind, StoredSshSecretBundle,
-    load_secret_bundle, merge_edit_bundle, persist_secret_bundle, ssh_credential_ref,
+    CachedCredentialStore, CredentialStore, MemoryCredentialStore, SshCredentialKind,
+    StoredSshSecretBundle, load_secret_bundle, merge_edit_bundle, persist_secret_bundle,
+    ssh_credential_ref,
 };
 use mica_term::shell::view_model::AssetSshConnectionDraft;
+use std::sync::Arc;
 
 #[test]
 fn credential_store_round_trips_password_secret() {
@@ -173,4 +175,53 @@ fn explicit_clear_saved_secret_deletes_bundle() {
     let merged = merge_edit_bundle(existing, &draft);
 
     assert!(merged.is_empty());
+}
+
+#[test]
+fn cached_credential_store_survives_same_process_backend_read_miss() {
+    let backing = Arc::new(MemoryCredentialStore::default());
+    let store = CachedCredentialStore::new(backing.clone() as Arc<dyn CredentialStore>);
+    let credential_ref = ssh_credential_ref("asset-prod", SshCredentialKind::SavedSecrets);
+
+    store
+        .put_secret(credential_ref.as_str(), "super-secret")
+        .expect("write cached secret");
+    backing
+        .delete_secret(credential_ref.as_str())
+        .expect("simulate backend read miss");
+
+    assert_eq!(
+        store
+            .get_secret(credential_ref.as_str())
+            .expect("read cached secret after backend miss")
+            .as_deref(),
+        Some("super-secret")
+    );
+}
+
+#[test]
+fn cached_credential_store_delete_clears_cache_and_backing_store() {
+    let backing = Arc::new(MemoryCredentialStore::default());
+    let store = CachedCredentialStore::new(backing.clone() as Arc<dyn CredentialStore>);
+    let credential_ref = ssh_credential_ref("asset-prod", SshCredentialKind::SavedSecrets);
+
+    store
+        .put_secret(credential_ref.as_str(), "super-secret")
+        .expect("write cached secret");
+    store
+        .delete_secret(credential_ref.as_str())
+        .expect("delete cached secret");
+
+    assert_eq!(
+        store
+            .get_secret(credential_ref.as_str())
+            .expect("read cached store after delete"),
+        None
+    );
+    assert_eq!(
+        backing
+            .get_secret(credential_ref.as_str())
+            .expect("read backing store after delete"),
+        None
+    );
 }

@@ -27,8 +27,8 @@ use crate::app::assets_catalog::{
 use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::ssh::credentials::{
-    CredentialStore, StoredSshSecretBundle, SystemCredentialStore, load_secret_bundle,
-    merge_edit_bundle, persist_secret_bundle,
+    CachedCredentialStore, CredentialStore, StoredSshSecretBundle, SystemCredentialStore,
+    load_secret_bundle, merge_edit_bundle, persist_secret_bundle,
 };
 use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::ConnectionProfile;
@@ -93,8 +93,10 @@ enum HostKeyApprovalIntent {
     OpenSession(OpenSessionMode),
 }
 
-#[derive(Clone, Default)]
-struct LiveSessionRuntimeLauncher;
+#[derive(Clone)]
+struct LiveSessionRuntimeLauncher {
+    credential_store: Arc<dyn CredentialStore>,
+}
 
 impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
     fn launch(
@@ -104,8 +106,15 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
+        let credential_store = Arc::clone(&self.credential_store);
         Box::pin(async move {
-            let session = SshSessionRuntime::connect(profile, session_id, event_tx).await?;
+            let session = SshSessionRuntime::connect_with_credential_store(
+                profile,
+                session_id,
+                event_tx,
+                credential_store,
+            )
+            .await?;
             Ok(Box::new(session) as Box<dyn SessionRuntimeControl>)
         })
     }
@@ -114,9 +123,16 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
         &self,
         profile: ConnectionProfile,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        let credential_store = Arc::clone(&self.credential_store);
         Box::pin(async move {
             let (event_tx, _event_rx) = mpsc::unbounded_channel();
-            let runtime = SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx).await?;
+            let runtime = SshSessionRuntime::connect_with_credential_store(
+                profile,
+                Uuid::new_v4(),
+                event_tx,
+                credential_store,
+            )
+            .await?;
             runtime.disconnect()?;
             Ok(())
         })
@@ -377,8 +393,9 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
                 draft.secret_retention_message.clone().into(),
             );
             window.set_asset_ssh_modal_can_clear_saved_secret(draft.can_clear_saved_secret);
-            window
-                .set_asset_ssh_modal_clear_saved_secret_requested(draft.clear_saved_secret_requested);
+            window.set_asset_ssh_modal_clear_saved_secret_requested(
+                draft.clear_saved_secret_requested,
+            );
             window.set_asset_ssh_modal_connect_family_enabled(
                 state.ssh_modal_connect_family_enabled(),
             );
@@ -535,11 +552,18 @@ fn parse_context_target_kind(value: &str) -> ContextTargetKind {
     }
 }
 
-fn build_session_bridge(runtime_handle: tokio::runtime::Handle) -> Rc<ShellSessionBridge> {
+fn shared_system_credential_store() -> Arc<dyn CredentialStore> {
+    Arc::new(CachedCredentialStore::new(Arc::new(SystemCredentialStore)))
+}
+
+fn build_session_bridge(
+    runtime_handle: tokio::runtime::Handle,
+    credential_store: Arc<dyn CredentialStore>,
+) -> Rc<ShellSessionBridge> {
     Rc::new(ShellSessionBridge {
         manager: SessionManager::new_with_launcher(
             runtime_handle,
-            Arc::new(LiveSessionRuntimeLauncher),
+            Arc::new(LiveSessionRuntimeLauncher { credential_store }),
         ),
     })
 }
@@ -548,7 +572,10 @@ fn selection_context_for(state: &ShellViewModel) -> SelectionContext {
     state.context_menu_selection()
 }
 
-fn profile_for_saved_asset(state: &ShellViewModel, asset_id: &str) -> anyhow::Result<ConnectionProfile> {
+fn profile_for_saved_asset(
+    state: &ShellViewModel,
+    asset_id: &str,
+) -> anyhow::Result<ConnectionProfile> {
     let node = state
         .console_asset_tree()
         .node(asset_id)
@@ -556,7 +583,9 @@ fn profile_for_saved_asset(state: &ShellViewModel, asset_id: &str) -> anyhow::Re
     let spec = state
         .console_asset_tree()
         .ssh_connection_spec(asset_id)
-        .with_context(|| format!("saved ssh asset `{asset_id}` is missing its connection payload"))?;
+        .with_context(|| {
+            format!("saved ssh asset `{asset_id}` is missing its connection payload")
+        })?;
     tracing::info!(
         target: "app.ssh",
         asset_id = asset_id,
@@ -579,9 +608,12 @@ fn profile_for_modal_action(
     else {
         return ConnectionProfile::from_draft(draft);
     };
-    let spec = state.console_asset_tree().ssh_connection_spec(asset_id).with_context(|| {
-        format!("saved ssh asset `{asset_id}` is missing its connection payload")
-    })?;
+    let spec = state
+        .console_asset_tree()
+        .ssh_connection_spec(asset_id)
+        .with_context(|| {
+            format!("saved ssh asset `{asset_id}` is missing its connection payload")
+        })?;
     ConnectionProfile::from_modal_draft(asset_id, spec, draft)
 }
 
@@ -745,7 +777,10 @@ fn forward_active_workspace_text_input(
         return;
     }
 
-    if let Err(err) = bridge.manager.send_session_input(session_id, text.as_bytes().to_vec()) {
+    if let Err(err) = bridge
+        .manager
+        .send_session_input(session_id, text.as_bytes().to_vec())
+    {
         tracing::error!(
             target: "app.ssh",
             session_id = session_id.to_string(),
@@ -1723,6 +1758,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
     asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
     launcher: Arc<dyn SessionRuntimeLauncher>,
 ) {
+    let credential_store = shared_system_credential_store();
     let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
         Ok(runtime) => {
             let session_bridge = Rc::new(ShellSessionBridge {
@@ -1748,7 +1784,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
         asset_repo,
         session_bridge,
         session_runtime_guard,
-        Arc::new(SystemCredentialStore),
+        credential_store,
     );
 }
 
@@ -1796,10 +1832,21 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     effects: Rc<dyn PlatformWindowEffects>,
     asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
 ) {
-    let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
+    match AppAsyncRuntime::new() {
         Ok(runtime) => {
-            let session_bridge = build_session_bridge(runtime.handle());
-            (Some(runtime), Some(session_bridge))
+            let credential_store = shared_system_credential_store();
+            let session_bridge =
+                build_session_bridge(runtime.handle(), Arc::clone(&credential_store));
+            bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
+                window,
+                store,
+                _profile,
+                effects,
+                asset_repo,
+                Some(session_bridge),
+                Some(runtime),
+                credential_store,
+            );
         }
         Err(err) => {
             tracing::error!(
@@ -1807,19 +1854,18 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
                 error = %err,
                 "failed to create default app async runtime for shell services"
             );
-            (None, None)
+            bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
+                window,
+                store,
+                _profile,
+                effects,
+                asset_repo,
+                None,
+                None,
+                shared_system_credential_store(),
+            );
         }
-    };
-    bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
-        window,
-        store,
-        _profile,
-        effects,
-        asset_repo,
-        session_bridge,
-        session_runtime_guard,
-        Arc::new(SystemCredentialStore),
-    );
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2682,8 +2728,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                             "opening ssh asset in a new tab from context menu"
                         );
                         state.close_context_menu();
-                        if let Some(asset_id) = target_asset_id
-                        {
+                        if let Some(asset_id) = target_asset_id {
                             match profile_for_saved_asset(&state, &asset_id) {
                                 Ok(profile) => {
                                     if let Some(session_bridge) = session_bridge_ref.as_ref() {
@@ -2923,7 +2968,9 @@ fn bind_top_status_bar_with_profile_and_async_handle(
     let effects = default_platform_window_effects();
     match async_runtime_handle {
         Some(async_runtime_handle) => {
-            let session_bridge = build_session_bridge(async_runtime_handle);
+            let credential_store = shared_system_credential_store();
+            let session_bridge =
+                build_session_bridge(async_runtime_handle, Arc::clone(&credential_store));
             bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 window,
                 store,
@@ -2932,7 +2979,7 @@ fn bind_top_status_bar_with_profile_and_async_handle(
                 asset_repo,
                 Some(session_bridge),
                 None,
-                Arc::new(SystemCredentialStore),
+                credential_store,
             );
         }
         None => {

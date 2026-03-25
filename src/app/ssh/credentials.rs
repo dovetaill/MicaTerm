@@ -1,7 +1,7 @@
 //! Credential storage adapters for SSH secrets.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,20 @@ pub trait CredentialStore: Send + Sync {
     fn put_secret(&self, key: &str, value: &str) -> Result<()>;
     fn get_secret(&self, key: &str) -> Result<Option<String>>;
     fn delete_secret(&self, key: &str) -> Result<()>;
+}
+
+pub struct CachedCredentialStore {
+    backing: Arc<dyn CredentialStore>,
+    cache: Mutex<HashMap<String, String>>,
+}
+
+impl CachedCredentialStore {
+    pub fn new(backing: Arc<dyn CredentialStore>) -> Self {
+        Self {
+            backing,
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,12 +89,14 @@ pub fn load_secret_bundle(
         return Ok(StoredSshSecretBundle::default());
     };
 
-    Ok(serde_json::from_str::<StoredSshSecretBundle>(&raw).unwrap_or_else(|_| {
-        StoredSshSecretBundle {
-            password: Some(raw),
-            ..StoredSshSecretBundle::default()
-        }
-    }))
+    Ok(
+        serde_json::from_str::<StoredSshSecretBundle>(&raw).unwrap_or_else(|_| {
+            StoredSshSecretBundle {
+                password: Some(raw),
+                ..StoredSshSecretBundle::default()
+            }
+        }),
+    )
 }
 
 pub fn merge_edit_bundle(
@@ -146,6 +162,50 @@ impl CredentialStore for MemoryCredentialStore {
             .map_err(|_| anyhow!("memory credential store lock poisoned"))?;
         secrets.remove(key);
         Ok(())
+    }
+}
+
+impl CredentialStore for CachedCredentialStore {
+    fn put_secret(&self, key: &str, value: &str) -> Result<()> {
+        self.backing.put_secret(key, value)?;
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| anyhow!("cached credential store lock poisoned"))?;
+        cache.insert(key.to_string(), value.to_string());
+        Ok(())
+    }
+
+    fn get_secret(&self, key: &str) -> Result<Option<String>> {
+        {
+            let cache = self
+                .cache
+                .lock()
+                .map_err(|_| anyhow!("cached credential store lock poisoned"))?;
+            if let Some(secret) = cache.get(key) {
+                return Ok(Some(secret.clone()));
+            }
+        }
+
+        let value = self.backing.get_secret(key)?;
+        if let Some(secret) = value.as_ref() {
+            let mut cache = self
+                .cache
+                .lock()
+                .map_err(|_| anyhow!("cached credential store lock poisoned"))?;
+            cache.insert(key.to_string(), secret.clone());
+        }
+        Ok(value)
+    }
+
+    fn delete_secret(&self, key: &str) -> Result<()> {
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| anyhow!("cached credential store lock poisoned"))?;
+        cache.remove(key);
+        drop(cache);
+        self.backing.delete_secret(key)
     }
 }
 
