@@ -209,26 +209,27 @@ fn ssh_modal_round_trips_password_visibility_without_secret_retention_flags() {
 }
 
 #[test]
-fn ssh_modal_round_trips_secret_retention_copy_and_clear_affordance() {
-    i_slint_backend_testing::init_no_event_loop();
+fn ssh_modal_contract_removes_saved_secret_retention_flags() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let ssh_modal = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
 
-    let app = AppWindow::new().unwrap();
-
-    app.set_asset_modal_open(true);
-    app.set_asset_modal_kind("new-ssh-connection".into());
-    app.set_asset_ssh_modal_secret_retention_message(
-        "Leave password / private key / passphrase blank to keep the saved secret.".into(),
+    assert!(
+        !app_window.contains("asset-ssh-modal-secret-retention-message"),
+        "app window should stop projecting saved-secret retention copy"
     );
-    app.set_asset_ssh_modal_can_clear_saved_secret(true);
-    app.set_asset_ssh_modal_clear_saved_secret_requested(true);
-
-    assert!(app.get_asset_modal_open());
-    assert_eq!(
-        app.get_asset_ssh_modal_secret_retention_message().as_str(),
-        "Leave password / private key / passphrase blank to keep the saved secret."
+    assert!(
+        !app_window.contains("asset-ssh-modal-can-clear-saved-secret"),
+        "app window should stop projecting clear-secret affordance state"
     );
-    assert!(app.get_asset_ssh_modal_can_clear_saved_secret());
-    assert!(app.get_asset_ssh_modal_clear_saved_secret_requested());
+    assert!(
+        !app_window.contains("asset-ssh-modal-clear-saved-secret-requested"),
+        "app window should stop projecting clear-secret request state"
+    );
+    assert!(
+        !ssh_modal.contains("Clear Saved Secret"),
+        "ssh modal should remove the clear-secret button"
+    );
 }
 
 #[test]

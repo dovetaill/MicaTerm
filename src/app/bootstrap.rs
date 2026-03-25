@@ -19,7 +19,7 @@ use crate::AppWindow;
 use crate::AssetsContextMenuItem;
 use crate::ConsoleAssetItem;
 use crate::WorkspaceTabItem;
-use crate::app::app_paths::{AppRootPathInputs, resolve_app_root_paths};
+use crate::app::app_paths::{AppRootPathInputs, AppRootPaths, resolve_app_root_paths};
 use crate::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
     RedbAssetCatalogStore, asset_tree_to_catalog, catalog_to_asset_tree,
@@ -27,9 +27,8 @@ use crate::app::assets_catalog::{
 use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::ssh::credentials::{
-    CachedCredentialStore, CredentialStore, StoredSecretLookupError, StoredSshSecretBundle,
-    SystemCredentialStore, load_secret_bundle, merge_edit_bundle, persist_secret_bundle,
-    required_secret_bundle_field,
+    CachedCredentialStore, CredentialStore, FileCredentialStore, StoredSecretLookupError,
+    StoredSshSecretBundle, persist_secret_bundle, required_secret_bundle_field,
 };
 use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
@@ -353,9 +352,6 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
-            window.set_asset_ssh_modal_secret_retention_message("".into());
-            window.set_asset_ssh_modal_can_clear_saved_secret(false);
-            window.set_asset_ssh_modal_clear_saved_secret_requested(false);
         }
         Some(AssetModalState::NewSshConnection {
             draft,
@@ -399,13 +395,6 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_remark(draft.remark.clone().into());
             window.set_asset_ssh_modal_environment(draft.environment.clone().into());
             window.set_asset_ssh_modal_proxy_method(draft.proxy_method.clone().into());
-            window.set_asset_ssh_modal_secret_retention_message(
-                draft.secret_retention_message.clone().into(),
-            );
-            window.set_asset_ssh_modal_can_clear_saved_secret(draft.can_clear_saved_secret);
-            window.set_asset_ssh_modal_clear_saved_secret_requested(
-                draft.clear_saved_secret_requested,
-            );
             window.set_asset_ssh_modal_connect_family_enabled(
                 state.ssh_modal_connect_family_enabled(),
             );
@@ -445,9 +434,6 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
-            window.set_asset_ssh_modal_secret_retention_message("".into());
-            window.set_asset_ssh_modal_can_clear_saved_secret(false);
-            window.set_asset_ssh_modal_clear_saved_secret_requested(false);
         }
         Some(AssetModalState::DeleteAssetConfirm {
             label,
@@ -484,9 +470,6 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
-            window.set_asset_ssh_modal_secret_retention_message("".into());
-            window.set_asset_ssh_modal_can_clear_saved_secret(false);
-            window.set_asset_ssh_modal_clear_saved_secret_requested(false);
         }
         None => {
             window.set_asset_modal_open(false);
@@ -519,9 +502,6 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
-            window.set_asset_ssh_modal_secret_retention_message("".into());
-            window.set_asset_ssh_modal_can_clear_saved_secret(false);
-            window.set_asset_ssh_modal_clear_saved_secret_requested(false);
         }
     }
 }
@@ -562,8 +542,24 @@ fn parse_context_target_kind(value: &str) -> ContextTargetKind {
     }
 }
 
-fn shared_system_credential_store() -> Arc<dyn CredentialStore> {
-    Arc::new(CachedCredentialStore::new(Arc::new(SystemCredentialStore)))
+fn shared_app_credential_store() -> Arc<dyn CredentialStore> {
+    match app_root_paths_for_app() {
+        Ok(app_paths) => Arc::new(CachedCredentialStore::new(Arc::new(
+            FileCredentialStore::new(app_paths.data_dir.join("credentials")),
+        ))),
+        Err(err) => {
+            let fallback_root = std::env::temp_dir().join("mica-term-fallback-credentials");
+            tracing::error!(
+                target: "app.ssh",
+                error = %err,
+                fallback_root = %fallback_root.display(),
+                "failed to resolve application data directory for ssh credentials; using fallback path"
+            );
+            Arc::new(CachedCredentialStore::new(Arc::new(
+                FileCredentialStore::new(fallback_root),
+            )))
+        }
+    }
 }
 
 fn build_session_bridge(
@@ -790,19 +786,7 @@ fn sync_saved_ssh_secrets(
     }
 
     let next_ref = next_ref.expect("checked credential ref");
-    let next_bundle = if existing_spec.is_some() {
-        if draft.clear_saved_secret_requested {
-            saved_secret_bundle_for_draft(draft)
-        } else {
-            let existing_bundle = previous_ref
-                .map(|credential_ref| load_secret_bundle(store, credential_ref))
-                .transpose()?
-                .unwrap_or_default();
-            merge_edit_bundle(existing_bundle, draft)
-        }
-    } else {
-        saved_secret_bundle_for_draft(draft)
-    };
+    let next_bundle = saved_secret_bundle_for_draft(draft);
     persist_secret_bundle(store, next_ref, &next_bundle)?;
 
     if let Some(previous_ref) = previous_ref
@@ -1845,20 +1829,23 @@ fn save_asset_catalog_if_available(
     }
 }
 
-fn asset_catalog_repository_for_app() -> Result<Rc<dyn AssetCatalogRepository>> {
+fn app_root_paths_for_app() -> Result<AppRootPaths> {
     let project_dirs = ProjectDirs::from("dev", "MicaTerm", "MicaTerm")
         .context("project directories are unavailable")?;
     let executable_dir = std::env::current_exe()?
         .parent()
         .context("executable directory is unavailable")?
         .to_path_buf();
-    let app_paths = resolve_app_root_paths(&AppRootPathInputs {
+    resolve_app_root_paths(&AppRootPathInputs {
         env_root_dir: std::env::var_os("MICA_TERM_APP_DIR").map(PathBuf::from),
         executable_dir,
         standard_local_data_dir: project_dirs.data_local_dir().join("MicaTerm"),
         portable_marker_name: ".mica-term-portable",
-    })?;
+    })
+}
 
+fn asset_catalog_repository_for_app() -> Result<Rc<dyn AssetCatalogRepository>> {
+    let app_paths = app_root_paths_for_app()?;
     Ok(Rc::new(RedbAssetCatalogStore::new(app_paths.data_dir)))
 }
 
@@ -1892,7 +1879,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
     asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
     launcher: Arc<dyn SessionRuntimeLauncher>,
 ) {
-    let credential_store = shared_system_credential_store();
+    let credential_store = shared_app_credential_store();
     let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
         Ok(runtime) => {
             let session_bridge = Rc::new(ShellSessionBridge {
@@ -1968,7 +1955,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
 ) {
     match AppAsyncRuntime::new() {
         Ok(runtime) => {
-            let credential_store = shared_system_credential_store();
+            let credential_store = shared_app_credential_store();
             let session_bridge =
                 build_session_bridge(runtime.handle(), Arc::clone(&credential_store));
             bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
@@ -1996,7 +1983,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
                 asset_repo,
                 None,
                 None,
-                shared_system_credential_store(),
+                shared_app_credential_store(),
             );
         }
     }
@@ -3103,7 +3090,7 @@ fn bind_top_status_bar_with_profile_and_async_handle(
     let effects = default_platform_window_effects();
     match async_runtime_handle {
         Some(async_runtime_handle) => {
-            let credential_store = shared_system_credential_store();
+            let credential_store = shared_app_credential_store();
             let session_bridge =
                 build_session_bridge(async_runtime_handle, Arc::clone(&credential_store));
             bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(

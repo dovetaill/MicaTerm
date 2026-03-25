@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow};
@@ -190,29 +192,24 @@ pub fn required_secret_bundle_field(
 }
 
 pub fn merge_edit_bundle(
-    existing: StoredSshSecretBundle,
+    _existing: StoredSshSecretBundle,
     draft: &AssetSshConnectionDraft,
 ) -> StoredSshSecretBundle {
-    if draft.clear_saved_secret_requested {
-        return StoredSshSecretBundle::default();
-    }
-
     match draft.auth_method.as_str() {
         "password" => StoredSshSecretBundle {
-            password: non_empty_secret(&draft.password).or(existing.password),
+            password: non_empty_secret(&draft.password),
             private_key_content: None,
             passphrase: None,
         },
         "private-key" if draft.private_key_source == "content" => StoredSshSecretBundle {
             password: None,
-            private_key_content: non_empty_secret(&draft.private_key_content)
-                .or(existing.private_key_content),
-            passphrase: non_empty_secret(&draft.passphrase).or(existing.passphrase),
+            private_key_content: non_empty_secret(&draft.private_key_content),
+            passphrase: non_empty_secret(&draft.passphrase),
         },
         "private-key" if draft.private_key_source == "path" => StoredSshSecretBundle {
             password: None,
             private_key_content: None,
-            passphrase: non_empty_secret(&draft.passphrase).or(existing.passphrase),
+            passphrase: non_empty_secret(&draft.passphrase),
         },
         _ => StoredSshSecretBundle::default(),
     }
@@ -296,6 +293,87 @@ impl CredentialStore for CachedCredentialStore {
         cache.remove(key);
         drop(cache);
         self.backing.delete_secret(key)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FileCredentialStore {
+    root_dir: PathBuf,
+}
+
+impl FileCredentialStore {
+    pub fn new(root_dir: PathBuf) -> Self {
+        Self { root_dir }
+    }
+
+    fn secret_path(&self, key: &str) -> Result<PathBuf> {
+        let key_path = Path::new(key);
+        if key_path.is_absolute() {
+            return Err(anyhow!("credential key `{key}` must be relative"));
+        }
+
+        let mut path = self.root_dir.clone();
+        for component in key_path.components() {
+            match component {
+                Component::Normal(segment) => path.push(segment),
+                _ => {
+                    return Err(anyhow!(
+                        "credential key `{key}` contains an invalid path component"
+                    ));
+                }
+            }
+        }
+
+        path.set_extension("json");
+        Ok(path)
+    }
+}
+
+impl CredentialStore for FileCredentialStore {
+    fn put_secret(&self, key: &str, value: &str) -> Result<()> {
+        let path = self.secret_path(key)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create credential store directory `{}`",
+                    parent.display()
+                )
+            })?;
+        }
+        fs::write(&path, value).with_context(|| {
+            format!(
+                "failed to persist secret in file credential store for key `{key}` at `{}`",
+                path.display()
+            )
+        })
+    }
+
+    fn get_secret(&self, key: &str) -> Result<Option<String>> {
+        let path = self.secret_path(key)?;
+        match fs::read_to_string(&path) {
+            Ok(secret) => Ok(Some(secret)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err).with_context(|| {
+                format!(
+                    "failed to read secret from file credential store for key `{key}` at `{}`",
+                    path.display()
+                )
+            }),
+        }
+    }
+
+    fn delete_secret(&self, key: &str) -> Result<()> {
+        let path = self.secret_path(key)?;
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err).with_context(|| {
+                format!(
+                    "failed to delete secret from file credential store for key `{key}` at `{}`",
+                    path.display()
+                )
+            }),
+        }
     }
 }
 

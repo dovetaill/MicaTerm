@@ -366,6 +366,38 @@ fn terminal_session_host_exposes_text_key_and_resize_callbacks() {
 }
 
 #[test]
+fn terminal_session_host_uses_compact_terminal_layout_contract() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        !terminal_host.contains("terminal-cell-width: 9px;"),
+        "terminal host should tighten the cell width from the old wide placeholder layout"
+    );
+    assert!(
+        !terminal_host.contains("terminal-cell-height: 18px;"),
+        "terminal host should tighten the cell height from the old loose placeholder layout"
+    );
+    assert!(
+        !terminal_host.contains("padding-left: 24px;"),
+        "terminal host should not keep the oversized left padding"
+    );
+    assert!(
+        !terminal_host.contains("padding-top: 24px;"),
+        "terminal host should not keep the oversized top padding"
+    );
+    assert!(
+        !terminal_host.contains("font-size: 20px;"),
+        "terminal host should not keep the oversized title treatment"
+    );
+    assert!(
+        !terminal_host
+            .contains("Reconnect is available once session lifecycle wiring is completed."),
+        "session error host should remove the placeholder reconnect copy"
+    );
+}
+
+#[test]
 fn disconnected_and_error_tabs_remain_reconnectable() {
     let disconnected = WorkspaceTab::from_session(&sample_handle(
         "Prod Bastion",

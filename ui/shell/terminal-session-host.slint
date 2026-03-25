@@ -18,14 +18,14 @@ export component TerminalSessionHost inherits Rectangle {
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
 
-    private property <length> terminal-cell-width: 9px;
-    private property <length> terminal-cell-height: 18px;
+    private property <length> terminal-cell-width: 8px;
+    private property <length> terminal-cell-height: 16px;
 
     function emit-surface-resize() {
         if root.mode == "terminal" {
             root.surface-resize-requested(
-                max(1, ((root.height - 121px) / 1px) / (root.terminal-cell-height / 1px)),
-                max(1, ((root.width - 48px) / 1px) / (root.terminal-cell-width / 1px)),
+                max(1, ((root.height - 84px) / 1px) / (root.terminal-cell-height / 1px)),
+                max(1, ((root.width - 28px) / 1px) / (root.terminal-cell-width / 1px)),
             );
         }
     }
@@ -127,45 +127,53 @@ export component TerminalSessionHost inherits Rectangle {
         }
 
         VerticalLayout {
-            padding-left: 24px;
-            padding-top: 24px;
-            padding-right: 24px;
-            padding-bottom: 24px;
-            spacing: 8px;
+            padding-left: 14px;
+            padding-top: 14px;
+            padding-right: 14px;
+            padding-bottom: 14px;
+            spacing: 6px;
 
-            Text {
-                text: root.session-title != "" ? root.session-title : "Terminal Session";
-                color: ThemeTokens.text-primary;
-                font-size: 20px;
-                font-weight: 700;
+            HorizontalLayout {
+                width: parent.width;
+                spacing: 10px;
+
+                Text {
+                    text: root.session-title != "" ? root.session-title : "Terminal Session";
+                    color: ThemeTokens.text-primary;
+                    font-size: 16px;
+                    font-weight: 700;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
+                }
+
+                Text {
+                    text: root.session-state == "connecting" ? "Connecting to remote shell..." : "Interactive terminal ready.";
+                    color: ThemeTokens.dark-mode ? #8ba3bc : #5a6c80;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
             }
 
-            Text {
+            if root.session-subtitle != "" : Text {
                 text: root.session-subtitle;
                 color: ThemeTokens.dark-mode ? #aeb8c7 : #516174;
-                font-size: 13px;
-            }
-
-            Rectangle {
-                height: 1px;
-                width: parent.width;
-                background: ThemeTokens.divider-subtle;
-            }
-
-            Text {
-                text: root.session-state == "connecting" ? "Connecting to remote shell..." :
-                      "Interactive terminal ready.";
-                color: ThemeTokens.dark-mode ? #aeb8c7 : #516174;
-                font-size: 13px;
+                font-size: 12px;
+                overflow: elide;
             }
 
             surface-frame := Rectangle {
                 width: parent.width;
-                min-height: 220px;
+                min-height: 200px;
                 vertical-stretch: 1;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.dark-mode ? #0d1218 : #f4f7fb;
+                background: ThemeTokens.dark-mode ? #0b1117 : #f5f8fc;
 
                 input-capture := TouchArea {
                     width: parent.width;
@@ -177,16 +185,18 @@ export component TerminalSessionHost inherits Rectangle {
                 }
 
                 terminal-lines := ListView {
-                    x: 16px;
-                    y: 16px;
-                    width: parent.width - 32px;
-                    height: max(0px, parent.height - 32px);
+                    x: 12px;
+                    y: 10px;
+                    width: parent.width - 24px;
+                    height: max(0px, parent.height - 20px);
 
                     for line in root.session-visible-lines : Text {
                         width: terminal-lines.width;
+                        height: root.terminal-cell-height;
                         text: line;
                         color: ThemeTokens.text-primary;
-                        font-size: 13px;
+                        font-size: 12px;
+                        vertical-alignment: center;
                     }
                 }
             }
@@ -199,37 +209,34 @@ export component TerminalSessionHost inherits Rectangle {
         background: transparent;
 
         VerticalLayout {
-            padding-left: 24px;
-            padding-top: 24px;
-            spacing: 8px;
+            padding-left: 16px;
+            padding-top: 16px;
+            padding-right: 16px;
+            padding-bottom: 16px;
+            spacing: 6px;
 
             Text {
                 text: root.session-title != "" ? root.session-title : "Session Issue";
                 color: ThemeTokens.text-primary;
-                font-size: 20px;
+                font-size: 16px;
                 font-weight: 700;
             }
 
-            Text {
+            if root.session-subtitle != "" : Text {
                 text: root.session-subtitle;
                 color: ThemeTokens.dark-mode ? #aeb8c7 : #516174;
-                font-size: 13px;
+                font-size: 12px;
             }
 
             Text {
-                text: root.session-state == "disconnected" ? "Connection dropped. The tab remains available for reconnect." :
+                text: root.session-state == "disconnected" && root.can-reconnect ? "Connection dropped. Reconnect is available." :
+                      root.session-state == "disconnected" ? "Connection dropped." :
                       root.session-state == "error" && root.session-error-detail != "" ? root.session-error-detail :
                       root.session-state == "error" ? "Connection failed." :
                       "Session is unavailable.";
                 color: ThemeTokens.text-primary;
-                font-size: 13px;
-                wrap: word-wrap;
-            }
-
-            if root.can-reconnect : Text {
-                text: "Reconnect is available once session lifecycle wiring is completed.";
-                color: ThemeTokens.dark-mode ? #aeb8c7 : #516174;
                 font-size: 12px;
+                wrap: word-wrap;
             }
         }
     }

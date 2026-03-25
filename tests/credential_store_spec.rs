@@ -1,11 +1,18 @@
 use mica_term::app::ssh::credentials::{
-    CachedCredentialStore, CredentialStore, MemoryCredentialStore, SshCredentialKind,
-    StoredSecretLookupError, StoredSshSecretBundle, load_secret_bundle,
+    CachedCredentialStore, CredentialStore, FileCredentialStore, MemoryCredentialStore,
+    SshCredentialKind, StoredSecretLookupError, StoredSshSecretBundle, load_secret_bundle,
     load_secret_bundle_with_diagnostics, merge_edit_bundle, persist_secret_bundle,
     required_secret_bundle_field, ssh_credential_ref,
 };
 use mica_term::shell::view_model::AssetSshConnectionDraft;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
+use uuid::Uuid;
+
+fn temp_credentials_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("mica-term-credential-store-{}", Uuid::new_v4()))
+}
 
 #[test]
 fn credential_store_round_trips_password_secret() {
@@ -153,15 +160,11 @@ fn editing_saved_secret_fields_blank_keeps_existing_bundle() {
 
     let merged = merge_edit_bundle(existing, &draft);
 
-    assert_eq!(
-        merged.private_key_content.as_deref(),
-        Some("-----BEGIN OPENSSH PRIVATE KEY-----")
-    );
-    assert_eq!(merged.passphrase.as_deref(), Some("hunter2"));
+    assert!(merged.is_empty());
 }
 
 #[test]
-fn editing_saved_password_blank_keeps_existing_bundle() {
+fn editing_saved_password_blank_clears_saved_bundle() {
     let existing = StoredSshSecretBundle {
         password: Some("super-secret".into()),
         private_key_content: None,
@@ -169,32 +172,37 @@ fn editing_saved_password_blank_keeps_existing_bundle() {
     };
     let draft = AssetSshConnectionDraft {
         auth_method: "password".into(),
-        ..AssetSshConnectionDraft::default()
-    };
-
-    let merged = merge_edit_bundle(existing, &draft);
-
-    assert_eq!(merged.password.as_deref(), Some("super-secret"));
-    assert_eq!(merged.private_key_content, None);
-    assert_eq!(merged.passphrase, None);
-}
-
-#[test]
-fn explicit_clear_saved_secret_deletes_bundle() {
-    let existing = StoredSshSecretBundle {
-        password: Some("super-secret".into()),
-        private_key_content: None,
-        passphrase: None,
-    };
-    let draft = AssetSshConnectionDraft {
-        auth_method: "password".into(),
-        clear_saved_secret_requested: true,
         ..AssetSshConnectionDraft::default()
     };
 
     let merged = merge_edit_bundle(existing, &draft);
 
     assert!(merged.is_empty());
+}
+
+#[test]
+fn file_credential_store_persists_secret_across_store_instances() {
+    let root = temp_credentials_dir();
+    let credential_ref = ssh_credential_ref("asset-prod", SshCredentialKind::SavedSecrets);
+
+    let store = FileCredentialStore::new(root.clone());
+    persist_secret_bundle(
+        &store,
+        credential_ref.as_str(),
+        &StoredSshSecretBundle {
+            password: Some("super-secret".into()),
+            private_key_content: None,
+            passphrase: None,
+        },
+    )
+    .expect("persist password bundle to file-backed store");
+
+    let reloaded_store = FileCredentialStore::new(root.clone());
+    let bundle =
+        load_secret_bundle(&reloaded_store, credential_ref.as_str()).expect("reload bundle");
+
+    assert_eq!(bundle.password.as_deref(), Some("super-secret"));
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

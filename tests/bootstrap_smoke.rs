@@ -926,7 +926,7 @@ fn editing_saved_private_key_path_modal_hydrates_saved_passphrase() {
 }
 
 #[test]
-fn editing_saved_private_key_path_modal_clear_action_deletes_saved_passphrase() {
+fn editing_saved_private_key_path_modal_saving_blank_passphrase_deletes_saved_passphrase() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -963,7 +963,7 @@ fn editing_saved_private_key_path_modal_clear_action_deletes_saved_passphrase() 
 
     app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
     app.invoke_assets_context_menu_action_invoked("edit-connection".into());
-    app.invoke_asset_ssh_modal_draft_changed("clear_saved_secret".into(), "true".into());
+    app.invoke_asset_ssh_modal_draft_changed("passphrase".into(), "".into());
     app.invoke_asset_ssh_modal_action_requested("save".into());
 
     assert!(!app.get_asset_modal_open());

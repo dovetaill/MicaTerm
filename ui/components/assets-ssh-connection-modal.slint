@@ -208,9 +208,6 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> remark: "";
     in property <string> environment: "";
     in property <string> proxy-method: "";
-    in property <string> secret-retention-message: "Leave password / private key / passphrase blank to keep the saved secret.";
-    in property <bool> can-clear-saved-secret: false;
-    in property <bool> clear-saved-secret-requested: false;
     in property <string> validation-message: "";
     in property <bool> connect-family-enabled: false;
     in property <string> feedback-state: "idle";
@@ -531,52 +528,6 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
 
-                        if root.secret-retention-message != "" : VerticalLayout {
-                            width: parent.width;
-                            spacing: 8px;
-
-                            Text {
-                                width: parent.width;
-                                text: root.secret-retention-message;
-                                color: ThemeTokens.text-primary;
-                                opacity: 0.72;
-                                wrap: word-wrap;
-                            }
-
-                            if root.can-clear-saved-secret : Rectangle {
-                                width: 160px;
-                                height: 30px;
-                                border-radius: 0px;
-                                border-width: 1px;
-                                border-color: ThemeTokens.divider-subtle;
-                                background: clear-secret-password-touch.pressed ? ThemeTokens.control-pressed-surface
-                                    : clear-secret-password-touch.has-hover ? ThemeTokens.control-hover-surface
-                                    : ThemeTokens.control-active-surface;
-
-                                Text {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    text: root.clear-saved-secret-requested ? "Keep Saved Secret" : "Clear Saved Secret";
-                                    color: ThemeTokens.text-primary;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                    font-size: 11px;
-                                }
-
-                                clear-secret-password-touch := TouchArea {
-                                    width: parent.width;
-                                    height: parent.height;
-
-                                    clicked => {
-                                        root.draft-changed(
-                                            "clear_saved_secret",
-                                            root.clear-saved-secret-requested ? "false" : "true"
-                                        );
-                                    }
-                                }
-                            }
-                        }
-
                         if root.auth-method == "private-key" : VerticalLayout {
                             width: parent.width;
                             spacing: 12px;
@@ -636,51 +587,6 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 }
                             }
 
-                            if root.secret-retention-message != "" : VerticalLayout {
-                                width: parent.width;
-                                spacing: 8px;
-
-                                Text {
-                                    width: parent.width;
-                                    text: root.secret-retention-message;
-                                    color: ThemeTokens.text-primary;
-                                    opacity: 0.72;
-                                    wrap: word-wrap;
-                                }
-
-                                if root.can-clear-saved-secret : Rectangle {
-                                    width: 160px;
-                                    height: 30px;
-                                    border-radius: 0px;
-                                    border-width: 1px;
-                                    border-color: ThemeTokens.divider-subtle;
-                                    background: clear-secret-key-touch.pressed ? ThemeTokens.control-pressed-surface
-                                        : clear-secret-key-touch.has-hover ? ThemeTokens.control-hover-surface
-                                        : ThemeTokens.control-active-surface;
-
-                                    Text {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        text: root.clear-saved-secret-requested ? "Keep Saved Secret" : "Clear Saved Secret";
-                                        color: ThemeTokens.text-primary;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                        font-size: 11px;
-                                    }
-
-                                    clear-secret-key-touch := TouchArea {
-                                        width: parent.width;
-                                        height: parent.height;
-
-                                        clicked => {
-                                            root.draft-changed(
-                                                "clear_saved_secret",
-                                                root.clear-saved-secret-requested ? "false" : "true"
-                                            );
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
 

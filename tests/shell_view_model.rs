@@ -176,13 +176,13 @@ fn new_ssh_modal_is_a_grouped_single_page_form() {
         "ssh modal should not keep the legacy Advanced tab in the grouped layout"
     );
     assert!(
-        ssh_modal
+        !ssh_modal
             .contains("Leave password / private key / passphrase blank to keep the saved secret."),
-        "ssh modal should explain the edit-mode leave-blank retention contract"
+        "ssh modal should stop advertising leave-blank secret retention copy"
     );
     assert!(
-        ssh_modal.contains("Clear Saved Secret"),
-        "ssh modal should expose an explicit clear-secret affordance in edit mode"
+        !ssh_modal.contains("Clear Saved Secret"),
+        "ssh modal should remove the legacy clear-secret affordance"
     );
     assert!(ssh_modal.contains("label: \"Password\""));
     assert!(
@@ -956,41 +956,7 @@ fn editing_saved_ssh_modal_keeps_password_fields_hidden_until_secret_hydration_e
 }
 
 #[test]
-fn editing_saved_ssh_modal_exposes_leave_blank_helper_copy() {
-    let mut view_model = ShellViewModel::default();
-    let mut tree = AssetTree::new();
-    let asset_id = tree.insert_root_with_payload(
-        ConsoleAssetKind::SshConnection,
-        "Prod Bastion",
-        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
-            host: "10.0.0.12".into(),
-            user: "ops".into(),
-            port: "22".into(),
-            auth_method: "password".into(),
-            private_key_source: "content".into(),
-            private_key_path: String::new(),
-            environment: String::new(),
-            proxy_method: String::new(),
-            remark: "Saved credential".into(),
-            credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
-        }),
-    );
-    view_model.replace_console_asset_tree(tree);
-
-    view_model.open_edit_ssh_modal(asset_id);
-
-    assert!(matches!(
-        view_model.asset_modal_state,
-        Some(AssetModalState::NewSshConnection { ref draft, .. })
-            if draft.secret_retention_message
-                == "Leave password / private key / passphrase blank to keep the saved secret."
-                && draft.can_clear_saved_secret
-                && !draft.clear_saved_secret_requested
-    ));
-}
-
-#[test]
-fn editing_saved_ssh_modal_allows_explicit_clear_saved_secret_action() {
+fn editing_saved_ssh_modal_allows_direct_password_editing_after_secret_hydration() {
     let mut view_model = ShellViewModel::default();
     let mut tree = AssetTree::new();
     let asset_id = tree.insert_root_with_payload(
@@ -1013,18 +979,17 @@ fn editing_saved_ssh_modal_allows_explicit_clear_saved_secret_action() {
 
     view_model.open_edit_ssh_modal(asset_id);
     view_model.hydrate_edit_ssh_modal_secret(Some("secret".into()), None, None, None);
-    view_model.update_ssh_modal_field("clear_saved_secret", "true".into());
+    view_model.update_ssh_modal_field("password", "rotated-secret".into());
 
     assert!(matches!(
         view_model.asset_modal_state,
         Some(AssetModalState::NewSshConnection { ref draft, .. })
-            if draft.clear_saved_secret_requested
-                && draft.password.is_empty()
+            if draft.password == "rotated-secret"
                 && draft.private_key_content.is_empty()
                 && draft.passphrase.is_empty()
                 && !draft.password_visible
     ));
-    assert!(!view_model.asset_create_modal_can_confirm());
+    assert!(view_model.asset_create_modal_can_confirm());
 }
 
 #[test]

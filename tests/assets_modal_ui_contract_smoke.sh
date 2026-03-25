@@ -141,16 +141,16 @@ if grep -F 'private property <string> active-tab:' "$SSH_MODAL" >/dev/null; then
   echo "ssh modal must not keep local active-tab state once the grouped form lands" >&2
   exit 1
 fi
-grep -F 'in property <string> secret-retention-message:' "$SSH_MODAL" >/dev/null
-grep -F 'in property <bool> can-clear-saved-secret:' "$SSH_MODAL" >/dev/null
-grep -F 'in property <bool> clear-saved-secret-requested:' "$SSH_MODAL" >/dev/null
-grep -F 'Clear Saved Secret' "$SSH_MODAL" >/dev/null
-grep -F 'in-out property <string> asset-ssh-modal-secret-retention-message: "";' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <bool> asset-ssh-modal-can-clear-saved-secret: false;' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <bool> asset-ssh-modal-clear-saved-secret-requested: false;' "$APP_WINDOW" >/dev/null
-grep -F 'secret-retention-message: root.asset-ssh-modal-secret-retention-message;' "$APP_WINDOW" >/dev/null
-grep -F 'can-clear-saved-secret: root.asset-ssh-modal-can-clear-saved-secret;' "$APP_WINDOW" >/dev/null
-grep -F 'clear-saved-secret-requested: root.asset-ssh-modal-clear-saved-secret-requested;' "$APP_WINDOW" >/dev/null
+! grep -F 'in property <string> secret-retention-message:' "$SSH_MODAL" >/dev/null
+! grep -F 'in property <bool> can-clear-saved-secret:' "$SSH_MODAL" >/dev/null
+! grep -F 'in property <bool> clear-saved-secret-requested:' "$SSH_MODAL" >/dev/null
+! grep -F 'Clear Saved Secret' "$SSH_MODAL" >/dev/null
+! grep -F 'in-out property <string> asset-ssh-modal-secret-retention-message: "";' "$APP_WINDOW" >/dev/null
+! grep -F 'in-out property <bool> asset-ssh-modal-can-clear-saved-secret: false;' "$APP_WINDOW" >/dev/null
+! grep -F 'in-out property <bool> asset-ssh-modal-clear-saved-secret-requested: false;' "$APP_WINDOW" >/dev/null
+! grep -F 'secret-retention-message: root.asset-ssh-modal-secret-retention-message;' "$APP_WINDOW" >/dev/null
+! grep -F 'can-clear-saved-secret: root.asset-ssh-modal-can-clear-saved-secret;' "$APP_WINDOW" >/dev/null
+! grep -F 'clear-saved-secret-requested: root.asset-ssh-modal-clear-saved-secret-requested;' "$APP_WINDOW" >/dev/null
 grep -F 'import { ScrollView } from "std-widgets.slint";' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Connect";' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Save and Connect";' "$SSH_MODAL" >/dev/null
