@@ -54,6 +54,8 @@ export component BlockingModalShell inherits Rectangle {
         background: ThemeTokens.assets-surface;
 
         header := Rectangle {
+            x: 0px;
+            y: 0px;
             width: parent.width;
             height: root.header-height;
             background: ThemeTokens.assets-surface;
@@ -135,6 +137,7 @@ export component BlockingModalShell inherits Rectangle {
         }
 
         content-host := Rectangle {
+            x: 0px;
             y: header.height;
             width: parent.width;
             height: parent.height - header.height;

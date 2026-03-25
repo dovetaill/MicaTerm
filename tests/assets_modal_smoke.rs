@@ -380,6 +380,21 @@ fn blocking_modal_shell_owns_shared_asset_modal_chrome_contract() {
 }
 
 #[test]
+fn blocking_modal_shell_header_and_content_are_top_anchored() {
+    let shell = fs::read_to_string("ui/components/blocking-modal-shell.slint")
+        .expect("read blocking modal shell");
+
+    assert!(
+        shell.contains("header := Rectangle {\n            x: 0px;\n            y: 0px;"),
+        "blocking modal shell header must be pinned to the frame origin instead of relying on Slint centering defaults"
+    );
+    assert!(
+        shell.contains("content-host := Rectangle {\n            x: 0px;\n            y: header.height;"),
+        "blocking modal shell content host must start immediately below the header"
+    );
+}
+
+#[test]
 fn blocking_modal_children_bind_overlay_parent_dimensions() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
 
