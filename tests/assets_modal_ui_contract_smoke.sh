@@ -33,8 +33,8 @@ grep -F 'callback asset-rename-modal-name-changed(string);' "$APP_WINDOW" >/dev/
 grep -F 'callback confirm-asset-rename-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback confirm-delete-asset-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'host-titlebar-height: titlebar.height;' "$APP_WINDOW" >/dev/null
-grep -F 'modal-height: 214px;' "$APP_WINDOW" >/dev/null
-grep -F 'modal-height: 700px;' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: 640px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 268px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 332px;' "$APP_WINDOW" >/dev/null
 grep -F 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" >/dev/null
@@ -74,6 +74,7 @@ grep -F 'in property <string> remark:' "$SSH_MODAL" >/dev/null
 ! grep -F 'callback tab-selected(string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback action-requested(string);' "$SSH_MODAL" >/dev/null
+grep -F 'min-width: 0px;' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Connection"' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Authentication"' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Metadata"' "$SSH_MODAL" >/dev/null

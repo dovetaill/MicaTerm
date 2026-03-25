@@ -87,6 +87,7 @@ component FormField inherits Rectangle {
     callback value-changed(string);
     callback trailing-action-requested();
 
+    min-width: 0px;
     private property <length> field-height: root.multiline ? 120px : 40px;
 
     height: root.multiline ? 154px : 72px;

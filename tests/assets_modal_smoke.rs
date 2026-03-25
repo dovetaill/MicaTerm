@@ -416,6 +416,17 @@ fn blocking_modal_children_bind_overlay_parent_dimensions() {
 }
 
 #[test]
+fn ssh_form_field_contract_allows_horizontal_rows_to_shrink_without_overflow() {
+    let ssh = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
+
+    assert!(
+        ssh.contains("component FormField inherits Rectangle {\n    in property <string> label: \"\";\n    in property <string> value: \"\";\n    in property <bool> required: false;\n    in property <bool> password-mode: false;\n    in property <bool> multiline: false;\n    in property <string> trailing-action-text: \"\";\n    callback value-changed(string);\n    callback trailing-action-requested();\n\n    min-width: 0px;"),
+        "form fields rendered inside SSH modal horizontal rows must opt into shrinking so Name/Host/User rows do not steal width from siblings"
+    );
+}
+
+#[test]
 fn create_modals_project_inline_validation_message_and_confirm_state() {
     i_slint_backend_testing::init_no_event_loop();
 

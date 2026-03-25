@@ -588,7 +588,7 @@ export component AppWindow inherits Window {
     if root.asset-modal-open && root.asset-modal-kind == "new-folder" : asset-folder-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 420px;
-        modal-height: 214px;
+        modal-height: 230px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
         dialog-title: "New Folder";
@@ -647,7 +647,7 @@ export component AppWindow inherits Window {
     if root.asset-modal-open && root.asset-modal-kind == "new-ssh-connection" : asset-ssh-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 860px;
-        modal-height: 700px;
+        modal-height: 640px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
         dialog-title: root.asset-ssh-modal-dialog-title;
@@ -729,7 +729,7 @@ export component AppWindow inherits Window {
     if root.asset-rename-modal-open : asset-rename-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 420px;
-        modal-height: 214px;
+        modal-height: 230px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
         dialog-title: "Rename Asset";
