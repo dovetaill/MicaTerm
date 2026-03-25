@@ -125,7 +125,6 @@ export component AppWindow inherits Window {
     out property <length> layout-main-workspace-x: main-workspace.x;
     out property <length> layout-main-workspace-width: main-workspace.width;
     out property <length> layout-right-panel-x: right-panel.x;
-    out property <length> layout-right-panel-y: right-panel.y;
     out property <length> layout-right-panel-width: right-panel.width;
     out property <length> layout-right-panel-height: right-panel.height;
     out property <length> layout-right-panel-radius: right-panel.layout-radius;
@@ -148,8 +147,6 @@ export component AppWindow inherits Window {
     callback minimize-requested();
     callback maximize-toggle-requested();
     callback close-requested();
-    callback titlebar-debug-event-requested(string);
-    callback right-panel-debug-event-requested(string);
     callback toggle-right-panel-requested();
     callback toggle-global-menu-requested();
     callback close-global-menu-requested();
@@ -309,10 +306,6 @@ export component AppWindow inherits Window {
 
                 close-requested => {
                     root.close-requested();
-                }
-
-                debug-event-requested(message) => {
-                    root.titlebar-debug-event-requested(message);
                 }
 
                 toggle-right-panel-requested => {
@@ -478,10 +471,6 @@ export component AppWindow inherits Window {
                         y: 0px;
                         height: parent.height;
                         expanded: root.effective-show-right-panel;
-
-                        debug-event-requested(message) => {
-                            root.right-panel-debug-event-requested(message);
-                        }
                     }
                 }
             }

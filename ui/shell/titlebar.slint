@@ -55,7 +55,6 @@ export component Titlebar inherits Rectangle {
     callback minimize-requested;
     callback maximize-toggle-requested;
     callback close-requested;
-    callback debug-event-requested(string);
 
     height: 48px;
     background: ThemeTokens.titlebar-surface;
@@ -220,12 +219,7 @@ export component Titlebar inherits Rectangle {
                 tooltip-text: "Toggle right panel";
                 tooltip-source-id: "panel-toggle-button";
 
-                pointer-event-requested(kind) => {
-                    root.debug-event-requested("panel-toggle-button.pointer." + kind);
-                }
-
                 clicked => {
-                    root.debug-event-requested("panel-toggle-button.clicked");
                     root.toggle-right-panel-requested();
                 }
 

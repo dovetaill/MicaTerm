@@ -303,45 +303,6 @@ fn bootstrap_logs_backdrop_error_details_when_native_sync_fails() {
 }
 
 #[test]
-fn titlebar_debug_logging_captures_panel_toggle_click_path() {
-    i_slint_backend_testing::init_no_event_loop();
-
-    let app = AppWindow::new().unwrap();
-    let temp_root = std::env::temp_dir()
-        .join("mica-term")
-        .join("tests")
-        .join("titlebar-right-panel-debug-log");
-    let _ = fs::remove_dir_all(&temp_root);
-    fs::create_dir_all(temp_root.join("logs")).unwrap();
-    fs::create_dir_all(temp_root.join("crash")).unwrap();
-
-    let paths = LoggingPaths {
-        root_source: LoggingRootSource::EnvOverride,
-        root_dir: temp_root.clone(),
-        logs_dir: temp_root.join("logs"),
-        crash_dir: temp_root.join("crash"),
-    };
-    let config = AppLoggingConfig::new(AppLogMode::Debug);
-    let runtime = build_test_logging_runtime(&paths, &config).unwrap();
-
-    tracing::dispatcher::with_default(&runtime.dispatch, || {
-        bind_top_status_bar_with_store(&app, None);
-        app.invoke_titlebar_debug_event_requested("panel-toggle-button.pointer.down".into());
-        app.invoke_titlebar_debug_event_requested("panel-toggle-button.clicked".into());
-        app.invoke_toggle_right_panel_requested();
-    });
-
-    drop(runtime.guard);
-
-    let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
-    assert!(content.contains("panel-toggle-button.pointer.down"));
-    assert!(content.contains("panel-toggle-button.clicked"));
-    assert!(content.contains("toggle-right-panel-requested received"));
-
-    let _ = fs::remove_dir_all(temp_root);
-}
-
-#[test]
 fn pointer_click_on_panel_toggle_flips_right_panel_request_state() {
     i_slint_backend_testing::init_no_event_loop();
 

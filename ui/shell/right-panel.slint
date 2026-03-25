@@ -7,7 +7,6 @@ export component RightPanel inherits Rectangle {
     in property <bool> expanded: false;
     out property <length> layout-radius: root.border-radius;
     out property <length> layout-border-width: root.border-width;
-    callback debug-event-requested(string);
 
     width: root.expanded ? 392px : 0px;
     visible: root.expanded;
@@ -16,18 +15,6 @@ export component RightPanel inherits Rectangle {
     border-radius: 0px;
     border-width: 0px;
     border-color: transparent;
-
-    changed expanded => {
-        root.debug-event-requested(root.expanded ? "right-panel.expanded.true" : "right-panel.expanded.false");
-    }
-
-    changed width => {
-        root.debug-event-requested("right-panel.width.changed");
-    }
-
-    changed height => {
-        root.debug-event-requested("right-panel.height.changed");
-    }
 
     left-divider := Rectangle {
         x: 0px;

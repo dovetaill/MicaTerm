@@ -36,7 +36,7 @@ BODY_HOST_BLOCK="$(sed -n '/body-host := Rectangle {/,/shell-body := Rectangle {
 grep -F 'y: titlebar.height;' <<<"$BODY_HOST_BLOCK" >/dev/null
 grep -F 'height: max(0px, parent.height - titlebar.height);' <<<"$BODY_HOST_BLOCK" >/dev/null
 
-SHELL_BODY_BLOCK="$(sed -n '/shell-body := Rectangle {/,/debug-event-requested(message) => {/p' "$APP_WINDOW")"
+SHELL_BODY_BLOCK="$(sed -n '/shell-body := Rectangle {/,/expanded: root.effective-show-right-panel;/p' "$APP_WINDOW")"
 grep -F 'x: sidebar.width;' <<<"$SHELL_BODY_BLOCK" >/dev/null
 grep -F 'width: max(0px, parent.width - sidebar.width - right-panel.width);' <<<"$SHELL_BODY_BLOCK" >/dev/null
 grep -F 'x: parent.width - self.width;' <<<"$SHELL_BODY_BLOCK" >/dev/null
