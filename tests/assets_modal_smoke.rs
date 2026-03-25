@@ -193,6 +193,22 @@ fn ssh_modal_contract_round_trips_button_state_and_inline_feedback() {
 }
 
 #[test]
+fn ssh_modal_round_trips_password_visibility_without_secret_retention_flags() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    app.set_asset_ssh_modal_password("secret".into());
+    app.set_asset_ssh_modal_password_visible(false);
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_ssh_modal_password().as_str(), "secret");
+    assert!(!app.get_asset_ssh_modal_password_visible());
+}
+
+#[test]
 fn ssh_modal_round_trips_secret_retention_copy_and_clear_affordance() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -204,7 +220,7 @@ fn ssh_modal_round_trips_secret_retention_copy_and_clear_affordance() {
         "Leave password / private key / passphrase blank to keep the saved secret.".into(),
     );
     app.set_asset_ssh_modal_can_clear_saved_secret(true);
-    app.set_asset_ssh_modal_clear_saved_secret_requested(false);
+    app.set_asset_ssh_modal_clear_saved_secret_requested(true);
 
     assert!(app.get_asset_modal_open());
     assert_eq!(
@@ -212,7 +228,7 @@ fn ssh_modal_round_trips_secret_retention_copy_and_clear_affordance() {
         "Leave password / private key / passphrase blank to keep the saved secret."
     );
     assert!(app.get_asset_ssh_modal_can_clear_saved_secret());
-    assert!(!app.get_asset_ssh_modal_clear_saved_secret_requested());
+    assert!(app.get_asset_ssh_modal_clear_saved_secret_requested());
 }
 
 #[test]
@@ -324,7 +340,10 @@ fn ssh_modal_reopens_with_default_authentication_fields() {
     assert!(app.get_asset_modal_open());
     assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
     assert_eq!(app.get_asset_ssh_modal_auth_method().as_str(), "password");
-    assert_eq!(app.get_asset_ssh_modal_dialog_title().as_str(), "New SSH Connection");
+    assert_eq!(
+        app.get_asset_ssh_modal_dialog_title().as_str(),
+        "New SSH Connection"
+    );
 }
 
 #[test]
@@ -370,8 +389,8 @@ fn blocking_modal_children_own_shared_asset_modal_chrome_contract() {
         .expect("read folder modal");
     let ssh = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
         .expect("read ssh modal");
-    let rename = fs::read_to_string("ui/components/assets-rename-modal.slint")
-        .expect("read rename modal");
+    let rename =
+        fs::read_to_string("ui/components/assets-rename-modal.slint").expect("read rename modal");
     let delete = fs::read_to_string("ui/components/assets-delete-confirm-modal.slint")
         .expect("read delete modal");
     let host_key = fs::read_to_string("ui/components/ssh-host-key-confirm-modal.slint")
@@ -409,8 +428,8 @@ fn blocking_modal_shell_exposes_a_full_frame_for_child_owned_chrome() {
 fn simple_asset_modals_anchor_header_and_footer_to_the_frame_edges() {
     let folder = fs::read_to_string("ui/components/assets-folder-create-modal.slint")
         .expect("read folder modal");
-    let rename = fs::read_to_string("ui/components/assets-rename-modal.slint")
-        .expect("read rename modal");
+    let rename =
+        fs::read_to_string("ui/components/assets-rename-modal.slint").expect("read rename modal");
     let delete = fs::read_to_string("ui/components/assets-delete-confirm-modal.slint")
         .expect("read delete modal");
     let host_key = fs::read_to_string("ui/components/ssh-host-key-confirm-modal.slint")
@@ -429,7 +448,7 @@ fn simple_asset_modals_anchor_header_and_footer_to_the_frame_edges() {
 }
 
 #[test]
-fn ssh_modal_header_tabs_body_and_footer_are_explicitly_anchored() {
+fn ssh_modal_header_body_and_footer_are_explicitly_anchored() {
     let ssh = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
         .expect("read ssh modal");
 
@@ -438,8 +457,14 @@ fn ssh_modal_header_tabs_body_and_footer_are_explicitly_anchored() {
         "ssh modal header must be pinned to the top-left corner"
     );
     assert!(
-        ssh.contains("body-scroll := ScrollView {\n            x: 0px;\n            y: root.body-top;"),
+        ssh.contains(
+            "body-scroll := ScrollView {\n            x: 0px;\n            y: root.header-height;"
+        ),
         "ssh modal body scroll host must start directly below the chrome"
+    );
+    assert!(
+        !ssh.contains("tabs-host := Rectangle {"),
+        "ssh modal must not keep the legacy top-level tabs host"
     );
     assert!(
         ssh.contains("footer := Rectangle {\n            x: 0px;\n            y: parent.height - root.footer-height;"),

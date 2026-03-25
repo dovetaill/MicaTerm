@@ -19,7 +19,8 @@ use wezterm_term::color::ColorPalette;
 use wezterm_term::{Terminal, TerminalConfiguration, TerminalSize};
 
 use crate::app::ssh::credentials::{
-    CredentialStore, StoredSshSecretBundle, SystemCredentialStore, load_secret_bundle,
+    CredentialStore, StoredSecretLookupError, StoredSshSecretBundle, SystemCredentialStore,
+    load_secret_bundle_with_diagnostics, required_secret_bundle_field,
 };
 use crate::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
@@ -297,29 +298,39 @@ async fn authenticate_client(
     profile: &ConnectionProfile,
     credential_store: &dyn CredentialStore,
 ) -> Result<()> {
-    let stored_bundle = load_stored_secret_bundle(profile, credential_store)?;
     tracing::info!(
         target: "app.ssh",
         asset_id = profile.asset_id.as_deref().unwrap_or(""),
         profile_name = profile.name.as_str(),
         auth_method = ?profile.auth_method,
-        has_password_secret = profile.password.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false)
-            || stored_bundle.password.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
-        has_inline_key_secret = profile.private_key_content.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false)
-            || stored_bundle.private_key_content.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
-        has_passphrase_secret = profile.passphrase.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false)
-            || stored_bundle.passphrase.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
+        has_password_secret = profile.password.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
+        has_inline_key_secret = profile.private_key_content.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
+        has_passphrase_secret = profile.passphrase.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
         "authenticating ssh client"
     );
 
     match profile.auth_method {
         SshAuthMethod::Password => {
-            let password = profile
+            let password = match profile
                 .password
                 .clone()
-                .or(stored_bundle.password)
                 .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| anyhow!("missing SSH password secret for `{}`", profile.name))?;
+            {
+                Some(password) => password,
+                None => {
+                    let stored_bundle = load_required_stored_secret_bundle(
+                        profile,
+                        credential_store,
+                        "SSH password secret",
+                    )?;
+                    require_profile_secret_field(
+                        profile,
+                        "SSH password secret",
+                        stored_bundle.as_ref(),
+                        "password",
+                    )?
+                }
+            };
             let auth_result = handle
                 .authenticate_password(profile.user.clone(), password)
                 .await
@@ -332,7 +343,30 @@ async fn authenticate_client(
                 .as_deref()
                 .filter(|path| !path.trim().is_empty())
                 .ok_or_else(|| anyhow!("missing private key path for `{}`", profile.name))?;
-            let passphrase = profile.passphrase.clone().or(stored_bundle.passphrase);
+            let stored_bundle = if profile
+                .passphrase
+                .as_ref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                None
+            } else {
+                load_optional_stored_secret_bundle(profile, credential_store).map_err(|err| {
+                    anyhow!(stored_secret_lookup_message(
+                        profile,
+                        "SSH passphrase secret",
+                        &err,
+                    ))
+                })?
+            };
+            let passphrase = profile
+                .passphrase
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    stored_bundle
+                        .as_ref()
+                        .and_then(|(_, bundle)| non_empty_secret(bundle.passphrase.as_deref()))
+                });
             let private_key = keys::load_secret_key(private_key_path, passphrase.as_deref())
                 .with_context(|| {
                     format!("failed to load SSH private key from `{private_key_path}`")
@@ -350,18 +384,47 @@ async fn authenticate_client(
             ensure_auth_success(auth_result, "private key path")?;
         }
         SshAuthMethod::PrivateKeyContent => {
-            let private_key_content = profile
+            let stored_bundle = if profile
+                .private_key_content
+                .as_ref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                load_optional_stored_secret_bundle(profile, credential_store).map_err(|err| {
+                    anyhow!(stored_secret_lookup_message(
+                        profile,
+                        "SSH inline private key secret",
+                        &err,
+                    ))
+                })?
+            } else {
+                load_required_stored_secret_bundle(
+                    profile,
+                    credential_store,
+                    "SSH inline private key secret",
+                )?
+            };
+            let private_key_content = match profile
                 .private_key_content
                 .clone()
-                .or(stored_bundle.private_key_content)
                 .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| {
-                    anyhow!(
-                        "missing inline SSH private key secret for `{}`",
-                        profile.name
-                    )
-                })?;
-            let passphrase = profile.passphrase.clone().or(stored_bundle.passphrase);
+            {
+                Some(private_key_content) => private_key_content,
+                None => require_profile_secret_field(
+                    profile,
+                    "SSH inline private key secret",
+                    stored_bundle.as_ref(),
+                    "private_key_content",
+                )?,
+            };
+            let passphrase = profile
+                .passphrase
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| {
+                    stored_bundle
+                        .as_ref()
+                        .and_then(|(_, bundle)| non_empty_secret(bundle.passphrase.as_deref()))
+                });
             let private_key = keys::decode_secret_key(&private_key_content, passphrase.as_deref())
                 .context("failed to decode inline SSH private key")?;
             let auth_result = handle
@@ -389,10 +452,10 @@ fn ensure_auth_success(result: AuthResult, method: &str) -> Result<()> {
     }
 }
 
-fn load_stored_secret_bundle(
+pub(crate) fn load_optional_stored_secret_bundle(
     profile: &ConnectionProfile,
     credential_store: &dyn CredentialStore,
-) -> Result<StoredSshSecretBundle> {
+) -> std::result::Result<Option<(String, StoredSshSecretBundle)>, StoredSecretLookupError> {
     let Some(credential_ref) = profile.credential_ref.as_deref() else {
         tracing::info!(
             target: "app.ssh",
@@ -400,7 +463,7 @@ fn load_stored_secret_bundle(
             profile_name = profile.name.as_str(),
             "no credential reference attached to ssh profile"
         );
-        return Ok(StoredSshSecretBundle::default());
+        return Ok(None);
     };
 
     tracing::info!(
@@ -410,17 +473,89 @@ fn load_stored_secret_bundle(
         credential_ref = credential_ref,
         "loading stored ssh secret bundle"
     );
-    let bundle = load_secret_bundle(credential_store, credential_ref)?;
-    Ok(match profile.auth_method {
+    let bundle = load_secret_bundle_with_diagnostics(credential_store, Some(credential_ref))?;
+    let bundle = match profile.auth_method {
         SshAuthMethod::Password => bundle,
-        SshAuthMethod::PrivateKeyContent if bundle.private_key_content.is_some() => bundle,
+        SshAuthMethod::PrivateKeyContent
+            if bundle
+                .private_key_content
+                .as_ref()
+                .is_some_and(|value| !value.trim().is_empty()) =>
+        {
+            bundle
+        }
         SshAuthMethod::PrivateKeyContent => StoredSshSecretBundle {
             private_key_content: bundle.password,
             passphrase: bundle.passphrase,
             ..StoredSshSecretBundle::default()
         },
         SshAuthMethod::PrivateKeyPath => bundle,
-    })
+    };
+    Ok(Some((credential_ref.to_string(), bundle)))
+}
+
+fn load_required_stored_secret_bundle(
+    profile: &ConnectionProfile,
+    credential_store: &dyn CredentialStore,
+    secret_label: &str,
+) -> Result<Option<(String, StoredSshSecretBundle)>> {
+    load_optional_stored_secret_bundle(profile, credential_store)
+        .map_err(|err| anyhow!(stored_secret_lookup_message(profile, secret_label, &err)))
+}
+
+fn require_profile_secret_field(
+    profile: &ConnectionProfile,
+    secret_label: &str,
+    stored_bundle: Option<&(String, StoredSshSecretBundle)>,
+    field: &'static str,
+) -> Result<String> {
+    let Some((credential_ref, bundle)) = stored_bundle else {
+        return Err(anyhow!(stored_secret_lookup_message(
+            profile,
+            secret_label,
+            &StoredSecretLookupError::MissingCredentialRef,
+        )));
+    };
+
+    required_secret_bundle_field(bundle, credential_ref, field)
+        .map_err(|err| anyhow!(stored_secret_lookup_message(profile, secret_label, &err)))
+}
+
+pub(crate) fn stored_secret_lookup_message(
+    profile: &ConnectionProfile,
+    secret_label: &str,
+    error: &StoredSecretLookupError,
+) -> String {
+    match error {
+        StoredSecretLookupError::MissingCredentialRef => format!(
+            "missing credential binding for {secret_label} on `{}`",
+            profile.name
+        ),
+        StoredSecretLookupError::MissingEntry { credential_ref } => format!(
+            "missing saved entry `{credential_ref}` for {secret_label} on `{}`",
+            profile.name
+        ),
+        StoredSecretLookupError::ReadFailed {
+            credential_ref,
+            message,
+        } => format!(
+            "failed to read saved entry `{credential_ref}` for {secret_label} on `{}`: {message}",
+            profile.name
+        ),
+        StoredSecretLookupError::EmptyBundleField {
+            credential_ref,
+            field,
+        } => format!(
+            "saved entry `{credential_ref}` for `{}` is missing field `{field}` required by {secret_label}",
+            profile.name
+        ),
+    }
+}
+
+fn non_empty_secret(value: Option<&str>) -> Option<String> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
 }
 
 async fn await_channel_success(

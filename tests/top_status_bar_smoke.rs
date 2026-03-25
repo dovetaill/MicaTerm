@@ -312,10 +312,8 @@ fn pointer_click_on_panel_toggle_flips_right_panel_request_state() {
 
     let content_width = app.get_layout_titlebar_content_width();
     let window_controls_width = app.get_layout_titlebar_window_controls_width();
-    let utility_zone_x = 6.0
-        + content_width
-        - window_controls_width
-        - ShellMetrics::TITLEBAR_UTILITY_WIDTH as f32;
+    let utility_zone_x =
+        6.0 + content_width - window_controls_width - ShellMetrics::TITLEBAR_UTILITY_WIDTH as f32;
     let position = LogicalPosition::new(
         utility_zone_x + 40.0 + (ShellMetrics::TITLEBAR_TOOL_BUTTON_SIZE as f32 / 2.0),
         6.0 + (ShellMetrics::TITLEBAR_TOOL_BUTTON_SIZE as f32 / 2.0),

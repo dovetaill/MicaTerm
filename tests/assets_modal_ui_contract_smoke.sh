@@ -89,11 +89,12 @@ grep -F 'in property <string> validation-message: "";' "$FOLDER_MODAL" >/dev/nul
 grep -F 'in property <bool> can-confirm: false;' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsRenameModal inherits Rectangle {' "$RENAME_MODAL" >/dev/null
 grep -F 'export component AssetsDeleteConfirmModal inherits Rectangle {' "$DELETE_MODAL" >/dev/null
-! grep -F 'in property <string> active-tab:' "$SSH_MODAL" >/dev/null
-grep -F 'private property <string> active-tab: "standard";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New SSH Connection";' "$SSH_MODAL" >/dev/null
 grep -F 'header := Rectangle {' "$SSH_MODAL" >/dev/null
-grep -F 'tabs-host := Rectangle {' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Basic";' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Authentication";' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Connection Options";' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Notes";' "$SSH_MODAL" >/dev/null
 grep -F 'footer := Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'footer-content := VerticalLayout {' "$SSH_MODAL" >/dev/null
 if grep -F 'footer-panel := Rectangle {' "$SSH_MODAL" >/dev/null; then
@@ -116,10 +117,40 @@ grep -F 'in property <string> remark:' "$SSH_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback action-requested(string);' "$SSH_MODAL" >/dev/null
 grep -F 'min-width: 0px;' "$SSH_MODAL" >/dev/null
-grep -F '"Standard"' "$SSH_MODAL" >/dev/null
-grep -F '"Proxy"' "$SSH_MODAL" >/dev/null
-grep -F '"Environment"' "$SSH_MODAL" >/dev/null
-grep -F '"Advanced"' "$SSH_MODAL" >/dev/null
+if grep -F '"Standard"' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not keep the legacy Standard tab label" >&2
+  exit 1
+fi
+if grep -F '"Proxy"' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not keep the legacy Proxy tab label" >&2
+  exit 1
+fi
+if grep -F '"Environment"' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not keep the legacy Environment tab label" >&2
+  exit 1
+fi
+if grep -F '"Advanced"' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not keep the legacy Advanced tab label" >&2
+  exit 1
+fi
+if grep -F 'in property <string> active-tab:' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not expose a bridged active-tab input property" >&2
+  exit 1
+fi
+if grep -F 'private property <string> active-tab:' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must not keep local active-tab state once the grouped form lands" >&2
+  exit 1
+fi
+grep -F 'in property <string> secret-retention-message:' "$SSH_MODAL" >/dev/null
+grep -F 'in property <bool> can-clear-saved-secret:' "$SSH_MODAL" >/dev/null
+grep -F 'in property <bool> clear-saved-secret-requested:' "$SSH_MODAL" >/dev/null
+grep -F 'Clear Saved Secret' "$SSH_MODAL" >/dev/null
+grep -F 'in-out property <string> asset-ssh-modal-secret-retention-message: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <bool> asset-ssh-modal-can-clear-saved-secret: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <bool> asset-ssh-modal-clear-saved-secret-requested: false;' "$APP_WINDOW" >/dev/null
+grep -F 'secret-retention-message: root.asset-ssh-modal-secret-retention-message;' "$APP_WINDOW" >/dev/null
+grep -F 'can-clear-saved-secret: root.asset-ssh-modal-can-clear-saved-secret;' "$APP_WINDOW" >/dev/null
+grep -F 'clear-saved-secret-requested: root.asset-ssh-modal-clear-saved-secret-requested;' "$APP_WINDOW" >/dev/null
 grep -F 'import { ScrollView } from "std-widgets.slint";' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Connect";' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Save and Connect";' "$SSH_MODAL" >/dev/null

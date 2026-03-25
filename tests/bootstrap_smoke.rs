@@ -23,6 +23,9 @@ use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store,
     default_window_size,
 };
+use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
+use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
+use mica_term::app::logging::runtime::build_test_logging_runtime;
 use mica_term::app::ssh::credentials::{
     CredentialStore, MemoryCredentialStore, SshCredentialKind, StoredSshSecretBundle,
     load_secret_bundle, persist_secret_bundle, ssh_credential_ref,
@@ -31,11 +34,10 @@ use mica_term::app::ssh::known_hosts::{
     KnownHostCheck, KnownHostsService, default_known_hosts_path,
 };
 use mica_term::app::ssh::profile::ConnectionProfile;
-use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalSurfaceState, UnknownHostKeyError};
+use mica_term::app::ssh::runtime::{
+    SessionRuntimeEvent, TerminalSurfaceState, UnknownHostKeyError,
+};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
-use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
-use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
-use mica_term::app::logging::runtime::build_test_logging_runtime;
 use mica_term::app::window_effects::default_platform_window_effects;
 use mica_term::shell::metrics::ShellMetrics;
 use russh::keys::{HashAlg, PublicKey};
@@ -149,7 +151,8 @@ impl SessionRuntimeLauncher for FakeLauncher {
         _profile: ConnectionProfile,
         _session_id: uuid::Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         Box::pin(async move { Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>) })
     }
 
@@ -174,10 +177,7 @@ impl TofuAwareLauncher {
                 host: profile.host.clone(),
                 port: profile.port,
                 fingerprint,
-                public_key_openssh: self
-                    .host_key
-                    .to_openssh()
-                    .expect("encode tofu host key"),
+                public_key_openssh: self.host_key.to_openssh().expect("encode tofu host key"),
             }
             .into()),
             KnownHostCheck::Changed { expected, actual } => Err(anyhow!(
@@ -197,7 +197,8 @@ impl SessionRuntimeLauncher for TofuAwareLauncher {
         profile: ConnectionProfile,
         _session_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         let launcher = self.clone();
         Box::pin(async move {
             launcher.ensure_trusted(&profile)?;
@@ -221,7 +222,8 @@ impl SessionRuntimeLauncher for AsyncProjectionLauncher {
         _profile: ConnectionProfile,
         session_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         Box::pin(async move {
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(25)).await;
@@ -254,7 +256,8 @@ impl SessionRuntimeLauncher for InteractiveProjectionLauncher {
         _profile: ConnectionProfile,
         session_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         Box::pin(async move {
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(TerminalSurfaceState {
@@ -285,7 +288,8 @@ impl SessionRuntimeLauncher for FailingProbeLauncher {
         _profile: ConnectionProfile,
         _session_id: uuid::Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         let message = self.message;
         Box::pin(async move { Err(anyhow!(message)) })
     }
@@ -329,7 +333,8 @@ impl SessionRuntimeLauncher for StoredSecretProbeLauncher {
         _profile: ConnectionProfile,
         _session_id: uuid::Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         Box::pin(async move { Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>) })
     }
 
@@ -340,6 +345,14 @@ impl SessionRuntimeLauncher for StoredSecretProbeLauncher {
         let store = Arc::clone(&self.store);
         let message = self.message;
         Box::pin(async move {
+            if profile
+                .password
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                return Ok(());
+            }
+
             let credential_ref = profile
                 .credential_ref
                 .as_deref()
@@ -364,7 +377,8 @@ impl SessionRuntimeLauncher for RecordingLauncher {
         profile: ConnectionProfile,
         _session_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         let state = Arc::clone(&self.state);
         Box::pin(async move {
             state
@@ -393,10 +407,7 @@ impl SessionRuntimeLauncher for RecordingLauncher {
     }
 }
 
-fn bind_with_fake_sessions(
-    app: &AppWindow,
-    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
-) {
+fn bind_with_fake_sessions(app: &AppWindow, asset_repo: Option<Rc<dyn AssetCatalogRepository>>) {
     bind_with_launcher(app, asset_repo, Arc::new(FakeLauncher));
 }
 
@@ -445,6 +456,25 @@ fn sample_public_key() -> PublicKey {
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILM+rvN+ot98qgEN796jTiQfZfG1KaT0PtFDJ/XFSqti bootstrap-tofu@example.com",
     )
     .expect("parse public key")
+}
+
+fn sample_logging_root(label: &str) -> std::path::PathBuf {
+    std::env::temp_dir()
+        .join("mica-term")
+        .join("tests")
+        .join(format!("{label}-{}", uuid::Uuid::new_v4()))
+}
+
+fn read_log_file_until_contains(path: &std::path::Path, expected: &[&str]) -> String {
+    let mut latest = String::new();
+    for _ in 0..20 {
+        latest = fs::read_to_string(path).unwrap_or_default();
+        if expected.iter().all(|needle| latest.contains(needle)) {
+            return latest;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    latest
 }
 
 fn create_root_ssh(app: &AppWindow, name: &str, host: &str) -> String {
@@ -527,6 +557,64 @@ fn loaded_legacy_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
                     proxy_method: String::new(),
                     remark: String::new(),
                     credential_ref: None,
+                }),
+            },
+        )]),
+    }
+}
+
+fn loaded_saved_password_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
+    PersistedAssetCatalog {
+        schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+        root_ids: vec!["ssh-prod".into()],
+        nodes: BTreeMap::from([(
+            "ssh-prod".into(),
+            PersistedAssetNode {
+                id: "ssh-prod".into(),
+                parent_id: None,
+                title: "Prod Bastion".into(),
+                kind: PersistedAssetKind::SshConnection,
+                child_ids: Vec::new(),
+                payload: PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                    host: "10.0.0.12".into(),
+                    user: "ops".into(),
+                    port: "22".into(),
+                    auth_method: "password".into(),
+                    private_key_source: "content".into(),
+                    private_key_path: String::new(),
+                    environment: String::new(),
+                    proxy_method: String::new(),
+                    remark: "Saved credential".into(),
+                    credential_ref: Some("ssh/saved-secrets/ssh-prod".into()),
+                }),
+            },
+        )]),
+    }
+}
+
+fn loaded_saved_private_key_path_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
+    PersistedAssetCatalog {
+        schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+        root_ids: vec!["ssh-path".into()],
+        nodes: BTreeMap::from([(
+            "ssh-path".into(),
+            PersistedAssetNode {
+                id: "ssh-path".into(),
+                parent_id: None,
+                title: "Path Bastion".into(),
+                kind: PersistedAssetKind::SshConnection,
+                child_ids: Vec::new(),
+                payload: PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                    host: "10.0.0.20".into(),
+                    user: "ops".into(),
+                    port: "22".into(),
+                    auth_method: "private-key".into(),
+                    private_key_source: "path".into(),
+                    private_key_path: "/tmp/id_ed25519".into(),
+                    environment: String::new(),
+                    proxy_method: String::new(),
+                    remark: "Saved passphrase".into(),
+                    credential_ref: Some("ssh/saved-secrets/ssh-path".into()),
                 }),
             },
         )]),
@@ -654,8 +742,12 @@ fn editing_legacy_saved_ssh_asset_reuses_fallback_saved_secret_for_test_connecti
     app.invoke_assets_context_menu_action_invoked("edit-connection".into());
 
     assert!(app.get_asset_modal_open());
-    assert_eq!(app.get_asset_ssh_modal_dialog_title().as_str(), "Edit SSH Connection");
-    assert_eq!(app.get_asset_ssh_modal_password().as_str(), "");
+    assert_eq!(
+        app.get_asset_ssh_modal_dialog_title().as_str(),
+        "Edit SSH Connection"
+    );
+    assert_eq!(app.get_asset_ssh_modal_password().as_str(), "secret");
+    assert!(!app.get_asset_ssh_modal_password_visible());
 
     app.invoke_asset_ssh_modal_action_requested("test".into());
 
@@ -664,6 +756,237 @@ fn editing_legacy_saved_ssh_asset_reuses_fallback_saved_secret_for_test_connecti
         app.get_asset_ssh_modal_feedback_message().as_str(),
         "Connection test succeeded."
     );
+}
+
+#[test]
+fn editing_saved_password_modal_hydrates_real_secret_masked() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_saved_password_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    persist_secret_bundle(
+        credential_store.as_ref(),
+        "ssh/saved-secrets/ssh-prod",
+        &StoredSshSecretBundle {
+            password: Some("secret".into()),
+            private_key_content: None,
+            passphrase: None,
+        },
+    )
+    .expect("persist saved ssh secret");
+    bind_with_launcher_and_credential_store(
+        &app,
+        Some(asset_repo),
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+    );
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("saved ssh asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(
+        app.get_asset_ssh_modal_dialog_title().as_str(),
+        "Edit SSH Connection"
+    );
+    assert_eq!(app.get_asset_ssh_modal_password().as_str(), "secret");
+    assert!(!app.get_asset_ssh_modal_password_visible());
+}
+
+#[test]
+fn saved_password_asset_rehydrates_after_rebinding_with_same_store() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let shared_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    let first_app = AppWindow::new().unwrap();
+    let first_repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let first_asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        PersistedAssetCatalog {
+            schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+            root_ids: Vec::new(),
+            nodes: BTreeMap::new(),
+        },
+        Rc::clone(&first_repo_state),
+        None,
+    ));
+    bind_with_launcher_and_credential_store(
+        &first_app,
+        Some(first_asset_repo),
+        Arc::new(FakeLauncher),
+        Arc::clone(&shared_store),
+    );
+
+    first_app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    first_app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    first_app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    first_app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    first_app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+    first_app.invoke_asset_ssh_modal_action_requested("save".into());
+
+    let rebound_catalog = first_repo_state
+        .borrow()
+        .save_attempts
+        .last()
+        .expect("saved catalog snapshot")
+        .clone();
+
+    let second_app = AppWindow::new().unwrap();
+    let second_repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let second_asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        rebound_catalog,
+        Rc::clone(&second_repo_state),
+        None,
+    ));
+    bind_with_launcher_and_credential_store(
+        &second_app,
+        Some(second_asset_repo),
+        Arc::new(FakeLauncher),
+        Arc::clone(&shared_store),
+    );
+
+    let ssh_id = second_app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("rebound ssh asset")
+        .id
+        .to_string();
+
+    second_app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    second_app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+
+    assert!(second_app.get_asset_modal_open());
+    assert_eq!(second_app.get_asset_ssh_modal_password().as_str(), "secret");
+    assert!(!second_app.get_asset_ssh_modal_password_visible());
+}
+
+#[test]
+fn editing_saved_private_key_path_modal_hydrates_saved_passphrase() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_saved_private_key_path_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    persist_secret_bundle(
+        credential_store.as_ref(),
+        "ssh/saved-secrets/ssh-path",
+        &StoredSshSecretBundle {
+            password: None,
+            private_key_content: None,
+            passphrase: Some("hunter2".into()),
+        },
+    )
+    .expect("persist saved ssh passphrase");
+    bind_with_launcher_and_credential_store(
+        &app,
+        Some(asset_repo),
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+    );
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("saved ssh path asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(
+        app.get_asset_ssh_modal_dialog_title().as_str(),
+        "Edit SSH Connection"
+    );
+    assert_eq!(
+        app.get_asset_ssh_modal_private_key_path().as_str(),
+        "/tmp/id_ed25519"
+    );
+    assert_eq!(app.get_asset_ssh_modal_passphrase().as_str(), "hunter2");
+    assert_eq!(app.get_asset_ssh_modal_password().as_str(), "");
+    assert_eq!(app.get_asset_ssh_modal_private_key_content().as_str(), "");
+}
+
+#[test]
+fn editing_saved_private_key_path_modal_clear_action_deletes_saved_passphrase() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_saved_private_key_path_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    persist_secret_bundle(
+        credential_store.as_ref(),
+        "ssh/saved-secrets/ssh-path",
+        &StoredSshSecretBundle {
+            password: None,
+            private_key_content: None,
+            passphrase: Some("hunter2".into()),
+        },
+    )
+    .expect("persist saved ssh passphrase");
+    bind_with_launcher_and_credential_store(
+        &app,
+        Some(asset_repo),
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+    );
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("saved ssh path asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("clear_saved_secret".into(), "true".into());
+    app.invoke_asset_ssh_modal_action_requested("save".into());
+
+    assert!(!app.get_asset_modal_open());
+    assert!(
+        load_secret_bundle(credential_store.as_ref(), "ssh/saved-secrets/ssh-path")
+            .expect("load cleared saved secret")
+            .is_empty()
+    );
+    let persisted_catalog = repo_state
+        .borrow()
+        .save_attempts
+        .last()
+        .expect("persisted catalog after clear")
+        .clone();
+    let PersistedAssetPayload::SshConnection(spec) = &persisted_catalog
+        .nodes
+        .get("ssh-path")
+        .expect("saved ssh path node")
+        .payload
+    else {
+        panic!("expected persisted ssh connection payload");
+    };
+    assert_eq!(spec.credential_ref, None);
 }
 
 #[test]
@@ -893,7 +1216,9 @@ fn connect_action_keeps_session_ephemeral_and_does_not_persist_asset() {
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
     slint::platform::update_timers_and_animations();
 
-    let launcher_state = launcher_state.lock().expect("lock recording launcher state");
+    let launcher_state = launcher_state
+        .lock()
+        .expect("lock recording launcher state");
     assert!(!app.get_asset_modal_open());
     assert_eq!(app.get_console_asset_items().row_count(), 0);
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
@@ -907,6 +1232,26 @@ fn connect_action_keeps_session_ephemeral_and_does_not_persist_asset() {
             .expect("ephemeral asset id")
             .starts_with("session:")
     );
+}
+
+#[test]
+fn connect_action_reuses_existing_ephemeral_session_for_same_draft() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app, None);
+
+    for _ in 0..2 {
+        app.invoke_assets_create_action_selected("new-ssh-connection".into());
+        app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+        app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+        app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+        app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+        app.invoke_asset_ssh_modal_action_requested("connect".into());
+    }
+
+    assert_eq!(app.get_console_asset_items().row_count(), 0);
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
 }
 
 #[test]
@@ -969,7 +1314,9 @@ fn save_and_connect_persists_asset_then_opens_session_with_saved_identity() {
     app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     app.invoke_asset_ssh_modal_action_requested("save-and-connect".into());
 
-    let launcher_state = launcher_state.lock().expect("lock recording launcher state");
+    let launcher_state = launcher_state
+        .lock()
+        .expect("lock recording launcher state");
     assert_eq!(repo_state.borrow().save_attempts.len(), 1);
     assert!(launcher_state.probe_profiles.is_empty());
     assert!(launcher_state.launch_profiles.is_empty());
@@ -1002,7 +1349,9 @@ fn test_connection_updates_feedback_without_creating_workspace_tab() {
     app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     app.invoke_asset_ssh_modal_action_requested("test".into());
 
-    let launcher_state = launcher_state.lock().expect("lock recording launcher state");
+    let launcher_state = launcher_state
+        .lock()
+        .expect("lock recording launcher state");
     assert!(app.get_asset_modal_open());
     assert_eq!(app.get_workspace_tab_items().row_count(), 0);
     assert_eq!(launcher_state.probe_profiles.len(), 1);
@@ -1019,10 +1368,7 @@ fn asset_activation_emits_layered_ssh_open_logs() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
-    let temp_root = std::env::temp_dir()
-        .join("mica-term")
-        .join("tests")
-        .join("ssh-open-logs-activation");
+    let temp_root = sample_logging_root("ssh-open-logs-activation");
     let _ = fs::remove_dir_all(&temp_root);
     fs::create_dir_all(temp_root.join("logs")).unwrap();
     fs::create_dir_all(temp_root.join("crash")).unwrap();
@@ -1045,7 +1391,16 @@ fn asset_activation_emits_layered_ssh_open_logs() {
 
     drop(runtime.guard);
 
-    let log_content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
+    let log_content = read_log_file_until_contains(
+        &paths.logs_dir.join("system-error.log"),
+        &[
+            "asset activated from explorer",
+            "activating asset",
+            "attempting to open ssh session after probe gate",
+            "session manager registered new session handle",
+            "synchronized workspace projection from session manager",
+        ],
+    );
     assert!(log_content.contains("asset activated from explorer"));
     assert!(log_content.contains("activating asset"));
     assert!(log_content.contains("attempting to open ssh session after probe gate"));
@@ -1060,10 +1415,7 @@ fn context_menu_open_emits_explicit_ssh_open_logs() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
-    let temp_root = std::env::temp_dir()
-        .join("mica-term")
-        .join("tests")
-        .join("ssh-open-logs-context-menu");
+    let temp_root = sample_logging_root("ssh-open-logs-context-menu");
     let _ = fs::remove_dir_all(&temp_root);
     fs::create_dir_all(temp_root.join("logs")).unwrap();
     fs::create_dir_all(temp_root.join("crash")).unwrap();

@@ -19,6 +19,7 @@ grep -F 'callback workspace-session-text-input(string);' "$APP_WINDOW" >/dev/nul
 grep -F 'callback workspace-session-key-input(string, bool, bool, bool);' "$APP_WINDOW" >/dev/null
 grep -F 'callback workspace-session-resize-requested(int, int);' "$APP_WINDOW" >/dev/null
 ! grep -F 'width: 216px;' "$TABBAR" >/dev/null
+grep -F 'horizontal-stretch: 1;' "$TABBAR" >/dev/null
 grep -F 'min-width: 0px;' "$ACTIVE_TAB" >/dev/null
 grep -F 'callback close-requested();' "$ACTIVE_TAB" >/dev/null
 grep -F 'overflow: elide;' "$ACTIVE_TAB" >/dev/null

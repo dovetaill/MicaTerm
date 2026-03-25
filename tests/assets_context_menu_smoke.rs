@@ -153,21 +153,19 @@ fn closing_folder_modal_resets_kind_and_confirm_state() {
 }
 
 #[test]
-fn ssh_modal_cancel_and_reopen_resets_tab_and_draft_fields() {
+fn ssh_modal_cancel_and_reopen_resets_grouped_form_draft_fields() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
     app.invoke_assets_create_action_selected("new-ssh-connection".into());
-    app.invoke_asset_ssh_modal_tab_selected("proxy".into());
     app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
     app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
     app.invoke_asset_ssh_modal_draft_changed("proxy_method".into(), "jump-host".into());
     app.invoke_close_asset_modal_requested();
 
     assert!(!app.get_asset_modal_open());
-    assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "standard");
     assert_eq!(app.get_asset_ssh_modal_name().as_str(), "");
     assert_eq!(app.get_asset_ssh_modal_host().as_str(), "");
     assert_eq!(app.get_asset_ssh_modal_proxy_method().as_str(), "");
@@ -176,7 +174,6 @@ fn ssh_modal_cancel_and_reopen_resets_tab_and_draft_fields() {
 
     assert!(app.get_asset_modal_open());
     assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
-    assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "standard");
     assert_eq!(app.get_asset_ssh_modal_name().as_str(), "SSH Connection 1");
     assert_eq!(app.get_asset_ssh_modal_host().as_str(), "");
     assert_eq!(app.get_asset_ssh_modal_proxy_method().as_str(), "");
@@ -202,7 +199,6 @@ fn closing_ssh_modal_resets_kind_and_confirm_state() {
     assert!(!app.get_asset_modal_open());
     assert_eq!(app.get_asset_modal_kind().as_str(), "");
     assert!(!app.get_asset_modal_can_confirm());
-    assert_eq!(app.get_asset_ssh_modal_active_tab().as_str(), "standard");
     assert_eq!(app.get_asset_ssh_modal_name().as_str(), "");
     assert_eq!(app.get_asset_ssh_modal_host().as_str(), "");
 }

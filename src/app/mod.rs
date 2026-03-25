@@ -1,8 +1,8 @@
 //! Application-layer orchestration for startup, native window integration, and persisted settings.
 
 pub mod app_paths;
-pub mod async_runtime;
 pub mod assets_catalog;
+pub mod async_runtime;
 pub mod bootstrap;
 pub mod logging;
 pub mod runtime_profile;

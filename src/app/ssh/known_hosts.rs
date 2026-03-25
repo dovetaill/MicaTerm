@@ -85,8 +85,9 @@ impl KnownHostsService {
             return Ok(Vec::new());
         }
 
-        let content = fs::read_to_string(&self.path)
-            .with_context(|| format!("failed to read known_hosts file `{}`", self.path.display()))?;
+        let content = fs::read_to_string(&self.path).with_context(|| {
+            format!("failed to read known_hosts file `{}`", self.path.display())
+        })?;
         content
             .lines()
             .filter(|line| {
@@ -136,8 +137,12 @@ pub fn default_known_hosts_path() -> Result<PathBuf> {
     let project_dirs = ProjectDirs::from("dev", "MicaTerm", "MicaTerm")
         .context("failed to resolve default project directories for known_hosts")?;
     let data_dir = project_dirs.data_local_dir().join("MicaTerm").join("data");
-    fs::create_dir_all(&data_dir)
-        .with_context(|| format!("failed to create known_hosts data dir `{}`", data_dir.display()))?;
+    fs::create_dir_all(&data_dir).with_context(|| {
+        format!(
+            "failed to create known_hosts data dir `{}`",
+            data_dir.display()
+        )
+    })?;
     Ok(data_dir.join("known_hosts"))
 }
 
@@ -148,9 +153,8 @@ fn parse_known_host_entry(line: &str) -> Result<KnownHostEntry> {
     };
 
     let host_pattern = trimmed[..separator_index].to_string();
-    let key = PublicKey::from_openssh(trimmed[separator_index..].trim()).with_context(|| {
-        format!("failed to parse known_hosts public key for `{host_pattern}`")
-    })?;
+    let key = PublicKey::from_openssh(trimmed[separator_index..].trim())
+        .with_context(|| format!("failed to parse known_hosts public key for `{host_pattern}`"))?;
 
     Ok(KnownHostEntry {
         host_pattern,

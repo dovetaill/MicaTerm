@@ -1,7 +1,8 @@
 use mica_term::app::ssh::credentials::{
     CachedCredentialStore, CredentialStore, MemoryCredentialStore, SshCredentialKind,
-    StoredSshSecretBundle, load_secret_bundle, merge_edit_bundle, persist_secret_bundle,
-    ssh_credential_ref,
+    StoredSecretLookupError, StoredSshSecretBundle, load_secret_bundle,
+    load_secret_bundle_with_diagnostics, merge_edit_bundle, persist_secret_bundle,
+    required_secret_bundle_field, ssh_credential_ref,
 };
 use mica_term::shell::view_model::AssetSshConnectionDraft;
 use std::sync::Arc;
@@ -160,6 +161,25 @@ fn editing_saved_secret_fields_blank_keeps_existing_bundle() {
 }
 
 #[test]
+fn editing_saved_password_blank_keeps_existing_bundle() {
+    let existing = StoredSshSecretBundle {
+        password: Some("super-secret".into()),
+        private_key_content: None,
+        passphrase: None,
+    };
+    let draft = AssetSshConnectionDraft {
+        auth_method: "password".into(),
+        ..AssetSshConnectionDraft::default()
+    };
+
+    let merged = merge_edit_bundle(existing, &draft);
+
+    assert_eq!(merged.password.as_deref(), Some("super-secret"));
+    assert_eq!(merged.private_key_content, None);
+    assert_eq!(merged.passphrase, None);
+}
+
+#[test]
 fn explicit_clear_saved_secret_deletes_bundle() {
     let existing = StoredSshSecretBundle {
         password: Some("super-secret".into()),
@@ -175,6 +195,48 @@ fn explicit_clear_saved_secret_deletes_bundle() {
     let merged = merge_edit_bundle(existing, &draft);
 
     assert!(merged.is_empty());
+}
+
+#[test]
+fn missing_saved_secret_binding_reports_missing_credential_ref() {
+    let store = MemoryCredentialStore::default();
+
+    let err = load_secret_bundle_with_diagnostics(&store, None).expect_err("missing binding");
+
+    assert_eq!(err, StoredSecretLookupError::MissingCredentialRef);
+}
+
+#[test]
+fn missing_saved_secret_reports_missing_keyring_entry() {
+    let store = MemoryCredentialStore::default();
+
+    let err = load_secret_bundle_with_diagnostics(&store, Some("ssh/saved-secrets/asset-prod"))
+        .expect_err("missing keyring entry");
+
+    assert_eq!(
+        err,
+        StoredSecretLookupError::MissingEntry {
+            credential_ref: "ssh/saved-secrets/asset-prod".into(),
+        }
+    );
+}
+
+#[test]
+fn empty_saved_secret_field_reports_empty_bundle_field() {
+    let err = required_secret_bundle_field(
+        &StoredSshSecretBundle::default(),
+        "ssh/saved-secrets/asset-prod",
+        "password",
+    )
+    .expect_err("missing password field");
+
+    assert_eq!(
+        err,
+        StoredSecretLookupError::EmptyBundleField {
+            credential_ref: "ssh/saved-secrets/asset-prod".into(),
+            field: "password",
+        }
+    );
 }
 
 #[test]

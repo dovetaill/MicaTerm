@@ -1,6 +1,7 @@
 //! Credential storage adapters for SSH secrets.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow};
@@ -64,6 +65,49 @@ impl StoredSshSecretBundle {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoredSecretLookupError {
+    MissingCredentialRef,
+    MissingEntry {
+        credential_ref: String,
+    },
+    ReadFailed {
+        credential_ref: String,
+        message: String,
+    },
+    EmptyBundleField {
+        credential_ref: String,
+        field: &'static str,
+    },
+}
+
+impl fmt::Display for StoredSecretLookupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingCredentialRef => write!(f, "missing SSH credential reference"),
+            Self::MissingEntry { credential_ref } => {
+                write!(f, "missing saved SSH secret entry `{credential_ref}`")
+            }
+            Self::ReadFailed {
+                credential_ref,
+                message,
+            } => write!(
+                f,
+                "failed to read saved SSH secret entry `{credential_ref}`: {message}"
+            ),
+            Self::EmptyBundleField {
+                credential_ref,
+                field,
+            } => write!(
+                f,
+                "saved SSH secret entry `{credential_ref}` is missing field `{field}`"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for StoredSecretLookupError {}
+
 pub fn persist_secret_bundle(
     store: &dyn CredentialStore,
     credential_ref: &str,
@@ -97,6 +141,52 @@ pub fn load_secret_bundle(
             }
         }),
     )
+}
+
+pub fn load_secret_bundle_with_diagnostics(
+    store: &dyn CredentialStore,
+    credential_ref: Option<&str>,
+) -> std::result::Result<StoredSshSecretBundle, StoredSecretLookupError> {
+    let credential_ref = credential_ref.ok_or(StoredSecretLookupError::MissingCredentialRef)?;
+    let raw = store
+        .get_secret(credential_ref)
+        .map_err(|err| StoredSecretLookupError::ReadFailed {
+            credential_ref: credential_ref.to_string(),
+            message: err.to_string(),
+        })?
+        .ok_or_else(|| StoredSecretLookupError::MissingEntry {
+            credential_ref: credential_ref.to_string(),
+        })?;
+
+    Ok(
+        serde_json::from_str::<StoredSshSecretBundle>(&raw).unwrap_or_else(|_| {
+            StoredSshSecretBundle {
+                password: Some(raw),
+                ..StoredSshSecretBundle::default()
+            }
+        }),
+    )
+}
+
+pub fn required_secret_bundle_field(
+    bundle: &StoredSshSecretBundle,
+    credential_ref: &str,
+    field: &'static str,
+) -> std::result::Result<String, StoredSecretLookupError> {
+    let value = match field {
+        "password" => bundle.password.as_deref(),
+        "private_key_content" => bundle.private_key_content.as_deref(),
+        "passphrase" => bundle.passphrase.as_deref(),
+        _ => None,
+    };
+
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| StoredSecretLookupError::EmptyBundleField {
+            credential_ref: credential_ref.to_string(),
+            field,
+        })
 }
 
 pub fn merge_edit_bundle(

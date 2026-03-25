@@ -63,10 +63,10 @@ pub struct AssetSshConnectionDraft {
     pub remark: String,
     pub environment: String,
     pub proxy_method: String,
+    pub validation_message: String,
     pub secret_retention_message: String,
     pub can_clear_saved_secret: bool,
     pub clear_saved_secret_requested: bool,
-    pub validation_message: String,
 }
 
 impl Default for AssetSshConnectionDraft {
@@ -86,15 +86,15 @@ impl Default for AssetSshConnectionDraft {
             remark: String::new(),
             environment: String::new(),
             proxy_method: String::new(),
+            validation_message: String::new(),
             secret_retention_message: String::new(),
             can_clear_saved_secret: false,
             clear_saved_secret_requested: false,
-            validation_message: String::new(),
         }
     }
 }
 
-const SSH_MODAL_SECRET_RETENTION_MESSAGE: &str =
+const SAVED_SECRET_RETENTION_MESSAGE: &str =
     "Leave password / private key / passphrase blank to keep the saved secret.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,11 +277,9 @@ impl ShellViewModel {
                 editing_asset_id,
                 draft,
                 ..
-            }) => self.ssh_modal_can_confirm(
-                parent_id.as_deref(),
-                editing_asset_id.as_deref(),
-                draft,
-            ),
+            }) => {
+                self.ssh_modal_can_confirm(parent_id.as_deref(), editing_asset_id.as_deref(), draft)
+            }
             _ => false,
         }
     }
@@ -314,10 +312,7 @@ impl ShellViewModel {
             .filter(|surface| surface.session_id.to_string() == active_id)
     }
 
-    pub fn set_active_workspace_terminal_surface(
-        &mut self,
-        surface: Option<TerminalSurfaceState>,
-    ) {
+    pub fn set_active_workspace_terminal_surface(&mut self, surface: Option<TerminalSurfaceState>) {
         self.active_workspace_terminal_surface = surface;
     }
 
@@ -349,9 +344,7 @@ impl ShellViewModel {
                 SshModalAction::Save => "Saving connection...".into(),
                 SshModalAction::TestConnection => "Testing connection...".into(),
                 SshModalAction::Connect => "Opening temporary session...".into(),
-                SshModalAction::SaveAndConnect => {
-                    "Saving connection and opening session...".into()
-                }
+                SshModalAction::SaveAndConnect => "Saving connection and opening session...".into(),
             },
             SshModalActionState::Success(message) | SshModalActionState::Error(message) => {
                 message.clone()
@@ -653,12 +646,8 @@ impl ShellViewModel {
         } else {
             spec.private_key_source.clone()
         };
-        let supports_saved_secret_binding = ssh_modal_supports_saved_secret_binding(
-            &auth_method,
-            &private_key_source,
-            spec.credential_ref.is_some(),
-        );
-
+        let can_clear_saved_secret =
+            uses_saved_secret_for_editing(&spec, auth_method.as_str(), private_key_source.as_str());
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
@@ -685,16 +674,39 @@ impl ShellViewModel {
                 remark: spec.remark,
                 environment: spec.environment,
                 proxy_method: spec.proxy_method,
-                secret_retention_message: if supports_saved_secret_binding {
-                    SSH_MODAL_SECRET_RETENTION_MESSAGE.into()
+                validation_message: String::new(),
+                secret_retention_message: if can_clear_saved_secret {
+                    SAVED_SECRET_RETENTION_MESSAGE.into()
                 } else {
                     String::new()
                 },
-                can_clear_saved_secret: supports_saved_secret_binding,
+                can_clear_saved_secret,
                 clear_saved_secret_requested: false,
-                validation_message: String::new(),
             },
         });
+    }
+
+    pub fn hydrate_edit_ssh_modal_secret(
+        &mut self,
+        password: Option<String>,
+        private_key_content: Option<String>,
+        passphrase: Option<String>,
+        inline_error: Option<String>,
+    ) {
+        let Some(AssetModalState::NewSshConnection {
+            editing_asset_id: Some(_),
+            draft,
+            ..
+        }) = self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        draft.password = password.unwrap_or_default();
+        draft.private_key_content = private_key_content.unwrap_or_default();
+        draft.passphrase = passphrase.unwrap_or_default();
+        draft.password_visible = false;
+        draft.validation_message = inline_error.unwrap_or_default();
     }
 
     pub fn open_rename_asset_modal(&mut self, asset_id: String) {
@@ -755,53 +767,66 @@ impl ShellViewModel {
     }
 
     pub fn update_ssh_modal_field(&mut self, field: &str, value: String) {
-        let Some(AssetModalState::NewSshConnection { draft, .. }) = self.asset_modal_state.as_mut()
-        else {
-            return;
-        };
-        let has_secret_input = !value.trim().is_empty();
-
-        match field {
-            "name" => draft.name = value,
-            "host" => draft.host = value,
-            "user" => draft.user = value,
-            "port" => draft.port = value,
-            "auth_method" => {
-                if matches!(value.as_str(), "password" | "private-key") {
-                    draft.auth_method = value;
+        let needs_saved_secret_sync = matches!(
+            field,
+            "auth_method"
+                | "private_key_source"
+                | "password"
+                | "private_key_content"
+                | "private_key_path"
+                | "passphrase"
+                | "clear_saved_secret"
+        );
+        {
+            let Some(AssetModalState::NewSshConnection { draft, .. }) =
+                self.asset_modal_state.as_mut()
+            else {
+                return;
+            };
+            match field {
+                "name" => draft.name = value,
+                "host" => draft.host = value,
+                "user" => draft.user = value,
+                "port" => draft.port = value,
+                "auth_method" => {
+                    if matches!(value.as_str(), "password" | "private-key") {
+                        draft.auth_method = value;
+                    }
                 }
-            }
-            "private_key_source" => {
-                if matches!(value.as_str(), "content" | "path") {
-                    draft.private_key_source = value;
+                "private_key_source" => {
+                    if matches!(value.as_str(), "content" | "path") {
+                        draft.private_key_source = value;
+                    }
                 }
+                "password" => draft.password = value,
+                "private_key_content" => draft.private_key_content = value,
+                "private_key_path" => draft.private_key_path = value,
+                "passphrase" => draft.passphrase = value,
+                "password_visibility" => {
+                    draft.password_visible = matches!(value.as_str(), "visible" | "show" | "true");
+                }
+                "clear_saved_secret" => {
+                    draft.clear_saved_secret_requested =
+                        matches!(value.as_str(), "true" | "clear" | "1");
+                    if draft.clear_saved_secret_requested {
+                        draft.password.clear();
+                        draft.private_key_content.clear();
+                        draft.passphrase.clear();
+                        draft.password_visible = false;
+                    }
+                }
+                "remark" => draft.remark = value,
+                "environment" => draft.environment = value,
+                "proxy_method" => draft.proxy_method = value,
+                _ => {}
             }
-            "password" => draft.password = value,
-            "private_key_content" => draft.private_key_content = value,
-            "private_key_path" => draft.private_key_path = value,
-            "passphrase" => draft.passphrase = value,
-            "password_visibility" => {
-                draft.password_visible = matches!(value.as_str(), "visible" | "show" | "true");
-            }
-            "clear_saved_secret" => {
-                draft.clear_saved_secret_requested = draft.can_clear_saved_secret
-                    && matches!(value.as_str(), "true" | "clear" | "1" | "yes");
-            }
-            "remark" => draft.remark = value,
-            "environment" => draft.environment = value,
-            "proxy_method" => draft.proxy_method = value,
-            _ => {}
+
+            draft.validation_message.clear();
         }
 
-        if matches!(field, "auth_method" | "private_key_source") {
-            draft.clear_saved_secret_requested = false;
+        if needs_saved_secret_sync {
+            self.sync_edit_ssh_modal_secret_retention();
         }
-
-        if matches!(field, "password" | "private_key_content" | "passphrase") && has_secret_input {
-            draft.clear_saved_secret_requested = false;
-        }
-
-        draft.validation_message.clear();
         self.ssh_modal_action_state = SshModalActionState::Idle;
     }
 
@@ -1534,10 +1559,12 @@ impl ShellViewModel {
         editing_asset_id: Option<&str>,
         draft: &AssetSshConnectionDraft,
     ) -> String {
-        let name_message = asset_name_validation_message(
-            self.console_asset_tree
-                .validate_name_in_parent(parent_id, &draft.name, editing_asset_id),
-        );
+        let name_message =
+            asset_name_validation_message(self.console_asset_tree.validate_name_in_parent(
+                parent_id,
+                &draft.name,
+                editing_asset_id,
+            ));
         if !name_message.is_empty() {
             return name_message;
         }
@@ -1551,11 +1578,9 @@ impl ShellViewModel {
         editing_asset_id: Option<&str>,
         draft: &AssetSshConnectionDraft,
     ) -> bool {
-        self.console_asset_tree.validate_name_in_parent(
-            parent_id,
-            &draft.name,
-            editing_asset_id,
-        ) == AssetNameValidation::Valid
+        self.console_asset_tree
+            .validate_name_in_parent(parent_id, &draft.name, editing_asset_id)
+            == AssetNameValidation::Valid
             && self
                 .ssh_modal_submit_validation_message(parent_id, editing_asset_id, draft)
                 .is_none()
@@ -1567,10 +1592,12 @@ impl ShellViewModel {
         editing_asset_id: Option<&str>,
         draft: &AssetSshConnectionDraft,
     ) -> Option<String> {
-        let name_message = asset_name_validation_message(
-            self.console_asset_tree
-                .validate_name_in_parent(parent_id, &draft.name, editing_asset_id),
-        );
+        let name_message =
+            asset_name_validation_message(self.console_asset_tree.validate_name_in_parent(
+                parent_id,
+                &draft.name,
+                editing_asset_id,
+            ));
         if !name_message.is_empty() {
             return Some(name_message);
         }
@@ -1583,8 +1610,7 @@ impl ShellViewModel {
             return Some("User is required.".into());
         }
 
-        let can_reuse_saved_secret =
-            self.ssh_modal_can_reuse_saved_secret(editing_asset_id, draft);
+        let can_reuse_saved_secret = self.ssh_modal_can_reuse_saved_secret(editing_asset_id, draft);
         match draft.auth_method.as_str() {
             "password" => {
                 if draft.password.trim().is_empty() && !can_reuse_saved_secret {
@@ -1623,6 +1649,15 @@ impl ShellViewModel {
         editing_asset_id: Option<&str>,
         draft: &AssetSshConnectionDraft,
     ) -> bool {
+        !draft.clear_saved_secret_requested
+            && self.ssh_modal_supports_saved_secret(editing_asset_id, draft)
+    }
+
+    fn ssh_modal_supports_saved_secret(
+        &self,
+        editing_asset_id: Option<&str>,
+        draft: &AssetSshConnectionDraft,
+    ) -> bool {
         let Some(asset_id) = editing_asset_id else {
             return false;
         };
@@ -1636,15 +1671,65 @@ impl ShellViewModel {
             return false;
         }
 
-        if draft.auth_method == "private-key" && spec_private_key_source != draft.private_key_source {
+        if draft.auth_method == "private-key" && spec_private_key_source != draft.private_key_source
+        {
             return false;
         }
 
-        ssh_modal_supports_saved_secret_binding(
-            spec_auth_method,
-            spec_private_key_source,
-            spec.credential_ref.is_some(),
-        )
+        match spec_auth_method {
+            "password" => true,
+            "private-key" if spec_private_key_source == "content" => true,
+            "private-key" if spec_private_key_source == "path" => spec.credential_ref.is_some(),
+            _ => false,
+        }
+    }
+
+    fn sync_edit_ssh_modal_secret_retention(&mut self) {
+        let Some(AssetModalState::NewSshConnection {
+            editing_asset_id,
+            draft,
+            ..
+        }) = self.asset_modal_state.as_ref()
+        else {
+            return;
+        };
+
+        let supports_saved_secret = editing_asset_id.as_deref().is_some_and(|asset_id| {
+            self.console_asset_tree
+                .ssh_connection_spec(asset_id)
+                .is_some_and(|spec| {
+                    uses_saved_secret_for_editing(
+                        spec,
+                        draft.auth_method.as_str(),
+                        draft.private_key_source.as_str(),
+                    )
+                })
+        });
+
+        let Some(AssetModalState::NewSshConnection {
+            editing_asset_id,
+            draft,
+            ..
+        }) = self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+        if editing_asset_id.is_none() {
+            draft.secret_retention_message.clear();
+            draft.can_clear_saved_secret = false;
+            draft.clear_saved_secret_requested = false;
+            return;
+        }
+
+        draft.secret_retention_message = if supports_saved_secret {
+            SAVED_SECRET_RETENTION_MESSAGE.into()
+        } else {
+            String::new()
+        };
+        draft.can_clear_saved_secret = supports_saved_secret;
+        if !supports_saved_secret {
+            draft.clear_saved_secret_requested = false;
+        }
     }
 }
 
@@ -1664,15 +1749,26 @@ fn normalized_ssh_private_key_source(value: &str) -> &str {
     }
 }
 
-fn ssh_modal_supports_saved_secret_binding(
-    auth_method: &str,
-    private_key_source: &str,
-    has_saved_credential_ref: bool,
+fn uses_saved_secret_for_editing(
+    spec: &AssetSshConnectionSpec,
+    draft_auth_method: &str,
+    draft_private_key_source: &str,
 ) -> bool {
-    match auth_method {
+    let spec_auth_method = normalized_ssh_auth_method(&spec.auth_method);
+    let spec_private_key_source = normalized_ssh_private_key_source(&spec.private_key_source);
+
+    if spec_auth_method != draft_auth_method {
+        return false;
+    }
+
+    if draft_auth_method == "private-key" && spec_private_key_source != draft_private_key_source {
+        return false;
+    }
+
+    match spec_auth_method {
         "password" => true,
-        "private-key" if private_key_source == "content" => true,
-        "private-key" if private_key_source == "path" => has_saved_credential_ref,
+        "private-key" if spec_private_key_source == "content" => true,
+        "private-key" if spec_private_key_source == "path" => spec.credential_ref.is_some(),
         _ => false,
     }
 }
@@ -1682,20 +1778,23 @@ fn build_saved_ssh_connection_spec(
     draft: &AssetSshConnectionDraft,
     existing_spec: Option<&AssetSshConnectionSpec>,
 ) -> AssetSshConnectionSpec {
-    let uses_saved_secret = if draft.clear_saved_secret_requested {
-        false
-    } else {
-        match draft.auth_method.as_str() {
-            "password" => true,
-            "private-key" if draft.private_key_source == "content" => true,
-            "private-key" if draft.private_key_source == "path" => {
-                !draft.passphrase.trim().is_empty()
-                    || existing_spec
-                        .and_then(|spec| spec.credential_ref.as_ref())
-                        .is_some()
-            }
-            _ => false,
+    let uses_saved_secret = match draft.auth_method.as_str() {
+        "password" => {
+            !draft.password.trim().is_empty()
+                || (!draft.clear_saved_secret_requested && existing_spec.is_some())
         }
+        "private-key" if draft.private_key_source == "content" => {
+            !draft.private_key_content.trim().is_empty()
+                || (!draft.clear_saved_secret_requested && existing_spec.is_some())
+        }
+        "private-key" if draft.private_key_source == "path" => {
+            !draft.passphrase.trim().is_empty()
+                || (!draft.clear_saved_secret_requested
+                    && existing_spec
+                        .and_then(|spec| spec.credential_ref.as_ref())
+                        .is_some())
+        }
+        _ => false,
     };
     let credential_ref = match draft.auth_method.as_str() {
         "password" | "private-key" if uses_saved_secret => {

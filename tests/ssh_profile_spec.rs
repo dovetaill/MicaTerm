@@ -96,3 +96,31 @@ fn ssh_profile_can_be_built_from_saved_asset_and_credential_reference() {
     assert_eq!(profile.private_key_path, None);
     assert_eq!(profile.remark, "Primary entry point");
 }
+
+#[test]
+fn ssh_profile_private_key_path_saved_asset_preserves_saved_credential_reference() {
+    let profile = ConnectionProfile::from_saved_asset(
+        "asset-prod",
+        "Prod Bastion",
+        &AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "2022".into(),
+            auth_method: "private-key".into(),
+            private_key_source: "path".into(),
+            private_key_path: "/tmp/id_ed25519".into(),
+            environment: "prod".into(),
+            proxy_method: "jump-host".into(),
+            remark: "Primary entry point".into(),
+            credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+        },
+    )
+    .expect("build saved private key path profile");
+
+    assert_eq!(profile.auth_method, SshAuthMethod::PrivateKeyPath);
+    assert_eq!(
+        profile.credential_ref.as_deref(),
+        Some("ssh/saved-secrets/asset-prod")
+    );
+    assert_eq!(profile.private_key_path.as_deref(), Some("/tmp/id_ed25519"));
+}

@@ -27,13 +27,15 @@ use crate::app::assets_catalog::{
 use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::ssh::credentials::{
-    CachedCredentialStore, CredentialStore, StoredSshSecretBundle, SystemCredentialStore,
-    load_secret_bundle, merge_edit_bundle, persist_secret_bundle,
+    CachedCredentialStore, CredentialStore, StoredSecretLookupError, StoredSshSecretBundle,
+    SystemCredentialStore, load_secret_bundle, merge_edit_bundle, persist_secret_bundle,
+    required_secret_bundle_field,
 };
 use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
-use crate::app::ssh::profile::ConnectionProfile;
+use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
 use crate::app::ssh::runtime::{
     SessionRuntimeEvent, SshSessionRuntime, UnknownHostKeyError, encode_named_key_input,
+    load_optional_stored_secret_bundle, stored_secret_lookup_message,
 };
 use crate::app::ssh::session_manager::{
     OpenSessionMode, SessionHandle, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
@@ -96,6 +98,14 @@ enum HostKeyApprovalIntent {
 #[derive(Clone)]
 struct LiveSessionRuntimeLauncher {
     credential_store: Arc<dyn CredentialStore>,
+}
+
+#[derive(Default)]
+struct EditSshModalSecretHydration {
+    password: Option<String>,
+    private_key_content: Option<String>,
+    passphrase: Option<String>,
+    inline_error: Option<String>,
 }
 
 impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
@@ -617,8 +627,128 @@ fn profile_for_modal_action(
     ConnectionProfile::from_modal_draft(asset_id, spec, draft)
 }
 
-fn temporary_session_asset_id_for_draft(_draft: &AssetSshConnectionDraft) -> String {
-    format!("session:{}", Uuid::new_v4())
+fn non_empty_saved_secret(value: Option<&str>) -> Option<String> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+}
+
+fn active_edit_ssh_asset_id(state: &ShellViewModel) -> Option<String> {
+    let Some(AssetModalState::NewSshConnection {
+        editing_asset_id: Some(asset_id),
+        ..
+    }) = &state.asset_modal_state
+    else {
+        return None;
+    };
+
+    Some(asset_id.clone())
+}
+
+fn resolve_edit_ssh_modal_secret_hydration(
+    profile: &ConnectionProfile,
+    credential_store: &dyn CredentialStore,
+) -> EditSshModalSecretHydration {
+    let secret_label = match profile.auth_method {
+        SshAuthMethod::Password => "SSH password secret",
+        SshAuthMethod::PrivateKeyContent => "SSH inline private key secret",
+        SshAuthMethod::PrivateKeyPath => "SSH passphrase secret",
+    };
+
+    let stored_bundle = match load_optional_stored_secret_bundle(profile, credential_store) {
+        Ok(stored_bundle) => stored_bundle,
+        Err(err) => {
+            return EditSshModalSecretHydration {
+                inline_error: Some(stored_secret_lookup_message(profile, secret_label, &err)),
+                ..EditSshModalSecretHydration::default()
+            };
+        }
+    };
+
+    match profile.auth_method {
+        SshAuthMethod::Password => {
+            let Some((credential_ref, bundle)) = stored_bundle else {
+                return EditSshModalSecretHydration {
+                    inline_error: Some(stored_secret_lookup_message(
+                        profile,
+                        secret_label,
+                        &StoredSecretLookupError::MissingCredentialRef,
+                    )),
+                    ..EditSshModalSecretHydration::default()
+                };
+            };
+
+            match required_secret_bundle_field(&bundle, &credential_ref, "password") {
+                Ok(password) => EditSshModalSecretHydration {
+                    password: Some(password),
+                    ..EditSshModalSecretHydration::default()
+                },
+                Err(err) => EditSshModalSecretHydration {
+                    inline_error: Some(stored_secret_lookup_message(profile, secret_label, &err)),
+                    ..EditSshModalSecretHydration::default()
+                },
+            }
+        }
+        SshAuthMethod::PrivateKeyContent => {
+            let Some((credential_ref, bundle)) = stored_bundle else {
+                return EditSshModalSecretHydration {
+                    inline_error: Some(stored_secret_lookup_message(
+                        profile,
+                        secret_label,
+                        &StoredSecretLookupError::MissingCredentialRef,
+                    )),
+                    ..EditSshModalSecretHydration::default()
+                };
+            };
+            let passphrase = non_empty_saved_secret(bundle.passphrase.as_deref());
+
+            match required_secret_bundle_field(&bundle, &credential_ref, "private_key_content") {
+                Ok(private_key_content) => EditSshModalSecretHydration {
+                    private_key_content: Some(private_key_content),
+                    passphrase,
+                    ..EditSshModalSecretHydration::default()
+                },
+                Err(err) => EditSshModalSecretHydration {
+                    passphrase,
+                    inline_error: Some(stored_secret_lookup_message(profile, secret_label, &err)),
+                    ..EditSshModalSecretHydration::default()
+                },
+            }
+        }
+        SshAuthMethod::PrivateKeyPath => EditSshModalSecretHydration {
+            passphrase: stored_bundle
+                .and_then(|(_, bundle)| non_empty_saved_secret(bundle.passphrase.as_deref())),
+            ..EditSshModalSecretHydration::default()
+        },
+    }
+}
+
+fn hydrate_edit_ssh_modal_secret_from_store(
+    state: &mut ShellViewModel,
+    credential_store: &dyn CredentialStore,
+) {
+    let Some(asset_id) = active_edit_ssh_asset_id(state) else {
+        return;
+    };
+
+    let hydration = match profile_for_saved_asset(state, &asset_id) {
+        Ok(profile) => resolve_edit_ssh_modal_secret_hydration(&profile, credential_store),
+        Err(err) => EditSshModalSecretHydration {
+            inline_error: Some(err.to_string()),
+            ..EditSshModalSecretHydration::default()
+        },
+    };
+
+    state.hydrate_edit_ssh_modal_secret(
+        hydration.password,
+        hydration.private_key_content,
+        hydration.passphrase,
+        hydration.inline_error,
+    );
+}
+
+fn temporary_session_asset_id_for_profile(profile: &ConnectionProfile) -> String {
+    profile.temporary_session_asset_id()
 }
 
 fn saved_secret_bundle_for_draft(draft: &AssetSshConnectionDraft) -> StoredSshSecretBundle {
@@ -661,11 +791,15 @@ fn sync_saved_ssh_secrets(
 
     let next_ref = next_ref.expect("checked credential ref");
     let next_bundle = if existing_spec.is_some() {
-        let existing_bundle = previous_ref
-            .map(|credential_ref| load_secret_bundle(store, credential_ref))
-            .transpose()?
-            .unwrap_or_default();
-        merge_edit_bundle(existing_bundle, draft)
+        if draft.clear_saved_secret_requested {
+            saved_secret_bundle_for_draft(draft)
+        } else {
+            let existing_bundle = previous_ref
+                .map(|credential_ref| load_secret_bundle(store, credential_ref))
+                .transpose()?
+                .unwrap_or_default();
+            merge_edit_bundle(existing_bundle, draft)
+        }
     } else {
         saved_secret_bundle_for_draft(draft)
     };
@@ -2287,8 +2421,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 }
                 SshModalAction::Connect => match profile_for_modal_action(&state, &request.draft) {
                     Ok(mut profile) => {
-                        profile.asset_id =
-                            Some(temporary_session_asset_id_for_draft(&request.draft));
+                        profile.asset_id = Some(temporary_session_asset_id_for_profile(&profile));
                         if let Some(session_bridge) = session_bridge_ref.as_ref() {
                             if let Err(err) = attempt_open_session_with_profile(
                                 &mut state,
@@ -2692,6 +2825,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_bridge_ref = session_bridge.clone();
     let session_runtime_guard_ref = session_runtime_guard.clone();
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    let credential_store_ref = Arc::clone(&credential_store);
     window.on_assets_context_menu_action_invoked(move |action_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -2790,6 +2924,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             }
         }
 
+        hydrate_edit_ssh_modal_secret_from_store(&mut state, credential_store_ref.as_ref());
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
         sync_workspace_tabs(&window, &state);

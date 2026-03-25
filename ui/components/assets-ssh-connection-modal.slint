@@ -205,12 +205,12 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> private-key-path: "";
     in property <string> passphrase: "";
     in property <bool> password-visible: false;
-    in property <string> secret-retention-message: "";
-    in property <bool> can-clear-saved-secret: false;
-    in property <bool> clear-saved-secret-requested: false;
     in property <string> remark: "";
     in property <string> environment: "";
     in property <string> proxy-method: "";
+    in property <string> secret-retention-message: "Leave password / private key / passphrase blank to keep the saved secret.";
+    in property <bool> can-clear-saved-secret: false;
+    in property <bool> clear-saved-secret-requested: false;
     in property <string> validation-message: "";
     in property <bool> connect-family-enabled: false;
     in property <string> feedback-state: "idle";
@@ -225,13 +225,10 @@ export component AssetsSshConnectionModal inherits Rectangle {
     callback drag-ended();
     callback focus-restore-requested();
 
-    private property <string> active-tab: "standard";
     private property <bool> compact-layout: root.width < 620px;
     private property <length> header-height: 56px;
-    private property <length> tabs-height: 48px;
     private property <length> footer-height: root.feedback-message != "" || root.validation-message != "" ? 112px : 84px;
-    private property <length> body-top: root.header-height + root.tabs-height;
-    private property <length> body-height: max(0px, root.height - root.body-top - root.footer-height);
+    private property <length> body-height: max(0px, root.height - root.header-height - root.footer-height);
 
     background: transparent;
 
@@ -332,44 +329,9 @@ export component AssetsSshConnectionModal inherits Rectangle {
             }
         }
 
-        tabs-host := Rectangle {
-            x: 0px;
-            y: root.header-height;
-            width: parent.width;
-            height: root.tabs-height;
-            background: ThemeTokens.assets-surface;
-
-            HorizontalLayout {
-                x: 20px;
-                y: 8px;
-                width: parent.width - 40px;
-                height: 32px;
-                spacing: 8px;
-
-                for tab-id in ["standard", "proxy", "environment", "advanced"] : ModalTabButton {
-                    label: tab-id == "standard" ? "Standard"
-                        : tab-id == "proxy" ? "Proxy"
-                        : tab-id == "environment" ? "Environment"
-                        : "Advanced";
-                    active: root.active-tab == tab-id;
-
-                    clicked => {
-                        root.active-tab = tab-id;
-                    }
-                }
-            }
-
-            tabs-divider := Rectangle {
-                y: parent.height - 1px;
-                width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
-            }
-        }
-
         body-scroll := ScrollView {
             x: 0px;
-            y: root.body-top;
+            y: root.header-height;
             width: parent.width;
             height: root.body-height;
             viewport-width: scroll-body.width;
@@ -384,9 +346,16 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     x: 20px;
                     y: 20px;
                     width: parent.width - 40px;
-                    spacing: 16px;
+                    spacing: 18px;
 
-                    if root.active-tab == "standard" : VerticalLayout {
+                    Text {
+                        width: parent.width;
+                        text: "Basic";
+                        color: ThemeTokens.text-primary;
+                        font-weight: 600;
+                    }
+
+                    VerticalLayout {
                         width: parent.width;
                         spacing: 16px;
 
@@ -508,6 +477,18 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 }
                             }
                         }
+                    }
+
+                    Text {
+                        width: parent.width;
+                        text: "Authentication";
+                        color: ThemeTokens.text-primary;
+                        font-weight: 600;
+                    }
+
+                    VerticalLayout {
+                        width: parent.width;
+                        spacing: 16px;
 
                         Rectangle {
                             width: parent.width;
@@ -530,53 +511,6 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
 
-                        if root.secret-retention-message != "" : VerticalLayout {
-                            width: parent.width;
-                            spacing: 8px;
-
-                            Text {
-                                width: parent.width;
-                                text: root.secret-retention-message;
-                                color: ThemeTokens.text-primary;
-                                opacity: 0.72;
-                                wrap: word-wrap;
-                            }
-
-                            if root.can-clear-saved-secret : Rectangle {
-                                width: parent.width;
-                                height: root.clear-saved-secret-requested ? 56px : 34px;
-                                background: transparent;
-
-                                VerticalLayout {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    spacing: 6px;
-
-                                    ModalTabButton {
-                                        width: 180px;
-                                        horizontal-stretch: 0;
-                                        label: root.clear-saved-secret-requested ? "Keep Saved Secret" : "Clear Saved Secret";
-                                        active: root.clear-saved-secret-requested;
-
-                                        clicked => {
-                                            root.draft-changed(
-                                                "clear_saved_secret",
-                                                root.clear-saved-secret-requested ? "false" : "true"
-                                            );
-                                        }
-                                    }
-
-                                    if root.clear-saved-secret-requested : Text {
-                                        width: parent.width;
-                                        text: "Saved secret will be removed on Save.";
-                                        color: ThemeTokens.text-primary;
-                                        opacity: 0.72;
-                                        wrap: word-wrap;
-                                    }
-                                }
-                            }
-                        }
-
                         if root.auth-method == "password" : FormField {
                             width: parent.width;
                             label: "Password";
@@ -594,6 +528,52 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     "password_visibility",
                                     root.password-visible ? "hidden" : "visible"
                                 );
+                            }
+                        }
+
+                        if root.secret-retention-message != "" : VerticalLayout {
+                            width: parent.width;
+                            spacing: 8px;
+
+                            Text {
+                                width: parent.width;
+                                text: root.secret-retention-message;
+                                color: ThemeTokens.text-primary;
+                                opacity: 0.72;
+                                wrap: word-wrap;
+                            }
+
+                            if root.can-clear-saved-secret : Rectangle {
+                                width: 160px;
+                                height: 30px;
+                                border-radius: 0px;
+                                border-width: 1px;
+                                border-color: ThemeTokens.divider-subtle;
+                                background: clear-secret-password-touch.pressed ? ThemeTokens.control-pressed-surface
+                                    : clear-secret-password-touch.has-hover ? ThemeTokens.control-hover-surface
+                                    : ThemeTokens.control-active-surface;
+
+                                Text {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: root.clear-saved-secret-requested ? "Keep Saved Secret" : "Clear Saved Secret";
+                                    color: ThemeTokens.text-primary;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                }
+
+                                clear-secret-password-touch := TouchArea {
+                                    width: parent.width;
+                                    height: parent.height;
+
+                                    clicked => {
+                                        root.draft-changed(
+                                            "clear_saved_secret",
+                                            root.clear-saved-secret-requested ? "false" : "true"
+                                        );
+                                    }
+                                }
                             }
                         }
 
@@ -655,10 +635,63 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     root.draft-changed("passphrase", value);
                                 }
                             }
+
+                            if root.secret-retention-message != "" : VerticalLayout {
+                                width: parent.width;
+                                spacing: 8px;
+
+                                Text {
+                                    width: parent.width;
+                                    text: root.secret-retention-message;
+                                    color: ThemeTokens.text-primary;
+                                    opacity: 0.72;
+                                    wrap: word-wrap;
+                                }
+
+                                if root.can-clear-saved-secret : Rectangle {
+                                    width: 160px;
+                                    height: 30px;
+                                    border-radius: 0px;
+                                    border-width: 1px;
+                                    border-color: ThemeTokens.divider-subtle;
+                                    background: clear-secret-key-touch.pressed ? ThemeTokens.control-pressed-surface
+                                        : clear-secret-key-touch.has-hover ? ThemeTokens.control-hover-surface
+                                        : ThemeTokens.control-active-surface;
+
+                                    Text {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        text: root.clear-saved-secret-requested ? "Keep Saved Secret" : "Clear Saved Secret";
+                                        color: ThemeTokens.text-primary;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                        font-size: 11px;
+                                    }
+
+                                    clear-secret-key-touch := TouchArea {
+                                        width: parent.width;
+                                        height: parent.height;
+
+                                        clicked => {
+                                            root.draft-changed(
+                                                "clear_saved_secret",
+                                                root.clear-saved-secret-requested ? "false" : "true"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    if root.active-tab == "proxy" : VerticalLayout {
+                    Text {
+                        width: parent.width;
+                        text: "Connection Options";
+                        color: ThemeTokens.text-primary;
+                        font-weight: 600;
+                    }
+
+                    VerticalLayout {
                         width: parent.width;
                         spacing: 12px;
 
@@ -671,15 +704,10 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 root.draft-changed("proxy_method", value);
                             }
                         }
-                    }
-
-                    if root.active-tab == "environment" : VerticalLayout {
-                        width: parent.width;
-                        spacing: 12px;
 
                         FormField {
                             width: parent.width;
-                            label: "Environment";
+                            label: "Session Environment";
                             value: root.environment;
                             multiline: true;
 
@@ -689,7 +717,14 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         }
                     }
 
-                    if root.active-tab == "advanced" : VerticalLayout {
+                    Text {
+                        width: parent.width;
+                        text: "Notes";
+                        color: ThemeTokens.text-primary;
+                        font-weight: 600;
+                    }
+
+                    VerticalLayout {
                         width: parent.width;
                         spacing: 12px;
 
@@ -784,7 +819,4 @@ export component AssetsSshConnectionModal inherits Rectangle {
         }
     }
 
-    changed focus-sequence => {
-        root.active-tab = "standard";
-    }
 }

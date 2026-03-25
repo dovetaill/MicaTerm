@@ -42,7 +42,8 @@ pub trait SessionRuntimeControl: Send {
     fn resize(&self, rows: u32, cols: u32) -> Result<()>;
 }
 
-type LaunchFuture = Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>;
+type LaunchFuture =
+    Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>;
 type ProbeFuture = Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
 
 pub trait SessionRuntimeLauncher: Send + Sync {
@@ -238,21 +239,27 @@ impl SessionManager {
     }
 
     pub fn resize_session(&self, session_id: Uuid, rows: u32, cols: u32) -> Result<()> {
-        let registry = self.registry.lock().expect("lock session registry");
-        let runtime_control = registry
-            .runtime_controls
-            .get(&session_id)
-            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.resize(rows, cols)
+        let mut registry = self.registry.lock().expect("lock session registry");
+        if let Some(runtime_control) = registry.runtime_controls.get(&session_id) {
+            return runtime_control.resize(rows, cols);
+        }
+        if registry.sessions.contains_key(&session_id) {
+            registry.pending_resizes.insert(session_id, (rows, cols));
+            return Ok(());
+        }
+        Err(anyhow!("session runtime is not ready for `{session_id}`"))
     }
 
     pub fn close_session(&self, session_id: Uuid) -> Option<SessionHandle> {
         let (removed, runtime_control) = {
             let mut registry = self.registry.lock().expect("lock session registry");
             let removed = registry.sessions.remove(&session_id)?;
-            registry.open_order.retain(|existing_id| *existing_id != session_id);
+            registry
+                .open_order
+                .retain(|existing_id| *existing_id != session_id);
             registry.terminal_surfaces.remove(&session_id);
             registry.pending_disconnects.remove(&session_id);
+            registry.pending_resizes.remove(&session_id);
             let runtime_control = registry.runtime_controls.remove(&session_id);
             if registry.asset_sessions.get(&removed.asset_id) == Some(&session_id) {
                 let replacement = registry
@@ -295,6 +302,7 @@ struct SessionRegistry {
     terminal_surfaces: HashMap<Uuid, TerminalSurfaceState>,
     runtime_controls: HashMap<Uuid, Box<dyn SessionRuntimeControl>>,
     pending_disconnects: HashSet<Uuid>,
+    pending_resizes: HashMap<Uuid, (u32, u32)>,
 }
 
 fn apply_runtime_event(
@@ -376,23 +384,31 @@ fn attach_runtime_control(
     runtime_control: Box<dyn SessionRuntimeControl>,
 ) {
     let mut runtime_control = Some(runtime_control);
-    let should_disconnect = {
+    let (should_disconnect, pending_resize) = {
         let mut registry = registry.lock().expect("lock session registry");
         if !registry.sessions.contains_key(&session_id)
             || registry.pending_disconnects.remove(&session_id)
         {
-            true
+            (true, None)
         } else {
             registry.runtime_controls.insert(
                 session_id,
                 runtime_control.take().expect("runtime control available"),
             );
-            false
+            (false, registry.pending_resizes.remove(&session_id))
         }
     };
 
     if should_disconnect && let Some(runtime_control) = runtime_control {
         let _ = runtime_control.disconnect();
+        return;
+    }
+
+    if let Some((rows, cols)) = pending_resize {
+        let registry = registry.lock().expect("lock session registry");
+        if let Some(runtime_control) = registry.runtime_controls.get(&session_id) {
+            let _ = runtime_control.resize(rows, cols);
+        }
     }
 }
 
@@ -400,4 +416,5 @@ fn clear_runtime_control(registry: &Arc<Mutex<SessionRegistry>>, session_id: Uui
     let mut registry = registry.lock().expect("lock session registry");
     registry.runtime_controls.remove(&session_id);
     registry.pending_disconnects.remove(&session_id);
+    registry.pending_resizes.remove(&session_id);
 }
