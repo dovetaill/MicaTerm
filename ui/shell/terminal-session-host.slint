@@ -24,7 +24,7 @@ export component TerminalSessionHost inherits Rectangle {
     function emit-surface-resize() {
         if root.mode == "terminal" {
             root.surface-resize-requested(
-                max(1, ((root.height - 84px) / 1px) / (root.terminal-cell-height / 1px)),
+                max(1, ((root.height - 20px) / 1px) / (root.terminal-cell-height / 1px)),
                 max(1, ((root.width - 28px) / 1px) / (root.terminal-cell-width / 1px)),
             );
         }
@@ -126,78 +126,35 @@ export component TerminalSessionHost inherits Rectangle {
             }
         }
 
-        VerticalLayout {
-            padding-left: 14px;
-            padding-top: 14px;
-            padding-right: 14px;
-            padding-bottom: 14px;
-            spacing: 6px;
+        surface-frame := Rectangle {
+            width: parent.width;
+            height: parent.height;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.dark-mode ? #0b1117 : #f5f8fc;
 
-            HorizontalLayout {
+            input-capture := TouchArea {
                 width: parent.width;
-                spacing: 10px;
+                height: parent.height;
 
-                Text {
-                    text: root.session-title != "" ? root.session-title : "Terminal Session";
+                clicked => {
+                    terminal-input.focus();
+                }
+            }
+
+            terminal-lines := ListView {
+                x: 12px;
+                y: 10px;
+                width: parent.width - 24px;
+                height: max(0px, parent.height - 20px);
+
+                for line in root.session-visible-lines : Text {
+                    width: terminal-lines.width;
+                    height: root.terminal-cell-height;
+                    text: line;
                     color: ThemeTokens.text-primary;
-                    font-size: 16px;
-                    font-weight: 700;
-                    overflow: elide;
-                    vertical-alignment: center;
-                }
-
-                Rectangle {
-                    horizontal-stretch: 1;
-                    background: transparent;
-                }
-
-                Text {
-                    text: root.session-state == "connecting" ? "Connecting to remote shell..." : "Interactive terminal ready.";
-                    color: ThemeTokens.dark-mode ? #8ba3bc : #5a6c80;
                     font-size: 12px;
                     vertical-alignment: center;
-                    overflow: elide;
-                }
-            }
-
-            if root.session-subtitle != "" : Text {
-                text: root.session-subtitle;
-                color: ThemeTokens.dark-mode ? #aeb8c7 : #516174;
-                font-size: 12px;
-                overflow: elide;
-            }
-
-            surface-frame := Rectangle {
-                width: parent.width;
-                min-height: 200px;
-                vertical-stretch: 1;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.dark-mode ? #0b1117 : #f5f8fc;
-
-                input-capture := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        terminal-input.focus();
-                    }
-                }
-
-                terminal-lines := ListView {
-                    x: 12px;
-                    y: 10px;
-                    width: parent.width - 24px;
-                    height: max(0px, parent.height - 20px);
-
-                    for line in root.session-visible-lines : Text {
-                        width: terminal-lines.width;
-                        height: root.terminal-cell-height;
-                        text: line;
-                        color: ThemeTokens.text-primary;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
                 }
             }
         }
@@ -220,12 +177,6 @@ export component TerminalSessionHost inherits Rectangle {
                 color: ThemeTokens.text-primary;
                 font-size: 16px;
                 font-weight: 700;
-            }
-
-            if root.session-subtitle != "" : Text {
-                text: root.session-subtitle;
-                color: ThemeTokens.dark-mode ? #aeb8c7 : #516174;
-                font-size: 12px;
             }
 
             Text {

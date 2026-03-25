@@ -19,7 +19,7 @@ impl WorkspaceTab {
             session_id: handle.session_id.to_string(),
             asset_id: handle.asset_id.clone(),
             title: resolve_title(&handle.title, &handle.subtitle),
-            subtitle: handle.subtitle.clone(),
+            subtitle: String::new(),
             state: session_state_id(&handle.state).into(),
             error_detail: session_error_detail(&handle.state).into(),
             active: false,

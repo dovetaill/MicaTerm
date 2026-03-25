@@ -109,6 +109,21 @@ fn tab_model_prefers_asset_name_then_host_for_title() {
 }
 
 #[test]
+fn workspace_tabs_hide_connection_details_from_visible_copy() {
+    let named = WorkspaceTab::from_session(&sample_handle(
+        "Prod Bastion",
+        "ops@example.com:22",
+        SessionState::Connected,
+    ));
+
+    assert_eq!(named.title, "Prod Bastion");
+    assert_eq!(
+        named.subtitle, "",
+        "workspace tabs should not surface root@host connection details in visible chrome"
+    );
+}
+
+#[test]
 fn tab_model_tracks_active_session_and_closeability() {
     let first = WorkspaceTab::from_session(&sample_handle(
         "Prod Bastion",
@@ -256,8 +271,20 @@ fn active_tab_layout_preserves_close_hit_target_and_elides_text() {
         "tab text should elide instead of overflowing into the close hit target"
     );
     assert!(
+        !active_tab.contains("text: root.subtitle;"),
+        "workspace tab chips should keep only the saved terminal name visible"
+    );
+    assert!(
         !active_tab.contains("width: 16px;"),
         "close affordance should expose a larger hit target than the old 16px box"
+    );
+    assert!(
+        active_tab.contains("content-hit-target := TouchArea {"),
+        "selection should use its own hit target instead of relying on an implicit root overlay"
+    );
+    assert!(
+        active_tab.contains("close-hit-target := TouchArea {"),
+        "close affordance should use a dedicated hit target"
     );
     assert!(
         !tabbar.contains("width: 216px;"),
@@ -266,12 +293,18 @@ fn active_tab_layout_preserves_close_hit_target_and_elides_text() {
 }
 
 #[test]
-fn tabbar_assigns_flexible_stretch_to_each_workspace_tab() {
+fn tabbar_sizes_workspace_tabs_from_title_content_instead_of_even_stretch() {
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
+    let active_tab =
+        fs::read_to_string("ui/components/active-tab.slint").expect("read active tab component");
 
     assert!(
-        tabbar.contains("horizontal-stretch: 1;"),
-        "workspace tabs should participate in stretch layout instead of relying on intrinsic chip width"
+        !tabbar.contains("horizontal-stretch: 1;"),
+        "workspace tabs should size from their content instead of stretching evenly across the row"
+    );
+    assert!(
+        active_tab.contains("preferred-width"),
+        "active tab layout should define an intrinsic width budget for title-driven sizing"
     );
 }
 
@@ -306,12 +339,20 @@ fn connected_session_projects_terminal_surface_state_without_placeholder_copy() 
             .any(|line| line.contains("last login"))
     );
     assert!(
-        terminal_host.contains("Interactive terminal ready."),
-        "terminal host should present an interactive-ready state once a terminal snapshot exists"
+        !terminal_host.contains("Interactive terminal ready."),
+        "terminal host should not render decorative interactive-ready chrome above the terminal surface"
     );
     assert!(
         !terminal_host.contains("Remote shell is ready but has not produced output yet."),
         "terminal host should stop rendering placeholder copy once a real terminal surface contract exists"
+    );
+    assert!(
+        !terminal_host.contains("Terminal Session"),
+        "terminal host should not render a synthetic title above the terminal surface"
+    );
+    assert!(
+        !terminal_host.contains("if root.session-subtitle != \"\""),
+        "terminal host should not render session subtitles above the terminal surface"
     );
 }
 
