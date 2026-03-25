@@ -1585,6 +1585,23 @@ fn sync_shell_layout(
         request_right_panel: state.requested_right_panel(),
     });
 
+    tracing::debug!(
+        target: "app.shell",
+        logical_width,
+        logical_height,
+        requested_assets_sidebar = state.requested_assets_sidebar(),
+        requested_right_panel = state.requested_right_panel(),
+        effective_assets_sidebar = layout.show_assets_sidebar,
+        effective_right_panel = layout.show_right_panel,
+        policy_main_workspace_width = layout.main_workspace_width,
+        policy_right_panel_width = if layout.show_right_panel {
+            ShellMetrics::RIGHT_PANEL_WIDTH
+        } else {
+            0
+        },
+        "resolved shell layout"
+    );
+
     window.set_effective_show_assets_sidebar(layout.show_assets_sidebar);
     window.set_effective_show_right_panel(layout.show_right_panel);
     window.set_shell_body_height_cache(
@@ -1932,10 +1949,86 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let _keep_session_projection_timer_alive = &session_projection_timer_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let requested_before = state.requested_right_panel();
+        let effective_before = window.get_effective_show_right_panel();
+        let (width, height) = current_window_size(&window);
+        tracing::debug!(
+            target: "ui.titlebar",
+            requested_before,
+            effective_before,
+            width,
+            height,
+            "toggle-right-panel-requested received"
+        );
         state.toggle_right_panel();
         window.set_show_right_panel(state.show_right_panel);
-        let (width, height) = current_window_size(&window);
         sync_shell_layout(&window, &mut state, width, height);
+        tracing::debug!(
+            target: "ui.titlebar",
+            requested_after = state.requested_right_panel(),
+            effective_after = window.get_effective_show_right_panel(),
+            right_panel_x = window.get_layout_right_panel_x(),
+            right_panel_y = window.get_layout_right_panel_y(),
+            right_panel_width = window.get_layout_right_panel_width(),
+            right_panel_height = window.get_layout_right_panel_height(),
+            shell_body_width = window.get_layout_shell_body_width(),
+            shell_body_height = window.get_layout_shell_body_actual_height(),
+            main_workspace_x = window.get_layout_main_workspace_x(),
+            main_workspace_width = window.get_layout_main_workspace_width(),
+            width,
+            height,
+            "toggle-right-panel-requested applied"
+        );
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_titlebar_debug_event_requested(move |message| {
+        let window = handle.unwrap();
+        let state = state.borrow();
+        let (width, height) = current_window_size(&window);
+        tracing::debug!(
+            target: "ui.titlebar",
+            %message,
+            requested_right_panel = state.requested_right_panel(),
+            effective_right_panel = window.get_effective_show_right_panel(),
+            right_panel_x = window.get_layout_right_panel_x(),
+            right_panel_y = window.get_layout_right_panel_y(),
+            right_panel_width = window.get_layout_right_panel_width(),
+            right_panel_height = window.get_layout_right_panel_height(),
+            shell_body_width = window.get_layout_shell_body_width(),
+            shell_body_height = window.get_layout_shell_body_actual_height(),
+            main_workspace_x = window.get_layout_main_workspace_x(),
+            main_workspace_width = window.get_layout_main_workspace_width(),
+            width,
+            height,
+            "titlebar diagnostic event"
+        );
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_right_panel_debug_event_requested(move |message| {
+        let window = handle.unwrap();
+        let state = state.borrow();
+        let (width, height) = current_window_size(&window);
+        tracing::debug!(
+            target: "app.shell",
+            %message,
+            requested_right_panel = state.requested_right_panel(),
+            effective_right_panel = window.get_effective_show_right_panel(),
+            right_panel_x = window.get_layout_right_panel_x(),
+            right_panel_y = window.get_layout_right_panel_y(),
+            right_panel_width = window.get_layout_right_panel_width(),
+            right_panel_height = window.get_layout_right_panel_height(),
+            shell_body_width = window.get_layout_shell_body_width(),
+            shell_body_height = window.get_layout_shell_body_actual_height(),
+            main_workspace_x = window.get_layout_main_workspace_x(),
+            main_workspace_width = window.get_layout_main_workspace_width(),
+            width,
+            height,
+            "right panel diagnostic event"
+        );
     });
 
     let state = Rc::clone(&view_model);

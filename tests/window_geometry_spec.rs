@@ -161,6 +161,43 @@ fn expanded_right_panel_is_flat_and_owns_no_full_card_border() {
 }
 
 #[test]
+fn expanded_right_panel_fills_shell_body_height() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.invoke_toggle_right_panel_requested();
+    app.show().unwrap();
+
+    assert_eq!(
+        app.get_layout_right_panel_height() as u32,
+        app.get_layout_shell_body_actual_height() as u32
+    );
+}
+
+#[test]
+fn expanded_right_panel_stays_inside_shell_body_and_shrinks_workspace() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.invoke_toggle_right_panel_requested();
+    app.show().unwrap();
+
+    let shell_body_width = app.get_layout_shell_body_width() as u32;
+    let sidebar_width =
+        (app.get_layout_activity_bar_width() + app.get_layout_assets_sidebar_width()) as u32;
+    let main_workspace_x = app.get_layout_main_workspace_x() as u32;
+    let main_workspace_width = app.get_layout_main_workspace_width() as u32;
+    let right_panel_x = app.get_layout_right_panel_x() as u32;
+    let right_panel_width = app.get_layout_right_panel_width() as u32;
+
+    assert_eq!(main_workspace_x, sidebar_width);
+    assert_eq!(main_workspace_x + main_workspace_width, right_panel_x);
+    assert_eq!(right_panel_x + right_panel_width, shell_body_width);
+}
+
+#[test]
 fn maximize_button_geometry_is_exported_for_native_frame_adapter() {
     i_slint_backend_testing::init_no_event_loop();
 

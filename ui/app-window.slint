@@ -119,10 +119,15 @@ export component AppWindow inherits Window {
     out property <length> layout-titlebar-maximize-button-height: titlebar.layout-maximize-button-height;
     out property <length> layout-shell-body-height: shell-frame.height - titlebar.height;
     out property <length> layout-shell-body-actual-height: body-host.height;
+    out property <length> layout-shell-body-width: body-host.width;
     out property <length> layout-shell-frame-radius: shell-frame.border-radius;
     out property <length> layout-resize-border-width: root.resize-border-width;
+    out property <length> layout-main-workspace-x: main-workspace.x;
     out property <length> layout-main-workspace-width: main-workspace.width;
+    out property <length> layout-right-panel-x: right-panel.x;
+    out property <length> layout-right-panel-y: right-panel.y;
     out property <length> layout-right-panel-width: right-panel.width;
+    out property <length> layout-right-panel-height: right-panel.height;
     out property <length> layout-right-panel-radius: right-panel.layout-radius;
     out property <length> layout-right-panel-border-width: right-panel.layout-border-width;
     out property <length> layout-activity-bar-width: sidebar.activity-bar-width;
@@ -143,6 +148,8 @@ export component AppWindow inherits Window {
     callback minimize-requested();
     callback maximize-toggle-requested();
     callback close-requested();
+    callback titlebar-debug-event-requested(string);
+    callback right-panel-debug-event-requested(string);
     callback toggle-right-panel-requested();
     callback toggle-global-menu-requested();
     callback close-global-menu-requested();
@@ -304,6 +311,10 @@ export component AppWindow inherits Window {
                     root.close-requested();
                 }
 
+                debug-event-requested(message) => {
+                    root.titlebar-debug-event-requested(message);
+                }
+
                 toggle-right-panel-requested => {
                     root.toggle-right-panel-requested();
                 }
@@ -332,12 +343,15 @@ export component AppWindow inherits Window {
                 height: max(0px, parent.height - titlebar.height);
                 background: transparent;
 
-                shell-body := HorizontalLayout {
+                shell-body := Rectangle {
                     width: parent.width;
                     height: parent.height;
-                    spacing: 0px;
+                    background: transparent;
 
                     sidebar := Sidebar {
+                        x: 0px;
+                        y: 0px;
+                        height: parent.height;
                         items: root.sidebar-items;
                         show-assets-sidebar: root.effective-show-assets-sidebar;
                         active-sidebar-destination: root.active-sidebar-destination;
@@ -422,6 +436,10 @@ export component AppWindow inherits Window {
                     }
 
                     main-workspace := WorkspacePane {
+                        x: sidebar.width;
+                        y: 0px;
+                        width: max(0px, parent.width - sidebar.width - right-panel.width);
+                        height: parent.height;
                         vertical-stretch: 1;
                         workspace-tab-items: root.workspace-tab-items;
                         active-workspace-session-id: root.active-workspace-session-id;
@@ -456,7 +474,14 @@ export component AppWindow inherits Window {
                     }
 
                     right-panel := RightPanel {
+                        x: parent.width - self.width;
+                        y: 0px;
+                        height: parent.height;
                         expanded: root.effective-show-right-panel;
+
+                        debug-event-requested(message) => {
+                            root.right-panel-debug-event-requested(message);
+                        }
                     }
                 }
             }

@@ -9,6 +9,7 @@ export component TitlebarIconButton inherits Rectangle {
     in property <string> tooltip-text;
     in property <string> tooltip-source-id;
     callback clicked;
+    callback pointer-event-requested(string);
     callback tooltip-open-requested(string, string, length, length);
     callback tooltip-close-requested(string);
 
@@ -54,6 +55,14 @@ export component TitlebarIconButton inherits Rectangle {
     }
 
     touch := TouchArea {
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down {
+                root.pointer-event-requested("down");
+            } else if event.kind == PointerEventKind.up {
+                root.pointer-event-requested("up");
+            }
+        }
+
         clicked => {
             root.tooltip-close-requested(root.tooltip-source-id);
             root.clicked();

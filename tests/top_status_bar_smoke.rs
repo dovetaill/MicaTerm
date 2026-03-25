@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::fs;
 use std::rc::Rc;
+use std::time::Duration;
 
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::{
@@ -18,7 +19,9 @@ use mica_term::app::window_effects::{
     BackdropApplyStatus, NativeWindowAppearanceRequest, NativeWindowCornerPreference,
     NativeWindowTheme, PlatformWindowEffects, WindowAppearanceSyncReport,
 };
-use slint::{ComponentHandle, PhysicalSize};
+use mica_term::shell::metrics::ShellMetrics;
+use slint::platform::{PointerEventButton, WindowEvent};
+use slint::{ComponentHandle, LogicalPosition, PhysicalSize};
 
 #[derive(Clone)]
 struct RecordingWindowEffects {
@@ -297,4 +300,79 @@ fn bootstrap_logs_backdrop_error_details_when_native_sync_fails() {
     assert!(!content.contains("native window appearance sync finished"));
 
     let _ = fs::remove_dir_all(temp_root);
+}
+
+#[test]
+fn titlebar_debug_logging_captures_panel_toggle_click_path() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let temp_root = std::env::temp_dir()
+        .join("mica-term")
+        .join("tests")
+        .join("titlebar-right-panel-debug-log");
+    let _ = fs::remove_dir_all(&temp_root);
+    fs::create_dir_all(temp_root.join("logs")).unwrap();
+    fs::create_dir_all(temp_root.join("crash")).unwrap();
+
+    let paths = LoggingPaths {
+        root_source: LoggingRootSource::EnvOverride,
+        root_dir: temp_root.clone(),
+        logs_dir: temp_root.join("logs"),
+        crash_dir: temp_root.join("crash"),
+    };
+    let config = AppLoggingConfig::new(AppLogMode::Debug);
+    let runtime = build_test_logging_runtime(&paths, &config).unwrap();
+
+    tracing::dispatcher::with_default(&runtime.dispatch, || {
+        bind_top_status_bar_with_store(&app, None);
+        app.invoke_titlebar_debug_event_requested("panel-toggle-button.pointer.down".into());
+        app.invoke_titlebar_debug_event_requested("panel-toggle-button.clicked".into());
+        app.invoke_toggle_right_panel_requested();
+    });
+
+    drop(runtime.guard);
+
+    let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
+    assert!(content.contains("panel-toggle-button.pointer.down"));
+    assert!(content.contains("panel-toggle-button.clicked"));
+    assert!(content.contains("toggle-right-panel-requested received"));
+
+    let _ = fs::remove_dir_all(temp_root);
+}
+
+#[test]
+fn pointer_click_on_panel_toggle_flips_right_panel_request_state() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.show().unwrap();
+
+    let content_width = app.get_layout_titlebar_content_width();
+    let window_controls_width = app.get_layout_titlebar_window_controls_width();
+    let utility_zone_x = 6.0
+        + content_width
+        - window_controls_width
+        - ShellMetrics::TITLEBAR_UTILITY_WIDTH as f32;
+    let position = LogicalPosition::new(
+        utility_zone_x + 40.0 + (ShellMetrics::TITLEBAR_TOOL_BUTTON_SIZE as f32 / 2.0),
+        6.0 + (ShellMetrics::TITLEBAR_TOOL_BUTTON_SIZE as f32 / 2.0),
+    );
+
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Left,
+    });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Left,
+    });
+
+    assert!(app.get_show_right_panel());
+    assert!(app.get_effective_show_right_panel());
+    assert!(app.get_layout_right_panel_width() > 0.0);
 }

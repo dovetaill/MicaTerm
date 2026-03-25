@@ -16,7 +16,7 @@ grep -F 'body-host := Rectangle' "$APP_WINDOW" >/dev/null
 grep -F 'border-radius: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'clip: true;' "$APP_WINDOW" >/dev/null
 grep -F 'vertical-stretch: 1;' "$APP_WINDOW" >/dev/null
-grep -F 'shell-body := HorizontalLayout' "$APP_WINDOW" >/dev/null
+grep -F 'shell-body := Rectangle' "$APP_WINDOW" >/dev/null
 grep -F 'WorkspacePane' "$APP_WINDOW" >/dev/null
 grep -F 'show-assets-sidebar: root.effective-show-assets-sidebar;' "$APP_WINDOW" >/dev/null
 grep -F 'expanded: root.effective-show-right-panel;' "$APP_WINDOW" >/dev/null
@@ -32,9 +32,14 @@ grep -F 'activity-bar := Rectangle' "$SIDEBAR" >/dev/null
 
 ! grep -F 'border-radius: 14px;' "$RIGHT_PANEL" >/dev/null
 
-BODY_HOST_BLOCK="$(sed -n '/body-host := Rectangle {/,/shell-body := HorizontalLayout {/p' "$APP_WINDOW")"
+BODY_HOST_BLOCK="$(sed -n '/body-host := Rectangle {/,/shell-body := Rectangle {/p' "$APP_WINDOW")"
 grep -F 'y: titlebar.height;' <<<"$BODY_HOST_BLOCK" >/dev/null
 grep -F 'height: max(0px, parent.height - titlebar.height);' <<<"$BODY_HOST_BLOCK" >/dev/null
+
+SHELL_BODY_BLOCK="$(sed -n '/shell-body := Rectangle {/,/debug-event-requested(message) => {/p' "$APP_WINDOW")"
+grep -F 'x: sidebar.width;' <<<"$SHELL_BODY_BLOCK" >/dev/null
+grep -F 'width: max(0px, parent.width - sidebar.width - right-panel.width);' <<<"$SHELL_BODY_BLOCK" >/dev/null
+grep -F 'x: parent.width - self.width;' <<<"$SHELL_BODY_BLOCK" >/dev/null
 
 if grep -F 'height: root.shell-body-height-cache;' <<<"$BODY_HOST_BLOCK" >/dev/null; then
     echo "body-host should not clamp shell height with a fixed cache" >&2

@@ -86,6 +86,7 @@ grep -F 'TITLEBAR_TOOLTIP_CLOSE_DEBOUNCE_MS' "$ROOT_DIR/src/shell/metrics.rs" >/
 ! grep -F 'bind_top_status_bar_with_store_and_log_dir' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
 ! grep -F 'bind_top_status_bar_with_store_and_effects_and_log_dir' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
 ! grep -F 'titlebar-tooltip.log' "$ROOT_DIR/src/app/bootstrap.rs" >/dev/null
+! grep -F 'show-right-panel: root.show-right-panel;' "$APP_WINDOW" >/dev/null
 ! grep -F 'root.use-flat-window-chrome ? 0px : 14px' "$APP_WINDOW" >/dev/null
 ! grep -F 'in property <bool> use-flat-window-chrome: false;' "$TITLEBAR" >/dev/null
 ! grep -F 'border-radius: root.use-flat-window-chrome ? 0px : 12px;' "$TITLEBAR" >/dev/null
