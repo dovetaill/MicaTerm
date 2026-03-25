@@ -216,7 +216,6 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <bool> can-confirm: false;
     in property <int> focus-sequence: 0;
     callback close-requested();
-    callback confirm-requested();
     callback draft-changed(string, string);
     callback action-requested(string);
     callback drag-requested(length, length);
@@ -233,9 +232,6 @@ export component AssetsSshConnectionModal inherits Rectangle {
     private property <length> body-height: max(0px, root.height - root.body-top - root.footer-height);
 
     background: transparent;
-
-    public function focus-primary-field() {
-    }
 
     modal-focus := FocusScope {
         width: parent.width;
@@ -791,6 +787,5 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
     changed focus-sequence => {
         root.active-tab = "standard";
-        root.focus-primary-field();
     }
 }

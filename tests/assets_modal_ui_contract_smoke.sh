@@ -133,5 +133,4 @@ rg -n "validation-message" "$FOLDER_MODAL" >/dev/null
 rg -n "validation-message" "$SSH_MODAL" >/dev/null
 rg -n "can-confirm" "$FOLDER_MODAL" >/dev/null
 rg -n "can-confirm" "$SSH_MODAL" >/dev/null
-grep -F 'public function focus-primary-field() {' "$SSH_MODAL" >/dev/null
 grep -F 'window.set_asset_modal_focus_sequence(window.get_asset_modal_focus_sequence() + 1);' "$BOOTSTRAP" >/dev/null

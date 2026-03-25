@@ -688,10 +688,6 @@ export component AppWindow inherits Window {
                 root.close-asset-modal-requested();
             }
 
-            confirm-requested => {
-                root.confirm-asset-modal-requested();
-            }
-
             draft-changed(field, value) => {
                 root.asset-ssh-modal-draft-changed(field, value);
             }
