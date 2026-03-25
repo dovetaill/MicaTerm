@@ -1,6 +1,8 @@
 //! Stable SSH connection profile normalized from modal draft state.
 
 use anyhow::{Context, bail};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use crate::app::ssh::credentials::{SshCredentialKind, ssh_credential_ref};
 use crate::shell::assets::AssetSshConnectionSpec;
@@ -75,17 +77,13 @@ impl ConnectionProfile {
         let (auth_method, credential_ref, private_key_path) = match draft.auth_method.as_str() {
             "password" => {
                 let credential_ref = if draft.password.trim().is_empty() {
-                    reusable_saved_secret_ref
-                        .clone()
-                        .ok_or_else(|| anyhow::anyhow!("password authentication requires a password"))?
+                    reusable_saved_secret_ref.clone().ok_or_else(|| {
+                        anyhow::anyhow!("password authentication requires a password")
+                    })?
                 } else {
                     format!("draft://ssh-password/{user}@{host}:{port}")
                 };
-                (
-                    SshAuthMethod::Password,
-                    Some(credential_ref),
-                    None,
-                )
+                (SshAuthMethod::Password, Some(credential_ref), None)
             }
             "private-key" => match draft.private_key_source.as_str() {
                 "path" => {
@@ -102,16 +100,14 @@ impl ConnectionProfile {
                 "content" => {
                     let credential_ref = if draft.private_key_content.trim().is_empty() {
                         reusable_saved_secret_ref.clone().ok_or_else(|| {
-                            anyhow::anyhow!("inline private key authentication requires key content")
+                            anyhow::anyhow!(
+                                "inline private key authentication requires key content"
+                            )
                         })?
                     } else {
                         format!("draft://ssh-inline-key/{user}@{host}:{port}")
                     };
-                    (
-                        SshAuthMethod::PrivateKeyContent,
-                        Some(credential_ref),
-                        None,
-                    )
+                    (SshAuthMethod::PrivateKeyContent, Some(credential_ref), None)
                 }
                 other => bail!("unsupported private key source: {other}"),
             },
@@ -181,7 +177,7 @@ impl ConnectionProfile {
                     }
                     (
                         SshAuthMethod::PrivateKeyPath,
-                        None,
+                        spec.credential_ref.clone(),
                         Some(private_key_path.to_string()),
                     )
                 }
@@ -206,6 +202,28 @@ impl ConnectionProfile {
             remark: spec.remark.trim().to_string(),
         })
     }
+
+    pub fn temporary_session_asset_id(&self) -> String {
+        let auth_scope = match self.auth_method {
+            SshAuthMethod::Password => "password".to_string(),
+            SshAuthMethod::PrivateKeyPath => format!(
+                "private-key-path:{}",
+                self.private_key_path.as_deref().unwrap_or_default()
+            ),
+            SshAuthMethod::PrivateKeyContent => "private-key-content".to_string(),
+        };
+        let identity = format!(
+            "{}@{}:{}:{}",
+            self.user.trim(),
+            self.host.trim(),
+            self.port,
+            auth_scope
+        );
+        let mut hasher = DefaultHasher::new();
+        identity.hash(&mut hasher);
+
+        format!("session:{:016x}", hasher.finish())
+    }
 }
 
 fn reusable_saved_secret_ref(
@@ -213,14 +231,20 @@ fn reusable_saved_secret_ref(
     existing_spec: &AssetSshConnectionSpec,
     draft: &AssetSshConnectionDraft,
 ) -> Option<String> {
+    if draft.clear_saved_secret_requested {
+        return None;
+    }
+
     let existing_auth_method = normalized_ssh_auth_method(&existing_spec.auth_method);
-    let existing_private_key_source = normalized_ssh_private_key_source(&existing_spec.private_key_source);
+    let existing_private_key_source =
+        normalized_ssh_private_key_source(&existing_spec.private_key_source);
 
     if existing_auth_method != draft.auth_method {
         return None;
     }
 
-    if draft.auth_method == "private-key" && existing_private_key_source != draft.private_key_source {
+    if draft.auth_method == "private-key" && existing_private_key_source != draft.private_key_source
+    {
         return None;
     }
 
@@ -229,7 +253,9 @@ fn reusable_saved_secret_ref(
         "private-key" if draft.private_key_source == "content" => {
             Some(saved_ssh_credential_ref(asset_id, existing_spec))
         }
-        "private-key" if draft.private_key_source == "path" && existing_spec.credential_ref.is_some() => {
+        "private-key"
+            if draft.private_key_source == "path" && existing_spec.credential_ref.is_some() =>
+        {
             Some(saved_ssh_credential_ref(asset_id, existing_spec))
         }
         _ => None,

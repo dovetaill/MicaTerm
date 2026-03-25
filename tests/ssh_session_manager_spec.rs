@@ -1,5 +1,5 @@
-use std::future::Future;
 use std::fs;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -19,8 +19,8 @@ use russh::keys::PrivateKey;
 use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::{Auth, Session};
 use russh::{Channel, ChannelId, server};
-use tokio::sync::mpsc;
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -52,6 +52,12 @@ struct InteractiveTrackingLauncher {
 #[derive(Clone)]
 struct DelayedTrackingLauncher {
     disconnects: Arc<AtomicUsize>,
+    ready_delay: Duration,
+}
+
+#[derive(Clone)]
+struct DelayedInteractiveTrackingLauncher {
+    state: InteractiveTrackingState,
     ready_delay: Duration,
 }
 
@@ -106,13 +112,20 @@ impl DelayedTrackingLauncher {
     }
 }
 
+impl DelayedInteractiveTrackingLauncher {
+    fn new(state: InteractiveTrackingState, ready_delay: Duration) -> Self {
+        Self { state, ready_delay }
+    }
+}
+
 impl SessionRuntimeLauncher for FakeLauncher {
     fn launch(
         &self,
         _profile: ConnectionProfile,
         _session_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         let behavior = self.behavior;
         Box::pin(async move {
             match behavior {
@@ -152,7 +165,8 @@ impl SessionRuntimeLauncher for RuntimeBackedLauncher {
         profile: ConnectionProfile,
         session_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         Box::pin(async move {
             let runtime = SshSessionRuntime::connect(profile, session_id, event_tx).await?;
             Ok(Box::new(runtime) as Box<dyn SessionRuntimeControl>)
@@ -178,7 +192,8 @@ impl SessionRuntimeLauncher for TrackingLauncher {
         _profile: ConnectionProfile,
         _session_id: Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         let disconnects = Arc::clone(&self.disconnects);
         Box::pin(async move {
             Ok(Box::new(TrackingRuntimeControl { disconnects }) as Box<dyn SessionRuntimeControl>)
@@ -199,10 +214,12 @@ impl SessionRuntimeLauncher for InteractiveTrackingLauncher {
         _profile: ConnectionProfile,
         _session_id: Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         let state = self.state.clone();
         Box::pin(async move {
-            Ok(Box::new(InteractiveTrackingRuntimeControl { state }) as Box<dyn SessionRuntimeControl>)
+            Ok(Box::new(InteractiveTrackingRuntimeControl { state })
+                as Box<dyn SessionRuntimeControl>)
         })
     }
 
@@ -220,12 +237,38 @@ impl SessionRuntimeLauncher for DelayedTrackingLauncher {
         _profile: ConnectionProfile,
         _session_id: Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         let disconnects = Arc::clone(&self.disconnects);
         let ready_delay = self.ready_delay;
         Box::pin(async move {
             tokio::time::sleep(ready_delay).await;
             Ok(Box::new(TrackingRuntimeControl { disconnects }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for DelayedInteractiveTrackingLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: Uuid,
+        _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        let ready_delay = self.ready_delay;
+        Box::pin(async move {
+            tokio::time::sleep(ready_delay).await;
+            Ok(Box::new(InteractiveTrackingRuntimeControl { state })
+                as Box<dyn SessionRuntimeControl>)
         })
     }
 
@@ -610,13 +653,16 @@ fn session_manager_marks_session_as_error_when_runtime_fails() {
 fn session_manager_marks_connected_only_after_runtime_connected_event() {
     let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
-    let (server_task, addr, private_key_path, server_public_key) = runtime.block_on(async {
-        spawn_publickey_shell_server(Duration::from_millis(75)).await
-    });
+    let (server_task, addr, private_key_path, server_public_key) =
+        runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(75)).await });
     let known_hosts_path = temp_known_hosts_path("runtime-ready");
     let known_hosts = KnownHostsService::new(&known_hosts_path);
     known_hosts
-        .accept_unknown(addr.ip().to_string().as_str(), addr.port(), &server_public_key)
+        .accept_unknown(
+            addr.ip().to_string().as_str(),
+            addr.port(),
+            &server_public_key,
+        )
         .expect("trust test server host key");
     unsafe {
         std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
@@ -666,9 +712,8 @@ fn session_manager_marks_connected_only_after_runtime_connected_event() {
 fn runtime_probe_surfaces_unknown_host_key_as_typed_error() {
     let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
-    let (server_task, addr, private_key_path, _server_public_key) = runtime.block_on(async {
-        spawn_publickey_shell_server(Duration::from_millis(10)).await
-    });
+    let (server_task, addr, private_key_path, _server_public_key) =
+        runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(10)).await });
     let known_hosts_path = temp_known_hosts_path("runtime-unknown");
     let _ = fs::remove_file(&known_hosts_path);
     unsafe {
@@ -788,12 +833,52 @@ fn session_manager_forwards_text_input_and_resize_to_runtime_control() {
         .expect("forward terminal resize");
 
     assert_eq!(
-        state.sent_inputs.lock().expect("lock sent inputs").as_slice(),
+        state
+            .sent_inputs
+            .lock()
+            .expect("lock sent inputs")
+            .as_slice(),
         &[b"pwd\n".to_vec()]
     );
     assert_eq!(
         state.resizes.lock().expect("lock resize events").as_slice(),
         &[(48, 132)]
+    );
+}
+
+#[test]
+fn resize_before_runtime_ready_replays_latest_dimensions_when_control_attaches() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let state = InteractiveTrackingState::default();
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(DelayedInteractiveTrackingLauncher::new(
+            state.clone(),
+            Duration::from_millis(25),
+        )),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    manager
+        .resize_session(handle.session_id, 36, 120)
+        .expect("queue initial resize before runtime ready");
+    manager
+        .resize_session(handle.session_id, 40, 132)
+        .expect("replace pending resize before runtime ready");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(60)).await;
+    });
+
+    assert_eq!(
+        state.resizes.lock().expect("lock resize events").as_slice(),
+        &[(40, 132)]
     );
 }
 

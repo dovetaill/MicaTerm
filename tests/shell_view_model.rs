@@ -155,23 +155,39 @@ fn new_ssh_modal_state_no_longer_tracks_top_level_tab_enum() {
 }
 
 #[test]
-fn new_ssh_modal_keeps_tab_state_local_to_the_component() {
-    let ssh_modal =
-        fs::read_to_string("ui/components/assets-ssh-connection-modal.slint").expect("read ssh modal");
+fn new_ssh_modal_is_a_grouped_single_page_form() {
+    let ssh_modal = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
 
     assert!(
-        !ssh_modal.contains("in property <string> active-tab:"),
-        "ssh modal should not expose an active-tab input property to the outer window bridge"
+        !ssh_modal.contains("\"Standard\""),
+        "ssh modal should not keep the legacy Standard tab in the grouped layout"
     );
     assert!(
-        !ssh_modal.contains("callback tab-selected(string);"),
-        "ssh modal should not expose a top-level tab-selected callback once the tab state stays local"
+        !ssh_modal.contains("\"Proxy\""),
+        "ssh modal should not keep the legacy Proxy tab in the grouped layout"
     );
-    assert!(ssh_modal.contains("private property <string> active-tab: \"standard\";"));
-    assert!(ssh_modal.contains("\"Standard\""));
-    assert!(ssh_modal.contains("\"Proxy\""));
-    assert!(ssh_modal.contains("\"Environment\""));
-    assert!(ssh_modal.contains("\"Advanced\""));
+    assert!(
+        !ssh_modal.contains("\"Environment\""),
+        "ssh modal should not keep the legacy Environment tab in the grouped layout"
+    );
+    assert!(
+        !ssh_modal.contains("\"Advanced\""),
+        "ssh modal should not keep the legacy Advanced tab in the grouped layout"
+    );
+    assert!(
+        ssh_modal
+            .contains("Leave password / private key / passphrase blank to keep the saved secret."),
+        "ssh modal should explain the edit-mode leave-blank retention contract"
+    );
+    assert!(
+        ssh_modal.contains("Clear Saved Secret"),
+        "ssh modal should expose an explicit clear-secret affordance in edit mode"
+    );
+    assert!(ssh_modal.contains("label: \"Password\""));
+    assert!(
+        ssh_modal.contains("trailing-action-text: root.password-visible ? \"Hide\" : \"Show\"")
+    );
 }
 
 #[test]
@@ -906,6 +922,40 @@ fn edit_connection_opens_modal_with_prefilled_non_secret_fields() {
 }
 
 #[test]
+fn editing_saved_ssh_modal_keeps_password_fields_hidden_until_secret_hydration_exists() {
+    let mut view_model = ShellViewModel::default();
+    let mut tree = AssetTree::new();
+    let asset_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Prod Bastion",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "22".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: String::new(),
+            proxy_method: String::new(),
+            remark: "Saved credential".into(),
+            credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+        }),
+    );
+    view_model.replace_console_asset_tree(tree);
+
+    view_model.open_edit_ssh_modal(asset_id);
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.password.is_empty()
+                && draft.private_key_content.is_empty()
+                && draft.passphrase.is_empty()
+                && !draft.password_visible
+    ));
+}
+
+#[test]
 fn editing_saved_ssh_modal_exposes_leave_blank_helper_copy() {
     let mut view_model = ShellViewModel::default();
     let mut tree = AssetTree::new();
@@ -934,39 +984,8 @@ fn editing_saved_ssh_modal_exposes_leave_blank_helper_copy() {
         Some(AssetModalState::NewSshConnection { ref draft, .. })
             if draft.secret_retention_message
                 == "Leave password / private key / passphrase blank to keep the saved secret."
-    ));
-}
-
-#[test]
-fn editing_legacy_saved_ssh_modal_uses_fallback_saved_secret_binding() {
-    let mut view_model = ShellViewModel::default();
-    let mut tree = AssetTree::new();
-    let asset_id = tree.insert_root_with_payload(
-        ConsoleAssetKind::SshConnection,
-        "Legacy Gateway",
-        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
-            host: "legacy.example.com".into(),
-            user: "ops".into(),
-            port: "22".into(),
-            auth_method: "password".into(),
-            private_key_source: "content".into(),
-            private_key_path: String::new(),
-            environment: String::new(),
-            proxy_method: String::new(),
-            remark: "Legacy saved credential".into(),
-            credential_ref: None,
-        }),
-    );
-    view_model.replace_console_asset_tree(tree);
-
-    view_model.open_edit_ssh_modal(asset_id);
-
-    assert!(matches!(
-        view_model.asset_modal_state,
-        Some(AssetModalState::NewSshConnection { ref draft, .. })
-            if draft.secret_retention_message
-                == "Leave password / private key / passphrase blank to keep the saved secret."
                 && draft.can_clear_saved_secret
+                && !draft.clear_saved_secret_requested
     ));
 }
 
@@ -993,12 +1012,63 @@ fn editing_saved_ssh_modal_allows_explicit_clear_saved_secret_action() {
     view_model.replace_console_asset_tree(tree);
 
     view_model.open_edit_ssh_modal(asset_id);
+    view_model.hydrate_edit_ssh_modal_secret(Some("secret".into()), None, None, None);
     view_model.update_ssh_modal_field("clear_saved_secret", "true".into());
 
     assert!(matches!(
         view_model.asset_modal_state,
         Some(AssetModalState::NewSshConnection { ref draft, .. })
-            if draft.can_clear_saved_secret && draft.clear_saved_secret_requested
+            if draft.clear_saved_secret_requested
+                && draft.password.is_empty()
+                && draft.private_key_content.is_empty()
+                && draft.passphrase.is_empty()
+                && !draft.password_visible
+    ));
+    assert!(!view_model.asset_create_modal_can_confirm());
+}
+
+#[test]
+fn hydrating_edit_ssh_modal_secret_updates_active_draft_and_inline_error() {
+    let mut view_model = ShellViewModel::default();
+    let mut tree = AssetTree::new();
+    let asset_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Prod Bastion",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "22".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: String::new(),
+            proxy_method: String::new(),
+            remark: "Saved credential".into(),
+            credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+        }),
+    );
+    view_model.replace_console_asset_tree(tree);
+
+    view_model.open_edit_ssh_modal(asset_id.clone());
+    view_model.hydrate_edit_ssh_modal_secret(
+        Some("secret".into()),
+        None,
+        None,
+        Some("missing keyring entry".into()),
+    );
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection {
+            editing_asset_id: Some(ref editing_asset_id),
+            ref draft,
+            ..
+        }) if editing_asset_id == &asset_id
+            && draft.password == "secret"
+            && draft.private_key_content.is_empty()
+            && draft.passphrase.is_empty()
+            && !draft.password_visible
+            && draft.validation_message == "missing keyring entry"
     ));
 }
 

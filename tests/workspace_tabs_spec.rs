@@ -7,8 +7,8 @@ use anyhow::Result;
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher;
 use mica_term::app::ssh::profile::ConnectionProfile;
-use mica_term::app::ssh::session_manager::{SessionHandle, SessionState};
 use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalSurfaceState};
+use mica_term::app::ssh::session_manager::{SessionHandle, SessionState};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::window_effects::default_platform_window_effects;
 use mica_term::shell::tabs::WorkspaceTab;
@@ -42,7 +42,8 @@ impl SessionRuntimeLauncher for FakeLauncher {
         _profile: ConnectionProfile,
         _session_id: Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         Box::pin(async move { Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>) })
     }
 
@@ -265,6 +266,16 @@ fn active_tab_layout_preserves_close_hit_target_and_elides_text() {
 }
 
 #[test]
+fn tabbar_assigns_flexible_stretch_to_each_workspace_tab() {
+    let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
+
+    assert!(
+        tabbar.contains("horizontal-stretch: 1;"),
+        "workspace tabs should participate in stretch layout instead of relying on intrinsic chip width"
+    );
+}
+
+#[test]
 fn connected_session_projects_terminal_surface_state_without_placeholder_copy() {
     let handle = sample_handle(
         "Prod Bastion",
@@ -432,5 +443,8 @@ fn double_click_and_open_in_new_tab_create_distinct_sessions() {
         .session_id
         .to_string();
     assert_ne!(first_session_id, second_session_id);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), second_session_id);
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        second_session_id
+    );
 }

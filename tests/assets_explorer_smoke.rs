@@ -37,7 +37,8 @@ impl SessionRuntimeLauncher for FakeLauncher {
         _profile: ConnectionProfile,
         _session_id: uuid::Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         Box::pin(async move { Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>) })
     }
 
@@ -235,7 +236,10 @@ fn double_clicking_ssh_asset_opens_session_and_reuses_existing_tab() {
     app.invoke_asset_activated(ssh_id.into());
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), first_session_id);
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        first_session_id
+    );
 }
 
 #[test]
@@ -262,7 +266,10 @@ fn explicit_open_context_action_opens_session_and_reuses_existing_tab() {
     app.invoke_assets_context_menu_action_invoked("open-connection".into());
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), first_session_id);
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        first_session_id
+    );
 }
 
 #[test]
@@ -292,7 +299,10 @@ fn open_in_new_tab_creates_second_session_for_same_asset() {
         .session_id
         .to_string();
     assert_ne!(first_session_id, second_session_id);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), second_session_id);
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        second_session_id
+    );
 }
 
 #[test]
@@ -315,7 +325,10 @@ fn disconnected_tab_stays_visible_until_user_closes_it() {
         .row_data(0)
         .expect("disconnected workspace tab");
     assert_eq!(disconnected.state.as_str(), "disconnected");
-    assert_eq!(app.get_active_workspace_session_id().as_str(), disconnected.session_id.as_str());
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        disconnected.session_id.as_str()
+    );
     assert!(app.get_workspace_session_can_reconnect());
 
     app.invoke_workspace_tab_close_requested(disconnected.session_id.clone());
