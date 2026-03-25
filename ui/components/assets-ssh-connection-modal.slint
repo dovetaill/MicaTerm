@@ -62,7 +62,9 @@ component DialogActionButton inherits Rectangle {
         height: parent.height;
         x: 8px;
         text: root.label;
-        color: ThemeTokens.text-primary;
+        color: !root.action-enabled ? ThemeTokens.text-primary
+            : root.primary ? ThemeTokens.text-primary
+            : ThemeTokens.accent;
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;
@@ -227,7 +229,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
     private property <bool> compact-layout: root.width < 620px;
     private property <length> header-height: 56px;
     private property <length> tabs-height: 48px;
-    private property <length> footer-height: 96px;
+    private property <length> footer-height: root.feedback-message != "" || root.validation-message != "" ? 96px : 72px;
     private property <length> body-top: root.header-height + root.tabs-height;
     private property <length> body-height: max(0px, root.height - root.body-top - root.footer-height);
 
@@ -719,33 +721,40 @@ export component AssetsSshConnectionModal inherits Rectangle {
                 background: ThemeTokens.divider-subtle;
             }
 
-            footer-column := VerticalLayout {
+            if root.feedback-message != "" : FeedbackBanner {
                 x: 20px;
                 y: 12px;
                 width: parent.width - 40px;
-                height: parent.height - 24px;
-                spacing: 8px;
+                state: root.feedback-state;
+                message: root.feedback-message;
+            }
 
-                FeedbackBanner {
-                    width: parent.width;
-                    state: root.feedback-state;
-                    message: root.feedback-message;
-                }
+            if root.feedback-message == "" && root.validation-message != "" : Text {
+                x: 20px;
+                y: 14px;
+                width: parent.width - 40px;
+                text: root.validation-message;
+                color: ThemeTokens.text-primary;
+                opacity: 0.72;
+                wrap: word-wrap;
+            }
 
-                if root.validation-message != "" : Text {
-                    width: parent.width;
-                    text: root.validation-message;
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.72;
-                    wrap: word-wrap;
-                }
+            actions-row := Rectangle {
+                x: parent.width - 196px;
+                y: parent.height - 50px;
+                width: 176px;
+                height: 34px;
+                background: transparent;
 
                 HorizontalLayout {
                     width: parent.width;
-                    spacing: 8px;
+                    height: parent.height;
+                    spacing: 12px;
 
                     DialogActionButton {
-                        label: "Test Connection";
+                        width: 80px;
+                        horizontal-stretch: 0;
+                        label: "Test";
                         action-enabled: root.connect-family-enabled;
 
                         clicked => {
@@ -754,30 +763,14 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     }
 
                     DialogActionButton {
-                        label: "Connect";
-                        action-enabled: root.connect-family-enabled;
-
-                        clicked => {
-                            root.action-requested("connect");
-                        }
-                    }
-
-                    DialogActionButton {
+                        width: 84px;
+                        horizontal-stretch: 0;
                         label: "Save";
                         primary: true;
                         action-enabled: root.can-confirm;
 
                         clicked => {
                             root.action-requested("save");
-                        }
-                    }
-
-                    DialogActionButton {
-                        label: "Save and Connect";
-                        action-enabled: root.connect-family-enabled;
-
-                        clicked => {
-                            root.action-requested("save-and-connect");
                         }
                     }
                 }

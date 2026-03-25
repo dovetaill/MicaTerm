@@ -103,9 +103,10 @@ grep -F '"Proxy"' "$SSH_MODAL" >/dev/null
 grep -F '"Environment"' "$SSH_MODAL" >/dev/null
 grep -F '"Advanced"' "$SSH_MODAL" >/dev/null
 grep -F 'import { ScrollView } from "std-widgets.slint";' "$SSH_MODAL" >/dev/null
-grep -F 'label: "Connect";' "$SSH_MODAL" >/dev/null
-grep -F 'label: "Save and Connect";' "$SSH_MODAL" >/dev/null
-grep -F 'label: "Test Connection";' "$SSH_MODAL" >/dev/null
+! grep -F 'label: "Connect";' "$SSH_MODAL" >/dev/null
+! grep -F 'label: "Save and Connect";' "$SSH_MODAL" >/dev/null
+! grep -F 'label: "Test Connection";' "$SSH_MODAL" >/dev/null
+grep -F 'label: "Test";' "$SSH_MODAL" >/dev/null
 grep -F 'label: "Save";' "$SSH_MODAL" >/dev/null
 grep -F 'InputType.password' "$SSH_MODAL" >/dev/null
 grep -F 'password_visibility' "$SSH_MODAL" >/dev/null
