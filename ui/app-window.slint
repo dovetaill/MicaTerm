@@ -591,23 +591,6 @@ export component AppWindow inherits Window {
         modal-height: 230px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
-        dialog-title: "New Folder";
-
-        close-requested => {
-            root.close-asset-modal-requested();
-        }
-
-        drag-requested(pointer-x, pointer-y) => {
-            root.blocking-modal-drag-requested(pointer-x, pointer-y);
-        }
-
-        drag-moved(pointer-x, pointer-y) => {
-            root.blocking-modal-drag-moved(pointer-x, pointer-y);
-        }
-
-        drag-ended => {
-            root.blocking-modal-drag-ended();
-        }
 
         focus-restore-requested => {
             root.blocking-modal-focus-restore-requested();
@@ -619,8 +602,9 @@ export component AppWindow inherits Window {
         asset-folder-modal-overlay := AssetsFolderCreateModal {
             x: 0px;
             y: 0px;
-            width: parent.width;
-            height: parent.height;
+            width: asset-folder-modal-shell.content-width;
+            height: asset-folder-modal-shell.content-height;
+            dialog-title: "New Folder";
             folder-name: root.asset-folder-modal-name;
             validation-message: root.asset-modal-validation-message;
             can-confirm: root.asset-modal-can-confirm;
@@ -638,6 +622,18 @@ export component AppWindow inherits Window {
                 root.asset-folder-modal-name-changed(value);
             }
 
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
             focus-restore-requested => {
                 root.blocking-modal-focus-restore-requested();
             }
@@ -646,27 +642,10 @@ export component AppWindow inherits Window {
 
     if root.asset-modal-open && root.asset-modal-kind == "new-ssh-connection" : asset-ssh-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
-        modal-width: 860px;
-        modal-height: 640px;
+        modal-width: 640px;
+        modal-height: 560px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
-        dialog-title: root.asset-ssh-modal-dialog-title;
-
-        close-requested => {
-            root.close-asset-modal-requested();
-        }
-
-        drag-requested(pointer-x, pointer-y) => {
-            root.blocking-modal-drag-requested(pointer-x, pointer-y);
-        }
-
-        drag-moved(pointer-x, pointer-y) => {
-            root.blocking-modal-drag-moved(pointer-x, pointer-y);
-        }
-
-        drag-ended => {
-            root.blocking-modal-drag-ended();
-        }
 
         focus-restore-requested => {
             root.blocking-modal-focus-restore-requested();
@@ -678,8 +657,9 @@ export component AppWindow inherits Window {
         asset-ssh-modal-overlay := AssetsSshConnectionModal {
             x: 0px;
             y: 0px;
-            width: parent.width;
-            height: parent.height;
+            width: asset-ssh-modal-shell.content-width;
+            height: asset-ssh-modal-shell.content-height;
+            dialog-title: root.asset-ssh-modal-dialog-title;
             name: root.asset-ssh-modal-name;
             host: root.asset-ssh-modal-host;
             user: root.asset-ssh-modal-user;
@@ -720,6 +700,18 @@ export component AppWindow inherits Window {
                 root.asset-ssh-modal-action-requested(action-id);
             }
 
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
             focus-restore-requested => {
                 root.blocking-modal-focus-restore-requested();
             }
@@ -732,23 +724,6 @@ export component AppWindow inherits Window {
         modal-height: 230px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
-        dialog-title: "Rename Asset";
-
-        close-requested => {
-            root.close-asset-modal-requested();
-        }
-
-        drag-requested(pointer-x, pointer-y) => {
-            root.blocking-modal-drag-requested(pointer-x, pointer-y);
-        }
-
-        drag-moved(pointer-x, pointer-y) => {
-            root.blocking-modal-drag-moved(pointer-x, pointer-y);
-        }
-
-        drag-ended => {
-            root.blocking-modal-drag-ended();
-        }
 
         focus-restore-requested => {
             root.blocking-modal-focus-restore-requested();
@@ -760,8 +735,9 @@ export component AppWindow inherits Window {
         asset-rename-modal-overlay := AssetsRenameModal {
             x: 0px;
             y: 0px;
-            width: parent.width;
-            height: parent.height;
+            width: asset-rename-modal-shell.content-width;
+            height: asset-rename-modal-shell.content-height;
+            dialog-title: "Rename Asset";
             item-name: root.asset-rename-modal-name;
             validation-message: root.asset-rename-modal-validation-message;
             can-confirm: root.asset-rename-modal-can-confirm;
@@ -778,6 +754,18 @@ export component AppWindow inherits Window {
                 root.asset-rename-modal-name-changed(value);
             }
 
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
             focus-restore-requested => {
                 root.blocking-modal-focus-restore-requested();
             }
@@ -790,23 +778,6 @@ export component AppWindow inherits Window {
         modal-height: 268px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
-        dialog-title: "Delete Asset";
-
-        close-requested => {
-            root.close-asset-modal-requested();
-        }
-
-        drag-requested(pointer-x, pointer-y) => {
-            root.blocking-modal-drag-requested(pointer-x, pointer-y);
-        }
-
-        drag-moved(pointer-x, pointer-y) => {
-            root.blocking-modal-drag-moved(pointer-x, pointer-y);
-        }
-
-        drag-ended => {
-            root.blocking-modal-drag-ended();
-        }
 
         focus-restore-requested => {
             root.blocking-modal-focus-restore-requested();
@@ -818,8 +789,9 @@ export component AppWindow inherits Window {
         asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {
             x: 0px;
             y: 0px;
-            width: parent.width;
-            height: parent.height;
+            width: asset-delete-confirm-modal-shell.content-width;
+            height: asset-delete-confirm-modal-shell.content-height;
+            dialog-title: "Delete Asset";
             target-label: root.asset-delete-confirm-target-label;
             descendant-count: root.asset-delete-confirm-descendant-count;
 
@@ -829,6 +801,18 @@ export component AppWindow inherits Window {
 
             confirm-requested => {
                 root.confirm-delete-asset-requested();
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
             }
 
             focus-restore-requested => {
@@ -843,23 +827,6 @@ export component AppWindow inherits Window {
         modal-height: 332px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
-        dialog-title: "Verify Host Key";
-
-        close-requested => {
-            root.ssh-host-key-modal-reject-requested();
-        }
-
-        drag-requested(pointer-x, pointer-y) => {
-            root.blocking-modal-drag-requested(pointer-x, pointer-y);
-        }
-
-        drag-moved(pointer-x, pointer-y) => {
-            root.blocking-modal-drag-moved(pointer-x, pointer-y);
-        }
-
-        drag-ended => {
-            root.blocking-modal-drag-ended();
-        }
 
         focus-restore-requested => {
             root.blocking-modal-focus-restore-requested();
@@ -871,8 +838,9 @@ export component AppWindow inherits Window {
         ssh-host-key-modal-overlay := SshHostKeyConfirmModal {
             x: 0px;
             y: 0px;
-            width: parent.width;
-            height: parent.height;
+            width: ssh-host-key-modal-shell.content-width;
+            height: ssh-host-key-modal-shell.content-height;
+            dialog-title: "Verify Host Key";
             host: root.ssh-host-key-modal-host;
             fingerprint: root.ssh-host-key-modal-fingerprint;
 
@@ -882,6 +850,18 @@ export component AppWindow inherits Window {
 
             reject-requested => {
                 root.ssh-host-key-modal-reject-requested();
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
             }
 
             focus-restore-requested => {

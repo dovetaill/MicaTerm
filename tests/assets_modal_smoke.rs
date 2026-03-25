@@ -363,34 +363,87 @@ fn delete_modal_visibility_round_trips_through_window_properties() {
 }
 
 #[test]
-fn blocking_modal_shell_owns_shared_asset_modal_chrome_contract() {
+fn blocking_modal_children_own_shared_asset_modal_chrome_contract() {
     let shell = fs::read_to_string("ui/components/blocking-modal-shell.slint")
         .expect("read blocking modal shell");
     let folder = fs::read_to_string("ui/components/assets-folder-create-modal.slint")
         .expect("read folder modal");
     let ssh = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
         .expect("read ssh modal");
+    let rename = fs::read_to_string("ui/components/assets-rename-modal.slint")
+        .expect("read rename modal");
+    let delete = fs::read_to_string("ui/components/assets-delete-confirm-modal.slint")
+        .expect("read delete modal");
+    let host_key = fs::read_to_string("ui/components/ssh-host-key-confirm-modal.slint")
+        .expect("read host key modal");
 
-    assert!(shell.contains("in property <string> dialog-title"));
-    assert!(shell.contains("callback close-requested();"));
-    assert!(shell.contains("header := Rectangle {"));
-    assert!(shell.contains("close-button := Rectangle {"));
-    assert!(!folder.contains("drag-touch := TouchArea {"));
-    assert!(!ssh.contains("drag-touch := TouchArea {"));
+    assert!(!shell.contains("in property <string> dialog-title"));
+    assert!(!shell.contains("callback close-requested();"));
+    assert!(!shell.contains("header := Rectangle {"));
+    assert!(!shell.contains("close-button := Rectangle {"));
+    assert!(folder.contains("in property <string> dialog-title: \"New Folder\";"));
+    assert!(folder.contains("drag-touch := TouchArea {"));
+    assert!(ssh.contains("in property <string> dialog-title: \"New SSH Connection\";"));
+    assert!(ssh.contains("drag-touch := TouchArea {"));
+    assert!(rename.contains("drag-touch := TouchArea {"));
+    assert!(delete.contains("drag-touch := TouchArea {"));
+    assert!(host_key.contains("drag-touch := TouchArea {"));
 }
 
 #[test]
-fn blocking_modal_shell_header_and_content_are_top_anchored() {
+fn blocking_modal_shell_exposes_a_full_frame_for_child_owned_chrome() {
     let shell = fs::read_to_string("ui/components/blocking-modal-shell.slint")
         .expect("read blocking modal shell");
 
     assert!(
-        shell.contains("header := Rectangle {\n            x: 0px;\n            y: 0px;"),
-        "blocking modal shell header must be pinned to the frame origin instead of relying on Slint centering defaults"
+        shell.contains("content-host := Rectangle {\n            x: 0px;\n            y: 0px;"),
+        "blocking modal shell content host must expose the full frame so child modals can own header and footer geometry"
     );
     assert!(
-        shell.contains("content-host := Rectangle {\n            x: 0px;\n            y: header.height;"),
-        "blocking modal shell content host must start immediately below the header"
+        shell.contains("height: parent.height;"),
+        "blocking modal shell content host must keep the full modal height available to child layouts"
+    );
+}
+
+#[test]
+fn simple_asset_modals_anchor_header_and_footer_to_the_frame_edges() {
+    let folder = fs::read_to_string("ui/components/assets-folder-create-modal.slint")
+        .expect("read folder modal");
+    let rename = fs::read_to_string("ui/components/assets-rename-modal.slint")
+        .expect("read rename modal");
+    let delete = fs::read_to_string("ui/components/assets-delete-confirm-modal.slint")
+        .expect("read delete modal");
+    let host_key = fs::read_to_string("ui/components/ssh-host-key-confirm-modal.slint")
+        .expect("read host key modal");
+
+    for modal in [&folder, &rename, &delete, &host_key] {
+        assert!(
+            modal.contains("header := Rectangle {\n            x: 0px;\n            y: 0px;"),
+            "simple asset modal headers must be pinned to the frame origin"
+        );
+        assert!(
+            modal.contains("footer := Rectangle {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
+            "simple asset modal footers must be pinned to the bottom edge"
+        );
+    }
+}
+
+#[test]
+fn ssh_modal_header_tabs_body_and_footer_are_explicitly_anchored() {
+    let ssh = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
+
+    assert!(
+        ssh.contains("header := Rectangle {\n            x: 0px;\n            y: 0px;"),
+        "ssh modal header must be pinned to the top-left corner"
+    );
+    assert!(
+        ssh.contains("body-scroll := ScrollView {\n            x: 0px;\n            y: root.body-top;"),
+        "ssh modal body scroll host must start directly below the chrome"
+    );
+    assert!(
+        ssh.contains("footer := Rectangle {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
+        "ssh modal footer must be pinned to the bottom edge"
     );
 }
 
@@ -399,19 +452,19 @@ fn blocking_modal_children_bind_overlay_parent_dimensions() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
 
     assert!(app_window.contains(
-        "asset-folder-modal-overlay := AssetsFolderCreateModal {\n            x: 0px;\n            y: 0px;\n            width: parent.width;"
+        "asset-folder-modal-overlay := AssetsFolderCreateModal {\n            x: 0px;\n            y: 0px;\n            width: asset-folder-modal-shell.content-width;"
     ));
     assert!(app_window.contains(
-        "asset-ssh-modal-overlay := AssetsSshConnectionModal {\n            x: 0px;\n            y: 0px;\n            width: parent.width;"
+        "asset-ssh-modal-overlay := AssetsSshConnectionModal {\n            x: 0px;\n            y: 0px;\n            width: asset-ssh-modal-shell.content-width;"
     ));
     assert!(app_window.contains(
-        "asset-rename-modal-overlay := AssetsRenameModal {\n            x: 0px;\n            y: 0px;\n            width: parent.width;"
+        "asset-rename-modal-overlay := AssetsRenameModal {\n            x: 0px;\n            y: 0px;\n            width: asset-rename-modal-shell.content-width;"
     ));
     assert!(app_window.contains(
-        "asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {\n            x: 0px;\n            y: 0px;\n            width: parent.width;"
+        "asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {\n            x: 0px;\n            y: 0px;\n            width: asset-delete-confirm-modal-shell.content-width;"
     ));
     assert!(app_window.contains(
-        "ssh-host-key-modal-overlay := SshHostKeyConfirmModal {\n            x: 0px;\n            y: 0px;\n            width: parent.width;"
+        "ssh-host-key-modal-overlay := SshHostKeyConfirmModal {\n            x: 0px;\n            y: 0px;\n            width: ssh-host-key-modal-shell.content-width;"
     ));
 }
 
@@ -421,7 +474,7 @@ fn ssh_form_field_contract_allows_horizontal_rows_to_shrink_without_overflow() {
         .expect("read ssh modal");
 
     assert!(
-        ssh.contains("component FormField inherits Rectangle {\n    in property <string> label: \"\";\n    in property <string> value: \"\";\n    in property <bool> required: false;\n    in property <bool> password-mode: false;\n    in property <bool> multiline: false;\n    in property <string> trailing-action-text: \"\";\n    callback value-changed(string);\n    callback trailing-action-requested();\n\n    min-width: 0px;"),
+        ssh.contains("component FormField inherits Rectangle {\n    in property <string> label: \"\";\n    in property <string> value: \"\";\n    in property <bool> required: false;\n    in property <bool> password-mode: false;\n    in property <bool> multiline: false;\n    in property <string> trailing-action-text: \"\";\n    callback value-changed(string);\n    callback trailing-action-requested();\n\n    min-width: 0px;\n    preferred-width: 0px;"),
         "form fields rendered inside SSH modal horizontal rows must opt into shrinking so Name/Host/User rows do not steal width from siblings"
     );
 }

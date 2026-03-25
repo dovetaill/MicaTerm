@@ -1,13 +1,13 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 
 export component BlockingModalShell inherits Rectangle {
-    in property <string> dialog-title: "";
     in property <length> host-titlebar-height: 0px;
     in property <length> modal-width: 360px;
     in property <length> modal-height: 240px;
     in-out property <length> offset-x: 0px;
     in-out property <length> offset-y: 0px;
-    callback close-requested();
+    out property <length> content-width: content-host.width;
+    out property <length> content-height: content-host.height;
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
@@ -24,7 +24,6 @@ export component BlockingModalShell inherits Rectangle {
         220px,
         root.height - root.host-titlebar-height - (root.viewport-margin * 2)
     );
-    private property <length> header-height: 56px;
     private property <length> resolved-modal-width: min(root.modal-width, root.available-width);
     private property <length> resolved-modal-height: min(root.modal-height, root.available-height);
 
@@ -53,94 +52,11 @@ export component BlockingModalShell inherits Rectangle {
         border-color: ThemeTokens.divider-strong;
         background: ThemeTokens.assets-surface;
 
-        header := Rectangle {
+        content-host := Rectangle {
             x: 0px;
             y: 0px;
             width: parent.width;
-            height: root.header-height;
-            background: ThemeTokens.assets-surface;
-
-            Text {
-                x: 20px;
-                y: 0px;
-                width: parent.width - 72px;
-                height: parent.height;
-                text: root.dialog-title;
-                color: ThemeTokens.text-primary;
-                font-size: 18px;
-                font-weight: 600;
-                vertical-alignment: center;
-                overflow: elide;
-            }
-
-            drag-touch := TouchArea {
-                width: parent.width - 48px;
-                height: parent.height;
-
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down
-                        && event.button == PointerEventButton.left
-                    {
-                        root.drag-requested(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.move {
-                        root.drag-moved(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.up {
-                        root.drag-ended();
-                    }
-                }
-            }
-
-            close-button := Rectangle {
-                x: parent.width - 40px;
-                y: 12px;
-                width: 28px;
-                height: 28px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
-
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: "×";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                close-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        root.focus-restore-requested();
-                        root.close-requested();
-                    }
-                }
-            }
-
-            divider := Rectangle {
-                y: parent.height - 1px;
-                width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
-            }
-        }
-
-        content-host := Rectangle {
-            x: 0px;
-            y: header.height;
-            width: parent.width;
-            height: parent.height - header.height;
+            height: parent.height;
             background: transparent;
 
             @children

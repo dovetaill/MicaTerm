@@ -22,10 +22,10 @@ grep -F 'in-out property <bool> asset-delete-confirm-modal-open: false;' "$APP_W
 grep -F 'in-out property <string> asset-delete-confirm-target-label: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <int> asset-delete-confirm-descendant-count: 0;' "$APP_WINDOW" >/dev/null
 grep -F 'callback drag-requested(length, length);' "$MODAL_SHELL" >/dev/null
-grep -F 'in property <string> dialog-title: "";' "$MODAL_SHELL" >/dev/null
-grep -F 'callback close-requested();' "$MODAL_SHELL" >/dev/null
-grep -F 'header := Rectangle {' "$MODAL_SHELL" >/dev/null
-grep -F 'close-button := Rectangle {' "$MODAL_SHELL" >/dev/null
+! grep -F 'in property <string> dialog-title: "";' "$MODAL_SHELL" >/dev/null
+! grep -F 'callback close-requested();' "$MODAL_SHELL" >/dev/null
+! grep -F 'header := Rectangle {' "$MODAL_SHELL" >/dev/null
+! grep -F 'close-button := Rectangle {' "$MODAL_SHELL" >/dev/null
 grep -F 'clicked => { }' "$APP_WINDOW" >/dev/null
 grep -F 'callback close-asset-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback confirm-asset-modal-requested();' "$APP_WINDOW" >/dev/null
@@ -34,7 +34,7 @@ grep -F 'callback confirm-asset-rename-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback confirm-delete-asset-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'host-titlebar-height: titlebar.height;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
-grep -F 'modal-height: 640px;' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: 560px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 268px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 332px;' "$APP_WINDOW" >/dev/null
 grep -F 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" >/dev/null
@@ -42,29 +42,52 @@ grep -F 'asset-ssh-modal-overlay := AssetsSshConnectionModal {' "$APP_WINDOW" >/
 grep -F 'asset-rename-modal-overlay := AssetsRenameModal {' "$APP_WINDOW" >/dev/null
 grep -F 'asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {' "$APP_WINDOW" >/dev/null
 grep -F 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDOW" >/dev/null
-grep -F -A4 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" | grep -F 'width: parent.width;' >/dev/null
-grep -F -A5 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" | grep -F 'height: parent.height;' >/dev/null
-grep -F -A4 'asset-ssh-modal-overlay := AssetsSshConnectionModal {' "$APP_WINDOW" | grep -F 'width: parent.width;' >/dev/null
-grep -F -A5 'asset-ssh-modal-overlay := AssetsSshConnectionModal {' "$APP_WINDOW" | grep -F 'height: parent.height;' >/dev/null
-grep -F -A4 'asset-rename-modal-overlay := AssetsRenameModal {' "$APP_WINDOW" | grep -F 'width: parent.width;' >/dev/null
-grep -F -A5 'asset-rename-modal-overlay := AssetsRenameModal {' "$APP_WINDOW" | grep -F 'height: parent.height;' >/dev/null
-grep -F -A4 'asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {' "$APP_WINDOW" | grep -F 'width: parent.width;' >/dev/null
-grep -F -A5 'asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {' "$APP_WINDOW" | grep -F 'height: parent.height;' >/dev/null
-grep -F -A4 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDOW" | grep -F 'width: parent.width;' >/dev/null
-grep -F -A5 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDOW" | grep -F 'height: parent.height;' >/dev/null
-grep -F 'dialog-title: root.asset-ssh-modal-dialog-title;' "$APP_WINDOW" >/dev/null
+grep -F -A4 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" | grep -F 'width: asset-folder-modal-shell.content-width;' >/dev/null
+grep -F -A5 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" | grep -F 'height: asset-folder-modal-shell.content-height;' >/dev/null
+grep -F -A4 'asset-ssh-modal-overlay := AssetsSshConnectionModal {' "$APP_WINDOW" | grep -F 'width: asset-ssh-modal-shell.content-width;' >/dev/null
+grep -F -A5 'asset-ssh-modal-overlay := AssetsSshConnectionModal {' "$APP_WINDOW" | grep -F 'height: asset-ssh-modal-shell.content-height;' >/dev/null
+grep -F -A4 'asset-rename-modal-overlay := AssetsRenameModal {' "$APP_WINDOW" | grep -F 'width: asset-rename-modal-shell.content-width;' >/dev/null
+grep -F -A5 'asset-rename-modal-overlay := AssetsRenameModal {' "$APP_WINDOW" | grep -F 'height: asset-rename-modal-shell.content-height;' >/dev/null
+grep -F -A4 'asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {' "$APP_WINDOW" | grep -F 'width: asset-delete-confirm-modal-shell.content-width;' >/dev/null
+grep -F -A5 'asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {' "$APP_WINDOW" | grep -F 'height: asset-delete-confirm-modal-shell.content-height;' >/dev/null
+grep -F -A4 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDOW" | grep -F 'width: ssh-host-key-modal-shell.content-width;' >/dev/null
+grep -F -A5 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDOW" | grep -F 'height: ssh-host-key-modal-shell.content-height;' >/dev/null
 grep -F 'x: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'y: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'export component AssetsFolderCreateModal inherits Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsSshConnectionModal inherits Rectangle {' "$SSH_MODAL" >/dev/null
-! grep -F 'drag-touch := TouchArea {' "$FOLDER_MODAL" >/dev/null
-! grep -F 'drag-touch := TouchArea {' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> dialog-title: "New Folder";' "$FOLDER_MODAL" >/dev/null
+grep -F 'header := Rectangle {' "$FOLDER_MODAL" >/dev/null
+grep -F 'x: 0px;' "$FOLDER_MODAL" >/dev/null
+grep -F 'y: 0px;' "$FOLDER_MODAL" >/dev/null
+grep -F 'footer := Rectangle {' "$FOLDER_MODAL" >/dev/null
+grep -F 'drag-touch := TouchArea {' "$FOLDER_MODAL" >/dev/null
+grep -F 'close-button := Rectangle {' "$FOLDER_MODAL" >/dev/null
+grep -F 'in property <string> dialog-title: "Rename Asset";' "$RENAME_MODAL" >/dev/null
+grep -F 'footer := Rectangle {' "$RENAME_MODAL" >/dev/null
+grep -F 'drag-touch := TouchArea {' "$RENAME_MODAL" >/dev/null
+grep -F 'close-button := Rectangle {' "$RENAME_MODAL" >/dev/null
+grep -F 'in property <string> dialog-title: "Delete Asset";' "$DELETE_MODAL" >/dev/null
+grep -F 'footer := Rectangle {' "$DELETE_MODAL" >/dev/null
+grep -F 'drag-touch := TouchArea {' "$DELETE_MODAL" >/dev/null
+grep -F 'close-button := Rectangle {' "$DELETE_MODAL" >/dev/null
+grep -F 'in property <string> dialog-title: "Verify Host Key";' "$ROOT_DIR/ui/components/ssh-host-key-confirm-modal.slint" >/dev/null
+grep -F 'footer := Rectangle {' "$ROOT_DIR/ui/components/ssh-host-key-confirm-modal.slint" >/dev/null
+grep -F 'drag-touch := TouchArea {' "$ROOT_DIR/ui/components/ssh-host-key-confirm-modal.slint" >/dev/null
+grep -F 'close-button := Rectangle {' "$ROOT_DIR/ui/components/ssh-host-key-confirm-modal.slint" >/dev/null
 grep -F 'in-out property <string> asset-modal-validation-message: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in property <string> validation-message: "";' "$FOLDER_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm: false;' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsRenameModal inherits Rectangle {' "$RENAME_MODAL" >/dev/null
 grep -F 'export component AssetsDeleteConfirmModal inherits Rectangle {' "$DELETE_MODAL" >/dev/null
 ! grep -F 'in property <string> active-tab:' "$SSH_MODAL" >/dev/null
+grep -F 'private property <string> active-tab: "standard";' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> dialog-title: "New SSH Connection";' "$SSH_MODAL" >/dev/null
+grep -F 'header := Rectangle {' "$SSH_MODAL" >/dev/null
+grep -F 'tabs-host := Rectangle {' "$SSH_MODAL" >/dev/null
+grep -F 'footer := Rectangle {' "$SSH_MODAL" >/dev/null
+grep -F 'drag-touch := TouchArea {' "$SSH_MODAL" >/dev/null
+grep -F 'close-button := Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> validation-message: "";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm: false;' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> auth-method:' "$SSH_MODAL" >/dev/null
@@ -75,10 +98,10 @@ grep -F 'in property <string> remark:' "$SSH_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback action-requested(string);' "$SSH_MODAL" >/dev/null
 grep -F 'min-width: 0px;' "$SSH_MODAL" >/dev/null
-grep -F 'text: "Connection"' "$SSH_MODAL" >/dev/null
-grep -F 'text: "Authentication"' "$SSH_MODAL" >/dev/null
-grep -F 'text: "Metadata"' "$SSH_MODAL" >/dev/null
-grep -F 'text: "More Settings"' "$SSH_MODAL" >/dev/null
+grep -F '"Standard"' "$SSH_MODAL" >/dev/null
+grep -F '"Proxy"' "$SSH_MODAL" >/dev/null
+grep -F '"Environment"' "$SSH_MODAL" >/dev/null
+grep -F '"Advanced"' "$SSH_MODAL" >/dev/null
 grep -F 'import { ScrollView } from "std-widgets.slint";' "$SSH_MODAL" >/dev/null
 grep -F 'label: "Connect";' "$SSH_MODAL" >/dev/null
 grep -F 'label: "Save and Connect";' "$SSH_MODAL" >/dev/null
@@ -103,11 +126,7 @@ grep -F 'callback close-requested();' "$DELETE_MODAL" >/dev/null
 ! rg -n '[一-龥]' "$SSH_MODAL" >/dev/null
 ! rg -n '[一-龥]' "$RENAME_MODAL" >/dev/null
 ! rg -n '[一-龥]' "$DELETE_MODAL" >/dev/null
-grep -F 'dialog-title: "New Folder"' "$APP_WINDOW" >/dev/null
 grep -F 'dialog-title: root.asset-ssh-modal-dialog-title;' "$APP_WINDOW" >/dev/null
-grep -F 'dialog-title: "Rename Asset"' "$APP_WINDOW" >/dev/null
-grep -F 'dialog-title: "Delete Asset"' "$APP_WINDOW" >/dev/null
-grep -F 'dialog-title: "Verify Host Key"' "$APP_WINDOW" >/dev/null
 grep -F 'in property <int> focus-sequence: 0;' "$FOLDER_MODAL" >/dev/null
 grep -F 'in property <int> focus-sequence: 0;' "$SSH_MODAL" >/dev/null
 rg -n "validation-message" "$FOLDER_MODAL" >/dev/null

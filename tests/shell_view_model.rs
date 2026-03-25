@@ -155,22 +155,23 @@ fn new_ssh_modal_state_no_longer_tracks_top_level_tab_enum() {
 }
 
 #[test]
-fn new_ssh_modal_exposes_connection_authentication_metadata_and_more_settings_groups() {
+fn new_ssh_modal_keeps_tab_state_local_to_the_component() {
     let ssh_modal =
         fs::read_to_string("ui/components/assets-ssh-connection-modal.slint").expect("read ssh modal");
 
     assert!(
         !ssh_modal.contains("in property <string> active-tab:"),
-        "ssh modal should not expose an active-tab property once the grouped form lands"
+        "ssh modal should not expose an active-tab input property to the outer window bridge"
     );
     assert!(
         !ssh_modal.contains("callback tab-selected(string);"),
-        "ssh modal should not expose a top-level tab-selected callback once grouped"
+        "ssh modal should not expose a top-level tab-selected callback once the tab state stays local"
     );
-    assert!(ssh_modal.contains("text: \"Connection\""));
-    assert!(ssh_modal.contains("text: \"Authentication\""));
-    assert!(ssh_modal.contains("text: \"Metadata\""));
-    assert!(ssh_modal.contains("text: \"More Settings\""));
+    assert!(ssh_modal.contains("private property <string> active-tab: \"standard\";"));
+    assert!(ssh_modal.contains("\"Standard\""));
+    assert!(ssh_modal.contains("\"Proxy\""));
+    assert!(ssh_modal.contains("\"Environment\""));
+    assert!(ssh_modal.contains("\"Advanced\""));
 }
 
 #[test]

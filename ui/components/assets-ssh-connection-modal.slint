@@ -7,6 +7,7 @@ component ModalTabButton inherits Rectangle {
     callback clicked();
 
     min-width: 0px;
+    preferred-width: 0px;
     horizontal-stretch: 1;
     height: 34px;
     border-radius: 0px;
@@ -44,6 +45,7 @@ component DialogActionButton inherits Rectangle {
     callback clicked();
 
     min-width: 0px;
+    preferred-width: 0px;
     horizontal-stretch: 1;
     height: 34px;
     border-radius: 0px;
@@ -88,6 +90,7 @@ component FormField inherits Rectangle {
     callback trailing-action-requested();
 
     min-width: 0px;
+    preferred-width: 0px;
     private property <length> field-height: root.multiline ? 120px : 40px;
 
     height: root.multiline ? 154px : 72px;
@@ -188,6 +191,7 @@ component FeedbackBanner inherits Rectangle {
 }
 
 export component AssetsSshConnectionModal inherits Rectangle {
+    in property <string> dialog-title: "New SSH Connection";
     in property <string> name: "";
     in property <string> host: "";
     in property <string> user: "";
@@ -215,14 +219,19 @@ export component AssetsSshConnectionModal inherits Rectangle {
     callback confirm-requested();
     callback draft-changed(string, string);
     callback action-requested(string);
+    callback drag-requested(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended();
     callback focus-restore-requested();
 
-    private property <bool> compact-layout: root.width < 780px;
-    private property <length> footer-height: root.compact-layout ? 120px : 92px;
-    private property <length> body-height: max(0px, root.height - root.footer-height);
+    private property <string> active-tab: "standard";
+    private property <bool> compact-layout: root.width < 620px;
+    private property <length> header-height: 56px;
+    private property <length> tabs-height: 48px;
+    private property <length> footer-height: 96px;
+    private property <length> body-top: root.header-height + root.tabs-height;
+    private property <length> body-height: max(0px, root.height - root.body-top - root.footer-height);
 
-    width: 100%;
-    height: 100%;
     background: transparent;
 
     public function focus-primary-field() {
@@ -242,8 +251,127 @@ export component AssetsSshConnectionModal inherits Rectangle {
             }
         }
 
-        body-scroll := ScrollView {
+        header := Rectangle {
+            x: 0px;
             y: 0px;
+            width: parent.width;
+            height: root.header-height;
+            background: ThemeTokens.assets-surface;
+
+            Text {
+                x: 20px;
+                y: 0px;
+                width: parent.width - 72px;
+                height: parent.height;
+                text: root.dialog-title;
+                color: ThemeTokens.text-primary;
+                font-size: 18px;
+                font-weight: 600;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            drag-touch := TouchArea {
+                width: parent.width - 48px;
+                height: parent.height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down
+                        && event.button == PointerEventButton.left
+                    {
+                        root.drag-requested(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.move {
+                        root.drag-moved(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.up {
+                        root.drag-ended();
+                    }
+                }
+            }
+
+            close-button := Rectangle {
+                x: parent.width - 40px;
+                y: 12px;
+                width: 28px;
+                height: 28px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.control-active-surface;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "×";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                close-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.close-requested();
+                    }
+                }
+            }
+
+            header-divider := Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
+            }
+        }
+
+        tabs-host := Rectangle {
+            x: 0px;
+            y: root.header-height;
+            width: parent.width;
+            height: root.tabs-height;
+            background: ThemeTokens.assets-surface;
+
+            HorizontalLayout {
+                x: 20px;
+                y: 8px;
+                width: parent.width - 40px;
+                height: 32px;
+                spacing: 8px;
+
+                for tab-id in ["standard", "proxy", "environment", "advanced"] : ModalTabButton {
+                    label: tab-id == "standard" ? "Standard"
+                        : tab-id == "proxy" ? "Proxy"
+                        : tab-id == "environment" ? "Environment"
+                        : "Advanced";
+                    active: root.active-tab == tab-id;
+
+                    clicked => {
+                        root.active-tab = tab-id;
+                    }
+                }
+            }
+
+            tabs-divider := Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
+            }
+        }
+
+        body-scroll := ScrollView {
+            x: 0px;
+            y: root.body-top;
             width: parent.width;
             height: root.body-height;
             viewport-width: scroll-body.width;
@@ -258,37 +386,73 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     x: 20px;
                     y: 20px;
                     width: parent.width - 40px;
-                    spacing: 24px;
+                    spacing: 16px;
 
-                    Rectangle {
+                    if root.active-tab == "standard" : VerticalLayout {
                         width: parent.width;
-                        background: transparent;
+                        spacing: 16px;
 
-                        VerticalLayout {
+                        if root.compact-layout : VerticalLayout {
                             width: parent.width;
-                            spacing: 16px;
+                            spacing: 12px;
 
-                            Text {
-                                text: "Connection";
-                                color: ThemeTokens.text-primary;
-                                font-size: 15px;
-                                font-weight: 700;
+                            FormField {
+                                width: parent.width;
+                                label: "Name";
+                                required: true;
+                                value: root.name;
+
+                                value-changed(value) => {
+                                    root.draft-changed("name", value);
+                                }
                             }
 
-                            Text {
+                            FormField {
                                 width: parent.width;
-                                text: "Define the saved SSH endpoint and default identity for this profile.";
-                                color: ThemeTokens.text-primary;
-                                opacity: 0.72;
-                                wrap: word-wrap;
+                                label: "Host";
+                                required: true;
+                                value: root.host;
+
+                                value-changed(value) => {
+                                    root.draft-changed("host", value);
+                                }
                             }
 
-                            if root.compact-layout : VerticalLayout {
+                            FormField {
                                 width: parent.width;
+                                label: "User";
+                                required: true;
+                                value: root.user;
+
+                                value-changed(value) => {
+                                    root.draft-changed("user", value);
+                                }
+                            }
+
+                            FormField {
+                                width: parent.width;
+                                label: "Port";
+                                value: root.port;
+
+                                value-changed(value) => {
+                                    root.draft-changed("port", value);
+                                }
+                            }
+                        }
+
+                        if !root.compact-layout : Rectangle {
+                            width: parent.width;
+                            height: 72px;
+                            background: transparent;
+
+                            HorizontalLayout {
+                                width: parent.width;
+                                height: parent.height;
                                 spacing: 12px;
 
                                 FormField {
-                                    width: parent.width;
+                                    horizontal-stretch: 1;
+                                    height: parent.height;
                                     label: "Name";
                                     required: true;
                                     value: root.name;
@@ -299,7 +463,8 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 }
 
                                 FormField {
-                                    width: parent.width;
+                                    horizontal-stretch: 1;
+                                    height: parent.height;
                                     label: "Host";
                                     required: true;
                                     value: root.host;
@@ -308,9 +473,22 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                         root.draft-changed("host", value);
                                     }
                                 }
+                            }
+                        }
+
+                        if !root.compact-layout : Rectangle {
+                            width: parent.width;
+                            height: 72px;
+                            background: transparent;
+
+                            HorizontalLayout {
+                                width: parent.width;
+                                height: parent.height;
+                                spacing: 12px;
 
                                 FormField {
-                                    width: parent.width;
+                                    horizontal-stretch: 1;
+                                    height: parent.height;
                                     label: "User";
                                     required: true;
                                     value: root.user;
@@ -321,7 +499,8 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 }
 
                                 FormField {
-                                    width: parent.width;
+                                    width: 132px;
+                                    height: parent.height;
                                     label: "Port";
                                     value: root.port;
 
@@ -330,105 +509,102 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     }
                                 }
                             }
-
-                            if !root.compact-layout : Rectangle {
-                                width: parent.width;
-                                height: 72px;
-                                background: transparent;
-
-                                HorizontalLayout {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    spacing: 12px;
-
-                                    FormField {
-                                        horizontal-stretch: 1;
-                                        height: parent.height;
-                                        label: "Name";
-                                        required: true;
-                                        value: root.name;
-
-                                        value-changed(value) => {
-                                            root.draft-changed("name", value);
-                                        }
-                                    }
-
-                                    FormField {
-                                        horizontal-stretch: 1;
-                                        height: parent.height;
-                                        label: "Host";
-                                        required: true;
-                                        value: root.host;
-
-                                        value-changed(value) => {
-                                            root.draft-changed("host", value);
-                                        }
-                                    }
-                                }
-                            }
-
-                            if !root.compact-layout : Rectangle {
-                                width: parent.width;
-                                height: 72px;
-                                background: transparent;
-
-                                HorizontalLayout {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    spacing: 12px;
-
-                                    FormField {
-                                        horizontal-stretch: 1;
-                                        height: parent.height;
-                                        label: "User";
-                                        required: true;
-                                        value: root.user;
-
-                                        value-changed(value) => {
-                                            root.draft-changed("user", value);
-                                        }
-                                    }
-
-                                    FormField {
-                                        width: 148px;
-                                        height: parent.height;
-                                        label: "Port";
-                                        value: root.port;
-
-                                        value-changed(value) => {
-                                            root.draft-changed("port", value);
-                                        }
-                                    }
-                                }
-                            }
-
                         }
-                    }
 
-                    Rectangle {
-                        width: parent.width;
-                        background: transparent;
-
-                        VerticalLayout {
+                        Rectangle {
                             width: parent.width;
-                            spacing: 16px;
+                            height: 34px;
+                            background: transparent;
 
-                            Text {
-                                text: "Authentication";
-                                color: ThemeTokens.text-primary;
-                                font-size: 15px;
-                                font-weight: 700;
+                            HorizontalLayout {
+                                width: parent.width;
+                                height: parent.height;
+                                spacing: 8px;
+
+                                for auth-option in ["password", "private-key"] : ModalTabButton {
+                                    label: auth-option == "password" ? "Password" : "Private Key";
+                                    active: root.auth-method == auth-option;
+
+                                    clicked => {
+                                        root.draft-changed("auth_method", auth-option);
+                                    }
+                                }
                             }
+                        }
+
+                        if root.secret-retention-message != "" : VerticalLayout {
+                            width: parent.width;
+                            spacing: 8px;
 
                             Text {
                                 width: parent.width;
-                                text: "Pick how the session authenticates and keep sensitive values inside the same dialog.";
+                                text: root.secret-retention-message;
                                 color: ThemeTokens.text-primary;
                                 opacity: 0.72;
                                 wrap: word-wrap;
                             }
 
+                            if root.can-clear-saved-secret : Rectangle {
+                                width: parent.width;
+                                height: root.clear-saved-secret-requested ? 56px : 34px;
+                                background: transparent;
+
+                                VerticalLayout {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    spacing: 6px;
+
+                                    ModalTabButton {
+                                        width: 180px;
+                                        horizontal-stretch: 0;
+                                        label: root.clear-saved-secret-requested ? "Keep Saved Secret" : "Clear Saved Secret";
+                                        active: root.clear-saved-secret-requested;
+
+                                        clicked => {
+                                            root.draft-changed(
+                                                "clear_saved_secret",
+                                                root.clear-saved-secret-requested ? "false" : "true"
+                                            );
+                                        }
+                                    }
+
+                                    if root.clear-saved-secret-requested : Text {
+                                        width: parent.width;
+                                        text: "Saved secret will be removed on Save.";
+                                        color: ThemeTokens.text-primary;
+                                        opacity: 0.72;
+                                        wrap: word-wrap;
+                                    }
+                                }
+                            }
+                        }
+
+                        if root.auth-method == "password" : FormField {
+                            width: parent.width;
+                            label: "Password";
+                            required: true;
+                            value: root.password;
+                            password-mode: !root.password-visible;
+                            trailing-action-text: root.password-visible ? "Hide" : "Show";
+
+                            value-changed(value) => {
+                                root.draft-changed("password", value);
+                            }
+
+                            trailing-action-requested => {
+                                root.draft-changed(
+                                    "password_visibility",
+                                    root.password-visible ? "hidden" : "visible"
+                                );
+                            }
+                        }
+
+                        if root.auth-method == "private-key" : VerticalLayout {
+                            width: parent.width;
+                            spacing: 12px;
+
                             Rectangle {
+                                width: parent.width;
                                 height: 34px;
                                 background: transparent;
 
@@ -437,228 +613,96 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     height: parent.height;
                                     spacing: 8px;
 
-                                    for auth-option in ["password", "private-key"] : ModalTabButton {
-                                        label: auth-option == "password" ? "Password" : "Private Key";
-                                        active: root.auth-method == auth-option;
+                                    for key-option in ["content", "path"] : ModalTabButton {
+                                        label: key-option == "content" ? "Inline Content" : "File Path";
+                                        active: root.private-key-source == key-option;
 
                                         clicked => {
-                                            root.draft-changed("auth_method", auth-option);
+                                            root.draft-changed("private_key_source", key-option);
                                         }
                                     }
                                 }
                             }
 
-                            if root.secret-retention-message != "" : VerticalLayout {
+                            if root.private-key-source == "content" : FormField {
                                 width: parent.width;
-                                spacing: 8px;
-
-                                Text {
-                                    width: parent.width;
-                                    text: root.secret-retention-message;
-                                    color: ThemeTokens.text-primary;
-                                    opacity: 0.72;
-                                    wrap: word-wrap;
-                                }
-
-                                if root.can-clear-saved-secret : Rectangle {
-                                    width: parent.width;
-                                    height: root.clear-saved-secret-requested ? 56px : 34px;
-                                    background: transparent;
-
-                                    VerticalLayout {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        spacing: 6px;
-
-                                        ModalTabButton {
-                                            width: 180px;
-                                            horizontal-stretch: 0;
-                                            label: root.clear-saved-secret-requested ? "Keep Saved Secret" : "Clear Saved Secret";
-                                            active: root.clear-saved-secret-requested;
-
-                                            clicked => {
-                                                root.draft-changed(
-                                                    "clear_saved_secret",
-                                                    root.clear-saved-secret-requested ? "false" : "true"
-                                                );
-                                            }
-                                        }
-
-                                        if root.clear-saved-secret-requested : Text {
-                                            width: parent.width;
-                                            text: "Saved secret will be removed on Save.";
-                                            color: ThemeTokens.text-primary;
-                                            opacity: 0.72;
-                                            wrap: word-wrap;
-                                        }
-                                    }
-                                }
-                            }
-
-                            if root.auth-method == "password" : FormField {
-                                width: parent.width;
-                                label: "Password";
+                                label: "Private Key Content";
                                 required: true;
-                                value: root.password;
-                                password-mode: !root.password-visible;
-                                trailing-action-text: root.password-visible ? "Hide" : "Show";
+                                multiline: true;
+                                value: root.private-key-content;
 
                                 value-changed(value) => {
-                                    root.draft-changed("password", value);
-                                }
-
-                                trailing-action-requested => {
-                                    root.draft-changed(
-                                        "password_visibility",
-                                        root.password-visible ? "hidden" : "visible"
-                                    );
+                                    root.draft-changed("private_key_content", value);
                                 }
                             }
 
-                            if root.auth-method == "private-key" : Rectangle {
+                            if root.private-key-source == "path" : FormField {
                                 width: parent.width;
-                                background: transparent;
+                                label: "Private Key Path";
+                                required: true;
+                                value: root.private-key-path;
 
-                                VerticalLayout {
-                                    width: parent.width;
-                                    spacing: 12px;
+                                value-changed(value) => {
+                                    root.draft-changed("private_key_path", value);
+                                }
+                            }
 
-                                    Rectangle {
-                                        height: 34px;
-                                        background: transparent;
+                            FormField {
+                                width: parent.width;
+                                label: "Passphrase";
+                                value: root.passphrase;
+                                password-mode: true;
 
-                                        HorizontalLayout {
-                                            width: parent.width;
-                                            height: parent.height;
-                                            spacing: 8px;
-
-                                            for key-option in ["content", "path"] : ModalTabButton {
-                                                label: key-option == "content" ? "Inline Content" : "File Path";
-                                                active: root.private-key-source == key-option;
-
-                                                clicked => {
-                                                    root.draft-changed("private_key_source", key-option);
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if root.private-key-source == "content" : FormField {
-                                        width: parent.width;
-                                        label: "Private Key Content";
-                                        required: true;
-                                        multiline: true;
-                                        value: root.private-key-content;
-
-                                        value-changed(value) => {
-                                            root.draft-changed("private_key_content", value);
-                                        }
-                                    }
-
-                                    if root.private-key-source == "path" : FormField {
-                                        width: parent.width;
-                                        label: "Private Key Path";
-                                        required: true;
-                                        value: root.private-key-path;
-
-                                        value-changed(value) => {
-                                            root.draft-changed("private_key_path", value);
-                                        }
-                                    }
-
-                                    FormField {
-                                        width: parent.width;
-                                        label: "Passphrase";
-                                        value: root.passphrase;
-                                        password-mode: true;
-
-                                        value-changed(value) => {
-                                            root.draft-changed("passphrase", value);
-                                        }
-                                    }
+                                value-changed(value) => {
+                                    root.draft-changed("passphrase", value);
                                 }
                             }
                         }
                     }
 
-                    Rectangle {
+                    if root.active-tab == "proxy" : VerticalLayout {
                         width: parent.width;
-                        background: transparent;
+                        spacing: 12px;
 
-                        VerticalLayout {
+                        FormField {
                             width: parent.width;
-                            spacing: 16px;
+                            label: "Proxy Method";
+                            value: root.proxy-method;
 
-                            Text {
-                                text: "Metadata";
-                                color: ThemeTokens.text-primary;
-                                font-size: 15px;
-                                font-weight: 700;
-                            }
-
-                            Text {
-                                width: parent.width;
-                                text: "Capture operator notes and profile context without leaving the dialog.";
-                                color: ThemeTokens.text-primary;
-                                opacity: 0.72;
-                                wrap: word-wrap;
-                            }
-
-                            FormField {
-                                width: parent.width;
-                                label: "Remark";
-                                value: root.remark;
-                                multiline: true;
-
-                                value-changed(value) => {
-                                    root.draft-changed("remark", value);
-                                }
+                            value-changed(value) => {
+                                root.draft-changed("proxy_method", value);
                             }
                         }
                     }
 
-                    Rectangle {
+                    if root.active-tab == "environment" : VerticalLayout {
                         width: parent.width;
-                        background: transparent;
+                        spacing: 12px;
 
-                        VerticalLayout {
+                        FormField {
                             width: parent.width;
-                            spacing: 16px;
+                            label: "Environment";
+                            value: root.environment;
+                            multiline: true;
 
-                            Text {
-                                text: "More Settings";
-                                color: ThemeTokens.text-primary;
-                                font-size: 15px;
-                                font-weight: 700;
+                            value-changed(value) => {
+                                root.draft-changed("environment", value);
                             }
+                        }
+                    }
 
-                            Text {
-                                width: parent.width;
-                                text: "Keep environment overrides and proxy hints attached to the same SSH profile.";
-                                color: ThemeTokens.text-primary;
-                                opacity: 0.72;
-                                wrap: word-wrap;
-                            }
+                    if root.active-tab == "advanced" : VerticalLayout {
+                        width: parent.width;
+                        spacing: 12px;
 
-                            FormField {
-                                width: parent.width;
-                                label: "Environment";
-                                value: root.environment;
-                                multiline: true;
+                        FormField {
+                            width: parent.width;
+                            label: "Remark";
+                            value: root.remark;
+                            multiline: true;
 
-                                value-changed(value) => {
-                                    root.draft-changed("environment", value);
-                                }
-                            }
-
-                            FormField {
-                                width: parent.width;
-                                label: "Proxy Method";
-                                value: root.proxy-method;
-
-                                value-changed(value) => {
-                                    root.draft-changed("proxy_method", value);
-                                }
+                            value-changed(value) => {
+                                root.draft-changed("remark", value);
                             }
                         }
                     }
@@ -667,6 +711,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
         }
 
         footer := Rectangle {
+            x: 0px;
             y: parent.height - root.footer-height;
             width: parent.width;
             height: root.footer-height;
@@ -699,59 +744,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     wrap: word-wrap;
                 }
 
-                if root.compact-layout : VerticalLayout {
-                    width: parent.width;
-                    spacing: 8px;
-
-                    HorizontalLayout {
-                        width: parent.width;
-                        spacing: 8px;
-
-                        DialogActionButton {
-                            label: "Test Connection";
-                            action-enabled: root.connect-family-enabled;
-
-                            clicked => {
-                                root.action-requested("test");
-                            }
-                        }
-
-                        DialogActionButton {
-                            label: "Connect";
-                            action-enabled: root.connect-family-enabled;
-
-                            clicked => {
-                                root.action-requested("connect");
-                            }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        width: parent.width;
-                        spacing: 8px;
-
-                        DialogActionButton {
-                            label: "Save";
-                            primary: true;
-                            action-enabled: root.can-confirm;
-
-                            clicked => {
-                                root.action-requested("save");
-                            }
-                        }
-
-                        DialogActionButton {
-                            label: "Save and Connect";
-                            action-enabled: root.connect-family-enabled;
-
-                            clicked => {
-                                root.action-requested("save-and-connect");
-                            }
-                        }
-                    }
-                }
-
-                if !root.compact-layout : HorizontalLayout {
+                HorizontalLayout {
                     width: parent.width;
                     spacing: 8px;
 
@@ -797,6 +790,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
     }
 
     changed focus-sequence => {
+        root.active-tab = "standard";
         root.focus-primary-field();
     }
 }
