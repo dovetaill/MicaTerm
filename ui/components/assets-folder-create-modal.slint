@@ -49,7 +49,7 @@ export component AssetsFolderCreateModal inherits Rectangle {
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
-    private property <length> footer-height: 66px;
+    private property <length> footer-height: 78px;
 
     background: transparent;
 
@@ -235,34 +235,54 @@ export component AssetsFolderCreateModal inherits Rectangle {
             height: root.footer-height;
             background: ThemeTokens.assets-surface;
 
-            footer-divider := Rectangle {
+            footer-content := VerticalLayout {
+                x: 0px;
+                y: 0px;
                 width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
-            }
+                height: parent.height;
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 14px;
+                padding-bottom: 14px;
+                spacing: 0px;
 
-            cancel-button := DialogButton {
-                x: parent.width - 204px;
-                y: 18px;
-                width: 88px;
-                label: "Cancel";
-
-                clicked => {
-                    root.focus-restore-requested();
-                    root.close-requested();
+                Rectangle {
+                    height: 0px;
+                    vertical-stretch: 1;
+                    background: transparent;
                 }
-            }
 
-            confirm-button := DialogButton {
-                x: parent.width - 104px;
-                y: 18px;
-                width: 84px;
-                label: "Create";
-                primary: true;
-                enabled: root.can-confirm;
+                HorizontalLayout {
+                    height: 34px;
+                    spacing: 12px;
 
-                clicked => {
-                    root.confirm-requested();
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: transparent;
+                    }
+
+                    cancel-button := DialogButton {
+                        width: 88px;
+                        height: 34px;
+                        label: "Cancel";
+
+                        clicked => {
+                            root.focus-restore-requested();
+                            root.close-requested();
+                        }
+                    }
+
+                    confirm-button := DialogButton {
+                        width: 84px;
+                        height: 34px;
+                        label: "Create";
+                        primary: true;
+                        enabled: root.can-confirm;
+
+                        clicked => {
+                            root.confirm-requested();
+                        }
+                    }
                 }
             }
         }

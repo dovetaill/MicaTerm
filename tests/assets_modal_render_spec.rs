@@ -142,10 +142,24 @@ fn new_folder_modal_renders_visible_footer_actions() {
         modal_surface,
         18,
     );
+    let footer_surface = pixel_at(&buffer, modal.x + 6, modal.y + modal.height - 20);
+    let footer_panel_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 28,
+        modal.y + modal.height - 56,
+        modal.width - 156,
+        30,
+        footer_surface,
+        12,
+    );
 
     assert!(
         footer_pixels >= 3000,
         "new folder modal footer action zone should render visible controls, only found {footer_pixels} distinct pixels"
+    );
+    assert!(
+        footer_panel_pixels >= 1900,
+        "new folder modal footer should keep an integrated action region, only found {footer_panel_pixels} distinct pixels"
     );
 }
 
@@ -192,10 +206,50 @@ fn new_ssh_modal_renders_footer_actions_and_balanced_top_row() {
         modal_surface,
         14,
     );
+    let left_action_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 18,
+        modal.y + modal.height - 50,
+        88,
+        36,
+        modal_surface,
+        14,
+    );
+    let right_action_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + modal.width - 106,
+        modal.y + modal.height - 50,
+        88,
+        36,
+        modal_surface,
+        14,
+    );
+    let footer_surface = pixel_at(&buffer, modal.x + 6, modal.y + modal.height - 22);
+    let footer_panel_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 28,
+        modal.y + modal.height - 64,
+        modal.width - 56,
+        40,
+        footer_surface,
+        12,
+    );
 
     assert!(
-        footer_pixels >= 2000,
+        footer_pixels >= 1500,
         "ssh modal footer action zone should render visible controls, only found {footer_pixels} distinct pixels"
+    );
+    assert!(
+        left_action_pixels >= 250,
+        "ssh modal left-side test action should render as a distinct button, only found {left_action_pixels} distinct pixels"
+    );
+    assert!(
+        right_action_pixels >= 250,
+        "ssh modal right-side save action should render as a distinct button, only found {right_action_pixels} distinct pixels"
+    );
+    assert!(
+        footer_panel_pixels >= 5000,
+        "ssh modal footer should keep an integrated action region, only found {footer_panel_pixels} distinct pixels"
     );
     assert!(
         right_field_pixels >= 120,

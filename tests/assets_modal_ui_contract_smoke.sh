@@ -61,6 +61,15 @@ grep -F 'header := Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'x: 0px;' "$FOLDER_MODAL" >/dev/null
 grep -F 'y: 0px;' "$FOLDER_MODAL" >/dev/null
 grep -F 'footer := Rectangle {' "$FOLDER_MODAL" >/dev/null
+grep -F 'footer-content := VerticalLayout {' "$FOLDER_MODAL" >/dev/null
+if grep -F 'footer-panel := Rectangle {' "$FOLDER_MODAL" >/dev/null; then
+  echo "folder modal footer must not use an inner footer-panel wrapper" >&2
+  exit 1
+fi
+if grep -F 'footer-divider := Rectangle {' "$FOLDER_MODAL" >/dev/null; then
+  echo "folder modal footer must not draw a dedicated footer divider" >&2
+  exit 1
+fi
 grep -F 'drag-touch := TouchArea {' "$FOLDER_MODAL" >/dev/null
 grep -F 'close-button := Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "Rename Asset";' "$RENAME_MODAL" >/dev/null
@@ -86,6 +95,15 @@ grep -F 'in property <string> dialog-title: "New SSH Connection";' "$SSH_MODAL" 
 grep -F 'header := Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'tabs-host := Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'footer := Rectangle {' "$SSH_MODAL" >/dev/null
+grep -F 'footer-content := VerticalLayout {' "$SSH_MODAL" >/dev/null
+if grep -F 'footer-panel := Rectangle {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal footer must not use an inner footer-panel wrapper" >&2
+  exit 1
+fi
+if grep -F 'footer-divider := Rectangle {' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal footer must not draw a dedicated footer divider" >&2
+  exit 1
+fi
 grep -F 'drag-touch := TouchArea {' "$SSH_MODAL" >/dev/null
 grep -F 'close-button := Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> validation-message: "";' "$SSH_MODAL" >/dev/null
