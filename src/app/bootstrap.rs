@@ -1162,7 +1162,7 @@ fn activate_asset(
                             session_bridge,
                             pending_host_key_approval,
                             profile,
-                            OpenSessionMode::ActivateExisting,
+                            OpenSessionMode::ForceNewTab,
                         ) {
                             tracing::error!(
                                 target: "app.ssh",
@@ -1289,25 +1289,6 @@ fn target_session_id_for_asset(state: &ShellViewModel, asset_id: &str) -> Option
                 .find(|tab| tab.asset_id == asset_id)
                 .map(|tab| tab.session_id.clone())
         })
-}
-
-fn disconnect_session_for_asset(
-    state: &mut ShellViewModel,
-    bridge: &ShellSessionBridge,
-    asset_id: &str,
-) -> bool {
-    let Some(session_id) = target_session_id_for_asset(state, asset_id) else {
-        return false;
-    };
-    let Ok(session_uuid) = Uuid::parse_str(&session_id) else {
-        return false;
-    };
-    let Some(handle) = bridge.manager.disconnect_session(session_uuid) else {
-        return false;
-    };
-    merge_session_handle_into_tabs(state, &handle);
-    let _ = sync_workspace_projection_from_manager(state, &bridge.manager);
-    true
 }
 
 fn close_session_by_id(
@@ -2721,64 +2702,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                 &pending_host_key_approval_ref,
                                 &asset_id,
                             );
-                        }
-                    }
-                    "open-in-new-tab" => {
-                        let target_asset_id = state.context_target_asset_id.clone();
-                        state.close_context_menu();
-                        if let Some(asset_id) = target_asset_id {
-                            match profile_for_saved_asset(&state, &asset_id) {
-                                Ok(profile) => {
-                                    if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                                        if let Err(err) = attempt_open_session_with_profile(
-                                            &mut state,
-                                            session_bridge.as_ref(),
-                                            &pending_host_key_approval_ref,
-                                            profile,
-                                            OpenSessionMode::ForceNewTab,
-                                        ) {
-                                            tracing::error!(
-                                                target: "app.ssh",
-                                                asset_id = asset_id.as_str(),
-                                                error = %err,
-                                                "failed to open ssh session in a new tab"
-                                            );
-                                        }
-                                    } else {
-                                        let message = "SSH session bridge is unavailable.";
-                                        show_failed_saved_asset_tab(&mut state, &asset_id, message);
-                                        tracing::error!(
-                                            target: "app.ssh",
-                                            asset_id = asset_id.as_str(),
-                                            error = message,
-                                            "failed to open ssh session in a new tab"
-                                        );
-                                    }
-                                }
-                                Err(err) => {
-                                    show_failed_saved_asset_tab(
-                                        &mut state,
-                                        &asset_id,
-                                        err.to_string(),
-                                    );
-                                    tracing::error!(
-                                        target: "app.ssh",
-                                        asset_id = asset_id.as_str(),
-                                        error = %err,
-                                        "failed to resolve saved ssh profile for context menu open"
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    "close-connection" => {
-                        let target_asset_id = state.context_target_asset_id.clone();
-                        state.close_context_menu();
-                        if let Some(asset_id) = target_asset_id
-                            && let Some(session_bridge) = session_bridge_ref.as_ref()
-                        {
-                            let _ =
-                                disconnect_session_for_asset(&mut state, session_bridge, &asset_id);
                         }
                     }
                     _ => state.handle_context_menu_leaf_action(action_id.as_str()),

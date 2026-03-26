@@ -233,6 +233,16 @@ fn ssh_modal_contract_removes_saved_secret_retention_flags() {
 }
 
 #[test]
+fn ssh_modal_no_longer_renders_dead_connection_options_group() {
+    let ssh_modal = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
+
+    assert!(!ssh_modal.contains("text: \"Connection Options\""));
+    assert!(!ssh_modal.contains("label: \"Proxy Method\""));
+    assert!(!ssh_modal.contains("label: \"Session Environment\""));
+}
+
+#[test]
 fn app_window_round_trips_workspace_tab_items_and_active_session() {
     i_slint_backend_testing::init_no_event_loop();
 

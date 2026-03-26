@@ -93,7 +93,9 @@ grep -F 'in property <string> dialog-title: "New SSH Connection";' "$SSH_MODAL" 
 grep -F 'header := Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Basic";' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Authentication";' "$SSH_MODAL" >/dev/null
-grep -F 'text: "Connection Options";' "$SSH_MODAL" >/dev/null
+if grep -F 'text: "Connection Options";' "$SSH_MODAL" >/dev/null; then
+  exit 1
+fi
 grep -F 'text: "Notes";' "$SSH_MODAL" >/dev/null
 grep -F 'footer := Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'footer-content := VerticalLayout {' "$SSH_MODAL" >/dev/null
@@ -113,6 +115,12 @@ grep -F 'in property <string> auth-method:' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> private-key-source:' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> password:' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> remark:' "$SSH_MODAL" >/dev/null
+if grep -F 'label: "Proxy Method";' "$SSH_MODAL" >/dev/null; then
+  exit 1
+fi
+if grep -F 'label: "Session Environment";' "$SSH_MODAL" >/dev/null; then
+  exit 1
+fi
 ! grep -F 'callback tab-selected(string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SSH_MODAL" >/dev/null
 grep -F 'callback action-requested(string);' "$SSH_MODAL" >/dev/null

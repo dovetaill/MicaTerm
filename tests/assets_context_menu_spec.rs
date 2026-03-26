@@ -10,7 +10,6 @@ fn blank_selection() -> SelectionContext {
         selected_ids: Vec::new(),
         clipboard_has_asset_payload: false,
         target_mutable: true,
-        target_has_active_connection: false,
     }
 }
 
@@ -59,12 +58,11 @@ fn blank_area_scene_omits_paste_and_other_legacy_actions() {
 }
 
 #[test]
-fn resolver_returns_ssh_actions_with_planned_proxy_tools() {
+fn ssh_context_menu_exposes_only_one_open_action() {
     let selection = SelectionContext {
         selected_ids: vec!["ssh-prod-01".into()],
         clipboard_has_asset_payload: true,
         target_mutable: true,
-        target_has_active_connection: true,
     };
 
     let ids: Vec<_> = resolve_action_tree(ContextTargetKind::SshConnection, &selection)
@@ -72,10 +70,9 @@ fn resolver_returns_ssh_actions_with_planned_proxy_tools() {
         .map(|node| node.id)
         .collect();
 
-    assert!(ids.contains(&"close-connection"));
     assert!(ids.contains(&"open-connection"));
-    assert!(ids.contains(&"open-in-new-tab"));
-    assert!(ids.contains(&"proxy-chrome-via-server"));
+    assert!(!ids.contains(&"open-in-new-tab"));
+    assert!(!ids.contains(&"close-connection"));
 }
 
 #[test]
@@ -104,7 +101,6 @@ fn ssh_scene_exposes_flat_create_actions_without_connection_submenu() {
         selected_ids: vec!["ssh-prod-01".into()],
         clipboard_has_asset_payload: true,
         target_mutable: true,
-        target_has_active_connection: true,
     };
 
     let ids: Vec<_> = resolve_action_tree(ContextTargetKind::SshConnection, &selection)
@@ -123,7 +119,6 @@ fn ssh_scene_marks_proxy_chrome_as_planned_but_clickable() {
         selected_ids: vec!["ssh-prod-01".into()],
         clipboard_has_asset_payload: true,
         target_mutable: true,
-        target_has_active_connection: true,
     };
 
     let roots = resolve_action_tree(ContextTargetKind::SshConnection, &selection);
@@ -136,48 +131,13 @@ fn ssh_scene_marks_proxy_chrome_as_planned_but_clickable() {
 }
 
 #[test]
-fn close_connection_is_disabled_without_live_session_and_enabled_with_live_session() {
-    let disabled = resolve_action_tree(
-        ContextTargetKind::SshConnection,
-        &SelectionContext {
-            selected_ids: vec!["ssh-prod-01".into()],
-            clipboard_has_asset_payload: false,
-            target_mutable: true,
-            target_has_active_connection: false,
-        },
-    );
-    let enabled = resolve_action_tree(
-        ContextTargetKind::SshConnection,
-        &SelectionContext {
-            selected_ids: vec!["ssh-prod-01".into()],
-            clipboard_has_asset_payload: false,
-            target_mutable: true,
-            target_has_active_connection: true,
-        },
-    );
-
-    let close_disabled = disabled
-        .iter()
-        .find(|node| node.id == "close-connection")
-        .expect("close action should exist");
-    let close_enabled = enabled
-        .iter()
-        .find(|node| node.id == "close-connection")
-        .expect("close action should exist");
-
-    assert_eq!(close_disabled.state, ContextMenuActionState::Disabled);
-    assert_eq!(close_enabled.state, ContextMenuActionState::Enabled);
-}
-
-#[test]
-fn open_actions_stay_enabled_for_ssh_assets() {
+fn open_action_stays_enabled_for_ssh_assets() {
     let actions = resolve_action_tree(
         ContextTargetKind::SshConnection,
         &SelectionContext {
             selected_ids: vec!["ssh-prod-01".into()],
             clipboard_has_asset_payload: false,
             target_mutable: true,
-            target_has_active_connection: false,
         },
     );
 
@@ -185,13 +145,8 @@ fn open_actions_stay_enabled_for_ssh_assets() {
         .iter()
         .find(|node| node.id == "open-connection")
         .expect("open action should exist");
-    let open_in_new_tab = actions
-        .iter()
-        .find(|node| node.id == "open-in-new-tab")
-        .expect("open in new tab action should exist");
 
     assert_eq!(open.state, ContextMenuActionState::Enabled);
-    assert_eq!(open_in_new_tab.state, ContextMenuActionState::Enabled);
 }
 
 #[test]
@@ -202,7 +157,6 @@ fn folder_target_exposes_flat_create_actions() {
             selected_ids: vec!["folder-1".into()],
             clipboard_has_asset_payload: false,
             target_mutable: true,
-            target_has_active_connection: false,
         },
     );
 
@@ -227,7 +181,6 @@ fn folder_and_ssh_context_menus_keep_rename_and_delete_as_enabled_leaf_actions()
             selected_ids: vec!["folder-1".into()],
             clipboard_has_asset_payload: false,
             target_mutable: true,
-            target_has_active_connection: false,
         },
     );
     let ssh_actions = resolve_action_tree(
@@ -236,7 +189,6 @@ fn folder_and_ssh_context_menus_keep_rename_and_delete_as_enabled_leaf_actions()
             selected_ids: vec!["ssh-1".into()],
             clipboard_has_asset_payload: false,
             target_mutable: true,
-            target_has_active_connection: true,
         },
     );
 
@@ -369,7 +321,6 @@ fn invoking_planned_action_sets_feedback_text_without_closing_documentation_gap(
             selected_ids: view_model.selected_asset_ids.clone(),
             clipboard_has_asset_payload: false,
             target_mutable: true,
-            target_has_active_connection: true,
         },
     );
     let proxy_index = roots

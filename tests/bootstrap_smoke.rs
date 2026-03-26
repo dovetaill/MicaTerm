@@ -688,6 +688,36 @@ fn activating_legacy_saved_ssh_asset_defaults_missing_auth_fields_and_opens_sess
 }
 
 #[test]
+fn opening_saved_ssh_asset_twice_creates_two_tabs() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app, None);
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_asset_activated(ssh_id.clone().into());
+    let first_session_id = app
+        .get_workspace_tab_items()
+        .row_data(0)
+        .expect("first workspace tab")
+        .session_id
+        .to_string();
+
+    app.invoke_asset_activated(ssh_id.into());
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+    let second_session_id = app
+        .get_workspace_tab_items()
+        .row_data(1)
+        .expect("second workspace tab")
+        .session_id
+        .to_string();
+    assert_ne!(first_session_id, second_session_id);
+    assert_eq!(app.get_active_workspace_session_id().as_str(), second_session_id);
+}
+
+#[test]
 fn editing_legacy_saved_ssh_asset_reuses_fallback_saved_secret_for_test_connection() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -1467,7 +1497,7 @@ fn save_action_persists_without_opening_session() {
 }
 
 #[test]
-fn close_connection_context_action_tracks_live_workspace_session_state() {
+fn ssh_context_menu_keeps_open_as_the_only_connection_action() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -1488,6 +1518,8 @@ fn close_connection_context_action_tracks_live_workspace_session_state() {
         .to_string();
 
     app.invoke_asset_context_menu_requested(ssh_id.clone().into(), "ssh".into(), 96.0, 160.0);
+    assert!(context_menu_item_enabled(&app, "open-connection"));
+    assert!(!context_menu_item_enabled(&app, "open-in-new-tab"));
     assert!(!context_menu_item_enabled(&app, "close-connection"));
 
     app.invoke_close_assets_context_menu_requested();
@@ -1495,20 +1527,9 @@ fn close_connection_context_action_tracks_live_workspace_session_state() {
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
 
     app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
-    assert!(context_menu_item_enabled(&app, "close-connection"));
-
-    app.invoke_assets_context_menu_action_invoked("close-connection".into());
-
-    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(
-        app.get_workspace_tab_items()
-            .row_data(0)
-            .expect("disconnected tab")
-            .state
-            .as_str(),
-        "disconnected"
-    );
-    assert!(app.get_workspace_session_can_reconnect());
+    assert!(context_menu_item_enabled(&app, "open-connection"));
+    assert!(!context_menu_item_enabled(&app, "open-in-new-tab"));
+    assert!(!context_menu_item_enabled(&app, "close-connection"));
 }
 
 #[test]

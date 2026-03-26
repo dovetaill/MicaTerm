@@ -29,7 +29,6 @@ pub struct SelectionContext {
     pub selected_ids: Vec<String>,
     pub clipboard_has_asset_payload: bool,
     pub target_mutable: bool,
-    pub target_has_active_connection: bool,
 }
 
 impl SelectionContext {
@@ -225,26 +224,8 @@ fn resolve_blank_area_actions(selection: &SelectionContext) -> Vec<ContextMenuAc
 fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
     let mut actions = vec![
         action_with_state(
-            "close-connection",
-            "Close",
-            "dismiss",
-            if selection.target_has_active_connection {
-                ContextMenuActionState::Enabled
-            } else {
-                ContextMenuActionState::Disabled
-            },
-            false,
-        ),
-        action_with_state(
             "open-connection",
             "Open",
-            "window-console",
-            selection_state(selection),
-            false,
-        ),
-        action_with_state(
-            "open-in-new-tab",
-            "Open in New Tab",
             "window-console",
             selection_state(selection),
             false,

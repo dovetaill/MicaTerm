@@ -13,6 +13,7 @@ export component ActiveTab inherits Rectangle {
     in property <length> min-chip-width: 120px;
     in property <length> max-chip-width: 220px;
     private property <image> close-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
+    private property <length> close-zone-width: 28px;
     out property <bool> has-hover: content-hit-target.has-hover || close-hit-target.has-hover;
     private property <bool> close-visible: root.active || root.has-hover;
 
@@ -68,9 +69,9 @@ export component ActiveTab inherits Rectangle {
     }
 
     close-button := Rectangle {
-        x: parent.width - self.width - 4px;
+        x: parent.width - root.close-zone-width - 4px;
         y: 3px;
-        width: 24px;
+        width: root.close-zone-width;
         height: 24px;
         border-radius: 4px;
         background: close-hit-target.pressed
@@ -105,7 +106,7 @@ export component ActiveTab inherits Rectangle {
     }
 
     content-hit-target := TouchArea {
-        width: root.close-visible ? close-button.x : parent.width;
+        width: max(0px, close-button.x);
         height: parent.height;
 
         clicked => { root.selected(); }
@@ -113,15 +114,9 @@ export component ActiveTab inherits Rectangle {
 
     close-hit-target := TouchArea {
         x: close-button.x;
-        width: parent.width - close-button.x;
+        width: root.close-zone-width + 4px;
         height: parent.height;
 
-        clicked => {
-            if root.close-visible {
-                root.close-requested();
-            } else {
-                root.selected();
-            }
-        }
+        clicked => { root.close-requested(); }
     }
 }

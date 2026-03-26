@@ -309,6 +309,21 @@ fn active_tab_layout_preserves_close_hit_target_and_elides_text() {
 }
 
 #[test]
+fn close_affordance_uses_stable_hit_geometry() {
+    let active_tab =
+        fs::read_to_string("ui/components/active-tab.slint").expect("read active tab component");
+
+    assert!(
+        !active_tab.contains("root.close-visible ? close-button.x : parent.width"),
+        "content hit target width must not depend on close-visible hover state"
+    );
+    assert!(
+        active_tab.contains("close-hit-target := TouchArea {"),
+        "close hit target should remain a dedicated stable touch area"
+    );
+}
+
+#[test]
 fn tabbar_sizes_workspace_tabs_from_title_content_instead_of_even_stretch() {
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
     let active_tab =
@@ -500,6 +515,15 @@ fn disconnected_and_error_tabs_remain_reconnectable() {
 }
 
 #[test]
+fn workspace_pane_only_renders_tabbar_when_tabs_exist() {
+    let workspace = fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    assert!(
+        workspace.contains("if root.workspace-tab-items.length > 0 : tab-strip := TabBar {"),
+        "workspace pane should only render the tab strip when at least one tab exists"
+    );
+}
+
+#[test]
 fn single_click_only_selects_saved_asset_without_opening_session() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -518,7 +542,7 @@ fn single_click_only_selects_saved_asset_without_opening_session() {
 }
 
 #[test]
-fn double_click_and_open_in_new_tab_create_distinct_sessions() {
+fn double_click_and_context_menu_open_create_distinct_sessions() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -534,7 +558,7 @@ fn double_click_and_open_in_new_tab_create_distinct_sessions() {
         .to_string();
 
     app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
-    app.invoke_assets_context_menu_action_invoked("open-in-new-tab".into());
+    app.invoke_assets_context_menu_action_invoked("open-connection".into());
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 2);
     let second_session_id = app
