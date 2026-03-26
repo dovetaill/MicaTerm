@@ -1,15 +1,17 @@
-use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
+use i_slint_backend_testing::ElementHandle;
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher;
 use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::runtime::SessionRuntimeEvent;
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::window_effects::default_platform_window_effects;
+use slint::ComponentHandle;
 use slint::Model;
+use slint::platform::PointerEventButton;
 use tokio::sync::mpsc;
 
 #[derive(Clone, Default)]
@@ -104,6 +106,23 @@ fn context_menu_item_enabled(app: &AppWindow, action_id: &str) -> bool {
         .find(|item| item.id.as_str() == action_id)
         .map(|item| item.enabled)
         .unwrap_or(false)
+}
+
+fn click_element(app: &AppWindow, element: &ElementHandle) {
+    let position = slint::LogicalPosition::new(
+        element.absolute_position().x + element.size().width / 2.0,
+        element.absolute_position().y + element.size().height / 2.0,
+    );
+    let window = app.window();
+    window.dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+    window.dispatch_event(slint::platform::WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Left,
+    });
+    window.dispatch_event(slint::platform::WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Left,
+    });
 }
 
 #[test]
@@ -278,6 +297,95 @@ fn explicit_open_context_action_opens_distinct_tabs_each_time() {
         .to_string();
     assert_ne!(first_session_id, second_session_id);
     assert_eq!(app.get_active_workspace_session_id().as_str(), second_session_id);
+}
+
+#[test]
+fn clicking_workspace_tabs_switches_active_session_and_close_hit_target_closes_tab() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().expect("create app window");
+    bind_with_fake_sessions(&app);
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.clone().into());
+    app.invoke_asset_activated(ssh_id.into());
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+
+    let first_session_id = app
+        .get_workspace_tab_items()
+        .row_data(0)
+        .expect("first workspace tab")
+        .session_id
+        .to_string();
+    let second_session_id = app
+        .get_workspace_tab_items()
+        .row_data(1)
+        .expect("second workspace tab")
+        .session_id
+        .to_string();
+
+    let mut tabs = ElementHandle::find_by_element_type_name(&app, "ActiveTab").collect::<Vec<_>>();
+    tabs.sort_by(|left, right| {
+        left.absolute_position()
+            .x
+            .partial_cmp(&right.absolute_position().x)
+            .expect("compare tab x positions")
+    });
+    assert_eq!(tabs.len(), 2, "expected two rendered ActiveTab instances");
+
+    click_element(&app, &tabs[0]);
+    assert_eq!(app.get_active_workspace_session_id().as_str(), first_session_id);
+
+    let mut close_targets = ElementHandle::find_by_element_id(&app, "ActiveTab::close-hit-target")
+        .collect::<Vec<_>>();
+    close_targets.sort_by(|left, right| {
+        left.absolute_position()
+            .x
+            .partial_cmp(&right.absolute_position().x)
+            .expect("compare close hit target x positions")
+    });
+    assert_eq!(
+        close_targets.len(),
+        2,
+        "expected close hit target for each rendered tab"
+    );
+
+    click_element(&app, &close_targets[0]);
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_active_workspace_session_id().as_str(), second_session_id);
+}
+
+#[test]
+fn clicking_open_connection_row_from_context_menu_opens_new_tab_after_session_exists() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().expect("create app window");
+    bind_with_fake_sessions(&app);
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.clone().into());
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    assert!(app.get_assets_context_menu_open());
+
+    let mut rows =
+        ElementHandle::find_by_element_type_name(&app, "AssetsContextMenuRow").collect::<Vec<_>>();
+    rows.sort_by(|top, bottom| {
+        top.absolute_position()
+            .y
+            .partial_cmp(&bottom.absolute_position().y)
+            .expect("compare context menu row y positions")
+    });
+    assert!(
+        !rows.is_empty(),
+        "expected at least one rendered AssetsContextMenuRow"
+    );
+
+    click_element(&app, &rows[0]);
+    assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+    assert!(!app.get_assets_context_menu_open());
 }
 
 #[test]

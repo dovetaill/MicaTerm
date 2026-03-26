@@ -28,6 +28,18 @@ use crate::app::ssh::session_manager::SessionRuntimeControl;
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
 const DEFAULT_TERMINAL_COLS: usize = 80;
+const SSH_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
+const SSH_KEEPALIVE_MAX_MISSES: usize = 3;
+
+fn ssh_client_config() -> client::Config {
+    client::Config {
+        inactivity_timeout: None,
+        keepalive_interval: Some(SSH_KEEPALIVE_INTERVAL),
+        keepalive_max: SSH_KEEPALIVE_MAX_MISSES,
+        nodelay: true,
+        ..Default::default()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalSurfaceState {
@@ -151,11 +163,7 @@ impl SshSessionRuntime {
             port: profile.port,
             known_hosts,
         };
-        let config = Arc::new(client::Config {
-            inactivity_timeout: Some(Duration::from_secs(30)),
-            nodelay: true,
-            ..Default::default()
-        });
+        let config = Arc::new(ssh_client_config());
 
         let mut handle = client::connect(config, (profile.host.as_str(), profile.port), handler)
             .await
@@ -783,5 +791,20 @@ impl Write for SharedWriteBuffer {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ssh_client_config_uses_keepalive_without_inactivity_disconnects() {
+        let config = ssh_client_config();
+
+        assert_eq!(config.inactivity_timeout, None);
+        assert_eq!(config.keepalive_interval, Some(SSH_KEEPALIVE_INTERVAL));
+        assert_eq!(config.keepalive_max, SSH_KEEPALIVE_MAX_MISSES);
+        assert!(config.nodelay);
     }
 }

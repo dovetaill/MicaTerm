@@ -807,10 +807,49 @@ fn merge_session_handle_into_tabs(state: &mut ShellViewModel, handle: &SessionHa
     let _ = state.activate_workspace_session(handle.session_id.to_string().as_str());
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct WorkspaceProjectionDelta {
+    tabs_changed: bool,
+    surface_changed: bool,
+}
+
+impl WorkspaceProjectionDelta {
+    fn any_changed(self) -> bool {
+        self.tabs_changed || self.surface_changed
+    }
+}
+
+fn projected_active_workspace_session_id(
+    state: &ShellViewModel,
+    next_tabs: &[WorkspaceTab],
+) -> Option<String> {
+    state
+        .active_workspace_session_id()
+        .filter(|candidate| {
+            next_tabs
+                .iter()
+                .any(|tab| tab.session_id == *candidate)
+        })
+        .map(str::to_string)
+        .or_else(|| {
+            state
+                .workspace_tabs()
+                .iter()
+                .find(|tab| {
+                    tab.active
+                        && next_tabs
+                            .iter()
+                            .any(|candidate| candidate.session_id == tab.session_id)
+                })
+                .map(|tab| tab.session_id.clone())
+        })
+        .or_else(|| next_tabs.first().map(|tab| tab.session_id.clone()))
+}
+
 fn sync_workspace_projection_from_manager(
     state: &mut ShellViewModel,
     manager: &SessionManager,
-) -> bool {
+) -> WorkspaceProjectionDelta {
     let mut next_tabs = manager
         .ordered_sessions()
         .into_iter()
@@ -835,6 +874,10 @@ fn sync_workspace_projection_from_manager(
         .cloned()
         .collect::<Vec<_>>();
     next_tabs.extend(preserved_error_tabs);
+    let active_id = projected_active_workspace_session_id(state, &next_tabs);
+    for tab in &mut next_tabs {
+        tab.active = active_id.as_deref() == Some(tab.session_id.as_str());
+    }
     let next_surface = state
         .active_workspace_session_id()
         .and_then(|session_id| Uuid::parse_str(session_id).ok())
@@ -850,7 +893,10 @@ fn sync_workspace_projection_from_manager(
         state.set_active_workspace_terminal_surface(next_surface);
     }
 
-    tabs_changed || surface_changed
+    WorkspaceProjectionDelta {
+        tabs_changed,
+        surface_changed,
+    }
 }
 
 fn active_workspace_session_uuid(state: &ShellViewModel) -> Option<Uuid> {
@@ -1525,7 +1571,7 @@ fn sync_console_assets(window: &AppWindow, state: &ShellViewModel) {
     window.set_console_asset_items(ModelRc::new(VecModel::from(rows)));
 }
 
-fn sync_workspace_tabs(window: &AppWindow, state: &ShellViewModel) {
+fn sync_workspace_tab_items(window: &AppWindow, state: &ShellViewModel) {
     let tabs = state
         .workspace_tabs()
         .iter()
@@ -1539,6 +1585,9 @@ fn sync_workspace_tabs(window: &AppWindow, state: &ShellViewModel) {
         .collect::<Vec<_>>();
 
     window.set_workspace_tab_items(ModelRc::new(VecModel::from(tabs)));
+}
+
+fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
     window.set_workspace_session_host_mode(state.workspace_session_host_mode().into());
@@ -1566,6 +1615,11 @@ fn sync_workspace_tabs(window: &AppWindow, state: &ShellViewModel) {
         window.set_workspace_session_can_reconnect(false);
         window.set_workspace_session_surface_seqno(0);
     }
+}
+
+fn sync_workspace_tabs(window: &AppWindow, state: &ShellViewModel) {
+    sync_workspace_tab_items(window, state);
+    sync_workspace_session_state(window, state);
 }
 
 fn sync_shell_state(
@@ -1931,9 +1985,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 return;
             };
             let mut state = state.borrow_mut();
-            if sync_workspace_projection_from_manager(&mut state, &manager) {
-                sync_workspace_tabs(&window, &state);
+            let projection_delta = sync_workspace_projection_from_manager(&mut state, &manager);
+            if projection_delta.tabs_changed {
+                sync_workspace_tab_items(&window, &state);
                 sync_assets_context_menu_state(&window, &state);
+            }
+            if projection_delta.any_changed() {
+                sync_workspace_session_state(&window, &state);
             }
         });
     }
@@ -2930,4 +2988,183 @@ pub fn run_with_profile(
     bind_top_status_bar_with_profile_and_async_handle(&window, profile, Some(async_runtime_handle));
     window.run()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::ssh::runtime::TerminalSurfaceState;
+    use crate::app::ssh::profile::SshAuthMethod;
+    use std::future::Future;
+    use std::pin::Pin;
+
+    #[derive(Clone, Default)]
+    struct NoopLauncher;
+
+    #[derive(Clone, Default)]
+    struct SequencedSurfaceLauncher;
+
+    struct NoopRuntimeControl;
+
+    impl SessionRuntimeControl for NoopRuntimeControl {
+        fn disconnect(&self) -> Result<()> {
+            Ok(())
+        }
+
+        fn send_input(&self, _bytes: Vec<u8>) -> Result<()> {
+            Ok(())
+        }
+
+        fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl SessionRuntimeLauncher for NoopLauncher {
+        fn launch(
+            &self,
+            _profile: ConnectionProfile,
+            _session_id: Uuid,
+            _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+        ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+        {
+            Box::pin(
+                async move { Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>) },
+            )
+        }
+
+        fn probe(
+            &self,
+            _profile: ConnectionProfile,
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+            Box::pin(async move { Ok(()) })
+        }
+    }
+
+    impl SessionRuntimeLauncher for SequencedSurfaceLauncher {
+        fn launch(
+            &self,
+            _profile: ConnectionProfile,
+            session_id: Uuid,
+            event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+        ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+        {
+            Box::pin(async move {
+                let _ = event_tx.send(SessionRuntimeEvent::Connected);
+                let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(TerminalSurfaceState {
+                    session_id,
+                    seqno: 1,
+                    rows: 24,
+                    cols: 80,
+                    visible_lines: vec!["welcome".into()],
+                }));
+                let delayed_tx = event_tx.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    let _ = delayed_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                        TerminalSurfaceState {
+                            session_id,
+                            seqno: 2,
+                            rows: 24,
+                            cols: 80,
+                            visible_lines: vec!["welcome".into(), "$ pwd".into()],
+                        },
+                    ));
+                });
+                Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>)
+            })
+        }
+
+        fn probe(
+            &self,
+            _profile: ConnectionProfile,
+        ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+            Box::pin(async move { Ok(()) })
+        }
+    }
+
+    fn sample_profile(asset_id: &str) -> ConnectionProfile {
+        ConnectionProfile {
+            asset_id: Some(asset_id.into()),
+            name: "Prod Bastion".into(),
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: 22,
+            auth_method: SshAuthMethod::Password,
+            credential_ref: Some("draft://ssh-password/ops@10.0.0.12:22".into()),
+            private_key_path: None,
+            password: Some("secret".into()),
+            private_key_content: None,
+            passphrase: None,
+            remark: String::new(),
+        }
+    }
+
+    #[test]
+    fn workspace_projection_ignores_locally_derived_active_flag_when_tabs_are_unchanged() {
+        let runtime = tokio::runtime::Runtime::new().expect("create tokio runtime");
+        let manager =
+            SessionManager::new_with_launcher(runtime.handle().clone(), Arc::new(NoopLauncher));
+        let handle = manager
+            .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+            .expect("open session");
+        let mut state = ShellViewModel::default();
+
+        let delta = sync_workspace_projection_from_manager(&mut state, &manager);
+        assert!(delta.tabs_changed);
+        assert!(!delta.surface_changed);
+        assert_eq!(
+            state.active_workspace_session_id(),
+            Some(handle.session_id.to_string().as_str())
+        );
+
+        let delta = sync_workspace_projection_from_manager(&mut state, &manager);
+        assert!(
+            !delta.tabs_changed && !delta.surface_changed,
+            "re-running projection without manager changes should not churn tab chrome"
+        );
+    }
+
+    #[test]
+    fn workspace_projection_surface_refresh_does_not_report_a_tab_change() {
+        let runtime = tokio::runtime::Runtime::new().expect("create tokio runtime");
+        let manager = SessionManager::new_with_launcher(
+            runtime.handle().clone(),
+            Arc::new(SequencedSurfaceLauncher),
+        );
+        manager
+            .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+            .expect("open session");
+        runtime.block_on(async {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        });
+
+        let mut state = ShellViewModel::default();
+        let delta = sync_workspace_projection_from_manager(&mut state, &manager);
+        assert!(delta.tabs_changed);
+        assert!(
+            !delta.surface_changed,
+            "initial projection should establish the active session id before surface hydration"
+        );
+
+        runtime.block_on(async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        });
+
+        let delta = sync_workspace_projection_from_manager(&mut state, &manager);
+        assert!(
+            delta.surface_changed,
+            "terminal surface refresh should still update the active workspace surface"
+        );
+        assert!(
+            !delta.tabs_changed,
+            "terminal surface refresh should not rebuild the workspace tab strip"
+        );
+        assert_eq!(state.workspace_terminal_surface_seqno(), 2);
+        assert_eq!(
+            state.workspace_tabs().len(),
+            1,
+            "surface refresh should not manufacture a second workspace tab"
+        );
+    }
 }

@@ -1,7 +1,12 @@
 // Cargo build script that compiles the Slint UI and embeds the Windows application icon.
 
 fn main() {
-    slint_build::compile("ui/app-window.slint").expect("failed to compile Slint UI");
+    let enable_debug_info = std::env::var("PROFILE")
+        .map(|profile| profile != "release")
+        .unwrap_or(true);
+    let config = slint_build::CompilerConfiguration::new().with_debug_info(enable_debug_info);
+    slint_build::compile_with_config("ui/app-window.slint", config)
+        .expect("failed to compile Slint UI");
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         // Windows installers and taskbar integration rely on a native resource section instead of
