@@ -2,7 +2,7 @@
 
 import { ThemeTokens } from "../theme/tokens.slint";
 import { TabBar, WorkspaceTabItem } from "./tabbar.slint";
-import { TerminalSessionHost } from "./terminal-session-host.slint";
+import { TerminalCellItem, TerminalSessionHost } from "./terminal-session-host.slint";
 
 export component WorkspacePane inherits Rectangle {
     in property <[WorkspaceTabItem]> workspace-tab-items: [];
@@ -13,6 +13,17 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-session-state: "";
     in property <string> workspace-session-error-detail: "";
     in property <bool> workspace-session-can-reconnect: false;
+    in property <[TerminalCellItem]> workspace-session-cells: [];
+    in property <int> workspace-session-rows: 24;
+    in property <int> workspace-session-cols: 80;
+    in property <int> workspace-session-cursor-row: 0;
+    in property <int> workspace-session-cursor-col: 0;
+    in property <bool> workspace-session-cursor-visible: false;
+    in property <bool> workspace-session-cursor-blinking: false;
+    in property <string> workspace-session-cursor-shape: "block";
+    in property <color> workspace-session-cursor-fg: #000000;
+    in property <color> workspace-session-cursor-bg: #52ad70;
+    in property <bool> workspace-session-mouse-grabbed: false;
     in property <[string]> workspace-session-visible-lines: [];
     in property <int> workspace-session-surface-seqno: 0;
     callback workspace-tab-selected(string);
@@ -20,6 +31,9 @@ export component WorkspacePane inherits Rectangle {
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
+    callback copy-selection-requested(int, int, int, int);
+    callback paste-requested();
+    callback mouse-input(string, string, int, int, bool, bool, bool);
 
     horizontal-stretch: 1;
     min-width: 0px;
@@ -60,6 +74,17 @@ export component WorkspacePane inherits Rectangle {
                 session-state: root.workspace-session-state;
                 session-error-detail: root.workspace-session-error-detail;
                 can-reconnect: root.workspace-session-can-reconnect;
+                session-cells: root.workspace-session-cells;
+                session-rows: root.workspace-session-rows;
+                session-cols: root.workspace-session-cols;
+                session-cursor-row: root.workspace-session-cursor-row;
+                session-cursor-col: root.workspace-session-cursor-col;
+                session-cursor-visible: root.workspace-session-cursor-visible;
+                session-cursor-blinking: root.workspace-session-cursor-blinking;
+                session-cursor-shape: root.workspace-session-cursor-shape;
+                session-cursor-fg: root.workspace-session-cursor-fg;
+                session-cursor-bg: root.workspace-session-cursor-bg;
+                session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                 session-visible-lines: root.workspace-session-visible-lines;
                 session-surface-seqno: root.workspace-session-surface-seqno;
 
@@ -73,6 +98,18 @@ export component WorkspacePane inherits Rectangle {
 
                 surface-resize-requested(rows, cols) => {
                     root.surface-resize-requested(rows, cols);
+                }
+
+                copy-selection-requested(start-row, start-col, end-row, end-col) => {
+                    root.copy-selection-requested(start-row, start-col, end-row, end-col);
+                }
+
+                paste-requested() => {
+                    root.paste-requested();
+                }
+
+                mouse-input(kind, button, row, col, shift, ctrl, alt) => {
+                    root.mouse-input(kind, button, row, col, shift, ctrl, alt);
                 }
             }
         }

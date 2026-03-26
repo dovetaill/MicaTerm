@@ -10,7 +10,8 @@ use mica_term::app::async_runtime::AppAsyncRuntime;
 use mica_term::app::ssh::known_hosts::KnownHostsService;
 use mica_term::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
 use mica_term::app::ssh::runtime::{
-    SessionRuntimeEvent, SshSessionRuntime, TerminalSession, UnknownHostKeyError,
+    SessionRuntimeEvent, SshSessionRuntime, TerminalMouseButton, TerminalMouseEventKind,
+    TerminalMouseInput, TerminalSession, UnknownHostKeyError,
 };
 use mica_term::app::ssh::session_manager::{
     OpenSessionMode, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher, SessionState,
@@ -42,6 +43,7 @@ struct TrackingLauncher {
 struct InteractiveTrackingState {
     sent_inputs: Arc<Mutex<Vec<Vec<u8>>>>,
     resizes: Arc<Mutex<Vec<(u32, u32)>>>,
+    mouse_inputs: Arc<Mutex<Vec<TerminalMouseInput>>>,
 }
 
 #[derive(Clone)]
@@ -293,6 +295,10 @@ impl SessionRuntimeControl for TrackingRuntimeControl {
     fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
         Ok(())
     }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
 }
 
 impl SessionRuntimeControl for InteractiveTrackingRuntimeControl {
@@ -315,6 +321,15 @@ impl SessionRuntimeControl for InteractiveTrackingRuntimeControl {
             .lock()
             .expect("lock resize events")
             .push((rows, cols));
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()> {
+        self.state
+            .mouse_inputs
+            .lock()
+            .expect("lock mouse events")
+            .push(event);
         Ok(())
     }
 }
@@ -843,6 +858,59 @@ fn session_manager_forwards_text_input_and_resize_to_runtime_control() {
     assert_eq!(
         state.resizes.lock().expect("lock resize events").as_slice(),
         &[(48, 132)]
+    );
+}
+
+#[test]
+fn session_manager_forwards_mouse_input_to_runtime_control() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let state = InteractiveTrackingState::default();
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(InteractiveTrackingLauncher::new(state.clone())),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    manager
+        .send_session_mouse_input(
+            handle.session_id,
+            TerminalMouseInput {
+                kind: TerminalMouseEventKind::Move,
+                button: TerminalMouseButton::None,
+                row: 11,
+                col: 17,
+                shift: false,
+                ctrl: true,
+                alt: false,
+            },
+        )
+        .expect("forward mouse input");
+
+    assert_eq!(
+        state
+            .mouse_inputs
+            .lock()
+            .expect("lock mouse events")
+            .as_slice(),
+        &[TerminalMouseInput {
+            kind: TerminalMouseEventKind::Move,
+            button: TerminalMouseButton::None,
+            row: 11,
+            col: 17,
+            shift: false,
+            ctrl: true,
+            alt: false,
+        }]
     );
 }
 

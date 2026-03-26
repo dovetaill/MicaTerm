@@ -12,11 +12,12 @@ use russh::Disconnect;
 use russh::client;
 use russh::client::AuthResult;
 use russh::keys::{self, PrivateKeyWithHashAlg};
-use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers};
+use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers as TermwizModifiers};
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use wezterm_term::color::ColorPalette;
-use wezterm_term::{Terminal, TerminalConfiguration, TerminalSize};
+use wezterm_term::color::{ColorPalette, ColorAttribute, SrgbaTuple};
+use wezterm_term::{Line, Terminal, TerminalConfiguration, TerminalSize};
+use wezterm_surface::{CursorShape, CursorVisibility};
 
 use crate::app::ssh::credentials::{
     CredentialStore, StoredSecretLookupError, StoredSshSecretBundle, SystemCredentialStore,
@@ -47,7 +48,73 @@ pub struct TerminalSurfaceState {
     pub seqno: usize,
     pub rows: u32,
     pub cols: u32,
+    pub visible_rows: Vec<TerminalRowState>,
     pub visible_lines: Vec<String>,
+    pub cells: Vec<TerminalCellState>,
+    pub cursor: TerminalCursorState,
+    pub mouse_grabbed: bool,
+    pub bracketed_paste_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalRowState {
+    pub index: u32,
+    pub text: String,
+    pub wrapped: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalCellState {
+    pub row: u32,
+    pub col: u32,
+    pub width: u32,
+    pub text: String,
+    pub fg_rgba: u32,
+    pub bg_rgba: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalCursorShape {
+    Block,
+    Underline,
+    Bar,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalCursorState {
+    pub row: u32,
+    pub col: u32,
+    pub visible: bool,
+    pub blinking: bool,
+    pub shape: TerminalCursorShape,
+    pub fg_rgba: u32,
+    pub bg_rgba: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalMouseEventKind {
+    Down,
+    Up,
+    Move,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalMouseButton {
+    Left,
+    Middle,
+    Right,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalMouseInput {
+    pub kind: TerminalMouseEventKind,
+    pub button: TerminalMouseButton,
+    pub row: u32,
+    pub col: u32,
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +156,7 @@ impl StdError for UnknownHostKeyError {}
 #[derive(Debug)]
 enum RuntimeCommand {
     Input(Vec<u8>),
+    MouseInput(TerminalMouseInput),
     Resize { rows: u32, cols: u32 },
     Disconnect,
 }
@@ -244,6 +312,12 @@ impl SshSessionRuntime {
             .map_err(|_| anyhow!("ssh runtime resize channel is closed"))
     }
 
+    pub fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()> {
+        self.command_tx
+            .send(RuntimeCommand::MouseInput(event))
+            .map_err(|_| anyhow!("ssh runtime mouse input channel is closed"))
+    }
+
     pub fn disconnect(&self) -> Result<()> {
         self.command_tx
             .send(RuntimeCommand::Disconnect)
@@ -262,6 +336,10 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
     fn resize(&self, rows: u32, cols: u32) -> Result<()> {
         SshSessionRuntime::resize(self, rows, cols)
+    }
+
+    fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()> {
+        SshSessionRuntime::send_mouse_input(self, event)
     }
 }
 
@@ -553,6 +631,35 @@ async fn run_channel_pump(
                             break;
                         }
                     }
+                    Some(RuntimeCommand::MouseInput(event)) => {
+                        let bytes = match terminal.lock() {
+                            Ok(mut terminal) => match terminal.send_mouse_input(event) {
+                                Ok(bytes) => bytes,
+                                Err(err) => {
+                                    let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                        "failed to encode mouse input for SSH channel: {err}"
+                                    )));
+                                    break;
+                                }
+                            },
+                            Err(_) => {
+                                let _ = event_tx.send(SessionRuntimeEvent::Error(
+                                    "failed to lock terminal for mouse input".into()
+                                ));
+                                break;
+                            }
+                        };
+                        if bytes.is_empty() {
+                            continue;
+                        }
+                        if let Err(bytes) = handle.data(channel.id(), bytes).await {
+                            let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                "failed to write {} mouse bytes to SSH channel",
+                                bytes.len()
+                            )));
+                            break;
+                        }
+                    }
                     Some(RuntimeCommand::Resize { rows, cols }) => {
                         if let Ok(mut terminal) = terminal.lock() {
                             terminal.resize(rows as usize, cols as usize);
@@ -628,6 +735,7 @@ fn snapshot_terminal_surface(
 pub struct TerminalSession {
     terminal: Terminal,
     writer: SharedWriteBuffer,
+    fallback_mouse_button: Option<TerminalMouseButton>,
 }
 
 impl TerminalSession {
@@ -647,7 +755,11 @@ impl TerminalSession {
             Box::new(writer.clone()),
         );
 
-        Self { terminal, writer }
+        Self {
+            terminal,
+            writer,
+            fallback_mouse_button: None,
+        }
     }
 
     pub fn sequence_number(&self) -> usize {
@@ -662,15 +774,40 @@ impl TerminalSession {
         self.visible_lines().join("\n")
     }
 
-    pub fn visible_lines(&self) -> Vec<String> {
-        let mut lines = Vec::new();
-        let rows = self.terminal.get_size().rows.max(1);
-        self.terminal.screen().for_each_phys_line(|_, line| {
-            if lines.len() == rows {
-                let _ = lines.remove(0);
+    pub fn visible_rows(&self) -> Vec<TerminalRowState> {
+        let size = self.terminal.get_size();
+        let visible_start = self.terminal.screen().phys_row(0);
+        let visible_end = visible_start + size.rows.max(1);
+        let mut rows = Vec::with_capacity(size.rows.max(1));
+        self.terminal.screen().for_each_phys_line(|phys_idx, line| {
+            if phys_idx < visible_start || phys_idx >= visible_end {
+                return;
             }
-            lines.push(line.as_str().trim_end().to_string());
+
+            rows.push(project_terminal_row(
+                line,
+                (phys_idx - visible_start) as u32,
+                size.cols.max(1),
+            ));
         });
+
+        while rows.len() < size.rows.max(1) {
+            rows.push(TerminalRowState {
+                index: rows.len() as u32,
+                text: String::new(),
+                wrapped: false,
+            });
+        }
+
+        rows
+    }
+
+    pub fn visible_lines(&self) -> Vec<String> {
+        let mut lines = self
+            .visible_rows()
+            .into_iter()
+            .map(|row| row.text)
+            .collect::<Vec<_>>();
         while lines.first().is_some_and(String::is_empty) {
             let _ = lines.remove(0);
         }
@@ -692,16 +829,25 @@ impl TerminalSession {
 
     pub fn surface_state(&self, session_id: Uuid) -> TerminalSurfaceState {
         let size = self.terminal.get_size();
+        let palette = self.terminal.palette();
+        let visible_rows = self.visible_rows();
+        let cells = self.visible_cells(&palette);
+        let cursor = self.cursor_state(&palette);
         TerminalSurfaceState {
             session_id,
             seqno: self.sequence_number(),
             rows: size.rows as u32,
             cols: size.cols as u32,
             visible_lines: self.visible_lines(),
+            visible_rows,
+            cells,
+            cursor,
+            mouse_grabbed: self.terminal.is_mouse_grabbed(),
+            bracketed_paste_enabled: self.terminal.bracketed_paste_enabled(),
         }
     }
 
-    pub fn send_key_down(&mut self, key: KeyCode, modifiers: Modifiers) -> Result<Vec<u8>> {
+    pub fn send_key_down(&mut self, key: KeyCode, modifiers: TermwizModifiers) -> Result<Vec<u8>> {
         let encoded = key.encode(
             modifiers,
             KeyCodeEncodeModes {
@@ -719,6 +865,195 @@ impl TerminalSession {
         writer.flush()?;
 
         Ok(self.writer.take())
+    }
+
+    pub fn send_mouse_input(&mut self, event: TerminalMouseInput) -> Result<Vec<u8>> {
+        let fallback_button = self.resolve_fallback_mouse_button(event);
+        self.terminal.mouse_event(wezterm_term::MouseEvent {
+            kind: match event.kind {
+                TerminalMouseEventKind::Down => wezterm_term::MouseEventKind::Press,
+                TerminalMouseEventKind::Up => wezterm_term::MouseEventKind::Release,
+                TerminalMouseEventKind::Move => wezterm_term::MouseEventKind::Move,
+            },
+            x: event.col as usize,
+            y: event.row as i64,
+            x_pixel_offset: 0,
+            y_pixel_offset: 0,
+            button: match event.button {
+                TerminalMouseButton::Left => wezterm_term::MouseButton::Left,
+                TerminalMouseButton::Middle => wezterm_term::MouseButton::Middle,
+                TerminalMouseButton::Right => wezterm_term::MouseButton::Right,
+                TerminalMouseButton::None => wezterm_term::MouseButton::None,
+            },
+            modifiers: mouse_modifiers(event),
+        })?;
+
+        let bytes = self.writer.take();
+        if !self.terminal.is_mouse_grabbed() {
+            return Ok(bytes);
+        }
+        if matches!(event.kind, TerminalMouseEventKind::Down) && !bytes.is_empty() {
+            return Ok(bytes);
+        }
+
+        Ok(encode_sgr_mouse_fallback(event, fallback_button))
+    }
+
+    fn visible_cells(&self, palette: &ColorPalette) -> Vec<TerminalCellState> {
+        let size = self.terminal.get_size();
+        let visible_start = self.terminal.screen().phys_row(0);
+        let visible_end = visible_start + size.rows.max(1);
+        let mut cells = Vec::new();
+
+        self.terminal.screen().for_each_phys_line(|phys_idx, line| {
+            if phys_idx < visible_start || phys_idx >= visible_end {
+                return;
+            }
+
+            let row = (phys_idx - visible_start) as u32;
+            for cell in line.visible_cells() {
+                if cell.cell_index() >= size.cols {
+                    continue;
+                }
+
+                let (fg_rgba, bg_rgba) = resolve_cell_colors(palette, cell.attrs());
+                cells.push(TerminalCellState {
+                    row,
+                    col: cell.cell_index() as u32,
+                    width: cell.width() as u32,
+                    text: cell.str().to_string(),
+                    fg_rgba,
+                    bg_rgba,
+                });
+            }
+        });
+
+        cells
+    }
+
+    fn cursor_state(&self, palette: &ColorPalette) -> TerminalCursorState {
+        let cursor = self.terminal.cursor_pos();
+        TerminalCursorState {
+            row: cursor.y.max(0) as u32,
+            col: cursor.x as u32,
+            visible: matches!(cursor.visibility, CursorVisibility::Visible),
+            blinking: cursor_shape_blinks(cursor.shape),
+            shape: project_cursor_shape(cursor.shape),
+            fg_rgba: pack_color(palette.cursor_fg),
+            bg_rgba: pack_color(palette.cursor_bg),
+        }
+    }
+
+    fn resolve_fallback_mouse_button(
+        &mut self,
+        event: TerminalMouseInput,
+    ) -> TerminalMouseButton {
+        match event.kind {
+            TerminalMouseEventKind::Down => {
+                if event.button != TerminalMouseButton::None {
+                    self.fallback_mouse_button = Some(event.button);
+                    event.button
+                } else {
+                    self.fallback_mouse_button.unwrap_or(TerminalMouseButton::None)
+                }
+            }
+            TerminalMouseEventKind::Move => {
+                if event.button != TerminalMouseButton::None {
+                    self.fallback_mouse_button = Some(event.button);
+                    event.button
+                } else {
+                    self.fallback_mouse_button.unwrap_or(TerminalMouseButton::None)
+                }
+            }
+            TerminalMouseEventKind::Up => {
+                let effective = if event.button != TerminalMouseButton::None {
+                    event.button
+                } else {
+                    self.fallback_mouse_button.unwrap_or(TerminalMouseButton::None)
+                };
+                self.fallback_mouse_button = None;
+                effective
+            }
+        }
+    }
+}
+
+impl TerminalSurfaceState {
+    pub fn from_visible_lines(
+        session_id: Uuid,
+        seqno: usize,
+        rows: u32,
+        cols: u32,
+        visible_lines: Vec<String>,
+    ) -> Self {
+        Self {
+            session_id,
+            seqno,
+            rows,
+            cols,
+            visible_rows: visible_lines
+                .iter()
+                .enumerate()
+                .map(|(index, text)| TerminalRowState {
+                    index: index as u32,
+                    text: text.clone(),
+                    wrapped: false,
+                })
+                .collect(),
+            visible_lines,
+            cells: Vec::new(),
+            cursor: TerminalCursorState {
+                row: 0,
+                col: 0,
+                visible: false,
+                blinking: false,
+                shape: TerminalCursorShape::Block,
+                fg_rgba: 0xff00_0000,
+                bg_rgba: 0xff52_ad70,
+            },
+            mouse_grabbed: false,
+            bracketed_paste_enabled: false,
+        }
+    }
+
+    pub fn selection_text(&self, start_row: u32, start_col: u32, end_row: u32, end_col: u32) -> String {
+        let ((start_row, start_col), (end_row, end_col)) =
+            normalized_selection((start_row, start_col), (end_row, end_col));
+        let mut text = String::new();
+
+        for row in start_row..=end_row {
+            let row_start = if row == start_row { start_col } else { 0 };
+            let row_end = if row == end_row {
+                end_col
+            } else {
+                self.cols.saturating_sub(1)
+            };
+            let mut row_text = String::new();
+
+            for cell in self.cells.iter().filter(|cell| cell.row == row) {
+                let cell_start = cell.col;
+                let cell_end = cell
+                    .col
+                    .saturating_add(cell.width.saturating_sub(1));
+                if cell_end < row_start || cell_start > row_end {
+                    continue;
+                }
+                row_text.push_str(&cell.text);
+            }
+
+            text.push_str(row_text.trim_end_matches(' '));
+            let wrapped = self
+                .visible_rows
+                .iter()
+                .find(|visible_row| visible_row.index == row)
+                .map(|visible_row| visible_row.wrapped)
+                .unwrap_or(false);
+            if row < end_row && !wrapped {
+                text.push('\n');
+            }
+        }
+
+        text
     }
 }
 
@@ -745,15 +1080,15 @@ pub fn encode_named_key_input(
         _ => return Ok(None),
     };
 
-    let mut modifiers = Modifiers::NONE;
+    let mut modifiers = TermwizModifiers::NONE;
     if alt {
-        modifiers |= Modifiers::ALT;
+        modifiers |= TermwizModifiers::ALT;
     }
     if ctrl {
-        modifiers |= Modifiers::CTRL;
+        modifiers |= TermwizModifiers::CTRL;
     }
     if shift {
-        modifiers |= Modifiers::SHIFT;
+        modifiers |= TermwizModifiers::SHIFT;
     }
 
     let mut session = TerminalSession::new(DEFAULT_TERMINAL_ROWS, DEFAULT_TERMINAL_COLS);
@@ -768,6 +1103,132 @@ impl TerminalConfiguration for SessionTerminalConfig {
     fn color_palette(&self) -> ColorPalette {
         ColorPalette::default()
     }
+}
+
+fn project_terminal_row(line: &Line, index: u32, cols: usize) -> TerminalRowState {
+    TerminalRowState {
+        index,
+        text: line.columns_as_str(0..cols).trim_end().to_string(),
+        wrapped: line.last_cell_was_wrapped(),
+    }
+}
+
+fn resolve_cell_colors(palette: &ColorPalette, attrs: &wezterm_term::CellAttributes) -> (u32, u32) {
+    let mut fg = resolve_palette_color(palette, attrs.foreground(), false);
+    let mut bg = resolve_palette_color(palette, attrs.background(), true);
+    if attrs.reverse() {
+        std::mem::swap(&mut fg, &mut bg);
+    }
+    if attrs.invisible() {
+        fg = bg;
+    }
+    (fg, bg)
+}
+
+fn resolve_palette_color(
+    palette: &ColorPalette,
+    color: ColorAttribute,
+    background: bool,
+) -> u32 {
+    let rgba = if background {
+        palette.resolve_bg(color)
+    } else {
+        palette.resolve_fg(color)
+    };
+    pack_color(rgba)
+}
+
+fn pack_color(color: SrgbaTuple) -> u32 {
+    let channel = |value: f32| -> u32 { (value.clamp(0.0, 1.0) * 255.0).round() as u32 };
+    let r = channel(color.0);
+    let g = channel(color.1);
+    let b = channel(color.2);
+    let a = channel(color.3);
+    (a << 24) | (r << 16) | (g << 8) | b
+}
+
+fn project_cursor_shape(shape: CursorShape) -> TerminalCursorShape {
+    match shape {
+        CursorShape::BlinkingUnderline | CursorShape::SteadyUnderline => {
+            TerminalCursorShape::Underline
+        }
+        CursorShape::BlinkingBar | CursorShape::SteadyBar => TerminalCursorShape::Bar,
+        CursorShape::Default | CursorShape::BlinkingBlock | CursorShape::SteadyBlock => {
+            TerminalCursorShape::Block
+        }
+    }
+}
+
+fn cursor_shape_blinks(shape: CursorShape) -> bool {
+    matches!(
+        shape,
+        CursorShape::Default
+            | CursorShape::BlinkingBlock
+            | CursorShape::BlinkingUnderline
+            | CursorShape::BlinkingBar
+    )
+}
+
+fn normalized_selection(
+    start: (u32, u32),
+    end: (u32, u32),
+) -> ((u32, u32), (u32, u32)) {
+    if start.0 < end.0 || (start.0 == end.0 && start.1 <= end.1) {
+        (start, end)
+    } else {
+        (end, start)
+    }
+}
+
+fn mouse_modifiers(event: TerminalMouseInput) -> wezterm_term::KeyModifiers {
+    let mut modifiers = wezterm_term::KeyModifiers::NONE;
+    if event.shift {
+        modifiers |= wezterm_term::KeyModifiers::SHIFT;
+    }
+    if event.ctrl {
+        modifiers |= wezterm_term::KeyModifiers::CTRL;
+    }
+    if event.alt {
+        modifiers |= wezterm_term::KeyModifiers::ALT;
+    }
+    modifiers
+}
+
+fn encode_sgr_mouse_fallback(
+    event: TerminalMouseInput,
+    button: TerminalMouseButton,
+) -> Vec<u8> {
+    let mut code = match button {
+        TerminalMouseButton::Left => 0,
+        TerminalMouseButton::Middle => 1,
+        TerminalMouseButton::Right => 2,
+        TerminalMouseButton::None => 3,
+    };
+    if event.shift {
+        code += 4;
+    }
+    if event.alt {
+        code += 8;
+    }
+    if event.ctrl {
+        code += 16;
+    }
+    if matches!(event.kind, TerminalMouseEventKind::Move) {
+        code += 32;
+    }
+
+    format!(
+        "\x1b[<{};{};{}{}",
+        code,
+        event.col + 1,
+        event.row + 1,
+        if matches!(event.kind, TerminalMouseEventKind::Up) {
+            "m"
+        } else {
+            "M"
+        }
+    )
+    .into_bytes()
 }
 
 #[derive(Clone, Debug, Default)]

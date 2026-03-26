@@ -16,6 +16,7 @@ import { WindowResizeGrips } from "components/window-resize-grips.slint";
 import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { RightPanel } from "shell/right-panel.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
+import { TerminalCellItem } from "shell/terminal-session-host.slint";
 import { WorkspaceTabItem } from "shell/tabbar.slint";
 import { Titlebar } from "shell/titlebar.slint";
 import { WorkspacePane } from "shell/workspace-pane.slint";
@@ -89,6 +90,17 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-session-state: "";
     in-out property <string> workspace-session-error-detail: "";
     in-out property <bool> workspace-session-can-reconnect: false;
+    in-out property <[TerminalCellItem]> workspace-session-cells: [];
+    in-out property <int> workspace-session-rows: 24;
+    in-out property <int> workspace-session-cols: 80;
+    in-out property <int> workspace-session-cursor-row: 0;
+    in-out property <int> workspace-session-cursor-col: 0;
+    in-out property <bool> workspace-session-cursor-visible: false;
+    in-out property <bool> workspace-session-cursor-blinking: false;
+    in-out property <string> workspace-session-cursor-shape: "block";
+    in-out property <color> workspace-session-cursor-fg: #000000;
+    in-out property <color> workspace-session-cursor-bg: #52ad70;
+    in-out property <bool> workspace-session-mouse-grabbed: false;
     in-out property <[string]> workspace-session-visible-lines: [];
     in-out property <int> workspace-session-surface-seqno: 0;
     in-out property <bool> assets-context-menu-open: false;
@@ -179,6 +191,9 @@ export component AppWindow inherits Window {
     callback workspace-session-text-input(string);
     callback workspace-session-key-input(string, bool, bool, bool);
     callback workspace-session-resize-requested(int, int);
+    callback workspace-session-copy-selection-requested(int, int, int, int);
+    callback workspace-session-paste-requested();
+    callback workspace-session-mouse-input(string, string, int, int, bool, bool, bool);
     callback asset-selected(string);
     callback asset-activated(string);
     callback toggle-expanded-requested(string);
@@ -439,6 +454,17 @@ export component AppWindow inherits Window {
                         workspace-session-state: root.workspace-session-state;
                         workspace-session-error-detail: root.workspace-session-error-detail;
                         workspace-session-can-reconnect: root.workspace-session-can-reconnect;
+                        workspace-session-cells: root.workspace-session-cells;
+                        workspace-session-rows: root.workspace-session-rows;
+                        workspace-session-cols: root.workspace-session-cols;
+                        workspace-session-cursor-row: root.workspace-session-cursor-row;
+                        workspace-session-cursor-col: root.workspace-session-cursor-col;
+                        workspace-session-cursor-visible: root.workspace-session-cursor-visible;
+                        workspace-session-cursor-blinking: root.workspace-session-cursor-blinking;
+                        workspace-session-cursor-shape: root.workspace-session-cursor-shape;
+                        workspace-session-cursor-fg: root.workspace-session-cursor-fg;
+                        workspace-session-cursor-bg: root.workspace-session-cursor-bg;
+                        workspace-session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                         workspace-session-visible-lines: root.workspace-session-visible-lines;
                         workspace-session-surface-seqno: root.workspace-session-surface-seqno;
 
@@ -460,6 +486,18 @@ export component AppWindow inherits Window {
 
                         surface-resize-requested(rows, cols) => {
                             root.workspace-session-resize-requested(rows, cols);
+                        }
+
+                        copy-selection-requested(start-row, start-col, end-row, end-col) => {
+                            root.workspace-session-copy-selection-requested(start-row, start-col, end-row, end-col);
+                        }
+
+                        paste-requested() => {
+                            root.workspace-session-paste-requested();
+                        }
+
+                        mouse-input(kind, button, row, col, shift, ctrl, alt) => {
+                            root.workspace-session-mouse-input(kind, button, row, col, shift, ctrl, alt);
                         }
                     }
 

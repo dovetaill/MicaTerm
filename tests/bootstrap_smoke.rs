@@ -35,7 +35,7 @@ use mica_term::app::ssh::known_hosts::{
 };
 use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::runtime::{
-    SessionRuntimeEvent, TerminalSurfaceState, UnknownHostKeyError,
+    SessionRuntimeEvent, TerminalMouseInput, TerminalSurfaceState, UnknownHostKeyError,
 };
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::window_effects::default_platform_window_effects;
@@ -140,6 +140,10 @@ impl SessionRuntimeControl for NoopRuntimeControl {
         Ok(())
     }
 
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
     fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
         Ok(())
     }
@@ -225,17 +229,17 @@ impl SessionRuntimeLauncher for AsyncProjectionLauncher {
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
         Box::pin(async move {
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(25)).await;
-                let _ = event_tx.send(SessionRuntimeEvent::Connected);
-                let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
-                    mica_term::app::ssh::runtime::TerminalSurfaceState {
-                        session_id,
-                        seqno: 1,
-                        rows: 24,
-                        cols: 80,
-                        visible_lines: vec!["welcome to mica-term".into()],
-                    },
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                    let _ = event_tx.send(SessionRuntimeEvent::Connected);
+                    let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                        mica_term::app::ssh::runtime::TerminalSurfaceState::from_visible_lines(
+                            session_id,
+                            1,
+                            24,
+                            80,
+                            vec!["welcome to mica-term".into()],
+                        ),
                 ));
             });
             Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>)
@@ -260,13 +264,15 @@ impl SessionRuntimeLauncher for InteractiveProjectionLauncher {
     {
         Box::pin(async move {
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
-            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(TerminalSurfaceState {
-                session_id,
-                seqno: 1,
-                rows: 24,
-                cols: 80,
-                visible_lines: vec!["welcome to mica-term".into()],
-            }));
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                TerminalSurfaceState::from_visible_lines(
+                    session_id,
+                    1,
+                    24,
+                    80,
+                    vec!["welcome to mica-term".into()],
+                ),
+            ));
             Ok(Box::new(InteractiveProjectionRuntimeControl {
                 session_id,
                 event_tx,
@@ -312,13 +318,33 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
         let rendered = String::from_utf8(bytes).unwrap_or_default();
         let _ = self
             .event_tx
-            .send(SessionRuntimeEvent::SurfaceChanged(TerminalSurfaceState {
-                session_id: self.session_id,
-                seqno: 2,
-                rows: 24,
-                cols: 80,
-                visible_lines: vec!["welcome to mica-term".into(), format!("$ {}", rendered)],
-            }));
+            .send(SessionRuntimeEvent::SurfaceChanged(
+                TerminalSurfaceState::from_visible_lines(
+                    self.session_id,
+                    2,
+                    24,
+                    80,
+                    vec!["welcome to mica-term".into(), format!("$ {}", rendered)],
+                ),
+            ));
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::SurfaceChanged(
+                TerminalSurfaceState::from_visible_lines(
+                    self.session_id,
+                    2,
+                    24,
+                    80,
+                    vec![
+                        "welcome to mica-term".into(),
+                        "mouse input forwarded".into(),
+                    ],
+                ),
+            ));
         Ok(())
     }
 
@@ -1697,6 +1723,40 @@ fn workspace_terminal_input_callback_updates_active_session_surface() {
     assert_eq!(app.get_workspace_session_surface_seqno(), 2);
     assert_eq!(visible_lines.row_count(), 2);
     assert_eq!(visible_lines.row_data(1).unwrap().as_str(), "$ pwd");
+}
+
+#[test]
+fn workspace_terminal_mouse_input_callback_updates_active_session_surface() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    app.invoke_workspace_session_mouse_input(
+        "down".into(),
+        "left".into(),
+        2,
+        4,
+        false,
+        false,
+        false,
+    );
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    let visible_lines = app.get_workspace_session_visible_lines();
+    assert_eq!(app.get_workspace_session_surface_seqno(), 2);
+    assert_eq!(visible_lines.row_count(), 2);
+    assert_eq!(visible_lines.row_data(1).unwrap().as_str(), "mouse input forwarded");
 }
 
 #[test]

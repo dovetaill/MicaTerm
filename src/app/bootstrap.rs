@@ -11,13 +11,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
-use slint::{ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
+use slint::{Color, ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::AppWindow;
 use crate::AssetsContextMenuItem;
 use crate::ConsoleAssetItem;
+use crate::TerminalCellItem;
 use crate::WorkspaceTabItem;
 use crate::app::app_paths::{AppRootPathInputs, AppRootPaths, resolve_app_root_paths};
 use crate::app::assets_catalog::{
@@ -33,7 +34,8 @@ use crate::app::ssh::credentials::{
 use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
 use crate::app::ssh::runtime::{
-    SessionRuntimeEvent, SshSessionRuntime, UnknownHostKeyError, encode_named_key_input,
+    SessionRuntimeEvent, SshSessionRuntime, TerminalMouseButton, TerminalMouseEventKind,
+    TerminalMouseInput, UnknownHostKeyError, encode_named_key_input,
     load_optional_stored_secret_bundle, stored_secret_lookup_message,
 };
 use crate::app::ssh::session_manager::{
@@ -1001,6 +1003,102 @@ fn forward_active_workspace_resize(
     }
 }
 
+fn set_system_clipboard_text(text: &str) -> Result<()> {
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text(text, slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .map_err(anyhow::Error::from)
+}
+
+fn system_clipboard_text() -> Option<String> {
+    i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .ok()
+    .flatten()
+}
+
+fn forward_active_workspace_copy_selection(
+    state: &ShellViewModel,
+    start_row: i32,
+    start_col: i32,
+    end_row: i32,
+    end_col: i32,
+) {
+    let Some(surface) = state.active_workspace_terminal_surface() else {
+        return;
+    };
+
+    let text = surface.selection_text(
+        start_row.max(0) as u32,
+        start_col.max(0) as u32,
+        end_row.max(0) as u32,
+        end_col.max(0) as u32,
+    );
+    if text.is_empty() {
+        return;
+    }
+
+    if let Err(err) = set_system_clipboard_text(&text) {
+        tracing::error!(
+            target: "app.ssh",
+            error = %err,
+            "failed to copy workspace terminal selection to clipboard"
+        );
+    }
+}
+
+fn forward_active_workspace_paste(state: &ShellViewModel, bridge: Option<&ShellSessionBridge>) {
+    let Some(text) = system_clipboard_text() else {
+        return;
+    };
+    forward_active_workspace_text_input(state, bridge, &text);
+}
+
+fn forward_active_workspace_mouse_input(
+    state: &ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    event: TerminalMouseInput,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return;
+    };
+
+    if let Err(err) = bridge.manager.send_session_mouse_input(session_id, event) {
+        tracing::error!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            row = event.row,
+            col = event.col,
+            error = %err,
+            "failed to forward workspace terminal mouse input"
+        );
+    }
+}
+
+fn parse_terminal_mouse_kind(value: &str) -> Option<TerminalMouseEventKind> {
+    match value {
+        "down" => Some(TerminalMouseEventKind::Down),
+        "up" => Some(TerminalMouseEventKind::Up),
+        "move" => Some(TerminalMouseEventKind::Move),
+        _ => None,
+    }
+}
+
+fn parse_terminal_mouse_button(value: &str) -> Option<TerminalMouseButton> {
+    match value {
+        "left" => Some(TerminalMouseButton::Left),
+        "middle" => Some(TerminalMouseButton::Middle),
+        "right" => Some(TerminalMouseButton::Right),
+        "none" => Some(TerminalMouseButton::None),
+        _ => None,
+    }
+}
+
 fn open_session_with_profile(
     state: &mut ShellViewModel,
     bridge: &ShellSessionBridge,
@@ -1587,6 +1685,14 @@ fn sync_workspace_tab_items(window: &AppWindow, state: &ShellViewModel) {
     window.set_workspace_tab_items(ModelRc::new(VecModel::from(tabs)));
 }
 
+fn slint_color_from_rgba(rgba: u32) -> Color {
+    let a = ((rgba >> 24) & 0xff) as u8;
+    let r = ((rgba >> 16) & 0xff) as u8;
+    let g = ((rgba >> 8) & 0xff) as u8;
+    let b = (rgba & 0xff) as u8;
+    Color::from_argb_u8(a, r, g, b)
+}
+
 fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
@@ -1597,6 +1703,55 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         .map(SharedString::from)
         .collect::<Vec<_>>();
     window.set_workspace_session_visible_lines(ModelRc::new(VecModel::from(visible_lines)));
+
+    if let Some(surface) = state.active_workspace_terminal_surface() {
+        let cells = surface
+            .cells
+            .iter()
+            .map(|cell| TerminalCellItem {
+                row: i32::try_from(cell.row).unwrap_or(i32::MAX),
+                col: i32::try_from(cell.col).unwrap_or(i32::MAX),
+                width: i32::try_from(cell.width).unwrap_or(i32::MAX),
+                text: cell.text.clone().into(),
+                fg: slint_color_from_rgba(cell.fg_rgba),
+                bg: slint_color_from_rgba(cell.bg_rgba),
+            })
+            .collect::<Vec<_>>();
+        window.set_workspace_session_cells(ModelRc::new(VecModel::from(cells)));
+        window.set_workspace_session_rows(i32::try_from(surface.rows).unwrap_or(i32::MAX));
+        window.set_workspace_session_cols(i32::try_from(surface.cols).unwrap_or(i32::MAX));
+        window.set_workspace_session_cursor_row(
+            i32::try_from(surface.cursor.row).unwrap_or(i32::MAX),
+        );
+        window.set_workspace_session_cursor_col(
+            i32::try_from(surface.cursor.col).unwrap_or(i32::MAX),
+        );
+        window.set_workspace_session_cursor_visible(surface.cursor.visible);
+        window.set_workspace_session_cursor_blinking(surface.cursor.blinking);
+        window.set_workspace_session_cursor_shape(
+            match surface.cursor.shape {
+                crate::app::ssh::runtime::TerminalCursorShape::Block => "block",
+                crate::app::ssh::runtime::TerminalCursorShape::Underline => "underline",
+                crate::app::ssh::runtime::TerminalCursorShape::Bar => "bar",
+            }
+            .into(),
+        );
+        window.set_workspace_session_cursor_fg(slint_color_from_rgba(surface.cursor.fg_rgba));
+        window.set_workspace_session_cursor_bg(slint_color_from_rgba(surface.cursor.bg_rgba));
+        window.set_workspace_session_mouse_grabbed(surface.mouse_grabbed);
+    } else {
+        window.set_workspace_session_cells(ModelRc::new(VecModel::from(Vec::<TerminalCellItem>::new())));
+        window.set_workspace_session_rows(24);
+        window.set_workspace_session_cols(80);
+        window.set_workspace_session_cursor_row(0);
+        window.set_workspace_session_cursor_col(0);
+        window.set_workspace_session_cursor_visible(false);
+        window.set_workspace_session_cursor_blinking(false);
+        window.set_workspace_session_cursor_shape("block".into());
+        window.set_workspace_session_cursor_fg(Color::from_argb_u8(255, 0, 0, 0));
+        window.set_workspace_session_cursor_bg(Color::from_argb_u8(255, 0x52, 0xad, 0x70));
+        window.set_workspace_session_mouse_grabbed(false);
+    }
 
     if let Some(active_tab) = state.active_workspace_tab() {
         window.set_workspace_session_title(active_tab.title.clone().into());
@@ -2627,6 +2782,54 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     let state = Rc::clone(&view_model);
+    window.on_workspace_session_copy_selection_requested(move |start_row, start_col, end_row, end_col| {
+        let state = state.borrow();
+        forward_active_workspace_copy_selection(&state, start_row, start_col, end_row, end_col);
+    });
+
+    let state = Rc::clone(&view_model);
+    let session_bridge_ref = session_bridge.clone();
+    window.on_workspace_session_paste_requested(move || {
+        let state = state.borrow();
+        forward_active_workspace_paste(&state, session_bridge_ref.as_deref());
+    });
+
+    let state = Rc::clone(&view_model);
+    let session_bridge_ref = session_bridge.clone();
+    window.on_workspace_session_mouse_input(move |kind, button, row, col, shift, ctrl, alt| {
+        let state = state.borrow();
+        let Some(kind) = parse_terminal_mouse_kind(kind.as_str()) else {
+            tracing::warn!(
+                target: "app.ssh",
+                kind = %kind,
+                "ignored unknown workspace terminal mouse kind"
+            );
+            return;
+        };
+        let Some(button) = parse_terminal_mouse_button(button.as_str()) else {
+            tracing::warn!(
+                target: "app.ssh",
+                button = %button,
+                "ignored unknown workspace terminal mouse button"
+            );
+            return;
+        };
+        forward_active_workspace_mouse_input(
+            &state,
+            session_bridge_ref.as_deref(),
+            TerminalMouseInput {
+                kind,
+                button,
+                row: row.max(0) as u32,
+                col: col.max(0) as u32,
+                shift,
+                ctrl,
+                alt,
+            },
+        );
+    });
+
+    let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
@@ -3015,6 +3218,10 @@ mod tests {
             Ok(())
         }
 
+        fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+            Ok(())
+        }
+
         fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
             Ok(())
         }
@@ -3051,24 +3258,26 @@ mod tests {
         {
             Box::pin(async move {
                 let _ = event_tx.send(SessionRuntimeEvent::Connected);
-                let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(TerminalSurfaceState {
-                    session_id,
-                    seqno: 1,
-                    rows: 24,
-                    cols: 80,
-                    visible_lines: vec!["welcome".into()],
-                }));
+                let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                    TerminalSurfaceState::from_visible_lines(
+                        session_id,
+                        1,
+                        24,
+                        80,
+                        vec!["welcome".into()],
+                    ),
+                ));
                 let delayed_tx = event_tx.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(Duration::from_millis(5)).await;
                     let _ = delayed_tx.send(SessionRuntimeEvent::SurfaceChanged(
-                        TerminalSurfaceState {
+                        TerminalSurfaceState::from_visible_lines(
                             session_id,
-                            seqno: 2,
-                            rows: 24,
-                            cols: 80,
-                            visible_lines: vec!["welcome".into(), "$ pwd".into()],
-                        },
+                            2,
+                            24,
+                            80,
+                            vec!["welcome".into(), "$ pwd".into()],
+                        ),
                     ));
                 });
                 Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>)

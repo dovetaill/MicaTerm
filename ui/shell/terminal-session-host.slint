@@ -1,8 +1,54 @@
 // Workspace content host that switches between welcome, terminal, and error states.
 
-import { ListView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { WelcomeView } from "../welcome/welcome-view.slint";
+
+export struct TerminalCellItem {
+    row: int,
+    col: int,
+    width: int,
+    text: string,
+    fg: color,
+    bg: color,
+}
+
+component TerminalContextMenuRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    out property <bool> has-hover: touch.has-hover;
+    callback invoked();
+
+    height: 32px;
+    border-radius: 6px;
+    background: !root.enabled
+        ? transparent
+        : touch.pressed
+            ? ThemeTokens.menu-row-open-surface
+            : touch.has-hover
+                ? ThemeTokens.menu-row-hover-surface
+                : transparent;
+
+    Text {
+        x: 12px;
+        y: 0px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        opacity: root.enabled ? 1.0 : 0.48;
+        vertical-alignment: center;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.invoked();
+        }
+    }
+}
 
 export component TerminalSessionHost inherits Rectangle {
     in property <string> session-id: "";
@@ -12,22 +58,152 @@ export component TerminalSessionHost inherits Rectangle {
     in property <string> session-state: "";
     in property <string> session-error-detail: "";
     in property <bool> can-reconnect: false;
+    in property <[TerminalCellItem]> session-cells: [];
+    in property <int> session-rows: 24;
+    in property <int> session-cols: 80;
+    in property <int> session-cursor-row: 0;
+    in property <int> session-cursor-col: 0;
+    in property <bool> session-cursor-visible: false;
+    in property <bool> session-cursor-blinking: false;
+    in property <string> session-cursor-shape: "block";
+    in property <color> session-cursor-fg: #000000;
+    in property <color> session-cursor-bg: #52ad70;
+    in property <bool> session-mouse-grabbed: false;
     in property <[string]> session-visible-lines: [];
     in property <int> session-surface-seqno: 0;
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
+    callback copy-selection-requested(int, int, int, int);
+    callback paste-requested();
+    callback mouse-input(string, string, int, int, bool, bool, bool);
 
     private property <length> terminal-cell-width: 8px;
     private property <length> terminal-cell-height: 16px;
+    private property <length> terminal-padding-left: 12px;
+    private property <length> terminal-padding-top: 10px;
+    private property <length> terminal-padding-right: 12px;
+    private property <length> terminal-padding-bottom: 10px;
+    private property <int> selection-anchor-row: -1;
+    private property <int> selection-anchor-col: -1;
+    private property <int> selection-focus-row: -1;
+    private property <int> selection-focus-col: -1;
+    private property <bool> selection-drag-active: false;
+    private property <bool> cursor-blink-visible: true;
+    private property <bool> terminal-context-menu-open: false;
+    private property <length> terminal-context-menu-x: 12px;
+    private property <length> terminal-context-menu-y: 12px;
 
     function emit-surface-resize() {
         if root.mode == "terminal" {
             root.surface-resize-requested(
-                max(1, ((root.height - 20px) / 1px) / (root.terminal-cell-height / 1px)),
-                max(1, ((root.width - 28px) / 1px) / (root.terminal-cell-width / 1px)),
+                max(1, ((root.height - root.terminal-padding-top - root.terminal-padding-bottom) / 1px)
+                    / (root.terminal-cell-height / 1px)),
+                max(1, ((root.width - root.terminal-padding-left - root.terminal-padding-right) / 1px)
+                    / (root.terminal-cell-width / 1px)),
             );
         }
+    }
+
+    function clear-selection() {
+        root.selection-anchor-row = -1;
+        root.selection-anchor-col = -1;
+        root.selection-focus-row = -1;
+        root.selection-focus-col = -1;
+        root.selection-drag-active = false;
+    }
+
+    function close-context-menu() {
+        root.terminal-context-menu-open = false;
+    }
+
+    function has-selection() -> bool {
+        return root.selection-anchor-row >= 0 && root.selection-focus-row >= 0;
+    }
+
+    function normalized-selection-start-row() -> int {
+        return root.selection-anchor-row < root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col <= root.selection-focus-col)
+            ? root.selection-anchor-row
+            : root.selection-focus-row;
+    }
+
+    function normalized-selection-start-col() -> int {
+        return root.selection-anchor-row < root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col <= root.selection-focus-col)
+            ? root.selection-anchor-col
+            : root.selection-focus-col;
+    }
+
+    function normalized-selection-end-row() -> int {
+        return root.selection-anchor-row > root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col > root.selection-focus-col)
+            ? root.selection-anchor-row
+            : root.selection-focus-row;
+    }
+
+    function normalized-selection-end-col() -> int {
+        return root.selection-anchor-row > root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col > root.selection-focus-col)
+            ? root.selection-anchor-col
+            : root.selection-focus-col;
+    }
+
+    function selection-copy-enabled() -> bool {
+        return root.has-selection();
+    }
+
+    function cell-row(pointer-y: length) -> int {
+        return max(0, min(
+            root.session-rows - 1,
+            (((pointer-y - root.terminal-padding-top) / 1px) / (root.terminal-cell-height / 1px)),
+        ));
+    }
+
+    function cell-col(pointer-x: length) -> int {
+        return max(0, min(
+            root.session-cols - 1,
+            (((pointer-x - root.terminal-padding-left) / 1px) / (root.terminal-cell-width / 1px)),
+        ));
+    }
+
+    function cell-selected(row: int, col: int, width: int) -> bool {
+        if !root.has-selection() {
+            return false;
+        }
+        let start-row = root.normalized-selection-start-row();
+        let end-row = root.normalized-selection-end-row();
+        if row < start-row || row > end-row {
+            return false;
+        }
+        let row-start-col = row == start-row ? root.normalized-selection-start-col() : 0;
+        let row-end-col = row == end-row ? root.normalized-selection-end-col() : root.session-cols - 1;
+        let cell-end-col = col + width - 1;
+        return cell-end-col >= row-start-col && col <= row-end-col;
+    }
+
+    function terminal-menu-width() -> length {
+        return 168px;
+    }
+
+    function terminal-menu-height() -> length {
+        return 108px;
+    }
+
+    function open-context-menu(pointer-x: length, pointer-y: length) {
+        root.terminal-context-menu-open = true;
+        root.terminal-context-menu-x = min(
+            max(12px, pointer-x),
+            max(12px, root.width - root.terminal-menu-width() - 12px),
+        );
+        root.terminal-context-menu-y = min(
+            max(12px, pointer-y),
+            max(12px, root.height - root.terminal-menu-height() - 12px),
+        );
     }
 
     width: 100%;
@@ -36,14 +212,26 @@ export component TerminalSessionHost inherits Rectangle {
     background: transparent;
 
     changed mode => {
+        root.close-context-menu();
+        root.clear-selection();
         if root.mode == "terminal" {
             root.emit-surface-resize();
         }
     }
 
     changed session-id => {
+        root.close-context-menu();
+        root.clear-selection();
         if root.mode == "terminal" && root.session-id != "" {
             root.emit-surface-resize();
+        }
+    }
+
+    changed session-surface-seqno => {
+        root.cursor-blink-visible = true;
+        cursor-blink-timer.stop();
+        if root.mode == "terminal" && root.session-cursor-visible && root.session-cursor-blinking {
+            cursor-blink-timer.start();
         }
     }
 
@@ -53,6 +241,21 @@ export component TerminalSessionHost inherits Rectangle {
 
     changed height => {
         root.emit-surface-resize();
+    }
+
+    cursor-blink-timer := Timer {
+        interval: 520ms;
+        running: false;
+
+        triggered => {
+            if root.mode != "terminal" || !root.session-cursor-visible || !root.session-cursor-blinking {
+                self.running = false;
+                root.cursor-blink-visible = true;
+            } else {
+                root.cursor-blink-visible = !root.cursor-blink-visible;
+                self.restart();
+            }
+        }
     }
 
     if root.mode == "welcome" : WelcomeView {
@@ -81,13 +284,29 @@ export component TerminalSessionHost inherits Rectangle {
             }
 
             key-pressed(event) => {
-                if (event.text == Key.Return) {
+                if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == "c") {
+                    if root.has-selection() {
+                        root.copy-selection-requested(
+                            root.normalized-selection-start-row(),
+                            root.normalized-selection-start-col(),
+                            root.normalized-selection-end-row(),
+                            root.normalized-selection-end-col(),
+                        );
+                        accept
+                    } else {
+                        reject
+                    }
+                } else if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == "v") {
+                    root.paste-requested();
+                    accept
+                } else if (event.text == Key.Return) {
                     root.key-input("enter", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
                 } else if (event.text == Key.Tab) {
                     root.key-input("tab", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
                 } else if (event.text == Key.Escape) {
+                    root.close-context-menu();
                     root.key-input("escape", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
                 } else if (event.text == Key.Backspace) {
@@ -120,6 +339,12 @@ export component TerminalSessionHost inherits Rectangle {
                 } else if (event.text == Key.PageDown) {
                     root.key-input("page-down", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
+                } else if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == "a") {
+                    root.selection-anchor-row = 0;
+                    root.selection-anchor-col = 0;
+                    root.selection-focus-row = max(0, root.session-rows - 1);
+                    root.selection-focus-col = max(0, root.session-cols - 1);
+                    accept
                 } else {
                     reject
                 }
@@ -136,25 +361,198 @@ export component TerminalSessionHost inherits Rectangle {
             input-capture := TouchArea {
                 width: parent.width;
                 height: parent.height;
+                mouse-cursor: MouseCursor.text;
 
-                clicked => {
-                    terminal-input.focus();
+                pointer-event(event) => {
+                    let row = root.cell-row(self.mouse-y);
+                    let col = root.cell-col(self.mouse-x);
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                        terminal-input.focus();
+                        root.close-context-menu();
+                        if root.session-mouse-grabbed {
+                            root.mouse-input(
+                                "down",
+                                "left",
+                                row,
+                                col,
+                                event.modifiers.shift,
+                                event.modifiers.control,
+                                event.modifiers.alt,
+                            );
+                        } else {
+                            root.selection-anchor-row = row;
+                            root.selection-anchor-col = col;
+                            root.selection-focus-row = row;
+                            root.selection-focus-col = col;
+                            root.selection-drag-active = true;
+                        }
+                    } else if event.kind == PointerEventKind.move {
+                        if root.session-mouse-grabbed {
+                            root.mouse-input(
+                                "move",
+                                "none",
+                                row,
+                                col,
+                                event.modifiers.shift,
+                                event.modifiers.control,
+                                event.modifiers.alt,
+                            );
+                        } else if root.selection-drag-active {
+                            root.selection-focus-row = row;
+                            root.selection-focus-col = col;
+                        }
+                    } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                        if root.session-mouse-grabbed {
+                            root.mouse-input(
+                                "up",
+                                "left",
+                                row,
+                                col,
+                                event.modifiers.shift,
+                                event.modifiers.control,
+                                event.modifiers.alt,
+                            );
+                        } else {
+                            if root.selection-anchor-row == root.selection-focus-row
+                                && root.selection-anchor-col == root.selection-focus-col {
+                                root.clear-selection();
+                            }
+                            root.selection-drag-active = false;
+                        }
+                    } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                        terminal-input.focus();
+                        if root.session-mouse-grabbed {
+                            root.mouse-input(
+                                "down",
+                                "right",
+                                row,
+                                col,
+                                event.modifiers.shift,
+                                event.modifiers.control,
+                                event.modifiers.alt,
+                            );
+                        } else {
+                            root.open-context-menu(self.mouse-x, self.mouse-y);
+                        }
+                    } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.right && root.session-mouse-grabbed {
+                        root.mouse-input(
+                            "up",
+                            "right",
+                            row,
+                            col,
+                            event.modifiers.shift,
+                            event.modifiers.control,
+                            event.modifiers.alt,
+                        );
+                    }
                 }
             }
 
-            terminal-lines := ListView {
-                x: 12px;
-                y: 10px;
-                width: parent.width - 24px;
-                height: max(0px, parent.height - 20px);
+            for cell in root.session-cells : Rectangle {
+                x: root.terminal-padding-left + (cell.col * root.terminal-cell-width);
+                y: root.terminal-padding-top + (cell.row * root.terminal-cell-height);
+                width: max(root.terminal-cell-width, cell.width * root.terminal-cell-width);
+                height: root.terminal-cell-height;
+                background: root.cell-selected(cell.row, cell.col, cell.width)
+                    ? ThemeTokens.accent
+                    : cell.bg;
 
-                for line in root.session-visible-lines : Text {
-                    width: terminal-lines.width;
-                    height: root.terminal-cell-height;
-                    text: line;
-                    color: ThemeTokens.text-primary;
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    text: cell.text;
+                    color: root.cell-selected(cell.row, cell.col, cell.width)
+                        ? (ThemeTokens.dark-mode ? #0b1117 : #ffffff)
+                        : cell.fg;
                     font-size: 12px;
+                    font-family: "Cascadia Mono";
                     vertical-alignment: center;
+                }
+            }
+
+            if root.session-cursor-visible && root.cursor-blink-visible : cursor-overlay := Rectangle {
+                x: root.terminal-padding-left + (root.session-cursor-col * root.terminal-cell-width);
+                width: root.session-cursor-shape == "bar"
+                    ? 2px
+                    : root.terminal-cell-width;
+                height: root.session-cursor-shape == "underline"
+                    ? 2px
+                    : root.terminal-cell-height;
+                background: root.session-cursor-bg;
+                opacity: root.session-cursor-shape == "block" ? 0.72 : 1.0;
+                y: root.session-cursor-shape == "underline"
+                    ? root.terminal-padding-top + ((root.session-cursor-row + 1) * root.terminal-cell-height) - 2px
+                    : root.terminal-padding-top + (root.session-cursor-row * root.terminal-cell-height);
+            }
+
+            if root.terminal-context-menu-open : terminal-context-menu-dismiss-layer := TouchArea {
+                width: parent.width;
+                height: parent.height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                        root.close-context-menu();
+                    }
+                }
+            }
+
+            if root.terminal-context-menu-open : terminal-context-menu := Rectangle {
+                x: root.terminal-context-menu-x;
+                y: root.terminal-context-menu-y;
+                width: root.terminal-menu-width();
+                height: root.terminal-menu-height();
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-strong;
+                background: ThemeTokens.inspector-surface;
+
+                VerticalLayout {
+                    x: 8px;
+                    y: 8px;
+                    width: parent.width - 16px;
+                    spacing: 4px;
+
+                    copy-row := TerminalContextMenuRow {
+                        width: parent.width;
+                        label: "Copy";
+                        enabled: root.selection-copy-enabled();
+
+                        invoked => {
+                            root.close-context-menu();
+                            root.copy-selection-requested(
+                                root.normalized-selection-start-row(),
+                                root.normalized-selection-start-col(),
+                                root.normalized-selection-end-row(),
+                                root.normalized-selection-end-col(),
+                            );
+                        }
+                    }
+
+                    paste-row := TerminalContextMenuRow {
+                        width: parent.width;
+                        label: "Paste";
+
+                        invoked => {
+                            root.close-context-menu();
+                            root.paste-requested();
+                        }
+                    }
+
+                    select-all-row := TerminalContextMenuRow {
+                        width: parent.width;
+                        label: "Select All";
+
+                        invoked => {
+                            root.close-context-menu();
+                            root.selection-anchor-row = 0;
+                            root.selection-anchor-col = 0;
+                            root.selection-focus-row = max(0, root.session-rows - 1);
+                            root.selection-focus-col = max(0, root.session-cols - 1);
+                            terminal-input.focus();
+                        }
+                    }
                 }
             }
         }

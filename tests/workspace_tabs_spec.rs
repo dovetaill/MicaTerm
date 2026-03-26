@@ -7,7 +7,7 @@ use anyhow::Result;
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher;
 use mica_term::app::ssh::profile::ConnectionProfile;
-use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalSurfaceState};
+use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalMouseInput, TerminalSurfaceState};
 use mica_term::app::ssh::session_manager::{SessionHandle, SessionState};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::window_effects::default_platform_window_effects;
@@ -28,6 +28,10 @@ impl SessionRuntimeControl for NoopRuntimeControl {
     }
 
     fn send_input(&self, _bytes: Vec<u8>) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
         Ok(())
     }
 
@@ -361,13 +365,13 @@ fn connected_session_projects_terminal_surface_state_without_placeholder_copy() 
     let tab = WorkspaceTab::from_session(&handle);
     let mut view_model = ShellViewModel::default();
     view_model.set_workspace_tabs(vec![tab]);
-    view_model.set_active_workspace_terminal_surface(Some(TerminalSurfaceState {
-        session_id: handle.session_id,
-        seqno: 3,
-        rows: 24,
-        cols: 80,
-        visible_lines: vec!["last login: Tue Mar 24".into(), "pwd".into()],
-    }));
+    view_model.set_active_workspace_terminal_surface(Some(TerminalSurfaceState::from_visible_lines(
+        handle.session_id,
+        3,
+        24,
+        80,
+        vec!["last login: Tue Mar 24".into(), "pwd".into()],
+    )));
 
     let terminal_host =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
@@ -446,6 +450,76 @@ fn terminal_session_host_exposes_text_key_and_resize_callbacks() {
     assert!(
         !terminal_host.contains("Remote shell is ready but has not produced output yet."),
         "interactive terminal host should stop rendering the old placeholder copy"
+    );
+}
+
+#[test]
+fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        app_window.contains("workspace-session-cells"),
+        "AppWindow should expose a terminal cell projection model instead of only string lines"
+    );
+    assert!(
+        app_window.contains("workspace-session-cursor-row"),
+        "AppWindow should expose cursor row projection for the terminal surface"
+    );
+    assert!(
+        app_window.contains("workspace-session-cursor-col"),
+        "AppWindow should expose cursor column projection for the terminal surface"
+    );
+    assert!(
+        app_window.contains("workspace-session-copy-selection-requested(int, int, int, int);"),
+        "AppWindow should expose a copy-selection callback for terminal text selection"
+    );
+    assert!(
+        app_window.contains("workspace-session-paste-requested();"),
+        "AppWindow should expose a paste callback for the terminal context menu"
+    );
+    assert!(
+        app_window.contains("workspace-session-mouse-input(string, string, int, int, bool, bool, bool);"),
+        "AppWindow should expose terminal mouse input forwarding for cell-relative pointer events"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-cells"),
+        "WorkspacePane should forward the terminal cell model into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("copy-selection-requested(start-row, start-col, end-row, end-col) =>"),
+        "WorkspacePane should forward copy-selection requests back to the app shell"
+    );
+    assert!(
+        workspace_pane.contains("paste-requested() =>"),
+        "WorkspacePane should forward paste requests back to the app shell"
+    );
+    assert!(
+        workspace_pane.contains("mouse-input(kind, button, row, col, shift, ctrl, alt) =>"),
+        "WorkspacePane should forward terminal mouse events back to the app shell"
+    );
+    assert!(
+        terminal_host.contains("callback copy-selection-requested(int, int, int, int);"),
+        "TerminalSessionHost should emit a copy-selection callback"
+    );
+    assert!(
+        terminal_host.contains("callback paste-requested();"),
+        "TerminalSessionHost should emit a paste callback"
+    );
+    assert!(
+        terminal_host.contains("callback mouse-input(string, string, int, int, bool, bool, bool);"),
+        "TerminalSessionHost should emit mouse input callbacks with terminal-relative coordinates"
+    );
+    assert!(
+        terminal_host.contains("cursor-blink-timer := Timer {"),
+        "terminal host should manage a visible cursor blink timer instead of rendering a cursorless text dump"
+    );
+    assert!(
+        !terminal_host.contains("terminal-lines := ListView {"),
+        "terminal host should stop rendering the terminal as a ListView of plain strings"
     );
 }
 

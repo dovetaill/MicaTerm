@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::app::ssh::profile::ConnectionProfile;
-use crate::app::ssh::runtime::{SessionRuntimeEvent, TerminalSurfaceState};
+use crate::app::ssh::runtime::{SessionRuntimeEvent, TerminalMouseInput, TerminalSurfaceState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenSessionMode {
@@ -39,6 +39,7 @@ pub struct SessionHandle {
 pub trait SessionRuntimeControl: Send {
     fn disconnect(&self) -> Result<()>;
     fn send_input(&self, bytes: Vec<u8>) -> Result<()>;
+    fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()>;
     fn resize(&self, rows: u32, cols: u32) -> Result<()>;
 }
 
@@ -221,6 +222,19 @@ impl SessionManager {
             return Ok(());
         }
         Err(anyhow!("session runtime is not ready for `{session_id}`"))
+    }
+
+    pub fn send_session_mouse_input(
+        &self,
+        session_id: Uuid,
+        event: TerminalMouseInput,
+    ) -> Result<()> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        runtime_control.send_mouse_input(event)
     }
 
     pub fn close_session(&self, session_id: Uuid) -> Option<SessionHandle> {

@@ -10,7 +10,7 @@ use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store, bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher,
 };
 use mica_term::app::ssh::profile::ConnectionProfile;
-use mica_term::app::ssh::runtime::SessionRuntimeEvent;
+use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalMouseInput};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::window_effects::default_platform_window_effects;
 use slint::ComponentHandle;
@@ -29,6 +29,10 @@ impl SessionRuntimeControl for NoopRuntimeControl {
     }
 
     fn send_input(&self, _bytes: Vec<u8>) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
         Ok(())
     }
 
