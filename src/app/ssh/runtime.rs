@@ -140,17 +140,6 @@ impl SshSessionRuntime {
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
         credential_store: Arc<dyn CredentialStore>,
     ) -> Result<Self> {
-        tracing::info!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            asset_id = profile.asset_id.as_deref().unwrap_or(""),
-            profile_name = profile.name.as_str(),
-            host = profile.host.as_str(),
-            user = profile.user.as_str(),
-            port = profile.port,
-            auth_method = ?profile.auth_method,
-            "starting ssh runtime connection"
-        );
         let terminal = Arc::new(Mutex::new(TerminalSession::new(
             DEFAULT_TERMINAL_ROWS,
             DEFAULT_TERMINAL_COLS,
@@ -176,28 +165,13 @@ impl SshSessionRuntime {
                     profile.host, profile.port
                 )
             })?;
-        tracing::info!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            "ssh runtime established transport connection"
-        );
 
         authenticate_client(&mut handle, &profile, credential_store.as_ref()).await?;
-        tracing::info!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            "ssh runtime completed authentication"
-        );
 
         let mut channel = handle
             .channel_open_session()
             .await
             .context("failed to open SSH session channel")?;
-        tracing::info!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            "ssh runtime opened session channel"
-        );
         channel
             .request_pty(
                 true,
@@ -213,22 +187,12 @@ impl SshSessionRuntime {
 
         let mut pending_output = Vec::new();
         await_channel_success(&mut channel, "pty", &mut pending_output).await?;
-        tracing::info!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            "ssh runtime negotiated pty"
-        );
 
         channel
             .request_shell(true)
             .await
             .context("failed to request remote shell")?;
         await_channel_success(&mut channel, "shell", &mut pending_output).await?;
-        tracing::info!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            "ssh runtime requested remote shell"
-        );
 
         let _ = event_tx.send(SessionRuntimeEvent::Connected);
         if !pending_output.is_empty() {
@@ -298,17 +262,6 @@ async fn authenticate_client(
     profile: &ConnectionProfile,
     credential_store: &dyn CredentialStore,
 ) -> Result<()> {
-    tracing::info!(
-        target: "app.ssh",
-        asset_id = profile.asset_id.as_deref().unwrap_or(""),
-        profile_name = profile.name.as_str(),
-        auth_method = ?profile.auth_method,
-        has_password_secret = profile.password.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
-        has_inline_key_secret = profile.private_key_content.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
-        has_passphrase_secret = profile.passphrase.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
-        "authenticating ssh client"
-    );
-
     match profile.auth_method {
         SshAuthMethod::Password => {
             let password = match profile
@@ -457,22 +410,9 @@ pub(crate) fn load_optional_stored_secret_bundle(
     credential_store: &dyn CredentialStore,
 ) -> std::result::Result<Option<(String, StoredSshSecretBundle)>, StoredSecretLookupError> {
     let Some(credential_ref) = profile.credential_ref.as_deref() else {
-        tracing::info!(
-            target: "app.ssh",
-            asset_id = profile.asset_id.as_deref().unwrap_or(""),
-            profile_name = profile.name.as_str(),
-            "no credential reference attached to ssh profile"
-        );
         return Ok(None);
     };
 
-    tracing::info!(
-        target: "app.ssh",
-        asset_id = profile.asset_id.as_deref().unwrap_or(""),
-        profile_name = profile.name.as_str(),
-        credential_ref = credential_ref,
-        "loading stored ssh secret bundle"
-    );
     let bundle = load_secret_bundle_with_diagnostics(credential_store, Some(credential_ref))?;
     let bundle = match profile.auth_method {
         SshAuthMethod::Password => bundle,
@@ -623,11 +563,6 @@ async fn run_channel_pump(
                         }
                     }
                     Some(RuntimeCommand::Disconnect) => {
-                        tracing::info!(
-                            target: "app.ssh",
-                            session_id = session_id.to_string(),
-                            "runtime disconnect requested"
-                        );
                         let _ = channel.eof().await;
                         let _ = channel.close().await;
                         let _ = handle
@@ -650,11 +585,6 @@ async fn run_channel_pump(
                         }
                     }
                     Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => {
-                        tracing::info!(
-                            target: "app.ssh",
-                            session_id = session_id.to_string(),
-                            "runtime channel closed"
-                        );
                         let _ = event_tx.send(SessionRuntimeEvent::Disconnected);
                         break;
                     }

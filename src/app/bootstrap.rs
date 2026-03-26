@@ -592,14 +592,6 @@ fn profile_for_saved_asset(
         .with_context(|| {
             format!("saved ssh asset `{asset_id}` is missing its connection payload")
         })?;
-    tracing::info!(
-        target: "app.ssh",
-        asset_id = asset_id,
-        title = node.title.as_str(),
-        host = spec.host.as_str(),
-        user = spec.user.as_str(),
-        "resolved saved ssh asset profile inputs"
-    );
     ConnectionProfile::from_saved_asset(asset_id, &node.title, spec)
 }
 
@@ -842,7 +834,6 @@ fn sync_workspace_projection_from_manager(
         })
         .cloned()
         .collect::<Vec<_>>();
-    let preserved_error_tab_count = preserved_error_tabs.len();
     next_tabs.extend(preserved_error_tabs);
     let next_surface = state
         .active_workspace_session_id()
@@ -857,18 +848,6 @@ fn sync_workspace_projection_from_manager(
     let surface_changed = state.active_workspace_terminal_surface().cloned() != next_surface;
     if surface_changed {
         state.set_active_workspace_terminal_surface(next_surface);
-    }
-
-    if tabs_changed || surface_changed {
-        tracing::info!(
-            target: "app.ssh",
-            tab_count = state.workspace_tabs().len(),
-            active_session_id = state.active_workspace_session_id().unwrap_or(""),
-            tabs_changed,
-            surface_changed,
-            preserved_error_tab_count,
-            "synchronized workspace projection from session manager"
-        );
     }
 
     tabs_changed || surface_changed
@@ -982,27 +961,10 @@ fn open_session_with_profile(
     profile: ConnectionProfile,
     mode: OpenSessionMode,
 ) -> anyhow::Result<()> {
-    tracing::info!(
-        target: "app.ssh",
-        asset_id = profile.asset_id.as_deref().unwrap_or(""),
-        profile_name = profile.name.as_str(),
-        host = profile.host.as_str(),
-        user = profile.user.as_str(),
-        port = profile.port,
-        mode = ?mode,
-        "opening ssh session with normalized profile"
-    );
     let handle = bridge.manager.open_session(profile, mode)?;
     let resolved = bridge.manager.session(handle.session_id).unwrap_or(handle);
     merge_session_handle_into_tabs(state, &resolved);
     let _ = sync_workspace_projection_from_manager(state, &bridge.manager);
-    tracing::info!(
-        target: "app.ssh",
-        session_id = resolved.session_id.to_string(),
-        asset_id = resolved.asset_id.as_str(),
-        state = ?resolved.state,
-        "workspace tab merged for ssh session"
-    );
     Ok(())
 }
 
@@ -1087,26 +1049,10 @@ fn attempt_test_connection(
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
     profile: ConnectionProfile,
 ) {
-    tracing::info!(
-        target: "app.ssh",
-        asset_id = profile.asset_id.as_deref().unwrap_or(""),
-        profile_name = profile.name.as_str(),
-        host = profile.host.as_str(),
-        user = profile.user.as_str(),
-        port = profile.port,
-        "probing ssh connection from modal action"
-    );
     match bridge.manager.probe_connection(profile.clone()) {
         Ok(()) => state.finish_ssh_modal_action_success("Connection test succeeded."),
         Err(err) => {
             if let Some(unknown) = err.downcast_ref::<UnknownHostKeyError>() {
-                tracing::info!(
-                    target: "app.ssh",
-                    host = unknown.host.as_str(),
-                    port = unknown.port,
-                    fingerprint = unknown.fingerprint.as_str(),
-                    "ssh probe requires host key confirmation"
-                );
                 prompt_unknown_host_key(
                     state,
                     pending_host_key_approval,
@@ -1133,50 +1079,21 @@ fn attempt_open_session_with_profile(
     profile: ConnectionProfile,
     mode: OpenSessionMode,
 ) -> anyhow::Result<()> {
-    tracing::info!(
-        target: "app.ssh",
-        asset_id = profile.asset_id.as_deref().unwrap_or(""),
-        profile_name = profile.name.as_str(),
-        host = profile.host.as_str(),
-        user = profile.user.as_str(),
-        port = profile.port,
-        mode = ?mode,
-        "attempting to open ssh session after probe gate"
-    );
     if matches!(mode, OpenSessionMode::ActivateExisting)
         && let Some(asset_id) = profile.asset_id.as_deref()
         && target_session_id_for_asset(state, asset_id).is_some()
     {
-        tracing::info!(
-            target: "app.ssh",
-            asset_id = asset_id,
-            "reusing existing workspace tab for activated ssh asset"
-        );
         return open_session_with_profile(state, bridge, profile, mode);
     }
 
     match bridge.manager.probe_connection(profile.clone()) {
         Ok(()) => {
-            tracing::info!(
-                target: "app.ssh",
-                asset_id = profile.asset_id.as_deref().unwrap_or(""),
-                host = profile.host.as_str(),
-                port = profile.port,
-                "ssh probe succeeded, opening workspace session"
-            );
             open_session_with_profile(state, bridge, profile.clone(), mode).inspect_err(|err| {
                 show_failed_session_tab(state, &profile, err.to_string());
             })
         }
         Err(err) => {
             if let Some(unknown) = err.downcast_ref::<UnknownHostKeyError>() {
-                tracing::info!(
-                    target: "app.ssh",
-                    host = unknown.host.as_str(),
-                    port = unknown.port,
-                    fingerprint = unknown.fingerprint.as_str(),
-                    "ssh open requires host key confirmation"
-                );
                 prompt_unknown_host_key(
                     state,
                     pending_host_key_approval,
@@ -1232,12 +1149,6 @@ fn activate_asset(
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
     asset_id: &str,
 ) {
-    tracing::info!(
-        target: "app.ssh",
-        asset_id = asset_id,
-        asset_kind = ?state.console_asset_tree().kind(asset_id),
-        "activating asset"
-    );
     match state.console_asset_tree().kind(asset_id) {
         Some(crate::shell::assets::ConsoleAssetKind::Folder) => {
             state.toggle_folder_expanded(asset_id);
@@ -2341,11 +2252,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        tracing::info!(
-            target: "app.ssh",
-            action = action.as_str(),
-            "received ssh modal action request"
-        );
         let accepted = state.begin_ssh_modal_action(action.as_str());
         let pending_action = state.take_pending_ssh_modal_action();
         let mut did_mutate = false;
@@ -2520,13 +2426,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             }
         } else if accepted {
             state.finish_ssh_modal_action_error("SSH modal action did not produce a request.");
-        } else {
-            tracing::info!(
-                target: "app.ssh",
-                action = action.as_str(),
-                validation_message = state.asset_create_modal_validation_message().as_str(),
-                "ssh modal action was rejected before request creation"
-            );
         }
 
         if did_mutate && !catalog_persisted_in_action {
@@ -2700,12 +2599,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         state.select_asset(item_id.as_str());
         let should_activate =
             register_asset_click(&asset_click_tracker_ref, item_id.as_str(), Instant::now());
-        tracing::info!(
-            target: "app.ssh",
-            asset_id = item_id.as_str(),
-            should_activate,
-            "asset selected from explorer"
-        );
         if should_activate {
             pending_double_click_activation_ref
                 .borrow_mut()
@@ -2742,12 +2635,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             .as_ref()
             .map(|asset_id| asset_id == item_id.as_str())
             .unwrap_or(false);
-        tracing::info!(
-            target: "app.ssh",
-            asset_id = item_id.as_str(),
-            skip_duplicate,
-            "asset activated from explorer"
-        );
         pending_double_click_activation_ref.borrow_mut().take();
         if !skip_duplicate {
             activate_asset(
@@ -2826,11 +2713,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 match action_id.as_str() {
                     "open-connection" => {
                         let target_asset_id = state.context_target_asset_id.clone();
-                        tracing::info!(
-                            target: "app.ssh",
-                            asset_id = target_asset_id.as_deref().unwrap_or(""),
-                            "opening ssh asset from context menu"
-                        );
                         state.close_context_menu();
                         if let Some(asset_id) = target_asset_id {
                             activate_asset(
@@ -2843,11 +2725,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     }
                     "open-in-new-tab" => {
                         let target_asset_id = state.context_target_asset_id.clone();
-                        tracing::info!(
-                            target: "app.ssh",
-                            asset_id = target_asset_id.as_deref().unwrap_or(""),
-                            "opening ssh asset in a new tab from context menu"
-                        );
                         state.close_context_menu();
                         if let Some(asset_id) = target_asset_id {
                             match profile_for_saved_asset(&state, &asset_id) {

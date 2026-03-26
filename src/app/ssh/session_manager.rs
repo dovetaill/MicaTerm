@@ -91,13 +91,6 @@ impl SessionManager {
             if let Some(existing_id) = registry.asset_sessions.get(&asset_id)
                 && let Some(existing) = registry.sessions.get(existing_id)
             {
-                tracing::info!(
-                    target: "app.ssh",
-                    session_id = existing.session_id.to_string(),
-                    asset_id = asset_id.as_str(),
-                    mode = ?mode,
-                    "session manager reused existing session handle"
-                );
                 return Ok(existing.clone());
             }
         }
@@ -118,17 +111,6 @@ impl SessionManager {
             registry.sessions.insert(session_id, handle.clone());
             registry.open_order.push(session_id);
         }
-
-        tracing::info!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            asset_id = handle.asset_id.as_str(),
-            host = profile.host.as_str(),
-            user = profile.user.as_str(),
-            port = profile.port,
-            mode = ?mode,
-            "session manager registered new session handle"
-        );
 
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let registry_for_events = Arc::clone(&self.registry);
@@ -187,18 +169,9 @@ impl SessionManager {
     }
 
     pub fn probe_connection(&self, profile: ConnectionProfile) -> Result<()> {
-        tracing::info!(
-            target: "app.ssh",
-            asset_id = profile.asset_id.as_deref().unwrap_or(""),
-            profile_name = profile.name.as_str(),
-            host = profile.host.as_str(),
-            user = profile.user.as_str(),
-            port = profile.port,
-            "session manager probing ssh connection"
-        );
         let result = self.runtime_handle.block_on(self.launcher.probe(profile));
         match &result {
-            Ok(()) => tracing::info!(target: "app.ssh", "session manager probe completed"),
+            Ok(()) => {}
             Err(error) => tracing::error!(
                 target: "app.ssh",
                 error = %error,
@@ -312,19 +285,9 @@ fn apply_runtime_event(
 ) {
     match event {
         SessionRuntimeEvent::Connected => {
-            tracing::info!(
-                target: "app.ssh",
-                session_id = session_id.to_string(),
-                "session manager received connected event"
-            );
             update_session(registry, session_id, SessionState::Connected, false);
         }
         SessionRuntimeEvent::Disconnected => {
-            tracing::info!(
-                target: "app.ssh",
-                session_id = session_id.to_string(),
-                "session manager received disconnected event"
-            );
             clear_runtime_control(registry, session_id);
             update_session(registry, session_id, SessionState::Disconnected, true);
         }
@@ -339,12 +302,6 @@ fn apply_runtime_event(
             update_session(registry, session_id, SessionState::Error(message), true);
         }
         SessionRuntimeEvent::SurfaceChanged(surface) => {
-            tracing::info!(
-                target: "app.ssh",
-                session_id = session_id.to_string(),
-                seqno = surface.seqno,
-                "session manager received terminal surface update"
-            );
             update_terminal_surface(registry, session_id, surface);
         }
     }

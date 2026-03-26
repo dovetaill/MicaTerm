@@ -465,18 +465,6 @@ fn sample_logging_root(label: &str) -> std::path::PathBuf {
         .join(format!("{label}-{}", uuid::Uuid::new_v4()))
 }
 
-fn read_log_file_until_contains(path: &std::path::Path, expected: &[&str]) -> String {
-    let mut latest = String::new();
-    for _ in 0..20 {
-        latest = fs::read_to_string(path).unwrap_or_default();
-        if expected.iter().all(|needle| latest.contains(needle)) {
-            return latest;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    latest
-}
-
 fn create_root_ssh(app: &AppWindow, name: &str, host: &str) -> String {
     app.invoke_assets_create_action_selected("new-ssh-connection".into());
     app.invoke_asset_ssh_modal_draft_changed("name".into(), name.into());
@@ -1364,7 +1352,7 @@ fn test_connection_updates_feedback_without_creating_workspace_tab() {
 }
 
 #[test]
-fn asset_activation_emits_layered_ssh_open_logs() {
+fn asset_activation_omits_internal_ssh_runtime_logs() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -1391,27 +1379,35 @@ fn asset_activation_emits_layered_ssh_open_logs() {
 
     drop(runtime.guard);
 
-    let log_content = read_log_file_until_contains(
-        &paths.logs_dir.join("system-error.log"),
-        &[
-            "asset activated from explorer",
-            "activating asset",
-            "attempting to open ssh session after probe gate",
-            "session manager registered new session handle",
-            "synchronized workspace projection from session manager",
-        ],
-    );
-    assert!(log_content.contains("asset activated from explorer"));
-    assert!(log_content.contains("activating asset"));
-    assert!(log_content.contains("attempting to open ssh session after probe gate"));
-    assert!(log_content.contains("session manager registered new session handle"));
-    assert!(log_content.contains("synchronized workspace projection from session manager"));
+    let log_content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
+    assert!(!log_content.contains("asset activated from explorer"));
+    assert!(!log_content.contains("activating asset"));
+    assert!(!log_content.contains("attempting to open ssh session after probe gate"));
+    assert!(!log_content.contains("reusing existing workspace tab for activated ssh asset"));
+    assert!(!log_content.contains("ssh probe succeeded, opening workspace session"));
+    assert!(!log_content.contains("session manager registered new session handle"));
+    assert!(!log_content.contains("session manager reused existing session handle"));
+    assert!(!log_content.contains("resolved saved ssh asset profile inputs"));
+    assert!(!log_content.contains("session manager probing ssh connection"));
+    assert!(!log_content.contains("starting ssh runtime connection"));
+    assert!(!log_content.contains("ssh runtime established transport connection"));
+    assert!(!log_content.contains("authenticating ssh client"));
+    assert!(!log_content.contains("loading stored ssh secret bundle"));
+    assert!(!log_content.contains("ssh runtime completed authentication"));
+    assert!(!log_content.contains("ssh runtime opened session channel"));
+    assert!(!log_content.contains("ssh runtime negotiated pty"));
+    assert!(!log_content.contains("ssh runtime requested remote shell"));
+    assert!(!log_content.contains("session manager probe completed"));
+    assert!(!log_content.contains("session manager received connected event"));
+    assert!(!log_content.contains("session manager received disconnected event"));
+    assert!(!log_content.contains("session manager received terminal surface update"));
+    assert!(!log_content.contains("synchronized workspace projection from session manager"));
 
     let _ = fs::remove_dir_all(temp_root);
 }
 
 #[test]
-fn context_menu_open_emits_explicit_ssh_open_logs() {
+fn context_menu_open_omits_ssh_action_logs() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -1440,8 +1436,12 @@ fn context_menu_open_emits_explicit_ssh_open_logs() {
     drop(runtime.guard);
 
     let log_content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
-    assert!(log_content.contains("opening ssh asset from context menu"));
-    assert!(log_content.contains("session manager registered new session handle"));
+    assert!(!log_content.contains("opening ssh asset from context menu"));
+    assert!(!log_content.contains("opening ssh asset in a new tab from context menu"));
+    assert!(!log_content.contains("activating asset"));
+    assert!(!log_content.contains("attempting to open ssh session after probe gate"));
+    assert!(!log_content.contains("ssh probe succeeded, opening workspace session"));
+    assert!(!log_content.contains("session manager registered new session handle"));
 
     let _ = fs::remove_dir_all(temp_root);
 }
