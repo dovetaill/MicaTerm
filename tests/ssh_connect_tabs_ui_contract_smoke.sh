@@ -19,13 +19,20 @@ grep -F 'callback workspace-session-text-input(string);' "$APP_WINDOW" >/dev/nul
 grep -F 'callback workspace-session-key-input(string, bool, bool, bool);' "$APP_WINDOW" >/dev/null
 grep -F 'callback workspace-session-resize-requested(int, int);' "$APP_WINDOW" >/dev/null
 ! grep -F 'width: 216px;' "$TABBAR" >/dev/null
-! grep -F 'horizontal-stretch: 1;' "$TABBAR" >/dev/null
+grep -F 'for item in root.items : ActiveTab {' "$TABBAR" >/dev/null
+grep -F 'horizontal-stretch: 0;' "$TABBAR" >/dev/null
+grep -F 'trailing-spacer := Rectangle {' "$TABBAR" >/dev/null
+grep -F 'background: ThemeTokens.titlebar-surface;' "$TABBAR" >/dev/null
 grep -F 'min-width: 0px;' "$ACTIVE_TAB" >/dev/null
 grep -F 'callback close-requested();' "$ACTIVE_TAB" >/dev/null
 grep -F 'overflow: elide;' "$ACTIVE_TAB" >/dev/null
 ! grep -F 'text: root.subtitle;' "$ACTIVE_TAB" >/dev/null
+grep -F '@image-url("../../assets/icons/fluent/dismiss-20-regular.svg")' "$ACTIVE_TAB" >/dev/null
+! grep -F 'text: "×";' "$ACTIVE_TAB" >/dev/null
+! grep -F 'background: root.active ? ThemeTokens.accent : transparent;' "$ACTIVE_TAB" >/dev/null
 grep -F 'content-hit-target := TouchArea {' "$ACTIVE_TAB" >/dev/null
 grep -F 'close-hit-target := TouchArea {' "$ACTIVE_TAB" >/dev/null
+grep -F 'close-visible' "$ACTIVE_TAB" >/dev/null
 grep -F 'connecting' "$TABBAR" >/dev/null
 grep -F 'error' "$TABBAR" >/dev/null
 grep -F 'export component TerminalSessionHost inherits Rectangle {' "$WORKSPACE_HOST" >/dev/null

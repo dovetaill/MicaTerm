@@ -19,21 +19,21 @@ export component TabBar inherits Rectangle {
 
     width: 100%;
     min-width: 0px;
-    height: 38px;
-    background: transparent;
-    border-width: 1px;
-    border-color: ThemeTokens.divider-subtle;
+    height: 36px;
+    background: ThemeTokens.titlebar-surface;
+    border-width: 0px;
 
     HorizontalLayout {
         width: parent.width;
         height: parent.height;
         padding-left: 12px;
-        padding-right: 12px;
-        padding-top: 5px;
-        padding-bottom: 5px;
-        spacing: 8px;
+        padding-right: 0px;
+        padding-top: 0px;
+        padding-bottom: 0px;
+        spacing: 0px;
 
         for item in root.items : ActiveTab {
+            horizontal-stretch: 0;
             min-width: 0px;
             title: item.title;
             subtitle: item.subtitle;
@@ -46,6 +46,20 @@ export component TabBar inherits Rectangle {
 
             close-requested => {
                 root.tab-close-requested(item.session_id);
+            }
+        }
+
+        trailing-spacer := Rectangle {
+            min-width: 0px;
+            horizontal-stretch: 1;
+            background: transparent;
+
+            Rectangle {
+                x: 0px;
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
             }
         }
     }

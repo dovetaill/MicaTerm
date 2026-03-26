@@ -251,7 +251,15 @@ fn close_affordance_is_modeled_separately_from_select_action() {
         "ActiveTab should expose a dedicated close callback"
     );
     assert!(
-        active_tab.contains("clicked => { root.close-requested(); }"),
+        active_tab.contains("@image-url(\"../../assets/icons/fluent/dismiss-20-regular.svg\")"),
+        "close affordance should use the shared Fluent dismiss icon instead of a text glyph"
+    );
+    assert!(
+        !active_tab.contains("text: \"×\";"),
+        "close affordance should be rendered as a real icon button instead of a text x"
+    );
+    assert!(
+        active_tab.contains("root.close-requested();"),
         "close affordance should be wired independently instead of relying on the root select action"
     );
 }
@@ -287,6 +295,14 @@ fn active_tab_layout_preserves_close_hit_target_and_elides_text() {
         "close affordance should use a dedicated hit target"
     );
     assert!(
+        active_tab.contains("close-visible"),
+        "tab chrome should explicitly model when the close button is visible"
+    );
+    assert!(
+        !active_tab.contains("background: root.active ? ThemeTokens.accent : transparent;"),
+        "VS Code-like tabs should rely on surface contrast instead of a browser-style accent strip"
+    );
+    assert!(
         !tabbar.contains("width: 216px;"),
         "tab strip should not hard-code a fixed tab width"
     );
@@ -299,8 +315,20 @@ fn tabbar_sizes_workspace_tabs_from_title_content_instead_of_even_stretch() {
         fs::read_to_string("ui/components/active-tab.slint").expect("read active tab component");
 
     assert!(
-        !tabbar.contains("horizontal-stretch: 1;"),
-        "workspace tabs should size from their content instead of stretching evenly across the row"
+        tabbar.contains("for item in root.items : ActiveTab {\n            horizontal-stretch: 0;"),
+        "workspace tabs should explicitly opt out of stretch layout inside the repeated tab row"
+    );
+    assert!(
+        tabbar.contains("horizontal-stretch: 0;"),
+        "workspace tabs should explicitly opt out of stretch layout so a single tab does not fill the row"
+    );
+    assert!(
+        tabbar.contains("trailing-spacer := Rectangle {"),
+        "tab row should keep unused width in a trailing spacer instead of stretching the last tab"
+    );
+    assert!(
+        tabbar.contains("background: ThemeTokens.titlebar-surface;"),
+        "tab strip should sit on the titlebar-like surface instead of the plain editor surface"
     );
     assert!(
         active_tab.contains("preferred-width"),

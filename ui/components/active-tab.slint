@@ -12,14 +12,22 @@ export component ActiveTab inherits Rectangle {
 
     in property <length> min-chip-width: 120px;
     in property <length> max-chip-width: 220px;
+    private property <image> close-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
+    out property <bool> has-hover: content-hit-target.has-hover || close-hit-target.has-hover;
+    private property <bool> close-visible: root.active || root.has-hover;
 
     min-width: 0px;
-    height: 28px;
+    height: 30px;
     preferred-width: min(root.max-chip-width, max(root.min-chip-width, title-metric.preferred-width + 62px));
     border-radius: 0px;
-    border-width: 1px;
-    border-color: root.active ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-    background: root.active ? ThemeTokens.control-active-surface : ThemeTokens.control-hover-surface;
+    border-width: 0px;
+    background: root.active
+        ? ThemeTokens.workspace-surface
+        : (content-hit-target.pressed || close-hit-target.pressed)
+            ? ThemeTokens.control-pressed-surface
+            : root.has-hover
+                ? ThemeTokens.control-hover-surface
+                : transparent;
     clip: true;
 
     title-metric := Text {
@@ -34,36 +42,59 @@ export component ActiveTab inherits Rectangle {
     }
 
     state-dot := Rectangle {
-        x: 10px;
+        x: 8px;
         y: (parent.height - self.height) / 2;
-        width: 6px;
-        height: 6px;
-        border-radius: 3px;
+        width: 2px;
+        height: 14px;
+        border-radius: 1px;
         background: root.state == "error" || root.state == "disconnected" ? #c94f4f :
                     root.state == "connecting" ? ThemeTokens.accent : #4da36d;
     }
 
+    bottom-divider := Rectangle {
+        x: 0px;
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: root.active ? transparent : ThemeTokens.divider-subtle;
+    }
+
+    trailing-divider := Rectangle {
+        x: parent.width - 1px;
+        y: 8px;
+        width: 1px;
+        height: parent.height - 16px;
+        background: root.active || root.has-hover ? transparent : ThemeTokens.divider-subtle;
+    }
+
     close-button := Rectangle {
         x: parent.width - self.width - 4px;
-        y: 2px;
+        y: 3px;
         width: 24px;
         height: 24px;
-        background: transparent;
+        border-radius: 4px;
+        background: close-hit-target.pressed
+            ? ThemeTokens.control-pressed-surface
+            : close-hit-target.has-hover
+                ? ThemeTokens.control-hover-surface
+                : transparent;
+        opacity: root.close-visible ? 1 : 0;
 
-        Text {
-            text: "×";
-            width: parent.width;
-            height: parent.height;
-            color: ThemeTokens.dark-mode ? #aeb8c7 : #516174;
-            horizontal-alignment: center;
-            vertical-alignment: center;
+        if (root.close-icon.width > 0 && root.close-icon.height > 0) : Image {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 14px;
+            height: 14px;
+            source <=> root.close-icon;
+            image-fit: contain;
+            colorize: ThemeTokens.text-primary;
         }
     }
 
     title-label := Text {
-        x: 26px;
+        x: 18px;
         y: 0px;
-        width: max(0px, close-button.x - 34px);
+        width: max(0px, close-button.x - 24px);
         height: parent.height;
         text: root.title;
         color: ThemeTokens.text-primary;
@@ -74,7 +105,7 @@ export component ActiveTab inherits Rectangle {
     }
 
     content-hit-target := TouchArea {
-        width: close-button.x;
+        width: root.close-visible ? close-button.x : parent.width;
         height: parent.height;
 
         clicked => { root.selected(); }
@@ -85,6 +116,12 @@ export component ActiveTab inherits Rectangle {
         width: parent.width - close-button.x;
         height: parent.height;
 
-        clicked => { root.close-requested(); }
+        clicked => {
+            if root.close-visible {
+                root.close-requested();
+            } else {
+                root.selected();
+            }
+        }
     }
 }
