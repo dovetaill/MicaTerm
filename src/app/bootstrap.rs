@@ -34,8 +34,8 @@ use crate::app::ssh::credentials::{
 use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
 use crate::app::ssh::runtime::{
-    SessionRuntimeEvent, SshSessionRuntime, TerminalMouseButton, TerminalMouseEventKind,
-    TerminalMouseInput, UnknownHostKeyError, encode_named_key_input,
+    SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
+    TerminalMouseEventKind, TerminalMouseInput, UnknownHostKeyError,
     load_optional_stored_secret_bundle, stored_secret_lookup_message,
 };
 use crate::app::ssh::session_manager::{
@@ -924,7 +924,7 @@ fn forward_active_workspace_text_input(
 
     if let Err(err) = bridge
         .manager
-        .send_session_input(session_id, text.as_bytes().to_vec())
+        .send_session_text_input(session_id, text.to_string())
     {
         tracing::error!(
             target: "app.ssh",
@@ -950,22 +950,11 @@ fn forward_active_workspace_key_input(
         return;
     };
 
-    let bytes = match encode_named_key_input(key_name, alt, ctrl, shift) {
-        Ok(Some(bytes)) => bytes,
-        Ok(None) => return,
-        Err(err) => {
-            tracing::error!(
-                target: "app.ssh",
-                session_id = session_id.to_string(),
-                key = key_name,
-                error = %err,
-                "failed to encode workspace terminal key input"
-            );
-            return;
-        }
+    let Some(event) = terminal_key_event(key_name, alt, ctrl, shift) else {
+        return;
     };
 
-    if let Err(err) = bridge.manager.send_session_input(session_id, bytes) {
+    if let Err(err) = bridge.manager.send_session_key_input(session_id, event) {
         tracing::error!(
             target: "app.ssh",
             session_id = session_id.to_string(),
@@ -973,6 +962,37 @@ fn forward_active_workspace_key_input(
             error = %err,
             "failed to forward workspace terminal key input"
         );
+    }
+}
+
+fn terminal_key_event(
+    key_name: &str,
+    alt: bool,
+    ctrl: bool,
+    shift: bool,
+) -> Option<TerminalKeyEvent> {
+    if key_name.chars().count() == 1 {
+        return key_name
+            .chars()
+            .next()
+            .map(|ch| TerminalKeyEvent::character(ch, alt, ctrl, shift));
+    }
+
+    match key_name {
+        "enter" => Some(TerminalKeyEvent::named("enter", alt, ctrl, shift)),
+        "tab" => Some(TerminalKeyEvent::named("tab", alt, ctrl, shift)),
+        "escape" => Some(TerminalKeyEvent::named("escape", alt, ctrl, shift)),
+        "backspace" => Some(TerminalKeyEvent::named("backspace", alt, ctrl, shift)),
+        "delete" => Some(TerminalKeyEvent::named("delete", alt, ctrl, shift)),
+        "up" => Some(TerminalKeyEvent::named("up", alt, ctrl, shift)),
+        "down" => Some(TerminalKeyEvent::named("down", alt, ctrl, shift)),
+        "left" => Some(TerminalKeyEvent::named("left", alt, ctrl, shift)),
+        "right" => Some(TerminalKeyEvent::named("right", alt, ctrl, shift)),
+        "home" => Some(TerminalKeyEvent::named("home", alt, ctrl, shift)),
+        "end" => Some(TerminalKeyEvent::named("end", alt, ctrl, shift)),
+        "page-up" => Some(TerminalKeyEvent::named("page-up", alt, ctrl, shift)),
+        "page-down" => Some(TerminalKeyEvent::named("page-down", alt, ctrl, shift)),
+        _ => None,
     }
 }
 
@@ -1050,10 +1070,24 @@ fn forward_active_workspace_copy_selection(
 }
 
 fn forward_active_workspace_paste(state: &ShellViewModel, bridge: Option<&ShellSessionBridge>) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return;
+    };
     let Some(text) = system_clipboard_text() else {
         return;
     };
-    forward_active_workspace_text_input(state, bridge, &text);
+
+    if let Err(err) = bridge.manager.send_session_paste(session_id, text) {
+        tracing::error!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            error = %err,
+            "failed to forward workspace terminal paste"
+        );
+    }
 }
 
 fn forward_active_workspace_mouse_input(
@@ -1076,6 +1110,79 @@ fn forward_active_workspace_mouse_input(
             col = event.col,
             error = %err,
             "failed to forward workspace terminal mouse input"
+        );
+    }
+}
+
+struct WorkspaceScrollInput {
+    delta_lines: i32,
+    row: i32,
+    col: i32,
+    shift: bool,
+    ctrl: bool,
+    alt: bool,
+}
+
+fn forward_active_workspace_scroll(
+    state: &ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    input: WorkspaceScrollInput,
+) {
+    if input.delta_lines == 0 {
+        return;
+    }
+
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return;
+    };
+
+    let mouse_grabbed = state
+        .active_workspace_terminal_surface()
+        .map(|surface| surface.mouse_grabbed)
+        .unwrap_or(false);
+
+    if mouse_grabbed {
+        let button = if input.delta_lines > 0 {
+            TerminalMouseButton::WheelUp
+        } else {
+            TerminalMouseButton::WheelDown
+        };
+        let event = TerminalMouseInput {
+            kind: TerminalMouseEventKind::Scroll,
+            button,
+            row: input.row.max(0) as u32,
+            col: input.col.max(0) as u32,
+            shift: input.shift,
+            ctrl: input.ctrl,
+            alt: input.alt,
+        };
+        if let Err(err) = bridge.manager.send_session_mouse_input(session_id, event) {
+            tracing::error!(
+                target: "app.ssh",
+                session_id = session_id.to_string(),
+                delta_lines = input.delta_lines,
+                row = input.row,
+                col = input.col,
+                error = %err,
+                "failed to forward workspace terminal wheel input"
+            );
+        }
+        return;
+    }
+
+    if let Err(err) = bridge
+        .manager
+        .scroll_session_viewport(session_id, input.delta_lines)
+    {
+        tracing::error!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            delta_lines = input.delta_lines,
+            error = %err,
+            "failed to update workspace terminal local scrollback"
         );
     }
 }
@@ -2111,6 +2218,17 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     initial_view_model.theme_mode = prefs.theme_mode;
     initial_view_model.is_always_on_top = prefs.always_on_top;
     let view_model = Rc::new(RefCell::new(initial_view_model));
+    if let Some(session_bridge_ref) = session_bridge.as_ref()
+        && let Err(err) = session_bridge_ref
+            .manager
+            .set_theme_mode(view_model.borrow().theme_mode)
+    {
+        tracing::error!(
+            target: "app.ssh",
+            error = %err,
+            "failed to apply initial theme mode to SSH session manager"
+        );
+    }
     let controller = Rc::new(WindowController::new(window));
     let modal_drag_state = Rc::new(RefCell::new(None::<ModalDragState>));
     let pending_host_key_approval = Rc::new(RefCell::new(None::<PendingHostKeyApproval>));
@@ -2186,10 +2304,25 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(&effects);
+    let session_bridge_ref = session_bridge.clone();
     window.on_toggle_theme_mode_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.toggle_theme_mode();
+        if let Some(session_bridge) = session_bridge_ref.as_deref() {
+            if let Err(err) = session_bridge.manager.set_theme_mode(state.theme_mode) {
+                tracing::error!(
+                    target: "app.ssh",
+                    error = %err,
+                    theme_mode = ?state.theme_mode,
+                    "failed to synchronize theme mode into SSH sessions"
+                );
+            }
+            let projection = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+            if projection.tabs_changed || projection.surface_changed {
+                sync_workspace_tabs(&window, &state);
+            }
+        }
         sync_theme_and_window_effects(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
     });
@@ -2830,6 +2963,34 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     let state = Rc::clone(&view_model);
+    let session_bridge_ref = session_bridge.clone();
+    let window_handle = window.as_weak();
+    window.on_workspace_session_scroll_requested(move |delta_lines, row, col, shift, ctrl, alt| {
+        let mut state = state.borrow_mut();
+        forward_active_workspace_scroll(
+            &state,
+            session_bridge_ref.as_deref(),
+            WorkspaceScrollInput {
+                delta_lines,
+                row,
+                col,
+                shift,
+                ctrl,
+                alt,
+            },
+        );
+
+        if let Some(session_bridge) = session_bridge_ref.as_deref() {
+            let projection = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+            if (projection.tabs_changed || projection.surface_changed)
+                && let Some(window) = window_handle.upgrade()
+            {
+                sync_workspace_tabs(&window, &state);
+            }
+        }
+    });
+
+    let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
@@ -3196,7 +3357,7 @@ pub fn run_with_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::ssh::runtime::TerminalSurfaceState;
+    use crate::app::ssh::runtime::{TerminalKeyEvent, TerminalSurfaceState};
     use crate::app::ssh::profile::SshAuthMethod;
     use std::future::Future;
     use std::pin::Pin;
@@ -3214,7 +3375,15 @@ mod tests {
             Ok(())
         }
 
-        fn send_input(&self, _bytes: Vec<u8>) -> Result<()> {
+        fn send_text_input(&self, _text: String) -> Result<()> {
+            Ok(())
+        }
+
+        fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+            Ok(())
+        }
+
+        fn send_paste(&self, _text: String) -> Result<()> {
             Ok(())
         }
 

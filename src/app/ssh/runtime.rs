@@ -12,10 +12,10 @@ use russh::Disconnect;
 use russh::client;
 use russh::client::AuthResult;
 use russh::keys::{self, PrivateKeyWithHashAlg};
-use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers as TermwizModifiers};
+use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers as KeyModifiers};
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use wezterm_term::color::{ColorPalette, ColorAttribute, SrgbaTuple};
+use wezterm_term::color::{ColorPalette, ColorAttribute, RgbColor, SrgbaTuple};
 use wezterm_term::{Line, Terminal, TerminalConfiguration, TerminalSize};
 use wezterm_surface::{CursorShape, CursorVisibility};
 
@@ -26,11 +26,14 @@ use crate::app::ssh::credentials::{
 use crate::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
 use crate::app::ssh::session_manager::SessionRuntimeControl;
+use crate::theme::ThemeMode;
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
 const DEFAULT_TERMINAL_COLS: usize = 80;
 const SSH_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const SSH_KEEPALIVE_MAX_MISSES: usize = 3;
+const FILTERED_EXACT_BANNER: &str =
+    "Activate the web console with: systemctl enable --now cockpit.socket";
 
 fn ssh_client_config() -> client::Config {
     client::Config {
@@ -96,6 +99,7 @@ pub enum TerminalMouseEventKind {
     Down,
     Up,
     Move,
+    Scroll,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,6 +107,8 @@ pub enum TerminalMouseButton {
     Left,
     Middle,
     Right,
+    WheelUp,
+    WheelDown,
     None,
 }
 
@@ -115,6 +121,50 @@ pub struct TerminalMouseInput {
     pub shift: bool,
     pub ctrl: bool,
     pub alt: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalKeyKind {
+    Named(&'static str),
+    Function(u8),
+    Char(char),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalKeyEvent {
+    pub key: TerminalKeyKind,
+    pub alt: bool,
+    pub ctrl: bool,
+    pub shift: bool,
+}
+
+impl TerminalKeyEvent {
+    pub fn named(key_name: &'static str, alt: bool, ctrl: bool, shift: bool) -> Self {
+        Self {
+            key: TerminalKeyKind::Named(key_name),
+            alt,
+            ctrl,
+            shift,
+        }
+    }
+
+    pub fn function(number: u8, alt: bool, ctrl: bool, shift: bool) -> Self {
+        Self {
+            key: TerminalKeyKind::Function(number),
+            alt,
+            ctrl,
+            shift,
+        }
+    }
+
+    pub fn character(ch: char, alt: bool, ctrl: bool, shift: bool) -> Self {
+        Self {
+            key: TerminalKeyKind::Char(ch),
+            alt,
+            ctrl,
+            shift,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,8 +205,10 @@ impl StdError for UnknownHostKeyError {}
 
 #[derive(Debug)]
 enum RuntimeCommand {
-    Input(Vec<u8>),
+    TextInput(String),
+    KeyInput(TerminalKeyEvent),
     MouseInput(TerminalMouseInput),
+    Paste(String),
     Resize { rows: u32, cols: u32 },
     Disconnect,
 }
@@ -300,10 +352,16 @@ impl SshSessionRuntime {
         Arc::clone(&self.terminal)
     }
 
-    pub fn send_input(&self, bytes: Vec<u8>) -> Result<()> {
+    pub fn send_text_input(&self, text: String) -> Result<()> {
         self.command_tx
-            .send(RuntimeCommand::Input(bytes))
-            .map_err(|_| anyhow!("ssh runtime input channel is closed"))
+            .send(RuntimeCommand::TextInput(text))
+            .map_err(|_| anyhow!("ssh runtime text input channel is closed"))
+    }
+
+    pub fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()> {
+        self.command_tx
+            .send(RuntimeCommand::KeyInput(event))
+            .map_err(|_| anyhow!("ssh runtime key input channel is closed"))
     }
 
     pub fn resize(&self, rows: u32, cols: u32) -> Result<()> {
@@ -318,6 +376,30 @@ impl SshSessionRuntime {
             .map_err(|_| anyhow!("ssh runtime mouse input channel is closed"))
     }
 
+    pub fn send_paste(&self, text: String) -> Result<()> {
+        self.command_tx
+            .send(RuntimeCommand::Paste(text))
+            .map_err(|_| anyhow!("ssh runtime paste channel is closed"))
+    }
+
+    pub fn update_theme_mode(&self, mode: ThemeMode) -> Result<TerminalSurfaceState> {
+        let mut terminal = self
+            .terminal
+            .lock()
+            .map_err(|_| anyhow!("failed to lock terminal for theme update"))?;
+        terminal.set_theme_mode(mode);
+        Ok(terminal.surface_state(self.session_id))
+    }
+
+    pub fn scroll_viewport_lines(&self, delta: i32) -> Result<TerminalSurfaceState> {
+        let mut terminal = self
+            .terminal
+            .lock()
+            .map_err(|_| anyhow!("failed to lock terminal for local scrollback"))?;
+        terminal.scroll_viewport_lines(delta);
+        Ok(terminal.surface_state(self.session_id))
+    }
+
     pub fn disconnect(&self) -> Result<()> {
         self.command_tx
             .send(RuntimeCommand::Disconnect)
@@ -330,8 +412,12 @@ impl SessionRuntimeControl for SshSessionRuntime {
         SshSessionRuntime::disconnect(self)
     }
 
-    fn send_input(&self, bytes: Vec<u8>) -> Result<()> {
-        SshSessionRuntime::send_input(self, bytes)
+    fn send_text_input(&self, text: String) -> Result<()> {
+        SshSessionRuntime::send_text_input(self, text)
+    }
+
+    fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()> {
+        SshSessionRuntime::send_key_input(self, event)
     }
 
     fn resize(&self, rows: u32, cols: u32) -> Result<()> {
@@ -340,6 +426,18 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
     fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()> {
         SshSessionRuntime::send_mouse_input(self, event)
+    }
+
+    fn send_paste(&self, text: String) -> Result<()> {
+        SshSessionRuntime::send_paste(self, text)
+    }
+
+    fn update_theme_mode(&self, mode: ThemeMode) -> Result<Option<TerminalSurfaceState>> {
+        SshSessionRuntime::update_theme_mode(self, mode).map(Some)
+    }
+
+    fn scroll_viewport_lines(&self, delta: i32) -> Result<TerminalSurfaceState> {
+        SshSessionRuntime::scroll_viewport_lines(self, delta)
     }
 }
 
@@ -622,10 +720,40 @@ async fn run_channel_pump(
         tokio::select! {
             maybe_command = command_rx.recv(), if command_channel_open => {
                 match maybe_command {
-                    Some(RuntimeCommand::Input(bytes)) => {
+                    Some(RuntimeCommand::TextInput(text)) => {
+                        let bytes = text.into_bytes();
                         if let Err(bytes) = handle.data(channel.id(), bytes).await {
                             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
                                 "failed to write {} bytes to SSH channel",
+                                bytes.len()
+                            )));
+                            break;
+                        }
+                    }
+                    Some(RuntimeCommand::KeyInput(event)) => {
+                        let bytes = match terminal.lock() {
+                            Ok(mut terminal) => match terminal.send_key_event(event) {
+                                Ok(bytes) => bytes,
+                                Err(err) => {
+                                    let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                        "failed to encode key input for SSH channel: {err}"
+                                    )));
+                                    break;
+                                }
+                            },
+                            Err(_) => {
+                                let _ = event_tx.send(SessionRuntimeEvent::Error(
+                                    "failed to lock terminal for key input".into()
+                                ));
+                                break;
+                            }
+                        };
+                        if bytes.is_empty() {
+                            continue;
+                        }
+                        if let Err(bytes) = handle.data(channel.id(), bytes).await {
+                            let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                "failed to write {} key bytes to SSH channel",
                                 bytes.len()
                             )));
                             break;
@@ -655,6 +783,35 @@ async fn run_channel_pump(
                         if let Err(bytes) = handle.data(channel.id(), bytes).await {
                             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
                                 "failed to write {} mouse bytes to SSH channel",
+                                bytes.len()
+                            )));
+                            break;
+                        }
+                    }
+                    Some(RuntimeCommand::Paste(text)) => {
+                        let bytes = match terminal.lock() {
+                            Ok(mut terminal) => match terminal.encode_paste(&text) {
+                                Ok(bytes) => bytes,
+                                Err(err) => {
+                                    let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                        "failed to encode paste for SSH channel: {err}"
+                                    )));
+                                    break;
+                                }
+                            },
+                            Err(_) => {
+                                let _ = event_tx.send(SessionRuntimeEvent::Error(
+                                    "failed to lock terminal for paste".into()
+                                ));
+                                break;
+                            }
+                        };
+                        if bytes.is_empty() {
+                            continue;
+                        }
+                        if let Err(bytes) = handle.data(channel.id(), bytes).await {
+                            let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                "failed to write {} paste bytes to SSH channel",
                                 bytes.len()
                             )));
                             break;
@@ -734,13 +891,18 @@ fn snapshot_terminal_surface(
 
 pub struct TerminalSession {
     terminal: Terminal,
+    config: Arc<SessionTerminalConfig>,
     writer: SharedWriteBuffer,
     fallback_mouse_button: Option<TerminalMouseButton>,
+    pending_remote_line_buffer: PendingRemoteLineBuffer,
+    keyboard_modes: TerminalKeyboardModes,
+    viewport_offset_lines: usize,
 }
 
 impl TerminalSession {
     pub fn new(rows: usize, cols: usize) -> Self {
         let writer = SharedWriteBuffer::default();
+        let config = Arc::new(SessionTerminalConfig::new(ThemeMode::Dark));
         let terminal = Terminal::new(
             TerminalSize {
                 rows,
@@ -749,7 +911,7 @@ impl TerminalSession {
                 pixel_height: rows * 16,
                 dpi: 96,
             },
-            Arc::new(SessionTerminalConfig),
+            config.clone(),
             "MicaTerm",
             env!("CARGO_PKG_VERSION"),
             Box::new(writer.clone()),
@@ -757,8 +919,12 @@ impl TerminalSession {
 
         Self {
             terminal,
+            config,
             writer,
             fallback_mouse_button: None,
+            pending_remote_line_buffer: PendingRemoteLineBuffer::default(),
+            keyboard_modes: TerminalKeyboardModes::default(),
+            viewport_offset_lines: 0,
         }
     }
 
@@ -767,7 +933,12 @@ impl TerminalSession {
     }
 
     pub fn apply_remote_bytes(&mut self, bytes: &[u8]) {
-        self.terminal.advance_bytes(bytes);
+        self.keyboard_modes.observe(bytes);
+        let filtered = self.pending_remote_line_buffer.push_and_filter(bytes);
+        if !filtered.is_empty() {
+            self.terminal.advance_bytes(&filtered);
+        }
+        self.clamp_viewport_offset();
     }
 
     pub fn screen_text(&self) -> String {
@@ -776,8 +947,7 @@ impl TerminalSession {
 
     pub fn visible_rows(&self) -> Vec<TerminalRowState> {
         let size = self.terminal.get_size();
-        let visible_start = self.terminal.screen().phys_row(0);
-        let visible_end = visible_start + size.rows.max(1);
+        let (visible_start, visible_end) = self.visible_phys_row_bounds();
         let mut rows = Vec::with_capacity(size.rows.max(1));
         self.terminal.screen().for_each_phys_line(|phys_idx, line| {
             if phys_idx < visible_start || phys_idx >= visible_end {
@@ -825,6 +995,7 @@ impl TerminalSession {
             pixel_height: rows.max(1) * 16,
             dpi: 96,
         });
+        self.clamp_viewport_offset();
     }
 
     pub fn surface_state(&self, session_id: Uuid) -> TerminalSurfaceState {
@@ -847,14 +1018,55 @@ impl TerminalSession {
         }
     }
 
-    pub fn send_key_down(&mut self, key: KeyCode, modifiers: TermwizModifiers) -> Result<Vec<u8>> {
+    pub fn send_key_event(&mut self, event: TerminalKeyEvent) -> Result<Vec<u8>> {
+        let key = match event.key {
+            TerminalKeyKind::Named(name) => match named_key_code(name) {
+                Some(key) => key,
+                None => bail!("unsupported named terminal key `{name}`"),
+            },
+            TerminalKeyKind::Function(number) => KeyCode::Function(number),
+            TerminalKeyKind::Char(ch) => KeyCode::Char(ch),
+        };
+
+        self.send_key_down(key, key_modifiers(event.alt, event.ctrl, event.shift))
+    }
+
+    pub fn encode_paste(&mut self, text: &str) -> Result<Vec<u8>> {
+        let sanitized = text.replace("\x1b[200~", "").replace("\x1b[201~", "");
+        if self.terminal.bracketed_paste_enabled() {
+            Ok(format!("\x1b[200~{sanitized}\x1b[201~").into_bytes())
+        } else {
+            Ok(sanitized.into_bytes())
+        }
+    }
+
+    pub fn scroll_viewport_lines(&mut self, delta: i32) {
+        if delta > 0 {
+            self.viewport_offset_lines = self
+                .viewport_offset_lines
+                .saturating_add(delta as usize);
+        } else if delta < 0 {
+            self.viewport_offset_lines = self
+                .viewport_offset_lines
+                .saturating_sub(delta.unsigned_abs() as usize);
+        }
+        self.clamp_viewport_offset();
+    }
+
+    pub fn set_theme_mode(&mut self, mode: ThemeMode) {
+        if self.config.set_theme_mode(mode) {
+            self.terminal.increment_seqno();
+        }
+    }
+
+    pub fn send_key_down(&mut self, key: KeyCode, modifiers: KeyModifiers) -> Result<Vec<u8>> {
         let encoded = key.encode(
             modifiers,
             KeyCodeEncodeModes {
                 encoding: KeyboardEncoding::Xterm,
                 newline_mode: false,
-                application_cursor_keys: false,
-                modify_other_keys: None,
+                application_cursor_keys: self.keyboard_modes.application_cursor_keys,
+                modify_other_keys: self.keyboard_modes.modify_other_keys,
             },
             true,
         )?;
@@ -874,6 +1086,7 @@ impl TerminalSession {
                 TerminalMouseEventKind::Down => wezterm_term::MouseEventKind::Press,
                 TerminalMouseEventKind::Up => wezterm_term::MouseEventKind::Release,
                 TerminalMouseEventKind::Move => wezterm_term::MouseEventKind::Move,
+                TerminalMouseEventKind::Scroll => wezterm_term::MouseEventKind::Press,
             },
             x: event.col as usize,
             y: event.row as i64,
@@ -883,6 +1096,8 @@ impl TerminalSession {
                 TerminalMouseButton::Left => wezterm_term::MouseButton::Left,
                 TerminalMouseButton::Middle => wezterm_term::MouseButton::Middle,
                 TerminalMouseButton::Right => wezterm_term::MouseButton::Right,
+                TerminalMouseButton::WheelUp => wezterm_term::MouseButton::WheelUp(1),
+                TerminalMouseButton::WheelDown => wezterm_term::MouseButton::WheelDown(1),
                 TerminalMouseButton::None => wezterm_term::MouseButton::None,
             },
             modifiers: mouse_modifiers(event),
@@ -892,7 +1107,11 @@ impl TerminalSession {
         if !self.terminal.is_mouse_grabbed() {
             return Ok(bytes);
         }
-        if matches!(event.kind, TerminalMouseEventKind::Down) && !bytes.is_empty() {
+        if matches!(
+            event.kind,
+            TerminalMouseEventKind::Down | TerminalMouseEventKind::Scroll
+        ) && !bytes.is_empty()
+        {
             return Ok(bytes);
         }
 
@@ -901,8 +1120,7 @@ impl TerminalSession {
 
     fn visible_cells(&self, palette: &ColorPalette) -> Vec<TerminalCellState> {
         let size = self.terminal.get_size();
-        let visible_start = self.terminal.screen().phys_row(0);
-        let visible_end = visible_start + size.rows.max(1);
+        let (visible_start, visible_end) = self.visible_phys_row_bounds();
         let mut cells = Vec::new();
 
         self.terminal.screen().for_each_phys_line(|phys_idx, line| {
@@ -933,10 +1151,15 @@ impl TerminalSession {
 
     fn cursor_state(&self, palette: &ColorPalette) -> TerminalCursorState {
         let cursor = self.terminal.cursor_pos();
+        let (visible_start, visible_end) = self.visible_phys_row_bounds();
+        let cursor_phys = self.terminal.screen().phys_row(cursor.y);
+        let cursor_visible = matches!(cursor.visibility, CursorVisibility::Visible)
+            && cursor_phys >= visible_start
+            && cursor_phys < visible_end;
         TerminalCursorState {
-            row: cursor.y.max(0) as u32,
+            row: cursor_phys.saturating_sub(visible_start) as u32,
             col: cursor.x as u32,
-            visible: matches!(cursor.visibility, CursorVisibility::Visible),
+            visible: cursor_visible,
             blinking: cursor_shape_blinks(cursor.shape),
             shape: project_cursor_shape(cursor.shape),
             fg_rgba: pack_color(palette.cursor_fg),
@@ -974,6 +1197,105 @@ impl TerminalSession {
                 self.fallback_mouse_button = None;
                 effective
             }
+            TerminalMouseEventKind::Scroll => event.button,
+        }
+    }
+
+    fn visible_phys_row_bounds(&self) -> (usize, usize) {
+        let size = self.terminal.get_size();
+        let visible_rows = size.rows.max(1);
+        let visible_start = self
+            .terminal
+            .screen()
+            .scrollback_or_visible_row(-(self.viewport_offset_lines as i32));
+        let visible_end = visible_start.saturating_add(visible_rows);
+        (visible_start, visible_end)
+    }
+
+    fn max_viewport_offset_lines(&self) -> usize {
+        let size = self.terminal.get_size();
+        self.terminal
+            .screen()
+            .scrollback_rows()
+            .saturating_sub(size.rows.max(1))
+    }
+
+    fn clamp_viewport_offset(&mut self) {
+        self.viewport_offset_lines = self
+            .viewport_offset_lines
+            .min(self.max_viewport_offset_lines());
+    }
+}
+
+#[derive(Debug, Default)]
+struct PendingRemoteLineBuffer {
+    bytes: Vec<u8>,
+    passthrough_until_newline: bool,
+}
+
+impl PendingRemoteLineBuffer {
+    fn push_and_filter(&mut self, incoming: &[u8]) -> Vec<u8> {
+        let mut forwarded = Vec::with_capacity(incoming.len());
+
+        for &byte in incoming {
+            if self.passthrough_until_newline {
+                forwarded.push(byte);
+                if byte == b'\n' {
+                    self.passthrough_until_newline = false;
+                }
+                continue;
+            }
+
+            self.bytes.push(byte);
+            if byte == b'\n' {
+                if !matches_filtered_exact_banner(&self.bytes) {
+                    forwarded.extend_from_slice(&self.bytes);
+                }
+                self.bytes.clear();
+                continue;
+            }
+
+            if !matches_filtered_banner_prefix(&self.bytes) {
+                forwarded.extend_from_slice(&self.bytes);
+                self.bytes.clear();
+                self.passthrough_until_newline = true;
+            }
+        }
+
+        forwarded
+    }
+}
+
+#[derive(Debug, Default)]
+struct TerminalKeyboardModes {
+    application_cursor_keys: bool,
+    modify_other_keys: Option<i64>,
+    trailing_bytes: Vec<u8>,
+}
+
+impl TerminalKeyboardModes {
+    fn observe(&mut self, incoming: &[u8]) {
+        let mut observed = Vec::with_capacity(self.trailing_bytes.len() + incoming.len());
+        observed.extend_from_slice(&self.trailing_bytes);
+        observed.extend_from_slice(incoming);
+
+        for index in 0..observed.len() {
+            let remaining = &observed[index..];
+            if remaining.starts_with(b"\x1b[?1h") {
+                self.application_cursor_keys = true;
+                continue;
+            }
+            if remaining.starts_with(b"\x1b[?1l") {
+                self.application_cursor_keys = false;
+                continue;
+            }
+        }
+
+        const MAX_TRAILING_BYTES: usize = 8;
+        if observed.len() <= MAX_TRAILING_BYTES {
+            self.trailing_bytes = observed;
+        } else {
+            self.trailing_bytes = observed[observed.len() - MAX_TRAILING_BYTES..].to_vec();
         }
     }
 }
@@ -1063,46 +1385,139 @@ pub fn encode_named_key_input(
     ctrl: bool,
     shift: bool,
 ) -> Result<Option<Vec<u8>>> {
-    let key = match key_name {
-        "enter" => KeyCode::Enter,
-        "tab" => KeyCode::Tab,
-        "escape" => KeyCode::Escape,
-        "backspace" => KeyCode::Backspace,
-        "delete" => KeyCode::Delete,
-        "up" => KeyCode::UpArrow,
-        "down" => KeyCode::DownArrow,
-        "left" => KeyCode::LeftArrow,
-        "right" => KeyCode::RightArrow,
-        "home" => KeyCode::Home,
-        "end" => KeyCode::End,
-        "page-up" => KeyCode::PageUp,
-        "page-down" => KeyCode::PageDown,
-        _ => return Ok(None),
+    let Some(key) = named_key_code(key_name) else {
+        return Ok(None);
     };
 
-    let mut modifiers = TermwizModifiers::NONE;
-    if alt {
-        modifiers |= TermwizModifiers::ALT;
-    }
-    if ctrl {
-        modifiers |= TermwizModifiers::CTRL;
-    }
-    if shift {
-        modifiers |= TermwizModifiers::SHIFT;
-    }
-
     let mut session = TerminalSession::new(DEFAULT_TERMINAL_ROWS, DEFAULT_TERMINAL_COLS);
-    let bytes = session.send_key_down(key, modifiers)?;
+    let bytes = session.send_key_down(key, key_modifiers(alt, ctrl, shift))?;
     Ok(Some(bytes))
 }
 
-#[derive(Debug, Default)]
-struct SessionTerminalConfig;
+#[derive(Debug)]
+struct SessionTerminalConfig {
+    state: Mutex<SessionTerminalConfigState>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SessionTerminalConfigState {
+    theme_mode: ThemeMode,
+    generation: usize,
+}
+
+impl SessionTerminalConfig {
+    fn new(theme_mode: ThemeMode) -> Self {
+        Self {
+            state: Mutex::new(SessionTerminalConfigState {
+                theme_mode,
+                generation: 0,
+            }),
+        }
+    }
+
+    fn set_theme_mode(&self, theme_mode: ThemeMode) -> bool {
+        let mut state = self.state.lock().expect("lock session terminal config");
+        if state.theme_mode == theme_mode {
+            return false;
+        }
+        state.theme_mode = theme_mode;
+        state.generation = state.generation.saturating_add(1);
+        true
+    }
+
+    fn theme_mode(&self) -> ThemeMode {
+        self.state
+            .lock()
+            .expect("lock session terminal config")
+            .theme_mode
+    }
+}
 
 impl TerminalConfiguration for SessionTerminalConfig {
-    fn color_palette(&self) -> ColorPalette {
-        ColorPalette::default()
+    fn generation(&self) -> usize {
+        self.state
+            .lock()
+            .expect("lock session terminal config")
+            .generation
     }
+
+    fn color_palette(&self) -> ColorPalette {
+        build_terminal_color_palette(self.theme_mode())
+    }
+}
+
+fn build_terminal_color_palette(theme_mode: ThemeMode) -> ColorPalette {
+    let mut palette = ColorPalette::default();
+
+    match theme_mode {
+        ThemeMode::Dark => {
+            palette.colors.0[0] = rgb8(0x0b, 0x11, 0x17);
+            palette.colors.0[1] = rgb8(0xf4, 0x70, 0x67);
+            palette.colors.0[2] = rgb8(0x5e, 0xc2, 0x8b);
+            palette.colors.0[3] = rgb8(0xe5, 0xc0, 0x7b);
+            palette.colors.0[4] = rgb8(0x6c, 0xa0, 0xf6);
+            palette.colors.0[5] = rgb8(0xc6, 0x78, 0xdd);
+            palette.colors.0[6] = rgb8(0x56, 0xb6, 0xc2);
+            palette.colors.0[7] = rgb8(0xd7, 0xde, 0xe8);
+            palette.colors.0[8] = rgb8(0x3d, 0x4a, 0x5c);
+            palette.colors.0[9] = rgb8(0xff, 0x8f, 0x88);
+            palette.colors.0[10] = rgb8(0x7e, 0xd6, 0xa3);
+            palette.colors.0[11] = rgb8(0xf1, 0xd4, 0x8a);
+            palette.colors.0[12] = rgb8(0x8c, 0xb4, 0xff);
+            palette.colors.0[13] = rgb8(0xd7, 0x9a, 0xeb);
+            palette.colors.0[14] = rgb8(0x74, 0xc7, 0xd4);
+            palette.colors.0[15] = rgb8(0xf5, 0xf7, 0xfb);
+            palette.foreground = rgb8(0xf5, 0xf7, 0xfb);
+            palette.background = rgb8(0x0b, 0x11, 0x17);
+            palette.cursor_fg = rgb8(0x0b, 0x11, 0x17);
+            palette.cursor_bg = rgb8(0x4e, 0xa1, 0xff);
+            palette.cursor_border = rgb8(0x4e, 0xa1, 0xff);
+            palette.selection_bg = rgba8(0x4e, 0xa1, 0xff, 0.35);
+            palette.scrollbar_thumb = rgb8(0x23, 0x2c, 0x39);
+            palette.split = rgb8(0x2b, 0x38, 0x50);
+        }
+        ThemeMode::Light => {
+            palette.colors.0[0] = rgb8(0xf5, 0xf8, 0xfc);
+            palette.colors.0[1] = rgb8(0xc0, 0x3d, 0x3d);
+            palette.colors.0[2] = rgb8(0x2f, 0x7d, 0x51);
+            palette.colors.0[3] = rgb8(0x9c, 0x6b, 0x17);
+            palette.colors.0[4] = rgb8(0x2f, 0x6f, 0xd6);
+            palette.colors.0[5] = rgb8(0x8d, 0x4b, 0xc7);
+            palette.colors.0[6] = rgb8(0x1e, 0x7e, 0x91);
+            palette.colors.0[7] = rgb8(0x52, 0x5f, 0x70);
+            palette.colors.0[8] = rgb8(0xc6, 0xd0, 0xdd);
+            palette.colors.0[9] = rgb8(0xd0, 0x52, 0x52);
+            palette.colors.0[10] = rgb8(0x3d, 0x8c, 0x5f);
+            palette.colors.0[11] = rgb8(0xb8, 0x84, 0x22);
+            palette.colors.0[12] = rgb8(0x4e, 0x8e, 0xf4);
+            palette.colors.0[13] = rgb8(0x9e, 0x60, 0xd1);
+            palette.colors.0[14] = rgb8(0x2a, 0x94, 0xa8);
+            palette.colors.0[15] = rgb8(0x10, 0x14, 0x18);
+            palette.foreground = rgb8(0x10, 0x14, 0x18);
+            palette.background = rgb8(0xf5, 0xf8, 0xfc);
+            palette.cursor_fg = rgb8(0xf5, 0xf8, 0xfc);
+            palette.cursor_bg = rgb8(0x4e, 0xa1, 0xff);
+            palette.cursor_border = rgb8(0x4e, 0xa1, 0xff);
+            palette.selection_bg = rgba8(0x4e, 0xa1, 0xff, 0.22);
+            palette.scrollbar_thumb = rgb8(0xd8, 0xe6, 0xfb);
+            palette.split = rgb8(0xdc, 0xe7, 0xf7);
+        }
+    }
+
+    palette
+}
+
+fn rgb8(red: u8, green: u8, blue: u8) -> SrgbaTuple {
+    RgbColor::new_8bpc(red, green, blue).into()
+}
+
+fn rgba8(red: u8, green: u8, blue: u8, alpha: f32) -> SrgbaTuple {
+    SrgbaTuple(
+        f32::from(red) / 255.0,
+        f32::from(green) / 255.0,
+        f32::from(blue) / 255.0,
+        alpha,
+    )
 }
 
 fn project_terminal_row(line: &Line, index: u32, cols: usize) -> TerminalRowState {
@@ -1111,6 +1526,53 @@ fn project_terminal_row(line: &Line, index: u32, cols: usize) -> TerminalRowStat
         text: line.columns_as_str(0..cols).trim_end().to_string(),
         wrapped: line.last_cell_was_wrapped(),
     }
+}
+
+fn matches_filtered_exact_banner(bytes: &[u8]) -> bool {
+    normalized_remote_line(bytes) == FILTERED_EXACT_BANNER.as_bytes()
+}
+
+fn matches_filtered_banner_prefix(bytes: &[u8]) -> bool {
+    let normalized = bytes.strip_suffix(b"\r").unwrap_or(bytes);
+    FILTERED_EXACT_BANNER.as_bytes().starts_with(normalized)
+}
+
+fn normalized_remote_line(bytes: &[u8]) -> &[u8] {
+    let bytes = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    bytes.strip_suffix(b"\r").unwrap_or(bytes)
+}
+
+fn named_key_code(key_name: &str) -> Option<KeyCode> {
+    match key_name {
+        "enter" => Some(KeyCode::Enter),
+        "tab" => Some(KeyCode::Tab),
+        "escape" => Some(KeyCode::Escape),
+        "backspace" => Some(KeyCode::Backspace),
+        "delete" => Some(KeyCode::Delete),
+        "up" => Some(KeyCode::UpArrow),
+        "down" => Some(KeyCode::DownArrow),
+        "left" => Some(KeyCode::LeftArrow),
+        "right" => Some(KeyCode::RightArrow),
+        "home" => Some(KeyCode::Home),
+        "end" => Some(KeyCode::End),
+        "page-up" => Some(KeyCode::PageUp),
+        "page-down" => Some(KeyCode::PageDown),
+        _ => None,
+    }
+}
+
+fn key_modifiers(alt: bool, ctrl: bool, shift: bool) -> KeyModifiers {
+    let mut modifiers = KeyModifiers::NONE;
+    if alt {
+        modifiers |= KeyModifiers::ALT;
+    }
+    if ctrl {
+        modifiers |= KeyModifiers::CTRL;
+    }
+    if shift {
+        modifiers |= KeyModifiers::SHIFT;
+    }
+    modifiers
 }
 
 fn resolve_cell_colors(palette: &ColorPalette, attrs: &wezterm_term::CellAttributes) -> (u32, u32) {
@@ -1202,6 +1664,8 @@ fn encode_sgr_mouse_fallback(
         TerminalMouseButton::Left => 0,
         TerminalMouseButton::Middle => 1,
         TerminalMouseButton::Right => 2,
+        TerminalMouseButton::WheelUp => 64,
+        TerminalMouseButton::WheelDown => 65,
         TerminalMouseButton::None => 3,
     };
     if event.shift {

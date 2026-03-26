@@ -76,10 +76,14 @@ export component TerminalSessionHost inherits Rectangle {
     callback surface-resize-requested(int, int);
     callback copy-selection-requested(int, int, int, int);
     callback paste-requested();
+    callback scroll-requested(int, int, int, bool, bool, bool);
     callback mouse-input(string, string, int, int, bool, bool, bool);
 
+    private property <string> terminal-font-family: "Cascadia Mono";
+    private property <length> terminal-font-size: 12px;
     private property <length> terminal-cell-width: 8px;
     private property <length> terminal-cell-height: 16px;
+    private property <length> terminal-cursor-thickness: 2px;
     private property <length> terminal-padding-left: 12px;
     private property <length> terminal-padding-top: 10px;
     private property <length> terminal-padding-right: 12px;
@@ -94,13 +98,49 @@ export component TerminalSessionHost inherits Rectangle {
     private property <length> terminal-context-menu-x: 12px;
     private property <length> terminal-context-menu-y: 12px;
 
+    function terminal-content-width() -> length {
+        return max(0px, root.width - root.terminal-padding-left - root.terminal-padding-right);
+    }
+
+    function terminal-content-height() -> length {
+        return max(0px, root.height - root.terminal-padding-top - root.terminal-padding-bottom);
+    }
+
+    function terminal-grid-width() -> length {
+        return root.session-cols * root.terminal-cell-width;
+    }
+
+    function terminal-grid-height() -> length {
+        return root.session-rows * root.terminal-cell-height;
+    }
+
+    function terminal-cell-x(col: int) -> length {
+        return root.terminal-padding-left + (col * root.terminal-cell-width);
+    }
+
+    function terminal-cell-y(row: int) -> length {
+        return root.terminal-padding-top + (row * root.terminal-cell-height);
+    }
+
+    function terminal-hit-row(pointer-y: length) -> int {
+        return max(0, min(
+            root.session-rows - 1,
+            (((pointer-y - root.terminal-padding-top) / 1px) / (root.terminal-cell-height / 1px)),
+        ));
+    }
+
+    function terminal-hit-col(pointer-x: length) -> int {
+        return max(0, min(
+            root.session-cols - 1,
+            (((pointer-x - root.terminal-padding-left) / 1px) / (root.terminal-cell-width / 1px)),
+        ));
+    }
+
     function emit-surface-resize() {
         if root.mode == "terminal" {
             root.surface-resize-requested(
-                max(1, ((root.height - root.terminal-padding-top - root.terminal-padding-bottom) / 1px)
-                    / (root.terminal-cell-height / 1px)),
-                max(1, ((root.width - root.terminal-padding-left - root.terminal-padding-right) / 1px)
-                    / (root.terminal-cell-width / 1px)),
+                max(1, (root.terminal-content-height() / 1px) / (root.terminal-cell-height / 1px)),
+                max(1, (root.terminal-content-width() / 1px) / (root.terminal-cell-width / 1px)),
             );
         }
     }
@@ -155,20 +195,6 @@ export component TerminalSessionHost inherits Rectangle {
 
     function selection-copy-enabled() -> bool {
         return root.has-selection();
-    }
-
-    function cell-row(pointer-y: length) -> int {
-        return max(0, min(
-            root.session-rows - 1,
-            (((pointer-y - root.terminal-padding-top) / 1px) / (root.terminal-cell-height / 1px)),
-        ));
-    }
-
-    function cell-col(pointer-x: length) -> int {
-        return max(0, min(
-            root.session-cols - 1,
-            (((pointer-x - root.terminal-padding-left) / 1px) / (root.terminal-cell-width / 1px)),
-        ));
     }
 
     function cell-selected(row: int, col: int, width: int) -> bool {
@@ -284,7 +310,8 @@ export component TerminalSessionHost inherits Rectangle {
             }
 
             key-pressed(event) => {
-                if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == "c") {
+                if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
+                    && (event.text == "c" || event.text == "C")) {
                     if root.has-selection() {
                         root.copy-selection-requested(
                             root.normalized-selection-start-row(),
@@ -296,7 +323,11 @@ export component TerminalSessionHost inherits Rectangle {
                     } else {
                         reject
                     }
-                } else if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == "v") {
+                } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
+                    && (event.text == "v" || event.text == "V")) {
+                    root.paste-requested();
+                    accept
+                } else if (!event.modifiers.control && !event.modifiers.alt && event.modifiers.shift && event.text == Key.Insert) {
                     root.paste-requested();
                     accept
                 } else if (event.text == Key.Return) {
@@ -345,6 +376,9 @@ export component TerminalSessionHost inherits Rectangle {
                     root.selection-focus-row = max(0, root.session-rows - 1);
                     root.selection-focus-col = max(0, root.session-cols - 1);
                     accept
+                } else if ((event.modifiers.control || event.modifiers.alt) && event.text != "") {
+                    root.key-input(event.text, event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
                 } else {
                     reject
                 }
@@ -356,16 +390,44 @@ export component TerminalSessionHost inherits Rectangle {
             height: parent.height;
             border-width: 1px;
             border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.dark-mode ? #0b1117 : #f5f8fc;
+            background: ThemeTokens.terminal-canvas-surface;
+
+            blank-surface := Rectangle {
+                x: root.terminal-padding-left;
+                y: root.terminal-padding-top;
+                width: root.terminal-grid-width();
+                height: root.terminal-grid-height();
+                background: ThemeTokens.terminal-canvas-surface;
+            }
 
             input-capture := TouchArea {
                 width: parent.width;
                 height: parent.height;
                 mouse-cursor: MouseCursor.text;
 
+                scroll-event(event) => {
+                    if event.delta-y > 0px || event.delta-y < 0px {
+                        let row = root.terminal-hit-row(self.mouse-y);
+                        let col = root.terminal-hit-col(self.mouse-x);
+                        let delta-lines = event.delta-y > 0px ? 1 : -1;
+                        terminal-input.focus();
+                        root.close-context-menu();
+                        root.scroll-requested(
+                            delta-lines,
+                            row,
+                            col,
+                            event.modifiers.shift,
+                            event.modifiers.control,
+                            event.modifiers.alt,
+                        );
+                        return accept;
+                    }
+                    reject
+                }
+
                 pointer-event(event) => {
-                    let row = root.cell-row(self.mouse-y);
-                    let col = root.cell-col(self.mouse-x);
+                    let row = root.terminal-hit-row(self.mouse-y);
+                    let col = root.terminal-hit-col(self.mouse-x);
                     if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                         terminal-input.focus();
                         root.close-context-menu();
@@ -449,8 +511,8 @@ export component TerminalSessionHost inherits Rectangle {
             }
 
             for cell in root.session-cells : Rectangle {
-                x: root.terminal-padding-left + (cell.col * root.terminal-cell-width);
-                y: root.terminal-padding-top + (cell.row * root.terminal-cell-height);
+                x: root.terminal-cell-x(cell.col);
+                y: root.terminal-cell-y(cell.row);
                 width: max(root.terminal-cell-width, cell.width * root.terminal-cell-width);
                 height: root.terminal-cell-height;
                 background: root.cell-selected(cell.row, cell.col, cell.width)
@@ -466,25 +528,25 @@ export component TerminalSessionHost inherits Rectangle {
                     color: root.cell-selected(cell.row, cell.col, cell.width)
                         ? (ThemeTokens.dark-mode ? #0b1117 : #ffffff)
                         : cell.fg;
-                    font-size: 12px;
-                    font-family: "Cascadia Mono";
+                    font-size: root.terminal-font-size;
+                    font-family: root.terminal-font-family;
                     vertical-alignment: center;
                 }
             }
 
             if root.session-cursor-visible && root.cursor-blink-visible : cursor-overlay := Rectangle {
-                x: root.terminal-padding-left + (root.session-cursor-col * root.terminal-cell-width);
+                x: root.terminal-cell-x(root.session-cursor-col);
                 width: root.session-cursor-shape == "bar"
-                    ? 2px
+                    ? root.terminal-cursor-thickness
                     : root.terminal-cell-width;
                 height: root.session-cursor-shape == "underline"
-                    ? 2px
+                    ? root.terminal-cursor-thickness
                     : root.terminal-cell-height;
                 background: root.session-cursor-bg;
                 opacity: root.session-cursor-shape == "block" ? 0.72 : 1.0;
                 y: root.session-cursor-shape == "underline"
-                    ? root.terminal-padding-top + ((root.session-cursor-row + 1) * root.terminal-cell-height) - 2px
-                    : root.terminal-padding-top + (root.session-cursor-row * root.terminal-cell-height);
+                    ? root.terminal-cell-y(root.session-cursor-row + 1) - root.terminal-cursor-thickness
+                    : root.terminal-cell-y(root.session-cursor-row);
             }
 
             if root.terminal-context-menu-open : terminal-context-menu-dismiss-layer := TouchArea {

@@ -295,8 +295,43 @@
 - [ ] window resize 后 rows/cols 与 SSH PTY `window-change` 同步
 - [ ] 字体、间距、cursor、选区与 VSCode editor 风格接近，但不破坏 terminal 语义
 
+## 实施完成状态
+
+日期: 2026-03-26
+状态: 实施完成，自动化验证通过
+
+### 已完成任务
+
+- Task 1: 通过 failing tests 锁定 runtime interaction contract。
+- Task 2: 在 parser 前精确过滤 `cockpit.socket` 横幅。
+- Task 3: 用 live session encoder 替换静态命名键编码路径。
+- Task 4: 落地 terminal-native clipboard 语义与 bracketed paste。
+- Task 5: 完成 wheel 路由与本地 scrollback。
+- Task 6: 完成 theme-aware palette 同步与 full-surface blank canvas。
+- Task 7: 完成 shared metrics contract，统一 cell/cursor/hit-test/resize 几何。
+- Task 8: 完成文档同步、最终验证记录与 TDD 交接文档。
+
+### 有意保留的边界
+
+- 仍不实现 split panes、多 pane、`russh-sftp` 工作流、本地假 syntax highlighting。
+- 不引入 zebra 行底色。
+- 本轮未执行计划中的 `git commit` 步骤；当前仅完成实现与验证。
+- Windows 11 实机 GUI smoke 未在本环境执行，因此仅能确认自动化契约与编译验证通过。
+
+### 最终实际验证命令
+
+- `cargo test --test terminal_session_spec --test ssh_terminal_interaction_spec --test ssh_session_manager_spec --test terminal_scrollback_spec --test workspace_tabs_spec -- --nocapture`
+- `cargo check --workspace`
+- `cargo clippy --workspace -- -D warnings`
+
+### 最终实际验证结果
+
+- 终端 runtime、session manager、scrollback、workspace Slint contract 相关测试全部通过。
+- Workspace 级 `cargo check --workspace` 通过。
+- Workspace 级 `cargo clippy --workspace -- -D warnings` 通过。
+
 ## 备注
 
 - 本文档方案名为 `ssh-terminal-input-rendering`，文件名按约定写为 `2026-03-26-ssh-terminal-input-rendering-design.md`；
 - 对应 implementation plan 已生成：`2026-03-26-ssh-terminal-input-rendering-implementation-plan.md`；
-- 本轮仅修改文档，未修改业务代码。
+- 本轮最终状态已覆盖 runtime、UI、tests 与文档，不再是“仅修改文档”的设计阶段。

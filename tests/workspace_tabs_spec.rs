@@ -7,7 +7,9 @@ use anyhow::Result;
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher;
 use mica_term::app::ssh::profile::ConnectionProfile;
-use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalMouseInput, TerminalSurfaceState};
+use mica_term::app::ssh::runtime::{
+    SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceState,
+};
 use mica_term::app::ssh::session_manager::{SessionHandle, SessionState};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::window_effects::default_platform_window_effects;
@@ -27,7 +29,15 @@ impl SessionRuntimeControl for NoopRuntimeControl {
         Ok(())
     }
 
-    fn send_input(&self, _bytes: Vec<u8>) -> Result<()> {
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
         Ok(())
     }
 
@@ -512,6 +522,54 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         terminal_host.contains("callback mouse-input(string, string, int, int, bool, bool, bool);"),
         "TerminalSessionHost should emit mouse input callbacks with terminal-relative coordinates"
+    );
+    assert!(
+        terminal_host.contains("private property <length> terminal-font-size"),
+        "TerminalSessionHost should centralize the terminal font size in one visual contract"
+    );
+    assert!(
+        terminal_host.contains("private property <string> terminal-font-family"),
+        "TerminalSessionHost should centralize the terminal font family in one visual contract"
+    );
+    assert!(
+        terminal_host.contains("function terminal-cell-x("),
+        "TerminalSessionHost should centralize cell x-position geometry in a shared helper"
+    );
+    assert!(
+        terminal_host.contains("function terminal-cell-y("),
+        "TerminalSessionHost should centralize cell y-position geometry in a shared helper"
+    );
+    assert!(
+        terminal_host.contains("function terminal-hit-row("),
+        "TerminalSessionHost should centralize row hit testing in a shared helper"
+    );
+    assert!(
+        terminal_host.contains("function terminal-hit-col("),
+        "TerminalSessionHost should centralize column hit testing in a shared helper"
+    );
+    assert!(
+        terminal_host.contains("blank-surface := Rectangle {"),
+        "TerminalSessionHost should render a dedicated blank terminal canvas behind cell content"
+    );
+    assert!(
+        terminal_host.contains("font-family: \"Cascadia Mono\";"),
+        "TerminalSessionHost should keep the terminal surface on a monospace font contract"
+    );
+    assert!(
+        terminal_host.contains("event.modifiers.control && event.modifiers.shift"),
+        "TerminalSessionHost should reserve Ctrl+Shift shortcuts for local clipboard actions"
+    );
+    assert!(
+        terminal_host.contains("event.text == Key.Insert"),
+        "TerminalSessionHost should handle Shift+Insert as a paste shortcut"
+    );
+    assert!(
+        !terminal_host.contains("event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == \"c\""),
+        "TerminalSessionHost should not intercept plain Ctrl+C for local copy"
+    );
+    assert!(
+        !terminal_host.contains("event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == \"v\""),
+        "TerminalSessionHost should not intercept plain Ctrl+V for local paste"
     );
     assert!(
         terminal_host.contains("cursor-blink-timer := Timer {"),

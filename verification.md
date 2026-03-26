@@ -238,6 +238,47 @@ Date: 2026-03-20 CST
 - [x] `cargo check --workspace`
 - [x] `cargo clippy --workspace -- -D warnings`
 
+## SSH Terminal Input Rendering Verification
+
+Date: 2026-03-26 CST
+
+### Source Documents
+
+- 设计文档：`docs/plans/2026-03-26-ssh-terminal-input-rendering-design.md`
+- 实施计划：`docs/plans/2026-03-26-ssh-terminal-input-rendering-implementation-plan.md`
+- TDD 交接：`docs/plans/2026-03-26-ssh-terminal-input-rendering-tdd-spec.md`
+
+### Commands Executed
+
+- [x] `cargo test --test terminal_session_spec --test ssh_terminal_interaction_spec --test ssh_session_manager_spec --test terminal_scrollback_spec --test workspace_tabs_spec -- --nocapture`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+- [x] `git diff --stat`
+
+### Automated Results
+
+- `cargo test --test terminal_session_spec --test ssh_terminal_interaction_spec --test ssh_session_manager_spec --test terminal_scrollback_spec --test workspace_tabs_spec -- --nocapture`: passed
+- `cargo check --workspace`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+- `git diff --stat`: reviewed
+
+### Verification Conclusions
+
+- [x] parser 前 exact-match 横幅过滤完成
+- [x] live session key encoder / structured key routing 完成
+- [x] terminal-native clipboard 与 bracketed paste 完成
+- [x] wheel 在 `mouse_grabbed` 与本地 scrollback 间的路由完成
+- [x] palette 已跟随 app `ThemeMode` 同步
+- [x] blank surface canvas 已补齐
+- [x] shared terminal metrics contract 已收敛到统一 helper
+- [x] 最终目标测试矩阵通过
+
+### Manual Follow-up
+
+- [ ] Windows 11 实机核对 Fluent 风格下的 terminal spacing、cursor、selection、theme toggle 观感
+- [ ] Windows 11 实机核对 wheel / mouse_grabbed 在 `vim`、`less`、`htop` 场景下的真实交互
+- [ ] 关闭窗口与 SSH session 残留任务的时序观察
+
 ### Automated Results
 
 - `cargo test --test assets_sidebar_toolbar_spec --test assets_explorer_smoke --test assets_context_menu_spec --test assets_context_menu_smoke --test assets_modal_smoke --test shell_view_model -- --nocapture`：通过（`16 + 16 + 3 + 3 + 14 + 31` 个测试全部通过）

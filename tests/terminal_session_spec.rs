@@ -1,6 +1,7 @@
 use mica_term::app::ssh::runtime::{
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
 };
+use mica_term::theme::ThemeMode;
 use termwiz::input::{KeyCode, Modifiers};
 use uuid::Uuid;
 
@@ -13,6 +14,46 @@ fn terminal_session_applies_remote_bytes_and_tracks_seqno() {
 
     assert!(session.sequence_number() > initial_seqno);
     assert!(session.screen_text().contains("hello from ssh"));
+}
+
+#[test]
+fn exact_cockpit_banner_is_filtered_before_terminal_parser() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.apply_remote_bytes(
+        b"Activate the web console with: systemctl enable --now cockpit.socket\r\n[root@host ~]# ",
+    );
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    assert!(
+        !snapshot
+            .visible_lines
+            .iter()
+            .any(|line| line.contains("cockpit.socket"))
+    );
+    assert!(
+        snapshot
+            .visible_lines
+            .iter()
+            .any(|line| line.contains("[root@host ~]#"))
+    );
+}
+
+#[test]
+fn similar_lines_are_not_filtered_when_they_do_not_exactly_match() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.apply_remote_bytes(
+        b"Activate the web console with: systemctl enable --now cockpit.socket now\r\n",
+    );
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    assert!(
+        snapshot
+            .visible_lines
+            .iter()
+            .any(|line| line.contains("cockpit.socket now"))
+    );
 }
 
 #[test]
@@ -85,6 +126,49 @@ fn terminal_surface_projection_tracks_cursor_colors_and_filters_bracketed_paste_
         prompt_prefix.fg_rgba, prompt_prefix.bg_rgba,
         "ANSI-colored prompt text should retain distinct foreground/background colors in the surface projection"
     );
+}
+
+#[test]
+fn light_theme_default_background_projection_is_not_black() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.set_theme_mode(ThemeMode::Light);
+    session.apply_remote_bytes(b"[root@host ~]# ");
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    let prompt = snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 0)
+        .expect("prompt cell");
+
+    assert_ne!(prompt.bg_rgba, 0xff00_0000);
+}
+
+#[test]
+fn theme_toggle_refreshes_existing_terminal_palette_projection() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.apply_remote_bytes(b"[root@host ~]# ");
+
+    let dark_snapshot = session.surface_state(Uuid::new_v4());
+    let dark_prompt = dark_snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 0)
+        .expect("dark prompt cell");
+
+    session.set_theme_mode(ThemeMode::Light);
+
+    let light_snapshot = session.surface_state(Uuid::new_v4());
+    let light_prompt = light_snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 0)
+        .expect("light prompt cell");
+
+    assert_ne!(dark_prompt.bg_rgba, light_prompt.bg_rgba);
+    assert_ne!(light_prompt.bg_rgba, 0xff00_0000);
 }
 
 #[test]

@@ -35,7 +35,8 @@ use mica_term::app::ssh::known_hosts::{
 };
 use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::runtime::{
-    SessionRuntimeEvent, TerminalMouseInput, TerminalSurfaceState, UnknownHostKeyError,
+    SessionRuntimeEvent, TerminalKeyEvent, TerminalKeyKind, TerminalMouseInput, TerminalSurfaceState,
+    UnknownHostKeyError,
 };
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::window_effects::default_platform_window_effects;
@@ -102,6 +103,9 @@ struct AsyncProjectionLauncher;
 #[derive(Clone, Default)]
 struct InteractiveProjectionLauncher;
 
+#[derive(Clone, Default)]
+struct PasteProjectionLauncher;
+
 #[derive(Clone)]
 struct FailingProbeLauncher {
     message: &'static str,
@@ -131,12 +135,25 @@ struct InteractiveProjectionRuntimeControl {
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
 }
 
+struct PasteProjectionRuntimeControl {
+    session_id: uuid::Uuid,
+    event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+}
+
 impl SessionRuntimeControl for NoopRuntimeControl {
     fn disconnect(&self) -> Result<()> {
         Ok(())
     }
 
-    fn send_input(&self, _bytes: Vec<u8>) -> Result<()> {
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
         Ok(())
     }
 
@@ -288,6 +305,40 @@ impl SessionRuntimeLauncher for InteractiveProjectionLauncher {
     }
 }
 
+impl SessionRuntimeLauncher for PasteProjectionLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                TerminalSurfaceState::from_visible_lines(
+                    session_id,
+                    1,
+                    24,
+                    80,
+                    vec!["welcome to mica-term".into()],
+                ),
+            ));
+            Ok(Box::new(PasteProjectionRuntimeControl {
+                session_id,
+                event_tx,
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeLauncher for FailingProbeLauncher {
     fn launch(
         &self,
@@ -314,8 +365,27 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
         Ok(())
     }
 
-    fn send_input(&self, bytes: Vec<u8>) -> Result<()> {
-        let rendered = String::from_utf8(bytes).unwrap_or_default();
+    fn send_text_input(&self, text: String) -> Result<()> {
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::SurfaceChanged(
+                TerminalSurfaceState::from_visible_lines(
+                    self.session_id,
+                    2,
+                    24,
+                    80,
+                    vec!["welcome to mica-term".into(), format!("$ {}", text)],
+                ),
+            ));
+        Ok(())
+    }
+
+    fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()> {
+        let rendered = match event.key {
+            TerminalKeyKind::Named(name) => name.to_string(),
+            TerminalKeyKind::Function(number) => format!("f{number}"),
+            TerminalKeyKind::Char(ch) => ch.to_string(),
+        };
         let _ = self
             .event_tx
             .send(SessionRuntimeEvent::SurfaceChanged(
@@ -328,6 +398,10 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
                 ),
             ));
         Ok(())
+    }
+
+    fn send_paste(&self, text: String) -> Result<()> {
+        self.send_text_input(text)
     }
 
     fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
@@ -345,6 +419,70 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
                     ],
                 ),
             ));
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl SessionRuntimeControl for PasteProjectionRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, text: String) -> Result<()> {
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::SurfaceChanged(
+                TerminalSurfaceState::from_visible_lines(
+                    self.session_id,
+                    2,
+                    24,
+                    80,
+                    vec!["welcome to mica-term".into(), format!("text {}", text)],
+                ),
+            ));
+        Ok(())
+    }
+
+    fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()> {
+        let rendered = match event.key {
+            TerminalKeyKind::Named(name) => name.to_string(),
+            TerminalKeyKind::Function(number) => format!("f{number}"),
+            TerminalKeyKind::Char(ch) => ch.to_string(),
+        };
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::SurfaceChanged(
+                TerminalSurfaceState::from_visible_lines(
+                    self.session_id,
+                    2,
+                    24,
+                    80,
+                    vec!["welcome to mica-term".into(), format!("key {}", rendered)],
+                ),
+            ));
+        Ok(())
+    }
+
+    fn send_paste(&self, text: String) -> Result<()> {
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::SurfaceChanged(
+                TerminalSurfaceState::from_visible_lines(
+                    self.session_id,
+                    2,
+                    24,
+                    80,
+                    vec!["welcome to mica-term".into(), format!("paste {}", text)],
+                ),
+            ));
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
         Ok(())
     }
 
@@ -1723,6 +1861,38 @@ fn workspace_terminal_input_callback_updates_active_session_surface() {
     assert_eq!(app.get_workspace_session_surface_seqno(), 2);
     assert_eq!(visible_lines.row_count(), 2);
     assert_eq!(visible_lines.row_data(1).unwrap().as_str(), "$ pwd");
+}
+
+#[test]
+fn workspace_terminal_paste_callback_updates_active_session_surface() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(PasteProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("pwd", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("seed clipboard");
+
+    app.invoke_workspace_session_paste_requested();
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    let visible_lines = app.get_workspace_session_visible_lines();
+    assert_eq!(app.get_workspace_session_surface_seqno(), 2);
+    assert_eq!(visible_lines.row_count(), 2);
+    assert_eq!(visible_lines.row_data(1).unwrap().as_str(), "paste pwd");
 }
 
 #[test]

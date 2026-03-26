@@ -10,8 +10,8 @@ use mica_term::app::async_runtime::AppAsyncRuntime;
 use mica_term::app::ssh::known_hosts::KnownHostsService;
 use mica_term::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
 use mica_term::app::ssh::runtime::{
-    SessionRuntimeEvent, SshSessionRuntime, TerminalMouseButton, TerminalMouseEventKind,
-    TerminalMouseInput, TerminalSession, UnknownHostKeyError,
+    SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
+    TerminalMouseEventKind, TerminalMouseInput, TerminalSession, UnknownHostKeyError,
 };
 use mica_term::app::ssh::session_manager::{
     OpenSessionMode, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher, SessionState,
@@ -41,7 +41,9 @@ struct TrackingLauncher {
 
 #[derive(Clone, Default)]
 struct InteractiveTrackingState {
-    sent_inputs: Arc<Mutex<Vec<Vec<u8>>>>,
+    text_inputs: Arc<Mutex<Vec<String>>>,
+    key_inputs: Arc<Mutex<Vec<TerminalKeyEvent>>>,
+    paste_inputs: Arc<Mutex<Vec<String>>>,
     resizes: Arc<Mutex<Vec<(u32, u32)>>>,
     mouse_inputs: Arc<Mutex<Vec<TerminalMouseInput>>>,
 }
@@ -288,7 +290,15 @@ impl SessionRuntimeControl for TrackingRuntimeControl {
         Ok(())
     }
 
-    fn send_input(&self, _bytes: Vec<u8>) -> Result<()> {
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
         Ok(())
     }
 
@@ -306,12 +316,30 @@ impl SessionRuntimeControl for InteractiveTrackingRuntimeControl {
         Ok(())
     }
 
-    fn send_input(&self, bytes: Vec<u8>) -> Result<()> {
+    fn send_text_input(&self, text: String) -> Result<()> {
         self.state
-            .sent_inputs
+            .text_inputs
             .lock()
-            .expect("lock sent inputs")
-            .push(bytes);
+            .expect("lock text inputs")
+            .push(text);
+        Ok(())
+    }
+
+    fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()> {
+        self.state
+            .key_inputs
+            .lock()
+            .expect("lock key inputs")
+            .push(event);
+        Ok(())
+    }
+
+    fn send_paste(&self, text: String) -> Result<()> {
+        self.state
+            .paste_inputs
+            .lock()
+            .expect("lock paste inputs")
+            .push(text);
         Ok(())
     }
 
@@ -841,7 +869,7 @@ fn session_manager_forwards_text_input_and_resize_to_runtime_control() {
     });
 
     manager
-        .send_session_input(handle.session_id, b"pwd\n".to_vec())
+        .send_session_text_input(handle.session_id, "pwd\n".to_string())
         .expect("forward text input");
     manager
         .resize_session(handle.session_id, 48, 132)
@@ -849,15 +877,48 @@ fn session_manager_forwards_text_input_and_resize_to_runtime_control() {
 
     assert_eq!(
         state
-            .sent_inputs
+            .text_inputs
             .lock()
-            .expect("lock sent inputs")
+            .expect("lock text inputs")
             .as_slice(),
-        &[b"pwd\n".to_vec()]
+        &["pwd\n".to_string()]
     );
     assert_eq!(
         state.resizes.lock().expect("lock resize events").as_slice(),
         &[(48, 132)]
+    );
+}
+
+#[test]
+fn session_manager_forwards_structured_key_events_to_runtime() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let state = InteractiveTrackingState::default();
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(InteractiveTrackingLauncher::new(state.clone())),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    manager
+        .send_session_key_input(
+            handle.session_id,
+            TerminalKeyEvent::function(5, false, false, false),
+        )
+        .expect("forward key input");
+
+    assert_eq!(
+        state.key_inputs.lock().expect("lock key inputs").as_slice(),
+        &[TerminalKeyEvent::function(5, false, false, false)]
     );
 }
 

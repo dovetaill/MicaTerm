@@ -10,7 +10,10 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::app::ssh::profile::ConnectionProfile;
-use crate::app::ssh::runtime::{SessionRuntimeEvent, TerminalMouseInput, TerminalSurfaceState};
+use crate::app::ssh::runtime::{
+    SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceState,
+};
+use crate::theme::ThemeMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpenSessionMode {
@@ -38,9 +41,17 @@ pub struct SessionHandle {
 
 pub trait SessionRuntimeControl: Send {
     fn disconnect(&self) -> Result<()>;
-    fn send_input(&self, bytes: Vec<u8>) -> Result<()>;
+    fn send_text_input(&self, text: String) -> Result<()>;
+    fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()>;
     fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()>;
+    fn send_paste(&self, text: String) -> Result<()>;
     fn resize(&self, rows: u32, cols: u32) -> Result<()>;
+    fn update_theme_mode(&self, _mode: ThemeMode) -> Result<Option<TerminalSurfaceState>> {
+        Ok(None)
+    }
+    fn scroll_viewport_lines(&self, _delta: i32) -> Result<TerminalSurfaceState> {
+        Err(anyhow!("session runtime does not support local scrollback"))
+    }
 }
 
 type LaunchFuture =
@@ -203,13 +214,22 @@ impl SessionManager {
         Some(updated)
     }
 
-    pub fn send_session_input(&self, session_id: Uuid, bytes: Vec<u8>) -> Result<()> {
+    pub fn send_session_text_input(&self, session_id: Uuid, text: String) -> Result<()> {
         let registry = self.registry.lock().expect("lock session registry");
         let runtime_control = registry
             .runtime_controls
             .get(&session_id)
             .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
-        runtime_control.send_input(bytes)
+        runtime_control.send_text_input(text)
+    }
+
+    pub fn send_session_key_input(&self, session_id: Uuid, event: TerminalKeyEvent) -> Result<()> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        runtime_control.send_key_input(event)
     }
 
     pub fn resize_session(&self, session_id: Uuid, rows: u32, cols: u32) -> Result<()> {
@@ -235,6 +255,53 @@ impl SessionManager {
             .get(&session_id)
             .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
         runtime_control.send_mouse_input(event)
+    }
+
+    pub fn send_session_paste(&self, session_id: Uuid, text: String) -> Result<()> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let runtime_control = registry
+            .runtime_controls
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+        runtime_control.send_paste(text)
+    }
+
+    pub fn scroll_session_viewport(&self, session_id: Uuid, delta: i32) -> Result<()> {
+        let surface = {
+            let registry = self.registry.lock().expect("lock session registry");
+            let runtime_control = registry
+                .runtime_controls
+                .get(&session_id)
+                .ok_or_else(|| anyhow!("session runtime is not ready for `{session_id}`"))?;
+            runtime_control.scroll_viewport_lines(delta)?
+        };
+
+        update_terminal_surface(&self.registry, session_id, surface);
+        Ok(())
+    }
+
+    pub fn set_theme_mode(&self, mode: ThemeMode) -> Result<()> {
+        let session_ids = {
+            let mut registry = self.registry.lock().expect("lock session registry");
+            registry.theme_mode = mode;
+            registry.runtime_controls.keys().copied().collect::<Vec<_>>()
+        };
+
+        for session_id in session_ids {
+            let surface = {
+                let registry = self.registry.lock().expect("lock session registry");
+                let Some(runtime_control) = registry.runtime_controls.get(&session_id) else {
+                    continue;
+                };
+                runtime_control.update_theme_mode(mode)?
+            };
+
+            if let Some(surface) = surface {
+                update_terminal_surface(&self.registry, session_id, surface);
+            }
+        }
+
+        Ok(())
     }
 
     pub fn close_session(&self, session_id: Uuid) -> Option<SessionHandle> {
@@ -281,7 +348,6 @@ impl SessionManager {
     }
 }
 
-#[derive(Default)]
 struct SessionRegistry {
     sessions: HashMap<Uuid, SessionHandle>,
     asset_sessions: HashMap<String, Uuid>,
@@ -290,6 +356,22 @@ struct SessionRegistry {
     runtime_controls: HashMap<Uuid, Box<dyn SessionRuntimeControl>>,
     pending_disconnects: HashSet<Uuid>,
     pending_resizes: HashMap<Uuid, (u32, u32)>,
+    theme_mode: ThemeMode,
+}
+
+impl Default for SessionRegistry {
+    fn default() -> Self {
+        Self {
+            sessions: HashMap::new(),
+            asset_sessions: HashMap::new(),
+            open_order: Vec::new(),
+            terminal_surfaces: HashMap::new(),
+            runtime_controls: HashMap::new(),
+            pending_disconnects: HashSet::new(),
+            pending_resizes: HashMap::new(),
+            theme_mode: ThemeMode::Dark,
+        }
+    }
 }
 
 fn apply_runtime_event(
@@ -355,24 +437,39 @@ fn attach_runtime_control(
     runtime_control: Box<dyn SessionRuntimeControl>,
 ) {
     let mut runtime_control = Some(runtime_control);
-    let (should_disconnect, pending_resize) = {
+    let (should_disconnect, pending_resize, theme_mode) = {
         let mut registry = registry.lock().expect("lock session registry");
         if !registry.sessions.contains_key(&session_id)
             || registry.pending_disconnects.remove(&session_id)
         {
-            (true, None)
+            (true, None, registry.theme_mode)
         } else {
             registry.runtime_controls.insert(
                 session_id,
                 runtime_control.take().expect("runtime control available"),
             );
-            (false, registry.pending_resizes.remove(&session_id))
+            (
+                false,
+                registry.pending_resizes.remove(&session_id),
+                registry.theme_mode,
+            )
         }
     };
 
     if should_disconnect && let Some(runtime_control) = runtime_control {
         let _ = runtime_control.disconnect();
         return;
+    }
+
+    let theme_surface = {
+        let registry_guard = registry.lock().expect("lock session registry");
+        registry_guard
+            .runtime_controls
+            .get(&session_id)
+            .and_then(|runtime_control| runtime_control.update_theme_mode(theme_mode).ok().flatten())
+    };
+    if let Some(surface) = theme_surface {
+        update_terminal_surface(registry, session_id, surface);
     }
 
     if let Some((rows, cols)) = pending_resize {

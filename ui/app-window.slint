@@ -193,6 +193,7 @@ export component AppWindow inherits Window {
     callback workspace-session-resize-requested(int, int);
     callback workspace-session-copy-selection-requested(int, int, int, int);
     callback workspace-session-paste-requested();
+    callback workspace-session-scroll-requested(int, int, int, bool, bool, bool);
     callback workspace-session-mouse-input(string, string, int, int, bool, bool, bool);
     callback asset-selected(string);
     callback asset-activated(string);
@@ -494,6 +495,10 @@ export component AppWindow inherits Window {
 
                         paste-requested() => {
                             root.workspace-session-paste-requested();
+                        }
+
+                        scroll-requested(delta-lines, row, col, shift, ctrl, alt) => {
+                            root.workspace-session-scroll-requested(delta-lines, row, col, shift, ctrl, alt);
                         }
 
                         mouse-input(kind, button, row, col, shift, ctrl, alt) => {
