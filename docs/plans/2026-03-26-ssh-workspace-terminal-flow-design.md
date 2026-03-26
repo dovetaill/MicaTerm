@@ -1,4 +1,4 @@
-# SSH 新建 / 连接 / 标签页 Design
+# SSH Workspace / Terminal Flow Design
 
 日期: 2026-03-26
 执行者: Codex
@@ -628,3 +628,449 @@
 - [ ] `SSH modal` 中不再出现 `Session Environment`
 - [ ] 现有 `Test` / `Save` 动作保持可用
 - [ ] 相关测试从“默认复用旧 session”收敛到“每次 `Open` 新建 session tab”
+
+---
+
+## 追加设计任务：SSH 输入层级与终端显示修正
+
+日期: 2026-03-26
+执行者: Codex
+状态: 方案已确认，仅记录 design，不展开 implementation plan
+
+### 背景
+
+在 `SSH create/connect tabs` 主线落地后，当前 terminal host 仍存在四类关键问题：
+
+- 某些远端登录提示没有产品价值，尤其是
+  `Activate the web console with: systemctl enable --now cockpit.socket`
+  会直接污染首屏；
+- 输入链路仍停留在“普通文本 + 少量 named key + 部分鼠标事件”的半成品状态，导致
+  `Ctrl+C`、滚轮、`F` 键、应用模式下的方向键、bracketed paste 等行为不完整；
+- 亮色模式下，terminal viewport 的背景 ownership 与 palette strategy 错位，出现“只有渲染到字符的区域才是黑底，其余仍是浅色壳层”的断裂感；
+- 当前 renderer 仍以逐 cell 的 Slint `Rectangle/Text` 绘制为主，缺少更高一级的 presenter，
+  难以达到接近 VS Code editor 区域的整体观感。
+
+本轮目标不是直接实现，而是把最终确认后的架构边界、视觉边界和输入边界固化为设计结论。
+
+### 目标
+
+本轮设计目标：
+
+- 全局精确隐藏远端输出中 exact match 的 cockpit 提示行；
+- 将 terminal host 从分裂的输入转发逻辑升级为统一输入事件层；
+- 补齐以下输入类别的架构边界：
+  普通字符输入、`Ctrl` / `Alt` / `Shift` 组合键、`Enter` / `Backspace` / `Tab` / `Esc`、
+  箭头键、`Home` / `End` / `PageUp` / `PageDown` / `Delete` / `F` 键、
+  鼠标点击 / 拖拽 / 滚轮、bracketed paste、窗口 resize；
+- 让 terminal viewport 的整块背景、默认前景、cursor、selection 与 app theme 协同，而不是继续混用静态 Slint 背景与默认黑色 terminal palette；
+- 将 renderer 提升到 presenter 级，而不是继续沿用纯逐 cell 拼装，以支撑接近 VS Code editor 的 light-mode IDE 质感；
+- 行级视觉增强仅允许使用 contextual tint，不允许做全局强制 zebra striping。
+
+### 非目标 / 边界
+
+本轮设计不覆盖：
+
+- SSH 连接配置、tab 语义、资产菜单等上一轮已确认范围；
+- `russh-sftp` UI；
+- 多 pane / 多窗口 / 多 workspace；
+- 终端语义高亮、shell parser、命令语义分析；
+- implementation plan 文档，除非后续单独要求。
+
+本轮允许调整但必须保持边界清晰的内容：
+
+- `TerminalSessionHost` 的 focus / input capture 结构；
+- `bootstrap` 中 terminal callback 到 runtime 的事件归一化；
+- `runtime` 中 `wezterm-term` 的 palette、key、mouse、paste、resize 接口使用方式；
+- 基于 Slint 的 terminal presenter / viewport rendering 策略。
+
+### 当前实现现状
+
+#### 1. 当前 named key 编码没有复用 live terminal state
+
+当前 `encode_named_key_input(...)` 会临时 new 一个 `TerminalSession` 来编码按键，而不是让当前
+活跃 terminal 实例自己编码。这会绕过运行时里的 `application_cursor_keys`、
+`modify_other_keys`、当前 keyboard encoding 等状态。
+
+这也是 `vim`、`htop`、`tmux` 一类场景里“能进但用不顺”的根因之一。
+
+#### 2. 当前 paste 不是 bracketed paste
+
+当前 paste 路径是读取系统剪贴板，再把文本当普通输入直接发给 SSH channel。
+
+这意味着即使远端已经启用 bracketed paste mode，当前 UI 仍不会走 terminal-native paste 语义。
+
+#### 3. 当前鼠标只覆盖 press / move / release 的一部分
+
+当前 UI 只转发了 left/right 的 `down/up` 与 `move`，没有滚轮事件，也没有更高层的统一输入抽象。
+
+#### 4. 当前 terminal palette 默认就是 dark terminal
+
+当前 `SessionTerminalConfig::color_palette()` 直接返回 `ColorPalette::default()`。
+上游默认 palette 的 `background` 是黑色，因此 light mode 下如果不显式接管 palette，
+默认背景就天然偏黑。
+
+#### 5. 当前 viewport 背景和 terminal 默认背景不是同一个 owner
+
+当前 Slint 侧 `surface-frame` 画的是一整块静态背景，但真正的 terminal default background
+只会通过逐 cell 的背景色体现；结果就是“字符所在 cell 有背景，空白 viewport 仍是宿主背景”，
+视觉上形成断裂。
+
+#### 6. 当前 renderer 还是逐 cell 直绘
+
+当前 terminal host 直接遍历 `session-cells`，每个 cell 各自绘制背景和文本。
+这条路线短期可用，但无法优雅承载：
+
+- 整块 viewport 主题 ownership；
+- 更接近 IDE 编辑区的整体排版；
+- 行级 contextual tint；
+- 后续更复杂的 selection / cursor / run-based text painting。
+
+### 设计要点拆分
+
+#### 设计点 1：远端提示输出抑制层
+
+##### 方案 A：在远端输出进入 terminal 之前做全局 exact-match 过滤
+
+内容：
+
+- 在 SSH channel 到 terminal buffer 的单一入口增加一层 line-oriented suppression；
+- 仅对 exact match
+  `Activate the web console with: systemctl enable --now cockpit.socket`
+  生效；
+- 作为全局规则处理，而不是仅限某个 host 或某次会话。
+
+实现复杂度：
+
+- 中
+
+与当前架构契合度：
+
+- 高，输出入口集中，易于单点控制
+
+交互一致性：
+
+- 高，不会污染 row/cell/cursor/selection 的投影逻辑
+
+可维护性：
+
+- 中高，后续若再追加极少量 exact-match 抑制规则，也有统一入口
+
+潜在风险：
+
+- 需要处理分块输出与换行规范化；
+- 如果用户未来主动输出完全相同的一行，也会被隐藏。
+
+##### 方案 B：只在 surface projection 或渲染阶段做视觉隐藏
+
+内容：
+
+- 不动 transport / terminal buffer；
+- 仅在投影到 Slint 之前或绘制时把该行藏掉。
+
+实现复杂度：
+
+- 低到中
+
+与当前架构契合度：
+
+- 中
+
+交互一致性：
+
+- 低，terminal 内部状态与屏幕展示可能脱节
+
+可维护性：
+
+- 低
+
+潜在风险：
+
+- 容易引入 selection、cursor、mouse row 与 scrollback 语义错位。
+
+##### 最终决策
+
+采用方案 A。
+
+补充约束：
+
+- 抑制范围为全局 exact-match；
+- 不做模糊匹配，不做 host-specific 特判，不做前缀匹配。
+
+#### 设计点 2：terminal 输入事件总线
+
+##### 方案 A：沿用现有分裂 callback 结构，逐项补齐缺失输入
+
+内容：
+
+- 继续保留 `text-input`、`key-input`、`paste-requested`、`mouse-input`、`resize`；
+- 缺什么补什么，把更多 key 和 wheel 一项项接进来。
+
+实现复杂度：
+
+- 中
+
+与当前架构契合度：
+
+- 中高
+
+交互一致性：
+
+- 中，只能逐步缓解缺项，不能根治 terminal-native mode 同步问题
+
+可维护性：
+
+- 中低，输入规则会继续散落在 Slint 与 Rust 两边
+
+潜在风险：
+
+- 容易反复出现“又有一个键不对”的回归；
+- 仍可能绕过 live terminal 的 mode state。
+
+##### 方案 B：建立统一 `TerminalInputEvent` 层，统一走 terminal-native API
+
+内容：
+
+- Slint 只负责捕获键盘、鼠标、滚轮、paste、resize；
+- `bootstrap` 负责归一化为统一输入事件；
+- `runtime` 统一调用 live terminal 的 `key_down()`、`send_paste()`、`mouse_event()`、`resize()`；
+- named key 不再通过临时 `TerminalSession` 编码。
+
+实现复杂度：
+
+- 中高
+
+与当前架构契合度：
+
+- 高，符合 Slint host / bootstrap bridge / runtime state machine 的职责分层
+
+交互一致性：
+
+- 高，能够覆盖 shell 与全屏 TUI 的真实输入语义
+
+可维护性：
+
+- 高，后续追加 `focus_changed`、IME、更多鼠标模式时更稳定
+
+潜在风险：
+
+- 需要重整 terminal host 的 focus / key capture 结构；
+- 不是“补一个 key mapping”级别的小修。
+
+##### 最终决策
+
+采用方案 B。
+
+补充约束：
+
+- 输入事件源必须覆盖普通字符、组合键、功能键、滚轮、拖拽、粘贴、resize；
+- paste 必须通过 terminal-native bracketed paste 语义发送；
+- named key 编码必须基于 live terminal state，而不是临时 session。
+
+#### 设计点 3：terminal palette 与 viewport 背景 ownership
+
+##### 方案 A：terminal palette 跟随 app theme，viewport 背景由 terminal 自己拥有
+
+内容：
+
+- 为 terminal 定义明确的 light palette 与 dark palette；
+- 让 viewport 的整块默认背景、默认前景、cursor、selection 都从 terminal palette 派生；
+- 宿主壳层只负责外框和工作区层级，不再替 terminal 决定默认底色。
+
+实现复杂度：
+
+- 中
+
+与当前架构契合度：
+
+- 高，`SessionTerminalConfig` 正是 palette 注入点
+
+交互一致性：
+
+- 高，light mode 下不再出现“浅色壳层里悬浮黑条”的割裂感
+
+可维护性：
+
+- 中高，终端主题与 app theme 的关系会更清楚
+
+潜在风险：
+
+- 需要认真校准 light palette 下的 ANSI 16 色，避免 prompt / diff / highlight 发灰或发脏。
+
+##### 方案 B：terminal 永远保持 dark palette，只修 viewport 背景铺满
+
+内容：
+
+- 不为 light mode 定义独立 terminal theme；
+- 只修复“terminal 默认背景必须完整铺满 viewport”这一 correctness 问题。
+
+实现复杂度：
+
+- 低到中
+
+与当前架构契合度：
+
+- 高
+
+交互一致性：
+
+- 中，视觉会比现在完整，但仍保留“亮色壳层 + 深色 terminal”的分离感
+
+可维护性：
+
+- 高
+
+潜在风险：
+
+- 无法满足当前明确的 light-mode 协调目标。
+
+##### 最终决策
+
+采用方案 A。
+
+补充约束：
+
+- app theme 为 light 时，terminal 也进入 light palette；
+- terminal 默认背景必须完整拥有 viewport；
+- `ThemeTokens` 只负责外部 shell surface，不再与 terminal 默认背景抢 ownership。
+
+#### 设计点 4：presenter 级 renderer 与 VS Code 风格边界
+
+##### 方案 A：继续沿用逐 cell 直绘，仅做配色和间距美化
+
+内容：
+
+- 保留当前 `session-cells -> Rectangle/Text` 的直绘模型；
+- 只调字体、padding、cursor、selection、边框、配色。
+
+实现复杂度：
+
+- 低到中
+
+与当前架构契合度：
+
+- 高
+
+交互一致性：
+
+- 中，只能把现在的观感“修顺眼”，无法真正靠近 IDE editor 的整体感
+
+可维护性：
+
+- 中
+
+潜在风险：
+
+- 视觉上限较低；
+- 很容易变成一轮又一轮的 cosmetic patch。
+
+##### 方案 B：提升到 presenter 级 renderer，并使用 contextual tint
+
+内容：
+
+- 引入 terminal presenter 概念，由 presenter 负责：
+  viewport 背景、行背景、text run、selection、cursor、行内默认 tint；
+- 不再把“每个 cell 都是一个完整 UI 元素”当成唯一表达方式；
+- 视觉目标参考 VS Code editor 区域，但不机械照搬；
+- 行级视觉增强仅允许 contextual tint：
+  只对 default-background 行做很轻的相邻色变化；
+- 对 `vim`、`htop`、`less`、显式 ANSI 背景、alt-screen 场景，contextual tint 自动退让或关闭。
+
+实现复杂度：
+
+- 中高
+
+与当前架构契合度：
+
+- 高，符合“custom renderer on top of Slint”的长期方向
+
+交互一致性：
+
+- 高，既能提升 shell 观感，也不会粗暴破坏全屏 TUI 的自绘语义
+
+可维护性：
+
+- 高，后续扩展 selection、hyperlink、semantic decoration 时更有空间
+
+潜在风险：
+
+- renderer 分层会比当前复杂；
+- 如果 presenter 责任边界不清，容易与 runtime projection 再次耦合。
+
+##### 最终决策
+
+采用方案 B。
+
+补充约束：
+
+- 视觉目标是“接近 VS Code editor 区域的协调感”，不是像素级复刻；
+- 行交错只允许 contextual tint；
+- 明确禁止全局强制 zebra striping。
+
+### 方案对比摘要
+
+| 设计点 | 方案 A | 方案 B | 最终选择 |
+| --- | --- | --- | --- |
+| 输出抑制层 | transport 前 exact-match 过滤 | projection / render 视觉隐藏 | A |
+| 输入事件总线 | 沿用现有 callback 逐项补洞 | 统一 `TerminalInputEvent` + terminal-native API | B |
+| palette 与背景 ownership | terminal 跟随 app theme，完整拥有 viewport | 终端固定深色，只补 viewport 背景 | A |
+| renderer 风格边界 | 继续逐 cell 直绘 | presenter 级重构 + contextual tint | B |
+
+### 最终决策
+
+本轮确认后的最终决策如下：
+
+- cockpit 提示行采用全局 exact-match 抑制；
+- terminal 输入层重构为统一输入事件总线；
+- live terminal 成为 key / paste / mouse / resize 的唯一语义出口；
+- bracketed paste 必须走 terminal-native `send_paste()`；
+- terminal 主题随 app theme 切换，提供明确的 light / dark terminal palette；
+- terminal 默认背景必须完整拥有 viewport；
+- renderer 提升到 presenter 级；
+- VS Code 风格只作为气质参考，不做机械复刻；
+- 行级美化只允许 contextual tint，不允许全局 zebra。
+
+### 实施步骤
+
+本节只记录高层实施顺序，不展开为 implementation plan。
+
+1. 先建立 terminal 输入事件抽象，并收拢当前分裂的 Slint callback 语义。
+2. 把 named key、paste、mouse、resize 全部改为由 live terminal state 驱动。
+3. 在 SSH 输出入口增加 exact-match suppression，并保证不破坏 chunk 拼接与行边界。
+4. 重新定义 terminal theme contract，让 palette 与 app theme 形成明确映射。
+5. 让 terminal viewport 默认背景从 terminal palette 派生，并完全覆盖显示区域。
+6. 引入 presenter 层，替代当前纯逐 cell 直绘的核心职责。
+7. 在 presenter 层实现 contextual tint，并为显式背景 / alt-screen 场景设置退让规则。
+8. 最后补齐输入、渲染、主题与回归验证。
+
+### 风险与回滚策略
+
+#### 主要风险
+
+- 输入链路统一后，可能暴露出比当前更多的模式同步问题；
+- light palette 如果调校不佳，会让 ANSI 颜色在亮色主题下显脏；
+- presenter 重构如果边界不清，可能再次把 UI chrome 与 terminal 内容刷新耦合起来；
+- contextual tint 若退让规则不足，可能干扰 `vim` / `htop` / `less` 等全屏 TUI 的视觉正确性。
+
+#### 回滚策略
+
+- 若统一输入事件层引发高风险回归，可先保留事件抽象，但临时只切换 key / paste 路径，鼠标与滚轮延后；
+- 若 light palette 效果不稳定，可暂时保留 dark palette 作为 fallback，但不回退输入层重构；
+- 若 presenter 级重构超出可控范围，可先保留 presenter 的 viewport / row ownership，再逐步替换 text painting；
+- 若 contextual tint 对全屏 TUI 造成干扰，可先全局关闭 tint，但保留 presenter 与 palette 架构。
+
+### 验证清单
+
+- [ ] 远端输出中 exact match 的 cockpit 提示行不再显示
+- [ ] 其他普通输出不受 suppression 误伤
+- [ ] `Ctrl+C` 在无 selection 时能正确发送到远端
+- [ ] `Ctrl+C` 在有 selection 时仍可复制选中内容
+- [ ] `Ctrl` / `Alt` / `Shift` 组合键能覆盖常见 shell / TUI 场景
+- [ ] `Enter` / `Backspace` / `Tab` / `Esc` 行为与标准终端一致
+- [ ] 箭头键、`Home` / `End` / `PageUp` / `PageDown` / `Delete` / `F` 键可在 `vim` / `htop` 中正常工作
+- [ ] 鼠标点击、拖拽、滚轮在 shell 与支持 mouse tracking 的 TUI 中行为正确
+- [ ] bracketed paste 开启时，paste 以 bracketed 形式发送
+- [ ] 窗口 resize 后 rows / cols 能同步到远端 PTY
+- [ ] light mode 下 terminal viewport 不再出现“字符区黑底、空白区白底”的断裂
+- [ ] terminal 默认背景完整覆盖 viewport
+- [ ] 终端字体维持 mono 风格，整体观感接近 IDE 编辑区而非传统粗糙 cell 网格
+- [ ] contextual tint 仅在合适场景生效，不干扰显式背景或 alt-screen TUI
