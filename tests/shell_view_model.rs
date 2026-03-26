@@ -492,7 +492,6 @@ fn selecting_primary_leaf_path_keeps_blank_area_menu_flat() {
             selected_ids: view_model.selected_asset_ids.clone(),
             clipboard_has_asset_payload: true,
             target_mutable: true,
-            target_has_active_connection: false,
         },
     );
     let new_folder_index = roots

@@ -217,7 +217,7 @@ fn second_click_on_same_ssh_asset_opens_session() {
 }
 
 #[test]
-fn double_clicking_ssh_asset_opens_session_and_reuses_existing_tab() {
+fn double_clicking_same_ssh_asset_twice_creates_two_distinct_tabs() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -235,15 +235,19 @@ fn double_clicking_ssh_asset_opens_session_and_reuses_existing_tab() {
 
     app.invoke_asset_activated(ssh_id.into());
 
-    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(
-        app.get_active_workspace_session_id().as_str(),
-        first_session_id
-    );
+    assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+    let second_session_id = app
+        .get_workspace_tab_items()
+        .row_data(1)
+        .expect("second workspace tab")
+        .session_id
+        .to_string();
+    assert_ne!(first_session_id, second_session_id);
+    assert_eq!(app.get_active_workspace_session_id().as_str(), second_session_id);
 }
 
 #[test]
-fn explicit_open_context_action_opens_session_and_reuses_existing_tab() {
+fn explicit_open_context_action_opens_distinct_tabs_each_time() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -265,32 +269,6 @@ fn explicit_open_context_action_opens_session_and_reuses_existing_tab() {
     app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
     app.invoke_assets_context_menu_action_invoked("open-connection".into());
 
-    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(
-        app.get_active_workspace_session_id().as_str(),
-        first_session_id
-    );
-}
-
-#[test]
-fn open_in_new_tab_creates_second_session_for_same_asset() {
-    i_slint_backend_testing::init_no_event_loop();
-
-    let app = AppWindow::new().unwrap();
-    bind_with_fake_sessions(&app);
-
-    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-    app.invoke_asset_activated(ssh_id.clone().into());
-    let first_session_id = app
-        .get_workspace_tab_items()
-        .row_data(0)
-        .expect("first workspace tab")
-        .session_id
-        .to_string();
-
-    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
-    app.invoke_assets_context_menu_action_invoked("open-in-new-tab".into());
-
     assert_eq!(app.get_workspace_tab_items().row_count(), 2);
     let second_session_id = app
         .get_workspace_tab_items()
@@ -299,14 +277,11 @@ fn open_in_new_tab_creates_second_session_for_same_asset() {
         .session_id
         .to_string();
     assert_ne!(first_session_id, second_session_id);
-    assert_eq!(
-        app.get_active_workspace_session_id().as_str(),
-        second_session_id
-    );
+    assert_eq!(app.get_active_workspace_session_id().as_str(), second_session_id);
 }
 
 #[test]
-fn disconnected_tab_stays_visible_until_user_closes_it() {
+fn ssh_context_menu_only_exposes_single_open_action() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -317,22 +292,16 @@ fn disconnected_tab_stays_visible_until_user_closes_it() {
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
 
     app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
-    app.invoke_assets_context_menu_action_invoked("close-connection".into());
 
-    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    let disconnected = app
-        .get_workspace_tab_items()
-        .row_data(0)
-        .expect("disconnected workspace tab");
-    assert_eq!(disconnected.state.as_str(), "disconnected");
-    assert_eq!(
-        app.get_active_workspace_session_id().as_str(),
-        disconnected.session_id.as_str()
-    );
-    assert!(app.get_workspace_session_can_reconnect());
+    let primary = app.get_assets_context_menu_primary_items();
+    let ids: Vec<String> = (0..primary.row_count())
+        .filter_map(|index| primary.row_data(index))
+        .map(|item| item.id.to_string())
+        .collect();
 
-    app.invoke_workspace_tab_close_requested(disconnected.session_id.clone());
-    assert_eq!(app.get_workspace_tab_items().row_count(), 0);
+    assert!(ids.contains(&"open-connection".to_string()));
+    assert!(!ids.contains(&"open-in-new-tab".to_string()));
+    assert!(!ids.contains(&"close-connection".to_string()));
 }
 
 #[test]

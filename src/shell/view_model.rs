@@ -1412,14 +1412,6 @@ impl ShellViewModel {
             selected_ids: self.selected_asset_ids.clone(),
             clipboard_has_asset_payload: false,
             target_mutable: true,
-            target_has_active_connection: matches!(
-                self.context_menu_target_kind,
-                Some(ContextTargetKind::SshConnection)
-            ) && self
-                .context_target_asset_id
-                .as_deref()
-                .map(|asset_id| self.asset_has_live_workspace_session(asset_id))
-                .unwrap_or(false),
         }
     }
 
@@ -1484,12 +1476,6 @@ impl ShellViewModel {
             self.active_workspace_terminal_surface = None;
         }
         self.show_welcome = self.workspace_tabs.is_empty();
-    }
-
-    fn asset_has_live_workspace_session(&self, asset_id: &str) -> bool {
-        self.workspace_tabs.iter().any(|tab| {
-            tab.asset_id == asset_id && matches!(tab.state.as_str(), "connecting" | "connected")
-        })
     }
 
     fn normalize_folder_parent_id(&self, parent_id: Option<String>) -> Option<String> {

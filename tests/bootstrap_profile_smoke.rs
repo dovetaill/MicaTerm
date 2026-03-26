@@ -22,7 +22,9 @@ fn run_with_profile_accepts_external_async_handle_for_ssh_services() {
         "run_with_profile should explicitly accept the async runtime handle used by shell services"
     );
     assert!(
-        content.contains("let session_bridge = build_session_bridge(async_runtime_handle"),
+        content.contains(
+            "let session_bridge =\n                build_session_bridge(async_runtime_handle,"
+        ),
         "run_with_profile should thread the supplied runtime handle into session bridge construction"
     );
     assert!(

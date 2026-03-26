@@ -1,10 +1,85 @@
 //! Smoke coverage for the bootstrap-level assets context menu state bridge.
 
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use anyhow::Result;
 use mica_term::AppWindow;
-use mica_term::app::bootstrap::bind_top_status_bar_with_store;
+use mica_term::app::bootstrap::{
+    bind_top_status_bar_with_store, bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher,
+};
+use mica_term::app::ssh::profile::ConnectionProfile;
+use mica_term::app::ssh::runtime::SessionRuntimeEvent;
+use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
+use mica_term::app::window_effects::default_platform_window_effects;
 use slint::ComponentHandle;
 use slint::Model;
 use slint::PhysicalSize;
+use tokio::sync::mpsc;
+
+#[derive(Clone, Default)]
+struct FakeLauncher;
+
+struct NoopRuntimeControl;
+
+impl SessionRuntimeControl for NoopRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_input(&self, _bytes: Vec<u8>) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl SessionRuntimeLauncher for FakeLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: uuid::Uuid,
+        _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        Box::pin(async move { Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>) })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+fn bind_with_fake_sessions(app: &AppWindow) {
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
+        app,
+        None,
+        default_platform_window_effects(),
+        None,
+        Arc::new(FakeLauncher),
+    );
+}
+
+fn create_root_ssh(app: &AppWindow, name: &str, host: &str) -> String {
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), name.into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), host.into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    app.get_console_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string()
+}
 
 #[test]
 fn bootstrap_exposes_context_menu_closed_by_default() {
@@ -31,6 +106,22 @@ fn right_click_request_opens_context_menu_and_sets_anchor() {
     assert!(app.get_assets_context_menu_open());
     assert_eq!(app.get_assets_context_menu_anchor_x(), 144.0);
     assert_eq!(app.get_assets_context_menu_anchor_y(), 188.0);
+}
+
+#[test]
+fn invoking_open_from_ssh_context_menu_creates_a_new_session_tab() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app);
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_asset_context_menu_requested(ssh_id.clone().into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("open-connection".into());
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("open-connection".into());
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 2);
 }
 
 #[test]

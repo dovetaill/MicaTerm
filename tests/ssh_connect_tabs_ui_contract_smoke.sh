@@ -6,6 +6,7 @@ APP_WINDOW="$ROOT_DIR/ui/app-window.slint"
 HOST_KEY_MODAL="$ROOT_DIR/ui/components/ssh-host-key-confirm-modal.slint"
 ACTIVE_TAB="$ROOT_DIR/ui/components/active-tab.slint"
 TABBAR="$ROOT_DIR/ui/shell/tabbar.slint"
+WORKSPACE_PANE="$ROOT_DIR/ui/shell/workspace-pane.slint"
 WORKSPACE_HOST="$ROOT_DIR/ui/shell/terminal-session-host.slint"
 
 grep -F 'export component SshHostKeyConfirmModal inherits Rectangle {' "$HOST_KEY_MODAL" >/dev/null
@@ -23,6 +24,7 @@ grep -F 'for item in root.items : ActiveTab {' "$TABBAR" >/dev/null
 grep -F 'horizontal-stretch: 0;' "$TABBAR" >/dev/null
 grep -F 'trailing-spacer := Rectangle {' "$TABBAR" >/dev/null
 grep -F 'background: ThemeTokens.titlebar-surface;' "$TABBAR" >/dev/null
+grep -F 'if root.workspace-tab-items.length > 0 : tab-strip := TabBar {' "$WORKSPACE_PANE" >/dev/null
 grep -F 'min-width: 0px;' "$ACTIVE_TAB" >/dev/null
 grep -F 'callback close-requested();' "$ACTIVE_TAB" >/dev/null
 grep -F 'overflow: elide;' "$ACTIVE_TAB" >/dev/null
@@ -33,6 +35,9 @@ grep -F '@image-url("../../assets/icons/fluent/dismiss-20-regular.svg")' "$ACTIV
 grep -F 'content-hit-target := TouchArea {' "$ACTIVE_TAB" >/dev/null
 grep -F 'close-hit-target := TouchArea {' "$ACTIVE_TAB" >/dev/null
 grep -F 'close-visible' "$ACTIVE_TAB" >/dev/null
+if grep -F 'width: root.close-visible ? close-button.x : parent.width;' "$ACTIVE_TAB" >/dev/null; then
+    exit 1
+fi
 grep -F 'connecting' "$TABBAR" >/dev/null
 grep -F 'error' "$TABBAR" >/dev/null
 grep -F 'export component TerminalSessionHost inherits Rectangle {' "$WORKSPACE_HOST" >/dev/null

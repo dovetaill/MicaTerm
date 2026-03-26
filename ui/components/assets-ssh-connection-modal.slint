@@ -592,39 +592,6 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
                     Text {
                         width: parent.width;
-                        text: "Connection Options";
-                        color: ThemeTokens.text-primary;
-                        font-weight: 600;
-                    }
-
-                    VerticalLayout {
-                        width: parent.width;
-                        spacing: 12px;
-
-                        FormField {
-                            width: parent.width;
-                            label: "Proxy Method";
-                            value: root.proxy-method;
-
-                            value-changed(value) => {
-                                root.draft-changed("proxy_method", value);
-                            }
-                        }
-
-                        FormField {
-                            width: parent.width;
-                            label: "Session Environment";
-                            value: root.environment;
-                            multiline: true;
-
-                            value-changed(value) => {
-                                root.draft-changed("environment", value);
-                            }
-                        }
-                    }
-
-                    Text {
-                        width: parent.width;
                         text: "Notes";
                         color: ThemeTokens.text-primary;
                         font-weight: 600;

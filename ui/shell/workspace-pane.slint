@@ -30,7 +30,7 @@ export component WorkspacePane inherits Rectangle {
         height: 100%;
         spacing: 0px;
 
-        tab-strip := TabBar {
+        if root.workspace-tab-items.length > 0 : tab-strip := TabBar {
             width: 100%;
             min-width: 0px;
             items: root.workspace-tab-items;
