@@ -7,7 +7,7 @@ pub enum AppBuildFlavor {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RendererMode {
-    FemtoVgWgpu,
+    Software,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,7 +20,7 @@ impl AppRuntimeProfile {
     pub fn mainline() -> Self {
         Self {
             build_flavor: AppBuildFlavor::Mainline,
-            renderer_mode: RendererMode::FemtoVgWgpu,
+            renderer_mode: RendererMode::Software,
         }
     }
 
@@ -29,10 +29,6 @@ impl AppRuntimeProfile {
     }
 
     pub fn forced_renderer(self) -> Option<&'static str> {
-        Some("femtovg-wgpu")
-    }
-
-    pub fn requires_wgpu_28(self) -> bool {
-        true
+        Some("software")
     }
 }

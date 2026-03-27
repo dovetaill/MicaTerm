@@ -1,4 +1,4 @@
-#![cfg(not(feature = "slint-renderer-femtovg-wgpu"))]
+#![cfg(feature = "slint-renderer-software")]
 // Render smoke coverage for the software backend titlebar interactions.
 
 use std::rc::Rc;

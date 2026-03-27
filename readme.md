@@ -5,8 +5,6 @@ Project planning is in `docs/plans/`.
 - Overall style design: `docs/plans/2026-03-10-overall-style-design.md`
 - Overall style implementation plan: `docs/plans/2026-03-10-overall-style-implementation-plan.md`
 - Overall style verification: `docs/plans/2026-03-10-overall-style-verification.md`
-- Windows FemtoVG WGPU DX12 retrospective:
-  `docs/plans/2026-03-13-windows-femtovg-wgpu-dx12-retrospective.md`
 
 ## Icon Assets
 
@@ -17,7 +15,7 @@ Project planning is in `docs/plans/`.
 ## Mainline Build Entry Points
 
 - `./build-release.sh`
-  - Runs the mainline GPU release path for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu`
+  - Runs the mainline software release path for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu`
   - Default mode: `MODE=fail-fast`
   - Optional mode: `MODE=best-effort`
 
@@ -40,25 +38,11 @@ Project planning is in `docs/plans/`.
     `dist/mica-term-x86_64-pc-windows-gnu-release.zip`
     `dist/mica-term-x86_64-pc-windows-msvc-release.zip`
 
-- `./build-linux-x64-femtovg-wgpu.sh`
-  - Linux x64 mainline convenience wrapper for `x86_64-unknown-linux-gnu`
-  - Produces `dist/mica-term-x86_64-unknown-linux-gnu-release.tar.gz`
-
 Notes:
 
-- All build entrypoints now resolve to the same runtime route: `winit + femtovg-wgpu + wgpu-28`.
-- The runtime profile is internal to the app and is always locked to that GPU renderer.
+- All shipped build entrypoints resolve to the same mainline runtime route: `winit + software`.
+- The runtime profile is internal to the app and is locked to the software renderer.
 - `./build-release.sh` remains the aggregate Linux x64 + Windows GNU release entrypoint.
-
-## Windows FemtoVG WGPU Note
-
-- On Windows, the mainline `femtovg-wgpu` route now explicitly requests `wgpu::Backends::DX12`.
-- This is intentional and not a cosmetic tweak. The visual corruption issue still reproduced on the
-  tested RX550 system after `transparent_window=false`, `present_mode=Fifo`, and `alpha_mode=Opaque`
-  were already in place, but it stopped once the runtime actually initialized WGPU with `backend=Dx12`
-  instead of `backend=Vulkan`.
-- The complete investigation and timeline are recorded in
-  `docs/plans/2026-03-13-windows-femtovg-wgpu-dx12-retrospective.md`.
 
 Archive formats:
 

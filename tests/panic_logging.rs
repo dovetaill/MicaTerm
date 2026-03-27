@@ -51,6 +51,6 @@ fn startup_failure_message_is_explicit_for_mainline_profile() {
         .expect("mainline profile should expose a startup message");
 
     assert!(message.contains("Mica Term"));
-    assert!(message.contains("winit-femtovg-wgpu"));
+    assert!(message.contains("winit-software"));
     assert!(message.contains("mock init failure"));
 }

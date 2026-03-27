@@ -15,9 +15,9 @@ use russh::keys::{self, PrivateKeyWithHashAlg};
 use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers as KeyModifiers};
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use wezterm_term::color::{ColorPalette, ColorAttribute, RgbColor, SrgbaTuple};
-use wezterm_term::{Line, Terminal, TerminalConfiguration, TerminalSize};
 use wezterm_surface::{CursorShape, CursorVisibility};
+use wezterm_term::color::{ColorAttribute, ColorPalette, RgbColor, SrgbaTuple};
+use wezterm_term::{Line, Terminal, TerminalConfiguration, TerminalSize};
 
 use crate::app::ssh::credentials::{
     CredentialStore, StoredSecretLookupError, StoredSshSecretBundle, SystemCredentialStore,
@@ -58,6 +58,26 @@ pub struct TerminalSurfaceState {
     pub visible_lines: Vec<String>,
     pub cells: Vec<TerminalCellState>,
     pub cursor: TerminalCursorState,
+    pub mouse_grabbed: bool,
+    pub bracketed_paste_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalSurfaceSignature {
+    pub session_id: Uuid,
+    pub seqno: usize,
+    pub rows: u32,
+    pub cols: u32,
+    pub viewport_offset_lines: u32,
+    pub viewport_max_offset_lines: u32,
+    pub viewport_at_bottom: bool,
+    pub cursor_row: u32,
+    pub cursor_col: u32,
+    pub cursor_visible: bool,
+    pub cursor_blinking: bool,
+    pub cursor_shape: TerminalCursorShape,
+    pub cursor_fg_rgba: u32,
+    pub cursor_bg_rgba: u32,
     pub mouse_grabbed: bool,
     pub bracketed_paste_enabled: bool,
 }
@@ -1050,9 +1070,7 @@ impl TerminalSession {
 
     pub fn scroll_viewport_lines(&mut self, delta: i32) {
         if delta > 0 {
-            self.viewport_offset_lines = self
-                .viewport_offset_lines
-                .saturating_add(delta as usize);
+            self.viewport_offset_lines = self.viewport_offset_lines.saturating_add(delta as usize);
         } else if delta < 0 {
             self.viewport_offset_lines = self
                 .viewport_offset_lines
@@ -1184,17 +1202,15 @@ impl TerminalSession {
         }
     }
 
-    fn resolve_fallback_mouse_button(
-        &mut self,
-        event: TerminalMouseInput,
-    ) -> TerminalMouseButton {
+    fn resolve_fallback_mouse_button(&mut self, event: TerminalMouseInput) -> TerminalMouseButton {
         match event.kind {
             TerminalMouseEventKind::Down => {
                 if event.button != TerminalMouseButton::None {
                     self.fallback_mouse_button = Some(event.button);
                     event.button
                 } else {
-                    self.fallback_mouse_button.unwrap_or(TerminalMouseButton::None)
+                    self.fallback_mouse_button
+                        .unwrap_or(TerminalMouseButton::None)
                 }
             }
             TerminalMouseEventKind::Move => {
@@ -1202,14 +1218,16 @@ impl TerminalSession {
                     self.fallback_mouse_button = Some(event.button);
                     event.button
                 } else {
-                    self.fallback_mouse_button.unwrap_or(TerminalMouseButton::None)
+                    self.fallback_mouse_button
+                        .unwrap_or(TerminalMouseButton::None)
                 }
             }
             TerminalMouseEventKind::Up => {
                 let effective = if event.button != TerminalMouseButton::None {
                     event.button
                 } else {
-                    self.fallback_mouse_button.unwrap_or(TerminalMouseButton::None)
+                    self.fallback_mouse_button
+                        .unwrap_or(TerminalMouseButton::None)
                 };
                 self.fallback_mouse_button = None;
                 effective
@@ -1325,6 +1343,27 @@ impl TerminalKeyboardModes {
 }
 
 impl TerminalSurfaceState {
+    pub fn signature(&self) -> TerminalSurfaceSignature {
+        TerminalSurfaceSignature {
+            session_id: self.session_id,
+            seqno: self.seqno,
+            rows: self.rows,
+            cols: self.cols,
+            viewport_offset_lines: self.viewport_offset_lines,
+            viewport_max_offset_lines: self.viewport_max_offset_lines,
+            viewport_at_bottom: self.viewport_at_bottom,
+            cursor_row: self.cursor.row,
+            cursor_col: self.cursor.col,
+            cursor_visible: self.cursor.visible,
+            cursor_blinking: self.cursor.blinking,
+            cursor_shape: self.cursor.shape,
+            cursor_fg_rgba: self.cursor.fg_rgba,
+            cursor_bg_rgba: self.cursor.bg_rgba,
+            mouse_grabbed: self.mouse_grabbed,
+            bracketed_paste_enabled: self.bracketed_paste_enabled,
+        }
+    }
+
     pub fn from_visible_lines(
         session_id: Uuid,
         seqno: usize,
@@ -1365,7 +1404,13 @@ impl TerminalSurfaceState {
         }
     }
 
-    pub fn selection_text(&self, start_row: u32, start_col: u32, end_row: u32, end_col: u32) -> String {
+    pub fn selection_text(
+        &self,
+        start_row: u32,
+        start_col: u32,
+        end_row: u32,
+        end_col: u32,
+    ) -> String {
         let ((start_row, start_col), (end_row, end_col)) =
             normalized_selection((start_row, start_col), (end_row, end_col));
         let mut text = String::new();
@@ -1381,9 +1426,7 @@ impl TerminalSurfaceState {
 
             for cell in self.cells.iter().filter(|cell| cell.row == row) {
                 let cell_start = cell.col;
-                let cell_end = cell
-                    .col
-                    .saturating_add(cell.width.saturating_sub(1));
+                let cell_end = cell.col.saturating_add(cell.width.saturating_sub(1));
                 if cell_end < row_start || cell_start > row_end {
                     continue;
                 }
@@ -1614,11 +1657,7 @@ fn resolve_cell_colors(palette: &ColorPalette, attrs: &wezterm_term::CellAttribu
     (fg, bg)
 }
 
-fn resolve_palette_color(
-    palette: &ColorPalette,
-    color: ColorAttribute,
-    background: bool,
-) -> u32 {
+fn resolve_palette_color(palette: &ColorPalette, color: ColorAttribute, background: bool) -> u32 {
     let rgba = if background {
         palette.resolve_bg(color)
     } else {
@@ -1658,10 +1697,7 @@ fn cursor_shape_blinks(shape: CursorShape) -> bool {
     )
 }
 
-fn normalized_selection(
-    start: (u32, u32),
-    end: (u32, u32),
-) -> ((u32, u32), (u32, u32)) {
+fn normalized_selection(start: (u32, u32), end: (u32, u32)) -> ((u32, u32), (u32, u32)) {
     if start.0 < end.0 || (start.0 == end.0 && start.1 <= end.1) {
         (start, end)
     } else {
@@ -1683,10 +1719,7 @@ fn mouse_modifiers(event: TerminalMouseInput) -> wezterm_term::KeyModifiers {
     modifiers
 }
 
-fn encode_sgr_mouse_fallback(
-    event: TerminalMouseInput,
-    button: TerminalMouseButton,
-) -> Vec<u8> {
+fn encode_sgr_mouse_fallback(event: TerminalMouseInput, button: TerminalMouseButton) -> Vec<u8> {
     let mut code = match button {
         TerminalMouseButton::Left => 0,
         TerminalMouseButton::Middle => 1,
