@@ -822,3 +822,38 @@ Date: 2026-03-23 11:34:00 CST
 - [x] `assets.redb` 缺失时能初始化空 catalog
 - [x] `assets.redb` 损坏时会被隔离而不是静默覆盖
 - [x] `readme.md` 已说明 working directory 不影响资产数据位置
+
+## Terminal Interaction Polish Verification
+
+Date: 2026-03-27 09:55:02 CST
+
+### Source Documents
+
+- Design: `docs/plans/2026-03-26-terminal-interaction-polish-design.md`
+- Implementation Plan: `docs/plans/2026-03-26-terminal-interaction-polish-implementation-plan.md`
+
+### Commands Executed
+
+- [x] `cargo test --test terminal_session_spec --test ssh_terminal_interaction_spec --test terminal_scrollback_spec --test ssh_session_manager_spec --test bootstrap_smoke --test workspace_tabs_spec -- --nocapture`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+
+### Automated Results
+
+- `cargo test --test terminal_session_spec --test ssh_terminal_interaction_spec --test terminal_scrollback_spec --test ssh_session_manager_spec --test bootstrap_smoke --test workspace_tabs_spec -- --nocapture`: passed
+  - `bootstrap_smoke`: 32 passed
+  - `ssh_session_manager_spec`: 20 passed
+  - `ssh_terminal_interaction_spec`: 5 passed
+  - `terminal_scrollback_spec`: 3 passed
+  - `terminal_session_spec`: 11 passed
+  - `workspace_tabs_spec`: 18 passed
+- `cargo check --workspace`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+
+### Verification Conclusions
+
+- [x] runtime surface projection now exposes `viewport_offset_lines / viewport_max_offset_lines / viewport_at_bottom`
+- [x] local scrollback snaps back to bottom on terminal text input, key input, paste, and new remote output
+- [x] `TerminalSessionHost` exposes the planned local shortcut and scrollbar callback contract
+- [x] `SessionManager` can scroll an active session to top, bottom, or a clamped ratio target
+- [x] `bootstrap` projects active viewport state into `AppWindow` and refreshes it immediately after local terminal commands

@@ -280,6 +280,43 @@ impl SessionManager {
         Ok(())
     }
 
+    pub fn scroll_session_to_top(&self, session_id: Uuid) -> Result<()> {
+        let (_, max_offset) = self.viewport_offsets(session_id)?;
+        self.scroll_session_to_offset(session_id, max_offset)
+    }
+
+    pub fn scroll_session_to_bottom(&self, session_id: Uuid) -> Result<()> {
+        self.scroll_session_to_offset(session_id, 0)
+    }
+
+    pub fn scroll_session_to_ratio(&self, session_id: Uuid, ratio: f32) -> Result<()> {
+        let (_, max_offset) = self.viewport_offsets(session_id)?;
+        let target = ((max_offset as f32) * ratio.clamp(0.0, 1.0)).round() as u32;
+        self.scroll_session_to_offset(session_id, target)
+    }
+
+    fn viewport_offsets(&self, session_id: Uuid) -> Result<(u32, u32)> {
+        let registry = self.registry.lock().expect("lock session registry");
+        let surface = registry
+            .terminal_surfaces
+            .get(&session_id)
+            .ok_or_else(|| anyhow!("session terminal surface is not ready for `{session_id}`"))?;
+        Ok((surface.viewport_offset_lines, surface.viewport_max_offset_lines))
+    }
+
+    fn scroll_session_to_offset(&self, session_id: Uuid, target_offset: u32) -> Result<()> {
+        let (current_offset, max_offset) = self.viewport_offsets(session_id)?;
+        let target_offset = target_offset.min(max_offset);
+        let delta = i64::from(target_offset) - i64::from(current_offset);
+        let delta =
+            i32::try_from(delta).context("session viewport delta exceeded supported range")?;
+        if delta == 0 {
+            return Ok(());
+        }
+
+        self.scroll_session_viewport(session_id, delta)
+    }
+
     pub fn set_theme_mode(&self, mode: ThemeMode) -> Result<()> {
         let session_ids = {
             let mut registry = self.registry.lock().expect("lock session registry");

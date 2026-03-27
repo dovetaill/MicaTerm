@@ -44,6 +44,23 @@ fn local_scrollback_changes_visible_projection_without_mutating_remote_screen() 
 }
 
 #[test]
+fn keyboard_input_snaps_local_scrollback_back_to_bottom() {
+    let mut session = TerminalSession::new(4, 20);
+
+    session.apply_remote_bytes(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n");
+    session.scroll_viewport_lines(2);
+
+    let before = session.surface_state(Uuid::new_v4());
+    session
+        .send_key_event(TerminalKeyEvent::character('a', false, false, false))
+        .expect("encode key input");
+    let after = session.surface_state(Uuid::new_v4());
+
+    assert!(!before.viewport_at_bottom);
+    assert!(after.viewport_at_bottom);
+}
+
+#[test]
 fn light_theme_palette_changes_default_background_projection() {
     let mut session = TerminalSession::new(24, 80);
 

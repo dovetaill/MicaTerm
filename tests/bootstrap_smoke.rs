@@ -106,6 +106,9 @@ struct InteractiveProjectionLauncher;
 #[derive(Clone, Default)]
 struct PasteProjectionLauncher;
 
+#[derive(Clone, Default)]
+struct ScrollProjectionLauncher;
+
 #[derive(Clone)]
 struct FailingProbeLauncher {
     message: &'static str,
@@ -138,6 +141,15 @@ struct InteractiveProjectionRuntimeControl {
 struct PasteProjectionRuntimeControl {
     session_id: uuid::Uuid,
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+}
+
+#[derive(Clone, Default)]
+struct ScrollProjectionState {
+    surface: Arc<Mutex<Option<TerminalSurfaceState>>>,
+}
+
+struct ScrollProjectionRuntimeControl {
+    state: ScrollProjectionState,
 }
 
 impl SessionRuntimeControl for NoopRuntimeControl {
@@ -339,6 +351,32 @@ impl SessionRuntimeLauncher for PasteProjectionLauncher {
     }
 }
 
+impl SessionRuntimeLauncher for ScrollProjectionLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        Box::pin(async move {
+            let state = ScrollProjectionState::default();
+            let surface = bootstrap_surface_with_viewport(session_id, 1, 3, 8);
+            *state.surface.lock().expect("lock scroll projection surface") = Some(surface.clone());
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+            Ok(Box::new(ScrollProjectionRuntimeControl { state }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeLauncher for FailingProbeLauncher {
     fn launch(
         &self,
@@ -491,6 +529,56 @@ impl SessionRuntimeControl for PasteProjectionRuntimeControl {
     }
 }
 
+impl SessionRuntimeControl for ScrollProjectionRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn scroll_viewport_lines(&self, delta: i32) -> Result<TerminalSurfaceState> {
+        let mut surface = self
+            .state
+            .surface
+            .lock()
+            .expect("lock scroll projection surface")
+            .clone()
+            .expect("current scroll projection surface");
+        let next_offset = (surface.viewport_offset_lines as i32 + delta)
+            .clamp(0, surface.viewport_max_offset_lines as i32) as u32;
+        surface = bootstrap_surface_with_viewport(
+            surface.session_id,
+            surface.seqno.saturating_add(1),
+            next_offset,
+            surface.viewport_max_offset_lines,
+        );
+        *self
+            .state
+            .surface
+            .lock()
+            .expect("lock scroll projection surface") = Some(surface.clone());
+        Ok(surface)
+    }
+}
+
 impl SessionRuntimeLauncher for StoredSecretProbeLauncher {
     fn launch(
         &self,
@@ -613,6 +701,25 @@ fn sample_known_hosts_path(label: &str) -> std::path::PathBuf {
         std::process::id()
     ));
     path
+}
+
+fn bootstrap_surface_with_viewport(
+    session_id: uuid::Uuid,
+    seqno: usize,
+    offset: u32,
+    max_offset: u32,
+) -> TerminalSurfaceState {
+    let mut surface = TerminalSurfaceState::from_visible_lines(
+        session_id,
+        seqno,
+        24,
+        80,
+        vec![format!("offset {offset}")],
+    );
+    surface.viewport_offset_lines = offset;
+    surface.viewport_max_offset_lines = max_offset;
+    surface.viewport_at_bottom = offset == 0;
+    surface
 }
 
 fn sample_public_key() -> PublicKey {
@@ -1927,6 +2034,84 @@ fn workspace_terminal_mouse_input_callback_updates_active_session_surface() {
     assert_eq!(app.get_workspace_session_surface_seqno(), 2);
     assert_eq!(visible_lines.row_count(), 2);
     assert_eq!(visible_lines.row_data(1).unwrap().as_str(), "mouse input forwarded");
+}
+
+#[test]
+fn bootstrap_projects_terminal_scrollback_state_into_window_properties() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 3);
+    assert_eq!(app.get_workspace_session_viewport_max_offset_lines(), 8);
+    assert!(!app.get_workspace_session_viewport_at_bottom());
+}
+
+#[test]
+fn terminal_input_callback_snaps_scrolled_session_back_to_latest_surface() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 3);
+    assert_eq!(
+        app.get_workspace_session_visible_lines()
+            .row_data(0)
+            .expect("scrolled visible line")
+            .as_str(),
+        "offset 3"
+    );
+
+    app.invoke_workspace_session_text_input("pwd".into());
+
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
+    assert!(app.get_workspace_session_viewport_at_bottom());
+    assert_eq!(
+        app.get_workspace_session_visible_lines()
+            .row_data(0)
+            .expect("bottom visible line")
+            .as_str(),
+        "offset 0"
+    );
+}
+
+#[test]
+fn workspace_terminal_scroll_callbacks_update_active_session_surface() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    app.invoke_workspace_session_scroll_jump_requested(1.0);
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 8);
+    assert!(!app.get_workspace_session_viewport_at_bottom());
+
+    app.invoke_workspace_session_scroll_thumb_drag_requested(0.0);
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
+    assert!(app.get_workspace_session_viewport_at_bottom());
 }
 
 #[test]

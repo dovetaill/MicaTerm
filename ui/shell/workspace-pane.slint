@@ -26,6 +26,9 @@ export component WorkspacePane inherits Rectangle {
     in property <bool> workspace-session-mouse-grabbed: false;
     in property <[string]> workspace-session-visible-lines: [];
     in property <int> workspace-session-surface-seqno: 0;
+    in property <int> workspace-session-viewport-offset-lines: 0;
+    in property <int> workspace-session-viewport-max-offset-lines: 0;
+    in property <bool> workspace-session-viewport-at-bottom: true;
     callback workspace-tab-selected(string);
     callback workspace-tab-close-requested(string);
     callback text-input(string);
@@ -34,6 +37,8 @@ export component WorkspacePane inherits Rectangle {
     callback copy-selection-requested(int, int, int, int);
     callback paste-requested();
     callback scroll-requested(int, int, int, bool, bool, bool);
+    callback scroll-thumb-drag-requested(float);
+    callback scroll-jump-requested(float);
     callback mouse-input(string, string, int, int, bool, bool, bool);
 
     horizontal-stretch: 1;
@@ -88,6 +93,9 @@ export component WorkspacePane inherits Rectangle {
                 session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                 session-visible-lines: root.workspace-session-visible-lines;
                 session-surface-seqno: root.workspace-session-surface-seqno;
+                session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
+                session-viewport-max-offset-lines: root.workspace-session-viewport-max-offset-lines;
+                session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
 
                 text-input(text) => {
                     root.text-input(text);
@@ -111,6 +119,14 @@ export component WorkspacePane inherits Rectangle {
 
                 scroll-requested(delta-lines, row, col, shift, ctrl, alt) => {
                     root.scroll-requested(delta-lines, row, col, shift, ctrl, alt);
+                }
+
+                scroll-thumb-drag-requested(ratio) => {
+                    root.scroll-thumb-drag-requested(ratio);
+                }
+
+                scroll-jump-requested(ratio) => {
+                    root.scroll-jump-requested(ratio);
                 }
 
                 mouse-input(kind, button, row, col, shift, ctrl, alt) => {

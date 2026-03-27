@@ -90,6 +90,22 @@ fn terminal_runtime_snapshot_can_be_polled_without_exposing_transport_objects() 
             .iter()
             .any(|line| line.contains("welcome to mica-term"))
     );
+    assert_eq!(snapshot.viewport_offset_lines, 0);
+    assert_eq!(snapshot.viewport_max_offset_lines, 0);
+    assert!(snapshot.viewport_at_bottom);
+}
+
+#[test]
+fn surface_projection_exposes_scrollback_metadata() {
+    let mut session = TerminalSession::new(4, 20);
+
+    session.apply_remote_bytes(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n");
+    session.scroll_viewport_lines(3);
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+
+    assert!(snapshot.viewport_offset_lines > 0);
+    assert!(snapshot.viewport_max_offset_lines >= snapshot.viewport_offset_lines);
 }
 
 #[test]
@@ -169,6 +185,22 @@ fn theme_toggle_refreshes_existing_terminal_palette_projection() {
 
     assert_ne!(dark_prompt.bg_rgba, light_prompt.bg_rgba);
     assert_ne!(light_prompt.bg_rgba, 0xff00_0000);
+}
+
+#[test]
+fn dark_theme_palette_uses_bright_default_foreground() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.apply_remote_bytes(b"[root@host ~]# ");
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    let prompt = snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 0)
+        .expect("prompt cell");
+
+    assert_ne!(prompt.fg_rgba, 0xff00_0000);
 }
 
 #[test]

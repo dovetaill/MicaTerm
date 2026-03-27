@@ -51,6 +51,9 @@ pub struct TerminalSurfaceState {
     pub seqno: usize,
     pub rows: u32,
     pub cols: u32,
+    pub viewport_offset_lines: u32,
+    pub viewport_max_offset_lines: u32,
+    pub viewport_at_bottom: bool,
     pub visible_rows: Vec<TerminalRowState>,
     pub visible_lines: Vec<String>,
     pub cells: Vec<TerminalCellState>,
@@ -933,10 +936,11 @@ impl TerminalSession {
     }
 
     pub fn apply_remote_bytes(&mut self, bytes: &[u8]) {
-        self.keyboard_modes.observe(bytes);
         let filtered = self.pending_remote_line_buffer.push_and_filter(bytes);
+        self.keyboard_modes.observe(filtered.as_slice());
         if !filtered.is_empty() {
-            self.terminal.advance_bytes(&filtered);
+            self.snap_viewport_to_bottom();
+            self.terminal.advance_bytes(filtered.as_slice());
         }
         self.clamp_viewport_offset();
     }
@@ -1009,6 +1013,9 @@ impl TerminalSession {
             seqno: self.sequence_number(),
             rows: size.rows as u32,
             cols: size.cols as u32,
+            viewport_offset_lines: self.viewport_offset_lines as u32,
+            viewport_max_offset_lines: self.max_viewport_offset_lines() as u32,
+            viewport_at_bottom: self.viewport_offset_lines == 0,
             visible_lines: self.visible_lines(),
             visible_rows,
             cells,
@@ -1032,6 +1039,7 @@ impl TerminalSession {
     }
 
     pub fn encode_paste(&mut self, text: &str) -> Result<Vec<u8>> {
+        self.snap_viewport_to_bottom();
         let sanitized = text.replace("\x1b[200~", "").replace("\x1b[201~", "");
         if self.terminal.bracketed_paste_enabled() {
             Ok(format!("\x1b[200~{sanitized}\x1b[201~").into_bytes())
@@ -1053,6 +1061,14 @@ impl TerminalSession {
         self.clamp_viewport_offset();
     }
 
+    pub fn scroll_viewport_to_top(&mut self) {
+        self.viewport_offset_lines = self.max_viewport_offset_lines();
+    }
+
+    pub fn scroll_viewport_to_bottom(&mut self) {
+        self.viewport_offset_lines = 0;
+    }
+
     pub fn set_theme_mode(&mut self, mode: ThemeMode) {
         if self.config.set_theme_mode(mode) {
             self.terminal.increment_seqno();
@@ -1060,6 +1076,7 @@ impl TerminalSession {
     }
 
     pub fn send_key_down(&mut self, key: KeyCode, modifiers: KeyModifiers) -> Result<Vec<u8>> {
+        self.snap_viewport_to_bottom();
         let encoded = key.encode(
             modifiers,
             KeyCodeEncodeModes {
@@ -1225,6 +1242,13 @@ impl TerminalSession {
             .viewport_offset_lines
             .min(self.max_viewport_offset_lines());
     }
+
+    #[allow(dead_code)]
+    fn snap_viewport_to_bottom(&mut self) {
+        if self.viewport_offset_lines > 0 {
+            self.scroll_viewport_to_bottom();
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1313,6 +1337,9 @@ impl TerminalSurfaceState {
             seqno,
             rows,
             cols,
+            viewport_offset_lines: 0,
+            viewport_max_offset_lines: 0,
+            viewport_at_bottom: true,
             visible_rows: visible_lines
                 .iter()
                 .enumerate()
@@ -1451,56 +1478,56 @@ fn build_terminal_color_palette(theme_mode: ThemeMode) -> ColorPalette {
 
     match theme_mode {
         ThemeMode::Dark => {
-            palette.colors.0[0] = rgb8(0x0b, 0x11, 0x17);
-            palette.colors.0[1] = rgb8(0xf4, 0x70, 0x67);
-            palette.colors.0[2] = rgb8(0x5e, 0xc2, 0x8b);
-            palette.colors.0[3] = rgb8(0xe5, 0xc0, 0x7b);
-            palette.colors.0[4] = rgb8(0x6c, 0xa0, 0xf6);
-            palette.colors.0[5] = rgb8(0xc6, 0x78, 0xdd);
-            palette.colors.0[6] = rgb8(0x56, 0xb6, 0xc2);
-            palette.colors.0[7] = rgb8(0xd7, 0xde, 0xe8);
-            palette.colors.0[8] = rgb8(0x3d, 0x4a, 0x5c);
-            palette.colors.0[9] = rgb8(0xff, 0x8f, 0x88);
-            palette.colors.0[10] = rgb8(0x7e, 0xd6, 0xa3);
-            palette.colors.0[11] = rgb8(0xf1, 0xd4, 0x8a);
-            palette.colors.0[12] = rgb8(0x8c, 0xb4, 0xff);
-            palette.colors.0[13] = rgb8(0xd7, 0x9a, 0xeb);
-            palette.colors.0[14] = rgb8(0x74, 0xc7, 0xd4);
-            palette.colors.0[15] = rgb8(0xf5, 0xf7, 0xfb);
-            palette.foreground = rgb8(0xf5, 0xf7, 0xfb);
-            palette.background = rgb8(0x0b, 0x11, 0x17);
-            palette.cursor_fg = rgb8(0x0b, 0x11, 0x17);
-            palette.cursor_bg = rgb8(0x4e, 0xa1, 0xff);
-            palette.cursor_border = rgb8(0x4e, 0xa1, 0xff);
-            palette.selection_bg = rgba8(0x4e, 0xa1, 0xff, 0.35);
-            palette.scrollbar_thumb = rgb8(0x23, 0x2c, 0x39);
-            palette.split = rgb8(0x2b, 0x38, 0x50);
+            palette.colors.0[0] = rgb8(0x0d, 0x11, 0x17);
+            palette.colors.0[1] = rgb8(0xff, 0x7b, 0x72);
+            palette.colors.0[2] = rgb8(0x3f, 0xb9, 0x50);
+            palette.colors.0[3] = rgb8(0xd2, 0x99, 0x22);
+            palette.colors.0[4] = rgb8(0x58, 0xa6, 0xff);
+            palette.colors.0[5] = rgb8(0xbc, 0x8c, 0xff);
+            palette.colors.0[6] = rgb8(0x39, 0xc5, 0xcf);
+            palette.colors.0[7] = rgb8(0xd7, 0xe2, 0xf0);
+            palette.colors.0[8] = rgb8(0x6e, 0x76, 0x81);
+            palette.colors.0[9] = rgb8(0xff, 0xa1, 0x98);
+            palette.colors.0[10] = rgb8(0x56, 0xd3, 0x64);
+            palette.colors.0[11] = rgb8(0xe3, 0xb3, 0x41);
+            palette.colors.0[12] = rgb8(0x79, 0xc0, 0xff);
+            palette.colors.0[13] = rgb8(0xd2, 0xa8, 0xff);
+            palette.colors.0[14] = rgb8(0x56, 0xd4, 0xdd);
+            palette.colors.0[15] = rgb8(0xf0, 0xf6, 0xfc);
+            palette.foreground = rgb8(0xe6, 0xed, 0xf3);
+            palette.background = rgb8(0x0d, 0x11, 0x17);
+            palette.cursor_fg = rgb8(0x0d, 0x11, 0x17);
+            palette.cursor_bg = rgb8(0x79, 0xc0, 0xff);
+            palette.cursor_border = rgb8(0x79, 0xc0, 0xff);
+            palette.selection_bg = rgba8(0x58, 0xa6, 0xff, 0.30);
+            palette.scrollbar_thumb = rgb8(0x30, 0x36, 0x3d);
+            palette.split = rgb8(0x21, 0x26, 0x2d);
         }
         ThemeMode::Light => {
-            palette.colors.0[0] = rgb8(0xf5, 0xf8, 0xfc);
-            palette.colors.0[1] = rgb8(0xc0, 0x3d, 0x3d);
-            palette.colors.0[2] = rgb8(0x2f, 0x7d, 0x51);
-            palette.colors.0[3] = rgb8(0x9c, 0x6b, 0x17);
-            palette.colors.0[4] = rgb8(0x2f, 0x6f, 0xd6);
-            palette.colors.0[5] = rgb8(0x8d, 0x4b, 0xc7);
-            palette.colors.0[6] = rgb8(0x1e, 0x7e, 0x91);
-            palette.colors.0[7] = rgb8(0x52, 0x5f, 0x70);
-            palette.colors.0[8] = rgb8(0xc6, 0xd0, 0xdd);
-            palette.colors.0[9] = rgb8(0xd0, 0x52, 0x52);
-            palette.colors.0[10] = rgb8(0x3d, 0x8c, 0x5f);
-            palette.colors.0[11] = rgb8(0xb8, 0x84, 0x22);
-            palette.colors.0[12] = rgb8(0x4e, 0x8e, 0xf4);
-            palette.colors.0[13] = rgb8(0x9e, 0x60, 0xd1);
-            palette.colors.0[14] = rgb8(0x2a, 0x94, 0xa8);
-            palette.colors.0[15] = rgb8(0x10, 0x14, 0x18);
-            palette.foreground = rgb8(0x10, 0x14, 0x18);
-            palette.background = rgb8(0xf5, 0xf8, 0xfc);
-            palette.cursor_fg = rgb8(0xf5, 0xf8, 0xfc);
-            palette.cursor_bg = rgb8(0x4e, 0xa1, 0xff);
-            palette.cursor_border = rgb8(0x4e, 0xa1, 0xff);
-            palette.selection_bg = rgba8(0x4e, 0xa1, 0xff, 0.22);
-            palette.scrollbar_thumb = rgb8(0xd8, 0xe6, 0xfb);
-            palette.split = rgb8(0xdc, 0xe7, 0xf7);
+            palette.colors.0[0] = rgb8(0xff, 0xff, 0xff);
+            palette.colors.0[1] = rgb8(0xcf, 0x22, 0x2e);
+            palette.colors.0[2] = rgb8(0x1a, 0x7f, 0x37);
+            palette.colors.0[3] = rgb8(0x9a, 0x67, 0x00);
+            palette.colors.0[4] = rgb8(0x09, 0x69, 0xda);
+            palette.colors.0[5] = rgb8(0x82, 0x50, 0xdf);
+            palette.colors.0[6] = rgb8(0x1b, 0x7c, 0x83);
+            palette.colors.0[7] = rgb8(0x57, 0x60, 0x6a);
+            palette.colors.0[8] = rgb8(0xd0, 0xd7, 0xde);
+            palette.colors.0[9] = rgb8(0xff, 0x81, 0x82);
+            palette.colors.0[10] = rgb8(0x2d, 0xa4, 0x4e);
+            palette.colors.0[11] = rgb8(0xbf, 0x87, 0x00);
+            palette.colors.0[12] = rgb8(0x21, 0x8b, 0xff);
+            palette.colors.0[13] = rgb8(0xa4, 0x75, 0xf9);
+            palette.colors.0[14] = rgb8(0x31, 0x92, 0xaa);
+            palette.colors.0[15] = rgb8(0x1f, 0x23, 0x28);
+            palette.foreground = rgb8(0x1f, 0x23, 0x28);
+            palette.background = rgb8(0xff, 0xff, 0xff);
+            palette.cursor_fg = rgb8(0xff, 0xff, 0xff);
+            palette.cursor_bg = rgb8(0x09, 0x69, 0xda);
+            palette.cursor_border = rgb8(0x09, 0x69, 0xda);
+            palette.selection_bg = rgba8(0x09, 0x69, 0xda, 0.18);
+            palette.scrollbar_thumb = rgb8(0xd0, 0xd7, 0xde);
+            palette.split = rgb8(0xd8, 0xde, 0xe4);
         }
     }
 

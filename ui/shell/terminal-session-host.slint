@@ -71,15 +71,20 @@ export component TerminalSessionHost inherits Rectangle {
     in property <bool> session-mouse-grabbed: false;
     in property <[string]> session-visible-lines: [];
     in property <int> session-surface-seqno: 0;
+    in property <int> session-viewport-offset-lines: 0;
+    in property <int> session-viewport-max-offset-lines: 0;
+    in property <bool> session-viewport-at-bottom: true;
+    in property <string> terminal-font-family: "Cascadia Code, Cascadia Mono, Consolas, JetBrains Mono";
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
     callback copy-selection-requested(int, int, int, int);
     callback paste-requested();
     callback scroll-requested(int, int, int, bool, bool, bool);
+    callback scroll-thumb-drag-requested(float);
+    callback scroll-jump-requested(float);
     callback mouse-input(string, string, int, int, bool, bool, bool);
 
-    private property <string> terminal-font-family: "Cascadia Mono";
     private property <length> terminal-font-size: 12px;
     private property <length> terminal-cell-width: 8px;
     private property <length> terminal-cell-height: 16px;
@@ -88,18 +93,26 @@ export component TerminalSessionHost inherits Rectangle {
     private property <length> terminal-padding-top: 10px;
     private property <length> terminal-padding-right: 12px;
     private property <length> terminal-padding-bottom: 10px;
+    private property <length> scrollbar-reserved-width: 14px;
+    private property <length> scrollbar-track-width: 8px;
+    private property <length> scrollbar-thumb-min-height: 28px;
     private property <int> selection-anchor-row: -1;
     private property <int> selection-anchor-col: -1;
     private property <int> selection-focus-row: -1;
     private property <int> selection-focus-col: -1;
     private property <bool> selection-drag-active: false;
+    private property <bool> scrollbar-thumb-drag-active: false;
     private property <bool> cursor-blink-visible: true;
     private property <bool> terminal-context-menu-open: false;
     private property <length> terminal-context-menu-x: 12px;
     private property <length> terminal-context-menu-y: 12px;
 
     function terminal-content-width() -> length {
-        return max(0px, root.width - root.terminal-padding-left - root.terminal-padding-right);
+        return max(
+            0px,
+            root.width - root.terminal-padding-left - root.terminal-padding-right
+                - (root.scrollbar-visible() ? root.scrollbar-reserved-width : 0px),
+        );
     }
 
     function terminal-content-height() -> length {
@@ -112,6 +125,54 @@ export component TerminalSessionHost inherits Rectangle {
 
     function terminal-grid-height() -> length {
         return root.session-rows * root.terminal-cell-height;
+    }
+
+    function scrollbar-visible() -> bool {
+        return !root.session-mouse-grabbed && root.session-viewport-max-offset-lines > 0;
+    }
+
+    function scrollbar-track-x() -> length {
+        return root.width - root.terminal-padding-right - root.scrollbar-track-width;
+    }
+
+    function scrollbar-track-y() -> length {
+        return root.terminal-padding-top;
+    }
+
+    function scrollbar-track-height() -> length {
+        return root.terminal-grid-height();
+    }
+
+    function scrollbar-thumb-height() -> length {
+        return min(
+            root.scrollbar-track-height(),
+            max(
+                root.scrollbar-thumb-min-height,
+                (root.scrollbar-track-height() * max(1, root.session-rows))
+                    / max(1, root.session-rows + root.session-viewport-max-offset-lines),
+            ),
+        );
+    }
+
+    function scrollbar-thumb-y() -> length {
+        return root.scrollbar-track-y()
+            + max(
+                0px,
+                ((root.scrollbar-track-height() - root.scrollbar-thumb-height())
+                    * max(0, root.session-viewport-max-offset-lines - root.session-viewport-offset-lines))
+                    / max(1, root.session-viewport-max-offset-lines),
+            );
+    }
+
+    function scroll-ratio-for-track-position(pointer-y: length) -> float {
+        return min(
+            1.0,
+            max(
+                0.0,
+                1.0 - ((pointer-y - root.scrollbar-track-y())
+                    / max(1px, root.scrollbar-track-height() - root.scrollbar-thumb-height())),
+            ),
+        );
     }
 
     function terminal-cell-x(col: int) -> length {
@@ -327,8 +388,37 @@ export component TerminalSessionHost inherits Rectangle {
                     && (event.text == "v" || event.text == "V")) {
                     root.paste-requested();
                     accept
+                } else if (event.modifiers.control && event.text == Key.Insert
+                    && !event.modifiers.shift && !event.modifiers.alt) {
+                    if root.has-selection() {
+                        root.copy-selection-requested(
+                            root.normalized-selection-start-row(),
+                            root.normalized-selection-start-col(),
+                            root.normalized-selection-end-row(),
+                            root.normalized-selection-end-col(),
+                        );
+                        accept
+                    } else {
+                        reject
+                    }
                 } else if (!event.modifiers.control && !event.modifiers.alt && event.modifiers.shift && event.text == Key.Insert) {
                     root.paste-requested();
+                    accept
+                } else if (event.modifiers.shift && event.text == Key.PageUp
+                    && !event.modifiers.control && !event.modifiers.alt) {
+                    root.scroll-requested(max(1, root.session-rows - 2), 0, 0, true, false, false);
+                    accept
+                } else if (event.modifiers.shift && event.text == Key.PageDown
+                    && !event.modifiers.control && !event.modifiers.alt) {
+                    root.scroll-requested(-max(1, root.session-rows - 2), 0, 0, true, false, false);
+                    accept
+                } else if (event.modifiers.control && event.modifiers.shift && event.text == Key.Home
+                    && !event.modifiers.alt) {
+                    root.scroll-jump-requested(1.0);
+                    accept
+                } else if (event.modifiers.control && event.modifiers.shift && event.text == Key.End
+                    && !event.modifiers.alt) {
+                    root.scroll-jump-requested(0.0);
                     accept
                 } else if (event.text == Key.Return) {
                     root.key-input("enter", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
@@ -547,6 +637,71 @@ export component TerminalSessionHost inherits Rectangle {
                 y: root.session-cursor-shape == "underline"
                     ? root.terminal-cell-y(root.session-cursor-row + 1) - root.terminal-cursor-thickness
                     : root.terminal-cell-y(root.session-cursor-row);
+            }
+
+            if root.scrollbar-visible() : scrollbar-track := Rectangle {
+                x: root.scrollbar-track-x();
+                y: root.scrollbar-track-y();
+                width: root.scrollbar-track-width;
+                height: root.scrollbar-track-height();
+                border-radius: self.width / 2;
+                background: scrollbar-track-touch.has-hover || root.scrollbar-thumb-drag-active
+                    ? ThemeTokens.terminal-scrollbar-thumb-surface
+                    : ThemeTokens.terminal-scrollbar-track-surface;
+
+                scrollbar-track-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                            terminal-input.focus();
+                            root.close-context-menu();
+                            root.scroll-jump-requested(
+                                root.scroll-ratio-for-track-position(
+                                    self.mouse-y - root.scrollbar-thumb-height() / 2,
+                                ),
+                            );
+                        }
+                    }
+                }
+
+                scrollbar-thumb := Rectangle {
+                    x: 0px;
+                    y: root.scrollbar-thumb-y() - root.scrollbar-track-y();
+                    width: parent.width;
+                    height: root.scrollbar-thumb-height();
+                    border-radius: self.width / 2;
+                    background: scrollbar-thumb-touch.has-hover || root.scrollbar-thumb-drag-active
+                        ? ThemeTokens.terminal-scrollbar-thumb-active-surface
+                        : ThemeTokens.terminal-scrollbar-thumb-surface;
+
+                    scrollbar-thumb-touch := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+
+                        pointer-event(event) => {
+                            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                                terminal-input.focus();
+                                root.close-context-menu();
+                                root.scrollbar-thumb-drag-active = true;
+                                root.scroll-thumb-drag-requested(
+                                    root.scroll-ratio-for-track-position(
+                                        scrollbar-thumb.y + self.mouse-y - root.scrollbar-thumb-height() / 2,
+                                    ),
+                                );
+                            } else if event.kind == PointerEventKind.move && root.scrollbar-thumb-drag-active {
+                                root.scroll-thumb-drag-requested(
+                                    root.scroll-ratio-for-track-position(
+                                        scrollbar-thumb.y + self.mouse-y - root.scrollbar-thumb-height() / 2,
+                                    ),
+                                );
+                            } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                                root.scrollbar-thumb-drag-active = false;
+                            }
+                        }
+                    }
+                }
             }
 
             if root.terminal-context-menu-open : terminal-context-menu-dismiss-layer := TouchArea {

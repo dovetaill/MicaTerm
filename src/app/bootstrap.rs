@@ -907,6 +907,48 @@ fn active_workspace_session_uuid(state: &ShellViewModel) -> Option<Uuid> {
         .and_then(|session_id| Uuid::parse_str(session_id).ok())
 }
 
+fn snap_active_workspace_viewport_to_bottom_if_needed(
+    state: &ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return;
+    };
+    let needs_snap = state
+        .active_workspace_terminal_surface()
+        .is_some_and(|surface| !surface.viewport_at_bottom);
+    if !needs_snap {
+        return;
+    }
+
+    if let Err(err) = bridge.manager.scroll_session_to_bottom(session_id) {
+        tracing::error!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            error = %err,
+            "failed to snap workspace terminal viewport to bottom"
+        );
+    }
+}
+
+fn refresh_active_workspace_projection(
+    window: &AppWindow,
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+
+    let projection = sync_workspace_projection_from_manager(state, &bridge.manager);
+    if projection.any_changed() {
+        sync_workspace_tabs(window, state);
+    }
+}
+
 fn forward_active_workspace_text_input(
     state: &ShellViewModel,
     bridge: Option<&ShellSessionBridge>,
@@ -921,6 +963,8 @@ fn forward_active_workspace_text_input(
     if text.is_empty() {
         return;
     }
+
+    snap_active_workspace_viewport_to_bottom_if_needed(state, Some(bridge));
 
     if let Err(err) = bridge
         .manager
@@ -953,6 +997,8 @@ fn forward_active_workspace_key_input(
     let Some(event) = terminal_key_event(key_name, alt, ctrl, shift) else {
         return;
     };
+
+    snap_active_workspace_viewport_to_bottom_if_needed(state, Some(bridge));
 
     if let Err(err) = bridge.manager.send_session_key_input(session_id, event) {
         tracing::error!(
@@ -1080,12 +1126,37 @@ fn forward_active_workspace_paste(state: &ShellViewModel, bridge: Option<&ShellS
         return;
     };
 
+    snap_active_workspace_viewport_to_bottom_if_needed(state, Some(bridge));
+
     if let Err(err) = bridge.manager.send_session_paste(session_id, text) {
         tracing::error!(
             target: "app.ssh",
             session_id = session_id.to_string(),
             error = %err,
             "failed to forward workspace terminal paste"
+        );
+    }
+}
+
+fn forward_active_workspace_scroll_ratio(
+    state: &ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    ratio: f32,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return;
+    };
+
+    if let Err(err) = bridge.manager.scroll_session_to_ratio(session_id, ratio) {
+        tracing::error!(
+            target: "app.ssh",
+            session_id = session_id.to_string(),
+            ratio,
+            error = %err,
+            "failed to update workspace terminal scrollback ratio"
         );
     }
 }
@@ -1846,6 +1917,13 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         window.set_workspace_session_cursor_fg(slint_color_from_rgba(surface.cursor.fg_rgba));
         window.set_workspace_session_cursor_bg(slint_color_from_rgba(surface.cursor.bg_rgba));
         window.set_workspace_session_mouse_grabbed(surface.mouse_grabbed);
+        window.set_workspace_session_viewport_offset_lines(
+            i32::try_from(surface.viewport_offset_lines).unwrap_or(i32::MAX),
+        );
+        window.set_workspace_session_viewport_max_offset_lines(
+            i32::try_from(surface.viewport_max_offset_lines).unwrap_or(i32::MAX),
+        );
+        window.set_workspace_session_viewport_at_bottom(surface.viewport_at_bottom);
     } else {
         window.set_workspace_session_cells(ModelRc::new(VecModel::from(Vec::<TerminalCellItem>::new())));
         window.set_workspace_session_rows(24);
@@ -1858,6 +1936,9 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         window.set_workspace_session_cursor_fg(Color::from_argb_u8(255, 0, 0, 0));
         window.set_workspace_session_cursor_bg(Color::from_argb_u8(255, 0x52, 0xad, 0x70));
         window.set_workspace_session_mouse_grabbed(false);
+        window.set_workspace_session_viewport_offset_lines(0);
+        window.set_workspace_session_viewport_max_offset_lines(0);
+        window.set_workspace_session_viewport_at_bottom(true);
     }
 
     if let Some(active_tab) = state.active_workspace_tab() {
@@ -2888,15 +2969,20 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
+    let window_handle = window.as_weak();
     window.on_workspace_session_text_input(move |text| {
-        let state = state.borrow();
+        let mut state = state.borrow_mut();
         forward_active_workspace_text_input(&state, session_bridge_ref.as_deref(), text.as_str());
+        if let Some(window) = window_handle.upgrade() {
+            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+        }
     });
 
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
+    let window_handle = window.as_weak();
     window.on_workspace_session_key_input(move |key, alt, ctrl, shift| {
-        let state = state.borrow();
+        let mut state = state.borrow_mut();
         forward_active_workspace_key_input(
             &state,
             session_bridge_ref.as_deref(),
@@ -2905,6 +2991,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             ctrl,
             shift,
         );
+        if let Some(window) = window_handle.upgrade() {
+            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+        }
     });
 
     let state = Rc::clone(&view_model);
@@ -2922,9 +3011,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
+    let window_handle = window.as_weak();
     window.on_workspace_session_paste_requested(move || {
-        let state = state.borrow();
+        let mut state = state.borrow_mut();
         forward_active_workspace_paste(&state, session_bridge_ref.as_deref());
+        if let Some(window) = window_handle.upgrade() {
+            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+        }
     });
 
     let state = Rc::clone(&view_model);
@@ -2980,13 +3073,30 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             },
         );
 
-        if let Some(session_bridge) = session_bridge_ref.as_deref() {
-            let projection = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
-            if (projection.tabs_changed || projection.surface_changed)
-                && let Some(window) = window_handle.upgrade()
-            {
-                sync_workspace_tabs(&window, &state);
-            }
+        if let Some(window) = window_handle.upgrade() {
+            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let session_bridge_ref = session_bridge.clone();
+    let window_handle = window.as_weak();
+    window.on_workspace_session_scroll_thumb_drag_requested(move |ratio| {
+        let mut state = state.borrow_mut();
+        forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), ratio);
+        if let Some(window) = window_handle.upgrade() {
+            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let session_bridge_ref = session_bridge.clone();
+    let window_handle = window.as_weak();
+    window.on_workspace_session_scroll_jump_requested(move |ratio| {
+        let mut state = state.borrow_mut();
+        forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), ratio);
+        if let Some(window) = window_handle.upgrade() {
+            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
         }
     });
 

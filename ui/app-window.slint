@@ -103,6 +103,9 @@ export component AppWindow inherits Window {
     in-out property <bool> workspace-session-mouse-grabbed: false;
     in-out property <[string]> workspace-session-visible-lines: [];
     in-out property <int> workspace-session-surface-seqno: 0;
+    in-out property <int> workspace-session-viewport-offset-lines: 0;
+    in-out property <int> workspace-session-viewport-max-offset-lines: 0;
+    in-out property <bool> workspace-session-viewport-at-bottom: true;
     in-out property <bool> assets-context-menu-open: false;
     in-out property <length> assets-context-menu-anchor-x: 0px;
     in-out property <length> assets-context-menu-anchor-y: 0px;
@@ -194,6 +197,8 @@ export component AppWindow inherits Window {
     callback workspace-session-copy-selection-requested(int, int, int, int);
     callback workspace-session-paste-requested();
     callback workspace-session-scroll-requested(int, int, int, bool, bool, bool);
+    callback workspace-session-scroll-thumb-drag-requested(float);
+    callback workspace-session-scroll-jump-requested(float);
     callback workspace-session-mouse-input(string, string, int, int, bool, bool, bool);
     callback asset-selected(string);
     callback asset-activated(string);
@@ -468,6 +473,9 @@ export component AppWindow inherits Window {
                         workspace-session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                         workspace-session-visible-lines: root.workspace-session-visible-lines;
                         workspace-session-surface-seqno: root.workspace-session-surface-seqno;
+                        workspace-session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
+                        workspace-session-viewport-max-offset-lines: root.workspace-session-viewport-max-offset-lines;
+                        workspace-session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
 
                         workspace-tab-selected(session-id) => {
                             root.workspace-tab-selected(session-id);
@@ -499,6 +507,14 @@ export component AppWindow inherits Window {
 
                         scroll-requested(delta-lines, row, col, shift, ctrl, alt) => {
                             root.workspace-session-scroll-requested(delta-lines, row, col, shift, ctrl, alt);
+                        }
+
+                        scroll-thumb-drag-requested(ratio) => {
+                            root.workspace-session-scroll-thumb-drag-requested(ratio);
+                        }
+
+                        scroll-jump-requested(ratio) => {
+                            root.workspace-session-scroll-jump-requested(ratio);
                         }
 
                         mouse-input(kind, button, row, col, shift, ctrl, alt) => {

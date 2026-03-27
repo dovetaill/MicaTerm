@@ -11,7 +11,8 @@ use mica_term::app::ssh::known_hosts::KnownHostsService;
 use mica_term::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
 use mica_term::app::ssh::runtime::{
     SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
-    TerminalMouseEventKind, TerminalMouseInput, TerminalSession, UnknownHostKeyError,
+    TerminalMouseEventKind, TerminalMouseInput, TerminalSession, TerminalSurfaceState,
+    UnknownHostKeyError,
 };
 use mica_term::app::ssh::session_manager::{
     OpenSessionMode, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher, SessionState,
@@ -48,9 +49,20 @@ struct InteractiveTrackingState {
     mouse_inputs: Arc<Mutex<Vec<TerminalMouseInput>>>,
 }
 
+#[derive(Clone, Default)]
+struct ScrollTrackingState {
+    surface: Arc<Mutex<Option<TerminalSurfaceState>>>,
+    scroll_deltas: Arc<Mutex<Vec<i32>>>,
+}
+
 #[derive(Clone)]
 struct InteractiveTrackingLauncher {
     state: InteractiveTrackingState,
+}
+
+#[derive(Clone)]
+struct ScrollTrackingLauncher {
+    state: ScrollTrackingState,
 }
 
 #[derive(Clone)]
@@ -73,6 +85,11 @@ struct TrackingRuntimeControl {
 #[derive(Clone)]
 struct InteractiveTrackingRuntimeControl {
     state: InteractiveTrackingState,
+}
+
+#[derive(Clone)]
+struct ScrollTrackingRuntimeControl {
+    state: ScrollTrackingState,
 }
 
 #[derive(Clone, Copy)]
@@ -103,6 +120,12 @@ impl TrackingLauncher {
 
 impl InteractiveTrackingLauncher {
     fn new(state: InteractiveTrackingState) -> Self {
+        Self { state }
+    }
+}
+
+impl ScrollTrackingLauncher {
+    fn new(state: ScrollTrackingState) -> Self {
         Self { state }
     }
 }
@@ -284,6 +307,32 @@ impl SessionRuntimeLauncher for DelayedInteractiveTrackingLauncher {
     }
 }
 
+impl SessionRuntimeLauncher for ScrollTrackingLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        Box::pin(async move {
+            let surface = surface_with_viewport(session_id, 1, 2, 6);
+            *state.surface.lock().expect("lock scroll surface") = Some(surface.clone());
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+            Ok(Box::new(ScrollTrackingRuntimeControl { state }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeControl for TrackingRuntimeControl {
     fn disconnect(&self) -> Result<()> {
         self.disconnects.fetch_add(1, Ordering::SeqCst);
@@ -359,6 +408,58 @@ impl SessionRuntimeControl for InteractiveTrackingRuntimeControl {
             .expect("lock mouse events")
             .push(event);
         Ok(())
+    }
+}
+
+impl SessionRuntimeControl for ScrollTrackingRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn scroll_viewport_lines(&self, delta: i32) -> Result<TerminalSurfaceState> {
+        self.state
+            .scroll_deltas
+            .lock()
+            .expect("lock scroll deltas")
+            .push(delta);
+
+        let mut surface = self
+            .state
+            .surface
+            .lock()
+            .expect("lock scroll surface")
+            .clone()
+            .expect("current scroll surface");
+        let next_offset = (surface.viewport_offset_lines as i32 + delta)
+            .clamp(0, surface.viewport_max_offset_lines as i32) as u32;
+        surface = surface_with_viewport(
+            surface.session_id,
+            surface.seqno.saturating_add(1),
+            next_offset,
+            surface.viewport_max_offset_lines,
+        );
+        *self.state.surface.lock().expect("lock scroll surface") = Some(surface.clone());
+        Ok(surface)
     }
 }
 
@@ -523,6 +624,25 @@ fn sample_publickey_profile(
         passphrase: None,
         remark: "Primary entry point".into(),
     }
+}
+
+fn surface_with_viewport(
+    session_id: Uuid,
+    seqno: usize,
+    offset: u32,
+    max_offset: u32,
+) -> TerminalSurfaceState {
+    let mut surface = TerminalSurfaceState::from_visible_lines(
+        session_id,
+        seqno,
+        24,
+        80,
+        vec![format!("offset {offset}")],
+    );
+    surface.viewport_offset_lines = offset;
+    surface.viewport_max_offset_lines = max_offset;
+    surface.viewport_at_bottom = offset == 0;
+    surface
 }
 
 fn temp_known_hosts_path(label: &str) -> std::path::PathBuf {
@@ -972,6 +1092,53 @@ fn session_manager_forwards_mouse_input_to_runtime_control() {
             ctrl: true,
             alt: false,
         }]
+    );
+}
+
+#[test]
+fn session_manager_can_scroll_session_to_top_or_bottom() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let state = ScrollTrackingState::default();
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(ScrollTrackingLauncher::new(state.clone())),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    manager
+        .scroll_session_to_top(handle.session_id)
+        .expect("scroll session to top");
+    let at_top = manager
+        .terminal_surface(handle.session_id)
+        .expect("surface after top scroll");
+    assert_eq!(at_top.viewport_offset_lines, 6);
+    assert!(!at_top.viewport_at_bottom);
+
+    manager
+        .scroll_session_to_bottom(handle.session_id)
+        .expect("scroll session to bottom");
+    let at_bottom = manager
+        .terminal_surface(handle.session_id)
+        .expect("surface after bottom scroll");
+    assert_eq!(at_bottom.viewport_offset_lines, 0);
+    assert!(at_bottom.viewport_at_bottom);
+    assert_eq!(
+        state
+            .scroll_deltas
+            .lock()
+            .expect("lock scroll deltas")
+            .as_slice(),
+        &[4, -6]
     );
 }
 

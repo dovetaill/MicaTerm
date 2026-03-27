@@ -43,3 +43,17 @@ fn wheel_with_mouse_grab_is_forwarded_as_remote_mouse_input() {
     assert_eq!(before.visible_lines, after.visible_lines);
     assert_eq!(bytes, b"\x1b[<64;1;4M");
 }
+
+#[test]
+fn remote_output_snaps_scrollback_back_to_latest_view() {
+    let mut session = TerminalSession::new(4, 20);
+
+    session.apply_remote_bytes(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n");
+    session.scroll_viewport_lines(2);
+    session.apply_remote_bytes(b"7\r\n");
+
+    let after = session.surface_state(Uuid::new_v4());
+
+    assert!(after.viewport_at_bottom);
+    assert!(after.visible_lines.iter().any(|line| line == "7"));
+}

@@ -496,6 +496,18 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose terminal mouse input forwarding for cell-relative pointer events"
     );
     assert!(
+        app_window.contains("in-out property <int> workspace-session-viewport-offset-lines: 0;"),
+        "AppWindow should expose the projected terminal viewport offset"
+    );
+    assert!(
+        app_window.contains("in-out property <int> workspace-session-viewport-max-offset-lines: 0;"),
+        "AppWindow should expose the projected terminal max viewport offset"
+    );
+    assert!(
+        app_window.contains("in-out property <bool> workspace-session-viewport-at-bottom: true;"),
+        "AppWindow should expose whether the terminal viewport is already at bottom"
+    );
+    assert!(
         workspace_pane.contains("workspace-session-cells"),
         "WorkspacePane should forward the terminal cell model into TerminalSessionHost"
     );
@@ -512,6 +524,18 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "WorkspacePane should forward terminal mouse events back to the app shell"
     );
     assert!(
+        workspace_pane.contains("workspace-session-viewport-offset-lines"),
+        "WorkspacePane should forward the viewport offset projection into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-viewport-max-offset-lines"),
+        "WorkspacePane should forward the viewport max offset projection into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-viewport-at-bottom"),
+        "WorkspacePane should forward the viewport bottom-state projection into TerminalSessionHost"
+    );
+    assert!(
         terminal_host.contains("callback copy-selection-requested(int, int, int, int);"),
         "TerminalSessionHost should emit a copy-selection callback"
     );
@@ -524,12 +548,20 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should emit mouse input callbacks with terminal-relative coordinates"
     );
     assert!(
+        terminal_host.contains("callback scroll-thumb-drag-requested(float);"),
+        "TerminalSessionHost should emit thumb drag requests for local scrollback"
+    );
+    assert!(
+        terminal_host.contains("callback scroll-jump-requested(float);"),
+        "TerminalSessionHost should emit track jump requests for local scrollback"
+    );
+    assert!(
         terminal_host.contains("private property <length> terminal-font-size"),
         "TerminalSessionHost should centralize the terminal font size in one visual contract"
     );
     assert!(
-        terminal_host.contains("private property <string> terminal-font-family"),
-        "TerminalSessionHost should centralize the terminal font family in one visual contract"
+        terminal_host.contains("in property <string> terminal-font-family"),
+        "TerminalSessionHost should accept the terminal font family as a root-level contract"
     );
     assert!(
         terminal_host.contains("function terminal-cell-x("),
@@ -552,16 +584,40 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should render a dedicated blank terminal canvas behind cell content"
     );
     assert!(
-        terminal_host.contains("font-family: \"Cascadia Mono\";"),
+        terminal_host.contains("font-family: root.terminal-font-family;"),
         "TerminalSessionHost should keep the terminal surface on a monospace font contract"
+    );
+    assert!(
+        !terminal_host.contains("private property <string> terminal-font-family: \"Cascadia Mono\";"),
+        "TerminalSessionHost should not hardcode the terminal font family in a private property"
     );
     assert!(
         terminal_host.contains("event.modifiers.control && event.modifiers.shift"),
         "TerminalSessionHost should reserve Ctrl+Shift shortcuts for local clipboard actions"
     );
     assert!(
+        terminal_host.contains("event.modifiers.control && event.text == Key.Insert"),
+        "TerminalSessionHost should handle Ctrl+Insert as a copy shortcut"
+    );
+    assert!(
         terminal_host.contains("event.text == Key.Insert"),
         "TerminalSessionHost should handle Shift+Insert as a paste shortcut"
+    );
+    assert!(
+        terminal_host.contains("event.modifiers.shift && event.text == Key.PageUp"),
+        "TerminalSessionHost should handle Shift+PageUp as a local scrollback shortcut"
+    );
+    assert!(
+        terminal_host.contains("event.modifiers.shift && event.text == Key.PageDown"),
+        "TerminalSessionHost should handle Shift+PageDown as a local scrollback shortcut"
+    );
+    assert!(
+        terminal_host.contains("event.modifiers.control && event.modifiers.shift && event.text == Key.Home"),
+        "TerminalSessionHost should handle Ctrl+Shift+Home as a jump-to-top shortcut"
+    );
+    assert!(
+        terminal_host.contains("event.modifiers.control && event.modifiers.shift && event.text == Key.End"),
+        "TerminalSessionHost should handle Ctrl+Shift+End as a jump-to-bottom shortcut"
     );
     assert!(
         !terminal_host.contains("event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == \"c\""),
@@ -574,6 +630,14 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         terminal_host.contains("cursor-blink-timer := Timer {"),
         "terminal host should manage a visible cursor blink timer instead of rendering a cursorless text dump"
+    );
+    assert!(
+        terminal_host.contains("scrollbar-track := Rectangle {"),
+        "TerminalSessionHost should render a dedicated scrollbar track"
+    );
+    assert!(
+        terminal_host.contains("scrollbar-thumb := Rectangle {"),
+        "TerminalSessionHost should render a dedicated scrollbar thumb"
     );
     assert!(
         !terminal_host.contains("terminal-lines := ListView {"),
