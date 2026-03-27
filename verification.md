@@ -238,6 +238,46 @@ Date: 2026-03-26 CST
 
 - [x] `bash tests/assets_context_menu_ui_contract_smoke.sh`
 - [x] `cargo test --test assets_context_menu_spec --test assets_context_menu_smoke --test shell_view_model -- --nocapture`
+
+## Terminal Interaction Polish Follow-up Verification
+
+Date: 2026-03-27 15:25:44 CST
+
+### Source Documents
+
+- 设计文档：`docs/plans/2026-03-27-terminal-interaction-polish-followup-design.md`
+- 实施计划：`docs/plans/2026-03-27-terminal-interaction-polish-followup-implementation-plan.md`
+- TDD 交接：`docs/plans/2026-03-27-terminal-interaction-polish-followup-tdd-spec.md`
+
+### Commands Executed
+
+- [x] `cargo test --test terminal_session_spec --test ssh_terminal_interaction_spec --test terminal_scrollback_spec --test ssh_session_manager_spec --test bootstrap_smoke --test workspace_tabs_spec -- --nocapture`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+
+### Automated Results
+
+- `cargo test --test terminal_session_spec --test ssh_terminal_interaction_spec --test terminal_scrollback_spec --test ssh_session_manager_spec --test bootstrap_smoke --test workspace_tabs_spec -- --nocapture`：通过
+- `cargo check --workspace`：通过
+- `cargo clippy --workspace -- -D warnings`：通过
+
+### Verification Conclusions
+
+- [x] `TerminalSurfaceState` 已稳定投影 `default_fg_rgba` / `default_bg_rgba`
+- [x] blank canvas / surface frame 已跟随 runtime palette background
+- [x] `Ctrl+Shift+<letter>` 保留命名空间已从远端输入路径剥离
+- [x] 单独按 `Ctrl` / `Shift` / `Alt` 不再进入远端输入
+- [x] wheel 已改为累积式、多行本地 scrollback，并保留 `mouse_grabbed` 远端鼠标优先级
+- [x] terminal 默认字体已切换到 bundled `Iosevka Term`
+- [x] terminal 默认 metrics 已从原型值收紧到更接近 IDE 风格的紧凑配置
+- [x] 本轮 follow-up 目标测试矩阵全部通过
+
+### Manual Follow-up
+
+- [ ] Windows 11 实机核对 `Iosevka Term` 在常见 SSH/TUI 场景下的字宽、行高、cursor 对齐
+- [ ] Windows 11 实机核对 light / dark mode 下 blank canvas 与 ANSI 背景拼接是否完全连续
+- [ ] Windows 11 实机核对高分辨率触控板与普通鼠标在 wheel accumulation 下的体感差异
+- [ ] 长时间会话下观察 unbounded channel 在高频输出与频繁滚轮交互下的消息堆积情况
 - [x] `cargo check --workspace`
 - [x] `cargo clippy --workspace -- -D warnings`
 

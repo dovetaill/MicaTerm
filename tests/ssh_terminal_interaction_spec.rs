@@ -1,3 +1,5 @@
+use std::fs;
+
 use mica_term::app::ssh::runtime::{TerminalKeyEvent, TerminalSession};
 use mica_term::theme::ThemeMode;
 use uuid::Uuid;
@@ -75,4 +77,27 @@ fn light_theme_palette_changes_default_background_projection() {
         .expect("prompt cell");
 
     assert_ne!(prompt.bg_rgba, 0xff00_0000);
+}
+
+#[test]
+fn terminal_host_declares_accumulated_multi_line_wheel_scrollback_contract() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        terminal_host.contains("private property <float> wheel-delta-remainder: 0;"),
+        "TerminalSessionHost should retain partial wheel deltas between scroll events"
+    );
+    assert!(
+        terminal_host.contains("private property <float> wheel-delta-threshold: 120;"),
+        "TerminalSessionHost should define a wheel threshold before converting movement into scrollback lines"
+    );
+    assert!(
+        terminal_host.contains("private property <int> wheel-lines-per-notch: 3;"),
+        "TerminalSessionHost should map one wheel notch to multiple local scrollback lines"
+    );
+    assert!(
+        !terminal_host.contains("let delta-lines = event.delta-y > 0px ? 1 : -1;"),
+        "TerminalSessionHost should not keep the prototype one-line-per-event wheel mapping"
+    );
 }

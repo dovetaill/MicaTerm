@@ -42,7 +42,8 @@ use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntime
 use mica_term::app::window_effects::default_platform_window_effects;
 use mica_term::shell::metrics::ShellMetrics;
 use russh::keys::{HashAlg, PublicKey};
-use slint::Model;
+use slint::{ComponentHandle, LogicalPosition, Model};
+use slint::platform::{Key, PointerEventButton, WindowEvent};
 use tokio::sync::mpsc;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -711,7 +712,37 @@ fn bootstrap_surface_with_viewport(
     surface.viewport_offset_lines = offset;
     surface.viewport_max_offset_lines = max_offset;
     surface.viewport_at_bottom = offset == 0;
+    surface.default_fg_rgba = 0xff1f_2328;
+    surface.default_bg_rgba = 0xffff_ffff;
     surface
+}
+
+fn settle_terminal_projection() {
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+}
+
+fn terminal_interaction_position(app: &AppWindow) -> LogicalPosition {
+    LogicalPosition::new(
+        app.get_layout_main_workspace_x() + 96.0,
+        app.get_layout_titlebar_height() + 96.0,
+    )
+}
+
+fn focus_workspace_terminal(app: &AppWindow) {
+    let position = terminal_interaction_position(app);
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Left,
+    });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Left,
+    });
 }
 
 fn sample_public_key() -> PublicKey {
@@ -2054,6 +2085,30 @@ fn bootstrap_projects_terminal_scrollback_state_into_window_properties() {
 }
 
 #[test]
+fn bootstrap_projects_terminal_canvas_palette_into_window_properties() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert_eq!(
+        app.get_workspace_session_default_fg().as_argb_encoded(),
+        0xff1f_2328
+    );
+    assert_eq!(
+        app.get_workspace_session_default_bg().as_argb_encoded(),
+        0xffff_ffff
+    );
+}
+
+#[test]
 fn terminal_input_callback_snaps_scrolled_session_back_to_latest_surface() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -2090,6 +2145,48 @@ fn terminal_input_callback_snaps_scrolled_session_back_to_latest_surface() {
 }
 
 #[test]
+fn ctrl_shift_letter_shortcuts_do_not_forward_remote_terminal_input() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Control.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Shift.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyPressed { text: "f".into() });
+    app.window().dispatch_event(WindowEvent::KeyReleased { text: "f".into() });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Shift.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Control.into(),
+    });
+    settle_terminal_projection();
+
+    let visible_lines = app.get_workspace_session_visible_lines();
+    assert_eq!(
+        app.get_workspace_session_surface_seqno(),
+        1,
+        "reserved Ctrl+Shift shortcuts should stay local and must not trigger a remote surface update"
+    );
+    assert_eq!(visible_lines.row_count(), 1);
+    assert_eq!(
+        visible_lines.row_data(0).expect("initial terminal line").as_str(),
+        "welcome to mica-term"
+    );
+}
+
+#[test]
 fn workspace_terminal_scroll_callbacks_update_active_session_surface() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -2110,6 +2207,47 @@ fn workspace_terminal_scroll_callbacks_update_active_session_surface() {
     app.invoke_workspace_session_scroll_thumb_drag_requested(0.0);
     assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
     assert!(app.get_workspace_session_viewport_at_bottom());
+}
+
+#[test]
+fn workspace_terminal_pointer_wheel_accumulates_before_multi_line_scrollback() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    let position = terminal_interaction_position(&app);
+    app.window().dispatch_event(WindowEvent::PointerScrolled {
+        position,
+        delta_x: 0.0,
+        delta_y: 60.0,
+    });
+    settle_terminal_projection();
+
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        3,
+        "half-wheel motion should be retained locally until the accumulation threshold is crossed"
+    );
+
+    app.window().dispatch_event(WindowEvent::PointerScrolled {
+        position,
+        delta_x: 0.0,
+        delta_y: 60.0,
+    });
+    settle_terminal_projection();
+
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        6,
+        "one accumulated wheel notch should scroll three local lines instead of the prototype single-line movement"
+    );
 }
 
 #[test]

@@ -23,6 +23,8 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-session-cursor-shape: "block";
     in property <color> workspace-session-cursor-fg: #000000;
     in property <color> workspace-session-cursor-bg: #52ad70;
+    in property <color> workspace-session-default-fg: #000000;
+    in property <color> workspace-session-default-bg: #ffffff;
     in property <bool> workspace-session-mouse-grabbed: false;
     in property <[string]> workspace-session-visible-lines: [];
     in property <int> workspace-session-surface-seqno: 0;
@@ -90,6 +92,8 @@ export component WorkspacePane inherits Rectangle {
                 session-cursor-shape: root.workspace-session-cursor-shape;
                 session-cursor-fg: root.workspace-session-cursor-fg;
                 session-cursor-bg: root.workspace-session-cursor-bg;
+                session-default-fg: root.workspace-session-default-fg;
+                session-default-bg: root.workspace-session-default-bg;
                 session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                 session-visible-lines: root.workspace-session-visible-lines;
                 session-surface-seqno: root.workspace-session-surface-seqno;

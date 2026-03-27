@@ -593,13 +593,30 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should keep the terminal surface on a monospace font contract"
     );
     assert!(
-        !terminal_host
-            .contains("private property <string> terminal-font-family: \"Cascadia Mono\";"),
+        terminal_host.contains("Iosevka Term"),
+        "TerminalSessionHost should prefer the bundled Iosevka Term face as its primary terminal font"
+    );
+    assert!(
+        !terminal_host.contains("private property <string> terminal-font-family: \"Cascadia Mono\";"),
         "TerminalSessionHost should not hardcode the terminal font family in a private property"
+    );
+    assert!(
+        !terminal_host.contains(
+            "in property <string> terminal-font-family: \"Cascadia Code, Cascadia Mono, Consolas, JetBrains Mono\";"
+        ),
+        "TerminalSessionHost should stop treating the old system fallback stack as the primary terminal font contract"
     );
     assert!(
         terminal_host.contains("event.modifiers.control && event.modifiers.shift"),
         "TerminalSessionHost should reserve Ctrl+Shift shortcuts for local clipboard actions"
+    );
+    assert!(
+        terminal_host.contains("event.text == Key.Control"),
+        "TerminalSessionHost should explicitly ignore a bare Control press before any remote forwarding branch"
+    );
+    assert!(
+        terminal_host.contains("event.text == Key.Shift"),
+        "TerminalSessionHost should explicitly ignore a bare Shift press before any remote forwarding branch"
     );
     assert!(
         terminal_host.contains("event.modifiers.control && event.text == Key.Insert"),
@@ -654,6 +671,25 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
 }
 
 #[test]
+fn terminal_session_host_keeps_reserved_ctrl_shift_shortcuts_local_contract() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        terminal_host.contains("event.text == Key.Control || event.text == Key.Shift || event.text == Key.Alt"),
+        "TerminalSessionHost should explicitly ignore bare modifier keys before any remote forwarding branch"
+    );
+    assert!(
+        terminal_host.contains("event.text == \"f\" || event.text == \"F\""),
+        "TerminalSessionHost should reserve Ctrl+Shift+F inside the local shortcut namespace"
+    );
+    assert!(
+        terminal_host.contains("&& !event.modifiers.shift && event.text != \"\""),
+        "TerminalSessionHost should exclude shifted modifier chords from the generic remote forwarding branch"
+    );
+}
+
+#[test]
 fn terminal_session_host_uses_compact_terminal_layout_contract() {
     let terminal_host =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
@@ -663,8 +699,20 @@ fn terminal_session_host_uses_compact_terminal_layout_contract() {
         "terminal host should tighten the cell width from the old wide placeholder layout"
     );
     assert!(
+        !terminal_host.contains("private property <length> terminal-font-size: 12px;"),
+        "terminal host should tighten the prototype font size to a denser IDE-like default"
+    );
+    assert!(
+        !terminal_host.contains("private property <length> terminal-cell-width: 8px;"),
+        "terminal host should tighten the prototype cell width to a denser IDE-like default"
+    );
+    assert!(
         !terminal_host.contains("terminal-cell-height: 18px;"),
         "terminal host should tighten the cell height from the old loose placeholder layout"
+    );
+    assert!(
+        !terminal_host.contains("private property <length> terminal-cell-height: 16px;"),
+        "terminal host should tighten the prototype cell height to a denser IDE-like default"
     );
     assert!(
         !terminal_host.contains("padding-left: 24px;"),

@@ -1,5 +1,6 @@
 // Root desktop window that composes chrome, sidebars, workspace content, overlays, and resize grips.
 
+import "fonts/IosevkaTerm-Regular.ttf";
 import { AssetsCreateMenu } from "components/assets-create-menu.slint";
 import { AssetsContextMenuItem } from "components/assets-context-menu-column.slint";
 import { AssetsContextMenuOverlay } from "components/assets-context-menu-overlay.slint";
@@ -100,6 +101,8 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-session-cursor-shape: "block";
     in-out property <color> workspace-session-cursor-fg: #000000;
     in-out property <color> workspace-session-cursor-bg: #52ad70;
+    in-out property <color> workspace-session-default-fg: #000000;
+    in-out property <color> workspace-session-default-bg: #ffffff;
     in-out property <bool> workspace-session-mouse-grabbed: false;
     in-out property <[string]> workspace-session-visible-lines: [];
     in-out property <int> workspace-session-surface-seqno: 0;
@@ -470,6 +473,8 @@ export component AppWindow inherits Window {
                         workspace-session-cursor-shape: root.workspace-session-cursor-shape;
                         workspace-session-cursor-fg: root.workspace-session-cursor-fg;
                         workspace-session-cursor-bg: root.workspace-session-cursor-bg;
+                        workspace-session-default-fg: root.workspace-session-default-fg;
+                        workspace-session-default-bg: root.workspace-session-default-bg;
                         workspace-session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                         workspace-session-visible-lines: root.workspace-session-visible-lines;
                         workspace-session-surface-seqno: root.workspace-session-surface-seqno;
