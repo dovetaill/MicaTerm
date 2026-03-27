@@ -49,9 +49,7 @@ fn session_bridge_reuses_supplied_runtime_handle_instead_of_creating_another_run
     let content = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
-        content.contains(
-            "fn build_session_bridge(\n    runtime_handle: tokio::runtime::Handle,"
-        ),
+        content.contains("fn build_session_bridge(\n    runtime_handle: tokio::runtime::Handle,"),
         "session bridge should accept the runtime handle created by main startup"
     );
     assert!(

@@ -274,7 +274,10 @@ fn double_clicking_same_ssh_asset_twice_creates_two_distinct_tabs() {
         .session_id
         .to_string();
     assert_ne!(first_session_id, second_session_id);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), second_session_id);
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        second_session_id
+    );
 }
 
 #[test]
@@ -308,7 +311,10 @@ fn explicit_open_context_action_opens_distinct_tabs_each_time() {
         .session_id
         .to_string();
     assert_ne!(first_session_id, second_session_id);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), second_session_id);
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        second_session_id
+    );
 }
 
 #[test]
@@ -347,10 +353,13 @@ fn clicking_workspace_tabs_switches_active_session_and_close_hit_target_closes_t
     assert_eq!(tabs.len(), 2, "expected two rendered ActiveTab instances");
 
     click_element(&app, &tabs[0]);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), first_session_id);
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        first_session_id
+    );
 
-    let mut close_targets = ElementHandle::find_by_element_id(&app, "ActiveTab::close-hit-target")
-        .collect::<Vec<_>>();
+    let mut close_targets =
+        ElementHandle::find_by_element_id(&app, "ActiveTab::close-hit-target").collect::<Vec<_>>();
     close_targets.sort_by(|left, right| {
         left.absolute_position()
             .x
@@ -365,7 +374,10 @@ fn clicking_workspace_tabs_switches_active_session_and_close_hit_target_closes_t
 
     click_element(&app, &close_targets[0]);
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), second_session_id);
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        second_session_id
+    );
 }
 
 #[test]

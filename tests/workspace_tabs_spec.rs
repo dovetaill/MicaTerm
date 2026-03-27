@@ -375,13 +375,15 @@ fn connected_session_projects_terminal_surface_state_without_placeholder_copy() 
     let tab = WorkspaceTab::from_session(&handle);
     let mut view_model = ShellViewModel::default();
     view_model.set_workspace_tabs(vec![tab]);
-    view_model.set_active_workspace_terminal_surface(Some(TerminalSurfaceState::from_visible_lines(
-        handle.session_id,
-        3,
-        24,
-        80,
-        vec!["last login: Tue Mar 24".into(), "pwd".into()],
-    )));
+    view_model.set_active_workspace_terminal_surface(Some(
+        TerminalSurfaceState::from_visible_lines(
+            handle.session_id,
+            3,
+            24,
+            80,
+            vec!["last login: Tue Mar 24".into(), "pwd".into()],
+        ),
+    ));
 
     let terminal_host =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
@@ -492,7 +494,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose a paste callback for the terminal context menu"
     );
     assert!(
-        app_window.contains("workspace-session-mouse-input(string, string, int, int, bool, bool, bool);"),
+        app_window
+            .contains("workspace-session-mouse-input(string, string, int, int, bool, bool, bool);"),
         "AppWindow should expose terminal mouse input forwarding for cell-relative pointer events"
     );
     assert!(
@@ -500,7 +503,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose the projected terminal viewport offset"
     );
     assert!(
-        app_window.contains("in-out property <int> workspace-session-viewport-max-offset-lines: 0;"),
+        app_window
+            .contains("in-out property <int> workspace-session-viewport-max-offset-lines: 0;"),
         "AppWindow should expose the projected terminal max viewport offset"
     );
     assert!(
@@ -512,7 +516,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "WorkspacePane should forward the terminal cell model into TerminalSessionHost"
     );
     assert!(
-        workspace_pane.contains("copy-selection-requested(start-row, start-col, end-row, end-col) =>"),
+        workspace_pane
+            .contains("copy-selection-requested(start-row, start-col, end-row, end-col) =>"),
         "WorkspacePane should forward copy-selection requests back to the app shell"
     );
     assert!(
@@ -588,7 +593,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should keep the terminal surface on a monospace font contract"
     );
     assert!(
-        !terminal_host.contains("private property <string> terminal-font-family: \"Cascadia Mono\";"),
+        !terminal_host
+            .contains("private property <string> terminal-font-family: \"Cascadia Mono\";"),
         "TerminalSessionHost should not hardcode the terminal font family in a private property"
     );
     assert!(
@@ -612,11 +618,13 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should handle Shift+PageDown as a local scrollback shortcut"
     );
     assert!(
-        terminal_host.contains("event.modifiers.control && event.modifiers.shift && event.text == Key.Home"),
+        terminal_host
+            .contains("event.modifiers.control && event.modifiers.shift && event.text == Key.Home"),
         "TerminalSessionHost should handle Ctrl+Shift+Home as a jump-to-top shortcut"
     );
     assert!(
-        terminal_host.contains("event.modifiers.control && event.modifiers.shift && event.text == Key.End"),
+        terminal_host
+            .contains("event.modifiers.control && event.modifiers.shift && event.text == Key.End"),
         "TerminalSessionHost should handle Ctrl+Shift+End as a jump-to-bottom shortcut"
     );
     assert!(
@@ -712,7 +720,8 @@ fn disconnected_and_error_tabs_remain_reconnectable() {
 
 #[test]
 fn workspace_pane_only_renders_tabbar_when_tabs_exist() {
-    let workspace = fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let workspace =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
     assert!(
         workspace.contains("if root.workspace-tab-items.length > 0 : tab-strip := TabBar {"),
         "workspace pane should only render the tab strip when at least one tab exists"
