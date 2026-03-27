@@ -10,5 +10,9 @@ vendor/*
 !vendor/gpu-allocator/**
 !vendor/i-slint-renderer-femtovg/
 !vendor/i-slint-renderer-femtovg/**
+!vendor/i-slint-backend-winit/
+!vendor/i-slint-backend-winit/**
+vendor/i-slint-backend-winit/Cargo.lock
+vendor/i-slint-backend-winit/target/
 vendor/i-slint-renderer-femtovg/target/
 .mcp.json
