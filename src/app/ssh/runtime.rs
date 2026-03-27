@@ -997,18 +997,7 @@ impl TerminalSession {
     }
 
     pub fn visible_lines(&self) -> Vec<String> {
-        let mut lines = self
-            .visible_rows()
-            .into_iter()
-            .map(|row| row.text)
-            .collect::<Vec<_>>();
-        while lines.first().is_some_and(String::is_empty) {
-            let _ = lines.remove(0);
-        }
-        while lines.last().is_some_and(String::is_empty) {
-            let _ = lines.pop();
-        }
-        lines
+        visible_lines_from_rows(&self.visible_rows())
     }
 
     pub fn resize(&mut self, rows: usize, cols: usize) {
@@ -1026,6 +1015,7 @@ impl TerminalSession {
         let size = self.terminal.get_size();
         let palette = self.terminal.palette();
         let visible_rows = self.visible_rows();
+        let visible_lines = visible_lines_from_rows(&visible_rows);
         let cells = self.visible_cells(&palette);
         let cursor = self.cursor_state(&palette);
         TerminalSurfaceState {
@@ -1036,7 +1026,7 @@ impl TerminalSession {
             viewport_offset_lines: self.viewport_offset_lines as u32,
             viewport_max_offset_lines: self.max_viewport_offset_lines() as u32,
             viewport_at_bottom: self.viewport_offset_lines == 0,
-            visible_lines: self.visible_lines(),
+            visible_lines,
             visible_rows,
             cells,
             cursor,
@@ -1598,6 +1588,17 @@ fn project_terminal_row(line: &Line, index: u32, cols: usize) -> TerminalRowStat
     }
 }
 
+fn visible_lines_from_rows(rows: &[TerminalRowState]) -> Vec<String> {
+    let mut lines = rows.iter().map(|row| row.text.clone()).collect::<Vec<_>>();
+    while lines.first().is_some_and(String::is_empty) {
+        let _ = lines.remove(0);
+    }
+    while lines.last().is_some_and(String::is_empty) {
+        let _ = lines.pop();
+    }
+    lines
+}
+
 fn matches_filtered_exact_banner(bytes: &[u8]) -> bool {
     normalized_remote_line(bytes) == FILTERED_EXACT_BANNER.as_bytes()
 }
@@ -1791,5 +1792,41 @@ mod tests {
         assert_eq!(config.keepalive_interval, Some(SSH_KEEPALIVE_INTERVAL));
         assert_eq!(config.keepalive_max, SSH_KEEPALIVE_MAX_MISSES);
         assert!(config.nodelay);
+    }
+
+    #[test]
+    fn visible_lines_from_rows_trims_only_outer_empty_rows() {
+        let rows = vec![
+            TerminalRowState {
+                index: 0,
+                text: String::new(),
+                wrapped: false,
+            },
+            TerminalRowState {
+                index: 1,
+                text: "top".into(),
+                wrapped: false,
+            },
+            TerminalRowState {
+                index: 2,
+                text: String::new(),
+                wrapped: false,
+            },
+            TerminalRowState {
+                index: 3,
+                text: "bottom".into(),
+                wrapped: false,
+            },
+            TerminalRowState {
+                index: 4,
+                text: String::new(),
+                wrapped: false,
+            },
+        ];
+
+        assert_eq!(
+            visible_lines_from_rows(&rows),
+            vec!["top".to_string(), String::new(), "bottom".to_string()]
+        );
     }
 }

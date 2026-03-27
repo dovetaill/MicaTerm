@@ -1964,9 +1964,6 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         );
         window.set_workspace_session_viewport_at_bottom(surface.viewport_at_bottom);
     } else {
-        window.set_workspace_session_cells(ModelRc::new(VecModel::from(
-            Vec::<TerminalCellItem>::new(),
-        )));
         window.set_workspace_session_rows(24);
         window.set_workspace_session_cols(80);
         window.set_workspace_session_cursor_row(0);
@@ -3765,5 +3762,55 @@ mod tests {
             initial_cells_model,
             "terminal cell projection should reuse the same VecModel instance"
         );
+    }
+
+    #[test]
+    fn workspace_session_state_reuses_terminal_models_when_surface_clears() {
+        i_slint_backend_testing::init_no_event_loop();
+
+        let window = AppWindow::new().expect("create app window");
+        let session_id = Uuid::new_v4();
+        let mut state = ShellViewModel::default();
+        let mut tab = WorkspaceTab::from_session(&SessionHandle {
+            session_id,
+            asset_id: "asset-prod".into(),
+            title: "Prod Bastion".into(),
+            subtitle: "ops@10.0.0.12:22".into(),
+            state: SessionState::Connected,
+            can_reconnect: false,
+        });
+        tab.active = true;
+        state.set_workspace_tabs(vec![tab]);
+        let mut initial_surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["welcome".into()]);
+        initial_surface.cells = vec![TerminalCellState {
+            row: 0,
+            col: 0,
+            width: 1,
+            text: "w".into(),
+            fg_rgba: 0xffff_ffff,
+            bg_rgba: 0xff0d_1117,
+        }];
+        state.set_active_workspace_terminal_surface(Some(initial_surface));
+
+        sync_workspace_session_state(&window, &state);
+        let initial_lines_model = window.get_workspace_session_visible_lines();
+        let initial_cells_model = window.get_workspace_session_cells();
+
+        state.set_active_workspace_terminal_surface(None);
+        sync_workspace_session_state(&window, &state);
+
+        assert_eq!(
+            window.get_workspace_session_visible_lines(),
+            initial_lines_model,
+            "clearing the surface should keep reusing the visible line model"
+        );
+        assert_eq!(
+            window.get_workspace_session_cells(),
+            initial_cells_model,
+            "clearing the surface should keep reusing the terminal cell model"
+        );
+        assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
+        assert_eq!(window.get_workspace_session_cells().row_count(), 0);
     }
 }
