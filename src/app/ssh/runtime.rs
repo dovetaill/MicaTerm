@@ -14,6 +14,7 @@ use russh::client::AuthResult;
 use russh::keys::{self, PrivateKeyWithHashAlg};
 use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers as KeyModifiers};
 use tokio::sync::mpsc;
+use tokio::time::{Sleep, sleep};
 use uuid::Uuid;
 use wezterm_surface::{CursorShape, CursorVisibility};
 use wezterm_term::color::{ColorAttribute, ColorPalette, RgbColor, SrgbaTuple};
@@ -30,8 +31,12 @@ use crate::theme::ThemeMode;
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
 const DEFAULT_TERMINAL_COLS: usize = 80;
+const TERMINAL_SCROLLBACK_LINES: usize = 3_500;
 const SSH_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const SSH_KEEPALIVE_MAX_MISSES: usize = 3;
+const SURFACE_DIRTY_NOTIFICATION_INTERVAL: Duration = Duration::from_millis(40);
+const WORKING_SET_TRIM_IDLE_INTERVAL: Duration = Duration::from_secs(2);
+const WORKING_SET_TRIM_MIN_OUTPUT_BYTES: usize = 1024 * 1024;
 const FILTERED_EXACT_BANNER: &str =
     "Activate the web console with: systemctl enable --now cockpit.socket";
 
@@ -198,6 +203,7 @@ impl TerminalKeyEvent {
 pub enum SessionRuntimeEvent {
     Connected,
     SurfaceChanged(TerminalSurfaceState),
+    SurfaceDirty,
     Disconnected,
     Error(String),
 }
@@ -353,9 +359,6 @@ impl SshSessionRuntime {
         if !pending_output.is_empty() {
             apply_remote_output(&terminal, &pending_output);
         }
-        if let Some(surface) = snapshot_terminal_surface(&terminal, session_id) {
-            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
-        }
 
         let runtime = Self {
             session_id,
@@ -427,6 +430,14 @@ impl SshSessionRuntime {
         Ok(terminal.surface_state(self.session_id))
     }
 
+    pub fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
+        let terminal = self
+            .terminal
+            .lock()
+            .map_err(|_| anyhow!("failed to lock terminal for surface snapshot"))?;
+        Ok(terminal.surface_state(self.session_id))
+    }
+
     pub fn disconnect(&self) -> Result<()> {
         self.command_tx
             .send(RuntimeCommand::Disconnect)
@@ -457,6 +468,10 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
     fn send_paste(&self, text: String) -> Result<()> {
         SshSessionRuntime::send_paste(self, text)
+    }
+
+    fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
+        SshSessionRuntime::terminal_surface(self)
     }
 
     fn update_theme_mode(&self, mode: ThemeMode) -> Result<Option<TerminalSurfaceState>> {
@@ -742,6 +757,10 @@ async fn run_channel_pump(
     mut command_rx: mpsc::UnboundedReceiver<RuntimeCommand>,
 ) {
     let mut command_channel_open = true;
+    let mut dirty_notifier = SurfaceDirtyNotifier::default();
+    let mut dirty_timer: Option<std::pin::Pin<Box<Sleep>>> = None;
+    let mut working_set_trim_scheduler = WorkingSetTrimScheduler::default();
+    let mut working_set_trim_timer: Option<std::pin::Pin<Box<Sleep>>> = None;
 
     loop {
         tokio::select! {
@@ -862,6 +881,9 @@ async fn run_channel_pump(
                         }
                     }
                     Some(RuntimeCommand::Disconnect) => {
+                        if dirty_notifier.take_pending() {
+                            let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
+                        }
                         let _ = channel.eof().await;
                         let _ = channel.close().await;
                         let _ = handle
@@ -879,15 +901,24 @@ async fn run_channel_pump(
                 match maybe_message {
                     Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => {
                         apply_remote_output(&terminal, data.as_ref());
-                        if let Some(surface) = snapshot_terminal_surface(&terminal, session_id) {
-                            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+                        working_set_trim_scheduler.record_output(data.len());
+                        working_set_trim_timer =
+                            Some(Box::pin(sleep(WORKING_SET_TRIM_IDLE_INTERVAL)));
+                        if dirty_notifier.record_output() {
+                            dirty_timer = Some(Box::pin(sleep(SURFACE_DIRTY_NOTIFICATION_INTERVAL)));
                         }
                     }
                     Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => {
+                        if dirty_notifier.take_pending() {
+                            let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
+                        }
                         let _ = event_tx.send(SessionRuntimeEvent::Disconnected);
                         break;
                     }
                     Some(ChannelMsg::Failure) => {
+                        if dirty_notifier.take_pending() {
+                            let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
+                        }
                         let _ = event_tx.send(SessionRuntimeEvent::Error(
                             "remote SSH channel reported failure".into()
                         ));
@@ -896,7 +927,74 @@ async fn run_channel_pump(
                     Some(_) => {}
                 }
             }
+            () = async { if let Some(timer) = dirty_timer.as_mut() { timer.await } }, if dirty_timer.is_some() => {
+                dirty_timer = None;
+                if dirty_notifier.flush_due() {
+                    let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
+                }
+            }
+            () = async { if let Some(timer) = working_set_trim_timer.as_mut() { timer.await } }, if working_set_trim_timer.is_some() => {
+                working_set_trim_timer = None;
+                if working_set_trim_scheduler.trim_due() {
+                    crate::app::memory::trim_process_working_set();
+                }
+            }
         }
+    }
+}
+
+#[derive(Debug, Default)]
+struct SurfaceDirtyNotifier {
+    dirty: bool,
+    notification_armed: bool,
+}
+
+impl SurfaceDirtyNotifier {
+    fn record_output(&mut self) -> bool {
+        self.dirty = true;
+        if self.notification_armed {
+            false
+        } else {
+            self.notification_armed = true;
+            true
+        }
+    }
+
+    fn flush_due(&mut self) -> bool {
+        self.notification_armed = false;
+        if self.dirty {
+            self.dirty = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn take_pending(&mut self) -> bool {
+        self.notification_armed = false;
+        if self.dirty {
+            self.dirty = false;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct WorkingSetTrimScheduler {
+    pending_output_bytes: usize,
+}
+
+impl WorkingSetTrimScheduler {
+    fn record_output(&mut self, bytes: usize) {
+        self.pending_output_bytes = self.pending_output_bytes.saturating_add(bytes);
+    }
+
+    fn trim_due(&mut self) -> bool {
+        let should_trim = self.pending_output_bytes >= WORKING_SET_TRIM_MIN_OUTPUT_BYTES;
+        self.pending_output_bytes = 0;
+        should_trim
     }
 }
 
@@ -1511,6 +1609,10 @@ impl TerminalConfiguration for SessionTerminalConfig {
             .generation
     }
 
+    fn scrollback_size(&self) -> usize {
+        TERMINAL_SCROLLBACK_LINES
+    }
+
     fn color_palette(&self) -> ColorPalette {
         build_terminal_color_palette(self.theme_mode())
     }
@@ -1547,22 +1649,22 @@ fn build_terminal_color_palette(theme_mode: ThemeMode) -> ColorPalette {
             palette.split = rgb8(0x21, 0x26, 0x2d);
         }
         ThemeMode::Light => {
-            palette.colors.0[0] = rgb8(0xff, 0xff, 0xff);
+            palette.colors.0[0] = rgb8(0x1f, 0x23, 0x28);
             palette.colors.0[1] = rgb8(0xcf, 0x22, 0x2e);
             palette.colors.0[2] = rgb8(0x1a, 0x7f, 0x37);
             palette.colors.0[3] = rgb8(0x9a, 0x67, 0x00);
             palette.colors.0[4] = rgb8(0x09, 0x69, 0xda);
             palette.colors.0[5] = rgb8(0x82, 0x50, 0xdf);
             palette.colors.0[6] = rgb8(0x1b, 0x7c, 0x83);
-            palette.colors.0[7] = rgb8(0x57, 0x60, 0x6a);
-            palette.colors.0[8] = rgb8(0xd0, 0xd7, 0xde);
+            palette.colors.0[7] = rgb8(0xd0, 0xd7, 0xde);
+            palette.colors.0[8] = rgb8(0x57, 0x60, 0x6a);
             palette.colors.0[9] = rgb8(0xff, 0x81, 0x82);
             palette.colors.0[10] = rgb8(0x2d, 0xa4, 0x4e);
             palette.colors.0[11] = rgb8(0xbf, 0x87, 0x00);
             palette.colors.0[12] = rgb8(0x21, 0x8b, 0xff);
             palette.colors.0[13] = rgb8(0xa4, 0x75, 0xf9);
             palette.colors.0[14] = rgb8(0x31, 0x92, 0xaa);
-            palette.colors.0[15] = rgb8(0x1f, 0x23, 0x28);
+            palette.colors.0[15] = rgb8(0xff, 0xff, 0xff);
             palette.foreground = rgb8(0x1f, 0x23, 0x28);
             palette.background = rgb8(0xff, 0xff, 0xff);
             palette.cursor_fg = rgb8(0xff, 0xff, 0xff);
@@ -1843,4 +1945,49 @@ mod tests {
             vec!["top".to_string(), String::new(), "bottom".to_string()]
         );
     }
+
+    #[test]
+    fn surface_dirty_notifier_coalesces_repeated_output_until_flush() {
+        let mut notifier = SurfaceDirtyNotifier::default();
+
+        assert!(notifier.record_output());
+        assert!(!notifier.record_output());
+        assert!(!notifier.record_output());
+        assert!(notifier.flush_due());
+        assert!(!notifier.flush_due());
+    }
+
+    #[test]
+    fn surface_dirty_notifier_rearms_after_flush() {
+        let mut notifier = SurfaceDirtyNotifier::default();
+
+        assert!(notifier.record_output());
+        assert!(notifier.flush_due());
+        assert!(notifier.record_output());
+        assert!(notifier.take_pending());
+        assert!(!notifier.take_pending());
+    }
+
+    #[test]
+    fn working_set_trim_scheduler_ignores_small_idle_output() {
+        let mut scheduler = WorkingSetTrimScheduler::default();
+
+        scheduler.record_output(WORKING_SET_TRIM_MIN_OUTPUT_BYTES / 4);
+
+        assert!(!scheduler.trim_due());
+        assert!(!scheduler.trim_due());
+    }
+
+    #[test]
+    fn working_set_trim_scheduler_requests_trim_after_large_idle_output() {
+        let mut scheduler = WorkingSetTrimScheduler::default();
+
+        scheduler.record_output(WORKING_SET_TRIM_MIN_OUTPUT_BYTES / 2);
+        scheduler.record_output(WORKING_SET_TRIM_MIN_OUTPUT_BYTES / 2);
+        scheduler.record_output(1);
+
+        assert!(scheduler.trim_due());
+        assert!(!scheduler.trim_due());
+    }
+
 }

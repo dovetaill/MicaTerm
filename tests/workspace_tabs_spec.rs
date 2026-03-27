@@ -512,6 +512,10 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose whether the terminal viewport is already at bottom"
     );
     assert!(
+        app_window.contains("in-out property <bool> workspace-session-selection-active: false;"),
+        "AppWindow should expose terminal selection state for native clipboard shortcut fallbacks"
+    );
+    assert!(
         workspace_pane.contains("workspace-session-cells"),
         "WorkspacePane should forward the terminal cell model into TerminalSessionHost"
     );
@@ -541,6 +545,10 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "WorkspacePane should forward the viewport bottom-state projection into TerminalSessionHost"
     );
     assert!(
+        workspace_pane.contains("selection-active <=> root.workspace-session-selection-active;"),
+        "WorkspacePane should forward terminal selection state into TerminalSessionHost"
+    );
+    assert!(
         terminal_host.contains("callback copy-selection-requested(int, int, int, int);"),
         "TerminalSessionHost should emit a copy-selection callback"
     );
@@ -563,6 +571,10 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         terminal_host.contains("private property <length> terminal-font-size"),
         "TerminalSessionHost should centralize the terminal font size in one visual contract"
+    );
+    assert!(
+        terminal_host.contains("private property <length> terminal-font-size: 16px;"),
+        "TerminalSessionHost should default to a desktop-readable font size"
     );
     assert!(
         terminal_host.contains("in property <string> terminal-font-family"),
@@ -593,8 +605,12 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should keep the terminal surface on a monospace font contract"
     );
     assert!(
-        terminal_host.contains("Iosevka Term"),
-        "TerminalSessionHost should prefer the bundled Iosevka Term face as its primary terminal font"
+        terminal_host.contains("Sarasa Term SC Nerd"),
+        "TerminalSessionHost should prefer the bundled Sarasa Term SC Nerd face as its primary terminal font"
+    );
+    assert!(
+        terminal_host.contains("in property <string> terminal-font-family: \"Sarasa Term SC Nerd\";"),
+        "TerminalSessionHost should expose the bundled Sarasa Term SC Nerd face as the exact terminal font contract"
     );
     assert!(
         !terminal_host.contains("private property <string> terminal-font-family: \"Cascadia Mono\";"),
@@ -611,6 +627,14 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should reserve Ctrl+Shift shortcuts for local clipboard actions"
     );
     assert!(
+        terminal_host.contains("\\u{3}"),
+        "TerminalSessionHost should recognize control-character copy tokens when Ctrl+Shift+C does not yield a printable `C`"
+    );
+    assert!(
+        terminal_host.contains("\\u{16}"),
+        "TerminalSessionHost should recognize control-character paste tokens when Ctrl+Shift+V does not yield a printable `V`"
+    );
+    assert!(
         terminal_host.contains("event.text == Key.Control"),
         "TerminalSessionHost should explicitly ignore a bare Control press before any remote forwarding branch"
     );
@@ -625,6 +649,14 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         terminal_host.contains("event.text == Key.Insert"),
         "TerminalSessionHost should handle Shift+Insert as a paste shortcut"
+    );
+    assert!(
+        terminal_host.contains("in-out property <bool> selection-active: false;"),
+        "TerminalSessionHost should project selection activity so native shortcut fallbacks can see current terminal selection state"
+    );
+    assert!(
+        terminal_host.contains("function sync-selection-state()"),
+        "TerminalSessionHost should centralize selection projection updates instead of leaving native copy fallback state stale"
     );
     assert!(
         terminal_host.contains("event.modifiers.shift && event.text == Key.PageUp"),
@@ -701,6 +733,10 @@ fn terminal_session_host_uses_compact_terminal_layout_contract() {
     assert!(
         !terminal_host.contains("private property <length> terminal-font-size: 12px;"),
         "terminal host should tighten the prototype font size to a denser IDE-like default"
+    );
+    assert!(
+        !terminal_host.contains("private property <length> terminal-font-size: 14px;"),
+        "terminal host should move beyond the still-too-small 14px contract"
     );
     assert!(
         !terminal_host.contains("private property <length> terminal-cell-width: 8px;"),

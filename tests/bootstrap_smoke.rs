@@ -35,7 +35,7 @@ use mica_term::app::ssh::known_hosts::{
 };
 use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::runtime::{
-    SessionRuntimeEvent, TerminalKeyEvent, TerminalKeyKind, TerminalMouseInput,
+    SessionRuntimeEvent, TerminalKeyEvent, TerminalKeyKind, TerminalMouseInput, TerminalSession,
     TerminalSurfaceState, UnknownHostKeyError,
 };
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
@@ -295,7 +295,7 @@ impl SessionRuntimeLauncher for InteractiveProjectionLauncher {
         Box::pin(async move {
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
-                TerminalSurfaceState::from_visible_lines(
+                terminal_surface_with_cells(
                     session_id,
                     1,
                     24,
@@ -410,7 +410,7 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
 
     fn send_text_input(&self, text: String) -> Result<()> {
         let _ = self.event_tx.send(SessionRuntimeEvent::SurfaceChanged(
-            TerminalSurfaceState::from_visible_lines(
+            terminal_surface_with_cells(
                 self.session_id,
                 2,
                 24,
@@ -428,7 +428,7 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
             TerminalKeyKind::Char(ch) => ch.to_string(),
         };
         let _ = self.event_tx.send(SessionRuntimeEvent::SurfaceChanged(
-            TerminalSurfaceState::from_visible_lines(
+            terminal_surface_with_cells(
                 self.session_id,
                 2,
                 24,
@@ -445,7 +445,7 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
 
     fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
         let _ = self.event_tx.send(SessionRuntimeEvent::SurfaceChanged(
-            TerminalSurfaceState::from_visible_lines(
+            terminal_surface_with_cells(
                 self.session_id,
                 2,
                 24,
@@ -714,6 +714,25 @@ fn bootstrap_surface_with_viewport(
     surface.viewport_at_bottom = offset == 0;
     surface.default_fg_rgba = 0xff1f_2328;
     surface.default_bg_rgba = 0xffff_ffff;
+    surface
+}
+
+fn terminal_surface_with_cells(
+    session_id: uuid::Uuid,
+    seqno: usize,
+    rows: u32,
+    cols: u32,
+    visible_lines: Vec<String>,
+) -> TerminalSurfaceState {
+    let mut session = TerminalSession::new(rows as usize, cols as usize);
+    let transcript = visible_lines
+        .iter()
+        .map(|line| format!("{line}\r\n"))
+        .collect::<String>();
+    session.apply_remote_bytes(transcript.as_bytes());
+
+    let mut surface = session.surface_state(session_id);
+    surface.seqno = seqno;
     surface
 }
 
@@ -2029,6 +2048,75 @@ fn workspace_terminal_paste_callback_updates_active_session_surface() {
 }
 
 #[test]
+fn workspace_terminal_ctrl_shift_c_copies_selected_text_to_clipboard() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    let selection_start = LogicalPosition::new(
+        app.get_layout_main_workspace_x() + 18.0,
+        app.get_layout_titlebar_height() + 56.0,
+    );
+    let selection_end = LogicalPosition::new(
+        app.get_layout_main_workspace_x() + 92.0,
+        app.get_layout_titlebar_height() + 56.0,
+    );
+
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: selection_start,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: selection_start,
+        button: PointerEventButton::Left,
+    });
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: selection_end,
+    });
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: selection_end,
+        button: PointerEventButton::Left,
+    });
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Shift.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Control.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyPressed { text: "C".into() });
+    app.window().dispatch_event(WindowEvent::KeyReleased { text: "C".into() });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Control.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Shift.into(),
+    });
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert!(
+        copied.as_deref().is_some_and(|text| text.contains("welcome")),
+        "Ctrl+Shift+C should copy the current terminal selection into the system clipboard"
+    );
+}
+
+#[test]
 fn workspace_terminal_mouse_input_callback_updates_active_session_surface() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -2245,8 +2333,8 @@ fn workspace_terminal_pointer_wheel_accumulates_before_multi_line_scrollback() {
 
     assert_eq!(
         app.get_workspace_session_viewport_offset_lines(),
-        6,
-        "one accumulated wheel notch should scroll three local lines instead of the prototype single-line movement"
+        8,
+        "one accumulated wheel notch should request six local lines, capped by the current viewport max offset"
     );
 }
 

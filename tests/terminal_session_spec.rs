@@ -126,6 +126,24 @@ fn surface_projection_exposes_scrollback_metadata() {
 }
 
 #[test]
+fn terminal_session_preserves_deeper_scrollback_history_for_large_bursts() {
+    let mut session = TerminalSession::new(4, 20);
+    let transcript = (0..9000)
+        .map(|line| format!("{line:04}\r\n"))
+        .collect::<String>();
+
+    session.apply_remote_bytes(transcript.as_bytes());
+    session.scroll_viewport_lines(20_000);
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+
+    assert!(
+        snapshot.visible_lines.iter().any(|line| line == "0000"),
+        "scrolling to the top after a large burst should still expose the earliest lines instead of truncating them out of local scrollback"
+    );
+}
+
+#[test]
 fn dark_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let mut session = TerminalSession::new(24, 80);
 

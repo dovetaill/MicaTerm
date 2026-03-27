@@ -247,6 +247,8 @@ impl winit::application::ApplicationHandler<SlintEvent> for EventLoopState {
                 ($($char:literal # $name:ident # $($_qt:ident)|* # $($winit:ident $(($pos:ident))?)|* # $($_xkb:ident)|*;)*) => {
                     match &key_code {
                         $($(winit::keyboard::Key::Named(winit::keyboard::NamedKey::$winit) $(if event.location == winit::keyboard::KeyLocation::$pos)? => $char.into(),)*)*
+                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Copy) => "c".into(),
+                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Paste) => "v".into(),
                         winit::keyboard::Key::Character(str) => str.as_str().into(),
                         _ => {
                             if let Some(text) = &event.text {
