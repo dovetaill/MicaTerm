@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use directories::ProjectDirs;
-use slint::{Color, ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
+use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -35,7 +35,7 @@ use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
 use crate::app::ssh::runtime::{
     SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
-    TerminalMouseEventKind, TerminalMouseInput, UnknownHostKeyError,
+    TerminalMouseEventKind, TerminalMouseInput, TerminalSurfaceState, UnknownHostKeyError,
     load_optional_stored_secret_bundle, stored_secret_lookup_message,
 };
 use crate::app::ssh::session_manager::{
@@ -159,9 +159,7 @@ pub fn runtime_window_title(_profile: AppRuntimeProfile) -> String {
 }
 
 pub fn startup_failure_message(_profile: AppRuntimeProfile, err: &str) -> Option<String> {
-    Some(format!(
-        "Mica Term failed to initialize winit-femtovg-wgpu: {err}"
-    ))
+    Some(format!("Mica Term failed to initialize winit-software: {err}"))
 }
 
 pub fn default_window_size() -> (u32, u32) {
@@ -827,11 +825,7 @@ fn projected_active_workspace_session_id(
 ) -> Option<String> {
     state
         .active_workspace_session_id()
-        .filter(|candidate| {
-            next_tabs
-                .iter()
-                .any(|tab| tab.session_id == *candidate)
-        })
+        .filter(|candidate| next_tabs.iter().any(|tab| tab.session_id == *candidate))
         .map(str::to_string)
         .or_else(|| {
             state
@@ -880,18 +874,24 @@ fn sync_workspace_projection_from_manager(
     for tab in &mut next_tabs {
         tab.active = active_id.as_deref() == Some(tab.session_id.as_str());
     }
-    let next_surface = state
+    let next_session_id = state
         .active_workspace_session_id()
-        .and_then(|session_id| Uuid::parse_str(session_id).ok())
-        .and_then(|session_id| manager.terminal_surface(session_id));
+        .and_then(|session_id| Uuid::parse_str(session_id).ok());
+    let current_surface_signature = state
+        .active_workspace_terminal_surface()
+        .map(TerminalSurfaceState::signature);
+    let next_surface_signature =
+        next_session_id.and_then(|session_id| manager.terminal_surface_signature(session_id));
 
     let tabs_changed = state.workspace_tabs() != next_tabs.as_slice();
     if tabs_changed {
         state.set_workspace_tabs(next_tabs);
     }
 
-    let surface_changed = state.active_workspace_terminal_surface().cloned() != next_surface;
+    let surface_changed = current_surface_signature != next_surface_signature;
     if surface_changed {
+        let next_surface =
+            next_session_id.and_then(|session_id| manager.terminal_surface(session_id));
         state.set_active_workspace_terminal_surface(next_surface);
     }
 
@@ -1871,6 +1871,39 @@ fn slint_color_from_rgba(rgba: u32) -> Color {
     Color::from_argb_u8(a, r, g, b)
 }
 
+fn sync_vec_model<T>(current: ModelRc<T>, next_rows: Vec<T>, replace: impl FnOnce(ModelRc<T>))
+where
+    T: Clone + PartialEq + 'static,
+{
+    if let Some(model) = current.as_any().downcast_ref::<VecModel<T>>() {
+        reconcile_vec_model_rows(model, &next_rows);
+    } else {
+        replace(ModelRc::from(Rc::new(VecModel::from(next_rows))));
+    }
+}
+
+fn reconcile_vec_model_rows<T>(model: &VecModel<T>, next_rows: &[T])
+where
+    T: Clone + PartialEq + 'static,
+{
+    let current_len = model.row_count();
+    let shared_len = current_len.min(next_rows.len());
+
+    for (index, next_row) in next_rows.iter().take(shared_len).enumerate() {
+        if model.row_data(index).as_ref() != Some(next_row) {
+            model.set_row_data(index, next_row.clone());
+        }
+    }
+
+    while model.row_count() > next_rows.len() {
+        let _ = model.remove(next_rows.len());
+    }
+
+    for next_row in next_rows.iter().skip(shared_len) {
+        model.push(next_row.clone());
+    }
+}
+
 fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
@@ -1880,7 +1913,11 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         .into_iter()
         .map(SharedString::from)
         .collect::<Vec<_>>();
-    window.set_workspace_session_visible_lines(ModelRc::new(VecModel::from(visible_lines)));
+    sync_vec_model(
+        window.get_workspace_session_visible_lines(),
+        visible_lines,
+        |model| window.set_workspace_session_visible_lines(model),
+    );
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
         let cells = surface
@@ -1895,7 +1932,9 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
                 bg: slint_color_from_rgba(cell.bg_rgba),
             })
             .collect::<Vec<_>>();
-        window.set_workspace_session_cells(ModelRc::new(VecModel::from(cells)));
+        sync_vec_model(window.get_workspace_session_cells(), cells, |model| {
+            window.set_workspace_session_cells(model);
+        });
         window.set_workspace_session_rows(i32::try_from(surface.rows).unwrap_or(i32::MAX));
         window.set_workspace_session_cols(i32::try_from(surface.cols).unwrap_or(i32::MAX));
         window.set_workspace_session_cursor_row(
@@ -1925,7 +1964,6 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         );
         window.set_workspace_session_viewport_at_bottom(surface.viewport_at_bottom);
     } else {
-        window.set_workspace_session_cells(ModelRc::new(VecModel::from(Vec::<TerminalCellItem>::new())));
         window.set_workspace_session_rows(24);
         window.set_workspace_session_cols(80);
         window.set_workspace_session_cursor_row(0);
@@ -1939,6 +1977,9 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         window.set_workspace_session_viewport_offset_lines(0);
         window.set_workspace_session_viewport_max_offset_lines(0);
         window.set_workspace_session_viewport_at_bottom(true);
+        sync_vec_model(window.get_workspace_session_cells(), Vec::new(), |model| {
+            window.set_workspace_session_cells(model);
+        });
     }
 
     if let Some(active_tab) = state.active_workspace_tab() {
@@ -2399,7 +2440,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     "failed to synchronize theme mode into SSH sessions"
                 );
             }
-            let projection = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+            let projection =
+                sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
             if projection.tabs_changed || projection.surface_changed {
                 sync_workspace_tabs(&window, &state);
             }
@@ -3004,10 +3046,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     let state = Rc::clone(&view_model);
-    window.on_workspace_session_copy_selection_requested(move |start_row, start_col, end_row, end_col| {
-        let state = state.borrow();
-        forward_active_workspace_copy_selection(&state, start_row, start_col, end_row, end_col);
-    });
+    window.on_workspace_session_copy_selection_requested(
+        move |start_row, start_col, end_row, end_col| {
+            let state = state.borrow();
+            forward_active_workspace_copy_selection(&state, start_row, start_col, end_row, end_col);
+        },
+    );
 
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
@@ -3467,8 +3511,8 @@ pub fn run_with_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::ssh::runtime::{TerminalKeyEvent, TerminalSurfaceState};
     use crate::app::ssh::profile::SshAuthMethod;
+    use crate::app::ssh::runtime::{TerminalCellState, TerminalKeyEvent, TerminalSurfaceState};
     use std::future::Future;
     use std::pin::Pin;
 
@@ -3654,5 +3698,119 @@ mod tests {
             1,
             "surface refresh should not manufacture a second workspace tab"
         );
+    }
+
+    #[test]
+    fn workspace_session_state_reuses_terminal_models_across_surface_refreshes() {
+        i_slint_backend_testing::init_no_event_loop();
+
+        let window = AppWindow::new().expect("create app window");
+        let session_id = Uuid::new_v4();
+        let mut state = ShellViewModel::default();
+        let mut tab = WorkspaceTab::from_session(&SessionHandle {
+            session_id,
+            asset_id: "asset-prod".into(),
+            title: "Prod Bastion".into(),
+            subtitle: "ops@10.0.0.12:22".into(),
+            state: SessionState::Connected,
+            can_reconnect: false,
+        });
+        tab.active = true;
+        state.set_workspace_tabs(vec![tab]);
+        let mut initial_surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["welcome".into()]);
+        initial_surface.cells = vec![TerminalCellState {
+            row: 0,
+            col: 0,
+            width: 1,
+            text: "w".into(),
+            fg_rgba: 0xffff_ffff,
+            bg_rgba: 0xff0d_1117,
+        }];
+        state.set_active_workspace_terminal_surface(Some(initial_surface));
+
+        sync_workspace_session_state(&window, &state);
+        let initial_lines_model = window.get_workspace_session_visible_lines();
+        let initial_cells_model = window.get_workspace_session_cells();
+
+        let mut updated_surface = TerminalSurfaceState::from_visible_lines(
+            session_id,
+            2,
+            24,
+            80,
+            vec!["welcome".into(), "$ pwd".into()],
+        );
+        updated_surface.cells = vec![TerminalCellState {
+            row: 1,
+            col: 0,
+            width: 1,
+            text: "$".into(),
+            fg_rgba: 0xffff_ffff,
+            bg_rgba: 0xff0d_1117,
+        }];
+        state.set_active_workspace_terminal_surface(Some(updated_surface));
+
+        sync_workspace_session_state(&window, &state);
+
+        assert_eq!(
+            window.get_workspace_session_visible_lines(),
+            initial_lines_model,
+            "terminal visible line projection should reuse the same VecModel instance"
+        );
+        assert_eq!(
+            window.get_workspace_session_cells(),
+            initial_cells_model,
+            "terminal cell projection should reuse the same VecModel instance"
+        );
+    }
+
+    #[test]
+    fn workspace_session_state_reuses_terminal_models_when_surface_clears() {
+        i_slint_backend_testing::init_no_event_loop();
+
+        let window = AppWindow::new().expect("create app window");
+        let session_id = Uuid::new_v4();
+        let mut state = ShellViewModel::default();
+        let mut tab = WorkspaceTab::from_session(&SessionHandle {
+            session_id,
+            asset_id: "asset-prod".into(),
+            title: "Prod Bastion".into(),
+            subtitle: "ops@10.0.0.12:22".into(),
+            state: SessionState::Connected,
+            can_reconnect: false,
+        });
+        tab.active = true;
+        state.set_workspace_tabs(vec![tab]);
+        let mut initial_surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["welcome".into()]);
+        initial_surface.cells = vec![TerminalCellState {
+            row: 0,
+            col: 0,
+            width: 1,
+            text: "w".into(),
+            fg_rgba: 0xffff_ffff,
+            bg_rgba: 0xff0d_1117,
+        }];
+        state.set_active_workspace_terminal_surface(Some(initial_surface));
+
+        sync_workspace_session_state(&window, &state);
+        let initial_lines_model = window.get_workspace_session_visible_lines();
+        let initial_cells_model = window.get_workspace_session_cells();
+
+        state.set_active_workspace_terminal_surface(None);
+        sync_workspace_session_state(&window, &state);
+
+        assert_eq!(
+            window.get_workspace_session_visible_lines(),
+            initial_lines_model,
+            "clearing the surface should keep reusing the visible line model"
+        );
+        assert_eq!(
+            window.get_workspace_session_cells(),
+            initial_cells_model,
+            "clearing the surface should keep reusing the terminal cell model"
+        );
+        assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
+        assert_eq!(window.get_workspace_session_cells().row_count(), 0);
     }
 }

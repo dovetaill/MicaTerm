@@ -1,6 +1,6 @@
 //! Session manager for SSH tabs and runtime event projection.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::ssh::runtime::{
-    SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceState,
+    SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceSignature,
+    TerminalSurfaceState,
 };
 use crate::theme::ThemeMode;
 
@@ -127,8 +128,34 @@ impl SessionManager {
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let registry_for_events = Arc::clone(&self.registry);
         self.runtime_handle.spawn(async move {
-            while let Some(event) = event_rx.recv().await {
-                apply_runtime_event(&registry_for_events, session_id, event);
+            let mut pending_events = VecDeque::new();
+
+            loop {
+                let event = if let Some(event) = pending_events.pop_front() {
+                    Some(event)
+                } else {
+                    event_rx.recv().await
+                };
+                let Some(event) = event else {
+                    break;
+                };
+
+                match event {
+                    SessionRuntimeEvent::SurfaceChanged(surface) => {
+                        let mut backlog = VecDeque::new();
+                        while let Ok(next) = event_rx.try_recv() {
+                            backlog.push_back(next);
+                        }
+                        let (surface, remaining) = coalesce_surface_backlog(surface, backlog);
+                        pending_events.extend(remaining);
+                        apply_runtime_event(
+                            &registry_for_events,
+                            session_id,
+                            SessionRuntimeEvent::SurfaceChanged(surface),
+                        );
+                    }
+                    other => apply_runtime_event(&registry_for_events, session_id, other),
+                }
             }
         });
 
@@ -178,6 +205,15 @@ impl SessionManager {
             .terminal_surfaces
             .get(&session_id)
             .cloned()
+    }
+
+    pub fn terminal_surface_signature(&self, session_id: Uuid) -> Option<TerminalSurfaceSignature> {
+        self.registry
+            .lock()
+            .expect("lock session registry")
+            .terminal_surfaces
+            .get(&session_id)
+            .map(TerminalSurfaceState::signature)
     }
 
     pub fn probe_connection(&self, profile: ConnectionProfile) -> Result<()> {
@@ -301,7 +337,10 @@ impl SessionManager {
             .terminal_surfaces
             .get(&session_id)
             .ok_or_else(|| anyhow!("session terminal surface is not ready for `{session_id}`"))?;
-        Ok((surface.viewport_offset_lines, surface.viewport_max_offset_lines))
+        Ok((
+            surface.viewport_offset_lines,
+            surface.viewport_max_offset_lines,
+        ))
     }
 
     fn scroll_session_to_offset(&self, session_id: Uuid, target_offset: u32) -> Result<()> {
@@ -321,7 +360,11 @@ impl SessionManager {
         let session_ids = {
             let mut registry = self.registry.lock().expect("lock session registry");
             registry.theme_mode = mode;
-            registry.runtime_controls.keys().copied().collect::<Vec<_>>()
+            registry
+                .runtime_controls
+                .keys()
+                .copied()
+                .collect::<Vec<_>>()
         };
 
         for session_id in session_ids {
@@ -468,6 +511,25 @@ fn update_terminal_surface(
     }
 }
 
+fn coalesce_surface_backlog(
+    initial_surface: TerminalSurfaceState,
+    mut backlog: VecDeque<SessionRuntimeEvent>,
+) -> (TerminalSurfaceState, VecDeque<SessionRuntimeEvent>) {
+    let mut latest_surface = initial_surface;
+
+    while matches!(
+        backlog.front(),
+        Some(SessionRuntimeEvent::SurfaceChanged(_))
+    ) {
+        let Some(SessionRuntimeEvent::SurfaceChanged(surface)) = backlog.pop_front() else {
+            break;
+        };
+        latest_surface = surface;
+    }
+
+    (latest_surface, backlog)
+}
+
 fn attach_runtime_control(
     registry: &Arc<Mutex<SessionRegistry>>,
     session_id: Uuid,
@@ -503,7 +565,9 @@ fn attach_runtime_control(
         registry_guard
             .runtime_controls
             .get(&session_id)
-            .and_then(|runtime_control| runtime_control.update_theme_mode(theme_mode).ok().flatten())
+            .and_then(|runtime_control| {
+                runtime_control.update_theme_mode(theme_mode).ok().flatten()
+            })
     };
     if let Some(surface) = theme_surface {
         update_terminal_surface(registry, session_id, surface);
@@ -522,4 +586,70 @@ fn clear_runtime_control(registry: &Arc<Mutex<SessionRegistry>>, session_id: Uui
     registry.runtime_controls.remove(&session_id);
     registry.pending_disconnects.remove(&session_id);
     registry.pending_resizes.remove(&session_id);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use uuid::Uuid;
+
+    use super::{SessionRuntimeEvent, coalesce_surface_backlog};
+    use crate::app::ssh::runtime::TerminalSurfaceState;
+
+    #[test]
+    fn coalesces_consecutive_surface_updates_but_preserves_following_control_events() {
+        let session_id = Uuid::new_v4();
+        let initial =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["one".into()]);
+        let newer =
+            TerminalSurfaceState::from_visible_lines(session_id, 2, 24, 80, vec!["two".into()]);
+        let latest =
+            TerminalSurfaceState::from_visible_lines(session_id, 3, 24, 80, vec!["three".into()]);
+        let backlog = VecDeque::from(vec![
+            SessionRuntimeEvent::SurfaceChanged(newer),
+            SessionRuntimeEvent::SurfaceChanged(latest.clone()),
+            SessionRuntimeEvent::Error("boom".into()),
+            SessionRuntimeEvent::Disconnected,
+        ]);
+
+        let (coalesced, remaining) = coalesce_surface_backlog(initial, backlog);
+
+        assert_eq!(coalesced, latest);
+        assert_eq!(remaining.len(), 2);
+        assert!(matches!(
+            remaining.front(),
+            Some(SessionRuntimeEvent::Error(message)) if message == "boom"
+        ));
+        assert!(matches!(
+            remaining.get(1),
+            Some(SessionRuntimeEvent::Disconnected)
+        ));
+    }
+
+    #[test]
+    fn leaves_non_surface_prefix_events_in_place() {
+        let session_id = Uuid::new_v4();
+        let initial =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["one".into()]);
+        let later =
+            TerminalSurfaceState::from_visible_lines(session_id, 2, 24, 80, vec!["two".into()]);
+        let backlog = VecDeque::from(vec![
+            SessionRuntimeEvent::Connected,
+            SessionRuntimeEvent::SurfaceChanged(later.clone()),
+        ]);
+
+        let (coalesced, remaining) = coalesce_surface_backlog(initial.clone(), backlog);
+
+        assert_eq!(coalesced, initial);
+        assert_eq!(remaining.len(), 2);
+        assert!(matches!(
+            remaining.front(),
+            Some(SessionRuntimeEvent::Connected)
+        ));
+        assert!(matches!(
+            remaining.get(1),
+            Some(SessionRuntimeEvent::SurfaceChanged(surface)) if *surface == later
+        ));
+    }
 }

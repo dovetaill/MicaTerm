@@ -43,4 +43,7 @@ grep -F '`zip`' "$INVENTORY_PATH" >/dev/null
 grep -F '`libwayland-dev`' "$INVENTORY_PATH" >/dev/null
 grep -F '`pkg-config`' "$INVENTORY_PATH" >/dev/null
 grep -F '`slint`' "$INVENTORY_PATH" >/dev/null
-grep -F '`i-slint-renderer-femtovg`' "$INVENTORY_PATH" >/dev/null
+if grep -F '`i-slint-renderer-femtovg`' "$INVENTORY_PATH" >/dev/null; then
+  echo "apt inventory should no longer describe vendored femtovg renderer patches as current dependencies" >&2
+  exit 1
+fi

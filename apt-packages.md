@@ -45,7 +45,7 @@ These are part of the current build flow, but they are not installed by `apt-get
 
 These dependencies come from `Cargo.toml` and are managed by Cargo rather than apt:
 
-- Core UI/runtime crates in the current tree include `slint` and the vendored patch `i-slint-renderer-femtovg`.
+- Core UI/runtime crates in the current tree include `slint` on the software-rendered mainline path.
 
 ### Runtime Dependencies
 
@@ -74,13 +74,6 @@ These dependencies come from `Cargo.toml` and are managed by Cargo rather than a
 
 - `filetime = "0.2"`
 - `i-slint-backend-testing = "1.15.1"`
-
-### Vendored Patches
-
-- `gpu-allocator`
-  - Pinned through `[patch.crates-io]` to `vendor/gpu-allocator`
-- `i-slint-renderer-femtovg`
-  - Pinned through `[patch.crates-io]` to `vendor/i-slint-renderer-femtovg`
 
 ## Scope Notes
 

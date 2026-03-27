@@ -7,7 +7,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::{
-    bind_top_status_bar_with_store, bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher,
+    bind_top_status_bar_with_store,
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher,
 };
 use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput};

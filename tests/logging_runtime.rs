@@ -95,10 +95,9 @@ fn debug_logging_can_emit_mainline_runtime_profile_metadata() {
     let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
     assert!(content.contains("initialized runtime profile"));
     assert!(content.contains("Mainline"));
-    assert!(content.contains("FemtoVgWgpu"));
+    assert!(content.contains("Software"));
     assert!(content.contains("Some(\"winit\")"));
-    assert!(content.contains("Some(\"femtovg-wgpu\")"));
-    assert!(!content.contains("Formal"));
-    assert!(!content.contains("Software"));
-    assert!(!content.contains("FemtoVgWgpuExperimental"));
+    assert!(content.contains("Some(\"software\")"));
+    assert!(!content.contains("wgpu_28_required"));
+    assert!(!content.contains("FemtoVgWgpu"));
 }

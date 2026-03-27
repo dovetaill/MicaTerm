@@ -222,15 +222,13 @@ fn resolve_blank_area_actions(selection: &SelectionContext) -> Vec<ContextMenuAc
 }
 
 fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
-    let mut actions = vec![
-        action_with_state(
-            "open-connection",
-            "Open",
-            "window-console",
-            selection_state(selection),
-            false,
-        ),
-    ];
+    let mut actions = vec![action_with_state(
+        "open-connection",
+        "Open",
+        "window-console",
+        selection_state(selection),
+        false,
+    )];
     actions.extend(create_actions(true));
     actions.extend([
         action_with_state(

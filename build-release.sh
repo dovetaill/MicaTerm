@@ -10,7 +10,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [--help]
 
-Mainline GPU release aggregator.
+Mainline software release aggregator.
 
 Modes:
   MODE=fail-fast   Stop on first failure (default)

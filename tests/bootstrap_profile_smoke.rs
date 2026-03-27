@@ -9,8 +9,17 @@ fn mainline_profile_requests_internal_selector_lock() {
     let profile = AppRuntimeProfile::mainline();
 
     assert_eq!(profile.forced_backend(), Some("winit"));
-    assert_eq!(profile.forced_renderer(), Some("femtovg-wgpu"));
-    assert!(profile.requires_wgpu_28());
+    assert_eq!(profile.forced_renderer(), Some("software"));
+}
+
+#[test]
+fn main_entrypoint_no_longer_carries_gpu_selector_logic() {
+    let content = fs::read_to_string("src/main.rs").expect("read main");
+
+    assert!(content.contains("renderer_name(\"software\".into())"));
+    assert!(!content.contains("femtovg-wgpu"));
+    assert!(!content.contains("wgpu_28"));
+    assert!(!content.contains("DX12"));
 }
 
 #[test]

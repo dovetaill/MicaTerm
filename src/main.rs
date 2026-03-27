@@ -11,44 +11,12 @@ fn apply_renderer_selector(_profile: AppRuntimeProfile) -> anyhow::Result<()> {
     use anyhow::Context;
     use slint::BackendSelector;
 
-    #[cfg(feature = "slint-renderer-femtovg-wgpu")]
-    use slint::wgpu_28::WGPUConfiguration;
-
-    #[cfg(all(feature = "slint-renderer-femtovg-wgpu", target_os = "windows"))]
-    let wgpu_configuration = {
-        // Prefer DX12 on Windows because the shell is validated against that backend in this
-        // repository's build and smoke-test matrix.
-        let mut settings = slint::wgpu_28::WGPUSettings::default();
-        settings.backends = slint::wgpu_28::wgpu::Backends::DX12;
-        WGPUConfiguration::Automatic(settings)
-    };
-
-    #[cfg(all(feature = "slint-renderer-femtovg-wgpu", not(target_os = "windows")))]
-    let wgpu_configuration = WGPUConfiguration::default();
-
-    #[cfg(feature = "slint-renderer-femtovg-wgpu")]
-    let selector = BackendSelector::new()
-        .backend_name("winit".into())
-        .renderer_name("femtovg-wgpu".into())
-        .require_wgpu_28(wgpu_configuration);
-
-    #[cfg(all(feature = "slint-renderer-femtovg-wgpu", target_os = "windows"))]
-    let selector =
-        selector.with_winit_window_attributes_hook(|attributes| attributes.with_transparent(false));
-
-    #[cfg(feature = "slint-renderer-femtovg-wgpu")]
-    return selector
-        .select()
-        .map_err(anyhow::Error::from)
-        .context("failed to select winit-femtovg-wgpu backend for mainline runtime");
-
-    #[cfg(not(feature = "slint-renderer-femtovg-wgpu"))]
     BackendSelector::new()
         .backend_name("winit".into())
         .renderer_name("software".into())
         .select()
         .map_err(anyhow::Error::from)
-        .context("failed to select winit-software backend for headless validation")
+        .context("failed to select winit-software backend for mainline runtime")
 }
 
 fn main() -> anyhow::Result<()> {

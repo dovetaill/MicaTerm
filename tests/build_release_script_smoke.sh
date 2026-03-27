@@ -10,7 +10,7 @@ SCRIPT_PATH="$ROOT_DIR/build-release.sh"
 bash -n "$SCRIPT_PATH"
 
 HELP_OUTPUT="$("$SCRIPT_PATH" --help)"
-grep -F 'Mainline GPU release aggregator' <<<"$HELP_OUTPUT" >/dev/null
+grep -F 'Mainline software release aggregator' <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'fail-fast' <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'best-effort' <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'x86_64-unknown-linux-gnu' <<<"$HELP_OUTPUT" >/dev/null

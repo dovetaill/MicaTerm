@@ -1,4 +1,4 @@
-#![cfg(not(feature = "slint-renderer-femtovg-wgpu"))]
+#![cfg(feature = "slint-renderer-software")]
 
 use std::rc::Rc;
 use std::time::{Duration, Instant};
