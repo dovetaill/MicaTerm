@@ -66,6 +66,11 @@ struct ScrollTrackingLauncher {
 }
 
 #[derive(Clone)]
+struct SurfacePullLauncher {
+    surface: TerminalSurfaceState,
+}
+
+#[derive(Clone)]
 struct DelayedTrackingLauncher {
     disconnects: Arc<AtomicUsize>,
     ready_delay: Duration,
@@ -90,6 +95,11 @@ struct InteractiveTrackingRuntimeControl {
 #[derive(Clone)]
 struct ScrollTrackingRuntimeControl {
     state: ScrollTrackingState,
+}
+
+#[derive(Clone)]
+struct SurfacePullRuntimeControl {
+    surface: TerminalSurfaceState,
 }
 
 #[derive(Clone, Copy)]
@@ -127,6 +137,12 @@ impl InteractiveTrackingLauncher {
 impl ScrollTrackingLauncher {
     fn new(state: ScrollTrackingState) -> Self {
         Self { state }
+    }
+}
+
+impl SurfacePullLauncher {
+    fn new(surface: TerminalSurfaceState) -> Self {
+        Self { surface }
     }
 }
 
@@ -333,6 +349,29 @@ impl SessionRuntimeLauncher for ScrollTrackingLauncher {
     }
 }
 
+impl SessionRuntimeLauncher for SurfacePullLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let surface = self.surface.clone();
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            Ok(Box::new(SurfacePullRuntimeControl { surface }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeControl for TrackingRuntimeControl {
     fn disconnect(&self) -> Result<()> {
         self.disconnects.fetch_add(1, Ordering::SeqCst);
@@ -460,6 +499,36 @@ impl SessionRuntimeControl for ScrollTrackingRuntimeControl {
         );
         *self.state.surface.lock().expect("lock scroll surface") = Some(surface.clone());
         Ok(surface)
+    }
+}
+
+impl SessionRuntimeControl for SurfacePullRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
+        Ok(self.surface.clone())
     }
 }
 
@@ -1198,6 +1267,39 @@ fn runtime_surface_snapshot_tracks_visible_rows_instead_of_single_placeholder_co
         ]
     );
     assert!(surface.seqno > 0);
+}
+
+#[test]
+fn session_manager_populates_initial_surface_from_runtime_control_snapshot() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(SurfacePullLauncher::new(TerminalSurfaceState::from_visible_lines(
+            Uuid::new_v4(),
+            7,
+            24,
+            80,
+            vec!["warm".into(), "boot".into()],
+        ))),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    let surface = manager
+        .terminal_surface(handle.session_id)
+        .expect("manager should populate initial surface from runtime snapshot");
+
+    assert_eq!(surface.seqno, 7);
+    assert_eq!(surface.visible_lines, vec!["warm".to_string(), "boot".to_string()]);
 }
 
 #[test]

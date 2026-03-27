@@ -5,6 +5,7 @@ pub mod assets_catalog;
 pub mod async_runtime;
 pub mod bootstrap;
 pub mod logging;
+pub mod memory;
 pub mod runtime_profile;
 pub mod ssh;
 pub mod ui_preferences;

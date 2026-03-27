@@ -31,6 +31,11 @@ export component WorkspacePane inherits Rectangle {
     in property <int> workspace-session-viewport-offset-lines: 0;
     in property <int> workspace-session-viewport-max-offset-lines: 0;
     in property <bool> workspace-session-viewport-at-bottom: true;
+    in-out property <bool> workspace-session-selection-active: false;
+    in-out property <int> workspace-session-selection-start-row: -1;
+    in-out property <int> workspace-session-selection-start-col: -1;
+    in-out property <int> workspace-session-selection-end-row: -1;
+    in-out property <int> workspace-session-selection-end-col: -1;
     callback workspace-tab-selected(string);
     callback workspace-tab-close-requested(string);
     callback text-input(string);
@@ -100,6 +105,11 @@ export component WorkspacePane inherits Rectangle {
                 session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
                 session-viewport-max-offset-lines: root.workspace-session-viewport-max-offset-lines;
                 session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
+                selection-active <=> root.workspace-session-selection-active;
+                selection-start-row <=> root.workspace-session-selection-start-row;
+                selection-start-col <=> root.workspace-session-selection-start-col;
+                selection-end-row <=> root.workspace-session-selection-end-row;
+                selection-end-col <=> root.workspace-session-selection-end-col;
 
                 text-input(text) => {
                     root.text-input(text);

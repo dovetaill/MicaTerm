@@ -80,6 +80,29 @@ fn light_theme_palette_changes_default_background_projection() {
 }
 
 #[test]
+fn light_theme_palette_preserves_standard_ansi_black_and_bright_white_backgrounds() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.set_theme_mode(ThemeMode::Light);
+    session.apply_remote_bytes(b"\x1b[40mA\x1b[0m\x1b[107mB\x1b[0m");
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    let ansi_black = snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 0)
+        .expect("ansi black background cell");
+    let ansi_bright_white = snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 1)
+        .expect("ansi bright white background cell");
+
+    assert_eq!(ansi_black.bg_rgba, 0xff1f_2328);
+    assert_eq!(ansi_bright_white.bg_rgba, 0xffff_ffff);
+}
+
+#[test]
 fn terminal_host_declares_accumulated_multi_line_wheel_scrollback_contract() {
     let terminal_host =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
@@ -93,11 +116,57 @@ fn terminal_host_declares_accumulated_multi_line_wheel_scrollback_contract() {
         "TerminalSessionHost should define a wheel threshold before converting movement into scrollback lines"
     );
     assert!(
-        terminal_host.contains("private property <int> wheel-lines-per-notch: 3;"),
+        terminal_host.contains("private property <int> wheel-lines-per-notch: 6;"),
         "TerminalSessionHost should map one wheel notch to multiple local scrollback lines"
     );
     assert!(
         !terminal_host.contains("let delta-lines = event.delta-y > 0px ? 1 : -1;"),
         "TerminalSessionHost should not keep the prototype one-line-per-event wheel mapping"
+    );
+}
+
+#[test]
+fn terminal_host_prefers_bundled_font_and_stable_clipboard_shortcut_tokens() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        terminal_host.contains("in property <string> terminal-font-family: \"Sarasa Term SC Nerd\";"),
+        "TerminalSessionHost should bind directly to the bundled Sarasa Term SC Nerd family instead of a CSS-style comma list"
+    );
+    assert!(
+        terminal_host.contains("private property <length> terminal-font-size: 16px;"),
+        "TerminalSessionHost should ship with a desktop-sized default font instead of the current too-small compact size"
+    );
+    assert!(
+        terminal_host.contains("latin-cell-metric-probe := Text {"),
+        "TerminalSessionHost should measure latin cell width with a dedicated probe"
+    );
+    assert!(
+        terminal_host.contains("cjk-cell-metric-probe := Text {"),
+        "TerminalSessionHost should measure line height with a dedicated CJK probe to avoid clipped fallback glyphs"
+    );
+    assert!(
+        terminal_host.contains("\\u{3}"),
+        "TerminalSessionHost should treat ETX as a Ctrl+Shift+C copy shortcut token when the backend emits control characters"
+    );
+    assert!(
+        terminal_host.contains("\\u{16}"),
+        "TerminalSessionHost should treat SYN as a Ctrl+Shift+V paste shortcut token when the backend emits control characters"
+    );
+}
+
+#[test]
+fn winit_backend_maps_named_copy_and_paste_keys_into_terminal_shortcut_chars() {
+    let event_loop =
+        fs::read_to_string("vendor/i-slint-backend-winit/event_loop.rs").expect("read event loop");
+
+    assert!(
+        event_loop.contains("NamedKey::Copy") && event_loop.contains("\"c\".into()"),
+        "the patched winit backend should translate NamedKey::Copy into a textual copy shortcut token"
+    );
+    assert!(
+        event_loop.contains("NamedKey::Paste") && event_loop.contains("\"v\".into()"),
+        "the patched winit backend should translate NamedKey::Paste into a textual paste shortcut token"
     );
 }

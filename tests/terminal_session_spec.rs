@@ -126,6 +126,34 @@ fn surface_projection_exposes_scrollback_metadata() {
 }
 
 #[test]
+fn terminal_session_preserves_deeper_scrollback_history_for_large_bursts() {
+    let mut session = TerminalSession::new(4, 20);
+    let configured_scrollback_lines = 3_500usize;
+    let transcript = (0..9000)
+        .map(|line| format!("{line:04}\r\n"))
+        .collect::<String>();
+
+    session.apply_remote_bytes(transcript.as_bytes());
+    session.scroll_viewport_lines(20_000);
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    let first_visible = snapshot
+        .visible_lines
+        .iter()
+        .find(|line| !line.is_empty())
+        .expect("top retained scrollback line");
+    let first_visible_line = first_visible
+        .parse::<usize>()
+        .expect("parse retained scrollback line number");
+    let expected_floor = 9_000usize.saturating_sub(configured_scrollback_lines + 4);
+
+    assert!(
+        first_visible_line >= expected_floor,
+        "bounded scrollback should retain only the newest configured history window when a burst exceeds the cap"
+    );
+}
+
+#[test]
 fn dark_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let mut session = TerminalSession::new(24, 80);
 

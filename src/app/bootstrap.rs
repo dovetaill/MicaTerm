@@ -96,6 +96,21 @@ enum HostKeyApprovalIntent {
     OpenSession(OpenSessionMode),
 }
 
+#[cfg(any(test, target_os = "windows"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct NativeTerminalModifierState {
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+}
+
+#[cfg(any(test, target_os = "windows"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeTerminalClipboardShortcut {
+    Copy,
+    Paste,
+}
+
 #[derive(Clone)]
 struct LiveSessionRuntimeLauncher {
     credential_store: Arc<dyn CredentialStore>,
@@ -150,6 +165,47 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
     }
 }
 
+#[cfg(any(test, target_os = "windows"))]
+fn update_native_terminal_modifier_state(
+    modifiers: &mut NativeTerminalModifierState,
+    event: &slint::winit_030::winit::event::KeyEvent,
+) {
+    use slint::winit_030::winit::event::ElementState;
+    use slint::winit_030::winit::keyboard::{Key, NamedKey};
+
+    let pressed = event.state == ElementState::Pressed;
+    match &event.logical_key {
+        Key::Named(NamedKey::Control) => modifiers.ctrl = pressed,
+        Key::Named(NamedKey::Shift) => modifiers.shift = pressed,
+        Key::Named(NamedKey::Alt | NamedKey::AltGraph) => modifiers.alt = pressed,
+        _ => {}
+    }
+}
+
+#[cfg(any(test, target_os = "windows"))]
+fn native_terminal_clipboard_shortcut(
+    key: &slint::winit_030::winit::keyboard::Key,
+    modifiers: NativeTerminalModifierState,
+) -> Option<NativeTerminalClipboardShortcut> {
+    use slint::winit_030::winit::keyboard::{Key, NamedKey};
+
+    if !modifiers.ctrl || !modifiers.shift || modifiers.alt {
+        return None;
+    }
+
+    match key {
+        Key::Named(NamedKey::Copy) => Some(NativeTerminalClipboardShortcut::Copy),
+        Key::Named(NamedKey::Paste) => Some(NativeTerminalClipboardShortcut::Paste),
+        Key::Character(text) if text.eq_ignore_ascii_case("c") => {
+            Some(NativeTerminalClipboardShortcut::Copy)
+        }
+        Key::Character(text) if text.eq_ignore_ascii_case("v") => {
+            Some(NativeTerminalClipboardShortcut::Paste)
+        }
+        _ => None,
+    }
+}
+
 pub fn app_title() -> &'static str {
     "Mica Term"
 }
@@ -194,14 +250,67 @@ fn bind_windows_window_state_tracking(
     window: &AppWindow,
     state: Rc<RefCell<ShellViewModel>>,
     effects: Rc<dyn PlatformWindowEffects>,
+    session_bridge: Option<Rc<ShellSessionBridge>>,
 ) {
     use slint::ComponentHandle;
     use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 
     let handle = window.as_weak();
+    let modifiers = Rc::new(RefCell::new(NativeTerminalModifierState::default()));
     window
         .window()
         .on_winit_window_event(move |_slint_window, event| {
+            if matches!(event, winit::event::WindowEvent::Focused(false)) {
+                *modifiers.borrow_mut() = NativeTerminalModifierState::default();
+            }
+
+            if let winit::event::WindowEvent::KeyboardInput {
+                event: key_event,
+                is_synthetic,
+                ..
+            } = event
+            {
+                let mut modifier_state = modifiers.borrow_mut();
+                update_native_terminal_modifier_state(&mut modifier_state, key_event);
+
+                if key_event.state == winit::event::ElementState::Pressed
+                    && !key_event.repeat
+                    && !is_synthetic
+                    && let Some(shortcut) = native_terminal_clipboard_shortcut(
+                        &key_event.logical_key,
+                        *modifier_state,
+                    )
+                {
+                    drop(modifier_state);
+                    let window = handle.unwrap();
+                    if window.get_workspace_session_host_mode() == "terminal"
+                        && !window.get_active_workspace_session_id().is_empty()
+                    {
+                        match shortcut {
+                            NativeTerminalClipboardShortcut::Copy
+                                if window.get_workspace_session_selection_active() =>
+                            {
+                                let state = state.borrow();
+                                forward_active_workspace_copy_selection(
+                                    &state,
+                                    window.get_workspace_session_selection_start_row(),
+                                    window.get_workspace_session_selection_start_col(),
+                                    window.get_workspace_session_selection_end_row(),
+                                    window.get_workspace_session_selection_end_col(),
+                                );
+                                return EventResult::PreventDefault;
+                            }
+                            NativeTerminalClipboardShortcut::Paste => {
+                                let state = state.borrow();
+                                forward_active_workspace_paste(&state, session_bridge.as_deref());
+                                return EventResult::PreventDefault;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
             // Win32 snap/maximize state can drift from declarative UI state, so re-sample it when
             // the platform reports geometry-affecting events.
             if matches!(
@@ -230,6 +339,7 @@ fn bind_windows_window_state_tracking(
     _window: &AppWindow,
     _state: Rc<RefCell<ShellViewModel>>,
     _effects: Rc<dyn PlatformWindowEffects>,
+    _session_bridge: Option<Rc<ShellSessionBridge>>,
 ) {
 }
 
@@ -2362,7 +2472,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_double_click_activation = Rc::new(RefCell::new(None::<String>));
 
     apply_restored_window_size(window, default_window_size());
-    bind_windows_window_state_tracking(window, Rc::clone(&view_model), Rc::clone(&effects));
+    bind_windows_window_state_tracking(
+        window,
+        Rc::clone(&view_model),
+        Rc::clone(&effects),
+        session_bridge.clone(),
+    );
     sync_shell_state(window, &view_model.borrow(), effects.as_ref());
     {
         let mut state = view_model.borrow_mut();
@@ -3817,4 +3932,61 @@ mod tests {
         assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
         assert_eq!(window.get_workspace_session_cells().row_count(), 0);
     }
+
+    #[test]
+    fn native_terminal_clipboard_shortcut_matches_ctrl_shift_copy_and_paste_keys() {
+        use slint::winit_030::winit::keyboard::{Key, NamedKey};
+
+        let modifiers = NativeTerminalModifierState {
+            ctrl: true,
+            shift: true,
+            alt: false,
+        };
+
+        assert_eq!(
+            native_terminal_clipboard_shortcut(&Key::Character("C".into()), modifiers),
+            Some(NativeTerminalClipboardShortcut::Copy)
+        );
+        assert_eq!(
+            native_terminal_clipboard_shortcut(&Key::Character("v".into()), modifiers),
+            Some(NativeTerminalClipboardShortcut::Paste)
+        );
+        assert_eq!(
+            native_terminal_clipboard_shortcut(&Key::Named(NamedKey::Copy), modifiers),
+            Some(NativeTerminalClipboardShortcut::Copy)
+        );
+        assert_eq!(
+            native_terminal_clipboard_shortcut(&Key::Named(NamedKey::Paste), modifiers),
+            Some(NativeTerminalClipboardShortcut::Paste)
+        );
+    }
+
+    #[test]
+    fn native_terminal_clipboard_shortcut_requires_ctrl_shift_without_alt() {
+        use slint::winit_030::winit::keyboard::Key;
+
+        assert_eq!(
+            native_terminal_clipboard_shortcut(
+                &Key::Character("C".into()),
+                NativeTerminalModifierState {
+                    ctrl: true,
+                    shift: false,
+                    alt: false,
+                }
+            ),
+            None
+        );
+        assert_eq!(
+            native_terminal_clipboard_shortcut(
+                &Key::Character("V".into()),
+                NativeTerminalModifierState {
+                    ctrl: true,
+                    shift: true,
+                    alt: true,
+                }
+            ),
+            None
+        );
+    }
+
 }

@@ -1,6 +1,6 @@
 // Root desktop window that composes chrome, sidebars, workspace content, overlays, and resize grips.
 
-import "fonts/IosevkaTerm-Regular.ttf";
+import "fonts/SarasaTermSCNerd-Regular.ttf";
 import { AssetsCreateMenu } from "components/assets-create-menu.slint";
 import { AssetsContextMenuItem } from "components/assets-context-menu-column.slint";
 import { AssetsContextMenuOverlay } from "components/assets-context-menu-overlay.slint";
@@ -109,6 +109,11 @@ export component AppWindow inherits Window {
     in-out property <int> workspace-session-viewport-offset-lines: 0;
     in-out property <int> workspace-session-viewport-max-offset-lines: 0;
     in-out property <bool> workspace-session-viewport-at-bottom: true;
+    in-out property <bool> workspace-session-selection-active: false;
+    in-out property <int> workspace-session-selection-start-row: -1;
+    in-out property <int> workspace-session-selection-start-col: -1;
+    in-out property <int> workspace-session-selection-end-row: -1;
+    in-out property <int> workspace-session-selection-end-col: -1;
     in-out property <bool> assets-context-menu-open: false;
     in-out property <length> assets-context-menu-anchor-x: 0px;
     in-out property <length> assets-context-menu-anchor-y: 0px;
@@ -481,6 +486,11 @@ export component AppWindow inherits Window {
                         workspace-session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
                         workspace-session-viewport-max-offset-lines: root.workspace-session-viewport-max-offset-lines;
                         workspace-session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
+                        workspace-session-selection-active <=> root.workspace-session-selection-active;
+                        workspace-session-selection-start-row <=> root.workspace-session-selection-start-row;
+                        workspace-session-selection-start-col <=> root.workspace-session-selection-start-col;
+                        workspace-session-selection-end-row <=> root.workspace-session-selection-end-row;
+                        workspace-session-selection-end-col <=> root.workspace-session-selection-end-col;
 
                         workspace-tab-selected(session-id) => {
                             root.workspace-tab-selected(session-id);

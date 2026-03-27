@@ -76,7 +76,12 @@ export component TerminalSessionHost inherits Rectangle {
     in property <int> session-viewport-offset-lines: 0;
     in property <int> session-viewport-max-offset-lines: 0;
     in property <bool> session-viewport-at-bottom: true;
-    in property <string> terminal-font-family: "Iosevka Term, Cascadia Mono, Consolas, monospace";
+    in property <string> terminal-font-family: "Sarasa Term SC Nerd";
+    in-out property <bool> selection-active: false;
+    in-out property <int> selection-start-row: -1;
+    in-out property <int> selection-start-col: -1;
+    in-out property <int> selection-end-row: -1;
+    in-out property <int> selection-end-col: -1;
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
@@ -87,10 +92,19 @@ export component TerminalSessionHost inherits Rectangle {
     callback scroll-jump-requested(float);
     callback mouse-input(string, string, int, int, bool, bool, bool);
 
-    private property <length> terminal-font-size: 11px;
-    private property <length> terminal-cell-width: 7px;
-    private property <length> terminal-cell-height: 14px;
-    private property <length> terminal-cursor-thickness: 2px;
+    private property <length> terminal-font-size: 16px;
+    private property <int> terminal-cell-measure-count: 16;
+    private property <length> terminal-cell-width:
+        max(
+            9px,
+            min(9.5px, latin-cell-metric-probe.width / root.terminal-cell-measure-count),
+        );
+    private property <length> terminal-cell-height:
+        max(
+            root.terminal-font-size + 6px,
+            max(latin-cell-metric-probe.height + 4px, cjk-cell-metric-probe.height + 4px),
+        );
+    private property <length> terminal-cursor-thickness: 1px;
     private property <length> terminal-padding-left: 12px;
     private property <length> terminal-padding-top: 10px;
     private property <length> terminal-padding-right: 12px;
@@ -100,7 +114,7 @@ export component TerminalSessionHost inherits Rectangle {
     private property <length> scrollbar-thumb-min-height: 28px;
     private property <float> wheel-delta-remainder: 0;
     private property <float> wheel-delta-threshold: 120;
-    private property <int> wheel-lines-per-notch: 3;
+    private property <int> wheel-lines-per-notch: 6;
     private property <int> selection-anchor-row: -1;
     private property <int> selection-anchor-col: -1;
     private property <int> selection-focus-row: -1;
@@ -202,6 +216,14 @@ export component TerminalSessionHost inherits Rectangle {
         ));
     }
 
+    function is-copy-shortcut-key(text: string) -> bool {
+        return text == "c" || text == "C" || text == "\u{3}";
+    }
+
+    function is-paste-shortcut-key(text: string) -> bool {
+        return text == "v" || text == "V" || text == "\u{16}";
+    }
+
     function emit-surface-resize() {
         if root.mode == "terminal" {
             root.surface-resize-requested(
@@ -217,6 +239,23 @@ export component TerminalSessionHost inherits Rectangle {
         root.selection-focus-row = -1;
         root.selection-focus-col = -1;
         root.selection-drag-active = false;
+        root.sync-selection-state();
+    }
+
+    function sync-selection-state() {
+        if root.has-selection() {
+            root.selection-active = true;
+            root.selection-start-row = root.normalized-selection-start-row();
+            root.selection-start-col = root.normalized-selection-start-col();
+            root.selection-end-row = root.normalized-selection-end-row();
+            root.selection-end-col = root.normalized-selection-end-col();
+        } else {
+            root.selection-active = false;
+            root.selection-start-row = -1;
+            root.selection-start-col = -1;
+            root.selection-end-row = -1;
+            root.selection-end-col = -1;
+        }
     }
 
     function close-context-menu() {
@@ -335,6 +374,34 @@ export component TerminalSessionHost inherits Rectangle {
         root.emit-surface-resize();
     }
 
+    changed terminal-cell-width => {
+        root.emit-surface-resize();
+    }
+
+    changed terminal-cell-height => {
+        root.emit-surface-resize();
+    }
+
+    latin-cell-metric-probe := Text {
+        x: -10000px;
+        y: -10000px;
+        text: "0000000000000000";
+        color: transparent;
+        font-size: root.terminal-font-size;
+        font-family: root.terminal-font-family;
+        wrap: no-wrap;
+    }
+
+    cjk-cell-metric-probe := Text {
+        x: -10000px;
+        y: -10000px;
+        text: "界";
+        color: transparent;
+        font-size: root.terminal-font-size;
+        font-family: root.terminal-font-family;
+        wrap: no-wrap;
+    }
+
     cursor-blink-timer := Timer {
         interval: 520ms;
         running: false;
@@ -379,7 +446,7 @@ export component TerminalSessionHost inherits Rectangle {
                 if (event.text == Key.Control || event.text == Key.Shift || event.text == Key.Alt) {
                     accept
                 } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
-                    && (event.text == "c" || event.text == "C")) {
+                    && root.is-copy-shortcut-key(event.text)) {
                     if root.has-selection() {
                         root.copy-selection-requested(
                             root.normalized-selection-start-row(),
@@ -392,7 +459,7 @@ export component TerminalSessionHost inherits Rectangle {
                         reject
                     }
                 } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
-                    && (event.text == "v" || event.text == "V")) {
+                    && root.is-paste-shortcut-key(event.text)) {
                     root.paste-requested();
                     accept
                 } else if (event.modifiers.control && event.text == Key.Insert
@@ -487,6 +554,7 @@ export component TerminalSessionHost inherits Rectangle {
                     root.selection-anchor-col = 0;
                     root.selection-focus-row = max(0, root.session-rows - 1);
                     root.selection-focus-col = max(0, root.session-cols - 1);
+                    root.sync-selection-state();
                     accept
                 } else if ((event.modifiers.control || event.modifiers.alt) && !event.modifiers.shift && event.text != "") {
                     root.key-input(event.text, event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
@@ -572,6 +640,7 @@ export component TerminalSessionHost inherits Rectangle {
                             root.selection-focus-row = row;
                             root.selection-focus-col = col;
                             root.selection-drag-active = true;
+                            root.sync-selection-state();
                         }
                     } else if event.kind == PointerEventKind.move {
                         if root.session-mouse-grabbed {
@@ -585,10 +654,13 @@ export component TerminalSessionHost inherits Rectangle {
                                 event.modifiers.alt,
                             );
                         } else if root.selection-drag-active {
+                            terminal-input.focus();
                             root.selection-focus-row = row;
                             root.selection-focus-col = col;
+                            root.sync-selection-state();
                         }
                     } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                        terminal-input.focus();
                         if root.session-mouse-grabbed {
                             root.mouse-input(
                                 "up",
@@ -655,7 +727,9 @@ export component TerminalSessionHost inherits Rectangle {
                         : cell.fg;
                     font-size: root.terminal-font-size;
                     font-family: root.terminal-font-family;
+                    horizontal-alignment: left;
                     vertical-alignment: center;
+                    wrap: no-wrap;
                 }
             }
 
@@ -802,6 +876,7 @@ export component TerminalSessionHost inherits Rectangle {
                             root.selection-anchor-col = 0;
                             root.selection-focus-row = max(0, root.session-rows - 1);
                             root.selection-focus-col = max(0, root.session-cols - 1);
+                            root.sync-selection-state();
                             terminal-input.focus();
                         }
                     }
