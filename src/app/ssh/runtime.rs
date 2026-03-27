@@ -51,6 +51,8 @@ pub struct TerminalSurfaceState {
     pub seqno: usize,
     pub rows: u32,
     pub cols: u32,
+    pub default_fg_rgba: u32,
+    pub default_bg_rgba: u32,
     pub viewport_offset_lines: u32,
     pub viewport_max_offset_lines: u32,
     pub viewport_at_bottom: bool,
@@ -68,6 +70,8 @@ pub struct TerminalSurfaceSignature {
     pub seqno: usize,
     pub rows: u32,
     pub cols: u32,
+    pub default_fg_rgba: u32,
+    pub default_bg_rgba: u32,
     pub viewport_offset_lines: u32,
     pub viewport_max_offset_lines: u32,
     pub viewport_at_bottom: bool,
@@ -1023,6 +1027,8 @@ impl TerminalSession {
             seqno: self.sequence_number(),
             rows: size.rows as u32,
             cols: size.cols as u32,
+            default_fg_rgba: color_to_rgba_u32(palette.foreground),
+            default_bg_rgba: color_to_rgba_u32(palette.background),
             viewport_offset_lines: self.viewport_offset_lines as u32,
             viewport_max_offset_lines: self.max_viewport_offset_lines() as u32,
             viewport_at_bottom: self.viewport_offset_lines == 0,
@@ -1339,6 +1345,8 @@ impl TerminalSurfaceState {
             seqno: self.seqno,
             rows: self.rows,
             cols: self.cols,
+            default_fg_rgba: self.default_fg_rgba,
+            default_bg_rgba: self.default_bg_rgba,
             viewport_offset_lines: self.viewport_offset_lines,
             viewport_max_offset_lines: self.viewport_max_offset_lines,
             viewport_at_bottom: self.viewport_at_bottom,
@@ -1366,6 +1374,8 @@ impl TerminalSurfaceState {
             seqno,
             rows,
             cols,
+            default_fg_rgba: 0xff00_0000,
+            default_bg_rgba: 0xffff_ffff,
             viewport_offset_lines: 0,
             viewport_max_offset_lines: 0,
             viewport_at_bottom: true,
@@ -1665,6 +1675,10 @@ fn resolve_palette_color(palette: &ColorPalette, color: ColorAttribute, backgrou
         palette.resolve_fg(color)
     };
     pack_color(rgba)
+}
+
+fn color_to_rgba_u32(color: SrgbaTuple) -> u32 {
+    pack_color(color)
 }
 
 fn pack_color(color: SrgbaTuple) -> u32 {

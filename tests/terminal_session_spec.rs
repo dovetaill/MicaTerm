@@ -5,6 +5,23 @@ use mica_term::theme::ThemeMode;
 use termwiz::input::{KeyCode, Modifiers};
 use uuid::Uuid;
 
+fn extract_debug_u32_field(debug: &str, field_name: &str) -> u32 {
+    let needle = format!("{field_name}: ");
+    let start = debug
+        .find(&needle)
+        .unwrap_or_else(|| panic!("missing `{field_name}` in snapshot debug output: {debug}"))
+        + needle.len();
+    let value = debug[start..]
+        .split([',', '}'])
+        .next()
+        .expect("debug field terminator")
+        .trim();
+
+    value
+        .parse::<u32>()
+        .unwrap_or_else(|error| panic!("parse `{field_name}` from `{value}`: {error}"))
+}
+
 #[test]
 fn terminal_session_applies_remote_bytes_and_tracks_seqno() {
     let mut session = TerminalSession::new(24, 80);
@@ -106,6 +123,35 @@ fn surface_projection_exposes_scrollback_metadata() {
 
     assert!(snapshot.viewport_offset_lines > 0);
     assert!(snapshot.viewport_max_offset_lines >= snapshot.viewport_offset_lines);
+}
+
+#[test]
+fn dark_theme_surface_projection_exposes_default_canvas_palette_fields() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.apply_remote_bytes(b"[root@host ~]# ");
+
+    let debug = format!("{:?}", session.surface_state(Uuid::new_v4()));
+    let default_fg_rgba = extract_debug_u32_field(&debug, "default_fg_rgba");
+    let default_bg_rgba = extract_debug_u32_field(&debug, "default_bg_rgba");
+
+    assert_eq!(default_fg_rgba, 0xffe6_edf3);
+    assert_eq!(default_bg_rgba, 0xff0d_1117);
+}
+
+#[test]
+fn light_theme_surface_projection_exposes_default_canvas_palette_fields() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.set_theme_mode(ThemeMode::Light);
+    session.apply_remote_bytes(b"[root@host ~]# ");
+
+    let debug = format!("{:?}", session.surface_state(Uuid::new_v4()));
+    let default_fg_rgba = extract_debug_u32_field(&debug, "default_fg_rgba");
+    let default_bg_rgba = extract_debug_u32_field(&debug, "default_bg_rgba");
+
+    assert_eq!(default_fg_rgba, 0xff1f_2328);
+    assert_eq!(default_bg_rgba, 0xffff_ffff);
 }
 
 #[test]

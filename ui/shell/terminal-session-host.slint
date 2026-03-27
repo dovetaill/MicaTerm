@@ -68,13 +68,15 @@ export component TerminalSessionHost inherits Rectangle {
     in property <string> session-cursor-shape: "block";
     in property <color> session-cursor-fg: #000000;
     in property <color> session-cursor-bg: #52ad70;
+    in property <color> session-default-fg: #000000;
+    in property <color> session-default-bg: #ffffff;
     in property <bool> session-mouse-grabbed: false;
     in property <[string]> session-visible-lines: [];
     in property <int> session-surface-seqno: 0;
     in property <int> session-viewport-offset-lines: 0;
     in property <int> session-viewport-max-offset-lines: 0;
     in property <bool> session-viewport-at-bottom: true;
-    in property <string> terminal-font-family: "Cascadia Code, Cascadia Mono, Consolas, JetBrains Mono";
+    in property <string> terminal-font-family: "Iosevka Term, Cascadia Mono, Consolas, monospace";
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
@@ -85,9 +87,9 @@ export component TerminalSessionHost inherits Rectangle {
     callback scroll-jump-requested(float);
     callback mouse-input(string, string, int, int, bool, bool, bool);
 
-    private property <length> terminal-font-size: 12px;
-    private property <length> terminal-cell-width: 8px;
-    private property <length> terminal-cell-height: 16px;
+    private property <length> terminal-font-size: 11px;
+    private property <length> terminal-cell-width: 7px;
+    private property <length> terminal-cell-height: 14px;
     private property <length> terminal-cursor-thickness: 2px;
     private property <length> terminal-padding-left: 12px;
     private property <length> terminal-padding-top: 10px;
@@ -96,6 +98,9 @@ export component TerminalSessionHost inherits Rectangle {
     private property <length> scrollbar-reserved-width: 14px;
     private property <length> scrollbar-track-width: 8px;
     private property <length> scrollbar-thumb-min-height: 28px;
+    private property <float> wheel-delta-remainder: 0;
+    private property <float> wheel-delta-threshold: 120;
+    private property <int> wheel-lines-per-notch: 3;
     private property <int> selection-anchor-row: -1;
     private property <int> selection-anchor-col: -1;
     private property <int> selection-focus-row: -1;
@@ -371,7 +376,9 @@ export component TerminalSessionHost inherits Rectangle {
             }
 
             key-pressed(event) => {
-                if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
+                if (event.text == Key.Control || event.text == Key.Shift || event.text == Key.Alt) {
+                    accept
+                } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
                     && (event.text == "c" || event.text == "C")) {
                     if root.has-selection() {
                         root.copy-selection-requested(
@@ -420,6 +427,21 @@ export component TerminalSessionHost inherits Rectangle {
                     && !event.modifiers.alt) {
                     root.scroll-jump-requested(0.0);
                     accept
+                } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
+                    && (
+                        event.text == "a" || event.text == "A"
+                        || event.text == "b" || event.text == "B"
+                        || event.text == "f" || event.text == "F"
+                        || event.text == "k" || event.text == "K"
+                        || event.text == "l" || event.text == "L"
+                        || event.text == "n" || event.text == "N"
+                        || event.text == "o" || event.text == "O"
+                        || event.text == "p" || event.text == "P"
+                        || event.text == "r" || event.text == "R"
+                        || event.text == "t" || event.text == "T"
+                        || event.text == "w" || event.text == "W"
+                    )) {
+                    accept
                 } else if (event.text == Key.Return) {
                     root.key-input("enter", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
@@ -466,7 +488,7 @@ export component TerminalSessionHost inherits Rectangle {
                     root.selection-focus-row = max(0, root.session-rows - 1);
                     root.selection-focus-col = max(0, root.session-cols - 1);
                     accept
-                } else if ((event.modifiers.control || event.modifiers.alt) && event.text != "") {
+                } else if ((event.modifiers.control || event.modifiers.alt) && !event.modifiers.shift && event.text != "") {
                     root.key-input(event.text, event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
                 } else {
@@ -480,14 +502,14 @@ export component TerminalSessionHost inherits Rectangle {
             height: parent.height;
             border-width: 1px;
             border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.terminal-canvas-surface;
+            background: root.session-default-bg;
 
             blank-surface := Rectangle {
                 x: root.terminal-padding-left;
                 y: root.terminal-padding-top;
                 width: root.terminal-grid-width();
                 height: root.terminal-grid-height();
-                background: ThemeTokens.terminal-canvas-surface;
+                background: root.session-default-bg;
             }
 
             input-capture := TouchArea {
@@ -499,17 +521,30 @@ export component TerminalSessionHost inherits Rectangle {
                     if event.delta-y > 0px || event.delta-y < 0px {
                         let row = root.terminal-hit-row(self.mouse-y);
                         let col = root.terminal-hit-col(self.mouse-x);
-                        let delta-lines = event.delta-y > 0px ? 1 : -1;
+                        root.wheel-delta-remainder = root.wheel-delta-remainder + (event.delta-y / 1px);
+                        let delta-lines =
+                            root.wheel-delta-remainder >= root.wheel-delta-threshold
+                            ? root.wheel-lines-per-notch
+                            : root.wheel-delta-remainder <= -root.wheel-delta-threshold
+                            ? -root.wheel-lines-per-notch
+                            : 0;
                         terminal-input.focus();
                         root.close-context-menu();
-                        root.scroll-requested(
-                            delta-lines,
-                            row,
-                            col,
-                            event.modifiers.shift,
-                            event.modifiers.control,
-                            event.modifiers.alt,
-                        );
+                        if delta-lines != 0 {
+                            if delta-lines > 0 {
+                                root.wheel-delta-remainder = root.wheel-delta-remainder - root.wheel-delta-threshold;
+                            } else {
+                                root.wheel-delta-remainder = root.wheel-delta-remainder + root.wheel-delta-threshold;
+                            }
+                            root.scroll-requested(
+                                delta-lines,
+                                row,
+                                col,
+                                event.modifiers.shift,
+                                event.modifiers.control,
+                                event.modifiers.alt,
+                            );
+                        }
                         return accept;
                     }
                     reject

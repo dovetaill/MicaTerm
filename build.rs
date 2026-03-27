@@ -1,6 +1,7 @@
 // Cargo build script that compiles the Slint UI and embeds the Windows application icon.
 
 fn main() {
+    println!("cargo:rerun-if-changed=ui/fonts/IosevkaTerm-Regular.ttf");
     let enable_debug_info = std::env::var("PROFILE")
         .map(|profile| profile != "release")
         .unwrap_or(true);

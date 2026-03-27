@@ -1955,6 +1955,8 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         );
         window.set_workspace_session_cursor_fg(slint_color_from_rgba(surface.cursor.fg_rgba));
         window.set_workspace_session_cursor_bg(slint_color_from_rgba(surface.cursor.bg_rgba));
+        window.set_workspace_session_default_fg(slint_color_from_rgba(surface.default_fg_rgba));
+        window.set_workspace_session_default_bg(slint_color_from_rgba(surface.default_bg_rgba));
         window.set_workspace_session_mouse_grabbed(surface.mouse_grabbed);
         window.set_workspace_session_viewport_offset_lines(
             i32::try_from(surface.viewport_offset_lines).unwrap_or(i32::MAX),
@@ -1973,6 +1975,8 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         window.set_workspace_session_cursor_shape("block".into());
         window.set_workspace_session_cursor_fg(Color::from_argb_u8(255, 0, 0, 0));
         window.set_workspace_session_cursor_bg(Color::from_argb_u8(255, 0x52, 0xad, 0x70));
+        window.set_workspace_session_default_fg(Color::from_argb_u8(255, 0, 0, 0));
+        window.set_workspace_session_default_bg(Color::from_argb_u8(255, 255, 255, 255));
         window.set_workspace_session_mouse_grabbed(false);
         window.set_workspace_session_viewport_offset_lines(0);
         window.set_workspace_session_viewport_max_offset_lines(0);
