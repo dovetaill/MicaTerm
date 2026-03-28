@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = ["slint-renderer-software"]
 slint-renderer-software = ["slint/renderer-software"]
+slint-renderer-skia = ["slint/renderer-skia"]
 
 [dependencies]
 anyhow = "1.0.102"
@@ -31,6 +32,7 @@ slint = { version = "1.15.1", default-features = false, features = [
     "std",
     "backend-winit-x11",
     "compat-1-2",
+    "unstable-fontique-07",
     "unstable-winit-030",
 ] }
 termwiz = "0.23.3"

@@ -4,19 +4,24 @@
 use mica_term::app::{async_runtime::AppAsyncRuntime, runtime_profile::AppRuntimeProfile};
 
 fn select_runtime_profile() -> AppRuntimeProfile {
-    AppRuntimeProfile::mainline()
+    AppRuntimeProfile::packaged()
 }
 
-fn apply_renderer_selector(_profile: AppRuntimeProfile) -> anyhow::Result<()> {
+fn apply_renderer_selector(profile: AppRuntimeProfile) -> anyhow::Result<()> {
     use anyhow::Context;
     use slint::BackendSelector;
 
     BackendSelector::new()
-        .backend_name("winit".into())
-        .renderer_name("software".into())
+        .backend_name(profile.forced_backend().unwrap().into())
+        .renderer_name(profile.forced_renderer().unwrap().into())
         .select()
         .map_err(anyhow::Error::from)
-        .context("failed to select winit-software backend for mainline runtime")
+        .with_context(|| {
+            format!(
+                "failed to select {} backend for packaged runtime",
+                profile.selector_label()
+            )
+        })
 }
 
 fn main() -> anyhow::Result<()> {

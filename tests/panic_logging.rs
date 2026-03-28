@@ -46,11 +46,11 @@ fn panic_hook_writes_crash_file_for_child_process() {
 }
 
 #[test]
-fn startup_failure_message_is_explicit_for_mainline_profile() {
+fn startup_failure_message_uses_selected_renderer_label() {
     let message = startup_failure_message(AppRuntimeProfile::mainline(), "mock init failure")
         .expect("mainline profile should expose a startup message");
 
     assert!(message.contains("Mica Term"));
-    assert!(message.contains("winit-software"));
+    assert!(message.contains("winit-skia-software"));
     assert!(message.contains("mock init failure"));
 }

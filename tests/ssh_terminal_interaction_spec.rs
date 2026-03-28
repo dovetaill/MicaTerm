@@ -215,13 +215,13 @@ fn terminal_host_uses_startup_safe_font_stack_and_stable_clipboard_shortcut_toke
 
     assert!(
         terminal_host.contains(
-            "in property <string> terminal-font-family: \"Iosevka Term, Cascadia Mono, Consolas, monospace\";"
+            "in property <string> terminal-font-family: \"Sarasa Term SC Nerd, Iosevka Term, Cascadia Mono, Consolas, monospace\";"
         ),
-        "TerminalSessionHost should default to the lighter startup-safe fallback stack"
+        "TerminalSessionHost should default to the Sarasa-first font stack once lazy registration is available"
     );
     assert!(
-        !terminal_host.contains("Sarasa Term SC Nerd"),
-        "TerminalSessionHost should not force the large Sarasa face into the startup font contract"
+        terminal_host.contains("Sarasa Term SC Nerd"),
+        "TerminalSessionHost should prefer the Sarasa face in the terminal font contract"
     );
     assert!(
         terminal_host.contains("private property <length> terminal-font-size: 16px;"),

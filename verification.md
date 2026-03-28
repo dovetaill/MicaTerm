@@ -1,5 +1,27 @@
 # Verification Reports
 
+## Windows Skia Mainline and Terminal Font Notes
+
+Date: 2026-03-28 CST
+
+### Source Documents
+
+- Design: `docs/plans/2026-03-28-windows-skia-mainline-and-terminal-font-design.md`
+- Implementation Plan: `docs/plans/2026-03-28-windows-skia-mainline-and-terminal-font-implementation-plan.md`
+
+### Current Contract
+
+- `./build-win-x64.sh` is the Windows Skia mainline wrapper and packages the `winit-skia-software` route.
+- `./build-win-x64-software.sh` is the Windows compatibility wrapper and packages the `winit-software` route.
+- `./build-release.sh` keeps the Linux x64 leg on the current default path and routes the Windows GNU leg through the Skia mainline wrapper settings.
+- `Cargo.toml` still pins `i-slint-backend-winit` to `vendor/i-slint-backend-winit`, so the vendored Windows partial-visibility patch remains active.
+- `SarasaTermSCNerd-Regular.ttf` remains embedded in the executable and is registered through `src/app/terminal_font.rs` only when the workspace session host mode becomes `terminal`.
+- `ui/app-window.slint` keeps the startup import path on `IosevkaTerm-Regular.ttf`, so the heavier Sarasa font is not globally imported during app startup.
+
+### Verification Status
+
+- The final feature-wide verification matrix for this design is deferred to the dedicated Task 5 pass.
+
 ## Top Status Bar Style Bugfix3 Verification
 
 Date: 2026-03-11 14:33:42 CST
