@@ -2868,6 +2868,67 @@ fn workspace_terminal_multiline_paste_warning_skips_bracketed_paste_sessions() {
 }
 
 #[test]
+fn workspace_terminal_long_multiline_paste_opens_editor_and_sends_edited_text() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(PasteWarningProjectionLauncher {
+            bracketed_paste_enabled: true,
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text(
+            "one\ntwo\nthree\nfour",
+            slint::platform::Clipboard::DefaultClipboard,
+        );
+        Ok(())
+    })
+    .expect("seed long multiline clipboard");
+
+    app.invoke_workspace_session_paste_requested();
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert!(app.get_workspace_paste_warning_modal_open());
+    assert!(app.get_workspace_paste_warning_editor_mode());
+    assert_eq!(
+        app.get_workspace_paste_warning_text(),
+        "one\ntwo\nthree\nfour"
+    );
+    assert_eq!(app.get_workspace_session_surface_seqno(), 1);
+
+    app.set_workspace_paste_warning_text("one\ntwo\nfour".into());
+    app.invoke_workspace_paste_warning_confirm_requested();
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert!(!app.get_workspace_paste_warning_modal_open());
+    assert_eq!(app.get_workspace_session_surface_seqno(), 2);
+    assert_eq!(
+        app.get_workspace_session_visible_lines()
+            .row_data(1)
+            .unwrap()
+            .as_str(),
+        "paste one\ntwo\nfour"
+    );
+}
+
+#[test]
 fn workspace_terminal_single_line_trailing_newline_pastes_without_warning() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -2980,6 +3041,81 @@ fn workspace_terminal_ctrl_shift_c_copies_selected_text_to_clipboard() {
             .as_deref()
             .is_some_and(|text| text.contains("welcome")),
         "Ctrl+Shift+C should copy the current terminal selection into the system clipboard"
+    );
+}
+
+#[test]
+fn workspace_terminal_ctrl_shift_c_copies_selected_text_when_backend_emits_etx() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    let selection_start = LogicalPosition::new(
+        app.get_layout_main_workspace_x() + 18.0,
+        app.get_layout_titlebar_height() + 56.0,
+    );
+    let selection_end = LogicalPosition::new(
+        app.get_layout_main_workspace_x() + 92.0,
+        app.get_layout_titlebar_height() + 56.0,
+    );
+
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: selection_start,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: selection_start,
+        button: PointerEventButton::Left,
+    });
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: selection_end,
+    });
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: selection_end,
+        button: PointerEventButton::Left,
+    });
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Shift.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Control.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: "\u{3}".into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: "\u{3}".into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Control.into(),
+    });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Shift.into(),
+    });
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard");
+
+    assert!(
+        copied
+            .as_deref()
+            .is_some_and(|text| text.contains("welcome")),
+        "Ctrl+Shift+C should still copy when the backend emits ETX instead of a literal C"
     );
 }
 

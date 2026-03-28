@@ -16,9 +16,13 @@ fn function_keys_and_application_cursor_keys_are_encoded_from_live_terminal_stat
     let f5 = session
         .send_key_event(TerminalKeyEvent::function(5, false, false, false))
         .expect("encode f5");
+    let f24 = session
+        .send_key_event(TerminalKeyEvent::function(24, false, false, false))
+        .expect("encode f24");
 
     assert_eq!(up, b"\x1bOA");
     assert_eq!(f5, b"\x1b[15~");
+    assert_eq!(f24, b"\x1b[45~");
 }
 
 #[test]
@@ -215,13 +219,17 @@ fn terminal_host_uses_startup_safe_font_stack_and_stable_clipboard_shortcut_toke
     );
     assert!(
         terminal_host.contains("event.text == Key.F1")
-            && terminal_host.contains("event.text == Key.F12"),
-        "TerminalSessionHost should recognize the terminal function-key range from F1 through F12"
+            && terminal_host.contains("event.text == Key.F12")
+            && terminal_host.contains("event.text == Key.F13")
+            && terminal_host.contains("event.text == Key.F24"),
+        "TerminalSessionHost should recognize the terminal function-key range from F1 through F24"
     );
     assert!(
         terminal_host.contains("root.key-input(\"f1\"")
-            && terminal_host.contains("root.key-input(\"f12\""),
-        "TerminalSessionHost should forward function keys into the terminal key-input contract"
+            && terminal_host.contains("root.key-input(\"f12\"")
+            && terminal_host.contains("root.key-input(\"f13\"")
+            && terminal_host.contains("root.key-input(\"f24\""),
+        "TerminalSessionHost should forward the supported function-key range into the terminal key-input contract"
     );
     assert!(
         terminal_host.contains("event.text == Key.Insert")

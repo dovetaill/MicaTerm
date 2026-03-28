@@ -58,6 +58,9 @@ export component AppWindow inherits Window {
     in-out property <string> ssh-host-key-modal-fingerprint: "";
     in-out property <bool> workspace-paste-warning-modal-open: false;
     in-out property <int> workspace-paste-warning-line-count: 0;
+    in-out property <bool> workspace-paste-warning-editor-mode: false;
+    in-out property <string> workspace-paste-warning-text: "";
+    in-out property <int> workspace-paste-warning-focus-sequence: 0;
     in-out property <string> asset-ssh-modal-name: "";
     in-out property <string> asset-ssh-modal-host: "";
     in-out property <string> asset-ssh-modal-user: "";
@@ -298,6 +301,7 @@ export component AppWindow inherits Window {
         if root.workspace-paste-warning-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
+            root.workspace-paste-warning-focus-sequence = root.workspace-paste-warning-focus-sequence + 1;
         }
     }
 
@@ -980,8 +984,8 @@ export component AppWindow inherits Window {
 
     if root.workspace-paste-warning-modal-open : workspace-paste-warning-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
-        modal-width: 440px;
-        modal-height: 248px;
+        modal-width: root.workspace-paste-warning-editor-mode ? 760px : 440px;
+        modal-height: root.workspace-paste-warning-editor-mode ? 432px : 248px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
 
@@ -998,6 +1002,9 @@ export component AppWindow inherits Window {
             width: workspace-paste-warning-modal-shell.content-width;
             height: workspace-paste-warning-modal-shell.content-height;
             line-count: root.workspace-paste-warning-line-count;
+            editor-mode: root.workspace-paste-warning-editor-mode;
+            paste-text <=> root.workspace-paste-warning-text;
+            focus-sequence: root.workspace-paste-warning-focus-sequence;
 
             confirm-requested => {
                 root.workspace-paste-warning-confirm-requested();

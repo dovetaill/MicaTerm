@@ -81,6 +81,7 @@ struct ShellSessionBridge {
 }
 
 const MAX_SSH_PROXY_CHAIN_DEPTH: usize = 8;
+const WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD: usize = 4;
 
 #[derive(Clone)]
 struct PendingHostKeyApproval {
@@ -100,6 +101,13 @@ struct PendingWorkspacePasteWarning {
     session_id: Uuid,
     text: String,
     logical_line_count: usize,
+    prompt_mode: WorkspacePastePromptMode,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspacePastePromptMode {
+    Confirm,
+    Editor,
 }
 
 #[derive(Clone, Copy)]
@@ -234,6 +242,8 @@ fn native_terminal_clipboard_shortcut(
     match key {
         Key::Named(NamedKey::Copy) => Some(NativeTerminalClipboardShortcut::Copy),
         Key::Named(NamedKey::Paste) => Some(NativeTerminalClipboardShortcut::Paste),
+        Key::Character(text) if text == "\u{3}" => Some(NativeTerminalClipboardShortcut::Copy),
+        Key::Character(text) if text == "\u{16}" => Some(NativeTerminalClipboardShortcut::Paste),
         Key::Character(text) if text.eq_ignore_ascii_case("c") => {
             Some(NativeTerminalClipboardShortcut::Copy)
         }
@@ -740,14 +750,21 @@ fn sync_workspace_paste_warning_modal_state(
 ) {
     match pending {
         Some(pending) => {
-            window.set_workspace_paste_warning_modal_open(true);
             window.set_workspace_paste_warning_line_count(
                 i32::try_from(pending.logical_line_count).unwrap_or(i32::MAX),
             );
+            window.set_workspace_paste_warning_editor_mode(matches!(
+                pending.prompt_mode,
+                WorkspacePastePromptMode::Editor
+            ));
+            window.set_workspace_paste_warning_text(pending.text.clone().into());
+            window.set_workspace_paste_warning_modal_open(true);
         }
         None => {
             window.set_workspace_paste_warning_modal_open(false);
             window.set_workspace_paste_warning_line_count(0);
+            window.set_workspace_paste_warning_editor_mode(false);
+            window.set_workspace_paste_warning_text("".into());
         }
     }
 }
@@ -1356,7 +1373,7 @@ fn terminal_key_event(
     if let Some(number) = key_name
         .strip_prefix('f')
         .and_then(|suffix| suffix.parse::<u8>().ok())
-        .filter(|number| (1..=12).contains(number))
+        .filter(|number| (1..=24).contains(number))
     {
         return Some(TerminalKeyEvent::function(number, alt, ctrl, shift));
     }
@@ -1474,14 +1491,27 @@ fn workspace_paste_logical_line_count(text: &str) -> usize {
     trimmed.split('\n').count()
 }
 
-fn workspace_paste_requires_warning(state: &ShellViewModel, text: &str) -> bool {
-    if workspace_paste_logical_line_count(text) < 2 {
-        return false;
+fn workspace_paste_prompt_mode(
+    state: &ShellViewModel,
+    text: &str,
+) -> Option<WorkspacePastePromptMode> {
+    let logical_line_count = workspace_paste_logical_line_count(text);
+    if logical_line_count < 2 {
+        return None;
     }
 
-    !state
+    if logical_line_count >= WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD {
+        return Some(WorkspacePastePromptMode::Editor);
+    }
+
+    if state
         .active_workspace_terminal_surface()
         .is_some_and(|surface| surface.bracketed_paste_enabled)
+    {
+        None
+    } else {
+        Some(WorkspacePastePromptMode::Confirm)
+    }
 }
 
 fn forward_workspace_session_paste(
@@ -1531,11 +1561,12 @@ fn forward_active_workspace_paste(
         return WorkspacePasteRequestOutcome::Ignored;
     };
 
-    if workspace_paste_requires_warning(state, &text) {
+    if let Some(prompt_mode) = workspace_paste_prompt_mode(state, &text) {
         *pending_warning.borrow_mut() = Some(PendingWorkspacePasteWarning {
             session_id,
             logical_line_count: workspace_paste_logical_line_count(&text),
             text,
+            prompt_mode,
         });
         return WorkspacePasteRequestOutcome::Prompted;
     }
@@ -3453,6 +3484,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let pending = pending_workspace_paste_warning_ref.borrow_mut().take();
+        let draft_text = window.get_workspace_paste_warning_text().to_string();
         sync_workspace_paste_warning_modal_state(&window, None);
         let Some(pending) = pending else {
             return;
@@ -3460,12 +3492,17 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         if active_workspace_session_uuid(&state) != Some(pending.session_id) {
             return;
         }
+        let text = if matches!(pending.prompt_mode, WorkspacePastePromptMode::Editor) {
+            draft_text
+        } else {
+            pending.text.clone()
+        };
 
         forward_workspace_session_paste(
             &state,
             session_bridge_ref.as_deref(),
             pending.session_id,
-            &pending.text,
+            &text,
         );
         refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
     });
@@ -4363,6 +4400,14 @@ mod tests {
             native_terminal_clipboard_shortcut(&Key::Named(NamedKey::Paste), modifiers),
             Some(NativeTerminalClipboardShortcut::Paste)
         );
+        assert_eq!(
+            native_terminal_clipboard_shortcut(&Key::Character("\u{3}".into()), modifiers),
+            Some(NativeTerminalClipboardShortcut::Copy)
+        );
+        assert_eq!(
+            native_terminal_clipboard_shortcut(&Key::Character("\u{16}".into()), modifiers),
+            Some(NativeTerminalClipboardShortcut::Paste)
+        );
     }
 
     #[test]
@@ -4395,30 +4440,30 @@ mod tests {
 
     #[test]
     fn workspace_multiline_paste_detection_normalizes_platform_line_endings() {
-        assert!(!workspace_paste_requires_warning(
-            &ShellViewModel::default(),
-            ""
-        ));
-        assert!(!workspace_paste_requires_warning(
-            &ShellViewModel::default(),
-            "echo hello\n"
-        ));
-        assert!(!workspace_paste_requires_warning(
-            &ShellViewModel::default(),
-            "echo hello\r\n"
-        ));
-        assert!(workspace_paste_requires_warning(
-            &ShellViewModel::default(),
-            "echo hello\nwhoami"
-        ));
-        assert!(workspace_paste_requires_warning(
-            &ShellViewModel::default(),
-            "echo hello\r\nwhoami"
-        ));
-        assert!(workspace_paste_requires_warning(
-            &ShellViewModel::default(),
-            "echo hello\rwhoami"
-        ));
+        assert_eq!(
+            workspace_paste_prompt_mode(&ShellViewModel::default(), ""),
+            None
+        );
+        assert_eq!(
+            workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\n"),
+            None
+        );
+        assert_eq!(
+            workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\r\n"),
+            None
+        );
+        assert_eq!(
+            workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\nwhoami"),
+            Some(WorkspacePastePromptMode::Confirm)
+        );
+        assert_eq!(
+            workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\r\nwhoami"),
+            Some(WorkspacePastePromptMode::Confirm)
+        );
+        assert_eq!(
+            workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\rwhoami"),
+            Some(WorkspacePastePromptMode::Confirm)
+        );
     }
 
     #[test]
@@ -4440,10 +4485,35 @@ mod tests {
         surface.bracketed_paste_enabled = true;
         state.set_active_workspace_terminal_surface(Some(surface));
 
-        assert!(!workspace_paste_requires_warning(
-            &state,
-            "echo hello\nwhoami"
-        ));
+        assert_eq!(
+            workspace_paste_prompt_mode(&state, "echo hello\nwhoami"),
+            None
+        );
+    }
+
+    #[test]
+    fn workspace_long_multiline_paste_uses_editor_even_with_bracketed_paste() {
+        let session_id = Uuid::new_v4();
+        let mut state = ShellViewModel::default();
+        let mut tab = WorkspaceTab::from_session(&SessionHandle {
+            session_id,
+            asset_id: "asset-prod".into(),
+            title: "Prod Bastion".into(),
+            subtitle: "ops@10.0.0.12:22".into(),
+            state: SessionState::Connected,
+            can_reconnect: false,
+        });
+        tab.active = true;
+        state.set_workspace_tabs(vec![tab]);
+        let mut surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["$ ".into()]);
+        surface.bracketed_paste_enabled = true;
+        state.set_active_workspace_terminal_surface(Some(surface));
+
+        assert_eq!(
+            workspace_paste_prompt_mode(&state, "one\ntwo\nthree\nfour"),
+            Some(WorkspacePastePromptMode::Editor)
+        );
     }
 
     #[test]
@@ -4455,6 +4525,10 @@ mod tests {
         assert_eq!(
             terminal_key_event("f12", true, false, true),
             Some(TerminalKeyEvent::function(12, true, false, true))
+        );
+        assert_eq!(
+            terminal_key_event("f24", false, true, false),
+            Some(TerminalKeyEvent::function(24, false, true, false))
         );
     }
 

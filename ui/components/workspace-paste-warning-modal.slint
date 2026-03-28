@@ -35,6 +35,9 @@ component DialogButton inherits Rectangle {
 export component WorkspacePasteWarningModal inherits Rectangle {
     in property <string> dialog-title: "Paste Multiple Lines";
     in property <int> line-count: 0;
+    in property <bool> editor-mode: false;
+    in-out property <string> paste-text: "";
+    in property <int> focus-sequence: 0;
     callback confirm-requested();
     callback cancel-requested();
     callback drag-requested(length, length);
@@ -44,6 +47,12 @@ export component WorkspacePasteWarningModal inherits Rectangle {
     private property <length> footer-height: 66px;
 
     background: transparent;
+
+    public function focus-input() {
+        if (root.editor-mode) {
+            paste-input.focus();
+        }
+    }
 
     modal-focus := FocusScope {
         width: parent.width;
@@ -151,10 +160,11 @@ export component WorkspacePasteWarningModal inherits Rectangle {
             height: parent.height - header.height - root.footer-height;
             background: transparent;
 
-            Text {
+            summary-copy := Text {
                 x: 20px;
                 y: 18px;
                 width: parent.width - 40px;
+                visible: !root.editor-mode;
                 text: "Paste " + root.line-count + " lines into this terminal?";
                 color: ThemeTokens.text-primary;
                 font-size: 16px;
@@ -162,14 +172,79 @@ export component WorkspacePasteWarningModal inherits Rectangle {
                 wrap: word-wrap;
             }
 
-            Text {
+            summary-detail := Text {
                 x: 20px;
                 y: 62px;
                 width: parent.width - 40px;
+                visible: !root.editor-mode;
                 text: "This shell has not advertised bracketed paste protection, so pasted lines may execute immediately.";
                 color: ThemeTokens.text-primary;
                 opacity: 0.72;
                 wrap: word-wrap;
+            }
+
+            editor-copy := Text {
+                x: 20px;
+                y: 18px;
+                width: parent.width - 40px;
+                visible: root.editor-mode;
+                text: "Review and edit this paste before sending it to the terminal.";
+                color: ThemeTokens.text-primary;
+                font-size: 16px;
+                font-weight: 600;
+                wrap: word-wrap;
+            }
+
+            editor-hint := Text {
+                x: 20px;
+                y: 48px;
+                width: parent.width - 40px;
+                visible: root.editor-mode;
+                text: "Press Enter to paste, or Esc to cancel.";
+                color: ThemeTokens.text-primary;
+                opacity: 0.72;
+                wrap: word-wrap;
+            }
+
+            editor-frame := Rectangle {
+                x: 20px;
+                y: 80px;
+                width: parent.width - 40px;
+                height: parent.height - 100px;
+                visible: root.editor-mode;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.inspector-surface;
+
+                paste-input := TextInput {
+                    x: 12px;
+                    y: 10px;
+                    width: parent.width - 24px;
+                    height: parent.height - 20px;
+                    text: root.paste-text;
+                    color: ThemeTokens.text-primary;
+                    single-line: false;
+                    selection-background-color: ThemeTokens.accent;
+                    selection-foreground-color: ThemeTokens.text-primary;
+
+                    edited => {
+                        root.paste-text = self.text;
+                    }
+
+                    key-pressed(event) => {
+                        if (event.text == Key.Escape) {
+                            root.focus-restore-requested();
+                            root.cancel-requested();
+                            accept
+                        } else if (event.text == Key.Return) {
+                            root.confirm-requested();
+                            accept
+                        } else {
+                            reject
+                        }
+                    }
+                }
             }
         }
 
@@ -210,5 +285,9 @@ export component WorkspacePasteWarningModal inherits Rectangle {
                 }
             }
         }
+    }
+
+    changed focus-sequence => {
+        root.focus-input();
     }
 }
