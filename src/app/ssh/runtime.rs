@@ -13,7 +13,7 @@ use russh::client;
 use russh::client::AuthResult;
 use russh::keys::{self, PrivateKeyWithHashAlg};
 use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers as KeyModifiers};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{Sleep, sleep};
@@ -53,40 +53,169 @@ fn ssh_client_config() -> client::Config {
     }
 }
 
-async fn open_transport_stream_for_profile(profile: &ConnectionProfile) -> Result<TcpStream> {
-    match profile.resolved_proxy_hops.as_slice() {
-        [] => TcpStream::connect((profile.host.as_str(), profile.port))
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to connect to SSH server `{}:{}`",
-                    profile.host, profile.port
-                )
-            }),
-        [
-            ResolvedProxyHop::Socks5 {
-                host,
-                port,
-                username,
-                password,
-            },
-        ] => connect_via_socks5(
-            host,
-            *port,
-            username.as_deref(),
-            password.as_deref(),
-            &profile.host,
-            profile.port,
-        )
-        .await
-        .with_context(|| format!("failed to connect to SOCKS5 proxy `{}:{}`", host, port)),
-        [ResolvedProxyHop::Socks5 { .. }, ..] => {
-            bail!("multi-hop proxy chains are not available until SSH upstream transport lands")
+trait TransportStream: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T> TransportStream for T where T: AsyncRead + AsyncWrite + Unpin + Send {}
+
+type BoxedTransportStream = Box<dyn TransportStream>;
+
+#[derive(Default)]
+struct TransportChainGuard {
+    upstream_handles: Vec<client::Handle<RuntimeClientHandler>>,
+}
+
+fn configure_transport_nodelay(stream: &TcpStream, enabled: bool) {
+    if enabled && let Err(error) = stream.set_nodelay(true) {
+        tracing::warn!("set_nodelay() failed for SSH transport stream: {error:?}");
+    }
+}
+
+async fn connect_direct_tcp_stream(
+    host: &str,
+    port: u16,
+    enable_nodelay: bool,
+) -> Result<TcpStream> {
+    let stream = TcpStream::connect((host, port)).await.with_context(|| {
+        format!("failed to connect to SSH server `{}:{}`", host, port)
+    })?;
+    configure_transport_nodelay(&stream, enable_nodelay);
+    Ok(stream)
+}
+
+fn next_chain_target(profile: &ConnectionProfile, hop_index: usize) -> Result<(&str, u16)> {
+    match profile.resolved_proxy_hops.get(hop_index + 1) {
+        Some(ResolvedProxyHop::Ssh(upstream)) => Ok((upstream.host.as_str(), upstream.port)),
+        Some(ResolvedProxyHop::Socks5 { .. }) => {
+            bail!("SOCKS5 hops must be the outermost transport in resolved SSH proxy chains")
         }
-        [ResolvedProxyHop::Ssh(_), ..] => {
-            bail!("SSH upstream proxy hops are not available until direct-tcpip transport lands")
+        None => Ok((profile.host.as_str(), profile.port)),
+    }
+}
+
+async fn connect_ssh_handle_over_stream(
+    config: Arc<client::Config>,
+    stream: BoxedTransportStream,
+    profile: &ConnectionProfile,
+    credential_store: &dyn CredentialStore,
+) -> Result<client::Handle<RuntimeClientHandler>> {
+    let handler = RuntimeClientHandler {
+        host: profile.host.clone(),
+        port: profile.port,
+        known_hosts: KnownHostsService::new(default_known_hosts_path()?),
+    };
+    let mut handle = client::connect_stream(config, stream, handler)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to connect to SSH server `{}:{}`",
+                profile.host, profile.port
+            )
+        })?;
+    authenticate_client(&mut handle, profile, credential_store).await?;
+    Ok(handle)
+}
+
+async fn open_direct_tcpip_stream(
+    upstream_handle: &client::Handle<RuntimeClientHandler>,
+    upstream_profile: &ConnectionProfile,
+    target_host: &str,
+    target_port: u16,
+) -> Result<BoxedTransportStream> {
+    match upstream_handle
+        .channel_open_direct_tcpip(target_host, u32::from(target_port), "127.0.0.1", 0)
+        .await
+    {
+        Ok(channel) => Ok(Box::new(channel.into_stream())),
+        Err(russh::Error::ChannelOpenFailure(_)) => {
+            bail!(
+                "SSH upstream '{}' rejected direct-tcpip forwarding",
+                upstream_profile.name
+            )
+        }
+        Err(error) => Err(anyhow!(error)).with_context(|| {
+            format!(
+                "failed to open direct-tcpip channel via SSH upstream `{}`",
+                upstream_profile.name
+            )
+        }),
+    }
+}
+
+async fn connect_target_handle_for_profile(
+    config: Arc<client::Config>,
+    profile: &ConnectionProfile,
+    credential_store: &dyn CredentialStore,
+) -> Result<(TransportChainGuard, client::Handle<RuntimeClientHandler>)> {
+    let mut chain_guard = TransportChainGuard::default();
+
+    let mut current_stream: BoxedTransportStream = match profile.resolved_proxy_hops.first() {
+        Some(ResolvedProxyHop::Socks5 {
+            host,
+            port,
+            username,
+            password,
+        }) => {
+            let (next_host, next_port) = next_chain_target(profile, 0)?;
+            Box::new(
+                connect_via_socks5(
+                    host,
+                    *port,
+                    username.as_deref(),
+                    password.as_deref(),
+                    next_host,
+                    next_port,
+                    config.as_ref().nodelay,
+                )
+                .await
+                .with_context(|| {
+                    format!("failed to connect to SOCKS5 proxy `{}:{}`", host, port)
+                })?,
+            )
+        }
+        Some(ResolvedProxyHop::Ssh(upstream)) => Box::new(
+            connect_direct_tcp_stream(upstream.host.as_str(), upstream.port, config.as_ref().nodelay)
+                .await?,
+        ),
+        None => Box::new(
+            connect_direct_tcp_stream(profile.host.as_str(), profile.port, config.as_ref().nodelay)
+                .await?,
+        ),
+    };
+
+    for (hop_index, hop) in profile.resolved_proxy_hops.iter().enumerate() {
+        match hop {
+            ResolvedProxyHop::Socks5 { .. } => {
+                if hop_index != 0 {
+                    bail!(
+                        "SOCKS5 hops must be the outermost transport in resolved SSH proxy chains"
+                    );
+                }
+            }
+            ResolvedProxyHop::Ssh(upstream) => {
+                let upstream_profile = upstream.as_ref();
+                let upstream_handle = connect_ssh_handle_over_stream(
+                    Arc::clone(&config),
+                    current_stream,
+                    upstream_profile,
+                    credential_store,
+                )
+                .await?;
+                let (next_host, next_port) = next_chain_target(profile, hop_index)?;
+                current_stream = open_direct_tcpip_stream(
+                    &upstream_handle,
+                    upstream_profile,
+                    next_host,
+                    next_port,
+                )
+                .await?;
+                chain_guard.upstream_handles.push(upstream_handle);
+            }
         }
     }
+
+    let handle = connect_ssh_handle_over_stream(config, current_stream, profile, credential_store)
+        .await?;
+    Ok((chain_guard, handle))
 }
 
 async fn connect_via_socks5(
@@ -96,10 +225,12 @@ async fn connect_via_socks5(
     password: Option<&str>,
     target_host: &str,
     target_port: u16,
+    enable_nodelay: bool,
 ) -> Result<TcpStream> {
     let mut stream = TcpStream::connect((proxy_host, proxy_port))
         .await
         .with_context(|| format!("failed to open TCP stream to SOCKS5 proxy `{proxy_host}:{proxy_port}`"))?;
+    configure_transport_nodelay(&stream, enable_nodelay);
 
     let requires_password_auth = username.is_some() || password.is_some();
     let mut methods = vec![0x00];
@@ -548,28 +679,10 @@ impl SshSessionRuntime {
             DEFAULT_TERMINAL_COLS,
         )));
         let (command_tx, command_rx) = mpsc::unbounded_channel();
-        let known_hosts = KnownHostsService::new(default_known_hosts_path()?);
-        let handler = RuntimeClientHandler {
-            host: profile.host.clone(),
-            port: profile.port,
-            known_hosts,
-        };
         let config = Arc::new(ssh_client_config());
-        let transport = open_transport_stream_for_profile(&profile).await?;
-        if config.as_ref().nodelay && let Err(error) = transport.set_nodelay(true) {
-            tracing::warn!("set_nodelay() failed for SSH transport stream: {error:?}");
-        }
-
-        let mut handle = client::connect_stream(config, transport, handler)
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to connect to SSH server `{}:{}`",
-                    profile.host, profile.port
-                )
-            })?;
-
-        authenticate_client(&mut handle, &profile, credential_store.as_ref()).await?;
+        let (transport_chain_guard, handle) =
+            connect_target_handle_for_profile(Arc::clone(&config), &profile, credential_store.as_ref())
+                .await?;
 
         let mut channel = handle
             .channel_open_session()
@@ -611,7 +724,13 @@ impl SshSessionRuntime {
         };
 
         tokio::spawn(run_channel_pump(
-            session_id, handle, channel, terminal, event_tx, command_rx,
+            session_id,
+            handle,
+            channel,
+            terminal,
+            event_tx,
+            command_rx,
+            transport_chain_guard,
         ));
 
         Ok(runtime)
@@ -1030,6 +1149,7 @@ async fn run_channel_pump(
     terminal: Arc<Mutex<TerminalSession>>,
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     mut command_rx: mpsc::UnboundedReceiver<RuntimeCommand>,
+    _transport_chain_guard: TransportChainGuard,
 ) {
     let mut command_channel_open = true;
     let mut dirty_notifier = SurfaceDirtyNotifier::default();

@@ -124,6 +124,19 @@ enum FakeSocks5AuthMode {
     RejectAuthentication,
 }
 
+#[derive(Clone)]
+struct DirectTcpipRoute {
+    requested_host: String,
+    requested_port: u16,
+    target_addr: std::net::SocketAddr,
+}
+
+#[derive(Clone, Default)]
+struct DirectTcpipBehavior {
+    routes: Vec<DirectTcpipRoute>,
+    reject_requests: bool,
+}
+
 impl FakeLauncher {
     fn stay_connecting() -> Self {
         Self {
@@ -552,6 +565,7 @@ impl SessionRuntimeControl for SurfacePullRuntimeControl {
 struct InteractiveTestServer {
     auth_key: russh::keys::PublicKey,
     shell_ready_delay: Duration,
+    direct_tcpip_behavior: DirectTcpipBehavior,
     state: InteractiveServerState,
 }
 
@@ -560,6 +574,7 @@ struct InteractiveServerState {
     pty_terms: Arc<Mutex<Vec<String>>>,
     environment_requests: Arc<Mutex<Vec<(String, String)>>>,
     request_order: Arc<Mutex<Vec<String>>>,
+    direct_tcpip_requests: Arc<Mutex<Vec<(String, u16)>>>,
 }
 
 impl server::Server for InteractiveTestServer {
@@ -655,6 +670,56 @@ impl server::Handler for InteractiveTestServer {
         session.data(channel, b"welcome to mica-term".to_vec())?;
         Ok(())
     }
+
+    async fn channel_open_direct_tcpip(
+        &mut self,
+        channel: Channel<server::Msg>,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        let requested_port = u16::try_from(port_to_connect).expect("direct-tcpip port fits u16");
+        self.state
+            .direct_tcpip_requests
+            .lock()
+            .expect("lock direct-tcpip requests")
+            .push((host_to_connect.to_string(), requested_port));
+
+        if self.direct_tcpip_behavior.reject_requests {
+            return Ok(false);
+        }
+
+        let Some(route) = self
+            .direct_tcpip_behavior
+            .routes
+            .iter()
+            .find(|route| {
+                route.requested_host == host_to_connect && route.requested_port == requested_port
+            })
+            .cloned()
+        else {
+            return Ok(false);
+        };
+
+        tokio::spawn(async move {
+            let mut channel_stream = channel.into_stream();
+            let mut downstream = TcpStream::connect(route.target_addr)
+                .await
+                .expect("connect downstream direct-tcpip target");
+            if let Err(error) = copy_bidirectional(&mut channel_stream, &mut downstream).await {
+                if error.kind() != std::io::ErrorKind::BrokenPipe
+                    && error.kind() != std::io::ErrorKind::ConnectionReset
+                    && error.kind() != std::io::ErrorKind::UnexpectedEof
+                {
+                    panic!("bridge direct-tcpip channel: {error}");
+                }
+            }
+        });
+
+        Ok(true)
+    }
 }
 
 fn temp_private_key_path(label: &str) -> std::path::PathBuf {
@@ -668,19 +733,16 @@ fn temp_private_key_path(label: &str) -> std::path::PathBuf {
     path
 }
 
-async fn spawn_publickey_shell_server(
-    shell_ready_delay: Duration,
+fn create_publickey_auth_material(
+    label: &str,
 ) -> (
-    tokio::task::JoinHandle<()>,
-    std::net::SocketAddr,
-    std::path::PathBuf,
     russh::keys::PublicKey,
-    InteractiveServerState,
+    std::path::PathBuf,
 ) {
     let client_key = PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
         .expect("generate client key");
     let client_public = client_key.public_key().clone();
-    let private_key_path = temp_private_key_path("client");
+    let private_key_path = temp_private_key_path(label);
     fs::write(
         &private_key_path,
         client_key
@@ -688,7 +750,19 @@ async fn spawn_publickey_shell_server(
             .expect("encode private key"),
     )
     .expect("write client private key");
+    (client_public, private_key_path)
+}
 
+async fn spawn_publickey_server_with_auth_key(
+    auth_key: russh::keys::PublicKey,
+    shell_ready_delay: Duration,
+    direct_tcpip_behavior: DirectTcpipBehavior,
+) -> (
+    tokio::task::JoinHandle<()>,
+    std::net::SocketAddr,
+    russh::keys::PublicKey,
+    InteractiveServerState,
+) {
     let mut config = server::Config::default();
     config.auth_rejection_time = Duration::from_millis(5);
     config.inactivity_timeout = Some(Duration::from_secs(30));
@@ -704,8 +778,9 @@ async fn spawn_publickey_shell_server(
     let addr = listener.local_addr().expect("server addr");
     let state = InteractiveServerState::default();
     let server = InteractiveTestServer {
-        auth_key: client_public,
+        auth_key,
         shell_ready_delay,
+        direct_tcpip_behavior,
         state: state.clone(),
     };
 
@@ -716,6 +791,25 @@ async fn spawn_publickey_shell_server(
             .expect("run ssh server");
     });
 
+    (join, addr, server_public, state)
+}
+
+async fn spawn_publickey_shell_server(
+    shell_ready_delay: Duration,
+) -> (
+    tokio::task::JoinHandle<()>,
+    std::net::SocketAddr,
+    std::path::PathBuf,
+    russh::keys::PublicKey,
+    InteractiveServerState,
+) {
+    let (client_public, private_key_path) = create_publickey_auth_material("client");
+    let (join, addr, server_public, state) = spawn_publickey_server_with_auth_key(
+        client_public,
+        shell_ready_delay,
+        DirectTcpipBehavior::default(),
+    )
+    .await;
     (join, addr, private_key_path, server_public, state)
 }
 
@@ -927,6 +1021,20 @@ fn sample_publickey_profile_via_socks5(
         username: proxy_username,
         password: proxy_password,
     }];
+    profile
+}
+
+fn sample_publickey_profile_with_proxy_hops(
+    asset_id: &str,
+    host: String,
+    port: u16,
+    private_key_path: String,
+    proxy: ConnectionProxyProfile,
+    resolved_proxy_hops: Vec<ResolvedProxyHop>,
+) -> ConnectionProfile {
+    let mut profile = sample_publickey_profile(asset_id, host, port, private_key_path);
+    profile.proxy = proxy;
+    profile.resolved_proxy_hops = resolved_proxy_hops;
     profile
 }
 
@@ -1516,6 +1624,375 @@ fn ssh_runtime_surfaces_socks5_authentication_rejection() {
     runtime.block_on(async {
         socks_task.await.expect("join fake socks5 server");
         server_task.abort();
+    });
+
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+}
+
+#[test]
+fn ssh_runtime_connects_through_single_direct_tcpip_upstream() {
+    let _env_lock = lock_known_hosts_env();
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (client_public, private_key_path) = create_publickey_auth_material("direct-tcpip");
+    let (target_task, target_addr, target_public_key, _target_state) = runtime.block_on(async {
+        spawn_publickey_server_with_auth_key(
+            client_public.clone(),
+            Duration::from_millis(10),
+            DirectTcpipBehavior::default(),
+        )
+        .await
+    });
+    let target_host = "ssh.internal.test".to_string();
+    let (upstream_task, upstream_addr, upstream_public_key, upstream_state) =
+        runtime.block_on(async {
+            spawn_publickey_server_with_auth_key(
+                client_public.clone(),
+                Duration::from_millis(10),
+                DirectTcpipBehavior {
+                    routes: vec![DirectTcpipRoute {
+                        requested_host: target_host.clone(),
+                        requested_port: target_addr.port(),
+                        target_addr,
+                    }],
+                    reject_requests: false,
+                },
+            )
+            .await
+        });
+    let upstream_host = upstream_addr.ip().to_string();
+    let known_hosts_path = temp_known_hosts_path("direct-tcpip-upstream");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(target_host.as_str(), target_addr.port(), &target_public_key)
+        .expect("trust target host key");
+    known_hosts
+        .accept_unknown(upstream_host.as_str(), upstream_addr.port(), &upstream_public_key)
+        .expect("trust upstream host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let upstream_profile = sample_publickey_profile(
+        "asset-upstream-a",
+        upstream_host.clone(),
+        upstream_addr.port(),
+        private_key_path.display().to_string(),
+    );
+    let profile = sample_publickey_profile_with_proxy_hops(
+        "asset-prod",
+        target_host.clone(),
+        target_addr.port(),
+        private_key_path.display().to_string(),
+        ConnectionProxyProfile::SshAsset {
+            asset_id: "asset-upstream-a".into(),
+        },
+        vec![ResolvedProxyHop::Ssh(Box::new(upstream_profile))],
+    );
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let runtime_handle = runtime.block_on(async {
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+            .await
+            .expect("connect ssh runtime through direct-tcpip upstream")
+    });
+
+    let saw_connected = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, SessionRuntimeEvent::Connected) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("wait for connected event")
+    });
+
+    assert!(
+        saw_connected,
+        "runtime should emit Connected after single direct-tcpip hop"
+    );
+    let direct_tcpip_requests = upstream_state
+        .direct_tcpip_requests
+        .lock()
+        .expect("lock direct-tcpip requests")
+        .clone();
+    assert_eq!(
+        direct_tcpip_requests,
+        vec![(target_host.clone(), target_addr.port())]
+    );
+
+    runtime_handle.disconnect().expect("disconnect runtime");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        upstream_task.await.expect("join upstream ssh server");
+        target_task.await.expect("join target ssh server");
+    });
+
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+}
+
+#[test]
+fn ssh_runtime_connects_through_multi_hop_socks5_and_ssh_chain() {
+    let _env_lock = lock_known_hosts_env();
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (client_public, private_key_path) = create_publickey_auth_material("multi-hop");
+    let (target_task, target_addr, target_public_key, _target_state) = runtime.block_on(async {
+        spawn_publickey_server_with_auth_key(
+            client_public.clone(),
+            Duration::from_millis(10),
+            DirectTcpipBehavior::default(),
+        )
+        .await
+    });
+    let target_host = "ssh.internal.test".to_string();
+    let upstream_a_host = "proxy-a.internal.test".to_string();
+    let upstream_b_host = "proxy-b.internal.test".to_string();
+
+    let (upstream_a_task, upstream_a_addr, upstream_a_public_key, upstream_a_state) =
+        runtime.block_on(async {
+            spawn_publickey_server_with_auth_key(
+                client_public.clone(),
+                Duration::from_millis(10),
+                DirectTcpipBehavior {
+                    routes: vec![DirectTcpipRoute {
+                        requested_host: target_host.clone(),
+                        requested_port: target_addr.port(),
+                        target_addr,
+                    }],
+                    reject_requests: false,
+                },
+            )
+            .await
+        });
+    let (upstream_b_task, upstream_b_addr, upstream_b_public_key, upstream_b_state) =
+        runtime.block_on(async {
+            spawn_publickey_server_with_auth_key(
+                client_public.clone(),
+                Duration::from_millis(10),
+                DirectTcpipBehavior {
+                    routes: vec![DirectTcpipRoute {
+                        requested_host: upstream_a_host.clone(),
+                        requested_port: upstream_a_addr.port(),
+                        target_addr: upstream_a_addr,
+                    }],
+                    reject_requests: false,
+                },
+            )
+            .await
+        });
+    let (socks_task, socks_addr) = runtime.block_on(async {
+        spawn_fake_socks5_server(
+            upstream_b_host.clone(),
+            upstream_b_addr,
+            FakeSocks5AuthMode::NoAuth,
+        )
+        .await
+    });
+
+    let known_hosts_path = temp_known_hosts_path("multi-hop-chain");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(target_host.as_str(), target_addr.port(), &target_public_key)
+        .expect("trust target host key");
+    known_hosts
+        .accept_unknown(
+            upstream_a_host.as_str(),
+            upstream_a_addr.port(),
+            &upstream_a_public_key,
+        )
+        .expect("trust upstream A host key");
+    known_hosts
+        .accept_unknown(
+            upstream_b_host.as_str(),
+            upstream_b_addr.port(),
+            &upstream_b_public_key,
+        )
+        .expect("trust upstream B host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let upstream_a_profile = sample_publickey_profile(
+        "asset-upstream-a",
+        upstream_a_host.clone(),
+        upstream_a_addr.port(),
+        private_key_path.display().to_string(),
+    );
+    let upstream_b_profile = sample_publickey_profile(
+        "asset-upstream-b",
+        upstream_b_host.clone(),
+        upstream_b_addr.port(),
+        private_key_path.display().to_string(),
+    );
+    let profile = sample_publickey_profile_with_proxy_hops(
+        "asset-prod",
+        target_host.clone(),
+        target_addr.port(),
+        private_key_path.display().to_string(),
+        ConnectionProxyProfile::Socks5 {
+            host: socks_addr.ip().to_string(),
+            port: socks_addr.port(),
+            username: None,
+            password: None,
+            credential_ref: None,
+        },
+        vec![
+            ResolvedProxyHop::Socks5 {
+                host: socks_addr.ip().to_string(),
+                port: socks_addr.port(),
+                username: None,
+                password: None,
+            },
+            ResolvedProxyHop::Ssh(Box::new(upstream_b_profile)),
+            ResolvedProxyHop::Ssh(Box::new(upstream_a_profile)),
+        ],
+    );
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let runtime_handle = runtime.block_on(async {
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+            .await
+            .expect("connect ssh runtime through multi-hop proxy chain")
+    });
+
+    let saw_connected = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, SessionRuntimeEvent::Connected) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("wait for connected event")
+    });
+
+    assert!(
+        saw_connected,
+        "runtime should emit Connected after SOCKS5 -> SSH -> SSH chain"
+    );
+    let upstream_b_requests = upstream_b_state
+        .direct_tcpip_requests
+        .lock()
+        .expect("lock upstream B requests")
+        .clone();
+    let upstream_a_requests = upstream_a_state
+        .direct_tcpip_requests
+        .lock()
+        .expect("lock upstream A requests")
+        .clone();
+    assert_eq!(
+        upstream_b_requests,
+        vec![(upstream_a_host.clone(), upstream_a_addr.port())]
+    );
+    assert_eq!(
+        upstream_a_requests,
+        vec![(target_host.clone(), target_addr.port())]
+    );
+
+    runtime_handle.disconnect().expect("disconnect runtime");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        socks_task.await.expect("join fake socks5 server");
+        upstream_b_task.await.expect("join upstream B ssh server");
+        upstream_a_task.await.expect("join upstream A ssh server");
+        target_task.await.expect("join target ssh server");
+    });
+
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+}
+
+#[test]
+fn ssh_runtime_surfaces_direct_tcpip_rejection_from_upstream() {
+    let _env_lock = lock_known_hosts_env();
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (client_public, private_key_path) = create_publickey_auth_material("direct-tcpip-reject");
+    let (target_task, target_addr, target_public_key, _target_state) = runtime.block_on(async {
+        spawn_publickey_server_with_auth_key(
+            client_public.clone(),
+            Duration::from_millis(10),
+            DirectTcpipBehavior::default(),
+        )
+        .await
+    });
+    let target_host = "ssh.internal.test".to_string();
+    let (upstream_task, upstream_addr, upstream_public_key, _upstream_state) =
+        runtime.block_on(async {
+            spawn_publickey_server_with_auth_key(
+                client_public.clone(),
+                Duration::from_millis(10),
+                DirectTcpipBehavior {
+                    routes: Vec::new(),
+                    reject_requests: true,
+                },
+            )
+            .await
+        });
+    let upstream_host = upstream_addr.ip().to_string();
+    let known_hosts_path = temp_known_hosts_path("direct-tcpip-reject");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(target_host.as_str(), target_addr.port(), &target_public_key)
+        .expect("trust target host key");
+    known_hosts
+        .accept_unknown(upstream_host.as_str(), upstream_addr.port(), &upstream_public_key)
+        .expect("trust upstream host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let mut upstream_profile = sample_publickey_profile(
+        "asset-upstream-a",
+        upstream_host,
+        upstream_addr.port(),
+        private_key_path.display().to_string(),
+    );
+    upstream_profile.name = "Proxy A".into();
+    let err = runtime.block_on(async {
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        match SshSessionRuntime::connect(
+            sample_publickey_profile_with_proxy_hops(
+                "asset-prod",
+                target_host,
+                target_addr.port(),
+                private_key_path.display().to_string(),
+                ConnectionProxyProfile::SshAsset {
+                    asset_id: "asset-upstream-a".into(),
+                },
+                vec![ResolvedProxyHop::Ssh(Box::new(upstream_profile))],
+            ),
+            Uuid::new_v4(),
+            event_tx,
+        )
+        .await
+        {
+            Ok(_) => panic!("direct-tcpip rejection should fail runtime connect"),
+            Err(err) => err,
+        }
+    });
+
+    let message = err.to_string();
+    assert!(
+        message.contains("SSH upstream 'Proxy A' rejected direct-tcpip forwarding"),
+        "expected direct-tcpip error, got: {message}"
+    );
+
+    runtime.block_on(async {
+        upstream_task.abort();
+        target_task.abort();
     });
 
     unsafe {
