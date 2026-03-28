@@ -48,7 +48,9 @@ pub trait SessionRuntimeControl: Send {
     fn send_paste(&self, text: String) -> Result<()>;
     fn resize(&self, rows: u32, cols: u32) -> Result<()>;
     fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
-        Err(anyhow!("session runtime does not expose terminal surface snapshots"))
+        Err(anyhow!(
+            "session runtime does not expose terminal surface snapshots"
+        ))
     }
     fn update_theme_mode(&self, _mode: ThemeMode) -> Result<Option<TerminalSurfaceState>> {
         Ok(None)
@@ -594,7 +596,10 @@ fn terminal_surface_signature_for_registry(
     session_id: Uuid,
 ) -> Option<TerminalSurfaceSignature> {
     let mut signature = registry.terminal_surfaces.get(&session_id)?.signature();
-    if let Some(revision) = registry.terminal_surface_revisions.get(&session_id).copied()
+    if let Some(revision) = registry
+        .terminal_surface_revisions
+        .get(&session_id)
+        .copied()
         && revision > signature.seqno
     {
         signature.seqno = revision;
@@ -718,9 +723,7 @@ mod tests {
         refresh_runtime_surface, terminal_surface_signature_for_registry, terminal_surface_stale,
         update_terminal_surface,
     };
-    use crate::app::ssh::runtime::{
-        TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceState,
-    };
+    use crate::app::ssh::runtime::{TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceState};
 
     #[test]
     fn coalesces_consecutive_surface_updates_but_preserves_following_control_events() {

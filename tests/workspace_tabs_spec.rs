@@ -649,11 +649,13 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should prefer the bundled Sarasa Term SC Nerd face as its primary terminal font"
     );
     assert!(
-        terminal_host.contains("in property <string> terminal-font-family: \"Sarasa Term SC Nerd\";"),
+        terminal_host
+            .contains("in property <string> terminal-font-family: \"Sarasa Term SC Nerd\";"),
         "TerminalSessionHost should expose the bundled Sarasa Term SC Nerd face as the exact terminal font contract"
     );
     assert!(
-        !terminal_host.contains("private property <string> terminal-font-family: \"Cascadia Mono\";"),
+        !terminal_host
+            .contains("private property <string> terminal-font-family: \"Cascadia Mono\";"),
         "TerminalSessionHost should not hardcode the terminal font family in a private property"
     );
     assert!(
@@ -772,7 +774,9 @@ fn terminal_session_host_keeps_reserved_ctrl_shift_shortcuts_local_contract() {
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        terminal_host.contains("event.text == Key.Control || event.text == Key.Shift || event.text == Key.Alt"),
+        terminal_host.contains(
+            "event.text == Key.Control || event.text == Key.Shift || event.text == Key.Alt"
+        ),
         "TerminalSessionHost should explicitly ignore bare modifier keys before any remote forwarding branch"
     );
     assert!(
