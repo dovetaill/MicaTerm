@@ -1353,6 +1353,14 @@ fn terminal_key_event(
     ctrl: bool,
     shift: bool,
 ) -> Option<TerminalKeyEvent> {
+    if let Some(number) = key_name
+        .strip_prefix('f')
+        .and_then(|suffix| suffix.parse::<u8>().ok())
+        .filter(|number| (1..=12).contains(number))
+    {
+        return Some(TerminalKeyEvent::function(number, alt, ctrl, shift));
+    }
+
     if key_name.chars().count() == 1 {
         return key_name
             .chars()
@@ -1365,6 +1373,7 @@ fn terminal_key_event(
         "tab" => Some(TerminalKeyEvent::named("tab", alt, ctrl, shift)),
         "escape" => Some(TerminalKeyEvent::named("escape", alt, ctrl, shift)),
         "backspace" => Some(TerminalKeyEvent::named("backspace", alt, ctrl, shift)),
+        "insert" => Some(TerminalKeyEvent::named("insert", alt, ctrl, shift)),
         "delete" => Some(TerminalKeyEvent::named("delete", alt, ctrl, shift)),
         "up" => Some(TerminalKeyEvent::named("up", alt, ctrl, shift)),
         "down" => Some(TerminalKeyEvent::named("down", alt, ctrl, shift)),
@@ -4435,5 +4444,25 @@ mod tests {
             &state,
             "echo hello\nwhoami"
         ));
+    }
+
+    #[test]
+    fn terminal_key_event_parses_function_key_names() {
+        assert_eq!(
+            terminal_key_event("f1", false, false, false),
+            Some(TerminalKeyEvent::function(1, false, false, false))
+        );
+        assert_eq!(
+            terminal_key_event("f12", true, false, true),
+            Some(TerminalKeyEvent::function(12, true, false, true))
+        );
+    }
+
+    #[test]
+    fn terminal_key_event_preserves_plain_insert_key() {
+        assert_eq!(
+            terminal_key_event("insert", false, false, false),
+            Some(TerminalKeyEvent::named("insert", false, false, false))
+        );
     }
 }

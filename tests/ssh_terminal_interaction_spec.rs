@@ -22,6 +22,17 @@ fn function_keys_and_application_cursor_keys_are_encoded_from_live_terminal_stat
 }
 
 #[test]
+fn insert_key_is_encoded_for_terminal_writeback() {
+    let mut session = TerminalSession::new(24, 80);
+
+    let insert = session
+        .send_key_event(TerminalKeyEvent::named("insert", false, false, false))
+        .expect("encode insert");
+
+    assert_eq!(insert, b"\x1b[2~");
+}
+
+#[test]
 fn paste_wraps_payload_when_bracketed_paste_is_enabled() {
     let mut session = TerminalSession::new(24, 80);
 
@@ -201,6 +212,21 @@ fn terminal_host_uses_startup_safe_font_stack_and_stable_clipboard_shortcut_toke
     assert!(
         terminal_host.contains("\\u{16}"),
         "TerminalSessionHost should treat SYN as a Ctrl+Shift+V paste shortcut token when the backend emits control characters"
+    );
+    assert!(
+        terminal_host.contains("event.text == Key.F1")
+            && terminal_host.contains("event.text == Key.F12"),
+        "TerminalSessionHost should recognize the terminal function-key range from F1 through F12"
+    );
+    assert!(
+        terminal_host.contains("root.key-input(\"f1\"")
+            && terminal_host.contains("root.key-input(\"f12\""),
+        "TerminalSessionHost should forward function keys into the terminal key-input contract"
+    );
+    assert!(
+        terminal_host.contains("event.text == Key.Insert")
+            && terminal_host.contains("root.key-input(\"insert\""),
+        "TerminalSessionHost should forward a plain Insert key when it is not part of the local clipboard shortcuts"
     );
 }
 

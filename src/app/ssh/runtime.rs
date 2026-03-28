@@ -2429,6 +2429,7 @@ fn named_key_code(key_name: &str) -> Option<KeyCode> {
         "tab" => Some(KeyCode::Tab),
         "escape" => Some(KeyCode::Escape),
         "backspace" => Some(KeyCode::Backspace),
+        "insert" => Some(KeyCode::Insert),
         "delete" => Some(KeyCode::Delete),
         "up" => Some(KeyCode::UpArrow),
         "down" => Some(KeyCode::DownArrow),

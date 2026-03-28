@@ -549,6 +549,45 @@ export component TerminalSessionHost inherits Rectangle {
                 } else if (event.text == Key.PageDown) {
                     root.key-input("page-down", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
+                } else if (event.text == Key.Insert) {
+                    root.key-input("insert", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F1) {
+                    root.key-input("f1", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F2) {
+                    root.key-input("f2", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F3) {
+                    root.key-input("f3", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F4) {
+                    root.key-input("f4", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F5) {
+                    root.key-input("f5", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F6) {
+                    root.key-input("f6", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F7) {
+                    root.key-input("f7", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F8) {
+                    root.key-input("f8", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F9) {
+                    root.key-input("f9", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F10) {
+                    root.key-input("f10", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F11) {
+                    root.key-input("f11", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
+                } else if (event.text == Key.F12) {
+                    root.key-input("f12", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
+                    accept
                 } else if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == "a") {
                     root.selection-anchor-row = 0;
                     root.selection-anchor-col = 0;
