@@ -99,10 +99,10 @@ export component AppWindow inherits Window {
     in-out property <bool> workspace-session-cursor-visible: false;
     in-out property <bool> workspace-session-cursor-blinking: false;
     in-out property <string> workspace-session-cursor-shape: "block";
-    in-out property <color> workspace-session-cursor-fg: #000000;
-    in-out property <color> workspace-session-cursor-bg: #52ad70;
-    in-out property <color> workspace-session-default-fg: #000000;
-    in-out property <color> workspace-session-default-bg: #ffffff;
+    in-out property <color> workspace-session-cursor-fg: ThemeTokens.dark-mode ? #11161d : #ffffff;
+    in-out property <color> workspace-session-cursor-bg: ThemeTokens.dark-mode ? #7fb7ff : #2563eb;
+    in-out property <color> workspace-session-default-fg: ThemeTokens.dark-mode ? #d7dee9 : #1f2328;
+    in-out property <color> workspace-session-default-bg: ThemeTokens.dark-mode ? #11161d : #f7f9fc;
     in-out property <bool> workspace-session-mouse-grabbed: false;
     in-out property <[string]> workspace-session-visible-lines: [];
     in-out property <int> workspace-session-surface-seqno: 0;

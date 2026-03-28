@@ -713,7 +713,9 @@ fn bootstrap_surface_with_viewport(
     surface.viewport_max_offset_lines = max_offset;
     surface.viewport_at_bottom = offset == 0;
     surface.default_fg_rgba = 0xff1f_2328;
-    surface.default_bg_rgba = 0xffff_ffff;
+    surface.default_bg_rgba = 0xfff7_f9fc;
+    surface.cursor.fg_rgba = 0xffff_ffff;
+    surface.cursor.bg_rgba = 0xff25_63eb;
     surface
 }
 
@@ -2192,7 +2194,15 @@ fn bootstrap_projects_terminal_canvas_palette_into_window_properties() {
     );
     assert_eq!(
         app.get_workspace_session_default_bg().as_argb_encoded(),
+        0xfff7_f9fc
+    );
+    assert_eq!(
+        app.get_workspace_session_cursor_fg().as_argb_encoded(),
         0xffff_ffff
+    );
+    assert_eq!(
+        app.get_workspace_session_cursor_bg().as_argb_encoded(),
+        0xff25_63eb
     );
 }
 

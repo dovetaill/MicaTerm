@@ -163,8 +163,8 @@ fn dark_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let default_fg_rgba = extract_debug_u32_field(&debug, "default_fg_rgba");
     let default_bg_rgba = extract_debug_u32_field(&debug, "default_bg_rgba");
 
-    assert_eq!(default_fg_rgba, 0xffe6_edf3);
-    assert_eq!(default_bg_rgba, 0xff0d_1117);
+    assert_eq!(default_fg_rgba, 0xffd7_dee9);
+    assert_eq!(default_bg_rgba, 0xff11_161d);
 }
 
 #[test]
@@ -179,7 +179,32 @@ fn light_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let default_bg_rgba = extract_debug_u32_field(&debug, "default_bg_rgba");
 
     assert_eq!(default_fg_rgba, 0xff1f_2328);
-    assert_eq!(default_bg_rgba, 0xffff_ffff);
+    assert_eq!(default_bg_rgba, 0xfff7_f9fc);
+}
+
+#[test]
+fn dark_theme_surface_projection_exposes_mica_code_dark_cursor_palette() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.apply_remote_bytes(b"[root@host ~]# ");
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+
+    assert_eq!(snapshot.cursor.fg_rgba, 0xff11_161d);
+    assert_eq!(snapshot.cursor.bg_rgba, 0xff7f_b7ff);
+}
+
+#[test]
+fn light_theme_surface_projection_exposes_mica_code_light_cursor_palette() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.set_theme_mode(ThemeMode::Light);
+    session.apply_remote_bytes(b"[root@host ~]# ");
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+
+    assert_eq!(snapshot.cursor.fg_rgba, 0xffff_ffff);
+    assert_eq!(snapshot.cursor.bg_rgba, 0xff25_63eb);
 }
 
 #[test]

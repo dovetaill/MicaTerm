@@ -21,10 +21,10 @@ export component WorkspacePane inherits Rectangle {
     in property <bool> workspace-session-cursor-visible: false;
     in property <bool> workspace-session-cursor-blinking: false;
     in property <string> workspace-session-cursor-shape: "block";
-    in property <color> workspace-session-cursor-fg: #000000;
-    in property <color> workspace-session-cursor-bg: #52ad70;
-    in property <color> workspace-session-default-fg: #000000;
-    in property <color> workspace-session-default-bg: #ffffff;
+    in property <color> workspace-session-cursor-fg: ThemeTokens.dark-mode ? #11161d : #ffffff;
+    in property <color> workspace-session-cursor-bg: ThemeTokens.dark-mode ? #7fb7ff : #2563eb;
+    in property <color> workspace-session-default-fg: ThemeTokens.dark-mode ? #d7dee9 : #1f2328;
+    in property <color> workspace-session-default-bg: ThemeTokens.dark-mode ? #11161d : #f7f9fc;
     in property <bool> workspace-session-mouse-grabbed: false;
     in property <[string]> workspace-session-visible-lines: [];
     in property <int> workspace-session-surface-seqno: 0;

@@ -12,7 +12,7 @@ use mica_term::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
 use mica_term::app::ssh::runtime::{
     SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
     TerminalMouseEventKind, TerminalMouseInput, TerminalSession, TerminalSurfaceState,
-    UnknownHostKeyError,
+    UnknownHostKeyError, negotiated_terminal_environment,
 };
 use mica_term::app::ssh::session_manager::{
     OpenSessionMode, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher, SessionState,
@@ -536,6 +536,14 @@ impl SessionRuntimeControl for SurfacePullRuntimeControl {
 struct InteractiveTestServer {
     auth_key: russh::keys::PublicKey,
     shell_ready_delay: Duration,
+    state: InteractiveServerState,
+}
+
+#[derive(Clone, Default)]
+struct InteractiveServerState {
+    pty_terms: Arc<Mutex<Vec<String>>>,
+    environment_requests: Arc<Mutex<Vec<(String, String)>>>,
+    request_order: Arc<Mutex<Vec<String>>>,
 }
 
 impl server::Server for InteractiveTestServer {
@@ -572,7 +580,7 @@ impl server::Handler for InteractiveTestServer {
     async fn pty_request(
         &mut self,
         channel: ChannelId,
-        _term: &str,
+        term: &str,
         _col_width: u32,
         _row_height: u32,
         _pix_width: u32,
@@ -580,7 +588,38 @@ impl server::Handler for InteractiveTestServer {
         _modes: &[(russh::Pty, u32)],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        self.state
+            .pty_terms
+            .lock()
+            .expect("lock pty terms")
+            .push(term.to_string());
+        self.state
+            .request_order
+            .lock()
+            .expect("lock request order")
+            .push("pty".into());
         tokio::time::sleep(self.shell_ready_delay).await;
+        let _ = session.channel_success(channel);
+        Ok(())
+    }
+
+    async fn env_request(
+        &mut self,
+        channel: ChannelId,
+        variable_name: &str,
+        variable_value: &str,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.state
+            .environment_requests
+            .lock()
+            .expect("lock environment requests")
+            .push((variable_name.to_string(), variable_value.to_string()));
+        self.state
+            .request_order
+            .lock()
+            .expect("lock request order")
+            .push(format!("env:{variable_name}"));
         let _ = session.channel_success(channel);
         Ok(())
     }
@@ -590,6 +629,11 @@ impl server::Handler for InteractiveTestServer {
         channel: ChannelId,
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        self.state
+            .request_order
+            .lock()
+            .expect("lock request order")
+            .push("shell".into());
         tokio::time::sleep(self.shell_ready_delay).await;
         let _ = session.channel_success(channel);
         session.data(channel, b"welcome to mica-term".to_vec())?;
@@ -615,6 +659,7 @@ async fn spawn_publickey_shell_server(
     std::net::SocketAddr,
     std::path::PathBuf,
     russh::keys::PublicKey,
+    InteractiveServerState,
 ) {
     let client_key = PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
         .expect("generate client key");
@@ -641,9 +686,11 @@ async fn spawn_publickey_shell_server(
         .await
         .expect("bind test ssh server");
     let addr = listener.local_addr().expect("server addr");
+    let state = InteractiveServerState::default();
     let server = InteractiveTestServer {
         auth_key: client_public,
         shell_ready_delay,
+        state: state.clone(),
     };
 
     let join = tokio::spawn(async move {
@@ -653,7 +700,7 @@ async fn spawn_publickey_shell_server(
             .expect("run ssh server");
     });
 
-    (join, addr, private_key_path, server_public)
+    (join, addr, private_key_path, server_public, state)
 }
 
 fn sample_profile(asset_id: &str) -> ConnectionProfile {
@@ -885,7 +932,7 @@ fn session_manager_marks_session_as_error_when_runtime_fails() {
 fn session_manager_marks_connected_only_after_runtime_connected_event() {
     let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
-    let (server_task, addr, private_key_path, server_public_key) =
+    let (server_task, addr, private_key_path, server_public_key, _server_state) =
         runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(75)).await });
     let known_hosts_path = temp_known_hosts_path("runtime-ready");
     let known_hosts = KnownHostsService::new(&known_hosts_path);
@@ -944,7 +991,7 @@ fn session_manager_marks_connected_only_after_runtime_connected_event() {
 fn runtime_probe_surfaces_unknown_host_key_as_typed_error() {
     let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
-    let (server_task, addr, private_key_path, _server_public_key) =
+    let (server_task, addr, private_key_path, _server_public_key, _server_state) =
         runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(10)).await });
     let known_hosts_path = temp_known_hosts_path("runtime-unknown");
     let _ = fs::remove_file(&known_hosts_path);
@@ -978,6 +1025,102 @@ fn runtime_probe_surfaces_unknown_host_key_as_typed_error() {
     unsafe {
         std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
     }
+}
+
+#[test]
+fn ssh_runtime_negotiates_truecolor_environment_before_requesting_shell() {
+    let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, addr, private_key_path, server_public_key, server_state) =
+        runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(10)).await });
+    let known_hosts_path = temp_known_hosts_path("truecolor-env");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(
+            addr.ip().to_string().as_str(),
+            addr.port(),
+            &server_public_key,
+        )
+        .expect("trust test server host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let runtime_handle = runtime.block_on(async {
+        SshSessionRuntime::connect(
+            sample_publickey_profile(
+                "asset-prod",
+                addr.ip().to_string(),
+                addr.port(),
+                private_key_path.display().to_string(),
+            ),
+            Uuid::new_v4(),
+            event_tx,
+        )
+        .await
+        .expect("connect ssh runtime")
+    });
+
+    let saw_connected = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, SessionRuntimeEvent::Connected) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("wait for connected event")
+    });
+
+    assert!(
+        saw_connected,
+        "runtime should emit Connected after shell bootstrap"
+    );
+    runtime_handle.disconnect().expect("disconnect runtime");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        server_task.await.expect("join test ssh server");
+    });
+
+    let expected_environment = negotiated_terminal_environment()
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect::<Vec<_>>();
+    let recorded_environment = server_state
+        .environment_requests
+        .lock()
+        .expect("lock environment requests")
+        .clone();
+    let request_order = server_state
+        .request_order
+        .lock()
+        .expect("lock request order")
+        .clone();
+    let pty_terms = server_state
+        .pty_terms
+        .lock()
+        .expect("lock pty terms")
+        .clone();
+
+    assert_eq!(pty_terms, vec!["xterm-256color".to_string()]);
+    assert_eq!(recorded_environment, expected_environment);
+    assert_eq!(
+        request_order,
+        vec![
+            "pty".to_string(),
+            "env:COLORTERM".to_string(),
+            "shell".to_string(),
+        ]
+    );
+
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
 }
 
 #[test]
@@ -1274,13 +1417,15 @@ fn session_manager_populates_initial_surface_from_runtime_control_snapshot() {
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let manager = SessionManager::new_with_launcher(
         runtime.handle(),
-        Arc::new(SurfacePullLauncher::new(TerminalSurfaceState::from_visible_lines(
-            Uuid::new_v4(),
-            7,
-            24,
-            80,
-            vec!["warm".into(), "boot".into()],
-        ))),
+        Arc::new(SurfacePullLauncher::new(
+            TerminalSurfaceState::from_visible_lines(
+                Uuid::new_v4(),
+                7,
+                24,
+                80,
+                vec!["warm".into(), "boot".into()],
+            ),
+        )),
     );
 
     let handle = manager
@@ -1299,7 +1444,10 @@ fn session_manager_populates_initial_surface_from_runtime_control_snapshot() {
         .expect("manager should populate initial surface from runtime snapshot");
 
     assert_eq!(surface.seqno, 7);
-    assert_eq!(surface.visible_lines, vec!["warm".to_string(), "boot".to_string()]);
+    assert_eq!(
+        surface.visible_lines,
+        vec!["warm".to_string(), "boot".to_string()]
+    );
 }
 
 #[test]

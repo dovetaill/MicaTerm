@@ -8,6 +8,7 @@ pub mod logging;
 pub mod memory;
 pub mod runtime_profile;
 pub mod ssh;
+pub mod terminal_theme;
 pub mod ui_preferences;
 pub mod window_effects;
 pub mod window_state;

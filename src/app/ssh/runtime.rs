@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use tokio::time::{Sleep, sleep};
 use uuid::Uuid;
 use wezterm_surface::{CursorShape, CursorVisibility};
-use wezterm_term::color::{ColorAttribute, ColorPalette, RgbColor, SrgbaTuple};
+use wezterm_term::color::{ColorAttribute, ColorPalette, SrgbaTuple};
 use wezterm_term::{Line, Terminal, TerminalConfiguration, TerminalSize};
 
 use crate::app::ssh::credentials::{
@@ -27,6 +27,7 @@ use crate::app::ssh::credentials::{
 use crate::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
 use crate::app::ssh::session_manager::SessionRuntimeControl;
+use crate::app::terminal_theme::palette_for_theme_mode;
 use crate::theme::ThemeMode;
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
@@ -348,6 +349,7 @@ impl SshSessionRuntime {
 
         let mut pending_output = Vec::new();
         await_channel_success(&mut channel, "pty", &mut pending_output).await?;
+        negotiate_terminal_environment(&mut channel, &mut pending_output).await;
 
         channel
             .request_shell(true)
@@ -744,6 +746,37 @@ async fn await_channel_success(
                 bail!("SSH channel closed during `{request_label}` request");
             }
             _ => {}
+        }
+    }
+}
+
+pub fn negotiated_terminal_environment() -> [(&'static str, &'static str); 1] {
+    [("COLORTERM", "truecolor")]
+}
+
+async fn negotiate_terminal_environment(
+    channel: &mut Channel<client::Msg>,
+    pending_output: &mut Vec<u8>,
+) {
+    for (variable_name, variable_value) in negotiated_terminal_environment() {
+        if let Err(err) = channel.set_env(true, variable_name, variable_value).await {
+            tracing::warn!(
+                variable_name,
+                variable_value,
+                error = %err,
+                "failed to send negotiated terminal environment request",
+            );
+            continue;
+        }
+
+        let request_label = format!("env {variable_name}");
+        if let Err(err) = await_channel_success(channel, &request_label, pending_output).await {
+            tracing::warn!(
+                variable_name,
+                variable_value,
+                error = %err,
+                "SSH server rejected negotiated terminal environment request",
+            );
         }
     }
 }
@@ -1614,82 +1647,8 @@ impl TerminalConfiguration for SessionTerminalConfig {
     }
 
     fn color_palette(&self) -> ColorPalette {
-        build_terminal_color_palette(self.theme_mode())
+        palette_for_theme_mode(self.theme_mode())
     }
-}
-
-fn build_terminal_color_palette(theme_mode: ThemeMode) -> ColorPalette {
-    let mut palette = ColorPalette::default();
-
-    match theme_mode {
-        ThemeMode::Dark => {
-            palette.colors.0[0] = rgb8(0x0d, 0x11, 0x17);
-            palette.colors.0[1] = rgb8(0xff, 0x7b, 0x72);
-            palette.colors.0[2] = rgb8(0x3f, 0xb9, 0x50);
-            palette.colors.0[3] = rgb8(0xd2, 0x99, 0x22);
-            palette.colors.0[4] = rgb8(0x58, 0xa6, 0xff);
-            palette.colors.0[5] = rgb8(0xbc, 0x8c, 0xff);
-            palette.colors.0[6] = rgb8(0x39, 0xc5, 0xcf);
-            palette.colors.0[7] = rgb8(0xd7, 0xe2, 0xf0);
-            palette.colors.0[8] = rgb8(0x6e, 0x76, 0x81);
-            palette.colors.0[9] = rgb8(0xff, 0xa1, 0x98);
-            palette.colors.0[10] = rgb8(0x56, 0xd3, 0x64);
-            palette.colors.0[11] = rgb8(0xe3, 0xb3, 0x41);
-            palette.colors.0[12] = rgb8(0x79, 0xc0, 0xff);
-            palette.colors.0[13] = rgb8(0xd2, 0xa8, 0xff);
-            palette.colors.0[14] = rgb8(0x56, 0xd4, 0xdd);
-            palette.colors.0[15] = rgb8(0xf0, 0xf6, 0xfc);
-            palette.foreground = rgb8(0xe6, 0xed, 0xf3);
-            palette.background = rgb8(0x0d, 0x11, 0x17);
-            palette.cursor_fg = rgb8(0x0d, 0x11, 0x17);
-            palette.cursor_bg = rgb8(0x79, 0xc0, 0xff);
-            palette.cursor_border = rgb8(0x79, 0xc0, 0xff);
-            palette.selection_bg = rgba8(0x58, 0xa6, 0xff, 0.30);
-            palette.scrollbar_thumb = rgb8(0x30, 0x36, 0x3d);
-            palette.split = rgb8(0x21, 0x26, 0x2d);
-        }
-        ThemeMode::Light => {
-            palette.colors.0[0] = rgb8(0x1f, 0x23, 0x28);
-            palette.colors.0[1] = rgb8(0xcf, 0x22, 0x2e);
-            palette.colors.0[2] = rgb8(0x1a, 0x7f, 0x37);
-            palette.colors.0[3] = rgb8(0x9a, 0x67, 0x00);
-            palette.colors.0[4] = rgb8(0x09, 0x69, 0xda);
-            palette.colors.0[5] = rgb8(0x82, 0x50, 0xdf);
-            palette.colors.0[6] = rgb8(0x1b, 0x7c, 0x83);
-            palette.colors.0[7] = rgb8(0xd0, 0xd7, 0xde);
-            palette.colors.0[8] = rgb8(0x57, 0x60, 0x6a);
-            palette.colors.0[9] = rgb8(0xff, 0x81, 0x82);
-            palette.colors.0[10] = rgb8(0x2d, 0xa4, 0x4e);
-            palette.colors.0[11] = rgb8(0xbf, 0x87, 0x00);
-            palette.colors.0[12] = rgb8(0x21, 0x8b, 0xff);
-            palette.colors.0[13] = rgb8(0xa4, 0x75, 0xf9);
-            palette.colors.0[14] = rgb8(0x31, 0x92, 0xaa);
-            palette.colors.0[15] = rgb8(0xff, 0xff, 0xff);
-            palette.foreground = rgb8(0x1f, 0x23, 0x28);
-            palette.background = rgb8(0xff, 0xff, 0xff);
-            palette.cursor_fg = rgb8(0xff, 0xff, 0xff);
-            palette.cursor_bg = rgb8(0x09, 0x69, 0xda);
-            palette.cursor_border = rgb8(0x09, 0x69, 0xda);
-            palette.selection_bg = rgba8(0x09, 0x69, 0xda, 0.18);
-            palette.scrollbar_thumb = rgb8(0xd0, 0xd7, 0xde);
-            palette.split = rgb8(0xd8, 0xde, 0xe4);
-        }
-    }
-
-    palette
-}
-
-fn rgb8(red: u8, green: u8, blue: u8) -> SrgbaTuple {
-    RgbColor::new_8bpc(red, green, blue).into()
-}
-
-fn rgba8(red: u8, green: u8, blue: u8, alpha: f32) -> SrgbaTuple {
-    SrgbaTuple(
-        f32::from(red) / 255.0,
-        f32::from(green) / 255.0,
-        f32::from(blue) / 255.0,
-        alpha,
-    )
 }
 
 fn project_terminal_row(line: &Line, index: u32, cols: usize) -> TerminalRowState {
@@ -1989,5 +1948,4 @@ mod tests {
         assert!(scheduler.trim_due());
         assert!(!scheduler.trim_due());
     }
-
 }

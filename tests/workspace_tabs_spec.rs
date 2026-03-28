@@ -482,6 +482,22 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose cursor row projection for the terminal surface"
     );
     assert!(
+        app_window.contains("workspace-session-cursor-fg"),
+        "AppWindow should expose cursor foreground palette projection for the terminal surface"
+    );
+    assert!(
+        app_window.contains("workspace-session-cursor-bg"),
+        "AppWindow should expose cursor background palette projection for the terminal surface"
+    );
+    assert!(
+        app_window.contains("workspace-session-default-fg"),
+        "AppWindow should expose default foreground palette projection for the terminal surface"
+    );
+    assert!(
+        app_window.contains("workspace-session-default-bg"),
+        "AppWindow should expose default background palette projection for the terminal surface"
+    );
+    assert!(
         app_window.contains("workspace-session-cursor-col"),
         "AppWindow should expose cursor column projection for the terminal surface"
     );
@@ -518,6 +534,22 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         workspace_pane.contains("workspace-session-cells"),
         "WorkspacePane should forward the terminal cell model into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("session-cursor-fg: root.workspace-session-cursor-fg;"),
+        "WorkspacePane should forward cursor foreground palette into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("session-cursor-bg: root.workspace-session-cursor-bg;"),
+        "WorkspacePane should forward cursor background palette into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("session-default-fg: root.workspace-session-default-fg;"),
+        "WorkspacePane should forward default foreground palette into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("session-default-bg: root.workspace-session-default-bg;"),
+        "WorkspacePane should forward default background palette into TerminalSessionHost"
     );
     assert!(
         workspace_pane
@@ -599,6 +631,14 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         terminal_host.contains("blank-surface := Rectangle {"),
         "TerminalSessionHost should render a dedicated blank terminal canvas behind cell content"
+    );
+    assert!(
+        terminal_host.contains("background: root.session-default-bg;"),
+        "TerminalSessionHost should paint the blank canvas from the runtime-projected default background"
+    );
+    assert!(
+        terminal_host.contains("background: root.session-cursor-bg;"),
+        "TerminalSessionHost should paint the cursor from the runtime-projected cursor background"
     );
     assert!(
         terminal_host.contains("font-family: root.terminal-font-family;"),
@@ -699,6 +739,30 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         !terminal_host.contains("terminal-lines := ListView {"),
         "terminal host should stop rendering the terminal as a ListView of plain strings"
+    );
+    assert!(
+        !app_window.contains("in-out property <color> workspace-session-cursor-bg: #52ad70;"),
+        "AppWindow should not retain the stale green cursor fallback constant"
+    );
+    assert!(
+        !app_window.contains("in-out property <color> workspace-session-default-bg: #ffffff;"),
+        "AppWindow should not retain the stale white terminal background fallback constant"
+    );
+    assert!(
+        !workspace_pane.contains("in property <color> workspace-session-cursor-bg: #52ad70;"),
+        "WorkspacePane should not retain the stale green cursor fallback constant"
+    );
+    assert!(
+        !workspace_pane.contains("in property <color> workspace-session-default-bg: #ffffff;"),
+        "WorkspacePane should not retain the stale white terminal background fallback constant"
+    );
+    assert!(
+        !terminal_host.contains("in property <color> session-cursor-bg: #52ad70;"),
+        "TerminalSessionHost should not retain the stale green cursor fallback constant"
+    );
+    assert!(
+        !terminal_host.contains("in property <color> session-default-bg: #ffffff;"),
+        "TerminalSessionHost should not retain the stale white terminal background fallback constant"
     );
 }
 

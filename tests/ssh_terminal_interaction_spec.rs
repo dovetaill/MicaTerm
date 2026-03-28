@@ -80,11 +80,11 @@ fn light_theme_palette_changes_default_background_projection() {
 }
 
 #[test]
-fn light_theme_palette_preserves_standard_ansi_black_and_bright_white_backgrounds() {
+fn light_theme_palette_preserves_mica_code_light_ansi_black_bright_white_and_default_backgrounds() {
     let mut session = TerminalSession::new(24, 80);
 
     session.set_theme_mode(ThemeMode::Light);
-    session.apply_remote_bytes(b"\x1b[40mA\x1b[0m\x1b[107mB\x1b[0m");
+    session.apply_remote_bytes(b"\x1b[40mA\x1b[0m\x1b[107mB\x1b[0mC");
 
     let snapshot = session.surface_state(Uuid::new_v4());
     let ansi_black = snapshot
@@ -97,9 +97,15 @@ fn light_theme_palette_preserves_standard_ansi_black_and_bright_white_background
         .iter()
         .find(|cell| cell.col == 1)
         .expect("ansi bright white background cell");
+    let default_after_reset = snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 2)
+        .expect("default background cell after reset");
 
     assert_eq!(ansi_black.bg_rgba, 0xff1f_2328);
     assert_eq!(ansi_bright_white.bg_rgba, 0xffff_ffff);
+    assert_eq!(default_after_reset.bg_rgba, 0xfff7_f9fc);
 }
 
 #[test]
@@ -131,7 +137,8 @@ fn terminal_host_prefers_bundled_font_and_stable_clipboard_shortcut_tokens() {
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        terminal_host.contains("in property <string> terminal-font-family: \"Sarasa Term SC Nerd\";"),
+        terminal_host
+            .contains("in property <string> terminal-font-family: \"Sarasa Term SC Nerd\";"),
         "TerminalSessionHost should bind directly to the bundled Sarasa Term SC Nerd family instead of a CSS-style comma list"
     );
     assert!(
