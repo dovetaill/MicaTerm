@@ -108,6 +108,11 @@ struct InteractiveProjectionLauncher;
 #[derive(Clone, Default)]
 struct PasteProjectionLauncher;
 
+#[derive(Clone, Copy)]
+struct PasteWarningProjectionLauncher {
+    bracketed_paste_enabled: bool,
+}
+
 #[derive(Clone, Default)]
 struct ScrollProjectionLauncher;
 
@@ -352,6 +357,41 @@ impl SessionRuntimeLauncher for PasteProjectionLauncher {
                     vec!["welcome to mica-term".into()],
                 ),
             ));
+            Ok(Box::new(PasteProjectionRuntimeControl {
+                session_id,
+                event_tx,
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for PasteWarningProjectionLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let bracketed_paste_enabled = self.bracketed_paste_enabled;
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let mut surface = TerminalSurfaceState::from_visible_lines(
+                session_id,
+                1,
+                24,
+                80,
+                vec!["welcome to mica-term".into()],
+            );
+            surface.bracketed_paste_enabled = bracketed_paste_enabled;
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
             Ok(Box::new(PasteProjectionRuntimeControl {
                 session_id,
                 event_tx,
@@ -2733,6 +2773,141 @@ fn workspace_terminal_paste_callback_updates_active_session_surface() {
     assert_eq!(app.get_workspace_session_surface_seqno(), 2);
     assert_eq!(visible_lines.row_count(), 2);
     assert_eq!(visible_lines.row_data(1).unwrap().as_str(), "paste pwd");
+}
+
+#[test]
+fn workspace_terminal_multiline_paste_warning_defers_unprotected_paste_until_confirmed() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(PasteWarningProjectionLauncher {
+            bracketed_paste_enabled: false,
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("pwd\necho hi", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("seed multiline clipboard");
+
+    app.invoke_workspace_session_paste_requested();
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert!(app.get_workspace_paste_warning_modal_open());
+    assert_eq!(app.get_workspace_paste_warning_line_count(), 2);
+    assert_eq!(app.get_workspace_session_surface_seqno(), 1);
+    assert_eq!(app.get_workspace_session_visible_lines().row_count(), 1);
+
+    app.invoke_workspace_paste_warning_confirm_requested();
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert!(!app.get_workspace_paste_warning_modal_open());
+    assert_eq!(app.get_workspace_session_surface_seqno(), 2);
+    assert_eq!(app.get_workspace_session_visible_lines().row_count(), 2);
+    assert_eq!(
+        app.get_workspace_session_visible_lines()
+            .row_data(1)
+            .unwrap()
+            .as_str(),
+        "paste pwd\necho hi"
+    );
+}
+
+#[test]
+fn workspace_terminal_multiline_paste_warning_skips_bracketed_paste_sessions() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(PasteWarningProjectionLauncher {
+            bracketed_paste_enabled: true,
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("pwd\necho hi", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("seed multiline clipboard");
+
+    app.invoke_workspace_session_paste_requested();
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert!(!app.get_workspace_paste_warning_modal_open());
+    assert_eq!(app.get_workspace_session_surface_seqno(), 2);
+    assert_eq!(app.get_workspace_session_visible_lines().row_count(), 2);
+}
+
+#[test]
+fn workspace_terminal_single_line_trailing_newline_pastes_without_warning() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(PasteWarningProjectionLauncher {
+            bracketed_paste_enabled: false,
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("pwd\n", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("seed single-line clipboard");
+
+    app.invoke_workspace_session_paste_requested();
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    assert!(!app.get_workspace_paste_warning_modal_open());
+    assert_eq!(app.get_workspace_session_surface_seqno(), 2);
+    assert_eq!(
+        app.get_workspace_session_visible_lines()
+            .row_data(1)
+            .unwrap()
+            .as_str(),
+        "paste pwd\n"
+    );
 }
 
 #[test]

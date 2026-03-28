@@ -346,3 +346,48 @@ fn terminal_session_encodes_mouse_input_using_active_tracking_mode() {
     assert_eq!(drag, b"\x1b[<36;6;3M");
     assert_eq!(release, b"\x1b[<4;6;3m");
 }
+
+#[test]
+fn terminal_session_ignores_hover_motion_when_only_button_event_tracking_is_enabled() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.apply_remote_bytes(b"\x1b[?1000h\x1b[?1002h\x1b[?1006h");
+
+    let hover = session
+        .send_mouse_input(TerminalMouseInput {
+            kind: TerminalMouseEventKind::Move,
+            button: TerminalMouseButton::None,
+            row: 2,
+            col: 4,
+            shift: false,
+            ctrl: false,
+            alt: false,
+        })
+        .expect("encode hover motion");
+
+    assert!(
+        hover.is_empty(),
+        "button-event tracking should not synthesize no-button hover motion reports"
+    );
+}
+
+#[test]
+fn terminal_session_encodes_hover_motion_when_any_event_tracking_is_enabled() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.apply_remote_bytes(b"\x1b[?1000h\x1b[?1003h\x1b[?1006h");
+
+    let hover = session
+        .send_mouse_input(TerminalMouseInput {
+            kind: TerminalMouseEventKind::Move,
+            button: TerminalMouseButton::None,
+            row: 2,
+            col: 4,
+            shift: false,
+            ctrl: false,
+            alt: false,
+        })
+        .expect("encode any-event hover motion");
+
+    assert_eq!(hover, b"\x1b[<35;5;3M");
+}

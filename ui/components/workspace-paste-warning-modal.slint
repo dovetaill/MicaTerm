@@ -1,0 +1,214 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+component DialogButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> primary: false;
+    callback clicked();
+
+    height: 34px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: root.primary ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    background: button-touch.pressed ? ThemeTokens.control-pressed-surface
+        : button-touch.has-hover ? ThemeTokens.control-hover-surface
+        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    button-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component WorkspacePasteWarningModal inherits Rectangle {
+    in property <string> dialog-title: "Paste Multiple Lines";
+    in property <int> line-count: 0;
+    callback confirm-requested();
+    callback cancel-requested();
+    callback drag-requested(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended();
+    callback focus-restore-requested();
+    private property <length> footer-height: 66px;
+
+    background: transparent;
+
+    modal-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.focus-restore-requested();
+                root.cancel-requested();
+                accept
+            } else if (event.text == Key.Return) {
+                root.confirm-requested();
+                accept
+            } else {
+                reject
+            }
+        }
+
+        header := Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 56px;
+            background: ThemeTokens.assets-surface;
+
+            Text {
+                x: 20px;
+                y: 0px;
+                width: parent.width - 72px;
+                height: parent.height;
+                text: root.dialog-title;
+                color: ThemeTokens.text-primary;
+                font-size: 18px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+
+            drag-touch := TouchArea {
+                width: parent.width - 48px;
+                height: parent.height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down
+                        && event.button == PointerEventButton.left
+                    {
+                        root.drag-requested(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.move {
+                        root.drag-moved(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.up {
+                        root.drag-ended();
+                    }
+                }
+            }
+
+            close-button := Rectangle {
+                x: parent.width - 40px;
+                y: 12px;
+                width: 28px;
+                height: 28px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.control-active-surface;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "×";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                close-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.cancel-requested();
+                    }
+                }
+            }
+
+            divider := Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
+            }
+        }
+
+        body := Rectangle {
+            x: 0px;
+            y: header.height;
+            width: parent.width;
+            height: parent.height - header.height - root.footer-height;
+            background: transparent;
+
+            Text {
+                x: 20px;
+                y: 18px;
+                width: parent.width - 40px;
+                text: "Paste " + root.line-count + " lines into this terminal?";
+                color: ThemeTokens.text-primary;
+                font-size: 16px;
+                font-weight: 600;
+                wrap: word-wrap;
+            }
+
+            Text {
+                x: 20px;
+                y: 62px;
+                width: parent.width - 40px;
+                text: "This shell has not advertised bracketed paste protection, so pasted lines may execute immediately.";
+                color: ThemeTokens.text-primary;
+                opacity: 0.72;
+                wrap: word-wrap;
+            }
+        }
+
+        footer := Rectangle {
+            x: 0px;
+            y: parent.height - root.footer-height;
+            width: parent.width;
+            height: root.footer-height;
+            background: ThemeTokens.assets-surface;
+
+            footer-divider := Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
+            }
+
+            cancel-button := DialogButton {
+                x: parent.width - 204px;
+                y: 16px;
+                width: 88px;
+                label: "Cancel";
+
+                clicked => {
+                    root.focus-restore-requested();
+                    root.cancel-requested();
+                }
+            }
+
+            confirm-button := DialogButton {
+                x: parent.width - 104px;
+                y: 16px;
+                width: 84px;
+                label: "Paste";
+                primary: true;
+
+                clicked => {
+                    root.confirm-requested();
+                }
+            }
+        }
+    }
+}

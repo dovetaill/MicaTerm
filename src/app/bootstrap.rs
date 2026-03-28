@@ -290,6 +290,7 @@ fn bind_windows_window_state_tracking(
     state: Rc<RefCell<ShellViewModel>>,
     _effects: Rc<dyn PlatformWindowEffects>,
     session_bridge: Option<Rc<ShellSessionBridge>>,
+    pending_workspace_paste_warning: Rc<RefCell<Option<PendingWorkspacePasteWarning>>>,
 ) {
     use slint::ComponentHandle;
     use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
@@ -339,7 +340,11 @@ fn bind_windows_window_state_tracking(
                             }
                             NativeTerminalClipboardShortcut::Paste => {
                                 let state = state.borrow();
-                                forward_active_workspace_paste(&state, session_bridge.as_deref());
+                                let _ = forward_active_workspace_paste(
+                                    &state,
+                                    session_bridge.as_deref(),
+                                    pending_workspace_paste_warning.as_ref(),
+                                );
                                 return EventResult::PreventDefault;
                             }
                             _ => {}
@@ -1485,7 +1490,10 @@ fn forward_workspace_session_paste(
 
     snap_active_workspace_viewport_to_bottom_if_needed(state, Some(bridge));
 
-    if let Err(err) = bridge.manager.send_session_paste(session_id, text.to_string()) {
+    if let Err(err) = bridge
+        .manager
+        .send_session_paste(session_id, text.to_string())
+    {
         tracing::error!(
             target: "app.ssh",
             session_id = session_id.to_string(),
@@ -2784,6 +2792,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         Rc::clone(&view_model),
         Rc::clone(&effects),
         session_bridge.clone(),
+        Rc::clone(&pending_workspace_paste_warning),
     );
     sync_shell_state(window, &view_model.borrow(), effects.as_ref());
     sync_workspace_paste_warning_modal_state(window, None);
@@ -4131,6 +4140,8 @@ mod tests {
             password: Some("secret".into()),
             private_key_content: None,
             passphrase: None,
+            proxy: ConnectionProxyProfile::None,
+            resolved_proxy_hops: Vec::new(),
             remark: String::new(),
         }
     }
@@ -4375,7 +4386,10 @@ mod tests {
 
     #[test]
     fn workspace_multiline_paste_detection_normalizes_platform_line_endings() {
-        assert!(!workspace_paste_requires_warning(&ShellViewModel::default(), ""));
+        assert!(!workspace_paste_requires_warning(
+            &ShellViewModel::default(),
+            ""
+        ));
         assert!(!workspace_paste_requires_warning(
             &ShellViewModel::default(),
             "echo hello\n"
@@ -4402,6 +4416,16 @@ mod tests {
     fn workspace_multiline_paste_warning_auto_skips_bracketed_paste_sessions() {
         let session_id = Uuid::new_v4();
         let mut state = ShellViewModel::default();
+        let mut tab = WorkspaceTab::from_session(&SessionHandle {
+            session_id,
+            asset_id: "asset-prod".into(),
+            title: "Prod Bastion".into(),
+            subtitle: "ops@10.0.0.12:22".into(),
+            state: SessionState::Connected,
+            can_reconnect: false,
+        });
+        tab.active = true;
+        state.set_workspace_tabs(vec![tab]);
         let mut surface =
             TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["$ ".into()]);
         surface.bracketed_paste_enabled = true;

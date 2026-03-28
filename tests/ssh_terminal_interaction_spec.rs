@@ -22,13 +22,49 @@ fn function_keys_and_application_cursor_keys_are_encoded_from_live_terminal_stat
 }
 
 #[test]
-fn bracketed_paste_wraps_clipboard_payload_when_enabled() {
+fn paste_wraps_payload_when_bracketed_paste_is_enabled() {
     let mut session = TerminalSession::new(24, 80);
 
     session.apply_remote_bytes(b"\x1b[?2004h");
 
     let bytes = session.encode_paste("echo hi\n").expect("encode paste");
     assert_eq!(bytes, b"\x1b[200~echo hi\n\x1b[201~");
+}
+
+#[test]
+fn bracketed_paste_echo_suppresses_active_region_reverse_video() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.apply_remote_bytes(b"\x1b[?2004h");
+    session
+        .encode_paste("echo hi")
+        .expect("arm bracketed paste echo filter");
+    session.apply_remote_bytes(b"\x1b[7mecho hi\x1b[27m");
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    assert!(
+        snapshot
+            .cells
+            .iter()
+            .take(7)
+            .all(|cell| cell.bg_rgba == snapshot.default_bg_rgba),
+        "paste echo highlight should not invert the background colors"
+    );
+}
+
+#[test]
+fn inverse_video_still_renders_without_a_pending_paste_echo() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.apply_remote_bytes(b"\x1b[7mX\x1b[27m");
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    let cell = snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.text == "X")
+        .expect("inverse cell");
+    assert_ne!(cell.bg_rgba, snapshot.default_bg_rgba);
 }
 
 #[test]

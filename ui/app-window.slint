@@ -11,6 +11,7 @@ import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal
 import { BlockingModalShell } from "components/blocking-modal-shell.slint";
 import { SshHostKeyConfirmModal } from "components/ssh-host-key-confirm-modal.slint";
 import { StatusPill } from "components/status-pill.slint";
+import { WorkspacePasteWarningModal } from "components/workspace-paste-warning-modal.slint";
 import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
 import { WindowResizeGrips } from "components/window-resize-grips.slint";
@@ -55,6 +56,8 @@ export component AppWindow inherits Window {
     in-out property <bool> ssh-host-key-modal-open: false;
     in-out property <string> ssh-host-key-modal-host: "";
     in-out property <string> ssh-host-key-modal-fingerprint: "";
+    in-out property <bool> workspace-paste-warning-modal-open: false;
+    in-out property <int> workspace-paste-warning-line-count: 0;
     in-out property <string> asset-ssh-modal-name: "";
     in-out property <string> asset-ssh-modal-host: "";
     in-out property <string> asset-ssh-modal-user: "";
@@ -202,6 +205,8 @@ export component AppWindow inherits Window {
     callback asset-ssh-modal-action-requested(string);
     callback ssh-host-key-modal-accept-requested();
     callback ssh-host-key-modal-reject-requested();
+    callback workspace-paste-warning-confirm-requested();
+    callback workspace-paste-warning-cancel-requested();
     callback blocking-modal-drag-requested(length, length);
     callback blocking-modal-drag-moved(length, length);
     callback blocking-modal-drag-ended();
@@ -284,6 +289,13 @@ export component AppWindow inherits Window {
 
     changed ssh-host-key-modal-open => {
         if root.ssh-host-key-modal-open {
+            root.blocking-modal-offset-x = 0px;
+            root.blocking-modal-offset-y = 0px;
+        }
+    }
+
+    changed workspace-paste-warning-modal-open => {
+        if root.workspace-paste-warning-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
         }
@@ -674,7 +686,7 @@ export component AppWindow inherits Window {
         y: titlebar.height;
         width: root.width;
         height: root.height - titlebar.height;
-        enabled: root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open;
+        enabled: root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open;
 
         clicked => { }
     }
@@ -946,6 +958,53 @@ export component AppWindow inherits Window {
 
             reject-requested => {
                 root.ssh-host-key-modal-reject-requested();
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
+    }
+
+    if root.workspace-paste-warning-modal-open : workspace-paste-warning-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 440px;
+        modal-height: 248px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        workspace-paste-warning-modal-overlay := WorkspacePasteWarningModal {
+            x: 0px;
+            y: 0px;
+            width: workspace-paste-warning-modal-shell.content-width;
+            height: workspace-paste-warning-modal-shell.content-height;
+            line-count: root.workspace-paste-warning-line-count;
+
+            confirm-requested => {
+                root.workspace-paste-warning-confirm-requested();
+            }
+
+            cancel-requested => {
+                root.workspace-paste-warning-cancel-requested();
             }
 
             drag-requested(pointer-x, pointer-y) => {

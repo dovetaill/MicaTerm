@@ -1574,6 +1574,7 @@ pub struct TerminalSession {
     pending_remote_line_buffer: PendingRemoteLineBuffer,
     pending_paste_highlight_filter: Option<PendingPasteHighlightFilter>,
     keyboard_modes: TerminalKeyboardModes,
+    mouse_modes: TerminalMouseModes,
     viewport_offset_lines: usize,
 }
 
@@ -1603,6 +1604,7 @@ impl TerminalSession {
             pending_remote_line_buffer: PendingRemoteLineBuffer::default(),
             pending_paste_highlight_filter: None,
             keyboard_modes: TerminalKeyboardModes::default(),
+            mouse_modes: TerminalMouseModes::default(),
             viewport_offset_lines: 0,
         }
     }
@@ -1623,6 +1625,7 @@ impl TerminalSession {
             filtered
         };
         self.keyboard_modes.observe(filtered.as_slice());
+        self.mouse_modes.observe(filtered.as_slice());
         if !filtered.is_empty() {
             self.snap_viewport_to_bottom();
             self.terminal.advance_bytes(filtered.as_slice());
@@ -1801,12 +1804,21 @@ impl TerminalSession {
         if !self.terminal.is_mouse_grabbed() {
             return Ok(bytes);
         }
-        if matches!(
-            event.kind,
-            TerminalMouseEventKind::Down | TerminalMouseEventKind::Scroll
-        ) && !bytes.is_empty()
-        {
-            return Ok(bytes);
+
+        match event.kind {
+            TerminalMouseEventKind::Down | TerminalMouseEventKind::Scroll if !bytes.is_empty() => {
+                return Ok(bytes);
+            }
+            TerminalMouseEventKind::Move
+                if matches!(fallback_button, TerminalMouseButton::None)
+                    && !self.mouse_modes.any_event_mouse =>
+            {
+                return Ok(bytes);
+            }
+            TerminalMouseEventKind::Up if matches!(fallback_button, TerminalMouseButton::None) => {
+                return Ok(bytes);
+            }
+            _ => {}
         }
 
         Ok(encode_sgr_mouse_fallback(event, fallback_button))
@@ -2017,6 +2029,10 @@ impl PendingPasteHighlightFilter {
                     self.highlight_active = false;
                     index += len;
                 }
+                SgrSequenceKind::ReverseOff(len) => {
+                    output.extend_from_slice(&self.pending_bytes[index..index + len]);
+                    index += len;
+                }
                 SgrSequenceKind::Other(len) => {
                     output.extend_from_slice(&self.pending_bytes[index..index + len]);
                     index += len;
@@ -2092,7 +2108,11 @@ fn classify_sgr_sequence(bytes: &[u8]) -> SgrSequenceKind {
 
     let values = params
         .split(|byte| *byte == b';')
-        .map(|value| std::str::from_utf8(value).ok().and_then(|value| value.parse::<i16>().ok()))
+        .map(|value| {
+            std::str::from_utf8(value)
+                .ok()
+                .and_then(|value| value.parse::<i16>().ok())
+        })
         .collect::<Option<Vec<_>>>();
     let Some(values) = values else {
         return SgrSequenceKind::Other(sequence_len);
@@ -2112,7 +2132,9 @@ fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
     if needle.is_empty() {
         return true;
     }
-    haystack.windows(needle.len()).any(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 fn strip_bracketed_paste_markers(text: &str) -> String {
@@ -2145,6 +2167,39 @@ impl TerminalKeyboardModes {
         }
 
         const MAX_TRAILING_BYTES: usize = 8;
+        if observed.len() <= MAX_TRAILING_BYTES {
+            self.trailing_bytes = observed;
+        } else {
+            self.trailing_bytes = observed[observed.len() - MAX_TRAILING_BYTES..].to_vec();
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct TerminalMouseModes {
+    any_event_mouse: bool,
+    trailing_bytes: Vec<u8>,
+}
+
+impl TerminalMouseModes {
+    fn observe(&mut self, incoming: &[u8]) {
+        let mut observed = Vec::with_capacity(self.trailing_bytes.len() + incoming.len());
+        observed.extend_from_slice(&self.trailing_bytes);
+        observed.extend_from_slice(incoming);
+
+        for index in 0..observed.len() {
+            let remaining = &observed[index..];
+            if remaining.starts_with(b"\x1b[?1003h") {
+                self.any_event_mouse = true;
+                continue;
+            }
+            if remaining.starts_with(b"\x1b[?1003l") {
+                self.any_event_mouse = false;
+                continue;
+            }
+        }
+
+        const MAX_TRAILING_BYTES: usize = 10;
         if observed.len() <= MAX_TRAILING_BYTES {
             self.trailing_bytes = observed;
         } else {
