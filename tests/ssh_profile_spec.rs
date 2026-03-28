@@ -1,5 +1,11 @@
-use mica_term::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, SshAuthMethod};
-use mica_term::shell::assets::{AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec};
+use std::collections::HashMap;
+
+use mica_term::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, ResolvedProxyHop, SshAuthMethod};
+use mica_term::app::ssh::proxy::resolve_proxy_chain;
+use mica_term::shell::assets::{
+    AssetNode, AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec,
+    AssetTree, ConsoleAssetKind,
+};
 use mica_term::shell::view_model::AssetSshConnectionDraft;
 
 fn base_draft() -> AssetSshConnectionDraft {
@@ -11,6 +17,49 @@ fn base_draft() -> AssetSshConnectionDraft {
         remark: "Primary entry point".into(),
         ..AssetSshConnectionDraft::default()
     }
+}
+
+fn saved_password_spec(proxy: AssetSshProxySpec) -> AssetSshConnectionSpec {
+    AssetSshConnectionSpec {
+        host: "10.0.0.12".into(),
+        user: "ops".into(),
+        port: "2022".into(),
+        auth_method: "password".into(),
+        private_key_source: "content".into(),
+        private_key_path: String::new(),
+        environment: "prod".into(),
+        proxy,
+        proxy_method: String::new(),
+        remark: "Primary entry point".into(),
+        credential_ref: Some("ssh/password/asset".into()),
+    }
+}
+
+fn saved_ssh_node(id: &str, title: &str, spec: AssetSshConnectionSpec) -> (String, AssetNode) {
+    (
+        id.to_string(),
+        AssetNode {
+            id: id.to_string(),
+            kind: ConsoleAssetKind::SshConnection,
+            title: title.to_string(),
+            parent_id: None,
+            children: Vec::new(),
+            expanded: false,
+            payload: AssetNodePayload::SshConnection(spec),
+        },
+    )
+}
+
+fn saved_ssh_tree(nodes: Vec<(&str, &str, AssetSshConnectionSpec)>) -> AssetTree {
+    let root_ids = nodes
+        .iter()
+        .map(|(id, _, _)| (*id).to_string())
+        .collect::<Vec<_>>();
+    let nodes = nodes
+        .into_iter()
+        .map(|(id, title, spec)| saved_ssh_node(id, title, spec))
+        .collect::<HashMap<_, _>>();
+    AssetTree::from_parts(root_ids, nodes)
 }
 
 #[test]
@@ -236,4 +285,177 @@ fn ssh_profile_normalizes_saved_socks5_proxy_reference() {
         }
     );
     assert!(profile.resolved_proxy_hops.is_empty());
+}
+
+#[test]
+fn ssh_proxy_chain_resolver_expands_recursive_upstream_chain() {
+    let tree = saved_ssh_tree(vec![
+        (
+            "asset-b",
+            "Upstream B",
+            saved_password_spec(AssetSshProxySpec::Socks5(AssetSocks5ProxySpec {
+                host: "proxy.example.net".into(),
+                port: "1080".into(),
+                username: "ops-proxy".into(),
+                password_credential_ref: Some("ssh/saved-secrets/asset-b".into()),
+            })),
+        ),
+        (
+            "asset-a",
+            "Upstream A",
+            saved_password_spec(AssetSshProxySpec::SshAsset {
+                asset_id: "asset-b".into(),
+            }),
+        ),
+        (
+            "asset-c",
+            "Target C",
+            saved_password_spec(AssetSshProxySpec::SshAsset {
+                asset_id: "asset-a".into(),
+            }),
+        ),
+    ]);
+    let profile = ConnectionProfile::from_saved_asset(
+        "asset-c",
+        "Target C",
+        tree.ssh_connection_spec("asset-c").expect("asset-c spec"),
+    )
+    .expect("normalize target profile");
+
+    let hops = resolve_proxy_chain(&tree, &profile, 8).expect("resolve proxy chain");
+
+    assert_eq!(hops.len(), 3);
+    assert_eq!(
+        hops[0],
+        ResolvedProxyHop::Socks5 {
+            host: "proxy.example.net".into(),
+            port: 1080,
+            username: Some("ops-proxy".into()),
+            password: None,
+        }
+    );
+    match &hops[1] {
+        ResolvedProxyHop::Ssh(profile) => {
+            assert_eq!(profile.asset_id.as_deref(), Some("asset-b"));
+            assert_eq!(
+                profile.proxy,
+                ConnectionProxyProfile::Socks5 {
+                    host: "proxy.example.net".into(),
+                    port: 1080,
+                    username: Some("ops-proxy".into()),
+                    password: None,
+                    credential_ref: Some("ssh/saved-secrets/asset-b".into()),
+                }
+            );
+            assert!(profile.resolved_proxy_hops.is_empty());
+        }
+        other => panic!("unexpected hop: {other:?}"),
+    }
+    match &hops[2] {
+        ResolvedProxyHop::Ssh(profile) => {
+            assert_eq!(profile.asset_id.as_deref(), Some("asset-a"));
+            assert_eq!(
+                profile.proxy,
+                ConnectionProxyProfile::SshAsset {
+                    asset_id: "asset-b".into(),
+                }
+            );
+            assert!(profile.resolved_proxy_hops.is_empty());
+        }
+        other => panic!("unexpected hop: {other:?}"),
+    }
+}
+
+#[test]
+fn ssh_proxy_chain_resolver_reports_cycle() {
+    let tree = saved_ssh_tree(vec![
+        (
+            "asset-a",
+            "Asset A",
+            saved_password_spec(AssetSshProxySpec::SshAsset {
+                asset_id: "asset-b".into(),
+            }),
+        ),
+        (
+            "asset-b",
+            "Asset B",
+            saved_password_spec(AssetSshProxySpec::SshAsset {
+                asset_id: "asset-a".into(),
+            }),
+        ),
+    ]);
+    let profile = ConnectionProfile::from_saved_asset(
+        "asset-a",
+        "Asset A",
+        tree.ssh_connection_spec("asset-a").expect("asset-a spec"),
+    )
+    .expect("normalize cycle profile");
+
+    let err = resolve_proxy_chain(&tree, &profile, 8).expect_err("cycle should fail");
+
+    assert!(err.to_string().contains("SSH proxy chain contains a cycle"));
+}
+
+#[test]
+fn ssh_proxy_chain_resolver_reports_missing_upstream_asset() {
+    let tree = saved_ssh_tree(vec![(
+        "asset-a",
+        "Asset A",
+        saved_password_spec(AssetSshProxySpec::SshAsset {
+            asset_id: "asset-missing".into(),
+        }),
+    )]);
+    let profile = ConnectionProfile::from_saved_asset(
+        "asset-a",
+        "Asset A",
+        tree.ssh_connection_spec("asset-a").expect("asset-a spec"),
+    )
+    .expect("normalize missing-upstream profile");
+
+    let err = resolve_proxy_chain(&tree, &profile, 8).expect_err("missing upstream should fail");
+
+    assert!(
+        err.to_string()
+            .contains("upstream SSH asset `asset-missing` was not found")
+    );
+}
+
+#[test]
+fn ssh_proxy_chain_resolver_reports_excessive_depth() {
+    let mut nodes = Vec::new();
+    for index in 1..=9 {
+        let proxy = if index == 9 {
+            AssetSshProxySpec::None
+        } else {
+            AssetSshProxySpec::SshAsset {
+                asset_id: format!("asset-{}", index + 1),
+            }
+        };
+        let asset_id = format!("asset-{index}");
+        let title = format!("Asset {index}");
+        nodes.push((asset_id, title, saved_password_spec(proxy)));
+    }
+    nodes.push((
+        "asset-target".to_string(),
+        "Target".to_string(),
+        saved_password_spec(AssetSshProxySpec::SshAsset {
+            asset_id: "asset-1".into(),
+        }),
+    ));
+    let tree = saved_ssh_tree(
+        nodes.iter()
+            .map(|(id, title, spec)| (id.as_str(), title.as_str(), spec.clone()))
+            .collect(),
+    );
+    let profile = ConnectionProfile::from_saved_asset(
+        "asset-target",
+        "Target",
+        tree.ssh_connection_spec("asset-target")
+            .expect("asset-target spec"),
+    )
+    .expect("normalize deep-chain profile");
+
+    let err = resolve_proxy_chain(&tree, &profile, 8).expect_err("deep chain should fail");
+
+    assert!(err.to_string().contains("SSH proxy chain is too deep"));
 }

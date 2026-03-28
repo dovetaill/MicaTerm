@@ -34,6 +34,7 @@ use crate::app::ssh::credentials::{
 };
 use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
+use crate::app::ssh::proxy::resolve_proxy_chain;
 use crate::app::ssh::runtime::{
     SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
     TerminalMouseEventKind, TerminalMouseInput, TerminalSurfaceState, UnknownHostKeyError,
@@ -77,6 +78,8 @@ use russh::keys::PublicKey;
 struct ShellSessionBridge {
     manager: SessionManager,
 }
+
+const MAX_SSH_PROXY_CHAIN_DEPTH: usize = 8;
 
 #[derive(Clone)]
 struct PendingHostKeyApproval {
@@ -776,6 +779,25 @@ fn profile_for_saved_asset(
     ConnectionProfile::from_saved_asset(asset_id, &node.title, spec)
 }
 
+fn runtime_ready_profile(
+    state: &ShellViewModel,
+    mut profile: ConnectionProfile,
+) -> anyhow::Result<ConnectionProfile> {
+    profile.resolved_proxy_hops = resolve_proxy_chain(
+        state.console_asset_tree(),
+        &profile,
+        MAX_SSH_PROXY_CHAIN_DEPTH,
+    )?;
+    Ok(profile)
+}
+
+fn runtime_profile_for_saved_asset(
+    state: &ShellViewModel,
+    asset_id: &str,
+) -> anyhow::Result<ConnectionProfile> {
+    runtime_ready_profile(state, profile_for_saved_asset(state, asset_id)?)
+}
+
 fn profile_for_modal_action(
     state: &ShellViewModel,
     draft: &AssetSshConnectionDraft,
@@ -794,6 +816,13 @@ fn profile_for_modal_action(
             format!("saved ssh asset `{asset_id}` is missing its connection payload")
         })?;
     ConnectionProfile::from_modal_draft(asset_id, spec, draft)
+}
+
+fn runtime_profile_for_modal_action(
+    state: &ShellViewModel,
+    draft: &AssetSshConnectionDraft,
+) -> anyhow::Result<ConnectionProfile> {
+    runtime_ready_profile(state, profile_for_modal_action(state, draft)?)
 }
 
 fn non_empty_saved_secret(value: Option<&str>) -> Option<String> {
@@ -1679,7 +1708,7 @@ fn activate_asset(
             state.toggle_folder_expanded(asset_id);
         }
         Some(crate::shell::assets::ConsoleAssetKind::SshConnection) => {
-            match profile_for_saved_asset(state, asset_id) {
+            match runtime_profile_for_saved_asset(state, asset_id) {
                 Ok(profile) => {
                     if let Some(session_bridge) = session_bridge {
                         if let Err(err) = attempt_open_session_with_profile(
@@ -2991,7 +3020,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     }
                 }
                 SshModalAction::TestConnection => {
-                    match profile_for_modal_action(&state, &request.draft) {
+                    match runtime_profile_for_modal_action(&state, &request.draft) {
                         Ok(profile) => {
                             if let Some(session_bridge) = session_bridge_ref.as_ref() {
                                 attempt_test_connection(
@@ -3009,7 +3038,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         Err(err) => state.finish_ssh_modal_action_error(err.to_string()),
                     }
                 }
-                SshModalAction::Connect => match profile_for_modal_action(&state, &request.draft) {
+                SshModalAction::Connect => match runtime_profile_for_modal_action(&state, &request.draft) {
                     Ok(mut profile) => {
                         profile.asset_id = Some(temporary_session_asset_id_for_profile(&profile));
                         if let Some(session_bridge) = session_bridge_ref.as_ref() {
@@ -3075,7 +3104,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                         state.finish_ssh_modal_action_error(err.to_string());
                                     } else {
                                         catalog_persisted_in_action = asset_repo_ref.is_some();
-                                        match profile_for_saved_asset(&state, &asset_id) {
+                                        match runtime_profile_for_saved_asset(&state, &asset_id) {
                                             Ok(profile) => {
                                                 if let Some(session_bridge) = session_bridge_ref.as_ref()
                                                     && let Err(err) = attempt_open_session_with_profile(
