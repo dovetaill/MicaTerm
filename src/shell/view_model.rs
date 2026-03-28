@@ -4,8 +4,9 @@ use crate::app::ssh::credentials::{SshCredentialKind, ssh_credential_ref};
 use crate::app::ssh::runtime::TerminalSurfaceState;
 use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::{
-    AssetNameValidation, AssetNodePayload, AssetSshConnectionSpec, AssetSshProxySpec, AssetTree,
-    AssetViewMode, ConsoleAssetKind, VisibleAssetRow, resolve_committed_name,
+    AssetNameValidation, AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec,
+    AssetSshProxySpec, AssetTree, AssetViewMode, ConsoleAssetKind, VisibleAssetRow,
+    resolve_committed_name,
 };
 use crate::shell::context_menu::{
     ContextMenuActionNode, ContextMenuActionState, ContextTargetKind, SelectionContext,
@@ -62,6 +63,13 @@ pub struct AssetSshConnectionDraft {
     pub password_visible: bool,
     pub remark: String,
     pub environment: String,
+    pub proxy_type: String,
+    pub proxy_socks5_host: String,
+    pub proxy_socks5_port: String,
+    pub proxy_socks5_username: String,
+    pub proxy_socks5_password: String,
+    pub proxy_socks5_password_visible: bool,
+    pub proxy_ssh_asset_id: String,
     pub proxy_method: String,
     pub validation_message: String,
 }
@@ -82,6 +90,13 @@ impl Default for AssetSshConnectionDraft {
             password_visible: false,
             remark: String::new(),
             environment: String::new(),
+            proxy_type: "none".into(),
+            proxy_socks5_host: String::new(),
+            proxy_socks5_port: String::new(),
+            proxy_socks5_username: String::new(),
+            proxy_socks5_password: String::new(),
+            proxy_socks5_password_visible: false,
+            proxy_ssh_asset_id: String::new(),
             proxy_method: String::new(),
             validation_message: String::new(),
         }
@@ -637,6 +652,35 @@ impl ShellViewModel {
         } else {
             spec.private_key_source.clone()
         };
+        let (
+            proxy_type,
+            proxy_socks5_host,
+            proxy_socks5_port,
+            proxy_socks5_username,
+            proxy_ssh_asset_id,
+        ) = match &spec.proxy {
+            AssetSshProxySpec::None => (
+                "none".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ),
+            AssetSshProxySpec::Socks5(proxy) => (
+                "socks5".to_string(),
+                proxy.host.clone(),
+                proxy.port.clone(),
+                proxy.username.clone(),
+                String::new(),
+            ),
+            AssetSshProxySpec::SshAsset { asset_id } => (
+                "ssh-asset".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                asset_id.clone(),
+            ),
+        };
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
@@ -662,6 +706,13 @@ impl ShellViewModel {
                 password_visible: false,
                 remark: spec.remark,
                 environment: spec.environment,
+                proxy_type,
+                proxy_socks5_host,
+                proxy_socks5_port,
+                proxy_socks5_username,
+                proxy_socks5_password: String::new(),
+                proxy_socks5_password_visible: false,
+                proxy_ssh_asset_id,
                 proxy_method: spec.proxy_method,
                 validation_message: String::new(),
             },
@@ -688,6 +739,7 @@ impl ShellViewModel {
         draft.private_key_content = private_key_content.unwrap_or_default();
         draft.passphrase = passphrase.unwrap_or_default();
         draft.password_visible = false;
+        draft.proxy_socks5_password_visible = false;
         draft.validation_message = inline_error.unwrap_or_default();
     }
 
@@ -784,6 +836,20 @@ impl ShellViewModel {
             }
             "remark" => draft.remark = value,
             "environment" => draft.environment = value,
+            "proxy_type" => {
+                if matches!(value.as_str(), "none" | "socks5" | "ssh-asset") {
+                    draft.proxy_type = value;
+                }
+            }
+            "proxy_socks5_host" => draft.proxy_socks5_host = value,
+            "proxy_socks5_port" => draft.proxy_socks5_port = value,
+            "proxy_socks5_username" => draft.proxy_socks5_username = value,
+            "proxy_socks5_password" => draft.proxy_socks5_password = value,
+            "proxy_socks5_password_visibility" => {
+                draft.proxy_socks5_password_visible =
+                    matches!(value.as_str(), "visible" | "show" | "true");
+            }
+            "proxy_ssh_asset_id" => draft.proxy_ssh_asset_id = value,
             "proxy_method" => draft.proxy_method = value,
             _ => {}
         }
@@ -1625,10 +1691,25 @@ fn build_saved_ssh_connection_spec(
             draft.private_key_path.clone()
         },
         environment: draft.environment.clone(),
-        proxy: AssetSshProxySpec::None,
-        proxy_method: draft.proxy_method.clone(),
+        proxy: build_draft_proxy_spec(draft),
+        proxy_method: String::new(),
         remark: draft.remark.clone(),
         credential_ref,
+    }
+}
+
+fn build_draft_proxy_spec(draft: &AssetSshConnectionDraft) -> AssetSshProxySpec {
+    match draft.proxy_type.as_str() {
+        "socks5" => AssetSshProxySpec::Socks5(AssetSocks5ProxySpec {
+            host: draft.proxy_socks5_host.clone(),
+            port: draft.proxy_socks5_port.clone(),
+            username: draft.proxy_socks5_username.clone(),
+            password_credential_ref: None,
+        }),
+        "ssh-asset" => AssetSshProxySpec::SshAsset {
+            asset_id: draft.proxy_ssh_asset_id.clone(),
+        },
+        _ => AssetSshProxySpec::None,
     }
 }
 

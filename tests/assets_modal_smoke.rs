@@ -2,7 +2,7 @@ use mica_term::AppWindow;
 use mica_term::WorkspaceTabItem;
 use mica_term::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
-    PersistedAssetPayload,
+    PersistedAssetPayload, PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec,
 };
 use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store, bind_top_status_bar_with_store_and_effects_and_asset_repo,
@@ -141,6 +141,44 @@ fn ssh_modal_round_trips_standard_fields_and_auth_fields() {
 }
 
 #[test]
+fn ssh_modal_round_trips_proxy_fields_and_visibility_flags() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-ssh-connection".into());
+    app.set_asset_ssh_modal_proxy_type("socks5".into());
+    app.set_asset_ssh_modal_proxy_socks5_host("proxy.example.net".into());
+    app.set_asset_ssh_modal_proxy_socks5_port("1080".into());
+    app.set_asset_ssh_modal_proxy_socks5_username("ops-proxy".into());
+    app.set_asset_ssh_modal_proxy_socks5_password("proxy-secret".into());
+    app.set_asset_ssh_modal_proxy_socks5_password_visible(true);
+    app.set_asset_ssh_modal_proxy_ssh_asset_id("asset-bastion".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_ssh_modal_proxy_type().as_str(), "socks5");
+    assert_eq!(
+        app.get_asset_ssh_modal_proxy_socks5_host().as_str(),
+        "proxy.example.net"
+    );
+    assert_eq!(app.get_asset_ssh_modal_proxy_socks5_port().as_str(), "1080");
+    assert_eq!(
+        app.get_asset_ssh_modal_proxy_socks5_username().as_str(),
+        "ops-proxy"
+    );
+    assert_eq!(
+        app.get_asset_ssh_modal_proxy_socks5_password().as_str(),
+        "proxy-secret"
+    );
+    assert!(app.get_asset_ssh_modal_proxy_socks5_password_visible());
+    assert_eq!(
+        app.get_asset_ssh_modal_proxy_ssh_asset_id().as_str(),
+        "asset-bastion"
+    );
+}
+
+#[test]
 fn ssh_modal_action_callback_contract_exposes_full_connect_family() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -240,6 +278,16 @@ fn ssh_modal_no_longer_renders_dead_connection_options_group() {
     assert!(!ssh_modal.contains("text: \"Connection Options\""));
     assert!(!ssh_modal.contains("label: \"Proxy Method\""));
     assert!(!ssh_modal.contains("label: \"Session Environment\""));
+    assert!(ssh_modal.contains("text: \"Proxy\""));
+    assert!(ssh_modal.contains("text: \"Proxy Type\""));
+    assert!(ssh_modal.contains("label: \"SOCKS5 Host\""));
+    assert!(ssh_modal.contains("label: \"SOCKS5 Port\""));
+    assert!(ssh_modal.contains("label: \"Username\""));
+    assert!(ssh_modal.contains("label: \"Password\""));
+    assert!(ssh_modal.contains("label: \"Upstream SSH Connection\""));
+    assert!(ssh_modal.contains("None"));
+    assert!(ssh_modal.contains("SOCKS5"));
+    assert!(ssh_modal.contains("Existing SSH Connection"));
 }
 
 #[test]
@@ -602,7 +650,13 @@ fn ssh_modal_confirm_updates_runtime_tree_and_persists_ssh_fields() {
     app.invoke_asset_ssh_modal_draft_changed("port".into(), "2022".into());
     app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     app.invoke_asset_ssh_modal_draft_changed("environment".into(), "prod".into());
-    app.invoke_asset_ssh_modal_draft_changed("proxy_method".into(), "jump-host".into());
+    app.invoke_asset_ssh_modal_draft_changed("proxy_type".into(), "socks5".into());
+    app.invoke_asset_ssh_modal_draft_changed(
+        "proxy_socks5_host".into(),
+        "proxy.example.net".into(),
+    );
+    app.invoke_asset_ssh_modal_draft_changed("proxy_socks5_port".into(), "1080".into());
+    app.invoke_asset_ssh_modal_draft_changed("proxy_socks5_username".into(), "ops-proxy".into());
     app.invoke_confirm_asset_modal_requested();
 
     assert_eq!(app.get_console_asset_items().row_count(), 1);
@@ -628,7 +682,15 @@ fn ssh_modal_confirm_updates_runtime_tree_and_persists_ssh_fields() {
             assert_eq!(spec.user, "ops");
             assert_eq!(spec.port, "2022");
             assert_eq!(spec.environment, "prod");
-            assert_eq!(spec.proxy_method, "jump-host");
+            assert_eq!(
+                spec.proxy,
+                PersistedAssetSshProxySpec::Socks5(PersistedAssetSocks5ProxySpec {
+                    host: "proxy.example.net".into(),
+                    port: "1080".into(),
+                    username: "ops-proxy".into(),
+                    password_credential_ref: None,
+                })
+            );
         }
         PersistedAssetPayload::Folder => panic!("expected ssh payload"),
     }

@@ -491,6 +491,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_password_visible(false);
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
+            window.set_asset_ssh_modal_proxy_type("none".into());
+            window.set_asset_ssh_modal_proxy_socks5_host("".into());
+            window.set_asset_ssh_modal_proxy_socks5_port("".into());
+            window.set_asset_ssh_modal_proxy_socks5_username("".into());
+            window.set_asset_ssh_modal_proxy_socks5_password("".into());
+            window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
+            window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
         Some(AssetModalState::NewSshConnection {
@@ -534,6 +541,19 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_password_visible(draft.password_visible);
             window.set_asset_ssh_modal_remark(draft.remark.clone().into());
             window.set_asset_ssh_modal_environment(draft.environment.clone().into());
+            window.set_asset_ssh_modal_proxy_type(draft.proxy_type.clone().into());
+            window.set_asset_ssh_modal_proxy_socks5_host(draft.proxy_socks5_host.clone().into());
+            window.set_asset_ssh_modal_proxy_socks5_port(draft.proxy_socks5_port.clone().into());
+            window.set_asset_ssh_modal_proxy_socks5_username(
+                draft.proxy_socks5_username.clone().into(),
+            );
+            window.set_asset_ssh_modal_proxy_socks5_password(
+                draft.proxy_socks5_password.clone().into(),
+            );
+            window.set_asset_ssh_modal_proxy_socks5_password_visible(
+                draft.proxy_socks5_password_visible,
+            );
+            window.set_asset_ssh_modal_proxy_ssh_asset_id(draft.proxy_ssh_asset_id.clone().into());
             window.set_asset_ssh_modal_proxy_method(draft.proxy_method.clone().into());
             window.set_asset_ssh_modal_connect_family_enabled(
                 state.ssh_modal_connect_family_enabled(),
@@ -573,6 +593,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_password_visible(false);
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
+            window.set_asset_ssh_modal_proxy_type("none".into());
+            window.set_asset_ssh_modal_proxy_socks5_host("".into());
+            window.set_asset_ssh_modal_proxy_socks5_port("".into());
+            window.set_asset_ssh_modal_proxy_socks5_username("".into());
+            window.set_asset_ssh_modal_proxy_socks5_password("".into());
+            window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
+            window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
         Some(AssetModalState::DeleteAssetConfirm {
@@ -609,6 +636,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_password_visible(false);
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
+            window.set_asset_ssh_modal_proxy_type("none".into());
+            window.set_asset_ssh_modal_proxy_socks5_host("".into());
+            window.set_asset_ssh_modal_proxy_socks5_port("".into());
+            window.set_asset_ssh_modal_proxy_socks5_username("".into());
+            window.set_asset_ssh_modal_proxy_socks5_password("".into());
+            window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
+            window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
         None => {
@@ -641,6 +675,13 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_password_visible(false);
             window.set_asset_ssh_modal_remark("".into());
             window.set_asset_ssh_modal_environment("".into());
+            window.set_asset_ssh_modal_proxy_type("none".into());
+            window.set_asset_ssh_modal_proxy_socks5_host("".into());
+            window.set_asset_ssh_modal_proxy_socks5_port("".into());
+            window.set_asset_ssh_modal_proxy_socks5_username("".into());
+            window.set_asset_ssh_modal_proxy_socks5_password("".into());
+            window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
+            window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
     }

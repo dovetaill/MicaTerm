@@ -4,8 +4,8 @@ use std::fs;
 
 use mica_term::app::window_state::WindowPlacementKind;
 use mica_term::shell::assets::{
-    AssetNameValidation, AssetNodePayload, AssetSshConnectionSpec, AssetTree, AssetViewMode,
-    ConsoleAssetKind,
+    AssetNameValidation, AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec,
+    AssetSshProxySpec, AssetTree, AssetViewMode, ConsoleAssetKind,
 };
 use mica_term::shell::context_menu::{
     ContextTargetKind, SelectionContext, resolve_action_tree, visible_columns_for_path,
@@ -164,10 +164,6 @@ fn new_ssh_modal_is_a_grouped_single_page_form() {
         "ssh modal should not keep the legacy Standard tab in the grouped layout"
     );
     assert!(
-        !ssh_modal.contains("\"Proxy\""),
-        "ssh modal should not keep the legacy Proxy tab in the grouped layout"
-    );
-    assert!(
         !ssh_modal.contains("\"Environment\""),
         "ssh modal should not keep the legacy Environment tab in the grouped layout"
     );
@@ -185,6 +181,8 @@ fn new_ssh_modal_is_a_grouped_single_page_form() {
         "ssh modal should remove the legacy clear-secret affordance"
     );
     assert!(ssh_modal.contains("label: \"Password\""));
+    assert!(ssh_modal.contains("text: \"Proxy\""));
+    assert!(ssh_modal.contains("text: \"Proxy Type\""));
     assert!(
         ssh_modal.contains("trailing-action-text: root.password-visible ? \"Hide\" : \"Show\"")
     );
@@ -310,6 +308,81 @@ fn opening_new_ssh_modal_does_not_insert_placeholder_row() {
     assert!(matches!(
         view_model.asset_modal_state,
         Some(AssetModalState::NewSshConnection { .. })
+    ));
+}
+
+#[test]
+fn new_ssh_modal_defaults_proxy_type_to_none() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_new_ssh_modal(None);
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.proxy_type == "none"
+                && draft.proxy_socks5_host.is_empty()
+                && draft.proxy_socks5_port.is_empty()
+                && draft.proxy_socks5_username.is_empty()
+                && draft.proxy_socks5_password.is_empty()
+                && !draft.proxy_socks5_password_visible
+                && draft.proxy_ssh_asset_id.is_empty()
+    ));
+}
+
+#[test]
+fn selecting_socks5_proxy_updates_only_socks5_draft_fields() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_field("password", "secret".into());
+    view_model.update_ssh_modal_field("proxy_ssh_asset_id", "asset-upstream".into());
+    view_model.update_ssh_modal_field("proxy_type", "socks5".into());
+    view_model.update_ssh_modal_field("proxy_socks5_host", "proxy.example.net".into());
+    view_model.update_ssh_modal_field("proxy_socks5_port", "1080".into());
+    view_model.update_ssh_modal_field("proxy_socks5_username", "ops-proxy".into());
+    view_model.update_ssh_modal_field("proxy_socks5_password", "proxy-secret".into());
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.proxy_type == "socks5"
+                && draft.proxy_socks5_host == "proxy.example.net"
+                && draft.proxy_socks5_port == "1080"
+                && draft.proxy_socks5_username == "ops-proxy"
+                && draft.proxy_socks5_password == "proxy-secret"
+                && draft.password == "secret"
+                && draft.proxy_ssh_asset_id == "asset-upstream"
+    ));
+}
+
+#[test]
+fn selecting_ssh_asset_proxy_stores_upstream_asset_id() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_field("proxy_type", "ssh-asset".into());
+    view_model.update_ssh_modal_field("proxy_ssh_asset_id", "asset-bastion".into());
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.proxy_type == "ssh-asset" && draft.proxy_ssh_asset_id == "asset-bastion"
+    ));
+}
+
+#[test]
+fn switching_proxy_type_clears_stale_validation_text() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_new_ssh_modal(None);
+    assert!(!view_model.begin_ssh_modal_action("save"));
+    view_model.update_ssh_modal_field("proxy_type", "socks5".into());
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.proxy_type == "socks5" && draft.validation_message.is_empty()
     ));
 }
 
@@ -888,7 +961,10 @@ fn edit_connection_opens_modal_with_prefilled_non_secret_fields() {
             private_key_source: "path".into(),
             private_key_path: "/tmp/id_ed25519".into(),
             environment: "prod".into(),
-            proxy_method: "jump-host".into(),
+            proxy: AssetSshProxySpec::SshAsset {
+                asset_id: "asset-upstream".into(),
+            },
+            proxy_method: String::new(),
             remark: "Primary entry point".into(),
             credential_ref: Some("ssh/private-key/asset-prod".into()),
         }),
@@ -912,11 +988,57 @@ fn edit_connection_opens_modal_with_prefilled_non_secret_fields() {
             && draft.private_key_source == "path"
             && draft.private_key_path == "/tmp/id_ed25519"
             && draft.environment == "prod"
-            && draft.proxy_method == "jump-host"
+            && draft.proxy_type == "ssh-asset"
+            && draft.proxy_ssh_asset_id == "asset-upstream"
             && draft.remark == "Primary entry point"
             && draft.password.is_empty()
             && draft.private_key_content.is_empty()
             && draft.passphrase.is_empty()
+    ));
+}
+
+#[test]
+fn edit_connection_opens_modal_with_prefilled_socks5_proxy_fields() {
+    let mut view_model = ShellViewModel::default();
+    let mut tree = AssetTree::new();
+    let asset_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Prod Bastion",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "2022".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: "prod".into(),
+            proxy: AssetSshProxySpec::Socks5(AssetSocks5ProxySpec {
+                host: "proxy.example.net".into(),
+                port: "1080".into(),
+                username: "ops-proxy".into(),
+                password_credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+            }),
+            proxy_method: String::new(),
+            remark: "Primary entry point".into(),
+            credential_ref: Some("ssh/private-key/asset-prod".into()),
+        }),
+    );
+    view_model.replace_console_asset_tree(tree);
+
+    view_model.open_edit_ssh_modal(asset_id.clone());
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection {
+            editing_asset_id: Some(ref editing_asset_id),
+            ref draft,
+            ..
+        }) if editing_asset_id == &asset_id
+            && draft.proxy_type == "socks5"
+            && draft.proxy_socks5_host == "proxy.example.net"
+            && draft.proxy_socks5_port == "1080"
+            && draft.proxy_socks5_username == "ops-proxy"
+            && draft.proxy_socks5_password.is_empty()
     ));
 }
 
@@ -935,6 +1057,7 @@ fn editing_saved_path_modal_switches_to_inline_content_when_private_key_content_
             private_key_source: "path".into(),
             private_key_path: "/tmp/id_ed25519".into(),
             environment: String::new(),
+            proxy: AssetSshProxySpec::None,
             proxy_method: String::new(),
             remark: "Legacy path asset".into(),
             credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
@@ -976,6 +1099,7 @@ fn editing_saved_ssh_modal_keeps_password_fields_hidden_until_secret_hydration_e
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: String::new(),
+            proxy: AssetSshProxySpec::None,
             proxy_method: String::new(),
             remark: "Saved credential".into(),
             credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
@@ -1010,6 +1134,7 @@ fn editing_saved_ssh_modal_allows_direct_password_editing_after_secret_hydration
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: String::new(),
+            proxy: AssetSshProxySpec::None,
             proxy_method: String::new(),
             remark: "Saved credential".into(),
             credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
@@ -1047,6 +1172,7 @@ fn hydrating_edit_ssh_modal_secret_updates_active_draft_and_inline_error() {
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: String::new(),
+            proxy: AssetSshProxySpec::None,
             proxy_method: String::new(),
             remark: "Saved credential".into(),
             credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
@@ -1092,6 +1218,7 @@ fn edit_connection_context_action_routes_to_ssh_edit_modal() {
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "prod".into(),
+            proxy: AssetSshProxySpec::None,
             proxy_method: "jump-host".into(),
             remark: "Primary entry point".into(),
             credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
