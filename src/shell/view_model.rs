@@ -1664,7 +1664,7 @@ fn build_saved_ssh_connection_spec(
     draft: &AssetSshConnectionDraft,
     existing_spec: Option<&AssetSshConnectionSpec>,
 ) -> AssetSshConnectionSpec {
-    let uses_saved_secret = match draft.auth_method.as_str() {
+    let uses_saved_auth_secret = match draft.auth_method.as_str() {
         "password" => !draft.password.trim().is_empty(),
         "private-key" if draft.private_key_source == "content" => {
             !draft.private_key_content.trim().is_empty()
@@ -1672,12 +1672,25 @@ fn build_saved_ssh_connection_spec(
         "private-key" if draft.private_key_source == "path" => !draft.passphrase.trim().is_empty(),
         _ => false,
     };
-    let credential_ref = match draft.auth_method.as_str() {
-        "password" | "private-key" if uses_saved_secret => {
-            Some(saved_ssh_credential_ref(asset_id, existing_spec))
-        }
-        _ => None,
+    let uses_saved_proxy_secret =
+        draft.proxy_type == "socks5" && !draft.proxy_socks5_password.trim().is_empty();
+    let saved_secret_ref =
+        (uses_saved_auth_secret || uses_saved_proxy_secret).then(|| {
+            saved_ssh_credential_ref(asset_id, existing_spec)
+        });
+    let credential_ref = if uses_saved_auth_secret || uses_saved_proxy_secret {
+        saved_secret_ref.clone()
+    } else {
+        None
     };
+    let mut proxy = build_draft_proxy_spec(draft);
+    if let AssetSshProxySpec::Socks5(spec) = &mut proxy {
+        spec.password_credential_ref = if uses_saved_proxy_secret {
+            saved_secret_ref.clone()
+        } else {
+            None
+        };
+    }
 
     AssetSshConnectionSpec {
         host: draft.host.clone(),
@@ -1691,7 +1704,7 @@ fn build_saved_ssh_connection_spec(
             draft.private_key_path.clone()
         },
         environment: draft.environment.clone(),
-        proxy: build_draft_proxy_spec(draft),
+        proxy,
         proxy_method: String::new(),
         remark: draft.remark.clone(),
         credential_ref,

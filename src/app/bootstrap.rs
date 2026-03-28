@@ -30,10 +30,11 @@ use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::ssh::credentials::{
     CachedCredentialStore, CredentialStore, FileCredentialStore, StoredSecretLookupError,
-    StoredSshSecretBundle, persist_secret_bundle, required_secret_bundle_field,
+    StoredSshSecretBundle, load_secret_bundle_with_diagnostics, persist_secret_bundle,
+    required_secret_bundle_field,
 };
 use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
-use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
+use crate::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, SshAuthMethod};
 use crate::app::ssh::proxy::resolve_proxy_chain;
 use crate::app::ssh::runtime::{
     SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
@@ -138,6 +139,7 @@ struct EditSshModalSecretHydration {
     password: Option<String>,
     private_key_content: Option<String>,
     passphrase: Option<String>,
+    proxy_socks5_password: Option<String>,
     inline_error: Option<String>,
 }
 
@@ -798,6 +800,14 @@ fn runtime_profile_for_saved_asset(
     runtime_ready_profile(state, profile_for_saved_asset(state, asset_id)?)
 }
 
+fn validate_saved_modal_profile(
+    state: &ShellViewModel,
+    asset_id: &str,
+) -> anyhow::Result<()> {
+    let _ = runtime_profile_for_saved_asset(state, asset_id)?;
+    Ok(())
+}
+
 fn profile_for_modal_action(
     state: &ShellViewModel,
     draft: &AssetSshConnectionDraft,
@@ -847,6 +857,16 @@ fn resolve_edit_ssh_modal_secret_hydration(
     profile: &ConnectionProfile,
     credential_store: &dyn CredentialStore,
 ) -> EditSshModalSecretHydration {
+    let proxy_socks5_password =
+        match resolve_proxy_socks5_secret_hydration(profile, credential_store) {
+            Ok(password) => password,
+            Err(message) => {
+                return EditSshModalSecretHydration {
+                    inline_error: Some(message),
+                    ..EditSshModalSecretHydration::default()
+                };
+            }
+        };
     let secret_label = match profile.auth_method {
         SshAuthMethod::Password => "SSH password secret",
         SshAuthMethod::PrivateKeyContent => "SSH inline private key secret",
@@ -879,9 +899,11 @@ fn resolve_edit_ssh_modal_secret_hydration(
             match required_secret_bundle_field(&bundle, &credential_ref, "password") {
                 Ok(password) => EditSshModalSecretHydration {
                     password: Some(password),
+                    proxy_socks5_password,
                     ..EditSshModalSecretHydration::default()
                 },
                 Err(err) => EditSshModalSecretHydration {
+                    proxy_socks5_password,
                     inline_error: Some(stored_secret_lookup_message(profile, secret_label, &err)),
                     ..EditSshModalSecretHydration::default()
                 },
@@ -904,10 +926,12 @@ fn resolve_edit_ssh_modal_secret_hydration(
                 Ok(private_key_content) => EditSshModalSecretHydration {
                     private_key_content: Some(private_key_content),
                     passphrase,
+                    proxy_socks5_password,
                     ..EditSshModalSecretHydration::default()
                 },
                 Err(err) => EditSshModalSecretHydration {
                     passphrase,
+                    proxy_socks5_password,
                     inline_error: Some(stored_secret_lookup_message(profile, secret_label, &err)),
                     ..EditSshModalSecretHydration::default()
                 },
@@ -916,6 +940,7 @@ fn resolve_edit_ssh_modal_secret_hydration(
         SshAuthMethod::PrivateKeyPath => EditSshModalSecretHydration {
             passphrase: stored_bundle
                 .and_then(|(_, bundle)| non_empty_saved_secret(bundle.passphrase.as_deref())),
+            proxy_socks5_password,
             ..EditSshModalSecretHydration::default()
         },
     }
@@ -937,6 +962,10 @@ fn hydrate_edit_ssh_modal_secret_from_store(
         },
     };
 
+    state.update_ssh_modal_field(
+        "proxy_socks5_password",
+        hydration.proxy_socks5_password.clone().unwrap_or_default(),
+    );
     state.hydrate_edit_ssh_modal_secret(
         hydration.password,
         hydration.private_key_content,
@@ -950,28 +979,57 @@ fn temporary_session_asset_id_for_profile(profile: &ConnectionProfile) -> String
 }
 
 fn saved_secret_bundle_for_draft(draft: &AssetSshConnectionDraft) -> StoredSshSecretBundle {
+    let proxy_socks5_password = if draft.proxy_type == "socks5" {
+        (!draft.proxy_socks5_password.trim().is_empty()).then(|| draft.proxy_socks5_password.clone())
+    } else {
+        None
+    };
     match draft.auth_method.as_str() {
         "password" => StoredSshSecretBundle {
             password: (!draft.password.trim().is_empty()).then(|| draft.password.clone()),
             private_key_content: None,
             passphrase: None,
-            proxy_socks5_password: None,
+            proxy_socks5_password,
         },
         "private-key" if draft.private_key_source == "content" => StoredSshSecretBundle {
             password: None,
             private_key_content: (!draft.private_key_content.trim().is_empty())
                 .then(|| draft.private_key_content.clone()),
             passphrase: (!draft.passphrase.trim().is_empty()).then(|| draft.passphrase.clone()),
-            proxy_socks5_password: None,
+            proxy_socks5_password,
         },
         "private-key" if draft.private_key_source == "path" => StoredSshSecretBundle {
             password: None,
             private_key_content: None,
             passphrase: (!draft.passphrase.trim().is_empty()).then(|| draft.passphrase.clone()),
-            proxy_socks5_password: None,
+            proxy_socks5_password,
         },
         _ => StoredSshSecretBundle::default(),
     }
+}
+
+fn resolve_proxy_socks5_secret_hydration(
+    profile: &ConnectionProfile,
+    credential_store: &dyn CredentialStore,
+) -> std::result::Result<Option<String>, String> {
+    let ConnectionProxyProfile::Socks5 {
+        credential_ref: Some(credential_ref),
+        ..
+    } = &profile.proxy
+    else {
+        return Ok(None);
+    };
+
+    let bundle = load_secret_bundle_with_diagnostics(credential_store, Some(credential_ref))
+        .map_err(|err| {
+            stored_secret_lookup_message(profile, "SOCKS5 proxy password secret", &err)
+        })?;
+
+    required_secret_bundle_field(&bundle, credential_ref, "proxy_socks5_password")
+        .map(Some)
+        .map_err(|err| {
+            stored_secret_lookup_message(profile, "SOCKS5 proxy password secret", &err)
+        })
 }
 
 fn sync_saved_ssh_secrets(
@@ -3000,23 +3058,27 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     did_mutate = state.confirm_asset_modal();
                     if !did_mutate {
                         state.finish_ssh_modal_action_error("Failed to save connection.");
-                    } else if let Some(saved_spec) =
-                        state.focused_asset_id.clone().and_then(|asset_id| {
+                    } else if let Some(asset_id) = state.focused_asset_id.clone() {
+                        if let Err(err) = validate_saved_modal_profile(&state, &asset_id) {
+                            *state = previous_state;
+                            did_mutate = false;
+                            state.finish_ssh_modal_action_error(err.to_string());
+                        } else if let Some(saved_spec) =
                             state
                                 .console_asset_tree()
                                 .ssh_connection_spec(&asset_id)
                                 .cloned()
-                        })
-                        && let Err(err) = sync_saved_ssh_secrets(
-                            credential_store_ref.as_ref(),
-                            &request.draft,
-                            existing_saved_spec.as_ref(),
-                            &saved_spec,
-                        )
-                    {
-                        *state = previous_state;
-                        did_mutate = false;
-                        state.finish_ssh_modal_action_error(err.to_string());
+                            && let Err(err) = sync_saved_ssh_secrets(
+                                credential_store_ref.as_ref(),
+                                &request.draft,
+                                existing_saved_spec.as_ref(),
+                                &saved_spec,
+                            )
+                        {
+                            *state = previous_state;
+                            did_mutate = false;
+                            state.finish_ssh_modal_action_error(err.to_string());
+                        }
                     }
                 }
                 SshModalAction::TestConnection => {
@@ -3081,7 +3143,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     did_mutate = state.confirm_asset_modal();
                     if did_mutate {
                         if let Some(asset_id) = state.focused_asset_id.clone() {
-                            if let Some(saved_spec) = state
+                            if let Err(err) = validate_saved_modal_profile(&state, &asset_id) {
+                                *state = previous_state;
+                                did_mutate = false;
+                                state.finish_ssh_modal_action_error(err.to_string());
+                            } else if let Some(saved_spec) = state
                                 .console_asset_tree()
                                 .ssh_connection_spec(&asset_id)
                                 .cloned()

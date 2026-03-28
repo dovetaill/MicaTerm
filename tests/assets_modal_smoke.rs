@@ -695,3 +695,66 @@ fn ssh_modal_confirm_updates_runtime_tree_and_persists_ssh_fields() {
         PersistedAssetPayload::Folder => panic!("expected ssh payload"),
     }
 }
+
+#[test]
+fn ssh_modal_confirm_persists_existing_ssh_connection_proxy_selection() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(ModalAssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> =
+        Rc::new(RecordingModalAssetRepo::new(Rc::clone(&repo_state)));
+
+    bind_top_status_bar_with_store_and_effects_and_asset_repo(
+        &app,
+        None,
+        default_platform_window_effects(),
+        Some(asset_repo),
+    );
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Upstream Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.10".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let upstream_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("saved upstream ssh asset")
+        .id
+        .to_string();
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Target Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.11".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+    app.invoke_asset_ssh_modal_draft_changed("proxy_type".into(), "ssh-asset".into());
+    app.invoke_asset_ssh_modal_draft_changed(
+        "proxy_ssh_asset_id".into(),
+        upstream_id.clone().into(),
+    );
+    app.invoke_confirm_asset_modal_requested();
+
+    let save_attempts = &repo_state.borrow().save_attempts;
+    assert_eq!(save_attempts.len(), 2);
+    let target_id = save_attempts[1]
+        .root_ids
+        .iter()
+        .find(|id| id.as_str() != upstream_id.as_str())
+        .expect("target asset id");
+    let node = save_attempts[1].nodes.get(target_id.as_str()).unwrap();
+    match &node.payload {
+        PersistedAssetPayload::SshConnection(spec) => {
+            assert_eq!(
+                spec.proxy,
+                PersistedAssetSshProxySpec::SshAsset {
+                    asset_id: upstream_id,
+                }
+            );
+        }
+        PersistedAssetPayload::Folder => panic!("expected ssh payload"),
+    }
+}

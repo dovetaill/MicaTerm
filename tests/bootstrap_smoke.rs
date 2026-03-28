@@ -14,7 +14,8 @@ use anyhow::{Result, anyhow};
 use mica_term::AppWindow;
 use mica_term::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
-    PersistedAssetKind, PersistedAssetNode, PersistedAssetPayload, PersistedSshConnectionSpec,
+    PersistedAssetKind, PersistedAssetNode, PersistedAssetPayload,
+    PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec, PersistedSshConnectionSpec,
     catalog_to_asset_tree,
 };
 use mica_term::app::bootstrap::{
@@ -882,7 +883,7 @@ fn loaded_catalog_for_bootstrap() -> PersistedAssetCatalog {
                         private_key_source: "content".into(),
                         private_key_path: String::new(),
                         environment: "prod".into(),
-                        proxy_method: "jump-host".into(),
+                        proxy: PersistedAssetSshProxySpec::None,
                         remark: String::new(),
                         credential_ref: None,
                     }),
@@ -912,7 +913,7 @@ fn loaded_legacy_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
                     private_key_source: String::new(),
                     private_key_path: String::new(),
                     environment: String::new(),
-                    proxy_method: String::new(),
+                    proxy: PersistedAssetSshProxySpec::None,
                     remark: String::new(),
                     credential_ref: None,
                 }),
@@ -941,7 +942,7 @@ fn loaded_saved_password_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
                     private_key_source: "content".into(),
                     private_key_path: String::new(),
                     environment: String::new(),
-                    proxy_method: String::new(),
+                    proxy: PersistedAssetSshProxySpec::None,
                     remark: "Saved credential".into(),
                     credential_ref: Some("ssh/saved-secrets/ssh-prod".into()),
                 }),
@@ -970,9 +971,129 @@ fn loaded_saved_private_key_path_ssh_catalog_for_bootstrap() -> PersistedAssetCa
                     private_key_source: "path".into(),
                     private_key_path: "/tmp/id_ed25519".into(),
                     environment: String::new(),
-                    proxy_method: String::new(),
+                    proxy: PersistedAssetSshProxySpec::None,
                     remark: "Saved passphrase".into(),
                     credential_ref: Some("ssh/saved-secrets/ssh-path".into()),
+                }),
+            },
+        )]),
+    }
+}
+
+fn loaded_saved_socks5_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
+    PersistedAssetCatalog {
+        schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+        root_ids: vec!["ssh-socks5".into()],
+        nodes: BTreeMap::from([(
+            "ssh-socks5".into(),
+            PersistedAssetNode {
+                id: "ssh-socks5".into(),
+                parent_id: None,
+                title: "SOCKS5 Bastion".into(),
+                kind: PersistedAssetKind::SshConnection,
+                child_ids: Vec::new(),
+                payload: PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                    host: "10.0.0.30".into(),
+                    user: "ops".into(),
+                    port: "22".into(),
+                    auth_method: "password".into(),
+                    private_key_source: "content".into(),
+                    private_key_path: String::new(),
+                    environment: "prod".into(),
+                    proxy: PersistedAssetSshProxySpec::Socks5(PersistedAssetSocks5ProxySpec {
+                        host: "proxy.example.net".into(),
+                        port: "1080".into(),
+                        username: "ops-proxy".into(),
+                        password_credential_ref: Some("ssh/saved-secrets/ssh-socks5".into()),
+                    }),
+                    remark: "Saved proxy credential".into(),
+                    credential_ref: Some("ssh/saved-secrets/ssh-socks5".into()),
+                }),
+            },
+        )]),
+    }
+}
+
+fn loaded_saved_upstream_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
+    PersistedAssetCatalog {
+        schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+        root_ids: vec!["ssh-upstream".into(), "ssh-target".into()],
+        nodes: BTreeMap::from([
+            (
+                "ssh-upstream".into(),
+                PersistedAssetNode {
+                    id: "ssh-upstream".into(),
+                    parent_id: None,
+                    title: "Upstream Bastion".into(),
+                    kind: PersistedAssetKind::SshConnection,
+                    child_ids: Vec::new(),
+                    payload: PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                        host: "10.0.0.40".into(),
+                        user: "ops".into(),
+                        port: "22".into(),
+                        auth_method: "password".into(),
+                        private_key_source: "content".into(),
+                        private_key_path: String::new(),
+                        environment: "prod".into(),
+                        proxy: PersistedAssetSshProxySpec::None,
+                        remark: String::new(),
+                        credential_ref: None,
+                    }),
+                },
+            ),
+            (
+                "ssh-target".into(),
+                PersistedAssetNode {
+                    id: "ssh-target".into(),
+                    parent_id: None,
+                    title: "Target Bastion".into(),
+                    kind: PersistedAssetKind::SshConnection,
+                    child_ids: Vec::new(),
+                    payload: PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                        host: "10.0.0.41".into(),
+                        user: "ops".into(),
+                        port: "22".into(),
+                        auth_method: "password".into(),
+                        private_key_source: "content".into(),
+                        private_key_path: String::new(),
+                        environment: "prod".into(),
+                        proxy: PersistedAssetSshProxySpec::SshAsset {
+                            asset_id: "ssh-upstream".into(),
+                        },
+                        remark: "Saved upstream reference".into(),
+                        credential_ref: None,
+                    }),
+                },
+            ),
+        ]),
+    }
+}
+
+fn loaded_missing_upstream_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
+    PersistedAssetCatalog {
+        schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+        root_ids: vec!["ssh-missing-upstream".into()],
+        nodes: BTreeMap::from([(
+            "ssh-missing-upstream".into(),
+            PersistedAssetNode {
+                id: "ssh-missing-upstream".into(),
+                parent_id: None,
+                title: "Broken Bastion".into(),
+                kind: PersistedAssetKind::SshConnection,
+                child_ids: Vec::new(),
+                payload: PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                    host: "10.0.0.50".into(),
+                    user: "ops".into(),
+                    port: "22".into(),
+                    auth_method: "password".into(),
+                    private_key_source: "content".into(),
+                    private_key_path: String::new(),
+                    environment: "prod".into(),
+                    proxy: PersistedAssetSshProxySpec::SshAsset {
+                        asset_id: "ssh-upstream-missing".into(),
+                    },
+                    remark: "Missing upstream reference".into(),
+                    credential_ref: Some("ssh/saved-secrets/ssh-missing-upstream".into()),
                 }),
             },
         )]),
@@ -1109,6 +1230,7 @@ fn editing_legacy_saved_ssh_asset_reuses_fallback_saved_secret_for_test_connecti
             password: Some("secret".into()),
             private_key_content: None,
             passphrase: None,
+            proxy_socks5_password: None,
         },
     )
     .expect("persist legacy saved ssh secret");
@@ -1168,6 +1290,7 @@ fn editing_saved_password_modal_hydrates_real_secret_masked() {
             password: Some("secret".into()),
             private_key_content: None,
             passphrase: None,
+            proxy_socks5_password: None,
         },
     )
     .expect("persist saved ssh secret");
@@ -1195,6 +1318,209 @@ fn editing_saved_password_modal_hydrates_real_secret_masked() {
     );
     assert_eq!(app.get_asset_ssh_modal_password().as_str(), "secret");
     assert!(!app.get_asset_ssh_modal_password_visible());
+}
+
+#[test]
+fn editing_saved_socks5_modal_hydrates_proxy_fields_and_proxy_password() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_saved_socks5_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    persist_secret_bundle(
+        credential_store.as_ref(),
+        "ssh/saved-secrets/ssh-socks5",
+        &StoredSshSecretBundle {
+            password: Some("secret".into()),
+            private_key_content: None,
+            passphrase: None,
+            proxy_socks5_password: Some("proxy-secret".into()),
+        },
+    )
+    .expect("persist saved socks5 secret bundle");
+    bind_with_launcher_and_credential_store(
+        &app,
+        Some(asset_repo),
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+    );
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("saved socks5 ssh asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_ssh_modal_proxy_type().as_str(), "socks5");
+    assert_eq!(
+        app.get_asset_ssh_modal_proxy_socks5_host().as_str(),
+        "proxy.example.net"
+    );
+    assert_eq!(app.get_asset_ssh_modal_proxy_socks5_port().as_str(), "1080");
+    assert_eq!(
+        app.get_asset_ssh_modal_proxy_socks5_username().as_str(),
+        "ops-proxy"
+    );
+    assert_eq!(
+        app.get_asset_ssh_modal_proxy_socks5_password().as_str(),
+        "proxy-secret"
+    );
+    assert!(!app.get_asset_ssh_modal_proxy_socks5_password_visible());
+}
+
+#[test]
+fn editing_saved_upstream_ssh_modal_projects_selected_upstream_asset_id() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_saved_upstream_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    bind_with_fake_sessions(&app, Some(asset_repo));
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(1)
+        .expect("target ssh asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_ssh_modal_proxy_type().as_str(), "ssh-asset");
+    assert_eq!(
+        app.get_asset_ssh_modal_proxy_ssh_asset_id().as_str(),
+        "ssh-upstream"
+    );
+}
+
+#[test]
+fn test_connection_with_missing_upstream_reports_inline_feedback_without_probe() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_missing_upstream_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    persist_secret_bundle(
+        credential_store.as_ref(),
+        "ssh/saved-secrets/ssh-missing-upstream",
+        &StoredSshSecretBundle {
+            password: Some("secret".into()),
+            private_key_content: None,
+            passphrase: None,
+            proxy_socks5_password: None,
+        },
+    )
+    .expect("persist missing-upstream ssh auth secret");
+    let launcher_state = Arc::new(Mutex::new(RecordingLauncherState::default()));
+    bind_with_launcher_and_credential_store(
+        &app,
+        Some(asset_repo),
+        Arc::new(RecordingLauncher {
+            state: Arc::clone(&launcher_state),
+        }),
+        Arc::clone(&credential_store),
+    );
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("broken ssh asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+    app.invoke_asset_ssh_modal_action_requested("test".into());
+
+    let launcher_state = launcher_state
+        .lock()
+        .expect("lock recording launcher state");
+    assert!(app.get_asset_modal_open());
+    assert!(launcher_state.probe_profiles.is_empty());
+    assert!(launcher_state.launch_profiles.is_empty());
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "error");
+    assert_eq!(
+        app.get_asset_ssh_modal_feedback_message().as_str(),
+        "upstream SSH asset `ssh-upstream-missing` was not found"
+    );
+}
+
+#[test]
+fn connect_with_missing_upstream_reports_inline_feedback_without_launch() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_missing_upstream_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    persist_secret_bundle(
+        credential_store.as_ref(),
+        "ssh/saved-secrets/ssh-missing-upstream",
+        &StoredSshSecretBundle {
+            password: Some("secret".into()),
+            private_key_content: None,
+            passphrase: None,
+            proxy_socks5_password: None,
+        },
+    )
+    .expect("persist missing-upstream ssh auth secret");
+    let launcher_state = Arc::new(Mutex::new(RecordingLauncherState::default()));
+    bind_with_launcher_and_credential_store(
+        &app,
+        Some(asset_repo),
+        Arc::new(RecordingLauncher {
+            state: Arc::clone(&launcher_state),
+        }),
+        Arc::clone(&credential_store),
+    );
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("broken ssh asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+    app.invoke_asset_ssh_modal_action_requested("connect".into());
+
+    let launcher_state = launcher_state
+        .lock()
+        .expect("lock recording launcher state");
+    assert!(app.get_asset_modal_open());
+    assert!(launcher_state.probe_profiles.is_empty());
+    assert!(launcher_state.launch_profiles.is_empty());
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "error");
+    assert_eq!(
+        app.get_asset_ssh_modal_feedback_message().as_str(),
+        "upstream SSH asset `ssh-upstream-missing` was not found"
+    );
 }
 
 #[test]
@@ -1282,6 +1608,7 @@ fn editing_saved_private_key_path_modal_hydrates_saved_passphrase() {
             password: None,
             private_key_content: None,
             passphrase: Some("hunter2".into()),
+            proxy_socks5_password: None,
         },
     )
     .expect("persist saved ssh passphrase");
@@ -1335,6 +1662,7 @@ fn editing_saved_private_key_path_modal_saving_blank_passphrase_deletes_saved_pa
             password: None,
             private_key_content: None,
             passphrase: Some("hunter2".into()),
+            proxy_socks5_password: None,
         },
     )
     .expect("persist saved ssh passphrase");
@@ -1548,7 +1876,12 @@ fn create_rename_delete_and_ssh_edit_trigger_repository_save() {
     app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
     app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
     app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
-    app.invoke_asset_ssh_modal_draft_changed("proxy_method".into(), "jump-host".into());
+    app.invoke_asset_ssh_modal_draft_changed("proxy_type".into(), "socks5".into());
+    app.invoke_asset_ssh_modal_draft_changed(
+        "proxy_socks5_host".into(),
+        "proxy.example.net".into(),
+    );
+    app.invoke_asset_ssh_modal_draft_changed("proxy_socks5_port".into(), "1080".into());
     app.invoke_confirm_asset_modal_requested();
     assert_eq!(repo_state.borrow().save_attempts.len(), 2);
 
@@ -1568,6 +1901,66 @@ fn create_rename_delete_and_ssh_edit_trigger_repository_save() {
     app.invoke_assets_context_menu_action_invoked("delete-asset".into());
     app.invoke_confirm_delete_asset_requested();
     assert_eq!(repo_state.borrow().save_attempts.len(), 4);
+}
+
+#[test]
+fn saving_self_referential_upstream_proxy_is_blocked_before_runtime_launch() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_saved_password_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    persist_secret_bundle(
+        credential_store.as_ref(),
+        "ssh/saved-secrets/ssh-prod",
+        &StoredSshSecretBundle {
+            password: Some("secret".into()),
+            private_key_content: None,
+            passphrase: None,
+            proxy_socks5_password: None,
+        },
+    )
+    .expect("persist existing ssh auth secret");
+    let launcher_state = Arc::new(Mutex::new(RecordingLauncherState::default()));
+    bind_with_launcher_and_credential_store(
+        &app,
+        Some(asset_repo),
+        Arc::new(RecordingLauncher {
+            state: Arc::clone(&launcher_state),
+        }),
+        Arc::clone(&credential_store),
+    );
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("saved ssh asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.clone().into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("proxy_type".into(), "ssh-asset".into());
+    app.invoke_asset_ssh_modal_draft_changed("proxy_ssh_asset_id".into(), ssh_id.into());
+    app.invoke_asset_ssh_modal_action_requested("save".into());
+
+    let launcher_state = launcher_state
+        .lock()
+        .expect("lock recording launcher state");
+    assert!(app.get_asset_modal_open());
+    assert!(repo_state.borrow().save_attempts.is_empty());
+    assert!(launcher_state.probe_profiles.is_empty());
+    assert!(launcher_state.launch_profiles.is_empty());
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "error");
+    assert_eq!(
+        app.get_asset_ssh_modal_feedback_message().as_str(),
+        "SSH proxy chain contains a cycle"
+    );
 }
 
 #[test]
