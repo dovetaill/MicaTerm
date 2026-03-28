@@ -37,6 +37,32 @@ fn insert_key_is_encoded_for_terminal_writeback() {
 }
 
 #[test]
+fn shifted_tab_is_encoded_for_terminal_writeback() {
+    let mut session = TerminalSession::new(24, 80);
+
+    let backtab = session
+        .send_key_event(TerminalKeyEvent::named("tab", false, false, true))
+        .expect("encode shifted tab");
+
+    assert_eq!(backtab, b"\x1b[Z");
+}
+
+#[test]
+fn terminal_host_forwards_backtab_into_terminal_tab_input() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        terminal_host.contains("event.text == Key.Backtab"),
+        "TerminalSessionHost should recognize Slint's Backtab key token for Shift+Tab"
+    );
+    assert!(
+        terminal_host.contains("root.key-input(\"tab\", event.modifiers.alt, event.modifiers.control, true);"),
+        "TerminalSessionHost should forward Backtab as a shifted terminal Tab sequence instead of leaving Shift+Tab to local focus navigation"
+    );
+}
+
+#[test]
 fn paste_wraps_payload_when_bracketed_paste_is_enabled() {
     let mut session = TerminalSession::new(24, 80);
 

@@ -515,6 +515,9 @@ export component TerminalSessionHost inherits Rectangle {
                 } else if (event.text == Key.Tab) {
                     root.key-input("tab", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
+                } else if (event.text == Key.Backtab) {
+                    root.key-input("tab", event.modifiers.alt, event.modifiers.control, true);
+                    accept
                 } else if (event.text == Key.Escape) {
                     root.close-context-menu();
                     root.key-input("escape", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
