@@ -532,47 +532,52 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             width: parent.width;
                             spacing: 12px;
 
-                            Rectangle {
+                            Text {
                                 width: parent.width;
-                                height: 34px;
-                                background: transparent;
+                                text: "Only the private key is needed here. The public key must already be installed on the server.";
+                                color: ThemeTokens.text-primary;
+                                opacity: 0.72;
+                                wrap: word-wrap;
+                            }
 
-                                HorizontalLayout {
+                            if root.private-key-source == "path" : VerticalLayout {
+                                width: parent.width;
+                                spacing: 8px;
+
+                                FormField {
                                     width: parent.width;
-                                    height: parent.height;
-                                    spacing: 8px;
+                                    label: "Legacy File Path";
+                                    required: true;
+                                    value: root.private-key-path;
 
-                                    for key-option in ["content", "path"] : ModalTabButton {
-                                        label: key-option == "content" ? "Inline Content" : "File Path";
-                                        active: root.private-key-source == key-option;
-
-                                        clicked => {
-                                            root.draft-changed("private_key_source", key-option);
-                                        }
+                                    value-changed(value) => {
+                                        root.draft-changed("private_key_path", value);
                                     }
+                                }
+
+                                Text {
+                                    width: parent.width;
+                                    text: "Paste or import a new private key to replace the legacy path.";
+                                    color: ThemeTokens.text-primary;
+                                    opacity: 0.72;
+                                    wrap: word-wrap;
                                 }
                             }
 
-                            if root.private-key-source == "content" : FormField {
+                            FormField {
                                 width: parent.width;
-                                label: "Private Key Content";
-                                required: true;
+                                label: "Private Key";
+                                required: root.private-key-source != "path";
                                 multiline: true;
                                 value: root.private-key-content;
+                                trailing-action-text: "Import";
 
                                 value-changed(value) => {
                                     root.draft-changed("private_key_content", value);
                                 }
-                            }
 
-                            if root.private-key-source == "path" : FormField {
-                                width: parent.width;
-                                label: "Private Key Path";
-                                required: true;
-                                value: root.private-key-path;
-
-                                value-changed(value) => {
-                                    root.draft-changed("private_key_path", value);
+                                trailing-action-requested => {
+                                    root.action-requested("import-private-key");
                                 }
                             }
 

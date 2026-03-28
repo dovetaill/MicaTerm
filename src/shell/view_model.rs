@@ -769,7 +769,14 @@ impl ShellViewModel {
                 }
             }
             "password" => draft.password = value,
-            "private_key_content" => draft.private_key_content = value,
+            "private_key_content" => {
+                if !value.trim().is_empty() {
+                    draft.auth_method = "private-key".into();
+                    draft.private_key_source = "content".into();
+                    draft.private_key_path.clear();
+                }
+                draft.private_key_content = value;
+            }
             "private_key_path" => draft.private_key_path = value,
             "passphrase" => draft.passphrase = value,
             "password_visibility" => {
@@ -1611,7 +1618,11 @@ fn build_saved_ssh_connection_spec(
         port: draft.port.clone(),
         auth_method: draft.auth_method.clone(),
         private_key_source: draft.private_key_source.clone(),
-        private_key_path: draft.private_key_path.clone(),
+        private_key_path: if draft.private_key_source == "content" {
+            String::new()
+        } else {
+            draft.private_key_path.clone()
+        },
         environment: draft.environment.clone(),
         proxy_method: draft.proxy_method.clone(),
         remark: draft.remark.clone(),

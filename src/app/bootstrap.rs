@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
+use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -116,12 +117,41 @@ struct LiveSessionRuntimeLauncher {
     credential_store: Arc<dyn CredentialStore>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedPrivateKey {
+    pub path: PathBuf,
+    pub content: String,
+}
+
+pub trait PrivateKeyImporter: Send + Sync {
+    fn import_private_key(&self) -> Result<Option<ImportedPrivateKey>>;
+}
+
+#[derive(Default)]
+struct LivePrivateKeyImporter;
+
 #[derive(Default)]
 struct EditSshModalSecretHydration {
     password: Option<String>,
     private_key_content: Option<String>,
     passphrase: Option<String>,
     inline_error: Option<String>,
+}
+
+impl PrivateKeyImporter for LivePrivateKeyImporter {
+    fn import_private_key(&self) -> Result<Option<ImportedPrivateKey>> {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Import SSH Private Key")
+            .pick_file()
+        else {
+            return Ok(None);
+        };
+
+        let content = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read private key file `{}`", path.display()))?;
+
+        Ok(Some(ImportedPrivateKey { path, content }))
+    }
 }
 
 impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
@@ -215,7 +245,9 @@ pub fn runtime_window_title(_profile: AppRuntimeProfile) -> String {
 }
 
 pub fn startup_failure_message(_profile: AppRuntimeProfile, err: &str) -> Option<String> {
-    Some(format!("Mica Term failed to initialize winit-software: {err}"))
+    Some(format!(
+        "Mica Term failed to initialize winit-software: {err}"
+    ))
 }
 
 pub fn default_window_size() -> (u32, u32) {
@@ -276,10 +308,8 @@ fn bind_windows_window_state_tracking(
                 if key_event.state == winit::event::ElementState::Pressed
                     && !key_event.repeat
                     && !is_synthetic
-                    && let Some(shortcut) = native_terminal_clipboard_shortcut(
-                        &key_event.logical_key,
-                        *modifier_state,
-                    )
+                    && let Some(shortcut) =
+                        native_terminal_clipboard_shortcut(&key_event.logical_key, *modifier_state)
                 {
                     drop(modifier_state);
                     let window = handle.unwrap();
@@ -897,6 +927,25 @@ fn sync_saved_ssh_secrets(
         store.delete_secret(previous_ref)?;
     }
 
+    Ok(())
+}
+
+fn import_private_key_into_ssh_modal(
+    state: &mut ShellViewModel,
+    private_key_importer: &dyn PrivateKeyImporter,
+) -> Result<()> {
+    let Some(AssetModalState::NewSshConnection { .. }) = state.asset_modal_state.as_ref() else {
+        return Ok(());
+    };
+
+    let Some(imported) = private_key_importer.import_private_key()? else {
+        return Ok(());
+    };
+
+    state.update_ssh_modal_field("auth_method", "private-key".into());
+    state.update_ssh_modal_field("private_key_source", "content".into());
+    state.update_ssh_modal_field("private_key_path", String::new());
+    state.update_ssh_modal_field("private_key_content", imported.content);
     Ok(())
 }
 
@@ -2350,6 +2399,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
         session_bridge,
         session_runtime_guard,
         credential_store,
+        Arc::new(LivePrivateKeyImporter),
     );
 }
 
@@ -2360,6 +2410,26 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_an
     asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
     launcher: Arc<dyn SessionRuntimeLauncher>,
     credential_store: Arc<dyn CredentialStore>,
+) {
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer(
+        window,
+        store,
+        effects,
+        asset_repo,
+        launcher,
+        credential_store,
+        Arc::new(LivePrivateKeyImporter),
+    );
+}
+
+pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    effects: Rc<dyn PlatformWindowEffects>,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+    credential_store: Arc<dyn CredentialStore>,
+    private_key_importer: Arc<dyn PrivateKeyImporter>,
 ) {
     let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
         Ok(runtime) => {
@@ -2387,6 +2457,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_an
         session_bridge,
         session_runtime_guard,
         credential_store,
+        private_key_importer,
     );
 }
 
@@ -2411,6 +2482,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
                 Some(session_bridge),
                 Some(runtime),
                 credential_store,
+                Arc::new(LivePrivateKeyImporter),
             );
         }
         Err(err) => {
@@ -2428,6 +2500,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
                 None,
                 None,
                 shared_app_credential_store(),
+                Arc::new(LivePrivateKeyImporter),
             );
         }
     }
@@ -2443,6 +2516,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     session_bridge: Option<Rc<ShellSessionBridge>>,
     session_runtime_guard: Option<AppAsyncRuntime>,
     credential_store: Arc<dyn CredentialStore>,
+    private_key_importer: Arc<dyn PrivateKeyImporter>,
 ) {
     let store = store.map(Rc::new);
     let prefs = load_ui_preferences(&store);
@@ -2817,10 +2891,20 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_runtime_guard_ref = session_runtime_guard.clone();
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let credential_store_ref = Arc::clone(&credential_store);
+    let private_key_importer_ref = Arc::clone(&private_key_importer);
     window.on_asset_ssh_modal_action_requested(move |action| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        if action.as_str() == "import-private-key" {
+            if let Err(err) =
+                import_private_key_into_ssh_modal(&mut state, private_key_importer_ref.as_ref())
+            {
+                state.finish_ssh_modal_action_error(err.to_string());
+            }
+            sync_asset_modal_state(&window, &state);
+            return;
+        }
         let accepted = state.begin_ssh_modal_action(action.as_str());
         let pending_action = state.take_pending_ssh_modal_action();
         let mut did_mutate = false;
@@ -3597,6 +3681,7 @@ fn bind_top_status_bar_with_profile_and_async_handle(
                 Some(session_bridge),
                 None,
                 credential_store,
+                Arc::new(LivePrivateKeyImporter),
             );
         }
         None => {
@@ -3988,5 +4073,4 @@ mod tests {
             None
         );
     }
-
 }

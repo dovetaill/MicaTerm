@@ -921,6 +921,47 @@ fn edit_connection_opens_modal_with_prefilled_non_secret_fields() {
 }
 
 #[test]
+fn editing_saved_path_modal_switches_to_inline_content_when_private_key_content_is_supplied() {
+    let mut view_model = ShellViewModel::default();
+    let mut tree = AssetTree::new();
+    let asset_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Prod Bastion",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "2022".into(),
+            auth_method: "private-key".into(),
+            private_key_source: "path".into(),
+            private_key_path: "/tmp/id_ed25519".into(),
+            environment: String::new(),
+            proxy_method: String::new(),
+            remark: "Legacy path asset".into(),
+            credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+        }),
+    );
+    view_model.replace_console_asset_tree(tree);
+
+    view_model.open_edit_ssh_modal(asset_id.clone());
+    view_model.update_ssh_modal_field(
+        "private_key_content",
+        "-----BEGIN OPENSSH PRIVATE KEY-----".into(),
+    );
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection {
+            editing_asset_id: Some(ref editing_asset_id),
+            ref draft,
+            ..
+        }) if editing_asset_id == &asset_id
+            && draft.auth_method == "private-key"
+            && draft.private_key_source == "content"
+            && draft.private_key_content == "-----BEGIN OPENSSH PRIVATE KEY-----"
+    ));
+}
+
+#[test]
 fn editing_saved_ssh_modal_keeps_password_fields_hidden_until_secret_hydration_exists() {
     let mut view_model = ShellViewModel::default();
     let mut tree = AssetTree::new();

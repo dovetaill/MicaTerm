@@ -18,9 +18,10 @@ use mica_term::app::assets_catalog::{
     catalog_to_asset_tree,
 };
 use mica_term::app::bootstrap::{
-    app_title, bind_top_status_bar_with_store_and_effects_and_asset_repo,
-    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher,
+    ImportedPrivateKey, PrivateKeyImporter, app_title,
+    bind_top_status_bar_with_store_and_effects_and_asset_repo,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store,
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer,
     default_window_size,
 };
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
@@ -42,8 +43,8 @@ use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntime
 use mica_term::app::window_effects::default_platform_window_effects;
 use mica_term::shell::metrics::ShellMetrics;
 use russh::keys::{HashAlg, PublicKey};
-use slint::{ComponentHandle, LogicalPosition, Model};
 use slint::platform::{Key, PointerEventButton, WindowEvent};
+use slint::{ComponentHandle, LogicalPosition, Model};
 use tokio::sync::mpsc;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -130,6 +131,20 @@ struct RecordingLauncherState {
 #[derive(Clone)]
 struct RecordingLauncher {
     state: Arc<Mutex<RecordingLauncherState>>,
+}
+
+#[derive(Clone)]
+struct SuccessfulPrivateKeyImporter {
+    path: std::path::PathBuf,
+    content: &'static str,
+}
+
+#[derive(Clone, Default)]
+struct CancelledPrivateKeyImporter;
+
+#[derive(Clone)]
+struct FailingPrivateKeyImporter {
+    message: &'static str,
 }
 
 struct NoopRuntimeControl;
@@ -652,6 +667,27 @@ impl SessionRuntimeLauncher for RecordingLauncher {
     }
 }
 
+impl PrivateKeyImporter for SuccessfulPrivateKeyImporter {
+    fn import_private_key(&self) -> Result<Option<ImportedPrivateKey>> {
+        Ok(Some(ImportedPrivateKey {
+            path: self.path.clone(),
+            content: self.content.into(),
+        }))
+    }
+}
+
+impl PrivateKeyImporter for CancelledPrivateKeyImporter {
+    fn import_private_key(&self) -> Result<Option<ImportedPrivateKey>> {
+        Ok(None)
+    }
+}
+
+impl PrivateKeyImporter for FailingPrivateKeyImporter {
+    fn import_private_key(&self) -> Result<Option<ImportedPrivateKey>> {
+        Err(anyhow!(self.message))
+    }
+}
+
 fn bind_with_fake_sessions(app: &AppWindow, asset_repo: Option<Rc<dyn AssetCatalogRepository>>) {
     bind_with_launcher(app, asset_repo, Arc::new(FakeLauncher));
 }
@@ -661,12 +697,13 @@ fn bind_with_launcher(
     asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
     launcher: Arc<dyn SessionRuntimeLauncher>,
 ) {
-    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store(
         app,
         None,
         default_platform_window_effects(),
         asset_repo,
         launcher,
+        Arc::new(MemoryCredentialStore::default()),
     );
 }
 
@@ -683,6 +720,24 @@ fn bind_with_launcher_and_credential_store(
         asset_repo,
         launcher,
         credential_store,
+    );
+}
+
+fn bind_with_launcher_and_credential_store_and_private_key_importer(
+    app: &AppWindow,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+    credential_store: Arc<dyn CredentialStore>,
+    private_key_importer: Arc<dyn PrivateKeyImporter>,
+) {
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer(
+        app,
+        None,
+        default_platform_window_effects(),
+        asset_repo,
+        launcher,
+        credential_store,
+        private_key_importer,
     );
 }
 
@@ -1323,6 +1378,125 @@ fn editing_saved_private_key_path_modal_saving_blank_passphrase_deletes_saved_pa
         panic!("expected persisted ssh connection payload");
     };
     assert_eq!(spec.credential_ref, None);
+}
+
+#[test]
+fn importing_private_key_into_saved_path_asset_migrates_it_to_content_mode_on_save() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_saved_private_key_path_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_launcher_and_credential_store_and_private_key_importer(
+        &app,
+        Some(asset_repo),
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+        Arc::new(SuccessfulPrivateKeyImporter {
+            path: std::path::PathBuf::from("/tmp/id_ed25519"),
+            content: "-----BEGIN OPENSSH PRIVATE KEY-----\nimported\n-----END OPENSSH PRIVATE KEY-----\n",
+        }),
+    );
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("saved ssh path asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+    app.invoke_asset_ssh_modal_action_requested("import-private-key".into());
+
+    assert_eq!(
+        app.get_asset_ssh_modal_private_key_content().as_str(),
+        "-----BEGIN OPENSSH PRIVATE KEY-----\nimported\n-----END OPENSSH PRIVATE KEY-----\n"
+    );
+
+    app.invoke_asset_ssh_modal_action_requested("save".into());
+
+    let persisted_catalog = repo_state
+        .borrow()
+        .save_attempts
+        .last()
+        .expect("persisted catalog after import")
+        .clone();
+    let PersistedAssetPayload::SshConnection(spec) = &persisted_catalog
+        .nodes
+        .get("ssh-path")
+        .expect("saved ssh path node")
+        .payload
+    else {
+        panic!("expected persisted ssh connection payload");
+    };
+    assert_eq!(spec.auth_method, "private-key");
+    assert_eq!(spec.private_key_source, "content");
+    assert_eq!(spec.private_key_path, "");
+    assert_eq!(
+        spec.credential_ref.as_deref(),
+        Some("ssh/saved-secrets/ssh-path")
+    );
+
+    let bundle = load_secret_bundle(credential_store.as_ref(), "ssh/saved-secrets/ssh-path")
+        .expect("load imported secret bundle");
+    assert_eq!(
+        bundle.private_key_content.as_deref(),
+        Some("-----BEGIN OPENSSH PRIVATE KEY-----\nimported\n-----END OPENSSH PRIVATE KEY-----\n")
+    );
+}
+
+#[test]
+fn importing_private_key_can_be_cancelled_without_mutating_modal_state() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_launcher_and_credential_store_and_private_key_importer(
+        &app,
+        None,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+        Arc::new(CancelledPrivateKeyImporter),
+    );
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_action_requested("import-private-key".into());
+
+    assert_eq!(app.get_asset_ssh_modal_private_key_content().as_str(), "");
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "idle");
+    assert_eq!(app.get_asset_ssh_modal_feedback_message().as_str(), "");
+}
+
+#[test]
+fn importing_private_key_reports_feedback_when_file_selection_fails() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_launcher_and_credential_store_and_private_key_importer(
+        &app,
+        None,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+        Arc::new(FailingPrivateKeyImporter {
+            message: "failed to read private key file",
+        }),
+    );
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_action_requested("import-private-key".into());
+
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "error");
+    assert_eq!(
+        app.get_asset_ssh_modal_feedback_message().as_str(),
+        "failed to read private key file"
+    );
 }
 
 #[test]
@@ -2098,8 +2272,10 @@ fn workspace_terminal_ctrl_shift_c_copies_selected_text_to_clipboard() {
     app.window().dispatch_event(WindowEvent::KeyPressed {
         text: Key::Control.into(),
     });
-    app.window().dispatch_event(WindowEvent::KeyPressed { text: "C".into() });
-    app.window().dispatch_event(WindowEvent::KeyReleased { text: "C".into() });
+    app.window()
+        .dispatch_event(WindowEvent::KeyPressed { text: "C".into() });
+    app.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: "C".into() });
     app.window().dispatch_event(WindowEvent::KeyReleased {
         text: Key::Control.into(),
     });
@@ -2113,7 +2289,9 @@ fn workspace_terminal_ctrl_shift_c_copies_selected_text_to_clipboard() {
     .expect("read clipboard");
 
     assert!(
-        copied.as_deref().is_some_and(|text| text.contains("welcome")),
+        copied
+            .as_deref()
+            .is_some_and(|text| text.contains("welcome")),
         "Ctrl+Shift+C should copy the current terminal selection into the system clipboard"
     );
 }
@@ -2261,8 +2439,10 @@ fn ctrl_shift_letter_shortcuts_do_not_forward_remote_terminal_input() {
     app.window().dispatch_event(WindowEvent::KeyPressed {
         text: Key::Shift.into(),
     });
-    app.window().dispatch_event(WindowEvent::KeyPressed { text: "f".into() });
-    app.window().dispatch_event(WindowEvent::KeyReleased { text: "f".into() });
+    app.window()
+        .dispatch_event(WindowEvent::KeyPressed { text: "f".into() });
+    app.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: "f".into() });
     app.window().dispatch_event(WindowEvent::KeyReleased {
         text: Key::Shift.into(),
     });
@@ -2279,7 +2459,10 @@ fn ctrl_shift_letter_shortcuts_do_not_forward_remote_terminal_input() {
     );
     assert_eq!(visible_lines.row_count(), 1);
     assert_eq!(
-        visible_lines.row_data(0).expect("initial terminal line").as_str(),
+        visible_lines
+            .row_data(0)
+            .expect("initial terminal line")
+            .as_str(),
         "welcome to mica-term"
     );
 }

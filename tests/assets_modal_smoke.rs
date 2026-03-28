@@ -243,6 +243,38 @@ fn ssh_modal_no_longer_renders_dead_connection_options_group() {
 }
 
 #[test]
+fn ssh_modal_exposes_private_key_import_guidance() {
+    let ssh_modal = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
+
+    assert!(
+        ssh_modal.contains(
+            "Only the private key is needed here. The public key must already be installed on the server."
+        ),
+        "ssh modal should explain that users only provide the private key locally"
+    );
+    assert!(
+        ssh_modal.contains("root.action-requested(\"import-private-key\")"),
+        "ssh modal should expose an import-private-key action hook"
+    );
+}
+
+#[test]
+fn ssh_modal_labels_saved_path_mode_as_legacy_file_path() {
+    let ssh_modal = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
+
+    assert!(
+        ssh_modal.contains("label: \"Legacy File Path\""),
+        "ssh modal should relabel saved path-mode assets as legacy file path"
+    );
+    assert!(
+        ssh_modal.contains("Paste or import a new private key to replace the legacy path."),
+        "ssh modal should explain how a legacy path asset migrates to imported key content"
+    );
+}
+
+#[test]
 fn app_window_round_trips_workspace_tab_items_and_active_session() {
     i_slint_backend_testing::init_no_event_loop();
 
