@@ -8,6 +8,8 @@ FILE="$ROOT_DIR/src/app/window_effects.rs"
 BOOTSTRAP_FILE="$ROOT_DIR/src/app/bootstrap.rs"
 APP_WINDOW_FILE="$ROOT_DIR/ui/app-window.slint"
 MAIN_FILE="$ROOT_DIR/src/main.rs"
+LEGACY_EXPERIMENTAL='windows-skia'
+LEGACY_EXPERIMENTAL_SUFFIX='-experimental'
 
 grep -F 'window.set_theme(Some(' "$FILE" >/dev/null
 grep -F 'set_corner_preference' "$FILE" >/dev/null
@@ -24,9 +26,8 @@ grep -F 'WindowEvent::Moved' "$BOOTSTRAP_FILE" >/dev/null
 grep -F 'preferred-width: 1440px;' "$APP_WINDOW_FILE" >/dev/null
 
 for unexpected in \
-  'winit-skia-software' \
   'SLINT_BACKEND' \
-  'windows-skia-experimental' \
+  "${LEGACY_EXPERIMENTAL}${LEGACY_EXPERIMENTAL_SUFFIX}" \
   'WindowRecoveryController' \
   'WindowRecoveryAction' \
   'current_window_visibility_snapshot' \

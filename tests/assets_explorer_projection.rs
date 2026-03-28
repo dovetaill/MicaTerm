@@ -1,7 +1,7 @@
 use mica_term::app::assets_catalog::{asset_tree_to_catalog, catalog_to_asset_tree};
 use mica_term::shell::assets::{
-    AssetDisclosureState, AssetNameValidation, AssetNodePayload, AssetSshConnectionSpec, AssetTree,
-    AssetViewMode, ConsoleAssetKind, next_default_name_from_base,
+    AssetDisclosureState, AssetNameValidation, AssetNodePayload, AssetSshConnectionSpec,
+    AssetSshProxySpec, AssetTree, AssetViewMode, ConsoleAssetKind, next_default_name_from_base,
 };
 
 #[test]
@@ -290,6 +290,7 @@ fn expanded_state_remains_runtime_only_after_catalog_mapping() {
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "".into(),
+            proxy: AssetSshProxySpec::None,
             proxy_method: "".into(),
             remark: String::new(),
             credential_ref: None,

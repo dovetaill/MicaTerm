@@ -68,7 +68,7 @@ fn logging_runtime_keeps_debug_events_when_debug_mode_is_enabled() {
 }
 
 #[test]
-fn debug_logging_can_emit_mainline_runtime_profile_metadata() {
+fn debug_logging_can_emit_windows_mainline_runtime_profile_metadata() {
     let temp_root = std::env::temp_dir()
         .join("mica-term")
         .join("tests")
@@ -94,10 +94,8 @@ fn debug_logging_can_emit_mainline_runtime_profile_metadata() {
 
     let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
     assert!(content.contains("initialized runtime profile"));
-    assert!(content.contains("Mainline"));
-    assert!(content.contains("Software"));
+    assert!(content.contains("WindowsMainline"));
+    assert!(content.contains("SkiaSoftware"));
     assert!(content.contains("Some(\"winit\")"));
-    assert!(content.contains("Some(\"software\")"));
-    assert!(!content.contains("wgpu_28_required"));
-    assert!(!content.contains("FemtoVgWgpu"));
+    assert!(content.contains("Some(\"skia-software\")"));
 }

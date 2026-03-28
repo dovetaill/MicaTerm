@@ -15,7 +15,7 @@ Project planning is in `docs/plans/`.
 ## Mainline Build Entry Points
 
 - `./build-release.sh`
-  - Runs the mainline software release path for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu`
+  - Runs the Linux x64 release path and the Windows Skia mainline release path for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu`
   - Default mode: `MODE=fail-fast`
   - Optional mode: `MODE=best-effort`
 
@@ -31,23 +31,34 @@ Project planning is in `docs/plans/`.
 - `TARGET=aarch64-pc-windows-msvc ./build-desktop.sh`
   - Windows ARM64 build on Windows MSVC environments
 - `./build-win-x64.sh`
-  - Single Windows x64 wrapper
+  - Windows Skia mainline wrapper
   - Default target: `x86_64-pc-windows-gnu`
   - Override target: `TARGET=x86_64-pc-windows-msvc ./build-win-x64.sh`
   - Outputs:
-    `dist/mica-term-x86_64-pc-windows-gnu-release.zip`
-    `dist/mica-term-x86_64-pc-windows-msvc-release.zip`
+    `dist/mica-term-x86_64-pc-windows-gnu-release-skia.zip`
+    `dist/mica-term-x86_64-pc-windows-msvc-release-skia.zip`
+- `./build-win-x64-software.sh`
+  - Windows software compatibility wrapper
+  - Default target: `x86_64-pc-windows-gnu`
+  - Override target: `TARGET=x86_64-pc-windows-msvc ./build-win-x64-software.sh`
+  - Outputs:
+    `dist/mica-term-x86_64-pc-windows-gnu-release-software.zip`
+    `dist/mica-term-x86_64-pc-windows-msvc-release-software.zip`
 
 Notes:
 
-- All shipped build entrypoints resolve to the same mainline runtime route: `winit + software`.
-- The runtime profile is internal to the app and is locked to the software renderer.
-- `./build-release.sh` remains the aggregate Linux x64 + Windows GNU release entrypoint.
+- `./build-win-x64.sh` packages the Windows mainline route as `winit-skia-software`.
+- `./build-win-x64-software.sh` packages the Windows compatibility route as `winit-software`.
+- Generic development builds stay on the default packaged fallback unless a wrapper injects build flavor and renderer environment variables.
+- `./build-release.sh` remains the aggregate Linux x64 + Windows GNU release entrypoint, with the Windows leg routed through the Skia mainline wrapper settings.
+- `[patch.crates-io]` in `Cargo.toml` still points to the vendored `i-slint-backend-winit` backend so the Windows partial-visibility fix stays active.
+- `SarasaTermSCNerd-Regular.ttf` stays embedded in the executable and is registered lazily when the workspace session host enters `terminal` mode.
+- `ui/app-window.slint` still imports only `IosevkaTerm-Regular.ttf` at startup to keep the initial font path lightweight.
 
 Archive formats:
 
 - Linux and macOS targets produce `dist/<app>-<target>-<profile>.tar.gz`
-- Windows targets produce `dist/<app>-<target>-<profile>.zip`
+- Windows wrapper targets produce `dist/<app>-<target>-<profile>-skia.zip` or `dist/<app>-<target>-<profile>-software.zip`
 
 Prerequisites by target:
 
@@ -77,7 +88,7 @@ file in the packaged app directory before launching the app.
 PowerShell example:
 
 ```powershell
-cd .\dist\mica-term-x86_64-pc-windows-gnu-release
+cd .\dist\mica-term-x86_64-pc-windows-gnu-release-skia
 ni .mica-term-portable -ItemType File -Force
 $env:MICA_TERM_LOG = "debug"
 .\mica-term.exe

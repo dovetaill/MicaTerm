@@ -645,18 +645,18 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should keep the terminal surface on a monospace font contract"
     );
     assert!(
-        terminal_host.contains("Iosevka Term, Cascadia Mono, Consolas, monospace"),
-        "TerminalSessionHost should keep a lighter startup-safe terminal font fallback stack"
+        terminal_host.contains("Sarasa Term SC Nerd, Iosevka Term, Cascadia Mono, Consolas, monospace"),
+        "TerminalSessionHost should expose the Sarasa-first terminal font stack once lazy registration is available"
     );
     assert!(
         terminal_host.contains(
-            "in property <string> terminal-font-family: \"Iosevka Term, Cascadia Mono, Consolas, monospace\";"
+            "in property <string> terminal-font-family: \"Sarasa Term SC Nerd, Iosevka Term, Cascadia Mono, Consolas, monospace\";"
         ),
-        "TerminalSessionHost should expose the lightweight terminal font fallback stack as the font contract"
+        "TerminalSessionHost should expose the Sarasa-first font contract for terminal rendering"
     );
     assert!(
-        !terminal_host.contains("Sarasa Term SC Nerd"),
-        "TerminalSessionHost should not require the large Sarasa font in the startup contract"
+        terminal_host.contains("Sarasa Term SC Nerd"),
+        "TerminalSessionHost should prefer Sarasa in the terminal font contract after lazy registration"
     );
     assert!(
         !terminal_host

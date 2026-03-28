@@ -262,9 +262,10 @@ pub fn runtime_window_title(_profile: AppRuntimeProfile) -> String {
     app_title().to_owned()
 }
 
-pub fn startup_failure_message(_profile: AppRuntimeProfile, err: &str) -> Option<String> {
+pub fn startup_failure_message(profile: AppRuntimeProfile, err: &str) -> Option<String> {
     Some(format!(
-        "Mica Term failed to initialize winit-software: {err}"
+        "Mica Term failed to initialize {}: {err}",
+        profile.selector_label()
     ))
 }
 
@@ -321,7 +322,7 @@ fn bind_windows_window_state_tracking(
             } = event
             {
                 let mut modifier_state = modifiers.borrow_mut();
-                update_native_terminal_modifier_state(&mut modifier_state, &key_event);
+                update_native_terminal_modifier_state(&mut modifier_state, key_event);
 
                 if key_event.state == winit::event::ElementState::Pressed
                     && !key_event.repeat
@@ -2346,6 +2347,9 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
     window.set_workspace_session_host_mode(state.workspace_session_host_mode().into());
+    if state.workspace_session_host_mode() == "terminal" {
+        let _ = crate::app::terminal_font::ensure_terminal_font_registered();
+    }
     let visible_lines = state
         .workspace_terminal_visible_lines()
         .into_iter()

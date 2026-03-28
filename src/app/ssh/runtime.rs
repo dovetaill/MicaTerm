@@ -2118,7 +2118,7 @@ fn classify_sgr_sequence(bytes: &[u8]) -> SgrSequenceKind {
         return SgrSequenceKind::Other(sequence_len);
     };
 
-    if values.iter().any(|value| *value == 7) {
+    if values.contains(&7) {
         return SgrSequenceKind::ReverseOn(sequence_len);
     }
     if values.iter().any(|value| matches!(*value, 0 | 27)) {

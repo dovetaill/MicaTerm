@@ -10,6 +10,8 @@ APP_NAME="${APP_NAME:-$(awk -F'"' '/^name = / { print $2; exit }' "$ROOT_DIR/Car
 BIN_NAME="${BIN_NAME:-$APP_NAME}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 ICON_PATH="$ROOT_DIR/assets/icons/windows/mica-term.ico"
+PACKAGE_FLAVOR_SUFFIX="${PACKAGE_FLAVOR_SUFFIX:-}"
+ARCHIVE_STEM="${APP_NAME}-${TARGET}-${PROFILE}${PACKAGE_FLAVOR_SUFFIX}"
 
 usage() {
   cat <<EOF
@@ -48,8 +50,8 @@ Windows GNU prerequisites on Linux hosts:
   nasm
 
 Output:
-  dist/<app>-<target>-<profile>.tar.gz
-  dist/<app>-<target>-<profile>.zip
+  dist/<app>-<target>-<profile><package flavor suffix>.tar.gz
+  dist/<app>-<target>-<profile><package flavor suffix>.zip
 EOF
 }
 
@@ -165,8 +167,8 @@ case "$TARGET" in
     ;;
 esac
 
-STAGE_DIR="$DIST_DIR/${APP_NAME}-${TARGET}-${PROFILE}"
-ARCHIVE_PATH="$DIST_DIR/${APP_NAME}-${TARGET}-${PROFILE}${ARCHIVE_SUFFIX}"
+STAGE_DIR="$DIST_DIR/$ARCHIVE_STEM"
+ARCHIVE_PATH="$DIST_DIR/${ARCHIVE_STEM}${ARCHIVE_SUFFIX}"
 BIN_PATH="$ROOT_DIR/target/$TARGET/$PROFILE/$BIN_NAME$BIN_SUFFIX"
 
 echo "==> Building $BIN_NAME for $TARGET ($PROFILE)"

@@ -284,7 +284,7 @@ fn ssh_modal_no_longer_renders_dead_connection_options_group() {
     assert!(ssh_modal.contains("label: \"SOCKS5 Port\""));
     assert!(ssh_modal.contains("label: \"Username\""));
     assert!(ssh_modal.contains("label: \"Password\""));
-    assert!(ssh_modal.contains("label: \"Upstream SSH Connection\""));
+    assert!(ssh_modal.contains("text: \"Upstream SSH Connection\""));
     assert!(ssh_modal.contains("None"));
     assert!(ssh_modal.contains("SOCKS5"));
     assert!(ssh_modal.contains("Existing SSH Connection"));

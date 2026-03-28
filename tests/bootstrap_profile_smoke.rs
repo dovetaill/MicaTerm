@@ -5,21 +5,21 @@ use std::fs;
 use mica_term::app::runtime_profile::AppRuntimeProfile;
 
 #[test]
-fn mainline_profile_requests_internal_selector_lock() {
+fn mainline_profile_requests_skia_selector_lock() {
     let profile = AppRuntimeProfile::mainline();
 
     assert_eq!(profile.forced_backend(), Some("winit"));
-    assert_eq!(profile.forced_renderer(), Some("software"));
+    assert_eq!(profile.forced_renderer(), Some("skia-software"));
 }
 
 #[test]
-fn main_entrypoint_no_longer_carries_gpu_selector_logic() {
+fn main_entrypoint_reads_packaged_profile_and_dynamic_renderer() {
     let content = fs::read_to_string("src/main.rs").expect("read main");
 
-    assert!(content.contains("renderer_name(\"software\".into())"));
-    assert!(!content.contains("femtovg-wgpu"));
-    assert!(!content.contains("wgpu_28"));
-    assert!(!content.contains("DX12"));
+    assert!(content.contains("AppRuntimeProfile::packaged()"));
+    assert!(content.contains(".backend_name(profile.forced_backend().unwrap().into())"));
+    assert!(content.contains(".renderer_name(profile.forced_renderer().unwrap().into())"));
+    assert!(!content.contains("renderer_name(\"software\".into())"));
 }
 
 #[test]

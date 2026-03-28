@@ -15,18 +15,14 @@ fn app_window_keeps_startup_font_import_lightweight() {
 }
 
 #[test]
-fn terminal_host_uses_startup_safe_font_fallbacks() {
+fn terminal_host_prefers_sarasa_without_global_startup_import() {
     let content =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
         content.contains(
-            "terminal-font-family: \"Iosevka Term, Cascadia Mono, Consolas, monospace\";"
+            "terminal-font-family: \"Sarasa Term SC Nerd, Iosevka Term, Cascadia Mono, Consolas, monospace\";"
         ),
-        "terminal host should default to the lighter fallback font stack"
-    );
-    assert!(
-        !content.contains("terminal-font-family: \"Sarasa Term SC Nerd\";"),
-        "terminal host should not force the large Sarasa font at startup"
+        "terminal host should prefer Sarasa once the runtime registration path is available"
     );
 }
