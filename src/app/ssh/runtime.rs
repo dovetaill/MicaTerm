@@ -13,6 +13,8 @@ use russh::client;
 use russh::client::AuthResult;
 use russh::keys::{self, PrivateKeyWithHashAlg};
 use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers as KeyModifiers};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{Sleep, sleep};
 use uuid::Uuid;
@@ -25,7 +27,7 @@ use crate::app::ssh::credentials::{
     load_secret_bundle_with_diagnostics, required_secret_bundle_field,
 };
 use crate::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService, default_known_hosts_path};
-use crate::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
+use crate::app::ssh::profile::{ConnectionProfile, ResolvedProxyHop, SshAuthMethod};
 use crate::app::ssh::session_manager::SessionRuntimeControl;
 use crate::app::terminal_theme::palette_for_theme_mode;
 use crate::theme::ThemeMode;
@@ -49,6 +51,241 @@ fn ssh_client_config() -> client::Config {
         nodelay: true,
         ..Default::default()
     }
+}
+
+async fn open_transport_stream_for_profile(profile: &ConnectionProfile) -> Result<TcpStream> {
+    match profile.resolved_proxy_hops.as_slice() {
+        [] => TcpStream::connect((profile.host.as_str(), profile.port))
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to connect to SSH server `{}:{}`",
+                    profile.host, profile.port
+                )
+            }),
+        [
+            ResolvedProxyHop::Socks5 {
+                host,
+                port,
+                username,
+                password,
+            },
+        ] => connect_via_socks5(
+            host,
+            *port,
+            username.as_deref(),
+            password.as_deref(),
+            &profile.host,
+            profile.port,
+        )
+        .await
+        .with_context(|| format!("failed to connect to SOCKS5 proxy `{}:{}`", host, port)),
+        [ResolvedProxyHop::Socks5 { .. }, ..] => {
+            bail!("multi-hop proxy chains are not available until SSH upstream transport lands")
+        }
+        [ResolvedProxyHop::Ssh(_), ..] => {
+            bail!("SSH upstream proxy hops are not available until direct-tcpip transport lands")
+        }
+    }
+}
+
+async fn connect_via_socks5(
+    proxy_host: &str,
+    proxy_port: u16,
+    username: Option<&str>,
+    password: Option<&str>,
+    target_host: &str,
+    target_port: u16,
+) -> Result<TcpStream> {
+    let mut stream = TcpStream::connect((proxy_host, proxy_port))
+        .await
+        .with_context(|| format!("failed to open TCP stream to SOCKS5 proxy `{proxy_host}:{proxy_port}`"))?;
+
+    let requires_password_auth = username.is_some() || password.is_some();
+    let mut methods = vec![0x00];
+    if requires_password_auth {
+        match (username, password) {
+            (Some(_), Some(_)) => methods.push(0x02),
+            _ => bail!("SOCKS5 username/password auth requires both username and password"),
+        }
+    }
+
+    stream
+        .write_all(&[0x05, methods.len() as u8])
+        .await
+        .context("failed to write SOCKS5 greeting")?;
+    stream
+        .write_all(&methods)
+        .await
+        .context("failed to write SOCKS5 auth methods")?;
+
+    let reply_version = stream
+        .read_u8()
+        .await
+        .context("failed to read SOCKS5 greeting response version")?;
+    let selected_method = stream
+        .read_u8()
+        .await
+        .context("failed to read SOCKS5 selected auth method")?;
+    if reply_version != 0x05 {
+        bail!("unexpected SOCKS5 greeting response version: {reply_version:#04x}");
+    }
+
+    match selected_method {
+        0x00 => {}
+        0x02 => {
+            let username = username.expect("username/password auth validated above");
+            let password = password.expect("username/password auth validated above");
+            authenticate_socks5_username_password(&mut stream, username, password).await?;
+        }
+        0xFF => bail!("SOCKS5 proxy rejected all advertised authentication methods"),
+        other => bail!("SOCKS5 proxy selected unsupported auth method: {other:#04x}"),
+    }
+
+    write_socks5_connect_request(&mut stream, target_host, target_port).await?;
+    read_socks5_connect_reply(&mut stream).await?;
+
+    Ok(stream)
+}
+
+async fn authenticate_socks5_username_password(
+    stream: &mut TcpStream,
+    username: &str,
+    password: &str,
+) -> Result<()> {
+    let username_len = u8::try_from(username.len())
+        .context("SOCKS5 username exceeds the protocol length limit")?;
+    let password_len = u8::try_from(password.len())
+        .context("SOCKS5 password exceeds the protocol length limit")?;
+
+    stream
+        .write_all(&[0x01, username_len])
+        .await
+        .context("failed to write SOCKS5 username/password auth header")?;
+    stream
+        .write_all(username.as_bytes())
+        .await
+        .context("failed to write SOCKS5 username")?;
+    stream
+        .write_all(&[password_len])
+        .await
+        .context("failed to write SOCKS5 password length")?;
+    stream
+        .write_all(password.as_bytes())
+        .await
+        .context("failed to write SOCKS5 password")?;
+
+    let reply_version = stream
+        .read_u8()
+        .await
+        .context("failed to read SOCKS5 username/password auth version")?;
+    let status = stream
+        .read_u8()
+        .await
+        .context("failed to read SOCKS5 username/password auth status")?;
+    if reply_version != 0x01 {
+        bail!("unexpected SOCKS5 username/password auth version: {reply_version:#04x}");
+    }
+    if status != 0x00 {
+        bail!("SOCKS5 username/password authentication was rejected");
+    }
+
+    Ok(())
+}
+
+async fn write_socks5_connect_request(
+    stream: &mut TcpStream,
+    target_host: &str,
+    target_port: u16,
+) -> Result<()> {
+    let mut request = vec![0x05, 0x01, 0x00];
+    if let Ok(ipv4) = target_host.parse::<std::net::Ipv4Addr>() {
+        request.push(0x01);
+        request.extend_from_slice(&ipv4.octets());
+    } else if let Ok(ipv6) = target_host.parse::<std::net::Ipv6Addr>() {
+        request.push(0x04);
+        request.extend_from_slice(&ipv6.octets());
+    } else {
+        let host_bytes = target_host.as_bytes();
+        let host_len =
+            u8::try_from(host_bytes.len()).context("SOCKS5 target host exceeds the protocol length limit")?;
+        request.push(0x03);
+        request.push(host_len);
+        request.extend_from_slice(host_bytes);
+    }
+    request.extend_from_slice(&target_port.to_be_bytes());
+
+    stream
+        .write_all(&request)
+        .await
+        .context("failed to write SOCKS5 CONNECT request")?;
+
+    Ok(())
+}
+
+async fn read_socks5_connect_reply(stream: &mut TcpStream) -> Result<()> {
+    let reply_version = stream
+        .read_u8()
+        .await
+        .context("failed to read SOCKS5 CONNECT reply version")?;
+    let reply_code = stream
+        .read_u8()
+        .await
+        .context("failed to read SOCKS5 CONNECT reply code")?;
+    let reserved = stream
+        .read_u8()
+        .await
+        .context("failed to read SOCKS5 CONNECT reserved byte")?;
+    let address_type = stream
+        .read_u8()
+        .await
+        .context("failed to read SOCKS5 CONNECT bound address type")?;
+
+    if reply_version != 0x05 {
+        bail!("unexpected SOCKS5 CONNECT reply version: {reply_version:#04x}");
+    }
+    if reserved != 0x00 {
+        bail!("unexpected SOCKS5 CONNECT reserved byte: {reserved:#04x}");
+    }
+
+    match address_type {
+        0x01 => {
+            let mut addr = [0_u8; 4];
+            stream
+                .read_exact(&mut addr)
+                .await
+                .context("failed to read SOCKS5 bound IPv4 address")?;
+        }
+        0x03 => {
+            let host_len = stream
+                .read_u8()
+                .await
+                .context("failed to read SOCKS5 bound domain length")?;
+            let mut host = vec![0_u8; host_len as usize];
+            stream
+                .read_exact(&mut host)
+                .await
+                .context("failed to read SOCKS5 bound domain")?;
+        }
+        0x04 => {
+            let mut addr = [0_u8; 16];
+            stream
+                .read_exact(&mut addr)
+                .await
+                .context("failed to read SOCKS5 bound IPv6 address")?;
+        }
+        other => bail!("unexpected SOCKS5 CONNECT address type: {other:#04x}"),
+    }
+    let _bound_port = stream
+        .read_u16()
+        .await
+        .context("failed to read SOCKS5 bound port")?;
+
+    if reply_code != 0x00 {
+        bail!("SOCKS5 CONNECT request failed with status: {reply_code:#04x}");
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -318,8 +555,12 @@ impl SshSessionRuntime {
             known_hosts,
         };
         let config = Arc::new(ssh_client_config());
+        let transport = open_transport_stream_for_profile(&profile).await?;
+        if config.as_ref().nodelay && let Err(error) = transport.set_nodelay(true) {
+            tracing::warn!("set_nodelay() failed for SSH transport stream: {error:?}");
+        }
 
-        let mut handle = client::connect(config, (profile.host.as_str(), profile.port), handler)
+        let mut handle = client::connect_stream(config, transport, handler)
             .await
             .with_context(|| {
                 format!(

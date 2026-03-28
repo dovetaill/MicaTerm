@@ -8,7 +8,9 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use mica_term::app::async_runtime::AppAsyncRuntime;
 use mica_term::app::ssh::known_hosts::KnownHostsService;
-use mica_term::app::ssh::profile::{ConnectionProfile, SshAuthMethod};
+use mica_term::app::ssh::profile::{
+    ConnectionProfile, ConnectionProxyProfile, ResolvedProxyHop, SshAuthMethod,
+};
 use mica_term::app::ssh::runtime::{
     SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
     TerminalMouseEventKind, TerminalMouseInput, TerminalSession, TerminalSurfaceState,
@@ -21,11 +23,18 @@ use russh::keys::PrivateKey;
 use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::{Auth, Session};
 use russh::{Channel, ChannelId, server};
-use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, copy_bidirectional};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_known_hosts_env() -> std::sync::MutexGuard<'static, ()> {
+    KNOWN_HOSTS_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[derive(Clone)]
 struct FakeLauncher {
@@ -106,6 +115,13 @@ struct SurfacePullRuntimeControl {
 enum FakeLauncherBehavior {
     StayConnecting,
     FailImmediately,
+}
+
+#[derive(Clone)]
+enum FakeSocks5AuthMode {
+    NoAuth,
+    UsernamePassword { username: String, password: String },
+    RejectAuthentication,
 }
 
 impl FakeLauncher {
@@ -703,6 +719,146 @@ async fn spawn_publickey_shell_server(
     (join, addr, private_key_path, server_public, state)
 }
 
+async fn spawn_fake_socks5_server(
+    expected_target_host: String,
+    target_addr: std::net::SocketAddr,
+    auth_mode: FakeSocks5AuthMode,
+) -> (tokio::task::JoinHandle<()>, std::net::SocketAddr) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind fake socks5 server");
+    let addr = listener.local_addr().expect("fake socks5 addr");
+
+    let join = tokio::spawn(async move {
+        let (mut client, _) = listener.accept().await.expect("accept socks5 client");
+
+        let greeting_version = client.read_u8().await.expect("read socks5 version");
+        assert_eq!(greeting_version, 0x05, "unexpected socks5 greeting version");
+        let method_count = client.read_u8().await.expect("read socks5 method count");
+        let mut methods = vec![0_u8; method_count as usize];
+        client
+            .read_exact(&mut methods)
+            .await
+            .expect("read socks5 methods");
+
+        let selected_method = match &auth_mode {
+            FakeSocks5AuthMode::NoAuth => {
+                assert!(
+                    methods.contains(&0x00),
+                    "runtime should advertise no-auth SOCKS5 support"
+                );
+                0x00
+            }
+            FakeSocks5AuthMode::UsernamePassword { .. } => {
+                assert!(
+                    methods.contains(&0x02),
+                    "runtime should advertise username/password SOCKS5 support"
+                );
+                0x02
+            }
+            FakeSocks5AuthMode::RejectAuthentication => 0xFF,
+        };
+
+        client
+            .write_all(&[0x05, selected_method])
+            .await
+            .expect("write socks5 method selection");
+
+        if selected_method == 0xFF {
+            return;
+        }
+
+        if let FakeSocks5AuthMode::UsernamePassword { username, password } = auth_mode {
+            let auth_version = client.read_u8().await.expect("read auth version");
+            assert_eq!(auth_version, 0x01, "unexpected username/password auth version");
+            let username_len = client.read_u8().await.expect("read username len");
+            let mut username_bytes = vec![0_u8; username_len as usize];
+            client
+                .read_exact(&mut username_bytes)
+                .await
+                .expect("read username");
+            let password_len = client.read_u8().await.expect("read password len");
+            let mut password_bytes = vec![0_u8; password_len as usize];
+            client
+                .read_exact(&mut password_bytes)
+                .await
+                .expect("read password");
+
+            let received_username =
+                String::from_utf8(username_bytes).expect("decode socks5 username");
+            let received_password =
+                String::from_utf8(password_bytes).expect("decode socks5 password");
+            let status = u8::from(!(received_username == username && received_password == password));
+            client
+                .write_all(&[0x01, status])
+                .await
+                .expect("write username/password auth reply");
+            if status != 0x00 {
+                return;
+            }
+        }
+
+        let request_version = client.read_u8().await.expect("read connect version");
+        assert_eq!(request_version, 0x05, "unexpected socks5 request version");
+        let command = client.read_u8().await.expect("read connect command");
+        assert_eq!(command, 0x01, "unexpected socks5 command");
+        let reserved = client.read_u8().await.expect("read reserved byte");
+        assert_eq!(reserved, 0x00, "unexpected socks5 reserved byte");
+        let address_type = client.read_u8().await.expect("read address type");
+
+        let requested_host = match address_type {
+            0x01 => {
+                let mut octets = [0_u8; 4];
+                client
+                    .read_exact(&mut octets)
+                    .await
+                    .expect("read ipv4 target");
+                std::net::Ipv4Addr::from(octets).to_string()
+            }
+            0x03 => {
+                let host_len = client.read_u8().await.expect("read domain len");
+                let mut host_bytes = vec![0_u8; host_len as usize];
+                client
+                    .read_exact(&mut host_bytes)
+                    .await
+                    .expect("read domain target");
+                String::from_utf8(host_bytes).expect("decode domain target")
+            }
+            0x04 => {
+                let mut octets = [0_u8; 16];
+                client
+                    .read_exact(&mut octets)
+                    .await
+                    .expect("read ipv6 target");
+                std::net::Ipv6Addr::from(octets).to_string()
+            }
+            other => panic!("unsupported socks5 address type: {other}"),
+        };
+        let requested_port = client.read_u16().await.expect("read target port");
+
+        if requested_host != expected_target_host || requested_port != target_addr.port() {
+            client
+                .write_all(&[0x05, 0x04, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+                .await
+                .expect("write host unreachable response");
+            return;
+        }
+
+        let mut upstream = TcpStream::connect(target_addr)
+            .await
+            .expect("connect target ssh server");
+        client
+            .write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+            .await
+            .expect("write socks5 connect success");
+        copy_bidirectional(&mut client, &mut upstream)
+            .await
+            .expect("bridge socks5 to ssh server");
+    });
+
+    (join, addr)
+}
+
 fn sample_profile(asset_id: &str) -> ConnectionProfile {
     ConnectionProfile {
         asset_id: Some(asset_id.into()),
@@ -716,6 +872,8 @@ fn sample_profile(asset_id: &str) -> ConnectionProfile {
         password: Some("secret".into()),
         private_key_content: None,
         passphrase: None,
+        proxy: ConnectionProxyProfile::None,
+        resolved_proxy_hops: Vec::new(),
         remark: "Primary entry point".into(),
     }
 }
@@ -738,8 +896,38 @@ fn sample_publickey_profile(
         password: None,
         private_key_content: None,
         passphrase: None,
+        proxy: ConnectionProxyProfile::None,
+        resolved_proxy_hops: Vec::new(),
         remark: "Primary entry point".into(),
     }
+}
+
+fn sample_publickey_profile_via_socks5(
+    asset_id: &str,
+    target_host: String,
+    target_port: u16,
+    private_key_path: String,
+    proxy_host: String,
+    proxy_port: u16,
+    proxy_username: Option<String>,
+    proxy_password: Option<String>,
+) -> ConnectionProfile {
+    let mut profile =
+        sample_publickey_profile(asset_id, target_host, target_port, private_key_path);
+    profile.proxy = ConnectionProxyProfile::Socks5 {
+        host: proxy_host.clone(),
+        port: proxy_port,
+        username: proxy_username.clone(),
+        password: proxy_password.clone(),
+        credential_ref: None,
+    };
+    profile.resolved_proxy_hops = vec![ResolvedProxyHop::Socks5 {
+        host: proxy_host,
+        port: proxy_port,
+        username: proxy_username,
+        password: proxy_password,
+    }];
+    profile
 }
 
 fn surface_with_viewport(
@@ -1115,6 +1303,220 @@ fn ssh_runtime_negotiates_truecolor_environment_before_requesting_shell() {
             "shell".to_string(),
         ]
     );
+
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+}
+
+#[test]
+fn ssh_runtime_connects_through_unauthenticated_socks5_proxy() {
+    let _env_lock = lock_known_hosts_env();
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, server_addr, private_key_path, server_public_key, _server_state) =
+        runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(10)).await });
+    let target_host = "ssh.internal.test".to_string();
+    let (socks_task, socks_addr) = runtime.block_on(async {
+        spawn_fake_socks5_server(
+            target_host.clone(),
+            server_addr,
+            FakeSocks5AuthMode::NoAuth,
+        )
+        .await
+    });
+    let known_hosts_path = temp_known_hosts_path("socks5-no-auth");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(target_host.as_str(), server_addr.port(), &server_public_key)
+        .expect("trust test server host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let profile = sample_publickey_profile_via_socks5(
+        "asset-prod",
+        target_host.clone(),
+        server_addr.port(),
+        private_key_path.display().to_string(),
+        socks_addr.ip().to_string(),
+        socks_addr.port(),
+        None,
+        None,
+    );
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let runtime_handle = runtime.block_on(async {
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+            .await
+            .expect("connect ssh runtime through unauthenticated socks5 proxy")
+    });
+
+    let saw_connected = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, SessionRuntimeEvent::Connected) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("wait for connected event")
+    });
+
+    assert!(
+        saw_connected,
+        "runtime should emit Connected after connecting through SOCKS5"
+    );
+    runtime_handle.disconnect().expect("disconnect runtime");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        socks_task.await.expect("join fake socks5 server");
+        server_task.await.expect("join test ssh server");
+    });
+
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+}
+
+#[test]
+fn ssh_runtime_connects_through_username_password_socks5_proxy() {
+    let _env_lock = lock_known_hosts_env();
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, server_addr, private_key_path, server_public_key, _server_state) =
+        runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(10)).await });
+    let target_host = "ssh.internal.test".to_string();
+    let proxy_username = "relay".to_string();
+    let proxy_password = "secret-pass".to_string();
+    let (socks_task, socks_addr) = runtime.block_on(async {
+        spawn_fake_socks5_server(
+            target_host.clone(),
+            server_addr,
+            FakeSocks5AuthMode::UsernamePassword {
+                username: proxy_username.clone(),
+                password: proxy_password.clone(),
+            },
+        )
+        .await
+    });
+    let known_hosts_path = temp_known_hosts_path("socks5-password");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(target_host.as_str(), server_addr.port(), &server_public_key)
+        .expect("trust test server host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let profile = sample_publickey_profile_via_socks5(
+        "asset-prod",
+        target_host.clone(),
+        server_addr.port(),
+        private_key_path.display().to_string(),
+        socks_addr.ip().to_string(),
+        socks_addr.port(),
+        Some(proxy_username),
+        Some(proxy_password),
+    );
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let runtime_handle = runtime.block_on(async {
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+            .await
+            .expect("connect ssh runtime through username/password socks5 proxy")
+    });
+
+    let saw_connected = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, SessionRuntimeEvent::Connected) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("wait for connected event")
+    });
+
+    assert!(
+        saw_connected,
+        "runtime should emit Connected after username/password SOCKS5 auth"
+    );
+    runtime_handle.disconnect().expect("disconnect runtime");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        socks_task.await.expect("join fake socks5 server");
+        server_task.await.expect("join test ssh server");
+    });
+
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+}
+
+#[test]
+fn ssh_runtime_surfaces_socks5_authentication_rejection() {
+    let _env_lock = lock_known_hosts_env();
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, server_addr, private_key_path, server_public_key, _server_state) =
+        runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(10)).await });
+    let target_host = "ssh.internal.test".to_string();
+    let (socks_task, socks_addr) = runtime.block_on(async {
+        spawn_fake_socks5_server(
+            target_host.clone(),
+            server_addr,
+            FakeSocks5AuthMode::RejectAuthentication,
+        )
+        .await
+    });
+    let known_hosts_path = temp_known_hosts_path("socks5-reject");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(target_host.as_str(), server_addr.port(), &server_public_key)
+        .expect("trust test server host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let err = runtime.block_on(async {
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        match SshSessionRuntime::connect(
+            sample_publickey_profile_via_socks5(
+                "asset-prod",
+                target_host,
+                server_addr.port(),
+                private_key_path.display().to_string(),
+                socks_addr.ip().to_string(),
+                socks_addr.port(),
+                Some("relay".into()),
+                Some("secret-pass".into()),
+            ),
+            Uuid::new_v4(),
+            event_tx,
+        )
+        .await
+        {
+            Ok(_) => panic!("SOCKS5 auth rejection should fail runtime connect"),
+            Err(err) => err,
+        }
+    });
+
+    let message = err.to_string();
+    assert!(
+        message.contains("failed to connect to SOCKS5 proxy"),
+        "expected SOCKS5 proxy error, got: {message}"
+    );
+
+    runtime.block_on(async {
+        socks_task.await.expect("join fake socks5 server");
+        server_task.abort();
+    });
 
     unsafe {
         std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
