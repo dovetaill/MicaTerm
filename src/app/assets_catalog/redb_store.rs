@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::app::assets_catalog::model::{
     ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetCatalog, PersistedAssetKind, PersistedAssetNode,
-    PersistedAssetPayload, PersistedSshConnectionSpec,
+    PersistedAssetPayload, PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec,
+    PersistedSshConnectionSpec,
 };
 use crate::app::assets_catalog::repository::AssetCatalogRepository;
 
@@ -220,8 +221,68 @@ enum StoredPersistedAssetPayload {
     SshConnection(StoredPersistedSshConnectionSpec),
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct StoredPersistedAssetSocks5ProxySpec {
+    host: String,
+    port: String,
+    username: String,
+    password_credential_ref: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+enum StoredPersistedAssetSshProxySpec {
+    #[default]
+    None,
+    Socks5(StoredPersistedAssetSocks5ProxySpec),
+    SshAsset {
+        asset_id: String,
+    },
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredPersistedSshConnectionSpec {
+    host: String,
+    user: String,
+    port: String,
+    #[serde(default)]
+    auth_method: String,
+    #[serde(default)]
+    private_key_source: String,
+    #[serde(default)]
+    private_key_path: String,
+    environment: String,
+    proxy: StoredPersistedAssetSshProxySpec,
+    #[serde(default)]
+    remark: String,
+    #[serde(default)]
+    credential_ref: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct LegacyStoredPersistedAssetNode {
+    id: String,
+    parent_id: Option<String>,
+    title: String,
+    kind: LegacyStoredPersistedAssetKind,
+    child_ids: Vec<String>,
+    payload: LegacyStoredPersistedAssetPayload,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum LegacyStoredPersistedAssetKind {
+    Folder,
+    SshConnection,
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Serialize, Deserialize)]
+enum LegacyStoredPersistedAssetPayload {
+    Folder,
+    SshConnection(LegacyStoredPersistedSshConnectionSpec),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct LegacyStoredPersistedSshConnectionSpec {
     host: String,
     user: String,
     port: String,
@@ -263,8 +324,12 @@ fn encode_node(node: &PersistedAssetNode) -> Result<Vec<u8>> {
 }
 
 fn decode_node(bytes: &[u8]) -> Result<PersistedAssetNode> {
-    let stored: StoredPersistedAssetNode = bincode::deserialize(bytes)?;
-    Ok(stored.into())
+    if let Ok(stored) = bincode::deserialize::<StoredPersistedAssetNode>(bytes) {
+        return Ok(stored.into());
+    }
+
+    let legacy: LegacyStoredPersistedAssetNode = bincode::deserialize(bytes)?;
+    Ok(legacy.into())
 }
 
 fn timestamp_suffix() -> u128 {
@@ -296,7 +361,7 @@ impl From<&PersistedAssetNode> for StoredPersistedAssetNode {
                         private_key_source: spec.private_key_source.clone(),
                         private_key_path: spec.private_key_path.clone(),
                         environment: spec.environment.clone(),
-                        proxy_method: spec.proxy_method.clone(),
+                        proxy: stored_proxy(&spec.proxy),
                         remark: spec.remark.clone(),
                         credential_ref: spec.credential_ref.clone(),
                     })
@@ -328,12 +393,81 @@ impl From<StoredPersistedAssetNode> for PersistedAssetNode {
                         private_key_source: default_private_key_source(spec.private_key_source),
                         private_key_path: spec.private_key_path,
                         environment: spec.environment,
-                        proxy_method: spec.proxy_method,
+                        proxy: persisted_proxy(spec.proxy),
                         remark: spec.remark,
                         credential_ref: spec.credential_ref,
                     })
                 }
             },
+        }
+    }
+}
+
+impl From<LegacyStoredPersistedAssetNode> for PersistedAssetNode {
+    fn from(node: LegacyStoredPersistedAssetNode) -> Self {
+        Self {
+            id: node.id,
+            parent_id: node.parent_id,
+            title: node.title,
+            kind: match node.kind {
+                LegacyStoredPersistedAssetKind::Folder => PersistedAssetKind::Folder,
+                LegacyStoredPersistedAssetKind::SshConnection => PersistedAssetKind::SshConnection,
+            },
+            child_ids: node.child_ids,
+            payload: match node.payload {
+                LegacyStoredPersistedAssetPayload::Folder => PersistedAssetPayload::Folder,
+                LegacyStoredPersistedAssetPayload::SshConnection(spec) => {
+                    let _ = spec.proxy_method;
+                    PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                        host: spec.host,
+                        user: spec.user,
+                        port: spec.port,
+                        auth_method: default_ssh_auth_method(spec.auth_method),
+                        private_key_source: default_private_key_source(spec.private_key_source),
+                        private_key_path: spec.private_key_path,
+                        environment: spec.environment,
+                        proxy: PersistedAssetSshProxySpec::None,
+                        remark: spec.remark,
+                        credential_ref: spec.credential_ref,
+                    })
+                }
+            },
+        }
+    }
+}
+
+fn stored_proxy(proxy: &PersistedAssetSshProxySpec) -> StoredPersistedAssetSshProxySpec {
+    match proxy {
+        PersistedAssetSshProxySpec::None => StoredPersistedAssetSshProxySpec::None,
+        PersistedAssetSshProxySpec::Socks5(spec) => {
+            StoredPersistedAssetSshProxySpec::Socks5(StoredPersistedAssetSocks5ProxySpec {
+                host: spec.host.clone(),
+                port: spec.port.clone(),
+                username: spec.username.clone(),
+                password_credential_ref: spec.password_credential_ref.clone(),
+            })
+        }
+        PersistedAssetSshProxySpec::SshAsset { asset_id } => {
+            StoredPersistedAssetSshProxySpec::SshAsset {
+                asset_id: asset_id.clone(),
+            }
+        }
+    }
+}
+
+fn persisted_proxy(proxy: StoredPersistedAssetSshProxySpec) -> PersistedAssetSshProxySpec {
+    match proxy {
+        StoredPersistedAssetSshProxySpec::None => PersistedAssetSshProxySpec::None,
+        StoredPersistedAssetSshProxySpec::Socks5(spec) => {
+            PersistedAssetSshProxySpec::Socks5(PersistedAssetSocks5ProxySpec {
+                host: spec.host,
+                port: spec.port,
+                username: spec.username,
+                password_credential_ref: spec.password_credential_ref,
+            })
+        }
+        StoredPersistedAssetSshProxySpec::SshAsset { asset_id } => {
+            PersistedAssetSshProxySpec::SshAsset { asset_id }
         }
     }
 }

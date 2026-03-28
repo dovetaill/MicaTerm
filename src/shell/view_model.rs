@@ -4,8 +4,8 @@ use crate::app::ssh::credentials::{SshCredentialKind, ssh_credential_ref};
 use crate::app::ssh::runtime::TerminalSurfaceState;
 use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::{
-    AssetNameValidation, AssetNodePayload, AssetSshConnectionSpec, AssetTree, AssetViewMode,
-    ConsoleAssetKind, VisibleAssetRow, resolve_committed_name,
+    AssetNameValidation, AssetNodePayload, AssetSshConnectionSpec, AssetSshProxySpec, AssetTree,
+    AssetViewMode, ConsoleAssetKind, VisibleAssetRow, resolve_committed_name,
 };
 use crate::shell::context_menu::{
     ContextMenuActionNode, ContextMenuActionState, ContextTargetKind, SelectionContext,
@@ -940,6 +940,7 @@ impl ShellViewModel {
                     private_key_source: draft.private_key_source,
                     private_key_path: draft.private_key_path,
                     environment: draft.environment,
+                    proxy: AssetSshProxySpec::None,
                     proxy_method: draft.proxy_method,
                     remark: draft.remark,
                     credential_ref: None,
@@ -1624,6 +1625,7 @@ fn build_saved_ssh_connection_spec(
             draft.private_key_path.clone()
         },
         environment: draft.environment.clone(),
+        proxy: AssetSshProxySpec::None,
         proxy_method: draft.proxy_method.clone(),
         remark: draft.remark.clone(),
         credential_ref,

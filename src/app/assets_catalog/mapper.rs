@@ -4,10 +4,12 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::app::assets_catalog::model::{
     ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetCatalog, PersistedAssetKind, PersistedAssetNode,
-    PersistedAssetPayload, PersistedSshConnectionSpec,
+    PersistedAssetPayload, PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec,
+    PersistedSshConnectionSpec,
 };
 use crate::shell::assets::{
-    AssetNode, AssetNodePayload, AssetSshConnectionSpec, AssetTree, ConsoleAssetKind,
+    AssetNode, AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec,
+    AssetTree, ConsoleAssetKind,
 };
 
 pub fn catalog_to_asset_tree(catalog: &PersistedAssetCatalog) -> AssetTree {
@@ -96,7 +98,8 @@ fn runtime_payload(payload: &PersistedAssetPayload) -> AssetNodePayload {
                 private_key_source: spec.private_key_source.clone(),
                 private_key_path: spec.private_key_path.clone(),
                 environment: spec.environment.clone(),
-                proxy_method: spec.proxy_method.clone(),
+                proxy: runtime_proxy(&spec.proxy),
+                proxy_method: String::new(),
                 remark: spec.remark.clone(),
                 credential_ref: spec.credential_ref.clone(),
             })
@@ -116,7 +119,7 @@ fn persisted_payload(node: &AssetNode) -> PersistedAssetPayload {
                 private_key_source: spec.private_key_source.clone(),
                 private_key_path: spec.private_key_path.clone(),
                 environment: spec.environment.clone(),
-                proxy_method: spec.proxy_method.clone(),
+                proxy: persisted_proxy(&spec.proxy),
                 remark: spec.remark.clone(),
                 credential_ref: spec.credential_ref.clone(),
             })
@@ -124,5 +127,39 @@ fn persisted_payload(node: &AssetNode) -> PersistedAssetPayload {
         (ConsoleAssetKind::SshConnection, AssetNodePayload::Folder) => {
             unreachable!("ssh runtime nodes must carry ssh payload")
         }
+    }
+}
+
+fn runtime_proxy(proxy: &PersistedAssetSshProxySpec) -> AssetSshProxySpec {
+    match proxy {
+        PersistedAssetSshProxySpec::None => AssetSshProxySpec::None,
+        PersistedAssetSshProxySpec::Socks5(spec) => {
+            AssetSshProxySpec::Socks5(AssetSocks5ProxySpec {
+                host: spec.host.clone(),
+                port: spec.port.clone(),
+                username: spec.username.clone(),
+                password_credential_ref: spec.password_credential_ref.clone(),
+            })
+        }
+        PersistedAssetSshProxySpec::SshAsset { asset_id } => AssetSshProxySpec::SshAsset {
+            asset_id: asset_id.clone(),
+        },
+    }
+}
+
+fn persisted_proxy(proxy: &AssetSshProxySpec) -> PersistedAssetSshProxySpec {
+    match proxy {
+        AssetSshProxySpec::None => PersistedAssetSshProxySpec::None,
+        AssetSshProxySpec::Socks5(spec) => {
+            PersistedAssetSshProxySpec::Socks5(PersistedAssetSocks5ProxySpec {
+                host: spec.host.clone(),
+                port: spec.port.clone(),
+                username: spec.username.clone(),
+                password_credential_ref: spec.password_credential_ref.clone(),
+            })
+        }
+        AssetSshProxySpec::SshAsset { asset_id } => PersistedAssetSshProxySpec::SshAsset {
+            asset_id: asset_id.clone(),
+        },
     }
 }

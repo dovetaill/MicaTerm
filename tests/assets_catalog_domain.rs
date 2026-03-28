@@ -1,9 +1,11 @@
 use mica_term::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetKind, PersistedAssetPayload,
-    PersistedSshConnectionSpec, asset_tree_to_catalog, catalog_to_asset_tree,
+    PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec, PersistedSshConnectionSpec,
+    asset_tree_to_catalog, catalog_to_asset_tree,
 };
 use mica_term::shell::assets::{
-    AssetNodePayload, AssetSshConnectionSpec, AssetTree, ConsoleAssetKind,
+    AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec, AssetTree,
+    ConsoleAssetKind,
 };
 
 #[test]
@@ -21,7 +23,8 @@ fn persisted_catalog_round_trips_tree_order_and_node_kind() {
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "prod".into(),
-            proxy_method: "none".into(),
+            proxy: AssetSshProxySpec::None,
+            proxy_method: String::new(),
             remark: String::new(),
             credential_ref: None,
         }),
@@ -38,7 +41,10 @@ fn persisted_catalog_round_trips_tree_order_and_node_kind() {
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "ops".into(),
-            proxy_method: "jump".into(),
+            proxy: AssetSshProxySpec::SshAsset {
+                asset_id: ssh_id.clone(),
+            },
+            proxy_method: String::new(),
             remark: String::new(),
             credential_ref: None,
         }),
@@ -81,7 +87,15 @@ fn persisted_catalog_round_trips_tree_order_and_node_kind() {
 }
 
 #[test]
-fn persisted_catalog_preserves_ssh_connection_fields() {
+fn ssh_connection_spec_defaults_to_no_proxy() {
+    assert_eq!(
+        AssetSshConnectionSpec::default().proxy,
+        AssetSshProxySpec::None
+    );
+}
+
+#[test]
+fn persisted_catalog_preserves_socks5_proxy_fields() {
     let mut tree = AssetTree::new();
     let ssh_id = tree.insert_root_with_payload(
         ConsoleAssetKind::SshConnection,
@@ -94,7 +108,13 @@ fn persisted_catalog_preserves_ssh_connection_fields() {
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "prod".into(),
-            proxy_method: "jump-host".into(),
+            proxy: AssetSshProxySpec::Socks5(AssetSocks5ProxySpec {
+                host: "proxy.example.net".into(),
+                port: "1080".into(),
+                username: "ops-proxy".into(),
+                password_credential_ref: Some("ssh/saved-secrets/asset-a".into()),
+            }),
+            proxy_method: String::new(),
             remark: String::new(),
             credential_ref: None,
         }),
@@ -113,7 +133,12 @@ fn persisted_catalog_preserves_ssh_connection_fields() {
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "prod".into(),
-            proxy_method: "jump-host".into(),
+            proxy: PersistedAssetSshProxySpec::Socks5(PersistedAssetSocks5ProxySpec {
+                host: "proxy.example.net".into(),
+                port: "1080".into(),
+                username: "ops-proxy".into(),
+                password_credential_ref: Some("ssh/saved-secrets/asset-a".into()),
+            }),
             remark: String::new(),
             credential_ref: None,
         })
@@ -130,7 +155,13 @@ fn persisted_catalog_preserves_ssh_connection_fields() {
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "prod".into(),
-            proxy_method: "jump-host".into(),
+            proxy: AssetSshProxySpec::Socks5(AssetSocks5ProxySpec {
+                host: "proxy.example.net".into(),
+                port: "1080".into(),
+                username: "ops-proxy".into(),
+                password_credential_ref: Some("ssh/saved-secrets/asset-a".into()),
+            }),
+            proxy_method: String::new(),
             remark: String::new(),
             credential_ref: None,
         })
@@ -138,7 +169,7 @@ fn persisted_catalog_preserves_ssh_connection_fields() {
 }
 
 #[test]
-fn persisted_ssh_connection_spec_round_trips_extended_non_secret_fields() {
+fn persisted_ssh_connection_spec_round_trips_ssh_upstream_proxy_reference() {
     let mut tree = AssetTree::new();
     let ssh_id = tree.insert_root_with_payload(
         ConsoleAssetKind::SshConnection,
@@ -151,7 +182,10 @@ fn persisted_ssh_connection_spec_round_trips_extended_non_secret_fields() {
             private_key_source: "path".into(),
             private_key_path: "/tmp/id_ed25519".into(),
             environment: "prod".into(),
-            proxy_method: "jump-host".into(),
+            proxy: AssetSshProxySpec::SshAsset {
+                asset_id: "asset-upstream".into(),
+            },
+            proxy_method: String::new(),
             remark: "Primary entry point".into(),
             credential_ref: Some("ssh/private-key/asset-gateway".into()),
         }),
@@ -170,7 +204,9 @@ fn persisted_ssh_connection_spec_round_trips_extended_non_secret_fields() {
             private_key_source: "path".into(),
             private_key_path: "/tmp/id_ed25519".into(),
             environment: "prod".into(),
-            proxy_method: "jump-host".into(),
+            proxy: PersistedAssetSshProxySpec::SshAsset {
+                asset_id: "asset-upstream".into(),
+            },
             remark: "Primary entry point".into(),
             credential_ref: Some("ssh/private-key/asset-gateway".into()),
         })
@@ -187,7 +223,10 @@ fn persisted_ssh_connection_spec_round_trips_extended_non_secret_fields() {
             private_key_source: "path".into(),
             private_key_path: "/tmp/id_ed25519".into(),
             environment: "prod".into(),
-            proxy_method: "jump-host".into(),
+            proxy: AssetSshProxySpec::SshAsset {
+                asset_id: "asset-upstream".into(),
+            },
+            proxy_method: String::new(),
             remark: "Primary entry point".into(),
             credential_ref: Some("ssh/private-key/asset-gateway".into()),
         })
@@ -210,7 +249,8 @@ fn persisted_catalog_excludes_ui_session_state() {
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "".into(),
-            proxy_method: "".into(),
+            proxy: AssetSshProxySpec::None,
+            proxy_method: String::new(),
             remark: String::new(),
             credential_ref: None,
         }),

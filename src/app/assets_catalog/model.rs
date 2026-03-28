@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-pub const ASSET_CATALOG_SCHEMA_VERSION: u32 = 2;
+pub const ASSET_CATALOG_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistedAssetCatalog {
@@ -35,6 +35,24 @@ pub enum PersistedAssetPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PersistedAssetSocks5ProxySpec {
+    pub host: String,
+    pub port: String,
+    pub username: String,
+    pub password_credential_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PersistedAssetSshProxySpec {
+    #[default]
+    None,
+    Socks5(PersistedAssetSocks5ProxySpec),
+    SshAsset {
+        asset_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PersistedSshConnectionSpec {
     pub host: String,
     pub user: String,
@@ -43,7 +61,7 @@ pub struct PersistedSshConnectionSpec {
     pub private_key_source: String,
     pub private_key_path: String,
     pub environment: String,
-    pub proxy_method: String,
+    pub proxy: PersistedAssetSshProxySpec,
     pub remark: String,
     pub credential_ref: Option<String>,
 }

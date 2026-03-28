@@ -116,6 +116,24 @@ pub enum AssetNameValidation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AssetSocks5ProxySpec {
+    pub host: String,
+    pub port: String,
+    pub username: String,
+    pub password_credential_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum AssetSshProxySpec {
+    #[default]
+    None,
+    Socks5(AssetSocks5ProxySpec),
+    SshAsset {
+        asset_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AssetSshConnectionSpec {
     pub host: String,
     pub user: String,
@@ -124,6 +142,8 @@ pub struct AssetSshConnectionSpec {
     pub private_key_source: String,
     pub private_key_path: String,
     pub environment: String,
+    pub proxy: AssetSshProxySpec,
+    // Transitional compatibility for pre-proxy-chain UI code.
     pub proxy_method: String,
     pub remark: String,
     pub credential_ref: Option<String>,
