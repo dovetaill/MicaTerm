@@ -168,14 +168,19 @@ fn terminal_host_declares_accumulated_multi_line_wheel_scrollback_contract() {
 }
 
 #[test]
-fn terminal_host_prefers_bundled_font_and_stable_clipboard_shortcut_tokens() {
+fn terminal_host_uses_startup_safe_font_stack_and_stable_clipboard_shortcut_tokens() {
     let terminal_host =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        terminal_host
-            .contains("in property <string> terminal-font-family: \"Sarasa Term SC Nerd\";"),
-        "TerminalSessionHost should bind directly to the bundled Sarasa Term SC Nerd family instead of a CSS-style comma list"
+        terminal_host.contains(
+            "in property <string> terminal-font-family: \"Iosevka Term, Cascadia Mono, Consolas, monospace\";"
+        ),
+        "TerminalSessionHost should default to the lighter startup-safe fallback stack"
+    );
+    assert!(
+        !terminal_host.contains("Sarasa Term SC Nerd"),
+        "TerminalSessionHost should not force the large Sarasa face into the startup font contract"
     );
     assert!(
         terminal_host.contains("private property <length> terminal-font-size: 16px;"),
