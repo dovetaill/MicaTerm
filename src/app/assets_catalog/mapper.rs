@@ -141,6 +141,12 @@ fn runtime_proxy(proxy: &PersistedAssetSshProxySpec) -> AssetSshProxySpec {
                 password_credential_ref: spec.password_credential_ref.clone(),
             })
         }
+        PersistedAssetSshProxySpec::Http(spec) => AssetSshProxySpec::Http(AssetSocks5ProxySpec {
+            host: spec.host.clone(),
+            port: spec.port.clone(),
+            username: spec.username.clone(),
+            password_credential_ref: spec.password_credential_ref.clone(),
+        }),
         PersistedAssetSshProxySpec::SshAsset { asset_id } => AssetSshProxySpec::SshAsset {
             asset_id: asset_id.clone(),
         },
@@ -152,6 +158,14 @@ fn persisted_proxy(proxy: &AssetSshProxySpec) -> PersistedAssetSshProxySpec {
         AssetSshProxySpec::None => PersistedAssetSshProxySpec::None,
         AssetSshProxySpec::Socks5(spec) => {
             PersistedAssetSshProxySpec::Socks5(PersistedAssetSocks5ProxySpec {
+                host: spec.host.clone(),
+                port: spec.port.clone(),
+                username: spec.username.clone(),
+                password_credential_ref: spec.password_credential_ref.clone(),
+            })
+        }
+        AssetSshProxySpec::Http(spec) => {
+            PersistedAssetSshProxySpec::Http(PersistedAssetSocks5ProxySpec {
                 host: spec.host.clone(),
                 port: spec.port.clone(),
                 username: spec.username.clone(),

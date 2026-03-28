@@ -169,6 +169,80 @@ fn persisted_catalog_preserves_socks5_proxy_fields() {
 }
 
 #[test]
+fn persisted_catalog_preserves_http_proxy_fields() {
+    let mut tree = AssetTree::new();
+    let ssh_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Gateway",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "gateway.example.com".into(),
+            user: "mica".into(),
+            port: "2022".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: "prod".into(),
+            proxy: AssetSshProxySpec::Http(AssetSocks5ProxySpec {
+                host: "proxy.example.net".into(),
+                port: "8080".into(),
+                username: "ops-proxy".into(),
+                password_credential_ref: Some("ssh/saved-secrets/asset-a".into()),
+            }),
+            proxy_method: String::new(),
+            remark: String::new(),
+            credential_ref: None,
+        }),
+    );
+
+    let catalog = asset_tree_to_catalog(&tree);
+    let persisted = catalog.nodes.get(&ssh_id).unwrap();
+
+    assert_eq!(
+        persisted.payload,
+        PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+            host: "gateway.example.com".into(),
+            user: "mica".into(),
+            port: "2022".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: "prod".into(),
+            proxy: PersistedAssetSshProxySpec::Http(PersistedAssetSocks5ProxySpec {
+                host: "proxy.example.net".into(),
+                port: "8080".into(),
+                username: "ops-proxy".into(),
+                password_credential_ref: Some("ssh/saved-secrets/asset-a".into()),
+            }),
+            remark: String::new(),
+            credential_ref: None,
+        })
+    );
+
+    let round_tripped = catalog_to_asset_tree(&catalog);
+    assert_eq!(
+        round_tripped.ssh_connection_spec(&ssh_id),
+        Some(&AssetSshConnectionSpec {
+            host: "gateway.example.com".into(),
+            user: "mica".into(),
+            port: "2022".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: "prod".into(),
+            proxy: AssetSshProxySpec::Http(AssetSocks5ProxySpec {
+                host: "proxy.example.net".into(),
+                port: "8080".into(),
+                username: "ops-proxy".into(),
+                password_credential_ref: Some("ssh/saved-secrets/asset-a".into()),
+            }),
+            proxy_method: String::new(),
+            remark: String::new(),
+            credential_ref: None,
+        })
+    );
+}
+
+#[test]
 fn persisted_ssh_connection_spec_round_trips_ssh_upstream_proxy_reference() {
     let mut tree = AssetTree::new();
     let ssh_id = tree.insert_root_with_payload(

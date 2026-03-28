@@ -1,4 +1,4 @@
-import { ScrollView } from "std-widgets.slint";
+import { ComboBox, ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 
 component ModalTabButton inherits Rectangle {
@@ -214,6 +214,8 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> proxy-socks5-password: "";
     in property <bool> proxy-socks5-password-visible: false;
     in property <string> proxy-ssh-asset-id: "";
+    in property <[string]> proxy-ssh-options: [];
+    in property <string> proxy-ssh-selected-label: "";
     in property <string> proxy-method: "";
     in property <string> validation-message: "";
     in property <bool> connect-family-enabled: false;
@@ -624,26 +626,23 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 opacity: 0.8;
                             }
 
-                            Rectangle {
+                            ComboBox {
                                 width: parent.width;
                                 height: 34px;
-                                background: transparent;
+                                model: ["None", "SOCKS5", "HTTP", "Existing SSH Connection"];
+                                current-value: root.proxy-type == "socks5" ? "SOCKS5"
+                                    : root.proxy-type == "http" ? "HTTP"
+                                    : root.proxy-type == "ssh-asset" ? "Existing SSH Connection"
+                                    : "None";
 
-                                HorizontalLayout {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    spacing: 8px;
-
-                                    for proxy-option in ["none", "socks5", "ssh-asset"] : ModalTabButton {
-                                        label: proxy-option == "none" ? "None"
-                                            : proxy-option == "socks5" ? "SOCKS5"
-                                            : "Existing SSH Connection";
-                                        active: root.proxy-type == proxy-option;
-
-                                        clicked => {
-                                            root.draft-changed("proxy_type", proxy-option);
-                                        }
-                                    }
+                                selected(value) => {
+                                    root.draft-changed(
+                                        "proxy_type",
+                                        value == "SOCKS5" ? "socks5"
+                                            : value == "HTTP" ? "http"
+                                            : value == "Existing SSH Connection" ? "ssh-asset"
+                                            : "none"
+                                    );
                                 }
                             }
                         }
@@ -741,13 +740,119 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
 
-                        if root.proxy-type == "ssh-asset" : FormField {
+                        if root.proxy-type == "http" : VerticalLayout {
                             width: parent.width;
-                            label: "Upstream SSH Connection";
-                            value: root.proxy-ssh-asset-id;
+                            spacing: 12px;
 
-                            value-changed(value) => {
-                                root.draft-changed("proxy_ssh_asset_id", value);
+                            if root.compact-layout : VerticalLayout {
+                                width: parent.width;
+                                spacing: 12px;
+
+                                FormField {
+                                    width: parent.width;
+                                    label: "HTTP Host";
+                                    value: root.proxy-socks5-host;
+
+                                    value-changed(value) => {
+                                        root.draft-changed("proxy_socks5_host", value);
+                                    }
+                                }
+
+                                FormField {
+                                    width: parent.width;
+                                    label: "HTTP Port";
+                                    value: root.proxy-socks5-port;
+
+                                    value-changed(value) => {
+                                        root.draft-changed("proxy_socks5_port", value);
+                                    }
+                                }
+                            }
+
+                            if !root.compact-layout : Rectangle {
+                                width: parent.width;
+                                height: 72px;
+                                background: transparent;
+
+                                HorizontalLayout {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    spacing: 12px;
+
+                                    FormField {
+                                        horizontal-stretch: 1;
+                                        height: parent.height;
+                                        label: "HTTP Host";
+                                        value: root.proxy-socks5-host;
+
+                                        value-changed(value) => {
+                                            root.draft-changed("proxy_socks5_host", value);
+                                        }
+                                    }
+
+                                    FormField {
+                                        width: 132px;
+                                        height: parent.height;
+                                        label: "HTTP Port";
+                                        value: root.proxy-socks5-port;
+
+                                        value-changed(value) => {
+                                            root.draft-changed("proxy_socks5_port", value);
+                                        }
+                                    }
+                                }
+                            }
+
+                            FormField {
+                                width: parent.width;
+                                label: "Username";
+                                value: root.proxy-socks5-username;
+
+                                value-changed(value) => {
+                                    root.draft-changed("proxy_socks5_username", value);
+                                }
+                            }
+
+                            FormField {
+                                width: parent.width;
+                                label: "Password";
+                                value: root.proxy-socks5-password;
+                                password-mode: !root.proxy-socks5-password-visible;
+                                trailing-action-text: root.proxy-socks5-password-visible ? "Hide" : "Show";
+
+                                value-changed(value) => {
+                                    root.draft-changed("proxy_socks5_password", value);
+                                }
+
+                                trailing-action-requested => {
+                                    root.draft-changed(
+                                        "proxy_socks5_password_visibility",
+                                        root.proxy-socks5-password-visible ? "hidden" : "visible"
+                                    );
+                                }
+                            }
+                        }
+
+                        if root.proxy-type == "ssh-asset" : VerticalLayout {
+                            width: parent.width;
+                            spacing: 8px;
+
+                            Text {
+                                width: parent.width;
+                                text: "Upstream SSH Connection";
+                                color: ThemeTokens.text-primary;
+                                opacity: 0.8;
+                            }
+
+                            ComboBox {
+                                width: parent.width;
+                                height: 34px;
+                                model: root.proxy-ssh-options;
+                                current-value: root.proxy-ssh-selected-label;
+
+                                selected(value) => {
+                                    root.draft-changed("proxy_ssh_asset_label", value);
+                                }
                             }
                         }
                     }

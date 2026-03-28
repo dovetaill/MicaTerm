@@ -165,7 +165,10 @@ fn persist_secret_bundle_round_trips_proxy_socks5_password() {
 
     let bundle = load_secret_bundle(&store, credential_ref.as_str()).expect("load proxy bundle");
     assert_eq!(bundle.password.as_deref(), Some("ssh-secret"));
-    assert_eq!(bundle.proxy_socks5_password.as_deref(), Some("proxy-secret"));
+    assert_eq!(
+        bundle.proxy_socks5_password.as_deref(),
+        Some("proxy-secret")
+    );
 }
 
 #[test]
@@ -207,7 +210,34 @@ fn editing_saved_password_mode_persists_proxy_password_alongside_ssh_auth_secret
     let merged = merge_edit_bundle(StoredSshSecretBundle::default(), &draft);
 
     assert_eq!(merged.password.as_deref(), Some("ssh-secret"));
-    assert_eq!(merged.proxy_socks5_password.as_deref(), Some("proxy-secret"));
+    assert_eq!(
+        merged.proxy_socks5_password.as_deref(),
+        Some("proxy-secret")
+    );
+    assert_eq!(merged.private_key_content, None);
+    assert_eq!(merged.passphrase, None);
+}
+
+#[test]
+fn editing_saved_password_mode_persists_http_proxy_password_alongside_ssh_auth_secret() {
+    let draft = AssetSshConnectionDraft {
+        auth_method: "password".into(),
+        password: "ssh-secret".into(),
+        proxy_type: "http".into(),
+        proxy_socks5_host: "proxy.example.net".into(),
+        proxy_socks5_port: "8080".into(),
+        proxy_socks5_username: "ops-proxy".into(),
+        proxy_socks5_password: "proxy-secret".into(),
+        ..AssetSshConnectionDraft::default()
+    };
+
+    let merged = merge_edit_bundle(StoredSshSecretBundle::default(), &draft);
+
+    assert_eq!(merged.password.as_deref(), Some("ssh-secret"));
+    assert_eq!(
+        merged.proxy_socks5_password.as_deref(),
+        Some("proxy-secret")
+    );
     assert_eq!(merged.private_key_content, None);
     assert_eq!(merged.passphrase, None);
 }

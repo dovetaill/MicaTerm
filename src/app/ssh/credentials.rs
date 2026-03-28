@@ -222,7 +222,7 @@ pub fn merge_edit_bundle(
         },
         _ => StoredSshSecretBundle::default(),
     };
-    bundle.proxy_socks5_password = if draft.proxy_type == "socks5" {
+    bundle.proxy_socks5_password = if matches!(draft.proxy_type.as_str(), "socks5" | "http") {
         non_empty_secret(&draft.proxy_socks5_password)
     } else {
         None

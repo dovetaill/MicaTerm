@@ -128,6 +128,7 @@ pub enum AssetSshProxySpec {
     #[default]
     None,
     Socks5(AssetSocks5ProxySpec),
+    Http(AssetSocks5ProxySpec),
     SshAsset {
         asset_id: String,
     },

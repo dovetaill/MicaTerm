@@ -75,6 +75,8 @@ export component AppWindow inherits Window {
     in-out property <string> asset-ssh-modal-proxy-socks5-password: "";
     in-out property <bool> asset-ssh-modal-proxy-socks5-password-visible: false;
     in-out property <string> asset-ssh-modal-proxy-ssh-asset-id: "";
+    in-out property <[string]> asset-ssh-modal-proxy-ssh-options: [];
+    in-out property <string> asset-ssh-modal-proxy-ssh-selected-label: "";
     in-out property <string> asset-ssh-modal-proxy-method: "";
     in-out property <bool> asset-ssh-modal-connect-family-enabled: false;
     in-out property <string> asset-ssh-modal-feedback-state: "idle";
@@ -772,6 +774,8 @@ export component AppWindow inherits Window {
             proxy-socks5-password: root.asset-ssh-modal-proxy-socks5-password;
             proxy-socks5-password-visible: root.asset-ssh-modal-proxy-socks5-password-visible;
             proxy-ssh-asset-id: root.asset-ssh-modal-proxy-ssh-asset-id;
+            proxy-ssh-options: root.asset-ssh-modal-proxy-ssh-options;
+            proxy-ssh-selected-label: root.asset-ssh-modal-proxy-ssh-selected-label;
             proxy-method: root.asset-ssh-modal-proxy-method;
             connect-family-enabled: root.asset-ssh-modal-connect-family-enabled;
             feedback-state: root.asset-ssh-modal-feedback-state;

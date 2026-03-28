@@ -26,6 +26,13 @@ pub enum ConnectionProxyProfile {
         password: Option<String>,
         credential_ref: Option<String>,
     },
+    Http {
+        host: String,
+        port: u16,
+        username: Option<String>,
+        password: Option<String>,
+        credential_ref: Option<String>,
+    },
     SshAsset {
         asset_id: String,
     },
@@ -34,6 +41,12 @@ pub enum ConnectionProxyProfile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedProxyHop {
     Socks5 {
+        host: String,
+        port: u16,
+        username: Option<String>,
+        password: Option<String>,
+    },
+    Http {
         host: String,
         port: u16,
         username: Option<String>,
@@ -266,12 +279,21 @@ fn saved_ssh_credential_ref(asset_id: &str, spec: &AssetSshConnectionSpec) -> St
         .unwrap_or_else(|| ssh_credential_ref(asset_id, SshCredentialKind::SavedSecrets))
 }
 
-fn normalize_draft_proxy(draft: &AssetSshConnectionDraft) -> anyhow::Result<ConnectionProxyProfile> {
+fn normalize_draft_proxy(
+    draft: &AssetSshConnectionDraft,
+) -> anyhow::Result<ConnectionProxyProfile> {
     match draft.proxy_type.trim() {
         "" | "none" => Ok(ConnectionProxyProfile::None),
         "socks5" => Ok(ConnectionProxyProfile::Socks5 {
             host: draft.proxy_socks5_host.trim().to_string(),
-            port: parse_socks5_port(draft.proxy_socks5_port.trim())?,
+            port: parse_proxy_port(draft.proxy_socks5_port.trim(), "socks5")?,
+            username: optional_string(&draft.proxy_socks5_username),
+            password: optional_string(&draft.proxy_socks5_password),
+            credential_ref: None,
+        }),
+        "http" => Ok(ConnectionProxyProfile::Http {
+            host: draft.proxy_socks5_host.trim().to_string(),
+            port: parse_proxy_port(draft.proxy_socks5_port.trim(), "http")?,
             username: optional_string(&draft.proxy_socks5_username),
             password: optional_string(&draft.proxy_socks5_password),
             credential_ref: None,
@@ -288,7 +310,14 @@ fn normalize_saved_proxy(spec: &AssetSshProxySpec) -> anyhow::Result<ConnectionP
         AssetSshProxySpec::None => Ok(ConnectionProxyProfile::None),
         AssetSshProxySpec::Socks5(proxy) => Ok(ConnectionProxyProfile::Socks5 {
             host: proxy.host.trim().to_string(),
-            port: parse_socks5_port(proxy.port.trim())?,
+            port: parse_proxy_port(proxy.port.trim(), "socks5")?,
+            username: optional_string(&proxy.username),
+            password: None,
+            credential_ref: proxy.password_credential_ref.clone(),
+        }),
+        AssetSshProxySpec::Http(proxy) => Ok(ConnectionProxyProfile::Http {
+            host: proxy.host.trim().to_string(),
+            port: parse_proxy_port(proxy.port.trim(), "http")?,
             username: optional_string(&proxy.username),
             password: None,
             credential_ref: proxy.password_credential_ref.clone(),
@@ -299,9 +328,9 @@ fn normalize_saved_proxy(spec: &AssetSshProxySpec) -> anyhow::Result<ConnectionP
     }
 }
 
-fn parse_socks5_port(raw: &str) -> anyhow::Result<u16> {
+fn parse_proxy_port(raw: &str, proxy_kind: &str) -> anyhow::Result<u16> {
     raw.parse::<u16>()
-        .with_context(|| format!("invalid socks5 proxy port: {raw}"))
+        .with_context(|| format!("invalid {proxy_kind} proxy port: {raw}"))
 }
 
 fn optional_string(raw: &str) -> Option<String> {

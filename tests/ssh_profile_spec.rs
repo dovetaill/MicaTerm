@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use mica_term::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, ResolvedProxyHop, SshAuthMethod};
+use mica_term::app::ssh::profile::{
+    ConnectionProfile, ConnectionProxyProfile, ResolvedProxyHop, SshAuthMethod,
+};
 use mica_term::app::ssh::proxy::resolve_proxy_chain;
 use mica_term::shell::assets::{
     AssetNode, AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec,
@@ -288,6 +290,71 @@ fn ssh_profile_normalizes_saved_socks5_proxy_reference() {
 }
 
 #[test]
+fn ssh_profile_normalizes_http_proxy_mode_from_modal_draft() {
+    let mut draft = base_draft();
+    draft.auth_method = "password".into();
+    draft.password = "super-secret".into();
+    draft.proxy_type = "http".into();
+    draft.proxy_socks5_host = "proxy.example.net".into();
+    draft.proxy_socks5_port = "8080".into();
+    draft.proxy_socks5_username = "ops-proxy".into();
+    draft.proxy_socks5_password = "proxy-secret".into();
+
+    let profile = ConnectionProfile::from_draft(&draft).expect("normalize http proxy draft");
+
+    assert_eq!(
+        profile.proxy,
+        ConnectionProxyProfile::Http {
+            host: "proxy.example.net".into(),
+            port: 8080,
+            username: Some("ops-proxy".into()),
+            password: Some("proxy-secret".into()),
+            credential_ref: None,
+        }
+    );
+    assert!(profile.resolved_proxy_hops.is_empty());
+}
+
+#[test]
+fn ssh_profile_normalizes_saved_http_proxy_reference() {
+    let profile = ConnectionProfile::from_saved_asset(
+        "asset-prod",
+        "Prod Bastion",
+        &AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "2022".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: "".into(),
+            environment: "prod".into(),
+            proxy: AssetSshProxySpec::Http(AssetSocks5ProxySpec {
+                host: "proxy.example.net".into(),
+                port: "8080".into(),
+                username: "ops-proxy".into(),
+                password_credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+            }),
+            proxy_method: String::new(),
+            remark: "Primary entry point".into(),
+            credential_ref: Some("ssh/password/asset-prod".into()),
+        },
+    )
+    .expect("build saved http proxy profile");
+
+    assert_eq!(
+        profile.proxy,
+        ConnectionProxyProfile::Http {
+            host: "proxy.example.net".into(),
+            port: 8080,
+            username: Some("ops-proxy".into()),
+            password: None,
+            credential_ref: Some("ssh/saved-secrets/asset-prod".into()),
+        }
+    );
+    assert!(profile.resolved_proxy_hops.is_empty());
+}
+
+#[test]
 fn ssh_proxy_chain_resolver_expands_recursive_upstream_chain() {
     let tree = saved_ssh_tree(vec![
         (
@@ -443,7 +510,8 @@ fn ssh_proxy_chain_resolver_reports_excessive_depth() {
         }),
     ));
     let tree = saved_ssh_tree(
-        nodes.iter()
+        nodes
+            .iter()
             .map(|(id, title, spec)| (id.as_str(), title.as_str(), spec.clone()))
             .collect(),
     );

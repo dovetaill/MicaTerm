@@ -234,6 +234,7 @@ enum StoredPersistedAssetSshProxySpec {
     #[default]
     None,
     Socks5(StoredPersistedAssetSocks5ProxySpec),
+    Http(StoredPersistedAssetSocks5ProxySpec),
     SshAsset {
         asset_id: String,
     },
@@ -447,6 +448,14 @@ fn stored_proxy(proxy: &PersistedAssetSshProxySpec) -> StoredPersistedAssetSshPr
                 password_credential_ref: spec.password_credential_ref.clone(),
             })
         }
+        PersistedAssetSshProxySpec::Http(spec) => {
+            StoredPersistedAssetSshProxySpec::Http(StoredPersistedAssetSocks5ProxySpec {
+                host: spec.host.clone(),
+                port: spec.port.clone(),
+                username: spec.username.clone(),
+                password_credential_ref: spec.password_credential_ref.clone(),
+            })
+        }
         PersistedAssetSshProxySpec::SshAsset { asset_id } => {
             StoredPersistedAssetSshProxySpec::SshAsset {
                 asset_id: asset_id.clone(),
@@ -460,6 +469,14 @@ fn persisted_proxy(proxy: StoredPersistedAssetSshProxySpec) -> PersistedAssetSsh
         StoredPersistedAssetSshProxySpec::None => PersistedAssetSshProxySpec::None,
         StoredPersistedAssetSshProxySpec::Socks5(spec) => {
             PersistedAssetSshProxySpec::Socks5(PersistedAssetSocks5ProxySpec {
+                host: spec.host,
+                port: spec.port,
+                username: spec.username,
+                password_credential_ref: spec.password_credential_ref,
+            })
+        }
+        StoredPersistedAssetSshProxySpec::Http(spec) => {
+            PersistedAssetSshProxySpec::Http(PersistedAssetSocks5ProxySpec {
                 host: spec.host,
                 port: spec.port,
                 username: spec.username,

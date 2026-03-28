@@ -372,6 +372,56 @@ fn selecting_ssh_asset_proxy_stores_upstream_asset_id() {
 }
 
 #[test]
+fn ssh_modal_validation_requires_http_proxy_host_and_port() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_field("host", "10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("password", "secret".into());
+    view_model.update_ssh_modal_field("proxy_type", "http".into());
+
+    assert!(!view_model.can_confirm_asset_modal());
+
+    view_model.update_ssh_modal_field("proxy_socks5_host", "proxy.example.net".into());
+    assert!(!view_model.can_confirm_asset_modal());
+
+    view_model.update_ssh_modal_field("proxy_socks5_port", "8080".into());
+    assert!(view_model.can_confirm_asset_modal());
+}
+
+#[test]
+fn editing_connection_cannot_proxy_through_itself() {
+    let mut view_model = ShellViewModel::default();
+    let mut tree = AssetTree::new();
+    let asset_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Target Bastion",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "10.0.0.41".into(),
+            user: "ops".into(),
+            port: "22".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: "prod".into(),
+            proxy: AssetSshProxySpec::None,
+            proxy_method: String::new(),
+            remark: String::new(),
+            credential_ref: None,
+        }),
+    );
+    view_model.replace_console_asset_tree(tree);
+
+    view_model.open_edit_ssh_modal(asset_id.clone());
+    view_model.update_ssh_modal_field("password", "secret".into());
+    view_model.update_ssh_modal_field("proxy_type", "ssh-asset".into());
+    view_model.update_ssh_modal_field("proxy_ssh_asset_id", asset_id);
+
+    assert!(!view_model.can_confirm_asset_modal());
+}
+
+#[test]
 fn switching_proxy_type_clears_stale_validation_text() {
     let mut view_model = ShellViewModel::default();
 

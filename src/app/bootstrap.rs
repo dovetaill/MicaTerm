@@ -95,13 +95,19 @@ struct PendingAssetClick {
     clicked_at: Instant,
 }
 
+#[derive(Clone)]
+struct PendingWorkspacePasteWarning {
+    session_id: Uuid,
+    text: String,
+    logical_line_count: usize,
+}
+
 #[derive(Clone, Copy)]
 enum HostKeyApprovalIntent {
     ModalTestConnection,
     OpenSession(OpenSessionMode),
 }
 
-#[cfg(any(test, target_os = "windows"))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct NativeTerminalModifierState {
     ctrl: bool,
@@ -109,7 +115,6 @@ struct NativeTerminalModifierState {
     alt: bool,
 }
 
-#[cfg(any(test, target_os = "windows"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativeTerminalClipboardShortcut {
     Copy,
@@ -200,7 +205,6 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
     }
 }
 
-#[cfg(any(test, target_os = "windows"))]
 fn update_native_terminal_modifier_state(
     modifiers: &mut NativeTerminalModifierState,
     event: &slint::winit_030::winit::event::KeyEvent,
@@ -217,7 +221,6 @@ fn update_native_terminal_modifier_state(
     }
 }
 
-#[cfg(any(test, target_os = "windows"))]
 fn native_terminal_clipboard_shortcut(
     key: &slint::winit_030::winit::keyboard::Key,
     modifiers: NativeTerminalModifierState,
@@ -282,11 +285,10 @@ fn sync_windows_true_window_placement(
     sync_top_status_bar_state(window, &state, effects);
 }
 
-#[cfg(target_os = "windows")]
 fn bind_windows_window_state_tracking(
     window: &AppWindow,
     state: Rc<RefCell<ShellViewModel>>,
-    effects: Rc<dyn PlatformWindowEffects>,
+    _effects: Rc<dyn PlatformWindowEffects>,
     session_bridge: Option<Rc<ShellSessionBridge>>,
 ) {
     use slint::ComponentHandle;
@@ -308,7 +310,7 @@ fn bind_windows_window_state_tracking(
             } = event
             {
                 let mut modifier_state = modifiers.borrow_mut();
-                update_native_terminal_modifier_state(&mut modifier_state, key_event);
+                update_native_terminal_modifier_state(&mut modifier_state, &key_event);
 
                 if key_event.state == winit::event::ElementState::Pressed
                     && !key_event.repeat
@@ -354,28 +356,24 @@ fn bind_windows_window_state_tracking(
                     | winit::event::WindowEvent::Resized(_)
                     | winit::event::WindowEvent::ScaleFactorChanged { .. }
             ) {
-                let window = handle.unwrap();
-                let _ = window.window().with_winit_window(|winit_window| {
-                    sync_windows_true_window_placement(
-                        &window,
-                        &state,
-                        effects.as_ref(),
-                        winit_window,
-                    );
-                });
+                #[cfg(target_os = "windows")]
+                {
+                    use slint::winit_030::WinitWindowAccessor;
+
+                    let window = handle.unwrap();
+                    let _ = window.window().with_winit_window(|winit_window| {
+                        sync_windows_true_window_placement(
+                            &window,
+                            &state,
+                            _effects.as_ref(),
+                            winit_window,
+                        );
+                    });
+                }
             }
 
             EventResult::Propagate
         });
-}
-
-#[cfg(not(target_os = "windows"))]
-fn bind_windows_window_state_tracking(
-    _window: &AppWindow,
-    _state: Rc<RefCell<ShellViewModel>>,
-    _effects: Rc<dyn PlatformWindowEffects>,
-    _session_bridge: Option<Rc<ShellSessionBridge>>,
-) {
 }
 
 fn sync_theme_and_window_effects(
@@ -503,6 +501,8 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_proxy_socks5_password("".into());
             window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
             window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
+            sync_ssh_proxy_target_options(window, Vec::new());
+            window.set_asset_ssh_modal_proxy_ssh_selected_label("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
         Some(AssetModalState::NewSshConnection {
@@ -559,6 +559,10 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
                 draft.proxy_socks5_password_visible,
             );
             window.set_asset_ssh_modal_proxy_ssh_asset_id(draft.proxy_ssh_asset_id.clone().into());
+            sync_ssh_proxy_target_options(window, state.ssh_proxy_target_option_labels());
+            window.set_asset_ssh_modal_proxy_ssh_selected_label(
+                state.ssh_proxy_target_selected_label().into(),
+            );
             window.set_asset_ssh_modal_proxy_method(draft.proxy_method.clone().into());
             window.set_asset_ssh_modal_connect_family_enabled(
                 state.ssh_modal_connect_family_enabled(),
@@ -605,6 +609,8 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_proxy_socks5_password("".into());
             window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
             window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
+            sync_ssh_proxy_target_options(window, Vec::new());
+            window.set_asset_ssh_modal_proxy_ssh_selected_label("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
         Some(AssetModalState::DeleteAssetConfirm {
@@ -648,6 +654,8 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_proxy_socks5_password("".into());
             window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
             window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
+            sync_ssh_proxy_target_options(window, Vec::new());
+            window.set_asset_ssh_modal_proxy_ssh_selected_label("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
         None => {
@@ -687,9 +695,23 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_proxy_socks5_password("".into());
             window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
             window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
+            sync_ssh_proxy_target_options(window, Vec::new());
+            window.set_asset_ssh_modal_proxy_ssh_selected_label("".into());
             window.set_asset_ssh_modal_proxy_method("".into());
         }
     }
+}
+
+fn sync_ssh_proxy_target_options(window: &AppWindow, labels: Vec<String>) {
+    let rows = labels
+        .into_iter()
+        .map(SharedString::from)
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        window.get_asset_ssh_modal_proxy_ssh_options(),
+        rows,
+        |model| window.set_asset_ssh_modal_proxy_ssh_options(model),
+    );
 }
 
 fn sync_ssh_host_key_modal_state(window: &AppWindow, state: &ShellViewModel) {
@@ -707,6 +729,24 @@ fn sync_ssh_host_key_modal_state(window: &AppWindow, state: &ShellViewModel) {
     }
 }
 
+fn sync_workspace_paste_warning_modal_state(
+    window: &AppWindow,
+    pending: Option<&PendingWorkspacePasteWarning>,
+) {
+    match pending {
+        Some(pending) => {
+            window.set_workspace_paste_warning_modal_open(true);
+            window.set_workspace_paste_warning_line_count(
+                i32::try_from(pending.logical_line_count).unwrap_or(i32::MAX),
+            );
+        }
+        None => {
+            window.set_workspace_paste_warning_modal_open(false);
+            window.set_workspace_paste_warning_line_count(0);
+        }
+    }
+}
+
 fn schedule_asset_modal_focus(window: &AppWindow) {
     let handle = window.as_weak();
     let _ = slint::invoke_from_event_loop(move || {
@@ -714,6 +754,7 @@ fn schedule_asset_modal_focus(window: &AppWindow) {
         if window.get_asset_modal_open()
             || window.get_asset_rename_modal_open()
             || window.get_asset_delete_confirm_modal_open()
+            || window.get_workspace_paste_warning_modal_open()
         {
             window.set_asset_modal_focus_sequence(window.get_asset_modal_focus_sequence() + 1);
         }
@@ -800,10 +841,7 @@ fn runtime_profile_for_saved_asset(
     runtime_ready_profile(state, profile_for_saved_asset(state, asset_id)?)
 }
 
-fn validate_saved_modal_profile(
-    state: &ShellViewModel,
-    asset_id: &str,
-) -> anyhow::Result<()> {
+fn validate_saved_modal_profile(state: &ShellViewModel, asset_id: &str) -> anyhow::Result<()> {
     let _ = runtime_profile_for_saved_asset(state, asset_id)?;
     Ok(())
 }
@@ -979,8 +1017,9 @@ fn temporary_session_asset_id_for_profile(profile: &ConnectionProfile) -> String
 }
 
 fn saved_secret_bundle_for_draft(draft: &AssetSshConnectionDraft) -> StoredSshSecretBundle {
-    let proxy_socks5_password = if draft.proxy_type == "socks5" {
-        (!draft.proxy_socks5_password.trim().is_empty()).then(|| draft.proxy_socks5_password.clone())
+    let proxy_socks5_password = if matches!(draft.proxy_type.as_str(), "socks5" | "http") {
+        (!draft.proxy_socks5_password.trim().is_empty())
+            .then(|| draft.proxy_socks5_password.clone())
     } else {
         None
     };
@@ -1012,24 +1051,26 @@ fn resolve_proxy_socks5_secret_hydration(
     profile: &ConnectionProfile,
     credential_store: &dyn CredentialStore,
 ) -> std::result::Result<Option<String>, String> {
-    let ConnectionProxyProfile::Socks5 {
-        credential_ref: Some(credential_ref),
-        ..
-    } = &profile.proxy
-    else {
+    let Some((credential_ref, secret_label)) = (match &profile.proxy {
+        ConnectionProxyProfile::Socks5 {
+            credential_ref: Some(credential_ref),
+            ..
+        } => Some((credential_ref.as_str(), "SOCKS5 proxy password secret")),
+        ConnectionProxyProfile::Http {
+            credential_ref: Some(credential_ref),
+            ..
+        } => Some((credential_ref.as_str(), "HTTP proxy password secret")),
+        _ => None,
+    }) else {
         return Ok(None);
     };
 
     let bundle = load_secret_bundle_with_diagnostics(credential_store, Some(credential_ref))
-        .map_err(|err| {
-            stored_secret_lookup_message(profile, "SOCKS5 proxy password secret", &err)
-        })?;
+        .map_err(|err| stored_secret_lookup_message(profile, secret_label, &err))?;
 
     required_secret_bundle_field(&bundle, credential_ref, "proxy_socks5_password")
         .map(Some)
-        .map_err(|err| {
-            stored_secret_lookup_message(profile, "SOCKS5 proxy password secret", &err)
-        })
+        .map_err(|err| stored_secret_lookup_message(profile, secret_label, &err))
 }
 
 fn sync_saved_ssh_secrets(
@@ -1405,20 +1446,46 @@ fn forward_active_workspace_copy_selection(
     }
 }
 
-fn forward_active_workspace_paste(state: &ShellViewModel, bridge: Option<&ShellSessionBridge>) {
+fn normalized_paste_newlines(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn workspace_paste_logical_line_count(text: &str) -> usize {
+    let normalized = normalized_paste_newlines(text);
+    let trimmed = normalized.trim_end_matches('\n');
+    if trimmed.is_empty() {
+        return usize::from(!text.is_empty());
+    }
+
+    trimmed.split('\n').count()
+}
+
+fn workspace_paste_requires_warning(state: &ShellViewModel, text: &str) -> bool {
+    if workspace_paste_logical_line_count(text) < 2 {
+        return false;
+    }
+
+    !state
+        .active_workspace_terminal_surface()
+        .is_some_and(|surface| surface.bracketed_paste_enabled)
+}
+
+fn forward_workspace_session_paste(
+    state: &ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    session_id: Uuid,
+    text: &str,
+) {
     let Some(bridge) = bridge else {
         return;
     };
-    let Some(session_id) = active_workspace_session_uuid(state) else {
+    if text.is_empty() {
         return;
-    };
-    let Some(text) = system_clipboard_text() else {
-        return;
-    };
+    }
 
     snap_active_workspace_viewport_to_bottom_if_needed(state, Some(bridge));
 
-    if let Err(err) = bridge.manager.send_session_paste(session_id, text) {
+    if let Err(err) = bridge.manager.send_session_paste(session_id, text.to_string()) {
         tracing::error!(
             target: "app.ssh",
             session_id = session_id.to_string(),
@@ -1426,6 +1493,39 @@ fn forward_active_workspace_paste(state: &ShellViewModel, bridge: Option<&ShellS
             "failed to forward workspace terminal paste"
         );
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspacePasteRequestOutcome {
+    Ignored,
+    Prompted,
+    Sent,
+}
+
+fn forward_active_workspace_paste(
+    state: &ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    pending_warning: &RefCell<Option<PendingWorkspacePasteWarning>>,
+) -> WorkspacePasteRequestOutcome {
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return WorkspacePasteRequestOutcome::Ignored;
+    };
+    let Some(text) = system_clipboard_text() else {
+        return WorkspacePasteRequestOutcome::Ignored;
+    };
+
+    if workspace_paste_requires_warning(state, &text) {
+        *pending_warning.borrow_mut() = Some(PendingWorkspacePasteWarning {
+            session_id,
+            logical_line_count: workspace_paste_logical_line_count(&text),
+            text,
+        });
+        return WorkspacePasteRequestOutcome::Prompted;
+    }
+
+    pending_warning.borrow_mut().take();
+    forward_workspace_session_paste(state, bridge, session_id, &text);
+    WorkspacePasteRequestOutcome::Sent
 }
 
 fn forward_active_workspace_scroll_ratio(
@@ -2673,6 +2773,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let controller = Rc::new(WindowController::new(window));
     let modal_drag_state = Rc::new(RefCell::new(None::<ModalDragState>));
     let pending_host_key_approval = Rc::new(RefCell::new(None::<PendingHostKeyApproval>));
+    let pending_workspace_paste_warning =
+        Rc::new(RefCell::new(None::<PendingWorkspacePasteWarning>));
     let asset_click_tracker = Rc::new(RefCell::new(None::<PendingAssetClick>));
     let pending_double_click_activation = Rc::new(RefCell::new(None::<String>));
 
@@ -2684,6 +2786,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         session_bridge.clone(),
     );
     sync_shell_state(window, &view_model.borrow(), effects.as_ref());
+    sync_workspace_paste_warning_modal_state(window, None);
     {
         let mut state = view_model.borrow_mut();
         sync_shell_layout(
@@ -2699,12 +2802,23 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let state = Rc::clone(&view_model);
         let handle = window.as_weak();
         let manager = session_bridge_ref.manager.clone();
+        let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
         session_projection_timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
             let Some(window) = handle.upgrade() else {
                 return;
             };
             let mut state = state.borrow_mut();
             let projection_delta = sync_workspace_projection_from_manager(&mut state, &manager);
+            let should_clear_pending_paste = pending_workspace_paste_warning_ref
+                .borrow()
+                .as_ref()
+                .is_some_and(|pending| {
+                    Some(pending.session_id) != active_workspace_session_uuid(&state)
+                });
+            if should_clear_pending_paste {
+                pending_workspace_paste_warning_ref.borrow_mut().take();
+                sync_workspace_paste_warning_modal_state(&window, None);
+            }
             if projection_delta.tabs_changed {
                 sync_workspace_tab_items(&window, &state);
                 sync_assets_context_menu_state(&window, &state);
@@ -3305,6 +3419,39 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         modal_drag_state_ref.borrow_mut().take();
     });
 
+    let handle = window.as_weak();
+    let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
+    window.on_workspace_paste_warning_cancel_requested(move || {
+        let window = handle.unwrap();
+        pending_workspace_paste_warning_ref.borrow_mut().take();
+        sync_workspace_paste_warning_modal_state(&window, None);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
+    window.on_workspace_paste_warning_confirm_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let pending = pending_workspace_paste_warning_ref.borrow_mut().take();
+        sync_workspace_paste_warning_modal_state(&window, None);
+        let Some(pending) = pending else {
+            return;
+        };
+        if active_workspace_session_uuid(&state) != Some(pending.session_id) {
+            return;
+        }
+
+        forward_workspace_session_paste(
+            &state,
+            session_bridge_ref.as_deref(),
+            pending.session_id,
+            &pending.text,
+        );
+        refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+    });
+
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
@@ -3398,11 +3545,24 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
+    let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
     window.on_workspace_session_paste_requested(move || {
         let mut state = state.borrow_mut();
-        forward_active_workspace_paste(&state, session_bridge_ref.as_deref());
+        let outcome = forward_active_workspace_paste(
+            &state,
+            session_bridge_ref.as_deref(),
+            pending_workspace_paste_warning_ref.as_ref(),
+        );
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+            let pending = pending_workspace_paste_warning_ref.borrow();
+            sync_workspace_paste_warning_modal_state(&window, pending.as_ref());
+            if matches!(outcome, WorkspacePasteRequestOutcome::Sent) {
+                refresh_active_workspace_projection(
+                    &window,
+                    &mut state,
+                    session_bridge_ref.as_deref(),
+                );
+            }
         }
     });
 
@@ -4211,5 +4371,45 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn workspace_multiline_paste_detection_normalizes_platform_line_endings() {
+        assert!(!workspace_paste_requires_warning(&ShellViewModel::default(), ""));
+        assert!(!workspace_paste_requires_warning(
+            &ShellViewModel::default(),
+            "echo hello\n"
+        ));
+        assert!(!workspace_paste_requires_warning(
+            &ShellViewModel::default(),
+            "echo hello\r\n"
+        ));
+        assert!(workspace_paste_requires_warning(
+            &ShellViewModel::default(),
+            "echo hello\nwhoami"
+        ));
+        assert!(workspace_paste_requires_warning(
+            &ShellViewModel::default(),
+            "echo hello\r\nwhoami"
+        ));
+        assert!(workspace_paste_requires_warning(
+            &ShellViewModel::default(),
+            "echo hello\rwhoami"
+        ));
+    }
+
+    #[test]
+    fn workspace_multiline_paste_warning_auto_skips_bracketed_paste_sessions() {
+        let session_id = Uuid::new_v4();
+        let mut state = ShellViewModel::default();
+        let mut surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["$ ".into()]);
+        surface.bracketed_paste_enabled = true;
+        state.set_active_workspace_terminal_surface(Some(surface));
+
+        assert!(!workspace_paste_requires_warning(
+            &state,
+            "echo hello\nwhoami"
+        ));
     }
 }

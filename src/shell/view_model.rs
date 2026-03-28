@@ -1,5 +1,7 @@
 //! Central shell state mirrored into Slint properties and mutated by UI callbacks.
 
+use std::collections::HashMap;
+
 use crate::app::ssh::credentials::{SshCredentialKind, ssh_credential_ref};
 use crate::app::ssh::runtime::TerminalSurfaceState;
 use crate::app::window_state::WindowPlacementKind;
@@ -72,6 +74,12 @@ pub struct AssetSshConnectionDraft {
     pub proxy_ssh_asset_id: String,
     pub proxy_method: String,
     pub validation_message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SshProxyTargetOption {
+    asset_id: String,
+    label: String,
 }
 
 impl Default for AssetSshConnectionDraft {
@@ -673,6 +681,13 @@ impl ShellViewModel {
                 proxy.username.clone(),
                 String::new(),
             ),
+            AssetSshProxySpec::Http(proxy) => (
+                "http".to_string(),
+                proxy.host.clone(),
+                proxy.port.clone(),
+                proxy.username.clone(),
+                String::new(),
+            ),
             AssetSshProxySpec::SshAsset { asset_id } => (
                 "ssh-asset".to_string(),
                 String::new(),
@@ -801,6 +816,11 @@ impl ShellViewModel {
     }
 
     pub fn update_ssh_modal_field(&mut self, field: &str, value: String) {
+        let selected_proxy_asset_id = if field == "proxy_ssh_asset_label" {
+            self.resolve_ssh_proxy_target_asset_id_from_label(value.as_str())
+        } else {
+            None
+        };
         let Some(AssetModalState::NewSshConnection { draft, .. }) = self.asset_modal_state.as_mut()
         else {
             return;
@@ -837,7 +857,7 @@ impl ShellViewModel {
             "remark" => draft.remark = value,
             "environment" => draft.environment = value,
             "proxy_type" => {
-                if matches!(value.as_str(), "none" | "socks5" | "ssh-asset") {
+                if matches!(value.as_str(), "none" | "socks5" | "http" | "ssh-asset") {
                     draft.proxy_type = value;
                 }
             }
@@ -845,6 +865,9 @@ impl ShellViewModel {
             "proxy_socks5_port" => draft.proxy_socks5_port = value,
             "proxy_socks5_username" => draft.proxy_socks5_username = value,
             "proxy_socks5_password" => draft.proxy_socks5_password = value,
+            "proxy_ssh_asset_label" => {
+                draft.proxy_ssh_asset_id = selected_proxy_asset_id.unwrap_or_default();
+            }
             "proxy_socks5_password_visibility" => {
                 draft.proxy_socks5_password_visible =
                     matches!(value.as_str(), "visible" | "show" | "true");
@@ -1473,6 +1496,43 @@ impl ShellViewModel {
         &self.console_asset_tree
     }
 
+    pub fn ssh_proxy_target_option_labels(&self) -> Vec<String> {
+        self.ssh_proxy_target_options()
+            .into_iter()
+            .map(|option| option.label)
+            .collect()
+    }
+
+    pub fn ssh_proxy_target_selected_label(&self) -> String {
+        let Some(AssetModalState::NewSshConnection { draft, .. }) = &self.asset_modal_state else {
+            return String::new();
+        };
+
+        self.ssh_proxy_target_options()
+            .into_iter()
+            .find(|option| option.asset_id == draft.proxy_ssh_asset_id.trim())
+            .map(|option| option.label)
+            .unwrap_or_default()
+    }
+
+    fn ssh_proxy_target_options(&self) -> Vec<SshProxyTargetOption> {
+        let editing_asset_id = match &self.asset_modal_state {
+            Some(AssetModalState::NewSshConnection {
+                editing_asset_id: Some(asset_id),
+                ..
+            }) => Some(asset_id.as_str()),
+            _ => None,
+        };
+        ssh_proxy_target_options_for_tree(&self.console_asset_tree, editing_asset_id)
+    }
+
+    fn resolve_ssh_proxy_target_asset_id_from_label(&self, label: &str) -> Option<String> {
+        self.ssh_proxy_target_options()
+            .into_iter()
+            .find(|option| option.label == label.trim())
+            .map(|option| option.asset_id)
+    }
+
     fn context_menu_roots(&self) -> Vec<ContextMenuActionNode> {
         let Some(target_kind) = self.context_menu_target_kind else {
             return Vec::new();
@@ -1647,6 +1707,36 @@ impl ShellViewModel {
             _ => return Some("Authentication method is required.".into()),
         }
 
+        match draft.proxy_type.as_str() {
+            "" | "none" => {}
+            "socks5" | "http" => {
+                let proxy_label = if draft.proxy_type == "http" {
+                    "HTTP"
+                } else {
+                    "SOCKS5"
+                };
+                if draft.proxy_socks5_host.trim().is_empty() {
+                    return Some(format!("{proxy_label} proxy host is required."));
+                }
+                if draft.proxy_socks5_port.trim().is_empty() {
+                    return Some(format!("{proxy_label} proxy port is required."));
+                }
+                if draft.proxy_socks5_port.trim().parse::<u16>().is_err() {
+                    return Some(format!("{proxy_label} proxy port must be a valid number."));
+                }
+            }
+            "ssh-asset" => {
+                let upstream_asset_id = draft.proxy_ssh_asset_id.trim();
+                if upstream_asset_id.is_empty() {
+                    return Some("Upstream SSH connection is required.".into());
+                }
+                if editing_asset_id.is_some_and(|editing_id| editing_id == upstream_asset_id) {
+                    return Some("Upstream SSH connection cannot reference itself.".into());
+                }
+            }
+            _ => return Some("Proxy type is invalid.".into()),
+        }
+
         None
     }
 
@@ -1672,24 +1762,25 @@ fn build_saved_ssh_connection_spec(
         "private-key" if draft.private_key_source == "path" => !draft.passphrase.trim().is_empty(),
         _ => false,
     };
-    let uses_saved_proxy_secret =
-        draft.proxy_type == "socks5" && !draft.proxy_socks5_password.trim().is_empty();
-    let saved_secret_ref =
-        (uses_saved_auth_secret || uses_saved_proxy_secret).then(|| {
-            saved_ssh_credential_ref(asset_id, existing_spec)
-        });
+    let uses_saved_proxy_secret = matches!(draft.proxy_type.as_str(), "socks5" | "http")
+        && !draft.proxy_socks5_password.trim().is_empty();
+    let saved_secret_ref = (uses_saved_auth_secret || uses_saved_proxy_secret)
+        .then(|| saved_ssh_credential_ref(asset_id, existing_spec));
     let credential_ref = if uses_saved_auth_secret || uses_saved_proxy_secret {
         saved_secret_ref.clone()
     } else {
         None
     };
     let mut proxy = build_draft_proxy_spec(draft);
-    if let AssetSshProxySpec::Socks5(spec) = &mut proxy {
-        spec.password_credential_ref = if uses_saved_proxy_secret {
-            saved_secret_ref.clone()
-        } else {
-            None
-        };
+    match &mut proxy {
+        AssetSshProxySpec::Socks5(spec) | AssetSshProxySpec::Http(spec) => {
+            spec.password_credential_ref = if uses_saved_proxy_secret {
+                saved_secret_ref.clone()
+            } else {
+                None
+            };
+        }
+        AssetSshProxySpec::None | AssetSshProxySpec::SshAsset { .. } => {}
     }
 
     AssetSshConnectionSpec {
@@ -1719,6 +1810,12 @@ fn build_draft_proxy_spec(draft: &AssetSshConnectionDraft) -> AssetSshProxySpec 
             username: draft.proxy_socks5_username.clone(),
             password_credential_ref: None,
         }),
+        "http" => AssetSshProxySpec::Http(AssetSocks5ProxySpec {
+            host: draft.proxy_socks5_host.clone(),
+            port: draft.proxy_socks5_port.clone(),
+            username: draft.proxy_socks5_username.clone(),
+            password_credential_ref: None,
+        }),
         "ssh-asset" => AssetSshProxySpec::SshAsset {
             asset_id: draft.proxy_ssh_asset_id.clone(),
         },
@@ -1742,6 +1839,52 @@ pub fn welcome_actions() -> &'static [WelcomeAction] {
         WelcomeAction::Snippets,
         WelcomeAction::Sftp,
     ]
+}
+
+fn ssh_proxy_target_options_for_tree(
+    tree: &AssetTree,
+    excluded_asset_id: Option<&str>,
+) -> Vec<SshProxyTargetOption> {
+    let mut entries = Vec::new();
+    collect_ssh_proxy_target_entries(tree, tree.root_ids(), excluded_asset_id, &mut entries);
+
+    let mut title_counts = HashMap::<String, usize>::new();
+    for (_, title) in &entries {
+        *title_counts.entry(title.clone()).or_default() += 1;
+    }
+
+    entries
+        .into_iter()
+        .map(|(asset_id, title)| SshProxyTargetOption {
+            label: if title_counts.get(&title).copied().unwrap_or_default() > 1 {
+                format!("{title} · {asset_id}")
+            } else {
+                title
+            },
+            asset_id,
+        })
+        .collect()
+}
+
+fn collect_ssh_proxy_target_entries(
+    tree: &AssetTree,
+    node_ids: &[String],
+    excluded_asset_id: Option<&str>,
+    output: &mut Vec<(String, String)>,
+) {
+    for node_id in node_ids {
+        let Some(node) = tree.node(node_id) else {
+            continue;
+        };
+
+        if node.kind == ConsoleAssetKind::SshConnection
+            && excluded_asset_id != Some(node.id.as_str())
+        {
+            output.push((node.id.clone(), node.title.clone()));
+        }
+
+        collect_ssh_proxy_target_entries(tree, &node.children, excluded_asset_id, output);
+    }
 }
 
 fn current_action_node<'a>(

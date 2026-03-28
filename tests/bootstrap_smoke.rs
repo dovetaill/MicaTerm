@@ -14,9 +14,8 @@ use anyhow::{Result, anyhow};
 use mica_term::AppWindow;
 use mica_term::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
-    PersistedAssetKind, PersistedAssetNode, PersistedAssetPayload,
-    PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec, PersistedSshConnectionSpec,
-    catalog_to_asset_tree,
+    PersistedAssetKind, PersistedAssetNode, PersistedAssetPayload, PersistedAssetSocks5ProxySpec,
+    PersistedAssetSshProxySpec, PersistedSshConnectionSpec, catalog_to_asset_tree,
 };
 use mica_term::app::bootstrap::{
     ImportedPrivateKey, PrivateKeyImporter, app_title,
@@ -1069,6 +1068,40 @@ fn loaded_saved_upstream_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
     }
 }
 
+fn loaded_saved_http_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
+    PersistedAssetCatalog {
+        schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+        root_ids: vec!["ssh-http".into()],
+        nodes: BTreeMap::from([(
+            "ssh-http".into(),
+            PersistedAssetNode {
+                id: "ssh-http".into(),
+                parent_id: None,
+                title: "HTTP Bastion".into(),
+                kind: PersistedAssetKind::SshConnection,
+                child_ids: Vec::new(),
+                payload: PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                    host: "10.0.0.35".into(),
+                    user: "ops".into(),
+                    port: "22".into(),
+                    auth_method: "password".into(),
+                    private_key_source: "content".into(),
+                    private_key_path: String::new(),
+                    environment: "prod".into(),
+                    proxy: PersistedAssetSshProxySpec::Http(PersistedAssetSocks5ProxySpec {
+                        host: "proxy.example.net".into(),
+                        port: "8080".into(),
+                        username: "ops-proxy".into(),
+                        password_credential_ref: Some("ssh/saved-secrets/ssh-http".into()),
+                    }),
+                    remark: "Saved HTTP proxy credential".into(),
+                    credential_ref: Some("ssh/saved-secrets/ssh-http".into()),
+                }),
+            },
+        )]),
+    }
+}
+
 fn loaded_missing_upstream_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
     PersistedAssetCatalog {
         schema_version: ASSET_CATALOG_SCHEMA_VERSION,
@@ -1407,6 +1440,92 @@ fn editing_saved_upstream_ssh_modal_projects_selected_upstream_asset_id() {
         app.get_asset_ssh_modal_proxy_ssh_asset_id().as_str(),
         "ssh-upstream"
     );
+}
+
+#[test]
+fn editing_saved_upstream_ssh_modal_excludes_current_asset_from_dropdown_options() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_saved_upstream_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    bind_with_fake_sessions(&app, Some(asset_repo));
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(1)
+        .expect("target ssh asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+
+    let options = app.get_asset_ssh_modal_proxy_ssh_options();
+    assert_eq!(options.row_count(), 1);
+    assert_eq!(options.row_data(0).unwrap().as_str(), "Upstream Bastion");
+}
+
+#[test]
+fn editing_saved_http_modal_hydrates_proxy_fields_and_proxy_password() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_saved_http_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    persist_secret_bundle(
+        credential_store.as_ref(),
+        "ssh/saved-secrets/ssh-http",
+        &StoredSshSecretBundle {
+            password: Some("secret".into()),
+            private_key_content: None,
+            passphrase: None,
+            proxy_socks5_password: Some("proxy-secret".into()),
+        },
+    )
+    .expect("persist saved http secret bundle");
+    bind_with_launcher_and_credential_store(
+        &app,
+        Some(asset_repo),
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+    );
+
+    let ssh_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("saved http ssh asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-connection".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_ssh_modal_proxy_type().as_str(), "http");
+    assert_eq!(
+        app.get_asset_ssh_modal_proxy_socks5_host().as_str(),
+        "proxy.example.net"
+    );
+    assert_eq!(app.get_asset_ssh_modal_proxy_socks5_port().as_str(), "8080");
+    assert_eq!(
+        app.get_asset_ssh_modal_proxy_socks5_username().as_str(),
+        "ops-proxy"
+    );
+    assert_eq!(
+        app.get_asset_ssh_modal_proxy_socks5_password().as_str(),
+        "proxy-secret"
+    );
+    assert!(!app.get_asset_ssh_modal_proxy_socks5_password_visible());
 }
 
 #[test]
@@ -1956,11 +2075,11 @@ fn saving_self_referential_upstream_proxy_is_blocked_before_runtime_launch() {
     assert!(repo_state.borrow().save_attempts.is_empty());
     assert!(launcher_state.probe_profiles.is_empty());
     assert!(launcher_state.launch_profiles.is_empty());
-    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "error");
     assert_eq!(
-        app.get_asset_ssh_modal_feedback_message().as_str(),
-        "SSH proxy chain contains a cycle"
+        app.get_asset_modal_validation_message().as_str(),
+        "Upstream SSH connection cannot reference itself."
     );
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "idle");
 }
 
 #[test]

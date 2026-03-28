@@ -75,9 +75,9 @@ async fn connect_direct_tcp_stream(
     port: u16,
     enable_nodelay: bool,
 ) -> Result<TcpStream> {
-    let stream = TcpStream::connect((host, port)).await.with_context(|| {
-        format!("failed to connect to SSH server `{}:{}`", host, port)
-    })?;
+    let stream = TcpStream::connect((host, port))
+        .await
+        .with_context(|| format!("failed to connect to SSH server `{}:{}`", host, port))?;
     configure_transport_nodelay(&stream, enable_nodelay);
     Ok(stream)
 }
@@ -85,8 +85,10 @@ async fn connect_direct_tcp_stream(
 fn next_chain_target(profile: &ConnectionProfile, hop_index: usize) -> Result<(&str, u16)> {
     match profile.resolved_proxy_hops.get(hop_index + 1) {
         Some(ResolvedProxyHop::Ssh(upstream)) => Ok((upstream.host.as_str(), upstream.port)),
-        Some(ResolvedProxyHop::Socks5 { .. }) => {
-            bail!("SOCKS5 hops must be the outermost transport in resolved SSH proxy chains")
+        Some(ResolvedProxyHop::Socks5 { .. } | ResolvedProxyHop::Http { .. }) => {
+            bail!(
+                "HTTP and SOCKS5 hops must be the outermost transport in resolved SSH proxy chains"
+            )
         }
         None => Ok((profile.host.as_str(), profile.port)),
     }
@@ -172,9 +174,34 @@ async fn connect_target_handle_for_profile(
                 })?,
             )
         }
+        Some(ResolvedProxyHop::Http {
+            host,
+            port,
+            username,
+            password,
+        }) => {
+            let (next_host, next_port) = next_chain_target(profile, 0)?;
+            Box::new(
+                connect_via_http_proxy(
+                    host,
+                    *port,
+                    username.as_deref(),
+                    password.as_deref(),
+                    next_host,
+                    next_port,
+                    config.as_ref().nodelay,
+                )
+                .await
+                .with_context(|| format!("failed to connect to HTTP proxy `{}:{}`", host, port))?,
+            )
+        }
         Some(ResolvedProxyHop::Ssh(upstream)) => Box::new(
-            connect_direct_tcp_stream(upstream.host.as_str(), upstream.port, config.as_ref().nodelay)
-                .await?,
+            connect_direct_tcp_stream(
+                upstream.host.as_str(),
+                upstream.port,
+                config.as_ref().nodelay,
+            )
+            .await?,
         ),
         None => Box::new(
             connect_direct_tcp_stream(profile.host.as_str(), profile.port, config.as_ref().nodelay)
@@ -184,10 +211,10 @@ async fn connect_target_handle_for_profile(
 
     for (hop_index, hop) in profile.resolved_proxy_hops.iter().enumerate() {
         match hop {
-            ResolvedProxyHop::Socks5 { .. } => {
+            ResolvedProxyHop::Socks5 { .. } | ResolvedProxyHop::Http { .. } => {
                 if hop_index != 0 {
                     bail!(
-                        "SOCKS5 hops must be the outermost transport in resolved SSH proxy chains"
+                        "HTTP and SOCKS5 hops must be the outermost transport in resolved SSH proxy chains"
                     );
                 }
             }
@@ -213,8 +240,8 @@ async fn connect_target_handle_for_profile(
         }
     }
 
-    let handle = connect_ssh_handle_over_stream(config, current_stream, profile, credential_store)
-        .await?;
+    let handle =
+        connect_ssh_handle_over_stream(config, current_stream, profile, credential_store).await?;
     Ok((chain_guard, handle))
 }
 
@@ -229,7 +256,9 @@ async fn connect_via_socks5(
 ) -> Result<TcpStream> {
     let mut stream = TcpStream::connect((proxy_host, proxy_port))
         .await
-        .with_context(|| format!("failed to open TCP stream to SOCKS5 proxy `{proxy_host}:{proxy_port}`"))?;
+        .with_context(|| {
+            format!("failed to open TCP stream to SOCKS5 proxy `{proxy_host}:{proxy_port}`")
+        })?;
     configure_transport_nodelay(&stream, enable_nodelay);
 
     let requires_password_auth = username.is_some() || password.is_some();
@@ -277,6 +306,131 @@ async fn connect_via_socks5(
     read_socks5_connect_reply(&mut stream).await?;
 
     Ok(stream)
+}
+
+async fn connect_via_http_proxy(
+    proxy_host: &str,
+    proxy_port: u16,
+    username: Option<&str>,
+    password: Option<&str>,
+    target_host: &str,
+    target_port: u16,
+    enable_nodelay: bool,
+) -> Result<TcpStream> {
+    let mut stream = TcpStream::connect((proxy_host, proxy_port))
+        .await
+        .with_context(|| {
+            format!("failed to open TCP stream to HTTP proxy `{proxy_host}:{proxy_port}`")
+        })?;
+    configure_transport_nodelay(&stream, enable_nodelay);
+
+    let target_authority = format_proxy_authority(target_host, target_port);
+    let mut request =
+        format!("CONNECT {target_authority} HTTP/1.1\r\nHost: {target_authority}\r\n");
+
+    if username.is_some() || password.is_some() {
+        let (username, password) = match (username, password) {
+            (Some(username), Some(password)) => (username, password),
+            _ => bail!("HTTP proxy basic auth requires both username and password"),
+        };
+        request.push_str("Proxy-Authorization: Basic ");
+        request.push_str(encode_basic_auth_header(username, password).as_str());
+        request.push_str("\r\n");
+    }
+    request.push_str("\r\n");
+
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .context("failed to write HTTP CONNECT request")?;
+
+    let response = read_http_connect_response(&mut stream).await?;
+    let status = parse_http_connect_status(response.as_str())?;
+    if !(200..300).contains(&status) {
+        bail!("HTTP CONNECT request failed with status: {status}");
+    }
+
+    Ok(stream)
+}
+
+fn format_proxy_authority(target_host: &str, target_port: u16) -> String {
+    if target_host.parse::<std::net::Ipv6Addr>().is_ok() {
+        format!("[{target_host}]:{target_port}")
+    } else {
+        format!("{target_host}:{target_port}")
+    }
+}
+
+fn encode_basic_auth_header(username: &str, password: &str) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let raw = format!("{username}:{password}");
+    let bytes = raw.as_bytes();
+    let mut encoded = String::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let first = bytes[index];
+        let second = bytes.get(index + 1).copied();
+        let third = bytes.get(index + 2).copied();
+
+        encoded.push(TABLE[(first >> 2) as usize] as char);
+        encoded.push(TABLE[(((first & 0x03) << 4) | (second.unwrap_or(0) >> 4)) as usize] as char);
+        match second {
+            Some(second) => {
+                encoded.push(
+                    TABLE[(((second & 0x0f) << 2) | (third.unwrap_or(0) >> 6)) as usize] as char,
+                );
+            }
+            None => encoded.push('='),
+        }
+        match third {
+            Some(third) => encoded.push(TABLE[(third & 0x3f) as usize] as char),
+            None => encoded.push('='),
+        }
+
+        index += 3;
+    }
+
+    encoded
+}
+
+async fn read_http_connect_response(stream: &mut TcpStream) -> Result<String> {
+    const MAX_HTTP_CONNECT_RESPONSE_BYTES: usize = 16 * 1024;
+
+    let mut response = Vec::new();
+    while !response.ends_with(b"\r\n\r\n") {
+        if response.len() >= MAX_HTTP_CONNECT_RESPONSE_BYTES {
+            bail!("HTTP CONNECT response headers exceeded the maximum supported size");
+        }
+        response.push(
+            stream
+                .read_u8()
+                .await
+                .context("failed to read HTTP CONNECT response")?,
+        );
+    }
+
+    String::from_utf8(response).context("failed to decode HTTP CONNECT response")
+}
+
+fn parse_http_connect_status(response: &str) -> Result<u16> {
+    let status_line = response
+        .lines()
+        .next()
+        .ok_or_else(|| anyhow!("HTTP CONNECT response was empty"))?;
+    let mut parts = status_line.split_whitespace();
+    let protocol = parts
+        .next()
+        .ok_or_else(|| anyhow!("HTTP CONNECT response is missing its protocol version"))?;
+    if !protocol.starts_with("HTTP/") {
+        bail!("unexpected HTTP CONNECT response protocol: {protocol}");
+    }
+    let status = parts
+        .next()
+        .ok_or_else(|| anyhow!("HTTP CONNECT response is missing its status code"))?;
+    status
+        .parse::<u16>()
+        .with_context(|| format!("invalid HTTP CONNECT status code: {status}"))
 }
 
 async fn authenticate_socks5_username_password(
@@ -338,8 +492,8 @@ async fn write_socks5_connect_request(
         request.extend_from_slice(&ipv6.octets());
     } else {
         let host_bytes = target_host.as_bytes();
-        let host_len =
-            u8::try_from(host_bytes.len()).context("SOCKS5 target host exceeds the protocol length limit")?;
+        let host_len = u8::try_from(host_bytes.len())
+            .context("SOCKS5 target host exceeds the protocol length limit")?;
         request.push(0x03);
         request.push(host_len);
         request.extend_from_slice(host_bytes);
@@ -680,9 +834,12 @@ impl SshSessionRuntime {
         )));
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let config = Arc::new(ssh_client_config());
-        let (transport_chain_guard, handle) =
-            connect_target_handle_for_profile(Arc::clone(&config), &profile, credential_store.as_ref())
-                .await?;
+        let (transport_chain_guard, handle) = connect_target_handle_for_profile(
+            Arc::clone(&config),
+            &profile,
+            credential_store.as_ref(),
+        )
+        .await?;
 
         let mut channel = handle
             .channel_open_session()
@@ -1415,6 +1572,7 @@ pub struct TerminalSession {
     writer: SharedWriteBuffer,
     fallback_mouse_button: Option<TerminalMouseButton>,
     pending_remote_line_buffer: PendingRemoteLineBuffer,
+    pending_paste_highlight_filter: Option<PendingPasteHighlightFilter>,
     keyboard_modes: TerminalKeyboardModes,
     viewport_offset_lines: usize,
 }
@@ -1443,6 +1601,7 @@ impl TerminalSession {
             writer,
             fallback_mouse_button: None,
             pending_remote_line_buffer: PendingRemoteLineBuffer::default(),
+            pending_paste_highlight_filter: None,
             keyboard_modes: TerminalKeyboardModes::default(),
             viewport_offset_lines: 0,
         }
@@ -1454,6 +1613,15 @@ impl TerminalSession {
 
     pub fn apply_remote_bytes(&mut self, bytes: &[u8]) {
         let filtered = self.pending_remote_line_buffer.push_and_filter(bytes);
+        let filtered = if let Some(filter) = self.pending_paste_highlight_filter.as_mut() {
+            let filtered = filter.filter(filtered.as_slice());
+            if filter.is_finished() {
+                self.pending_paste_highlight_filter = None;
+            }
+            filtered
+        } else {
+            filtered
+        };
         self.keyboard_modes.observe(filtered.as_slice());
         if !filtered.is_empty() {
             self.snap_viewport_to_bottom();
@@ -1549,12 +1717,14 @@ impl TerminalSession {
 
     pub fn encode_paste(&mut self, text: &str) -> Result<Vec<u8>> {
         self.snap_viewport_to_bottom();
-        let sanitized = text.replace("\x1b[200~", "").replace("\x1b[201~", "");
+        let sanitized = strip_bracketed_paste_markers(text);
         if self.terminal.bracketed_paste_enabled() {
-            Ok(format!("\x1b[200~{sanitized}\x1b[201~").into_bytes())
-        } else {
-            Ok(sanitized.into_bytes())
+            self.pending_paste_highlight_filter = PendingPasteHighlightFilter::arm(&sanitized);
+            return Ok(format!("\x1b[200~{sanitized}\x1b[201~").into_bytes());
         }
+
+        self.pending_paste_highlight_filter = None;
+        Ok(sanitized.into_bytes())
     }
 
     pub fn scroll_viewport_lines(&mut self, delta: i32) {
@@ -1795,6 +1965,158 @@ impl PendingRemoteLineBuffer {
 
         forwarded
     }
+}
+
+#[derive(Debug)]
+struct PendingPasteHighlightFilter {
+    expected_echo: Vec<u8>,
+    observed_output: Vec<u8>,
+    pending_bytes: Vec<u8>,
+    highlight_active: bool,
+    finished: bool,
+}
+
+impl PendingPasteHighlightFilter {
+    const MAX_OBSERVED_BYTES: usize = 4096;
+
+    fn arm(text: &str) -> Option<Self> {
+        if text.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            expected_echo: text.as_bytes().to_vec(),
+            observed_output: Vec::new(),
+            pending_bytes: Vec::new(),
+            highlight_active: false,
+            finished: false,
+        })
+    }
+
+    fn filter(&mut self, incoming: &[u8]) -> Vec<u8> {
+        if self.finished {
+            return incoming.to_vec();
+        }
+
+        if !self.pending_bytes.is_empty() {
+            self.pending_bytes.extend_from_slice(incoming);
+        } else {
+            self.pending_bytes = incoming.to_vec();
+        }
+
+        let mut output = Vec::with_capacity(self.pending_bytes.len());
+        let mut index = 0;
+
+        while index < self.pending_bytes.len() {
+            match classify_sgr_sequence(&self.pending_bytes[index..]) {
+                SgrSequenceKind::ReverseOn(len) => {
+                    self.highlight_active = true;
+                    index += len;
+                }
+                SgrSequenceKind::ReverseOff(len) if self.highlight_active => {
+                    self.highlight_active = false;
+                    index += len;
+                }
+                SgrSequenceKind::Other(len) => {
+                    output.extend_from_slice(&self.pending_bytes[index..index + len]);
+                    index += len;
+                }
+                SgrSequenceKind::Partial => break,
+                SgrSequenceKind::None => {
+                    output.push(self.pending_bytes[index]);
+                    index += 1;
+                }
+            }
+        }
+
+        self.pending_bytes.drain(..index);
+        self.record_output(output.as_slice());
+        output
+    }
+
+    fn is_finished(&self) -> bool {
+        self.finished
+    }
+
+    fn record_output(&mut self, output: &[u8]) {
+        if output.is_empty() {
+            return;
+        }
+
+        self.observed_output.extend_from_slice(output);
+        if self.observed_output.len() > Self::MAX_OBSERVED_BYTES {
+            let drain_len = self.observed_output.len() - Self::MAX_OBSERVED_BYTES;
+            self.observed_output.drain(..drain_len);
+        }
+
+        if contains_subslice(&self.observed_output, &self.expected_echo)
+            || self.observed_output.len() >= self.expected_echo.len().saturating_add(1024)
+        {
+            self.finished = true;
+            self.pending_bytes.clear();
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SgrSequenceKind {
+    None,
+    Partial,
+    Other(usize),
+    ReverseOn(usize),
+    ReverseOff(usize),
+}
+
+fn classify_sgr_sequence(bytes: &[u8]) -> SgrSequenceKind {
+    if !bytes.starts_with(b"\x1b[") {
+        return SgrSequenceKind::None;
+    }
+
+    let Some(final_index) = bytes
+        .iter()
+        .enumerate()
+        .skip(2)
+        .find_map(|(index, byte)| ((*byte >= 0x40) && (*byte <= 0x7e)).then_some(index))
+    else {
+        return SgrSequenceKind::Partial;
+    };
+    if bytes[final_index] != b'm' {
+        return SgrSequenceKind::Other(final_index + 1);
+    }
+    let sequence_len = final_index + 1;
+    let params = &bytes[2..final_index];
+
+    if params.is_empty() {
+        return SgrSequenceKind::ReverseOff(sequence_len);
+    }
+
+    let values = params
+        .split(|byte| *byte == b';')
+        .map(|value| std::str::from_utf8(value).ok().and_then(|value| value.parse::<i16>().ok()))
+        .collect::<Option<Vec<_>>>();
+    let Some(values) = values else {
+        return SgrSequenceKind::Other(sequence_len);
+    };
+
+    if values.iter().any(|value| *value == 7) {
+        return SgrSequenceKind::ReverseOn(sequence_len);
+    }
+    if values.iter().any(|value| matches!(*value, 0 | 27)) {
+        return SgrSequenceKind::ReverseOff(sequence_len);
+    }
+
+    SgrSequenceKind::Other(sequence_len)
+}
+
+fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    haystack.windows(needle.len()).any(|window| window == needle)
+}
+
+fn strip_bracketed_paste_markers(text: &str) -> String {
+    text.replace("\x1b[200~", "").replace("\x1b[201~", "")
 }
 
 #[derive(Debug, Default)]

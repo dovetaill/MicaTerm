@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-pub const ASSET_CATALOG_SCHEMA_VERSION: u32 = 3;
+pub const ASSET_CATALOG_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistedAssetCatalog {
@@ -47,6 +47,7 @@ pub enum PersistedAssetSshProxySpec {
     #[default]
     None,
     Socks5(PersistedAssetSocks5ProxySpec),
+    Http(PersistedAssetSocks5ProxySpec),
     SshAsset {
         asset_id: String,
     },

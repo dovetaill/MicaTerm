@@ -28,6 +28,8 @@ grep -F 'in-out property <string> asset-ssh-modal-proxy-socks5-username: "";' "$
 grep -F 'in-out property <string> asset-ssh-modal-proxy-socks5-password: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> asset-ssh-modal-proxy-socks5-password-visible: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-ssh-modal-proxy-ssh-asset-id: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <[string]> asset-ssh-modal-proxy-ssh-options: [];' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> asset-ssh-modal-proxy-ssh-selected-label: "";' "$APP_WINDOW" >/dev/null
 grep -F 'callback drag-requested(length, length);' "$MODAL_SHELL" >/dev/null
 ! grep -F 'in property <string> dialog-title: "";' "$MODAL_SHELL" >/dev/null
 ! grep -F 'callback close-requested();' "$MODAL_SHELL" >/dev/null
@@ -130,12 +132,16 @@ grep -F 'in property <string> proxy-socks5-username: "";' "$SSH_MODAL" >/dev/nul
 grep -F 'in property <string> proxy-socks5-password: "";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <bool> proxy-socks5-password-visible: false;' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> proxy-ssh-asset-id: "";' "$SSH_MODAL" >/dev/null
+grep -F 'in property <[string]> proxy-ssh-options: [];' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> proxy-ssh-selected-label: "";' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Proxy Type";' "$SSH_MODAL" >/dev/null
 grep -F 'label: "SOCKS5 Host";' "$SSH_MODAL" >/dev/null
 grep -F 'label: "SOCKS5 Port";' "$SSH_MODAL" >/dev/null
+grep -F 'label: "HTTP Host";' "$SSH_MODAL" >/dev/null
+grep -F 'label: "HTTP Port";' "$SSH_MODAL" >/dev/null
 grep -F 'label: "Username";' "$SSH_MODAL" >/dev/null
 grep -F 'label: "Password";' "$SSH_MODAL" >/dev/null
-grep -F 'label: "Upstream SSH Connection";' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Upstream SSH Connection";' "$SSH_MODAL" >/dev/null
 if grep -F 'label: "Proxy Method";' "$SSH_MODAL" >/dev/null; then
   exit 1
 fi
@@ -176,7 +182,8 @@ fi
 ! grep -F 'secret-retention-message: root.asset-ssh-modal-secret-retention-message;' "$APP_WINDOW" >/dev/null
 ! grep -F 'can-clear-saved-secret: root.asset-ssh-modal-can-clear-saved-secret;' "$APP_WINDOW" >/dev/null
 ! grep -F 'clear-saved-secret-requested: root.asset-ssh-modal-clear-saved-secret-requested;' "$APP_WINDOW" >/dev/null
-grep -F 'import { ScrollView } from "std-widgets.slint";' "$SSH_MODAL" >/dev/null
+grep -F 'import { ComboBox, ScrollView } from "std-widgets.slint";' "$SSH_MODAL" >/dev/null
+grep -F 'ComboBox {' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Connect";' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Save and Connect";' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Test Connection";' "$SSH_MODAL" >/dev/null
@@ -209,6 +216,8 @@ grep -F 'proxy-socks5-username: root.asset-ssh-modal-proxy-socks5-username;' "$A
 grep -F 'proxy-socks5-password: root.asset-ssh-modal-proxy-socks5-password;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-socks5-password-visible: root.asset-ssh-modal-proxy-socks5-password-visible;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-ssh-asset-id: root.asset-ssh-modal-proxy-ssh-asset-id;' "$APP_WINDOW" >/dev/null
+grep -F 'proxy-ssh-options: root.asset-ssh-modal-proxy-ssh-options;' "$APP_WINDOW" >/dev/null
+grep -F 'proxy-ssh-selected-label: root.asset-ssh-modal-proxy-ssh-selected-label;' "$APP_WINDOW" >/dev/null
 grep -F 'in property <int> focus-sequence: 0;' "$FOLDER_MODAL" >/dev/null
 grep -F 'in property <int> focus-sequence: 0;' "$SSH_MODAL" >/dev/null
 rg -n "validation-message" "$FOLDER_MODAL" >/dev/null

@@ -47,6 +47,22 @@ fn resolve_proxy_profile(
             });
             Ok(())
         }
+        ConnectionProxyProfile::Http {
+            host,
+            port,
+            username,
+            password,
+            ..
+        } => {
+            ensure_proxy_chain_capacity(hops, max_depth)?;
+            hops.push(ResolvedProxyHop::Http {
+                host: host.clone(),
+                port: *port,
+                username: username.clone(),
+                password: password.clone(),
+            });
+            Ok(())
+        }
         ConnectionProxyProfile::SshAsset { asset_id } => {
             if !visited.insert(asset_id.clone()) {
                 bail!("SSH proxy chain contains a cycle");

@@ -125,6 +125,44 @@ enum FakeSocks5AuthMode {
 }
 
 #[derive(Clone)]
+enum FakeHttpProxyAuthMode {
+    NoAuth,
+    Basic { username: String, password: String },
+    RejectAuthentication,
+}
+
+fn encode_basic_auth_header(username: &str, password: &str) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let input = format!("{username}:{password}");
+    let bytes = input.as_bytes();
+    let mut encoded = String::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let first = bytes[index];
+        let second = bytes.get(index + 1).copied();
+        let third = bytes.get(index + 2).copied();
+
+        encoded.push(TABLE[(first >> 2) as usize] as char);
+        encoded.push(TABLE[(((first & 0x03) << 4) | (second.unwrap_or(0) >> 4)) as usize] as char);
+        match second {
+            Some(second) => {
+                encoded.push(
+                    TABLE[(((second & 0x0f) << 2) | (third.unwrap_or(0) >> 6)) as usize] as char,
+                );
+            }
+            None => encoded.push('='),
+        }
+        match third {
+            Some(third) => encoded.push(TABLE[(third & 0x3f) as usize] as char),
+            None => encoded.push('='),
+        }
+
+        index += 3;
+    }
+    encoded
+}
+
+#[derive(Clone)]
 struct DirectTcpipRoute {
     requested_host: String,
     requested_port: u16,
@@ -733,12 +771,7 @@ fn temp_private_key_path(label: &str) -> std::path::PathBuf {
     path
 }
 
-fn create_publickey_auth_material(
-    label: &str,
-) -> (
-    russh::keys::PublicKey,
-    std::path::PathBuf,
-) {
+fn create_publickey_auth_material(label: &str) -> (russh::keys::PublicKey, std::path::PathBuf) {
     let client_key = PrivateKey::random(&mut OsRng, russh::keys::Algorithm::Ed25519)
         .expect("generate client key");
     let client_public = client_key.public_key().clone();
@@ -864,7 +897,10 @@ async fn spawn_fake_socks5_server(
 
         if let FakeSocks5AuthMode::UsernamePassword { username, password } = auth_mode {
             let auth_version = client.read_u8().await.expect("read auth version");
-            assert_eq!(auth_version, 0x01, "unexpected username/password auth version");
+            assert_eq!(
+                auth_version, 0x01,
+                "unexpected username/password auth version"
+            );
             let username_len = client.read_u8().await.expect("read username len");
             let mut username_bytes = vec![0_u8; username_len as usize];
             client
@@ -882,7 +918,8 @@ async fn spawn_fake_socks5_server(
                 String::from_utf8(username_bytes).expect("decode socks5 username");
             let received_password =
                 String::from_utf8(password_bytes).expect("decode socks5 password");
-            let status = u8::from(!(received_username == username && received_password == password));
+            let status =
+                u8::from(!(received_username == username && received_password == password));
             client
                 .write_all(&[0x01, status])
                 .await
@@ -953,6 +990,92 @@ async fn spawn_fake_socks5_server(
     (join, addr)
 }
 
+async fn spawn_fake_http_connect_proxy(
+    expected_target_host: String,
+    target_addr: std::net::SocketAddr,
+    auth_mode: FakeHttpProxyAuthMode,
+) -> (tokio::task::JoinHandle<()>, std::net::SocketAddr) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind fake http proxy");
+    let addr = listener.local_addr().expect("fake http proxy addr");
+
+    let join = tokio::spawn(async move {
+        let (mut client, _) = listener.accept().await.expect("accept http proxy client");
+
+        let mut request = Vec::new();
+        loop {
+            let byte = client.read_u8().await.expect("read http proxy byte");
+            request.push(byte);
+            if request.ends_with(b"\r\n\r\n") {
+                break;
+            }
+        }
+
+        let request_text = String::from_utf8(request).expect("decode http proxy request");
+        let mut lines = request_text.split("\r\n");
+        let request_line = lines.next().expect("http proxy request line");
+        let expected_target = format!(
+            "CONNECT {expected_target_host}:{} HTTP/1.1",
+            target_addr.port()
+        );
+        assert_eq!(
+            request_line, expected_target,
+            "unexpected http connect request line"
+        );
+
+        let mut proxy_authorization = None;
+        for line in lines {
+            if line.is_empty() {
+                break;
+            }
+            let Some((name, value)) = line.split_once(':') else {
+                continue;
+            };
+            if name.eq_ignore_ascii_case("proxy-authorization") {
+                proxy_authorization = Some(value.trim().to_string());
+            }
+        }
+
+        match auth_mode {
+            FakeHttpProxyAuthMode::NoAuth => {}
+            FakeHttpProxyAuthMode::Basic { username, password } => {
+                let expected = format!(
+                    "Basic {}",
+                    encode_basic_auth_header(username.as_str(), password.as_str())
+                );
+                assert_eq!(
+                    proxy_authorization.as_deref(),
+                    Some(expected.as_str()),
+                    "runtime should send basic proxy authorization header"
+                );
+            }
+            FakeHttpProxyAuthMode::RejectAuthentication => {
+                client
+                    .write_all(
+                        b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"test\"\r\n\r\n",
+                    )
+                    .await
+                    .expect("write auth rejection");
+                return;
+            }
+        }
+
+        let mut upstream = TcpStream::connect(target_addr)
+            .await
+            .expect("connect target ssh server");
+        client
+            .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            .await
+            .expect("write connect success");
+        copy_bidirectional(&mut client, &mut upstream)
+            .await
+            .expect("bridge http proxy to ssh server");
+    });
+
+    (join, addr)
+}
+
 fn sample_profile(asset_id: &str) -> ConnectionProfile {
     ConnectionProfile {
         asset_id: Some(asset_id.into()),
@@ -1016,6 +1139,34 @@ fn sample_publickey_profile_via_socks5(
         credential_ref: None,
     };
     profile.resolved_proxy_hops = vec![ResolvedProxyHop::Socks5 {
+        host: proxy_host,
+        port: proxy_port,
+        username: proxy_username,
+        password: proxy_password,
+    }];
+    profile
+}
+
+fn sample_publickey_profile_via_http_proxy(
+    asset_id: &str,
+    target_host: String,
+    target_port: u16,
+    private_key_path: String,
+    proxy_host: String,
+    proxy_port: u16,
+    proxy_username: Option<String>,
+    proxy_password: Option<String>,
+) -> ConnectionProfile {
+    let mut profile =
+        sample_publickey_profile(asset_id, target_host, target_port, private_key_path);
+    profile.proxy = ConnectionProxyProfile::Http {
+        host: proxy_host.clone(),
+        port: proxy_port,
+        username: proxy_username.clone(),
+        password: proxy_password.clone(),
+        credential_ref: None,
+    };
+    profile.resolved_proxy_hops = vec![ResolvedProxyHop::Http {
         host: proxy_host,
         port: proxy_port,
         username: proxy_username,
@@ -1427,12 +1578,7 @@ fn ssh_runtime_connects_through_unauthenticated_socks5_proxy() {
         runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(10)).await });
     let target_host = "ssh.internal.test".to_string();
     let (socks_task, socks_addr) = runtime.block_on(async {
-        spawn_fake_socks5_server(
-            target_host.clone(),
-            server_addr,
-            FakeSocks5AuthMode::NoAuth,
-        )
-        .await
+        spawn_fake_socks5_server(target_host.clone(), server_addr, FakeSocks5AuthMode::NoAuth).await
     });
     let known_hosts_path = temp_known_hosts_path("socks5-no-auth");
     let known_hosts = KnownHostsService::new(&known_hosts_path);
@@ -1569,6 +1715,211 @@ fn ssh_runtime_connects_through_username_password_socks5_proxy() {
 }
 
 #[test]
+fn ssh_runtime_connects_through_http_connect_proxy() {
+    let _env_lock = lock_known_hosts_env();
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, server_addr, private_key_path, server_public_key, _server_state) =
+        runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(10)).await });
+    let target_host = "ssh-http.internal.test".to_string();
+    let (proxy_task, proxy_addr) = runtime.block_on(async {
+        spawn_fake_http_connect_proxy(
+            target_host.clone(),
+            server_addr,
+            FakeHttpProxyAuthMode::NoAuth,
+        )
+        .await
+    });
+    let known_hosts_path = temp_known_hosts_path("http-connect-no-auth");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(target_host.as_str(), server_addr.port(), &server_public_key)
+        .expect("trust test server host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let profile = sample_publickey_profile_via_http_proxy(
+        "asset-http",
+        target_host,
+        server_addr.port(),
+        private_key_path.display().to_string(),
+        proxy_addr.ip().to_string(),
+        proxy_addr.port(),
+        None,
+        None,
+    );
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let runtime_handle = runtime.block_on(async {
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+            .await
+            .expect("connect ssh runtime through http proxy")
+    });
+
+    let saw_connected = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, SessionRuntimeEvent::Connected) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("wait for connected event")
+    });
+
+    assert!(
+        saw_connected,
+        "runtime should emit Connected after connecting through HTTP proxy"
+    );
+    runtime_handle.disconnect().expect("disconnect runtime");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        proxy_task.await.expect("join fake http proxy");
+        server_task.await.expect("join fake ssh server");
+    });
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+}
+
+#[test]
+fn ssh_runtime_connects_through_http_connect_proxy_with_basic_auth() {
+    let _env_lock = lock_known_hosts_env();
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, server_addr, private_key_path, server_public_key, _server_state) =
+        runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(10)).await });
+    let target_host = "ssh-http.internal.test".to_string();
+    let proxy_username = "ops-proxy".to_string();
+    let proxy_password = "secret-pass".to_string();
+    let (proxy_task, proxy_addr) = runtime.block_on(async {
+        spawn_fake_http_connect_proxy(
+            target_host.clone(),
+            server_addr,
+            FakeHttpProxyAuthMode::Basic {
+                username: proxy_username.clone(),
+                password: proxy_password.clone(),
+            },
+        )
+        .await
+    });
+    let known_hosts_path = temp_known_hosts_path("http-connect-basic-auth");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(target_host.as_str(), server_addr.port(), &server_public_key)
+        .expect("trust test server host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let profile = sample_publickey_profile_via_http_proxy(
+        "asset-http",
+        target_host,
+        server_addr.port(),
+        private_key_path.display().to_string(),
+        proxy_addr.ip().to_string(),
+        proxy_addr.port(),
+        Some(proxy_username),
+        Some(proxy_password),
+    );
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let runtime_handle = runtime.block_on(async {
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+            .await
+            .expect("connect ssh runtime through authenticated http proxy")
+    });
+
+    let saw_connected = runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, SessionRuntimeEvent::Connected) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .expect("wait for connected event")
+    });
+
+    assert!(
+        saw_connected,
+        "runtime should emit Connected after authenticated HTTP proxy connection"
+    );
+    runtime_handle.disconnect().expect("disconnect runtime");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        proxy_task.await.expect("join fake http proxy");
+        server_task.await.expect("join fake ssh server");
+    });
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+}
+
+#[test]
+fn ssh_runtime_surfaces_http_proxy_authentication_rejection() {
+    let _env_lock = lock_known_hosts_env();
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, server_addr, private_key_path, server_public_key, _server_state) =
+        runtime.block_on(async { spawn_publickey_shell_server(Duration::from_millis(10)).await });
+    let target_host = "ssh-http.internal.test".to_string();
+    let (proxy_task, proxy_addr) = runtime.block_on(async {
+        spawn_fake_http_connect_proxy(
+            target_host.clone(),
+            server_addr,
+            FakeHttpProxyAuthMode::RejectAuthentication,
+        )
+        .await
+    });
+    let known_hosts_path = temp_known_hosts_path("http-connect-reject");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(target_host.as_str(), server_addr.port(), &server_public_key)
+        .expect("trust test server host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let result = runtime.block_on(async {
+        SshSessionRuntime::connect(
+            sample_publickey_profile_via_http_proxy(
+                "asset-http",
+                target_host,
+                server_addr.port(),
+                private_key_path.display().to_string(),
+                proxy_addr.ip().to_string(),
+                proxy_addr.port(),
+                Some("ops-proxy".into()),
+                Some("bad-secret".into()),
+            ),
+            Uuid::new_v4(),
+            mpsc::unbounded_channel().0,
+        )
+        .await
+    });
+    let error = match result {
+        Ok(_) => panic!("http proxy auth rejection should surface"),
+        Err(error) => error,
+    };
+
+    assert!(format!("{error:#}").contains("HTTP CONNECT request failed with status: 407"));
+    runtime.block_on(async {
+        proxy_task.await.expect("join fake http proxy");
+        server_task.abort();
+    });
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+}
+
+#[test]
 fn ssh_runtime_surfaces_socks5_authentication_rejection() {
     let _env_lock = lock_known_hosts_env();
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
@@ -1670,7 +2021,11 @@ fn ssh_runtime_connects_through_single_direct_tcpip_upstream() {
         .accept_unknown(target_host.as_str(), target_addr.port(), &target_public_key)
         .expect("trust target host key");
     known_hosts
-        .accept_unknown(upstream_host.as_str(), upstream_addr.port(), &upstream_public_key)
+        .accept_unknown(
+            upstream_host.as_str(),
+            upstream_addr.port(),
+            &upstream_public_key,
+        )
         .expect("trust upstream host key");
     unsafe {
         std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
@@ -1757,8 +2112,8 @@ fn ssh_runtime_connects_through_multi_hop_socks5_and_ssh_chain() {
     let upstream_a_host = "proxy-a.internal.test".to_string();
     let upstream_b_host = "proxy-b.internal.test".to_string();
 
-    let (upstream_a_task, upstream_a_addr, upstream_a_public_key, upstream_a_state) =
-        runtime.block_on(async {
+    let (upstream_a_task, upstream_a_addr, upstream_a_public_key, upstream_a_state) = runtime
+        .block_on(async {
             spawn_publickey_server_with_auth_key(
                 client_public.clone(),
                 Duration::from_millis(10),
@@ -1773,8 +2128,8 @@ fn ssh_runtime_connects_through_multi_hop_socks5_and_ssh_chain() {
             )
             .await
         });
-    let (upstream_b_task, upstream_b_addr, upstream_b_public_key, upstream_b_state) =
-        runtime.block_on(async {
+    let (upstream_b_task, upstream_b_addr, upstream_b_public_key, upstream_b_state) = runtime
+        .block_on(async {
             spawn_publickey_server_with_auth_key(
                 client_public.clone(),
                 Duration::from_millis(10),
@@ -1948,7 +2303,11 @@ fn ssh_runtime_surfaces_direct_tcpip_rejection_from_upstream() {
         .accept_unknown(target_host.as_str(), target_addr.port(), &target_public_key)
         .expect("trust target host key");
     known_hosts
-        .accept_unknown(upstream_host.as_str(), upstream_addr.port(), &upstream_public_key)
+        .accept_unknown(
+            upstream_host.as_str(),
+            upstream_addr.port(),
+            &upstream_public_key,
+        )
         .expect("trust upstream host key");
     unsafe {
         std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
