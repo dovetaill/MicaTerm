@@ -25,6 +25,7 @@ import { WorkspacePane } from "shell/workspace-pane.slint";
 export component AppWindow inherits Window {
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
     in-out property <bool> show-right-panel: false;
+    in-out property <string> right-panel-view: "appearance";
     in-out property <bool> show-global-menu: false;
     in-out property <bool> is-window-maximized: false;
     in-out property <bool> is-window-active: true;
@@ -131,6 +132,15 @@ export component AppWindow inherits Window {
     in-out property <[AssetsContextMenuItem]> assets-context-menu-secondary-items: [];
     in-out property <[AssetsContextMenuItem]> assets-context-menu-tertiary-items: [];
     in-out property <string> context-menu-feedback-text: "";
+    in-out property <string> vault-panel-title: "Sync & Vault";
+    in-out property <string> vault-lock-state-label: "Locked";
+    in-out property <string> vault-primary-status-label: "Primary not configured";
+    in-out property <string> vault-primary-action-label: "Set";
+    in-out property <string> vault-secondary-action-label: "Change";
+    in-out property <string> vault-tertiary-action-label: "Lock now";
+    in-out property <string> vault-sync-now-label: "Sync now";
+    in-out property <string> vault-export-bootstrap-label: "Export bootstrap";
+    in-out property <string> vault-import-bootstrap-label: "Import bootstrap";
     in-out property <[SidebarNavItem]> sidebar-items: [];
     in-out property <length> shell-body-height-cache: 852px;
     out property <length> layout-titlebar-content-width: titlebar.layout-content-width;
@@ -175,6 +185,12 @@ export component AppWindow inherits Window {
     callback maximize-toggle-requested();
     callback close-requested();
     callback toggle-right-panel-requested();
+    callback open-settings-panel-requested();
+    callback open-appearance-panel-requested();
+    callback vault-create-requested(string);
+    callback vault-unlock-requested(string);
+    callback vault-sync-now-requested();
+    callback vault-lock-requested();
     callback toggle-global-menu-requested();
     callback close-global-menu-requested();
     callback toggle-theme-mode-requested();
@@ -351,6 +367,14 @@ export component AppWindow inherits Window {
 
                 close-global-menu-requested => {
                     root.close-global-menu-requested();
+                }
+
+                open-settings-panel-requested => {
+                    root.open-settings-panel-requested();
+                }
+
+                open-appearance-panel-requested => {
+                    root.open-appearance-panel-requested();
                 }
 
                 toggle-theme-mode-requested => {
@@ -549,6 +573,15 @@ export component AppWindow inherits Window {
                         y: 0px;
                         height: parent.height;
                         expanded: root.effective-show-right-panel;
+                        panel-view: root.right-panel-view;
+                        vault-lock-state-label: root.vault-lock-state-label;
+                        vault-primary-status-label: root.vault-primary-status-label;
+                        vault-primary-action-label: root.vault-primary-action-label;
+                        vault-secondary-action-label: root.vault-secondary-action-label;
+                        vault-tertiary-action-label: root.vault-tertiary-action-label;
+                        vault-sync-now-label: root.vault-sync-now-label;
+                        vault-export-bootstrap-label: root.vault-export-bootstrap-label;
+                        vault-import-bootstrap-label: root.vault-import-bootstrap-label;
                     }
                 }
             }

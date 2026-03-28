@@ -24,6 +24,57 @@ pub enum WelcomeAction {
     Sftp,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RightPanelView {
+    Appearance,
+    Vault,
+}
+
+impl RightPanelView {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Appearance => "appearance",
+            Self::Vault => "vault",
+        }
+    }
+
+    pub fn from_id(value: &str) -> Self {
+        match value {
+            "vault" => Self::Vault,
+            _ => Self::Appearance,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaultPanelViewState {
+    pub title: String,
+    pub lock_state_label: String,
+    pub primary_status_label: String,
+    pub primary_action_label: String,
+    pub secondary_action_label: String,
+    pub tertiary_action_label: String,
+    pub sync_now_label: String,
+    pub export_bootstrap_label: String,
+    pub import_bootstrap_label: String,
+}
+
+impl Default for VaultPanelViewState {
+    fn default() -> Self {
+        Self {
+            title: "Sync & Vault".into(),
+            lock_state_label: "Locked".into(),
+            primary_status_label: "Primary not configured".into(),
+            primary_action_label: "Set".into(),
+            secondary_action_label: "Change".into(),
+            tertiary_action_label: "Lock now".into(),
+            sync_now_label: "Sync now".into(),
+            export_bootstrap_label: "Export bootstrap".into(),
+            import_bootstrap_label: "Import bootstrap".into(),
+        }
+    }
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetModalState {
@@ -135,6 +186,7 @@ pub struct PendingSshModalAction {
 pub struct ShellViewModel {
     pub show_welcome: bool,
     pub show_right_panel: bool,
+    pub right_panel_view: RightPanelView,
     pub show_global_menu: bool,
     pub show_assets_sidebar: bool,
     pub active_sidebar_destination: SidebarDestination,
@@ -167,6 +219,7 @@ pub struct ShellViewModel {
     pub context_menu_child_flows_left: bool,
     pub context_menu_open_path: Vec<usize>,
     pub context_menu_feedback_text: String,
+    vault_panel_state: VaultPanelViewState,
     console_asset_tree: AssetTree,
     window_placement: WindowPlacementKind,
 }
@@ -176,6 +229,7 @@ impl Default for ShellViewModel {
         Self {
             show_welcome: true,
             show_right_panel: false,
+            right_panel_view: RightPanelView::Appearance,
             show_global_menu: false,
             show_assets_sidebar: true,
             active_sidebar_destination: SidebarDestination::Console,
@@ -208,6 +262,7 @@ impl Default for ShellViewModel {
             context_menu_child_flows_left: false,
             context_menu_open_path: Vec::new(),
             context_menu_feedback_text: String::new(),
+            vault_panel_state: VaultPanelViewState::default(),
             console_asset_tree: AssetTree::new(),
             window_placement: WindowPlacementKind::Restored,
         }
@@ -296,6 +351,34 @@ impl ShellViewModel {
 
     pub fn requested_right_panel(&self) -> bool {
         self.show_right_panel
+    }
+
+    pub fn right_panel_view_id(&self) -> &'static str {
+        self.right_panel_view.id()
+    }
+
+    pub fn set_right_panel_view(&mut self, value: RightPanelView) {
+        self.right_panel_view = value;
+    }
+
+    pub fn open_settings_panel(&mut self) {
+        self.right_panel_view = RightPanelView::Vault;
+        self.show_right_panel = true;
+        self.show_global_menu = false;
+    }
+
+    pub fn open_appearance_panel(&mut self) {
+        self.right_panel_view = RightPanelView::Appearance;
+        self.show_right_panel = true;
+        self.show_global_menu = false;
+    }
+
+    pub fn vault_panel_state(&self) -> &VaultPanelViewState {
+        &self.vault_panel_state
+    }
+
+    pub fn vault_panel_state_mut(&mut self) -> &mut VaultPanelViewState {
+        &mut self.vault_panel_state
     }
 
     pub fn workspace_tabs(&self) -> &[WorkspaceTab] {

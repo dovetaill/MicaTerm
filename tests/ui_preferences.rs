@@ -9,6 +9,7 @@ fn ui_preferences_default_to_dark_and_not_pinned() {
 
     assert_eq!(prefs.theme_mode, ThemeMode::Dark);
     assert!(!prefs.always_on_top);
+    assert_eq!(prefs.right_panel_view, "appearance");
 }
 
 #[test]
@@ -22,6 +23,7 @@ fn ui_preferences_roundtrip_theme_and_pin_state() {
     let prefs = UiPreferences {
         theme_mode: ThemeMode::Light,
         always_on_top: true,
+        right_panel_view: "vault".into(),
     };
 
     store.save(&prefs).unwrap();

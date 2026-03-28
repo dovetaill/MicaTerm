@@ -10,6 +10,7 @@ pub mod runtime_profile;
 pub mod ssh;
 pub mod terminal_theme;
 pub mod ui_preferences;
+pub mod vault;
 pub mod window_effects;
 pub mod window_state;
 pub mod windowing;

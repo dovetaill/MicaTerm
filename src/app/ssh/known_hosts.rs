@@ -8,6 +8,8 @@ use anyhow::{Context, Result, bail};
 use directories::ProjectDirs;
 use russh::keys::{HashAlg, PublicKey};
 
+use crate::app::vault::model::VaultKnownHostEntry;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KnownHostCheck {
     Trusted,
@@ -78,6 +80,42 @@ impl KnownHostsService {
                 "SSH host key changed for `{host}:{port}` (expected {expected}, got {actual})"
             ),
         }
+    }
+
+    pub fn export_snapshot_entries(&self) -> Result<Vec<VaultKnownHostEntry>> {
+        self.load_entries()?
+            .into_iter()
+            .map(|entry| {
+                Ok(VaultKnownHostEntry {
+                    host_pattern: entry.host_pattern,
+                    public_key: entry.public_key.to_openssh().with_context(|| {
+                        "failed to encode known_hosts entry for vault snapshot"
+                    })?,
+                })
+            })
+            .collect()
+    }
+
+    pub fn replace_snapshot_entries(&self, entries: &[VaultKnownHostEntry]) -> Result<()> {
+        let entries = entries
+            .iter()
+            .map(|entry| {
+                let public_key = PublicKey::from_openssh(entry.public_key.as_str()).with_context(
+                    || {
+                        format!(
+                            "failed to parse known_hosts public key for `{}`",
+                            entry.host_pattern
+                        )
+                    },
+                )?;
+                Ok(KnownHostEntry {
+                    host_pattern: entry.host_pattern.clone(),
+                    public_key,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        self.save_entries(entries.as_slice())
     }
 
     fn load_entries(&self) -> Result<Vec<KnownHostEntry>> {
