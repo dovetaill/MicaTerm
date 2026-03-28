@@ -19,10 +19,13 @@ use mica_term::app::assets_catalog::{
 };
 use mica_term::app::bootstrap::{
     ImportedPrivateKey, PrivateKeyImporter, app_title,
+    build_shared_app_credential_store_for_paths,
+    bind_top_status_bar_with_injected_services_and_vault_runtime,
     bind_top_status_bar_with_store_and_effects_and_asset_repo,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer,
     default_window_size,
+    VaultProviderFactory, VaultRuntimeOptions,
 };
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
@@ -40,12 +43,29 @@ use mica_term::app::ssh::runtime::{
     TerminalSurfaceState, UnknownHostKeyError,
 };
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
+use mica_term::app::vault::bootstrap::{
+    LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
+};
+use mica_term::app::vault::cache::store_encrypted_cache;
+use mica_term::app::vault::crypto::{encrypt_snapshot, generate_vault_key, wrap_vault_key};
+use mica_term::app::vault::model::{
+    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, KdfConfig,
+    ProviderAuthKind, ProviderKind, RemoteRole, SnapshotSyncPreferences,
+};
+use mica_term::app::vault::provider::mock::MockVaultProvider;
+use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
+use mica_term::app::vault::snapshot::export_vault_snapshot;
 use mica_term::app::window_effects::default_platform_window_effects;
 use mica_term::shell::metrics::ShellMetrics;
+use mica_term::shell::assets::{
+    AssetNodePayload, AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, ConsoleAssetKind,
+};
 use russh::keys::{HashAlg, PublicKey};
+use secrecy::SecretString;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, Model};
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -152,7 +172,37 @@ struct FailingPrivateKeyImporter {
     message: &'static str,
 }
 
+#[derive(Default)]
+struct UnavailableCredentialStore;
+
 struct NoopRuntimeControl;
+
+#[derive(Clone, Default)]
+struct RecordingVaultProviderFactory {
+    providers: Arc<Mutex<BTreeMap<String, Arc<MockVaultProvider>>>>,
+}
+
+impl RecordingVaultProviderFactory {
+    fn insert(&self, provider: Arc<MockVaultProvider>) {
+        self.providers
+            .lock()
+            .expect("lock vault provider factory")
+            .insert(provider.remote_id().to_string(), provider);
+    }
+}
+
+impl VaultProviderFactory for RecordingVaultProviderFactory {
+    fn build_provider(&self, remote: &BootstrapRemoteConfig) -> Result<Arc<dyn VaultProvider>> {
+        let provider = self
+            .providers
+            .lock()
+            .expect("lock vault provider factory")
+            .get(&remote.remote_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("missing mock vault provider `{}`", remote.remote_id))?;
+        Ok(provider as Arc<dyn VaultProvider>)
+    }
+}
 
 struct InteractiveProjectionRuntimeControl {
     session_id: uuid::Uuid,
@@ -728,6 +778,20 @@ impl PrivateKeyImporter for FailingPrivateKeyImporter {
     }
 }
 
+impl CredentialStore for UnavailableCredentialStore {
+    fn put_secret(&self, _key: &str, _value: &str) -> Result<()> {
+        Err(anyhow!("system credential store unavailable"))
+    }
+
+    fn get_secret(&self, _key: &str) -> Result<Option<String>> {
+        Err(anyhow!("system credential store unavailable"))
+    }
+
+    fn delete_secret(&self, _key: &str) -> Result<()> {
+        Err(anyhow!("system credential store unavailable"))
+    }
+}
+
 fn bind_with_fake_sessions(app: &AppWindow, asset_repo: Option<Rc<dyn AssetCatalogRepository>>) {
     bind_with_launcher(app, asset_repo, Arc::new(FakeLauncher));
 }
@@ -781,6 +845,24 @@ fn bind_with_launcher_and_credential_store_and_private_key_importer(
     );
 }
 
+fn bind_with_vault_runtime(
+    app: &AppWindow,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+    credential_store: Arc<dyn CredentialStore>,
+    vault_runtime: VaultRuntimeOptions,
+) {
+    bind_top_status_bar_with_injected_services_and_vault_runtime(
+        app,
+        None,
+        default_platform_window_effects(),
+        None,
+        launcher,
+        credential_store,
+        Arc::new(CancelledPrivateKeyImporter),
+        vault_runtime,
+    );
+}
+
 fn sample_known_hosts_path(label: &str) -> std::path::PathBuf {
     let mut path = std::env::temp_dir();
     path.push(format!(
@@ -789,6 +871,90 @@ fn sample_known_hosts_path(label: &str) -> std::path::PathBuf {
         std::process::id()
     ));
     path
+}
+
+fn sample_vault_runtime_root(label: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "mica-term-vault-runtime-{}-{}",
+        label,
+        Uuid::new_v4()
+    ))
+}
+
+fn sample_vault_kdf() -> KdfConfig {
+    KdfConfig::Argon2id {
+        memory_cost_kib: 19_456,
+        time_cost: 2,
+        parallelism: 1,
+        salt_b64: "vault-bootstrap-smoke-salt".into(),
+    }
+}
+
+fn sample_bootstrap_bundle_with_primary_and_mirror() -> BootstrapBundle {
+    BootstrapBundle {
+        vault_id: "vault-main".into(),
+        remotes: vec![
+            BootstrapRemoteConfig {
+                remote_id: "remote-primary".into(),
+                role: RemoteRole::Primary,
+                provider: ProviderKind::S3Compatible,
+                locator: BootstrapRemoteLocator::S3 {
+                    bucket: "vault-bucket".into(),
+                    prefix: "mica".into(),
+                    endpoint: None,
+                    region: Some("us-east-1".into()),
+                    force_path_style: false,
+                },
+                credential_ref: Some("vault/bootstrap/remote-primary".into()),
+                auth_kind: ProviderAuthKind::AwsStandardChain,
+                last_health: None,
+            },
+            BootstrapRemoteConfig {
+                remote_id: "remote-mirror".into(),
+                role: RemoteRole::Mirror,
+                provider: ProviderKind::GitHubGist,
+                locator: BootstrapRemoteLocator::GitHubGist {
+                    gist_id: "gist-mirror".into(),
+                },
+                credential_ref: Some("vault/bootstrap/remote-mirror".into()),
+                auth_kind: ProviderAuthKind::Pat,
+                last_health: None,
+            },
+        ],
+        auto_sync_enabled: false,
+        ..BootstrapBundle::default()
+    }
+}
+
+fn sample_vault_asset_tree(host: &str) -> (AssetTree, String) {
+    let mut tree = AssetTree::new();
+    let credential_ref = format!("ssh/saved-secrets/imported-{host}");
+    tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Imported Bastion",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: host.into(),
+            user: "ops".into(),
+            port: "22".into(),
+            auth_method: "password".into(),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: "prod".into(),
+            proxy: AssetSshProxySpec::None,
+            proxy_method: String::new(),
+            remark: String::new(),
+            credential_ref: Some(credential_ref.clone()),
+        }),
+    );
+    (tree, credential_ref)
+}
+
+fn sample_credential_root(label: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "mica-term-bootstrap-credentials-{}-{}",
+        label,
+        Uuid::new_v4()
+    ))
 }
 
 fn bootstrap_surface_with_viewport(
@@ -888,6 +1054,221 @@ fn create_root_ssh(app: &AppWindow, name: &str, host: &str) -> String {
         .expect("saved ssh asset")
         .id
         .to_string()
+}
+
+#[test]
+fn settings_panel_can_create_a_vault_and_persist_local_bootstrap_state() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("create");
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+        },
+    );
+
+    app.invoke_open_settings_panel_requested();
+    app.invoke_vault_create_requested("correct horse battery staple".into());
+
+    assert_eq!(app.get_vault_lock_state_label().as_str(), "Unlocked");
+    assert!(
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
+fn unlocking_existing_vault_restores_cached_snapshot_without_loading_while_locked() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("unlock");
+    let password = SecretString::new("vault-pass".into());
+    let source_store = Arc::new(MemoryCredentialStore::default());
+    let (asset_tree, credential_ref) = sample_vault_asset_tree("10.0.0.42");
+    persist_secret_bundle(
+        source_store.as_ref(),
+        &credential_ref,
+        &StoredSshSecretBundle {
+            password: Some("hunter2".into()),
+            ..StoredSshSecretBundle::default()
+        },
+    )
+    .unwrap();
+    let known_hosts_path = sample_known_hosts_path("vault-unlock");
+    let snapshot = export_vault_snapshot(
+        &asset_tree,
+        source_store.as_ref(),
+        &known_hosts_path,
+        SnapshotSyncPreferences::default(),
+        &mica_term::app::ui_preferences::UiPreferences::default(),
+    )
+    .unwrap();
+    let vault_key = generate_vault_key();
+    let encrypted = encrypt_snapshot(&snapshot, &vault_key).unwrap();
+    let wrapped_vault_key =
+        serde_json::to_string(&wrap_vault_key(&password, &sample_vault_kdf(), &vault_key).unwrap())
+            .unwrap();
+    save_local_vault_bootstrap_state(
+        &temp_root.join("vault-bootstrap-state.json"),
+        &LocalVaultBootstrapState {
+            bundle: sample_bootstrap_bundle_with_primary_and_mirror(),
+            wrapped_vault_key,
+            kdf: sample_vault_kdf(),
+            current_revision: Some("rev-0001".into()),
+        },
+    )
+    .unwrap();
+    store_encrypted_cache(&temp_root.join("cache"), "vault-main", &encrypted).unwrap();
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store.clone(),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            bootstrap_template: None,
+        },
+    );
+
+    assert_eq!(app.get_console_asset_items().row_count(), 0);
+    assert!(credential_store.get_secret(&credential_ref).unwrap().is_none());
+
+    app.invoke_vault_unlock_requested("vault-pass".into());
+
+    assert_eq!(app.get_vault_lock_state_label().as_str(), "Unlocked");
+    assert_eq!(app.get_console_asset_items().row_count(), 1);
+    assert!(credential_store.get_secret(&credential_ref).unwrap().is_some());
+}
+
+#[test]
+fn manual_vault_sync_reports_mirror_degradation_after_primary_commit() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("mirror-degraded");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    let mirror = Arc::new(MockVaultProvider::new(
+        "remote-mirror",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    mirror.set_write_error(Some("mirror unavailable"));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+    provider_factory.insert(mirror.clone());
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+        },
+    );
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_open_settings_panel_requested();
+    app.invoke_vault_create_requested("vault-pass".into());
+
+    app.invoke_vault_sync_now_requested();
+
+    assert_eq!(primary.recorded_writes().len(), 1);
+    assert_eq!(mirror.recorded_writes().len(), 0);
+    assert!(
+        app.get_vault_primary_status_label()
+            .as_str()
+            .contains("Mirror degraded")
+    );
+}
+
+#[test]
+fn manual_vault_sync_surfaces_provider_auth_errors_in_panel_state() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("provider-auth");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    primary.set_read_error(Some("token expired"));
+    let mirror = Arc::new(MockVaultProvider::new(
+        "remote-mirror",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary);
+    provider_factory.insert(mirror);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+        },
+    );
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_open_settings_panel_requested();
+    app.invoke_vault_create_requested("vault-pass".into());
+
+    app.invoke_vault_sync_now_requested();
+
+    assert!(
+        app.get_vault_primary_status_label()
+            .as_str()
+            .contains("Provider auth error")
+    );
+}
+
+#[test]
+fn locking_vault_clears_decrypted_assets_and_secrets_from_memory() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("lock");
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store.clone(),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+        },
+    );
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    let credential_ref = ssh_credential_ref(&ssh_id, SshCredentialKind::SavedSecrets);
+    app.invoke_open_settings_panel_requested();
+    app.invoke_vault_create_requested("vault-pass".into());
+
+    assert_eq!(app.get_console_asset_items().row_count(), 1);
+    assert!(credential_store.get_secret(&credential_ref).unwrap().is_some());
+
+    app.invoke_vault_lock_requested();
+
+    assert_eq!(app.get_vault_lock_state_label().as_str(), "Locked");
+    assert_eq!(app.get_console_asset_items().row_count(), 0);
+    assert!(credential_store.get_secret(&credential_ref).unwrap().is_none());
 }
 
 fn loaded_catalog_for_bootstrap() -> PersistedAssetCatalog {
@@ -1192,6 +1573,58 @@ fn bootstrap_exposes_shell_default_window_budget() {
             ShellMetrics::WINDOW_DEFAULT_HEIGHT,
         )
     );
+}
+
+#[test]
+fn bootstrap_shared_credential_store_prefers_encrypted_cache_when_preferred_store_is_unavailable() {
+    let encrypted_root = sample_credential_root("secure");
+    let recovery_root = sample_credential_root("recovery");
+    let credential_ref = ssh_credential_ref("asset-prod", SshCredentialKind::SavedSecrets);
+    let store = build_shared_app_credential_store_for_paths(
+        Some(Arc::new(UnavailableCredentialStore) as Arc<dyn CredentialStore>),
+        encrypted_root.clone(),
+        recovery_root.clone(),
+    );
+
+    persist_secret_bundle(
+        store.as_ref(),
+        credential_ref.as_str(),
+        &StoredSshSecretBundle {
+            password: Some("super-secret".into()),
+            private_key_content: None,
+            passphrase: None,
+            proxy_socks5_password: None,
+        },
+    )
+    .expect("persist bundle through shared bootstrap store");
+
+    assert_eq!(
+        load_secret_bundle(store.as_ref(), credential_ref.as_str())
+            .expect("reload shared credential bundle")
+            .password
+            .as_deref(),
+        Some("super-secret")
+    );
+
+    let encrypted_bytes = fs::read(
+        encrypted_root
+            .join("ssh")
+            .join("saved-secrets")
+            .join("asset-prod.bin"),
+    )
+    .expect("read encrypted fallback file");
+    assert!(!String::from_utf8_lossy(&encrypted_bytes).contains("super-secret"));
+    assert!(
+        !recovery_root
+            .join("ssh")
+            .join("saved-secrets")
+            .join("asset-prod.json")
+            .exists(),
+        "plain recovery store should not be used when encrypted fallback succeeds"
+    );
+
+    let _ = fs::remove_dir_all(encrypted_root);
+    let _ = fs::remove_dir_all(recovery_root);
 }
 
 #[test]

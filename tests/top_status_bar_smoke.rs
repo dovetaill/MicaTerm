@@ -132,6 +132,7 @@ fn bootstrap_binds_top_status_bar_callbacks_to_window_state() {
 
     app.invoke_toggle_right_panel_requested();
     assert!(app.get_show_right_panel());
+    assert_eq!(app.get_right_panel_view().as_str(), "appearance");
 
     app.invoke_toggle_global_menu_requested();
     assert!(app.get_show_global_menu());
@@ -152,6 +153,20 @@ fn bootstrap_binds_top_status_bar_callbacks_to_window_state() {
     assert!(!app.get_is_window_maximized());
 
     let _ = fs::remove_file(temp_path);
+}
+
+#[test]
+fn opening_settings_routes_right_panel_to_sync_and_vault_panel() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_open_settings_panel_requested();
+
+    assert!(app.get_show_right_panel());
+    assert_eq!(app.get_right_panel_view().as_str(), "vault");
+    assert_eq!(app.get_vault_panel_title().as_str(), "Sync & Vault");
 }
 
 #[test]

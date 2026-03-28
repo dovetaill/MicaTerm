@@ -1,17 +1,41 @@
+use anyhow::{Result, anyhow};
 use mica_term::app::ssh::credentials::{
-    CachedCredentialStore, CredentialStore, FileCredentialStore, MemoryCredentialStore,
-    SshCredentialKind, StoredSecretLookupError, StoredSshSecretBundle, load_secret_bundle,
+    CachedCredentialStore, CredentialStore, EncryptedFileCredentialStore,
+    FallbackCredentialStore, FileCredentialStore, MemoryCredentialStore, SshCredentialKind,
+    StoredSecretLookupError, StoredSshSecretBundle, load_secret_bundle,
     load_secret_bundle_with_diagnostics, merge_edit_bundle, persist_secret_bundle,
     required_secret_bundle_field, ssh_credential_ref,
 };
 use mica_term::shell::view_model::AssetSshConnectionDraft;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 fn temp_credentials_dir() -> PathBuf {
     std::env::temp_dir().join(format!("mica-term-credential-store-{}", Uuid::new_v4()))
+}
+
+#[derive(Default)]
+struct UnavailableCredentialStore {
+    put_attempts: Mutex<usize>,
+    get_attempts: Mutex<usize>,
+}
+
+impl CredentialStore for UnavailableCredentialStore {
+    fn put_secret(&self, _key: &str, _value: &str) -> Result<()> {
+        *self.put_attempts.lock().expect("lock put attempts") += 1;
+        Err(anyhow!("system credential store unavailable"))
+    }
+
+    fn get_secret(&self, _key: &str) -> Result<Option<String>> {
+        *self.get_attempts.lock().expect("lock get attempts") += 1;
+        Err(anyhow!("system credential store unavailable"))
+    }
+
+    fn delete_secret(&self, _key: &str) -> Result<()> {
+        Err(anyhow!("system credential store unavailable"))
+    }
 }
 
 #[test]
@@ -304,6 +328,51 @@ fn file_credential_store_persists_secret_across_store_instances() {
         load_secret_bundle(&reloaded_store, credential_ref.as_str()).expect("reload bundle");
 
     assert_eq!(bundle.password.as_deref(), Some("super-secret"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn fallback_credential_store_uses_encrypted_file_cache_when_primary_store_errors() {
+    let root = temp_credentials_dir();
+    let credential_ref = ssh_credential_ref("asset-prod", SshCredentialKind::SavedSecrets);
+    let primary = Arc::new(UnavailableCredentialStore::default());
+    let store = FallbackCredentialStore::new(
+        primary.clone() as Arc<dyn CredentialStore>,
+        Arc::new(EncryptedFileCredentialStore::new(root.clone())),
+    );
+
+    persist_secret_bundle(
+        &store,
+        credential_ref.as_str(),
+        &StoredSshSecretBundle {
+            password: Some("super-secret".into()),
+            private_key_content: None,
+            passphrase: None,
+            proxy_socks5_password: None,
+        },
+    )
+    .expect("persist bundle through fallback chain");
+
+    let bundle = load_secret_bundle(&store, credential_ref.as_str()).expect("load bundle");
+    assert_eq!(bundle.password.as_deref(), Some("super-secret"));
+    assert_eq!(
+        *primary.put_attempts.lock().expect("lock put attempts"),
+        1,
+        "fallback chain should try primary store before encrypted file cache"
+    );
+    assert!(
+        *primary.get_attempts.lock().expect("lock get attempts") >= 1,
+        "fallback chain should consult primary store on reads"
+    );
+
+    let raw = fs::read(
+        root.join("ssh")
+            .join("saved-secrets")
+            .join("asset-prod.bin"),
+    )
+    .expect("read encrypted fallback file");
+    assert!(!String::from_utf8_lossy(&raw).contains("super-secret"));
+
     let _ = fs::remove_dir_all(root);
 }
 

@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use directories::ProjectDirs;
 use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use tokio::sync::mpsc;
@@ -29,9 +29,10 @@ use crate::app::assets_catalog::{
 use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::ssh::credentials::{
-    CachedCredentialStore, CredentialStore, FileCredentialStore, StoredSecretLookupError,
-    StoredSshSecretBundle, load_secret_bundle_with_diagnostics, persist_secret_bundle,
-    required_secret_bundle_field,
+    CachedCredentialStore, CredentialStore, EncryptedFileCredentialStore,
+    FallbackCredentialStore, FileCredentialStore, StoredSecretLookupError,
+    StoredSshSecretBundle, SystemCredentialStore, load_secret_bundle_with_diagnostics,
+    persist_secret_bundle, required_secret_bundle_field, restore_snapshot_secret_bundle,
 };
 use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, SshAuthMethod};
@@ -46,6 +47,27 @@ use crate::app::ssh::session_manager::{
     SessionState,
 };
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
+use crate::app::vault::bootstrap::{
+    LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
+};
+use crate::app::vault::cache::{load_encrypted_cache, store_encrypted_cache};
+use crate::app::vault::crypto::{
+    WrappedVaultKey, decrypt_snapshot, encrypt_snapshot, generate_vault_key, unwrap_vault_key,
+    wrap_vault_key,
+};
+use crate::app::vault::engine::{SyncEngine, SyncError, SyncRequest};
+use crate::app::vault::model::{
+    BootstrapBundle, BootstrapRemoteConfig, KdfConfig, ProviderKind, RemoteRole,
+    SnapshotSyncPreferences, VaultAssetPayload, VaultSnapshot,
+};
+use crate::app::vault::provider::VaultProvider;
+use crate::app::vault::provider::gitee_gist::{GiteeGistProvider, GiteeGistProviderConfig};
+use crate::app::vault::provider::github_gist::{GitHubGistProvider, GitHubGistProviderConfig};
+use crate::app::vault::provider::gitlab_snippet::{
+    GitLabSnippetProvider, GitLabSnippetProviderConfig,
+};
+use crate::app::vault::provider::s3::{S3VaultProvider, S3VaultProviderConfig};
+use crate::app::vault::snapshot::{apply_vault_snapshot, export_vault_snapshot};
 use crate::app::window_effects::{
     PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
 };
@@ -58,7 +80,7 @@ use crate::app::windowing::{
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
 };
-use crate::shell::assets::{AssetDisclosureState, AssetSshConnectionSpec};
+use crate::shell::assets::{AssetDisclosureState, AssetSshConnectionSpec, AssetTree};
 use crate::shell::context_menu::{
     CONTEXT_MENU_COLUMN_GAP, CONTEXT_MENU_COLUMN_WIDTH, ContextMenuActionNode,
     ContextMenuActionState, ContextTargetKind, MenuPlacementInput, Rect, SelectionContext,
@@ -70,7 +92,7 @@ use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descriptor_for};
 use crate::shell::tabs::WorkspaceTab;
 use crate::shell::view_model::{
-    AssetModalState, AssetSshConnectionDraft, ShellViewModel, SshModalAction,
+    AssetModalState, AssetSshConnectionDraft, RightPanelView, ShellViewModel, SshModalAction,
 };
 use crate::theme::ThemeMode;
 use russh::keys::PublicKey;
@@ -116,6 +138,45 @@ enum HostKeyApprovalIntent {
     OpenSession(OpenSessionMode),
 }
 
+struct VaultSessionState {
+    root_dir: PathBuf,
+    provider_factory: Arc<dyn VaultProviderFactory>,
+    bootstrap_template: Option<BootstrapBundle>,
+    local_state: Option<LocalVaultBootstrapState>,
+    unlocked_vault_key: Option<[u8; 32]>,
+    decrypted_snapshot: Option<VaultSnapshot>,
+}
+
+impl VaultSessionState {
+    fn new(
+        root_dir: PathBuf,
+        provider_factory: Arc<dyn VaultProviderFactory>,
+        bootstrap_template: Option<BootstrapBundle>,
+        local_state: Option<LocalVaultBootstrapState>,
+    ) -> Self {
+        Self {
+            root_dir,
+            provider_factory,
+            bootstrap_template,
+            local_state,
+            unlocked_vault_key: None,
+            decrypted_snapshot: None,
+        }
+    }
+
+    fn bootstrap_state_path(&self) -> PathBuf {
+        self.root_dir.join("vault-bootstrap-state.json")
+    }
+
+    fn cache_root(&self) -> PathBuf {
+        self.root_dir.join("cache")
+    }
+
+    fn known_hosts_path(&self) -> PathBuf {
+        vault_known_hosts_path(&self.root_dir)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct NativeTerminalModifierState {
     ctrl: bool,
@@ -132,6 +193,49 @@ enum NativeTerminalClipboardShortcut {
 #[derive(Clone)]
 struct LiveSessionRuntimeLauncher {
     credential_store: Arc<dyn CredentialStore>,
+}
+
+pub trait VaultProviderFactory: Send + Sync {
+    fn build_provider(&self, remote: &BootstrapRemoteConfig) -> Result<Arc<dyn VaultProvider>>;
+}
+
+#[derive(Clone)]
+pub struct VaultRuntimeOptions {
+    pub root_dir: Option<PathBuf>,
+    pub provider_factory: Arc<dyn VaultProviderFactory>,
+    pub bootstrap_template: Option<BootstrapBundle>,
+}
+
+impl Default for VaultRuntimeOptions {
+    fn default() -> Self {
+        Self {
+            root_dir: None,
+            provider_factory: Arc::new(DefaultVaultProviderFactory),
+            bootstrap_template: None,
+        }
+    }
+}
+
+#[derive(Default)]
+struct DefaultVaultProviderFactory;
+
+impl VaultProviderFactory for DefaultVaultProviderFactory {
+    fn build_provider(&self, remote: &BootstrapRemoteConfig) -> Result<Arc<dyn VaultProvider>> {
+        match remote.provider {
+            ProviderKind::S3Compatible => Ok(Arc::new(S3VaultProvider::new(
+                S3VaultProviderConfig::try_from(remote)?,
+            )?)),
+            ProviderKind::GitHubGist => Ok(Arc::new(GitHubGistProvider::new(
+                GitHubGistProviderConfig::try_from(remote)?,
+            )?)),
+            ProviderKind::GitLabSnippet => Ok(Arc::new(GitLabSnippetProvider::new(
+                GitLabSnippetProviderConfig::try_from(remote)?,
+            )?)),
+            ProviderKind::GiteeGist => Ok(Arc::new(GiteeGistProvider::new(
+                GiteeGistProviderConfig::try_from(remote)?,
+            )?)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -321,7 +425,7 @@ fn bind_windows_window_state_tracking(
             } = event
             {
                 let mut modifier_state = modifiers.borrow_mut();
-                update_native_terminal_modifier_state(&mut modifier_state, &key_event);
+                update_native_terminal_modifier_state(&mut modifier_state, key_event);
 
                 if key_event.state == winit::event::ElementState::Pressed
                     && !key_event.repeat
@@ -427,6 +531,21 @@ fn sync_top_status_bar_state(
     window.set_is_window_maximized(state.is_window_maximized());
     window.set_is_window_active(state.is_window_active);
     window.set_is_window_always_on_top(state.is_always_on_top);
+}
+
+fn sync_right_panel_state(window: &AppWindow, state: &ShellViewModel) {
+    let vault_panel = state.vault_panel_state();
+
+    window.set_right_panel_view(state.right_panel_view_id().into());
+    window.set_vault_panel_title(vault_panel.title.clone().into());
+    window.set_vault_lock_state_label(vault_panel.lock_state_label.clone().into());
+    window.set_vault_primary_status_label(vault_panel.primary_status_label.clone().into());
+    window.set_vault_primary_action_label(vault_panel.primary_action_label.clone().into());
+    window.set_vault_secondary_action_label(vault_panel.secondary_action_label.clone().into());
+    window.set_vault_tertiary_action_label(vault_panel.tertiary_action_label.clone().into());
+    window.set_vault_sync_now_label(vault_panel.sync_now_label.clone().into());
+    window.set_vault_export_bootstrap_label(vault_panel.export_bootstrap_label.clone().into());
+    window.set_vault_import_bootstrap_label(vault_panel.import_bootstrap_label.clone().into());
 }
 
 fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
@@ -793,22 +912,45 @@ fn parse_context_target_kind(value: &str) -> ContextTargetKind {
 
 fn shared_app_credential_store() -> Arc<dyn CredentialStore> {
     match app_root_paths_for_app() {
-        Ok(app_paths) => Arc::new(CachedCredentialStore::new(Arc::new(
-            FileCredentialStore::new(app_paths.data_dir.join("credentials")),
-        ))),
+        Ok(app_paths) => build_shared_app_credential_store_for_paths(
+            None,
+            app_paths.data_dir.join("credentials-secure"),
+            app_paths.data_dir.join("credentials"),
+        ),
         Err(err) => {
-            let fallback_root = std::env::temp_dir().join("mica-term-fallback-credentials");
+            let encrypted_root = std::env::temp_dir().join("mica-term-fallback-credentials-secure");
+            let recovery_root = std::env::temp_dir().join("mica-term-fallback-credentials");
             tracing::error!(
                 target: "app.ssh",
                 error = %err,
-                fallback_root = %fallback_root.display(),
+                encrypted_root = %encrypted_root.display(),
+                recovery_root = %recovery_root.display(),
                 "failed to resolve application data directory for ssh credentials; using fallback path"
             );
-            Arc::new(CachedCredentialStore::new(Arc::new(
-                FileCredentialStore::new(fallback_root),
-            )))
+            build_shared_app_credential_store_for_paths(None, encrypted_root, recovery_root)
         }
     }
+}
+
+pub fn build_shared_app_credential_store_for_paths(
+    preferred_system_store: Option<Arc<dyn CredentialStore>>,
+    encrypted_root: PathBuf,
+    recovery_root: PathBuf,
+) -> Arc<dyn CredentialStore> {
+    let primary_store =
+        preferred_system_store.unwrap_or_else(|| Arc::new(SystemCredentialStore) as Arc<dyn CredentialStore>);
+    let encrypted_store =
+        Arc::new(EncryptedFileCredentialStore::new(encrypted_root)) as Arc<dyn CredentialStore>;
+    let recovery_store =
+        Arc::new(FileCredentialStore::new(recovery_root)) as Arc<dyn CredentialStore>;
+    let encrypted_chain = Arc::new(FallbackCredentialStore::new(
+        encrypted_store,
+        recovery_store,
+    )) as Arc<dyn CredentialStore>;
+    let backing =
+        Arc::new(FallbackCredentialStore::new(primary_store, encrypted_chain)) as Arc<dyn CredentialStore>;
+
+    Arc::new(CachedCredentialStore::new(backing))
 }
 
 fn build_session_bridge(
@@ -2454,6 +2596,7 @@ fn sync_shell_state(
     effects: &dyn PlatformWindowEffects,
 ) {
     sync_top_status_bar_state(window, state, effects);
+    sync_right_panel_state(window, state);
     sync_sidebar_state(window, state);
     sync_workspace_tabs(window, state);
     sync_assets_context_menu_state(window, state);
@@ -2487,6 +2630,302 @@ fn sync_shell_layout(
 fn current_window_size(window: &AppWindow) -> (u32, u32) {
     let size = window.window().size();
     (size.width, size.height)
+}
+
+fn default_vault_runtime_root() -> PathBuf {
+    app_root_paths_for_app()
+        .map(|paths| paths.data_dir.join("vault"))
+        .unwrap_or_else(|_| std::env::temp_dir().join("mica-term").join("vault"))
+}
+
+fn vault_known_hosts_path(root_dir: &std::path::Path) -> PathBuf {
+    root_dir.join("known_hosts")
+}
+
+fn default_vault_kdf() -> KdfConfig {
+    KdfConfig::Argon2id {
+        memory_cost_kib: 19_456,
+        time_cost: 2,
+        parallelism: 1,
+        salt_b64: Uuid::new_v4().simple().to_string(),
+    }
+}
+
+fn next_vault_revision(current_revision: Option<&str>) -> String {
+    let next_number = current_revision
+        .and_then(|revision| revision.strip_prefix("rev-"))
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|value| value + 1)
+        .unwrap_or(1);
+    format!("rev-{next_number:04}")
+}
+
+fn update_vault_panel_for_local_state(state: &mut ShellViewModel, vault: &VaultSessionState) {
+    let panel = state.vault_panel_state_mut();
+    match (&vault.local_state, vault.unlocked_vault_key.is_some()) {
+        (None, false) => {
+            panel.lock_state_label = "Locked".into();
+            panel.primary_status_label = "Primary not configured".into();
+            panel.primary_action_label = "Set".into();
+            panel.secondary_action_label = "Change".into();
+            panel.tertiary_action_label = "Lock now".into();
+        }
+        (Some(local_state), false) => {
+            panel.lock_state_label = "Locked".into();
+            panel.primary_status_label = if local_state
+                .bundle
+                .remotes
+                .iter()
+                .any(|remote| remote.role == RemoteRole::Primary)
+            {
+                "Primary configured".into()
+            } else {
+                "Primary not configured".into()
+            };
+            panel.primary_action_label = "Unlock".into();
+            panel.secondary_action_label = "Change".into();
+            panel.tertiary_action_label = "Lock now".into();
+        }
+        (Some(local_state), true) => {
+            panel.lock_state_label = "Unlocked".into();
+            panel.primary_status_label = if local_state
+                .bundle
+                .remotes
+                .iter()
+                .any(|remote| remote.role == RemoteRole::Primary)
+            {
+                "Primary configured".into()
+            } else {
+                "Primary not configured".into()
+            };
+            panel.primary_action_label = "Change".into();
+            panel.secondary_action_label = "Sync now".into();
+            panel.tertiary_action_label = "Lock now".into();
+        }
+        (None, true) => {}
+    }
+}
+
+fn sync_preferences_for_bundle(bundle: &BootstrapBundle, last_sync_result: Option<String>) -> SnapshotSyncPreferences {
+    SnapshotSyncPreferences {
+        auto_sync_enabled: bundle.auto_sync_enabled,
+        selected_primary_remote_id: bundle
+            .remotes
+            .iter()
+            .find(|remote| remote.role == RemoteRole::Primary)
+            .map(|remote| remote.remote_id.clone()),
+        selected_mirror_remote_ids: bundle
+            .remotes
+            .iter()
+            .filter(|remote| remote.role == RemoteRole::Mirror)
+            .map(|remote| remote.remote_id.clone())
+            .collect(),
+        last_sync_result,
+    }
+}
+
+fn apply_vault_snapshot_to_shell(
+    state: &mut ShellViewModel,
+    snapshot: &VaultSnapshot,
+    credential_store: &dyn CredentialStore,
+    known_hosts_path: &std::path::Path,
+) -> Result<()> {
+    let applied = apply_vault_snapshot(snapshot, credential_store, known_hosts_path)?;
+    state.replace_console_asset_tree(applied.asset_tree);
+    state.theme_mode = applied.ui_preferences.theme_mode;
+    state.is_always_on_top = applied.ui_preferences.always_on_top;
+    Ok(())
+}
+
+fn clear_vault_decrypted_state(
+    state: &mut ShellViewModel,
+    snapshot: Option<&VaultSnapshot>,
+    credential_store: &dyn CredentialStore,
+) -> Result<()> {
+    if let Some(snapshot) = snapshot {
+        for node in snapshot.asset_catalog.nodes.values() {
+            let VaultAssetPayload::SshConnection(spec) = &node.payload else {
+                continue;
+            };
+            restore_snapshot_secret_bundle(credential_store, spec.credential_ref.as_deref(), None)?;
+        }
+    }
+    state.replace_console_asset_tree(AssetTree::new());
+    Ok(())
+}
+
+fn create_local_vault_from_shell_state(
+    state: &mut ShellViewModel,
+    vault: &mut VaultSessionState,
+    credential_store: &dyn CredentialStore,
+    password: &secrecy::SecretString,
+) -> Result<()> {
+    let mut bundle = vault.bootstrap_template.clone().unwrap_or_default();
+    if bundle.vault_id.trim().is_empty() {
+        bundle.vault_id = format!("vault-{}", Uuid::new_v4().simple());
+    }
+    let kdf = default_vault_kdf();
+    let vault_key = generate_vault_key();
+    let wrapped_vault_key = serde_json::to_string(&wrap_vault_key(password, &kdf, &vault_key)?)
+        .context("failed to encode wrapped vault key")?;
+    let snapshot = export_vault_snapshot(
+        state.console_asset_tree(),
+        credential_store,
+        vault.known_hosts_path().as_path(),
+        sync_preferences_for_bundle(&bundle, None),
+        &UiPreferences::from(&*state),
+    )?;
+    let encrypted_snapshot = encrypt_snapshot(&snapshot, &vault_key)?;
+    store_encrypted_cache(
+        vault.cache_root().as_path(),
+        &bundle.vault_id,
+        &encrypted_snapshot,
+    )?;
+    let local_state = LocalVaultBootstrapState {
+        bundle,
+        wrapped_vault_key,
+        kdf: kdf.clone(),
+        current_revision: None,
+    };
+    save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
+    vault.local_state = Some(local_state);
+    vault.unlocked_vault_key = Some(vault_key);
+    vault.decrypted_snapshot = Some(snapshot);
+    update_vault_panel_for_local_state(state, vault);
+
+    Ok(())
+}
+
+fn unlock_local_vault_into_shell(
+    state: &mut ShellViewModel,
+    vault: &mut VaultSessionState,
+    credential_store: &dyn CredentialStore,
+    password: &secrecy::SecretString,
+) -> Result<()> {
+    let local_state = vault
+        .local_state
+        .as_ref()
+        .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
+    let wrapped: WrappedVaultKey = serde_json::from_str(&local_state.wrapped_vault_key)
+        .context("failed to decode wrapped vault key")?;
+    let vault_key = unwrap_vault_key(password, &wrapped)?;
+    let encrypted_snapshot = load_encrypted_cache(vault.cache_root().as_path(), &local_state.bundle.vault_id)?
+        .ok_or_else(|| anyhow!("encrypted cache is unavailable"))?;
+    let snapshot = decrypt_snapshot(&encrypted_snapshot, &vault_key)?;
+    apply_vault_snapshot_to_shell(
+        state,
+        &snapshot,
+        credential_store,
+        vault.known_hosts_path().as_path(),
+    )?;
+    vault.unlocked_vault_key = Some(vault_key);
+    vault.decrypted_snapshot = Some(snapshot);
+    update_vault_panel_for_local_state(state, vault);
+    Ok(())
+}
+
+fn lock_local_vault(
+    state: &mut ShellViewModel,
+    vault: &mut VaultSessionState,
+    credential_store: &dyn CredentialStore,
+) -> Result<()> {
+    clear_vault_decrypted_state(state, vault.decrypted_snapshot.as_ref(), credential_store)?;
+    vault.unlocked_vault_key = None;
+    vault.decrypted_snapshot = None;
+    update_vault_panel_for_local_state(state, vault);
+    Ok(())
+}
+
+fn sync_local_vault(
+    state: &mut ShellViewModel,
+    vault: &mut VaultSessionState,
+    credential_store: &dyn CredentialStore,
+) -> Result<()> {
+    let known_hosts_path = vault.known_hosts_path();
+    let cache_root = vault.cache_root();
+    let local_state = vault
+        .local_state
+        .as_mut()
+        .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
+    let vault_key = vault
+        .unlocked_vault_key
+        .ok_or_else(|| anyhow!("vault is locked"))?;
+    let primary_remote = local_state
+        .bundle
+        .remotes
+        .iter()
+        .find(|remote| remote.role == RemoteRole::Primary)
+        .cloned()
+        .ok_or_else(|| anyhow!("primary remote is not configured"))?;
+    let primary_provider = vault.provider_factory.build_provider(&primary_remote)?;
+    let mirror_providers = local_state
+        .bundle
+        .remotes
+        .iter()
+        .filter(|remote| remote.role == RemoteRole::Mirror)
+        .map(|remote| vault.provider_factory.build_provider(remote))
+        .collect::<Result<Vec<_>>>()?;
+    let snapshot = export_vault_snapshot(
+        state.console_asset_tree(),
+        credential_store,
+        known_hosts_path.as_path(),
+        sync_preferences_for_bundle(&local_state.bundle, None),
+        &UiPreferences::from(&*state),
+    )?;
+    let request = SyncRequest {
+        vault_id: local_state.bundle.vault_id.clone(),
+        snapshot: snapshot.clone(),
+        next_revision: next_vault_revision(local_state.current_revision.as_deref()),
+        parent_revision: local_state.current_revision.clone(),
+        device_id: "local-device".into(),
+        created_at: "2026-03-28T00:00:00Z".into(),
+        wrapped_vault_key: local_state.wrapped_vault_key.clone(),
+        kdf: local_state.kdf.clone(),
+        provider_kind: primary_remote.provider,
+        vault_key,
+    };
+    let engine = SyncEngine::new(primary_provider, mirror_providers);
+
+    match engine.sync(request) {
+        Ok(report) => {
+            store_encrypted_cache(
+                cache_root.as_path(),
+                &local_state.bundle.vault_id,
+                &report.encrypted_snapshot,
+            )?;
+            local_state.current_revision = Some(report.primary_revision.clone());
+            vault.decrypted_snapshot = Some(snapshot);
+            update_vault_panel_for_local_state(state, vault);
+            if report.is_mirror_degraded() {
+                state.vault_panel_state_mut().primary_status_label = format!(
+                    "Mirror degraded: {}",
+                    report
+                        .mirror_failures
+                        .first()
+                        .map(|failure| failure.message.as_str())
+                        .unwrap_or("unknown mirror failure")
+                );
+            } else {
+                state.vault_panel_state_mut().primary_status_label =
+                    format!("Primary synced {}", report.primary_revision);
+            }
+            Ok(())
+        }
+        Err(err) => {
+            update_vault_panel_for_local_state(state, vault);
+            state.vault_panel_state_mut().primary_status_label = match &err {
+                SyncError::PrimaryReadFailed { message, .. }
+                | SyncError::PrimaryWriteFailed { message, .. } => {
+                    format!("Provider auth error: {message}")
+                }
+                SyncError::Conflict { .. } => "Remote conflict".into(),
+                SyncError::PayloadAssemblyFailed { message } => {
+                    format!("Vault decrypt error: {message}")
+                }
+            };
+            Err(anyhow!(err.to_string()))
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -2679,6 +3118,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
         session_runtime_guard,
         credential_store,
         Arc::new(LivePrivateKeyImporter),
+        VaultRuntimeOptions::default(),
     );
 }
 
@@ -2710,6 +3150,29 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_an
     credential_store: Arc<dyn CredentialStore>,
     private_key_importer: Arc<dyn PrivateKeyImporter>,
 ) {
+    bind_top_status_bar_with_injected_services_and_vault_runtime(
+        window,
+        store,
+        effects,
+        asset_repo,
+        launcher,
+        credential_store,
+        private_key_importer,
+        VaultRuntimeOptions::default(),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn bind_top_status_bar_with_injected_services_and_vault_runtime(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    effects: Rc<dyn PlatformWindowEffects>,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+    credential_store: Arc<dyn CredentialStore>,
+    private_key_importer: Arc<dyn PrivateKeyImporter>,
+    vault_runtime: VaultRuntimeOptions,
+) {
     let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
         Ok(runtime) => {
             let session_bridge = Rc::new(ShellSessionBridge {
@@ -2737,6 +3200,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_an
         session_runtime_guard,
         credential_store,
         private_key_importer,
+        vault_runtime,
     );
 }
 
@@ -2762,6 +3226,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
                 Some(runtime),
                 credential_store,
                 Arc::new(LivePrivateKeyImporter),
+                VaultRuntimeOptions::default(),
             );
         }
         Err(err) => {
@@ -2780,6 +3245,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
                 None,
                 shared_app_credential_store(),
                 Arc::new(LivePrivateKeyImporter),
+                VaultRuntimeOptions::default(),
             );
         }
     }
@@ -2796,6 +3262,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     session_runtime_guard: Option<AppAsyncRuntime>,
     credential_store: Arc<dyn CredentialStore>,
     private_key_importer: Arc<dyn PrivateKeyImporter>,
+    vault_runtime: VaultRuntimeOptions,
 ) {
     let store = store.map(Rc::new);
     let prefs = load_ui_preferences(&store);
@@ -2806,7 +3273,31 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     }
     initial_view_model.theme_mode = prefs.theme_mode;
     initial_view_model.is_always_on_top = prefs.always_on_top;
+    initial_view_model.set_right_panel_view(RightPanelView::from_id(&prefs.right_panel_view));
+    let vault_root_dir = vault_runtime
+        .root_dir
+        .clone()
+        .unwrap_or_else(default_vault_runtime_root);
+    let initial_local_vault_state = load_local_vault_bootstrap_state(
+        vault_root_dir.join("vault-bootstrap-state.json").as_path(),
+    )
+    .unwrap_or_else(|err| {
+        tracing::error!(
+            target: "app.vault",
+            error = %err,
+            "failed to load local vault bootstrap state"
+        );
+        None
+    });
+    let initial_vault_session = VaultSessionState::new(
+        vault_root_dir,
+        Arc::clone(&vault_runtime.provider_factory),
+        vault_runtime.bootstrap_template.clone(),
+        initial_local_vault_state,
+    );
+    update_vault_panel_for_local_state(&mut initial_view_model, &initial_vault_session);
     let view_model = Rc::new(RefCell::new(initial_view_model));
+    let vault_session = Rc::new(RefCell::new(initial_vault_session));
     if let Some(session_bridge_ref) = session_bridge.as_ref()
         && let Err(err) = session_bridge_ref
             .manager
@@ -2881,14 +3372,140 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let session_projection_timer_ref = Rc::clone(&session_projection_timer);
+    let effects_ref = Rc::clone(&effects);
     window.on_toggle_right_panel_requested(move || {
         let _keep_session_projection_timer_alive = &session_projection_timer_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let (width, height) = current_window_size(&window);
         state.toggle_right_panel();
-        window.set_show_right_panel(state.show_right_panel);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_right_panel_state(&window, &state);
         sync_shell_layout(&window, &mut state, width, height);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    window.on_open_settings_panel_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        state.open_settings_panel();
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_right_panel_state(&window, &state);
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    window.on_open_appearance_panel_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        state.open_appearance_panel();
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_right_panel_state(&window, &state);
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    let vault_session_ref = Rc::clone(&vault_session);
+    let credential_store_ref = Arc::clone(&credential_store);
+    window.on_vault_create_requested(move |password| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let mut vault = vault_session_ref.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        let secret = secrecy::SecretString::new(password.to_string().into());
+        if let Err(err) = create_local_vault_from_shell_state(
+            &mut state,
+            &mut vault,
+            credential_store_ref.as_ref(),
+            &secret,
+        ) {
+            tracing::error!(target: "app.vault", error = %err, "failed to create local vault");
+            state.vault_panel_state_mut().primary_status_label =
+                format!("Vault create failed: {err}");
+        }
+        sync_shell_state(&window, &state, effects_ref.as_ref());
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    let vault_session_ref = Rc::clone(&vault_session);
+    let credential_store_ref = Arc::clone(&credential_store);
+    window.on_vault_unlock_requested(move |password| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let mut vault = vault_session_ref.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        let secret = secrecy::SecretString::new(password.to_string().into());
+        if let Err(err) = unlock_local_vault_into_shell(
+            &mut state,
+            &mut vault,
+            credential_store_ref.as_ref(),
+            &secret,
+        ) {
+            tracing::error!(target: "app.vault", error = %err, "failed to unlock local vault");
+            state.vault_panel_state_mut().primary_status_label =
+                format!("Vault decrypt error: {err}");
+        }
+        sync_shell_state(&window, &state, effects_ref.as_ref());
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    let vault_session_ref = Rc::clone(&vault_session);
+    let credential_store_ref = Arc::clone(&credential_store);
+    window.on_vault_sync_now_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let mut vault = vault_session_ref.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        if let Err(err) = sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()) {
+            tracing::error!(target: "app.vault", error = %err, "failed to sync local vault");
+        }
+        sync_shell_state(&window, &state, effects_ref.as_ref());
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    let vault_session_ref = Rc::clone(&vault_session);
+    let credential_store_ref = Arc::clone(&credential_store);
+    window.on_vault_lock_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let mut vault = vault_session_ref.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        if let Err(err) = lock_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()) {
+            tracing::error!(target: "app.vault", error = %err, "failed to lock local vault");
+            state.vault_panel_state_mut().primary_status_label =
+                format!("Vault lock failed: {err}");
+        }
+        sync_shell_state(&window, &state, effects_ref.as_ref());
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -4036,6 +4653,7 @@ fn bind_top_status_bar_with_profile_and_async_handle(
                 None,
                 credential_store,
                 Arc::new(LivePrivateKeyImporter),
+                VaultRuntimeOptions::default(),
             );
         }
         None => {

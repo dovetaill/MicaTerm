@@ -49,6 +49,8 @@ export component Titlebar inherits Rectangle {
     callback drag-double-clicked;
     callback toggle-theme-mode-requested;
     callback toggle-right-panel-requested;
+    callback open-settings-panel-requested;
+    callback open-appearance-panel-requested;
     callback toggle-global-menu-requested;
     callback close-global-menu-requested;
     callback toggle-window-always-on-top-requested;
@@ -367,11 +369,11 @@ export component Titlebar inherits Rectangle {
         }
 
         settings-selected => {
-            root.close-global-menu-requested();
+            root.open-settings-panel-requested();
         }
 
         appearance-selected => {
-            root.close-global-menu-requested();
+            root.open-appearance-panel-requested();
         }
     }
 

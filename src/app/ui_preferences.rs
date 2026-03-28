@@ -7,13 +7,26 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
-use crate::shell::view_model::ShellViewModel;
+use crate::app::vault::model::SnapshotUiPreferences;
+use crate::shell::view_model::{RightPanelView, ShellViewModel};
 use crate::theme::ThemeMode;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UiPreferences {
+    #[serde(default = "default_theme_mode")]
     pub theme_mode: ThemeMode,
+    #[serde(default)]
     pub always_on_top: bool,
+    #[serde(default = "default_right_panel_view")]
+    pub right_panel_view: String,
+}
+
+fn default_theme_mode() -> ThemeMode {
+    ThemeMode::Dark
+}
+
+fn default_right_panel_view() -> String {
+    RightPanelView::Appearance.id().into()
 }
 
 impl Default for UiPreferences {
@@ -21,6 +34,7 @@ impl Default for UiPreferences {
         Self {
             theme_mode: ThemeMode::Dark,
             always_on_top: false,
+            right_panel_view: default_right_panel_view(),
         }
     }
 }
@@ -65,6 +79,32 @@ impl From<&ShellViewModel> for UiPreferences {
         Self {
             theme_mode: value.theme_mode,
             always_on_top: value.is_always_on_top,
+            right_panel_view: value.right_panel_view_id().into(),
         }
+    }
+}
+
+impl From<&UiPreferences> for SnapshotUiPreferences {
+    fn from(value: &UiPreferences) -> Self {
+        Self {
+            theme_mode: Some(match value.theme_mode {
+                ThemeMode::Dark => "dark".into(),
+                ThemeMode::Light => "light".into(),
+            }),
+            always_on_top: Some(value.always_on_top),
+        }
+    }
+}
+
+pub fn ui_preferences_from_snapshot(snapshot: &SnapshotUiPreferences) -> UiPreferences {
+    let theme_mode = match snapshot.theme_mode.as_deref() {
+        Some("light") => ThemeMode::Light,
+        _ => ThemeMode::Dark,
+    };
+
+    UiPreferences {
+        theme_mode,
+        always_on_top: snapshot.always_on_top.unwrap_or(false),
+        right_panel_view: default_right_panel_view(),
     }
 }

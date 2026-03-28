@@ -1,0 +1,74 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component VaultProviderCard inherits Rectangle {
+    in property <string> role: "primary";
+    in property <string> provider-name: "Not configured";
+    in property <string> status-label: "";
+    in property <string> action-label: "";
+
+    height: 92px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: ThemeTokens.divider-strong;
+    background: ThemeTokens.control-active-surface;
+
+    role-chip := Rectangle {
+        x: 14px;
+        y: 14px;
+        width: root.role == "primary" ? 60px : 56px;
+        height: 24px;
+        border-radius: 12px;
+        background: ThemeTokens.control-hover-surface;
+
+        if root.role == "primary" : Text {
+            width: parent.width;
+            height: parent.height;
+            text: "Primary";
+            color: ThemeTokens.text-primary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        if root.role == "mirror" : Text {
+            width: parent.width;
+            height: parent.height;
+            text: "Mirror";
+            color: ThemeTokens.text-primary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-size: 12px;
+            font-weight: 700;
+        }
+    }
+
+    Text {
+        x: 14px;
+        y: 46px;
+        width: parent.width - 108px;
+        text: root.provider-name;
+        color: ThemeTokens.text-primary;
+        font-weight: 600;
+    }
+
+    Text {
+        x: 14px;
+        y: 66px;
+        width: parent.width - 108px;
+        text: root.status-label;
+        color: ThemeTokens.text-primary;
+        opacity: 0.72;
+        font-size: 12px;
+    }
+
+    Text {
+        x: parent.width - 78px;
+        y: 34px;
+        width: 64px;
+        text: root.action-label;
+        color: ThemeTokens.accent;
+        horizontal-alignment: right;
+        font-weight: 600;
+    }
+}
