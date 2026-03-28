@@ -5,7 +5,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use crate::app::ssh::credentials::{SshCredentialKind, ssh_credential_ref};
-use crate::shell::assets::AssetSshConnectionSpec;
+use crate::shell::assets::{AssetSshConnectionSpec, AssetSshProxySpec};
 use crate::shell::view_model::AssetSshConnectionDraft;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +13,33 @@ pub enum SshAuthMethod {
     Password,
     PrivateKeyPath,
     PrivateKeyContent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ConnectionProxyProfile {
+    #[default]
+    None,
+    Socks5 {
+        host: String,
+        port: u16,
+        username: Option<String>,
+        password: Option<String>,
+        credential_ref: Option<String>,
+    },
+    SshAsset {
+        asset_id: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedProxyHop {
+    Socks5 {
+        host: String,
+        port: u16,
+        username: Option<String>,
+        password: Option<String>,
+    },
+    Ssh(Box<ConnectionProfile>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +55,8 @@ pub struct ConnectionProfile {
     pub password: Option<String>,
     pub private_key_content: Option<String>,
     pub passphrase: Option<String>,
+    pub proxy: ConnectionProxyProfile,
+    pub resolved_proxy_hops: Vec<ResolvedProxyHop>,
     pub remark: String,
 }
 
@@ -112,6 +141,7 @@ impl ConnectionProfile {
             },
             other => bail!("unsupported ssh auth method: {other}"),
         };
+        let proxy = normalize_draft_proxy(draft)?;
 
         Ok(Self {
             asset_id: None,
@@ -126,6 +156,8 @@ impl ConnectionProfile {
             private_key_content: (!draft.private_key_content.trim().is_empty())
                 .then(|| draft.private_key_content.clone()),
             passphrase: (!draft.passphrase.trim().is_empty()).then(|| draft.passphrase.clone()),
+            proxy,
+            resolved_proxy_hops: Vec::new(),
             remark: draft.remark.trim().to_string(),
         })
     }
@@ -185,6 +217,7 @@ impl ConnectionProfile {
             },
             other => bail!("unsupported ssh auth method: {other}"),
         };
+        let proxy = normalize_saved_proxy(&spec.proxy)?;
 
         Ok(Self {
             asset_id: Some(asset_id.to_string()),
@@ -198,6 +231,8 @@ impl ConnectionProfile {
             password: None,
             private_key_content: None,
             passphrase: None,
+            proxy,
+            resolved_proxy_hops: Vec::new(),
             remark: spec.remark.trim().to_string(),
         })
     }
@@ -229,4 +264,47 @@ fn saved_ssh_credential_ref(asset_id: &str, spec: &AssetSshConnectionSpec) -> St
     spec.credential_ref
         .clone()
         .unwrap_or_else(|| ssh_credential_ref(asset_id, SshCredentialKind::SavedSecrets))
+}
+
+fn normalize_draft_proxy(draft: &AssetSshConnectionDraft) -> anyhow::Result<ConnectionProxyProfile> {
+    match draft.proxy_type.trim() {
+        "" | "none" => Ok(ConnectionProxyProfile::None),
+        "socks5" => Ok(ConnectionProxyProfile::Socks5 {
+            host: draft.proxy_socks5_host.trim().to_string(),
+            port: parse_socks5_port(draft.proxy_socks5_port.trim())?,
+            username: optional_string(&draft.proxy_socks5_username),
+            password: optional_string(&draft.proxy_socks5_password),
+            credential_ref: None,
+        }),
+        "ssh-asset" => Ok(ConnectionProxyProfile::SshAsset {
+            asset_id: draft.proxy_ssh_asset_id.trim().to_string(),
+        }),
+        other => bail!("unsupported ssh proxy type: {other}"),
+    }
+}
+
+fn normalize_saved_proxy(spec: &AssetSshProxySpec) -> anyhow::Result<ConnectionProxyProfile> {
+    match spec {
+        AssetSshProxySpec::None => Ok(ConnectionProxyProfile::None),
+        AssetSshProxySpec::Socks5(proxy) => Ok(ConnectionProxyProfile::Socks5 {
+            host: proxy.host.trim().to_string(),
+            port: parse_socks5_port(proxy.port.trim())?,
+            username: optional_string(&proxy.username),
+            password: None,
+            credential_ref: proxy.password_credential_ref.clone(),
+        }),
+        AssetSshProxySpec::SshAsset { asset_id } => Ok(ConnectionProxyProfile::SshAsset {
+            asset_id: asset_id.trim().to_string(),
+        }),
+    }
+}
+
+fn parse_socks5_port(raw: &str) -> anyhow::Result<u16> {
+    raw.parse::<u16>()
+        .with_context(|| format!("invalid socks5 proxy port: {raw}"))
+}
+
+fn optional_string(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }

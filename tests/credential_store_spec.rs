@@ -94,6 +94,7 @@ fn persist_secret_bundle_stores_password_as_json_payload() {
             password: Some("super-secret".into()),
             private_key_content: None,
             passphrase: None,
+            proxy_socks5_password: None,
         },
     )
     .expect("persist password bundle");
@@ -119,6 +120,7 @@ fn persist_secret_bundle_replaces_previous_secret_material_for_same_ref() {
             password: Some("first-password".into()),
             private_key_content: None,
             passphrase: None,
+            proxy_socks5_password: None,
         },
     )
     .expect("persist initial bundle");
@@ -130,6 +132,7 @@ fn persist_secret_bundle_replaces_previous_secret_material_for_same_ref() {
             password: None,
             private_key_content: Some("-----BEGIN OPENSSH PRIVATE KEY-----".into()),
             passphrase: Some("hunter2".into()),
+            proxy_socks5_password: None,
         },
     )
     .expect("replace bundle");
@@ -144,11 +147,78 @@ fn persist_secret_bundle_replaces_previous_secret_material_for_same_ref() {
 }
 
 #[test]
+fn persist_secret_bundle_round_trips_proxy_socks5_password() {
+    let store = MemoryCredentialStore::default();
+    let credential_ref = ssh_credential_ref("asset-prod", SshCredentialKind::SavedSecrets);
+
+    persist_secret_bundle(
+        &store,
+        credential_ref.as_str(),
+        &StoredSshSecretBundle {
+            password: Some("ssh-secret".into()),
+            private_key_content: None,
+            passphrase: None,
+            proxy_socks5_password: Some("proxy-secret".into()),
+        },
+    )
+    .expect("persist proxy password bundle");
+
+    let bundle = load_secret_bundle(&store, credential_ref.as_str()).expect("load proxy bundle");
+    assert_eq!(bundle.password.as_deref(), Some("ssh-secret"));
+    assert_eq!(bundle.proxy_socks5_password.as_deref(), Some("proxy-secret"));
+}
+
+#[test]
+fn editing_saved_proxy_password_blank_clears_proxy_secret_without_touching_ssh_auth_secret() {
+    let existing = StoredSshSecretBundle {
+        password: Some("ssh-secret".into()),
+        private_key_content: None,
+        passphrase: None,
+        proxy_socks5_password: Some("stale-proxy-secret".into()),
+    };
+    let draft = AssetSshConnectionDraft {
+        auth_method: "password".into(),
+        password: "ssh-secret".into(),
+        proxy_type: "socks5".into(),
+        proxy_socks5_host: "proxy.example.net".into(),
+        proxy_socks5_port: "1080".into(),
+        ..AssetSshConnectionDraft::default()
+    };
+
+    let merged = merge_edit_bundle(existing, &draft);
+
+    assert_eq!(merged.password.as_deref(), Some("ssh-secret"));
+    assert_eq!(merged.proxy_socks5_password, None);
+}
+
+#[test]
+fn editing_saved_password_mode_persists_proxy_password_alongside_ssh_auth_secret() {
+    let draft = AssetSshConnectionDraft {
+        auth_method: "password".into(),
+        password: "ssh-secret".into(),
+        proxy_type: "socks5".into(),
+        proxy_socks5_host: "proxy.example.net".into(),
+        proxy_socks5_port: "1080".into(),
+        proxy_socks5_username: "ops-proxy".into(),
+        proxy_socks5_password: "proxy-secret".into(),
+        ..AssetSshConnectionDraft::default()
+    };
+
+    let merged = merge_edit_bundle(StoredSshSecretBundle::default(), &draft);
+
+    assert_eq!(merged.password.as_deref(), Some("ssh-secret"));
+    assert_eq!(merged.proxy_socks5_password.as_deref(), Some("proxy-secret"));
+    assert_eq!(merged.private_key_content, None);
+    assert_eq!(merged.passphrase, None);
+}
+
+#[test]
 fn editing_saved_secret_fields_blank_keeps_existing_bundle() {
     let existing = StoredSshSecretBundle {
         password: None,
         private_key_content: Some("-----BEGIN OPENSSH PRIVATE KEY-----".into()),
         passphrase: Some("hunter2".into()),
+        proxy_socks5_password: None,
     };
     let draft = AssetSshConnectionDraft {
         auth_method: "private-key".into(),
@@ -169,6 +239,7 @@ fn editing_saved_password_blank_clears_saved_bundle() {
         password: Some("super-secret".into()),
         private_key_content: None,
         passphrase: None,
+        proxy_socks5_password: None,
     };
     let draft = AssetSshConnectionDraft {
         auth_method: "password".into(),
@@ -193,6 +264,7 @@ fn file_credential_store_persists_secret_across_store_instances() {
             password: Some("super-secret".into()),
             private_key_content: None,
             passphrase: None,
+            proxy_socks5_password: None,
         },
     )
     .expect("persist password bundle to file-backed store");

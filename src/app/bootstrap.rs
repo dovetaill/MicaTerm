@@ -926,17 +926,20 @@ fn saved_secret_bundle_for_draft(draft: &AssetSshConnectionDraft) -> StoredSshSe
             password: (!draft.password.trim().is_empty()).then(|| draft.password.clone()),
             private_key_content: None,
             passphrase: None,
+            proxy_socks5_password: None,
         },
         "private-key" if draft.private_key_source == "content" => StoredSshSecretBundle {
             password: None,
             private_key_content: (!draft.private_key_content.trim().is_empty())
                 .then(|| draft.private_key_content.clone()),
             passphrase: (!draft.passphrase.trim().is_empty()).then(|| draft.passphrase.clone()),
+            proxy_socks5_password: None,
         },
         "private-key" if draft.private_key_source == "path" => StoredSshSecretBundle {
             password: None,
             private_key_content: None,
             passphrase: (!draft.passphrase.trim().is_empty()).then(|| draft.passphrase.clone()),
+            proxy_socks5_password: None,
         },
         _ => StoredSshSecretBundle::default(),
     }

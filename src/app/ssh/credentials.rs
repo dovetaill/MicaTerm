@@ -49,6 +49,7 @@ pub struct StoredSshSecretBundle {
     pub password: Option<String>,
     pub private_key_content: Option<String>,
     pub passphrase: Option<String>,
+    pub proxy_socks5_password: Option<String>,
 }
 
 impl StoredSshSecretBundle {
@@ -62,6 +63,10 @@ impl StoredSshSecretBundle {
                 .is_none_or(|value| value.trim().is_empty())
             && self
                 .passphrase
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+            && self
+                .proxy_socks5_password
                 .as_deref()
                 .is_none_or(|value| value.trim().is_empty())
     }
@@ -179,6 +184,7 @@ pub fn required_secret_bundle_field(
         "password" => bundle.password.as_deref(),
         "private_key_content" => bundle.private_key_content.as_deref(),
         "passphrase" => bundle.passphrase.as_deref(),
+        "proxy_socks5_password" => bundle.proxy_socks5_password.as_deref(),
         _ => None,
     };
 
@@ -195,24 +201,33 @@ pub fn merge_edit_bundle(
     _existing: StoredSshSecretBundle,
     draft: &AssetSshConnectionDraft,
 ) -> StoredSshSecretBundle {
-    match draft.auth_method.as_str() {
+    let mut bundle = match draft.auth_method.as_str() {
         "password" => StoredSshSecretBundle {
             password: non_empty_secret(&draft.password),
             private_key_content: None,
             passphrase: None,
+            proxy_socks5_password: None,
         },
         "private-key" if draft.private_key_source == "content" => StoredSshSecretBundle {
             password: None,
             private_key_content: non_empty_secret(&draft.private_key_content),
             passphrase: non_empty_secret(&draft.passphrase),
+            proxy_socks5_password: None,
         },
         "private-key" if draft.private_key_source == "path" => StoredSshSecretBundle {
             password: None,
             private_key_content: None,
             passphrase: non_empty_secret(&draft.passphrase),
+            proxy_socks5_password: None,
         },
         _ => StoredSshSecretBundle::default(),
-    }
+    };
+    bundle.proxy_socks5_password = if draft.proxy_type == "socks5" {
+        non_empty_secret(&draft.proxy_socks5_password)
+    } else {
+        None
+    };
+    bundle
 }
 
 fn non_empty_secret(value: &str) -> Option<String> {

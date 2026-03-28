@@ -655,6 +655,7 @@ pub(crate) fn load_optional_stored_secret_bundle(
         SshAuthMethod::PrivateKeyContent => StoredSshSecretBundle {
             private_key_content: bundle.password,
             passphrase: bundle.passphrase,
+            proxy_socks5_password: None,
             ..StoredSshSecretBundle::default()
         },
         SshAuthMethod::PrivateKeyPath => bundle,
