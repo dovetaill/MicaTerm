@@ -84,9 +84,9 @@ pub fn toolbar_descriptor_for(
     ) = match destination {
         SidebarDestination::Console => (true, None, "Create Asset", "Search Console Assets", true),
         SidebarDestination::Snippets => (
-            false,
-            Some("new-snippet"),
-            "New Snippet",
+            true,
+            None,
+            "Create Snippet Asset",
             "Search Snippets",
             false,
         ),

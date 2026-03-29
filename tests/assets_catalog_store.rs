@@ -6,8 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use mica_term::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, ASSET_RECORDS_TABLE, AssetCatalogRepository,
     METADATA_ROOT_IDS_KEY, METADATA_SCHEMA_VERSION_KEY, METADATA_TABLE, PersistedAssetCatalog,
-    PersistedAssetKind, PersistedAssetNode, PersistedAssetPayload, PersistedAssetSocks5ProxySpec,
-    PersistedAssetSshProxySpec, PersistedSshConnectionSpec, RedbAssetCatalogStore,
+    PersistedAssetDomain, PersistedAssetKind, PersistedAssetNode, PersistedAssetPayload,
+    PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec, PersistedSnippetSpec,
+    PersistedSshConnectionSpec, RedbAssetCatalogStore,
 };
 use redb::{Database, ReadableTable};
 use serde::Serialize;
@@ -94,6 +95,97 @@ fn sample_catalog_with_ssh_upstream_proxy() -> PersistedAssetCatalog {
         credential_ref: None,
     });
     catalog
+}
+
+fn sample_catalog_with_snippets() -> PersistedAssetCatalog {
+    let folder_id = "folder-1".to_string();
+    let ssh_id = "ssh-1".to_string();
+    let package_id = "snippet-package-1".to_string();
+    let package_snippet_id = "snippet-1".to_string();
+    let root_snippet_id = "snippet-2".to_string();
+
+    PersistedAssetCatalog {
+        schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+        root_ids: vec![
+            folder_id.clone(),
+            package_id.clone(),
+            root_snippet_id.clone(),
+        ],
+        nodes: BTreeMap::from([
+            (
+                folder_id.clone(),
+                PersistedAssetNode {
+                    id: folder_id,
+                    parent_id: None,
+                    title: "Team".into(),
+                    kind: PersistedAssetKind::Folder,
+                    child_ids: vec![ssh_id.clone()],
+                    payload: PersistedAssetPayload::Folder,
+                },
+            ),
+            (
+                ssh_id.clone(),
+                PersistedAssetNode {
+                    id: ssh_id,
+                    parent_id: Some("folder-1".into()),
+                    title: "Gateway".into(),
+                    kind: PersistedAssetKind::SshConnection,
+                    child_ids: Vec::new(),
+                    payload: PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                        host: "gateway.example.com".into(),
+                        user: "ops".into(),
+                        port: "22".into(),
+                        auth_method: "password".into(),
+                        private_key_source: "content".into(),
+                        private_key_path: String::new(),
+                        environment: "prod".into(),
+                        proxy: PersistedAssetSshProxySpec::None,
+                        remark: String::new(),
+                        credential_ref: None,
+                    }),
+                },
+            ),
+            (
+                package_id.clone(),
+                PersistedAssetNode {
+                    id: package_id.clone(),
+                    parent_id: None,
+                    title: "Deploy".into(),
+                    kind: PersistedAssetKind::SnippetPackage,
+                    child_ids: vec![package_snippet_id.clone()],
+                    payload: PersistedAssetPayload::SnippetPackage,
+                },
+            ),
+            (
+                package_snippet_id.clone(),
+                PersistedAssetNode {
+                    id: package_snippet_id,
+                    parent_id: Some(package_id.clone()),
+                    title: "Deploy prod".into(),
+                    kind: PersistedAssetKind::Snippet,
+                    child_ids: Vec::new(),
+                    payload: PersistedAssetPayload::Snippet(PersistedSnippetSpec {
+                        script: "kubectl apply -f prod.yaml".into(),
+                        package_id: Some(package_id),
+                    }),
+                },
+            ),
+            (
+                root_snippet_id.clone(),
+                PersistedAssetNode {
+                    id: root_snippet_id,
+                    parent_id: None,
+                    title: "Restart API".into(),
+                    kind: PersistedAssetKind::Snippet,
+                    child_ids: Vec::new(),
+                    payload: PersistedAssetPayload::Snippet(PersistedSnippetSpec {
+                        script: "kubectl rollout restart deploy/api".into(),
+                        package_id: None,
+                    }),
+                },
+            ),
+        ]),
+    }
 }
 
 fn matching_files(data_dir: &PathBuf, prefix: &str) -> Vec<String> {
@@ -186,6 +278,34 @@ fn save_and_reload_preserves_ssh_upstream_asset_reference() {
     let loaded = store.load().unwrap();
 
     assert_eq!(loaded, catalog);
+}
+
+#[test]
+fn save_and_reload_preserves_snippets_package_and_root_snippet() {
+    let data_dir = temp_data_dir("assets-store-snippets-roundtrip");
+    let store = RedbAssetCatalogStore::new(data_dir);
+    let catalog = sample_catalog_with_snippets();
+
+    store.save(&catalog).unwrap();
+    let loaded = store.load().unwrap();
+
+    assert_eq!(loaded, catalog);
+    assert_eq!(
+        loaded
+            .nodes
+            .get("snippet-package-1")
+            .expect("snippet package")
+            .kind
+            .domain(),
+        PersistedAssetDomain::Snippets
+    );
+    assert_eq!(
+        loaded.nodes.get("snippet-2").expect("root snippet").payload,
+        PersistedAssetPayload::Snippet(PersistedSnippetSpec {
+            script: "kubectl rollout restart deploy/api".into(),
+            package_id: None,
+        })
+    );
 }
 
 #[test]

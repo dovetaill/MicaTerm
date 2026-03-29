@@ -100,6 +100,24 @@ impl Default for VaultManifest {
 pub enum VaultAssetKind {
     Folder,
     SshConnection,
+    SnippetPackage,
+    Snippet,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VaultAssetDomain {
+    Console,
+    Snippets,
+}
+
+impl VaultAssetKind {
+    pub fn domain(self) -> VaultAssetDomain {
+        match self {
+            Self::Folder | Self::SshConnection => VaultAssetDomain::Console,
+            Self::SnippetPackage | Self::Snippet => VaultAssetDomain::Snippets,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -136,10 +154,18 @@ pub struct VaultSshConnectionSpec {
     pub credential_ref: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct VaultSnippetSpec {
+    pub script: String,
+    pub package_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VaultAssetPayload {
     Folder,
     SshConnection(Box<VaultSshConnectionSpec>),
+    SnippetPackage,
+    Snippet(VaultSnippetSpec),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

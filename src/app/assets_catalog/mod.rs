@@ -6,12 +6,13 @@ pub mod redb_store;
 pub mod repository;
 
 pub use mapper::{
-    asset_tree_to_catalog, asset_tree_to_vault_catalog, catalog_to_asset_tree,
-    vault_catalog_to_asset_tree,
+    asset_tree_to_catalog, asset_tree_to_vault_catalog, asset_trees_to_catalog,
+    catalog_to_asset_tree, catalog_to_asset_trees, vault_catalog_to_asset_tree,
 };
 pub use model::{
-    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetCatalog, PersistedAssetKind, PersistedAssetNode,
-    PersistedAssetPayload, PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec,
+    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetCatalog, PersistedAssetDomain,
+    PersistedAssetKind, PersistedAssetNode, PersistedAssetPayload,
+    PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec, PersistedSnippetSpec,
     PersistedSshConnectionSpec,
 };
 pub use redb_store::{

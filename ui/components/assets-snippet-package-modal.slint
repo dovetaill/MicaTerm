@@ -1,0 +1,272 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+component DialogButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> primary: false;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 34px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: root.primary && root.enabled ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    background: !root.enabled ? ThemeTokens.control-disabled-surface
+        : button-touch.pressed ? ThemeTokens.control-pressed-surface
+        : button-touch.has-hover ? ThemeTokens.control-hover-surface
+        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+    opacity: root.enabled ? 1.0 : 0.56;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    button-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component AssetsSnippetPackageModal inherits Rectangle {
+    in property <string> dialog-title: "New Package";
+    in property <string> package-name: "";
+    in property <string> validation-message: "";
+    in property <bool> can-confirm: false;
+    in property <int> focus-sequence: 0;
+    callback close-requested();
+    callback confirm-requested();
+    callback name-changed(string);
+    callback drag-requested(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended();
+    callback focus-restore-requested();
+    private property <length> footer-height: 78px;
+
+    background: transparent;
+
+    public function focus-input() {
+        name-input.focus();
+    }
+
+    modal-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.focus-restore-requested();
+                root.close-requested();
+                accept
+            } else if (event.text == Key.Return) {
+                if (root.can-confirm) {
+                    root.confirm-requested();
+                }
+                accept
+            } else {
+                reject
+            }
+        }
+
+        header := Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 56px;
+            background: ThemeTokens.assets-surface;
+
+            Text {
+                x: 20px;
+                y: 0px;
+                width: parent.width - 72px;
+                height: parent.height;
+                text: root.dialog-title;
+                color: ThemeTokens.text-primary;
+                font-size: 18px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+
+            drag-touch := TouchArea {
+                width: parent.width - 48px;
+                height: parent.height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down
+                        && event.button == PointerEventButton.left
+                    {
+                        root.drag-requested(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.move {
+                        root.drag-moved(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.up {
+                        root.drag-ended();
+                    }
+                }
+            }
+
+            close-button := Rectangle {
+                x: parent.width - 40px;
+                y: 12px;
+                width: 28px;
+                height: 28px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.control-active-surface;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "×";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                close-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.close-requested();
+                    }
+                }
+            }
+
+            divider := Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
+            }
+        }
+
+        body := Rectangle {
+            x: 0px;
+            y: header.height;
+            width: parent.width;
+            height: parent.height - header.height - root.footer-height;
+            background: transparent;
+
+            Text {
+                x: 20px;
+                y: 18px;
+                width: parent.width - 40px;
+                text: "Package name";
+                color: ThemeTokens.text-primary;
+                opacity: 0.78;
+            }
+
+            input-frame := Rectangle {
+                x: 20px;
+                y: 44px;
+                width: parent.width - 40px;
+                height: 40px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: root.validation-message == "" ? ThemeTokens.divider-subtle : ThemeTokens.accent;
+                background: ThemeTokens.inspector-surface;
+
+                name-input := TextInput {
+                    x: 12px;
+                    y: 9px;
+                    width: parent.width - 24px;
+                    height: 22px;
+                    text: root.package-name;
+                    color: ThemeTokens.text-primary;
+                    selection-background-color: ThemeTokens.accent;
+                    selection-foreground-color: ThemeTokens.text-primary;
+
+                    edited => {
+                        root.name-changed(self.text);
+                    }
+                }
+            }
+
+            validation-copy := Text {
+                x: 20px;
+                y: 92px;
+                width: parent.width - 40px;
+                text: root.validation-message;
+                color: ThemeTokens.text-primary;
+                opacity: 0.72;
+                visible: root.validation-message != "";
+                wrap: word-wrap;
+            }
+        }
+
+        footer := Rectangle {
+            x: 0px;
+            y: parent.height - root.footer-height;
+            width: parent.width;
+            height: root.footer-height;
+            background: ThemeTokens.assets-surface;
+
+            footer-content := VerticalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 14px;
+                padding-bottom: 14px;
+                spacing: 0px;
+
+                Rectangle {
+                    height: 0px;
+                    vertical-stretch: 1;
+                    background: transparent;
+                }
+
+                HorizontalLayout {
+                    height: 34px;
+                    spacing: 12px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: transparent;
+                    }
+
+                    DialogButton {
+                        width: 88px;
+                        label: "Cancel";
+
+                        clicked => {
+                            root.focus-restore-requested();
+                            root.close-requested();
+                        }
+                    }
+
+                    DialogButton {
+                        width: 84px;
+                        label: "Create";
+                        primary: true;
+                        enabled: root.can-confirm;
+
+                        clicked => {
+                            root.confirm-requested();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

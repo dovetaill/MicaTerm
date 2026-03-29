@@ -25,6 +25,12 @@ impl AssetViewMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetDomain {
+    Console,
+    Snippets,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssetCreateAction {
     NewFolder,
     NewSshConnection,
@@ -43,6 +49,8 @@ impl AssetCreateAction {
 pub enum ConsoleAssetKind {
     SshConnection,
     Folder,
+    SnippetPackage,
+    Snippet,
 }
 
 impl ConsoleAssetKind {
@@ -50,6 +58,8 @@ impl ConsoleAssetKind {
         match self {
             Self::SshConnection => "ssh",
             Self::Folder => "folder",
+            Self::SnippetPackage => "snippet-package",
+            Self::Snippet => "snippet",
         }
     }
 
@@ -57,6 +67,8 @@ impl ConsoleAssetKind {
         match value {
             "ssh" => Some(Self::SshConnection),
             "folder" => Some(Self::Folder),
+            "snippet-package" => Some(Self::SnippetPackage),
+            "snippet" => Some(Self::Snippet),
             _ => None,
         }
     }
@@ -73,6 +85,8 @@ impl ConsoleAssetKind {
         match self {
             Self::Folder => "New Folder",
             Self::SshConnection => "New SSH Connection",
+            Self::SnippetPackage => "New Package",
+            Self::Snippet => "New Snippet",
         }
     }
 
@@ -80,7 +94,32 @@ impl ConsoleAssetKind {
         match self {
             Self::Folder => "Folder",
             Self::SshConnection => "SSH Connection",
+            Self::SnippetPackage => "Package",
+            Self::Snippet => "Snippet",
         }
+    }
+
+    pub fn domain(self) -> AssetDomain {
+        match self {
+            Self::Folder | Self::SshConnection => AssetDomain::Console,
+            Self::SnippetPackage | Self::Snippet => AssetDomain::Snippets,
+        }
+    }
+
+    fn can_accept_children(self) -> bool {
+        matches!(self, Self::Folder | Self::SnippetPackage)
+    }
+
+    fn allows_child(self, child: Self) -> bool {
+        match self {
+            Self::Folder => matches!(child, Self::Folder | Self::SshConnection),
+            Self::SnippetPackage => matches!(child, Self::Snippet),
+            Self::SshConnection | Self::Snippet => false,
+        }
+    }
+
+    fn should_appear_in_flat_view(self) -> bool {
+        matches!(self, Self::SshConnection | Self::Snippet)
     }
 }
 
@@ -150,11 +189,19 @@ pub struct AssetSshConnectionSpec {
     pub credential_ref: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AssetSnippetSpec {
+    pub script: String,
+    pub package_id: Option<String>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetNodePayload {
     Folder,
     SshConnection(AssetSshConnectionSpec),
+    SnippetPackage,
+    Snippet(AssetSnippetSpec),
 }
 
 impl AssetNodePayload {
@@ -164,6 +211,8 @@ impl AssetNodePayload {
             ConsoleAssetKind::SshConnection => {
                 Self::SshConnection(AssetSshConnectionSpec::default())
             }
+            ConsoleAssetKind::SnippetPackage => Self::SnippetPackage,
+            ConsoleAssetKind::Snippet => Self::Snippet(AssetSnippetSpec::default()),
         }
     }
 
@@ -172,6 +221,8 @@ impl AssetNodePayload {
             (kind, self),
             (ConsoleAssetKind::Folder, Self::Folder)
                 | (ConsoleAssetKind::SshConnection, Self::SshConnection(_))
+                | (ConsoleAssetKind::SnippetPackage, Self::SnippetPackage)
+                | (ConsoleAssetKind::Snippet, Self::Snippet(_))
         )
     }
 }
@@ -232,6 +283,12 @@ impl AssetTree {
             payload.matches_kind(kind),
             "payload kind must match runtime node kind"
         );
+        if let AssetNodePayload::Snippet(spec) = &payload {
+            assert!(
+                spec.package_id.is_none(),
+                "root snippets must not carry package references"
+            );
+        }
 
         let id = self.next_id();
         let node = AssetNode {
@@ -272,6 +329,40 @@ impl AssetTree {
             payload.matches_kind(kind),
             "payload kind must match runtime node kind"
         );
+        let parent_kind = self
+            .nodes
+            .get(parent_id)
+            .expect("parent existence checked above")
+            .kind;
+        assert!(
+            parent_kind.can_accept_children(),
+            "parent kind `{}` cannot accept children",
+            parent_kind.id()
+        );
+        assert!(
+            parent_kind.allows_child(kind),
+            "parent kind `{}` cannot contain child kind `{}`",
+            parent_kind.id(),
+            kind.id()
+        );
+        if let AssetNodePayload::Snippet(spec) = &payload {
+            match kind {
+                ConsoleAssetKind::Snippet if parent_kind == ConsoleAssetKind::SnippetPackage => {
+                    assert_eq!(
+                        spec.package_id.as_deref(),
+                        Some(parent_id),
+                        "package snippet payload must reference its parent package"
+                    );
+                }
+                ConsoleAssetKind::Snippet => {
+                    assert!(
+                        spec.package_id.is_none(),
+                        "non-package snippet children must not carry package references"
+                    );
+                }
+                _ => {}
+            }
+        }
 
         let id = self.next_id();
         let node = AssetNode {
@@ -308,7 +399,7 @@ impl AssetTree {
 
     pub fn set_all_expanded(&mut self, expanded: bool) {
         for node in self.nodes.values_mut() {
-            if node.kind == ConsoleAssetKind::Folder {
+            if node.kind.can_accept_children() {
                 node.expanded = expanded;
             }
         }
@@ -354,6 +445,8 @@ impl AssetTree {
         match &self.nodes.get(node_id)?.payload {
             AssetNodePayload::Folder => None,
             AssetNodePayload::SshConnection(spec) => Some(spec),
+            AssetNodePayload::SnippetPackage => None,
+            AssetNodePayload::Snippet(_) => None,
         }
     }
 
@@ -368,6 +461,32 @@ impl AssetTree {
                 *current = spec;
                 true
             }
+            AssetNodePayload::SnippetPackage | AssetNodePayload::Snippet(_) => false,
+        }
+    }
+
+    pub fn snippet_spec(&self, node_id: &str) -> Option<&AssetSnippetSpec> {
+        match &self.nodes.get(node_id)?.payload {
+            AssetNodePayload::Snippet(spec) => Some(spec),
+            AssetNodePayload::Folder
+            | AssetNodePayload::SshConnection(_)
+            | AssetNodePayload::SnippetPackage => None,
+        }
+    }
+
+    pub fn set_snippet_spec(&mut self, node_id: &str, spec: AssetSnippetSpec) -> bool {
+        let Some(node) = self.nodes.get_mut(node_id) else {
+            return false;
+        };
+
+        match &mut node.payload {
+            AssetNodePayload::Snippet(current) => {
+                *current = spec;
+                true
+            }
+            AssetNodePayload::Folder
+            | AssetNodePayload::SshConnection(_)
+            | AssetNodePayload::SnippetPackage => false,
         }
     }
 
@@ -517,7 +636,7 @@ impl AssetTree {
                 continue;
             };
 
-            if node.kind == ConsoleAssetKind::SshConnection {
+            if node.kind.should_appear_in_flat_view() {
                 rows.push(self.flat_row_from_node(node));
             }
             self.collect_flat_rows(&node.children, rows);
@@ -535,7 +654,7 @@ impl AssetTree {
                 continue;
             };
 
-            if node.kind == ConsoleAssetKind::SshConnection {
+            if node.kind.should_appear_in_flat_view() {
                 let row = self.flat_row_from_node(node);
                 let label_match = row.label.to_ascii_lowercase().contains(search_query);
                 let path_hint_match = row
@@ -584,8 +703,8 @@ impl AssetTree {
 
     fn row_from_node(&self, node: &AssetNode, depth: usize) -> VisibleAssetRow {
         let disclosure_state = match (node.kind, node.children.is_empty(), node.expanded) {
-            (ConsoleAssetKind::Folder, false, false) => AssetDisclosureState::Collapsed,
-            (ConsoleAssetKind::Folder, false, true) => AssetDisclosureState::Expanded,
+            (kind, false, false) if kind.can_accept_children() => AssetDisclosureState::Collapsed,
+            (kind, false, true) if kind.can_accept_children() => AssetDisclosureState::Expanded,
             _ => AssetDisclosureState::None,
         };
 
@@ -598,7 +717,7 @@ impl AssetTree {
             expanded: node.expanded,
             disclosure_state,
             path_hint: None,
-            show_disclosure: node.kind == ConsoleAssetKind::Folder && !node.children.is_empty(),
+            show_disclosure: node.kind.can_accept_children() && !node.children.is_empty(),
         }
     }
 
@@ -624,7 +743,7 @@ impl AssetTree {
             let Some(parent) = self.nodes.get(parent_id) else {
                 break;
             };
-            if parent.kind == ConsoleAssetKind::Folder {
+            if parent.kind.can_accept_children() {
                 ancestors.push(parent.title.clone());
             }
             cursor = parent.parent_id.as_deref();

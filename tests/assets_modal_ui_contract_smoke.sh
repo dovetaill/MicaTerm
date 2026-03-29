@@ -3,17 +3,26 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_WINDOW="$ROOT_DIR/ui/app-window.slint"
+CREATE_MENU="$ROOT_DIR/ui/components/assets-create-menu.slint"
 FOLDER_MODAL="$ROOT_DIR/ui/components/assets-folder-create-modal.slint"
 SSH_MODAL="$ROOT_DIR/ui/components/assets-ssh-connection-modal.slint"
 RENAME_MODAL="$ROOT_DIR/ui/components/assets-rename-modal.slint"
 DELETE_MODAL="$ROOT_DIR/ui/components/assets-delete-confirm-modal.slint"
+SNIPPET_MODAL="$ROOT_DIR/ui/components/assets-snippet-modal.slint"
+SNIPPET_PACKAGE_MODAL="$ROOT_DIR/ui/components/assets-snippet-package-modal.slint"
 MODAL_SHELL="$ROOT_DIR/ui/components/blocking-modal-shell.slint"
 BOOTSTRAP="$ROOT_DIR/src/app/bootstrap.rs"
 TOKENS="$ROOT_DIR/ui/theme/tokens.slint"
+ASSETS_SIDEBAR="$ROOT_DIR/ui/shell/assets-sidebar.slint"
+SIDEBAR="$ROOT_DIR/ui/shell/sidebar.slint"
 
 grep -F 'in-out property <bool> asset-modal-open: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-modal-kind: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <int> asset-modal-focus-sequence: 0;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> asset-snippet-modal-name: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> asset-snippet-modal-script: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> asset-snippet-modal-package: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> asset-snippet-package-modal-name: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> asset-rename-modal-open: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-rename-modal-name: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-rename-modal-validation-message: "";' "$APP_WINDOW" >/dev/null
@@ -38,21 +47,31 @@ grep -F 'callback drag-requested(length, length);' "$MODAL_SHELL" >/dev/null
 grep -F 'clicked => { }' "$APP_WINDOW" >/dev/null
 grep -F 'callback close-asset-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback confirm-asset-modal-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback asset-snippet-modal-draft-changed(string, string);' "$APP_WINDOW" >/dev/null
+grep -F 'callback asset-snippet-package-modal-name-changed(string);' "$APP_WINDOW" >/dev/null
 grep -F 'callback asset-rename-modal-name-changed(string);' "$APP_WINDOW" >/dev/null
 grep -F 'callback confirm-asset-rename-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback confirm-delete-asset-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'host-titlebar-height: titlebar.height;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: 520px;' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 560px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 268px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 332px;' "$APP_WINDOW" >/dev/null
 grep -F 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" >/dev/null
+grep -F 'asset-snippet-modal-overlay := AssetsSnippetModal {' "$APP_WINDOW" >/dev/null
+grep -F 'asset-snippet-package-modal-overlay := AssetsSnippetPackageModal {' "$APP_WINDOW" >/dev/null
 grep -F 'asset-ssh-modal-overlay := AssetsSshConnectionModal {' "$APP_WINDOW" >/dev/null
 grep -F 'asset-rename-modal-overlay := AssetsRenameModal {' "$APP_WINDOW" >/dev/null
 grep -F 'asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {' "$APP_WINDOW" >/dev/null
 grep -F 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDOW" >/dev/null
 grep -F -A4 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" | grep -F 'width: asset-folder-modal-shell.content-width;' >/dev/null
 grep -F -A5 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" | grep -F 'height: asset-folder-modal-shell.content-height;' >/dev/null
+grep -F -A4 'asset-snippet-modal-overlay := AssetsSnippetModal {' "$APP_WINDOW" | grep -F 'width: asset-snippet-modal-shell.content-width;' >/dev/null
+grep -F -A5 'asset-snippet-modal-overlay := AssetsSnippetModal {' "$APP_WINDOW" | grep -F 'height: asset-snippet-modal-shell.content-height;' >/dev/null
+grep -F -A4 'asset-snippet-package-modal-overlay := AssetsSnippetPackageModal {' "$APP_WINDOW" | grep -F 'width: asset-snippet-package-modal-shell.content-width;' >/dev/null
+grep -F -A5 'asset-snippet-package-modal-overlay := AssetsSnippetPackageModal {' "$APP_WINDOW" | grep -F 'height: asset-snippet-package-modal-shell.content-height;' >/dev/null
 grep -F -A4 'asset-ssh-modal-overlay := AssetsSshConnectionModal {' "$APP_WINDOW" | grep -F 'width: asset-ssh-modal-shell.content-width;' >/dev/null
 grep -F -A5 'asset-ssh-modal-overlay := AssetsSshConnectionModal {' "$APP_WINDOW" | grep -F 'height: asset-ssh-modal-shell.content-height;' >/dev/null
 grep -F -A4 'asset-rename-modal-overlay := AssetsRenameModal {' "$APP_WINDOW" | grep -F 'width: asset-rename-modal-shell.content-width;' >/dev/null
@@ -63,8 +82,26 @@ grep -F -A4 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDO
 grep -F -A5 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDOW" | grep -F 'height: ssh-host-key-modal-shell.content-height;' >/dev/null
 grep -F 'x: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'y: 0px;' "$APP_WINDOW" >/dev/null
+grep -F 'export component AssetsSnippetModal inherits Rectangle {' "$SNIPPET_MODAL" >/dev/null
+grep -F 'export component AssetsSnippetPackageModal inherits Rectangle {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'export component AssetsFolderCreateModal inherits Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsSshConnectionModal inherits Rectangle {' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> dialog-title: "New Snippet";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'in property <string> dialog-title: "New Package";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
+grep -F 'text: "Name";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'text: "Script";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'text: "Package";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'text: "Package name";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
+grep -F 'callback draft-changed(string, string);' "$SNIPPET_MODAL" >/dev/null
+grep -F 'callback name-changed(string);' "$SNIPPET_PACKAGE_MODAL" >/dev/null
+grep -F 'in property <string> validation-message: "";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'in property <bool> can-confirm: false;' "$SNIPPET_MODAL" >/dev/null
+grep -F 'in property <string> validation-message: "";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
+grep -F 'in property <bool> can-confirm: false;' "$SNIPPET_PACKAGE_MODAL" >/dev/null
+grep -F 'drag-touch := TouchArea {' "$SNIPPET_MODAL" >/dev/null
+grep -F 'close-button := Rectangle {' "$SNIPPET_MODAL" >/dev/null
+grep -F 'drag-touch := TouchArea {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
+grep -F 'close-button := Rectangle {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New Folder";' "$FOLDER_MODAL" >/dev/null
 grep -F 'header := Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'x: 0px;' "$FOLDER_MODAL" >/dev/null
@@ -209,6 +246,10 @@ grep -F 'callback close-requested();' "$DELETE_MODAL" >/dev/null
 ! rg -n '[一-龥]' "$RENAME_MODAL" >/dev/null
 ! rg -n '[一-龥]' "$DELETE_MODAL" >/dev/null
 grep -F 'dialog-title: root.asset-ssh-modal-dialog-title;' "$APP_WINDOW" >/dev/null
+grep -F 'name: root.asset-snippet-modal-name;' "$APP_WINDOW" >/dev/null
+grep -F 'script: root.asset-snippet-modal-script;' "$APP_WINDOW" >/dev/null
+grep -F 'package: root.asset-snippet-modal-package;' "$APP_WINDOW" >/dev/null
+grep -F 'package-name: root.asset-snippet-package-modal-name;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-type: root.asset-ssh-modal-proxy-type;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-socks5-host: root.asset-ssh-modal-proxy-socks5-host;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-socks5-port: root.asset-ssh-modal-proxy-socks5-port;' "$APP_WINDOW" >/dev/null
@@ -219,9 +260,26 @@ grep -F 'proxy-ssh-asset-id: root.asset-ssh-modal-proxy-ssh-asset-id;' "$APP_WIN
 grep -F 'proxy-ssh-options: root.asset-ssh-modal-proxy-ssh-options;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-ssh-selected-label: root.asset-ssh-modal-proxy-ssh-selected-label;' "$APP_WINDOW" >/dev/null
 grep -F 'in property <int> focus-sequence: 0;' "$FOLDER_MODAL" >/dev/null
+grep -F 'in property <int> focus-sequence: 0;' "$SNIPPET_MODAL" >/dev/null
+grep -F 'in property <int> focus-sequence: 0;' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'in property <int> focus-sequence: 0;' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> active-panel: "console";' "$CREATE_MENU" >/dev/null
+grep -F 'root.active-panel == "snippets"' "$CREATE_MENU" >/dev/null
+grep -F 'label: "New Snippet";' "$CREATE_MENU" >/dev/null
+grep -F 'label: "New Package";' "$CREATE_MENU" >/dev/null
+grep -F 'callback new-snippet-selected;' "$CREATE_MENU" >/dev/null
+grep -F 'callback new-snippet-package-selected;' "$CREATE_MENU" >/dev/null
+grep -F 'in property <[ConsoleAssetItem]> snippet-asset-items: [];' "$ASSETS_SIDEBAR" >/dev/null
+grep -F 'if root.active-panel == "snippets" && root.snippet-asset-items.length == 0' "$ASSETS_SIDEBAR" >/dev/null
+grep -F 'if root.active-panel == "snippets" && root.snippet-asset-items.length > 0' "$ASSETS_SIDEBAR" >/dev/null
+grep -F 'in property <[ConsoleAssetItem]> snippet-asset-items: [];' "$SIDEBAR" >/dev/null
+grep -F 'snippet-asset-items: root.snippet-asset-items;' "$SIDEBAR" >/dev/null
 rg -n "validation-message" "$FOLDER_MODAL" >/dev/null
+rg -n "validation-message" "$SNIPPET_MODAL" >/dev/null
+rg -n "validation-message" "$SNIPPET_PACKAGE_MODAL" >/dev/null
 rg -n "validation-message" "$SSH_MODAL" >/dev/null
 rg -n "can-confirm" "$FOLDER_MODAL" >/dev/null
+rg -n "can-confirm" "$SNIPPET_MODAL" >/dev/null
+rg -n "can-confirm" "$SNIPPET_PACKAGE_MODAL" >/dev/null
 rg -n "can-confirm" "$SSH_MODAL" >/dev/null
 grep -F 'window.set_asset_modal_focus_sequence(window.get_asset_modal_focus_sequence() + 1);' "$BOOTSTRAP" >/dev/null

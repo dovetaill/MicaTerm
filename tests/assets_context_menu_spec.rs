@@ -3,6 +3,7 @@ use mica_term::shell::context_menu::{
     context_menu_column_height, resolve_action_tree, resolve_root_menu_origin,
     should_keep_corridor_open, visible_columns_for_path,
 };
+use mica_term::shell::assets::{AssetTree, ConsoleAssetKind};
 use mica_term::shell::view_model::ShellViewModel;
 
 fn blank_selection() -> SelectionContext {
@@ -19,6 +20,14 @@ fn blank_area_scene_only_exposes_minimal_create_actions() {
     let ids: Vec<_> = roots.iter().map(|node| node.id).collect();
 
     assert_eq!(ids, vec!["new-folder", "new-ssh-connection"]);
+}
+
+#[test]
+fn snippets_blank_area_scene_only_exposes_minimal_create_actions() {
+    let roots = resolve_action_tree(ContextTargetKind::SnippetsBlankArea, &blank_selection());
+    let ids: Vec<_> = roots.iter().map(|node| node.id).collect();
+
+    assert_eq!(ids, vec!["new-snippet", "new-package"]);
 }
 
 #[test]
@@ -174,6 +183,44 @@ fn folder_target_exposes_flat_create_actions() {
 }
 
 #[test]
+fn snippet_target_exposes_paste_run_edit_and_delete_actions() {
+    let actions = resolve_action_tree(
+        ContextTargetKind::Snippet,
+        &SelectionContext {
+            selected_ids: vec!["snippet-1".into()],
+            clipboard_has_asset_payload: false,
+            target_mutable: true,
+        },
+    );
+    let ids: Vec<_> = actions.iter().map(|action| action.id).collect();
+
+    assert!(ids.contains(&"paste-snippet"));
+    assert!(ids.contains(&"run-snippet"));
+    assert!(ids.contains(&"edit-snippet"));
+    assert!(ids.contains(&"delete-snippet"));
+}
+
+#[test]
+fn snippet_package_target_omits_run_and_paste_but_keeps_package_actions() {
+    let actions = resolve_action_tree(
+        ContextTargetKind::SnippetPackage,
+        &SelectionContext {
+            selected_ids: vec!["package-1".into()],
+            clipboard_has_asset_payload: false,
+            target_mutable: true,
+        },
+    );
+    let ids: Vec<_> = actions.iter().map(|action| action.id).collect();
+
+    assert!(ids.contains(&"new-snippet"));
+    assert!(ids.contains(&"new-package"));
+    assert!(ids.contains(&"edit-package"));
+    assert!(ids.contains(&"delete-package"));
+    assert!(!ids.contains(&"run-snippet"));
+    assert!(!ids.contains(&"paste-snippet"));
+}
+
+#[test]
 fn folder_and_ssh_context_menus_keep_rename_and_delete_as_enabled_leaf_actions() {
     let folder_actions = resolve_action_tree(
         ContextTargetKind::Folder,
@@ -303,6 +350,28 @@ fn right_key_leaves_flat_blank_area_menu_on_primary_column() {
     view_model.navigate_context_menu_right();
 
     assert!(view_model.context_menu_open_path.is_empty());
+}
+
+#[test]
+fn invoking_run_snippet_leaf_action_records_explicit_run_activation() {
+    let mut snippet_tree = AssetTree::new();
+    let snippet_id = snippet_tree.insert_root(ConsoleAssetKind::Snippet, "Deploy prod");
+
+    let mut view_model = ShellViewModel::default();
+    view_model.replace_snippet_asset_tree(snippet_tree);
+    view_model.open_context_menu_for_target(
+        ContextTargetKind::Snippet,
+        Some(snippet_id),
+        120.0,
+        160.0,
+    );
+
+    view_model.handle_context_menu_leaf_action("run-snippet");
+
+    assert_eq!(
+        view_model.pending_snippet_activation(),
+        Some(mica_term::shell::view_model::SnippetActivation::Run)
+    );
 }
 
 #[test]

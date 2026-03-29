@@ -1,19 +1,19 @@
 //! Maps between the persisted asset catalog schema and the runtime asset tree.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::app::assets_catalog::model::{
-    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetCatalog, PersistedAssetKind, PersistedAssetNode,
-    PersistedAssetPayload, PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec,
-    PersistedSshConnectionSpec,
+    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetCatalog, PersistedAssetDomain,
+    PersistedAssetKind, PersistedAssetNode, PersistedAssetPayload, PersistedAssetSocks5ProxySpec,
+    PersistedAssetSshProxySpec, PersistedSnippetSpec, PersistedSshConnectionSpec,
 };
 use crate::app::vault::model::{
     VaultAssetCatalog, VaultAssetKind, VaultAssetNode, VaultAssetPayload, VaultSocks5ProxySpec,
-    VaultSshConnectionSpec, VaultSshProxySpec,
+    VaultSnippetSpec, VaultSshConnectionSpec, VaultSshProxySpec,
 };
 use crate::shell::assets::{
-    AssetNode, AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec,
-    AssetTree, ConsoleAssetKind,
+    AssetNode, AssetNodePayload, AssetSnippetSpec, AssetSocks5ProxySpec,
+    AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, ConsoleAssetKind,
 };
 
 pub fn catalog_to_asset_tree(catalog: &PersistedAssetCatalog) -> AssetTree {
@@ -39,6 +39,15 @@ pub fn catalog_to_asset_tree(catalog: &PersistedAssetCatalog) -> AssetTree {
     AssetTree::from_parts(catalog.root_ids.clone(), nodes)
 }
 
+pub fn catalog_to_asset_trees(catalog: &PersistedAssetCatalog) -> (AssetTree, AssetTree) {
+    let console_catalog = filter_catalog_by_domain(catalog, PersistedAssetDomain::Console);
+    let snippet_catalog = filter_catalog_by_domain(catalog, PersistedAssetDomain::Snippets);
+    (
+        catalog_to_asset_tree(&console_catalog),
+        catalog_to_asset_tree(&snippet_catalog),
+    )
+}
+
 pub fn asset_tree_to_catalog(tree: &AssetTree) -> PersistedAssetCatalog {
     let mut nodes = BTreeMap::new();
     collect_catalog_nodes(tree, tree.root_ids(), &mut nodes);
@@ -46,6 +55,29 @@ pub fn asset_tree_to_catalog(tree: &AssetTree) -> PersistedAssetCatalog {
     PersistedAssetCatalog {
         schema_version: ASSET_CATALOG_SCHEMA_VERSION,
         root_ids: tree.root_ids().to_vec(),
+        nodes,
+    }
+}
+
+pub fn asset_trees_to_catalog(
+    console_tree: &AssetTree,
+    snippet_tree: &AssetTree,
+) -> PersistedAssetCatalog {
+    let console_catalog = asset_tree_to_catalog(console_tree);
+    let snippet_catalog = remap_snippet_catalog_ids(
+        asset_tree_to_catalog(snippet_tree),
+        console_catalog.nodes.keys().cloned().collect(),
+    );
+
+    let mut root_ids = console_catalog.root_ids.clone();
+    root_ids.extend(snippet_catalog.root_ids.clone());
+
+    let mut nodes = console_catalog.nodes.clone();
+    nodes.extend(snippet_catalog.nodes);
+
+    PersistedAssetCatalog {
+        schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+        root_ids,
         nodes,
     }
 }
@@ -80,6 +112,165 @@ pub fn asset_tree_to_vault_catalog(tree: &AssetTree) -> VaultAssetCatalog {
     VaultAssetCatalog {
         root_ids: tree.root_ids().to_vec(),
         nodes,
+    }
+}
+
+fn filter_catalog_by_domain(
+    catalog: &PersistedAssetCatalog,
+    domain: PersistedAssetDomain,
+) -> PersistedAssetCatalog {
+    let allowed_ids = catalog
+        .nodes
+        .iter()
+        .filter_map(|(id, node)| (node.kind.domain() == domain).then_some(id.clone()))
+        .collect::<HashSet<_>>();
+    let root_ids = catalog
+        .root_ids
+        .iter()
+        .filter(|id| allowed_ids.contains(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let nodes = catalog
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.kind.domain() == domain)
+        .map(|(id, node)| {
+            let mut filtered = node.clone();
+            filtered.parent_id = filtered
+                .parent_id
+                .filter(|parent_id| allowed_ids.contains(parent_id));
+            filtered.child_ids = filtered
+                .child_ids
+                .iter()
+                .filter(|child_id| allowed_ids.contains(*child_id))
+                .cloned()
+                .collect();
+            (id.clone(), filtered)
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    PersistedAssetCatalog {
+        schema_version: catalog.schema_version,
+        root_ids,
+        nodes,
+    }
+}
+
+fn remap_snippet_catalog_ids(
+    catalog: PersistedAssetCatalog,
+    reserved_ids: HashSet<String>,
+) -> PersistedAssetCatalog {
+    let mut used_ids = reserved_ids;
+    let mut id_map = HashMap::new();
+
+    for node_id in catalog_node_order(&catalog) {
+        let remapped = if used_ids.contains(&node_id) {
+            next_available_snippet_id(&node_id, &used_ids)
+        } else {
+            node_id.clone()
+        };
+        used_ids.insert(remapped.clone());
+        id_map.insert(node_id, remapped);
+    }
+
+    let root_ids = catalog
+        .root_ids
+        .into_iter()
+        .map(|root_id| remap_id(&root_id, &id_map))
+        .collect::<Vec<_>>();
+    let nodes = catalog
+        .nodes
+        .into_iter()
+        .map(|(node_id, node)| {
+            let remapped_id = remap_id(&node_id, &id_map);
+            (
+                remapped_id.clone(),
+                PersistedAssetNode {
+                    id: remapped_id,
+                    parent_id: node.parent_id.map(|parent_id| remap_id(&parent_id, &id_map)),
+                    title: node.title,
+                    kind: node.kind,
+                    child_ids: node
+                        .child_ids
+                        .into_iter()
+                        .map(|child_id| remap_id(&child_id, &id_map))
+                        .collect(),
+                    payload: remap_persisted_payload_ids(node.payload, &id_map),
+                },
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    PersistedAssetCatalog {
+        schema_version: catalog.schema_version,
+        root_ids,
+        nodes,
+    }
+}
+
+fn catalog_node_order(catalog: &PersistedAssetCatalog) -> Vec<String> {
+    let mut order = Vec::new();
+    let mut seen = HashSet::new();
+    collect_catalog_node_order(catalog, &catalog.root_ids, &mut seen, &mut order);
+    for node_id in catalog.nodes.keys() {
+        if seen.insert(node_id.clone()) {
+            order.push(node_id.clone());
+        }
+    }
+    order
+}
+
+fn collect_catalog_node_order(
+    catalog: &PersistedAssetCatalog,
+    node_ids: &[String],
+    seen: &mut HashSet<String>,
+    order: &mut Vec<String>,
+) {
+    for node_id in node_ids {
+        if !seen.insert(node_id.clone()) {
+            continue;
+        }
+        order.push(node_id.clone());
+        if let Some(node) = catalog.nodes.get(node_id) {
+            collect_catalog_node_order(catalog, &node.child_ids, seen, order);
+        }
+    }
+}
+
+fn next_available_snippet_id(base_id: &str, used_ids: &HashSet<String>) -> String {
+    let normalized = if base_id.starts_with("snippet-") {
+        base_id.to_string()
+    } else {
+        format!("snippet-{base_id}")
+    };
+    if !used_ids.contains(&normalized) {
+        return normalized;
+    }
+
+    let mut suffix = 2_u64;
+    loop {
+        let candidate = format!("{normalized}-{suffix}");
+        if !used_ids.contains(&candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn remap_id(id: &str, id_map: &HashMap<String, String>) -> String {
+    id_map.get(id).cloned().unwrap_or_else(|| id.to_string())
+}
+
+fn remap_persisted_payload_ids(
+    payload: PersistedAssetPayload,
+    id_map: &HashMap<String, String>,
+) -> PersistedAssetPayload {
+    match payload {
+        PersistedAssetPayload::Snippet(mut spec) => {
+            spec.package_id = spec.package_id.map(|package_id| remap_id(&package_id, id_map));
+            PersistedAssetPayload::Snippet(spec)
+        }
+        other => other,
     }
 }
 
@@ -139,6 +330,8 @@ fn runtime_kind(kind: PersistedAssetKind) -> ConsoleAssetKind {
     match kind {
         PersistedAssetKind::Folder => ConsoleAssetKind::Folder,
         PersistedAssetKind::SshConnection => ConsoleAssetKind::SshConnection,
+        PersistedAssetKind::SnippetPackage => ConsoleAssetKind::SnippetPackage,
+        PersistedAssetKind::Snippet => ConsoleAssetKind::Snippet,
     }
 }
 
@@ -146,6 +339,8 @@ fn persisted_kind(kind: ConsoleAssetKind) -> PersistedAssetKind {
     match kind {
         ConsoleAssetKind::Folder => PersistedAssetKind::Folder,
         ConsoleAssetKind::SshConnection => PersistedAssetKind::SshConnection,
+        ConsoleAssetKind::SnippetPackage => PersistedAssetKind::SnippetPackage,
+        ConsoleAssetKind::Snippet => PersistedAssetKind::Snippet,
     }
 }
 
@@ -153,6 +348,8 @@ fn runtime_vault_kind(kind: VaultAssetKind) -> ConsoleAssetKind {
     match kind {
         VaultAssetKind::Folder => ConsoleAssetKind::Folder,
         VaultAssetKind::SshConnection => ConsoleAssetKind::SshConnection,
+        VaultAssetKind::SnippetPackage => ConsoleAssetKind::SnippetPackage,
+        VaultAssetKind::Snippet => ConsoleAssetKind::Snippet,
     }
 }
 
@@ -160,6 +357,8 @@ fn persisted_vault_kind(kind: ConsoleAssetKind) -> VaultAssetKind {
     match kind {
         ConsoleAssetKind::Folder => VaultAssetKind::Folder,
         ConsoleAssetKind::SshConnection => VaultAssetKind::SshConnection,
+        ConsoleAssetKind::SnippetPackage => VaultAssetKind::SnippetPackage,
+        ConsoleAssetKind::Snippet => VaultAssetKind::Snippet,
     }
 }
 
@@ -181,6 +380,11 @@ fn runtime_payload(payload: &PersistedAssetPayload) -> AssetNodePayload {
                 credential_ref: spec.credential_ref.clone(),
             })
         }
+        PersistedAssetPayload::SnippetPackage => AssetNodePayload::SnippetPackage,
+        PersistedAssetPayload::Snippet(spec) => AssetNodePayload::Snippet(AssetSnippetSpec {
+            script: spec.script.clone(),
+            package_id: spec.package_id.clone(),
+        }),
     }
 }
 
@@ -204,6 +408,22 @@ fn persisted_payload(node: &AssetNode) -> PersistedAssetPayload {
         (ConsoleAssetKind::SshConnection, AssetNodePayload::Folder) => {
             unreachable!("ssh runtime nodes must carry ssh payload")
         }
+        (ConsoleAssetKind::SshConnection, AssetNodePayload::SnippetPackage)
+        | (ConsoleAssetKind::SshConnection, AssetNodePayload::Snippet(_)) => {
+            unreachable!("ssh runtime nodes must not carry snippet payload")
+        }
+        (ConsoleAssetKind::SnippetPackage, _) => PersistedAssetPayload::SnippetPackage,
+        (ConsoleAssetKind::Snippet, AssetNodePayload::Snippet(spec)) => {
+            PersistedAssetPayload::Snippet(PersistedSnippetSpec {
+                script: spec.script.clone(),
+                package_id: spec.package_id.clone(),
+            })
+        }
+        (ConsoleAssetKind::Snippet, AssetNodePayload::Folder)
+        | (ConsoleAssetKind::Snippet, AssetNodePayload::SshConnection(_))
+        | (ConsoleAssetKind::Snippet, AssetNodePayload::SnippetPackage) => {
+            unreachable!("snippet runtime nodes must carry snippet payload")
+        }
     }
 }
 
@@ -225,6 +445,11 @@ fn runtime_vault_payload(payload: &VaultAssetPayload) -> AssetNodePayload {
                 credential_ref: spec.credential_ref.clone(),
             })
         }
+        VaultAssetPayload::SnippetPackage => AssetNodePayload::SnippetPackage,
+        VaultAssetPayload::Snippet(spec) => AssetNodePayload::Snippet(AssetSnippetSpec {
+            script: spec.script.clone(),
+            package_id: spec.package_id.clone(),
+        }),
     }
 }
 
@@ -247,6 +472,22 @@ fn persisted_vault_payload(node: &AssetNode) -> VaultAssetPayload {
         }
         (ConsoleAssetKind::SshConnection, AssetNodePayload::Folder) => {
             unreachable!("ssh runtime nodes must carry ssh payload")
+        }
+        (ConsoleAssetKind::SshConnection, AssetNodePayload::SnippetPackage)
+        | (ConsoleAssetKind::SshConnection, AssetNodePayload::Snippet(_)) => {
+            unreachable!("ssh runtime nodes must not carry snippet payload")
+        }
+        (ConsoleAssetKind::SnippetPackage, _) => VaultAssetPayload::SnippetPackage,
+        (ConsoleAssetKind::Snippet, AssetNodePayload::Snippet(spec)) => {
+            VaultAssetPayload::Snippet(VaultSnippetSpec {
+                script: spec.script.clone(),
+                package_id: spec.package_id.clone(),
+            })
+        }
+        (ConsoleAssetKind::Snippet, AssetNodePayload::Folder)
+        | (ConsoleAssetKind::Snippet, AssetNodePayload::SshConnection(_))
+        | (ConsoleAssetKind::Snippet, AssetNodePayload::SnippetPackage) => {
+            unreachable!("snippet runtime nodes must carry snippet payload")
         }
     }
 }

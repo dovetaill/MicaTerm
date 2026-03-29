@@ -4,16 +4,16 @@ use std::fs;
 
 use mica_term::app::window_state::WindowPlacementKind;
 use mica_term::shell::assets::{
-    AssetNameValidation, AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec,
-    AssetSshProxySpec, AssetTree, AssetViewMode, ConsoleAssetKind,
+    AssetNameValidation, AssetNodePayload, AssetSnippetSpec, AssetSocks5ProxySpec,
+    AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, AssetViewMode, ConsoleAssetKind,
 };
 use mica_term::shell::context_menu::{
     ContextTargetKind, SelectionContext, resolve_action_tree, visible_columns_for_path,
 };
 use mica_term::shell::sidebar::SidebarDestination;
 use mica_term::shell::view_model::{
-    AssetModalState, ShellViewModel, SshModalAction, SshModalActionState, WelcomeAction,
-    welcome_actions,
+    AssetModalState, ShellViewModel, SnippetActivation, SnippetCreateAction, SshModalAction,
+    SshModalActionState, WelcomeAction, welcome_actions,
 };
 use mica_term::theme::ThemeMode;
 
@@ -1641,4 +1641,52 @@ fn replacing_console_asset_tree_reprojects_loaded_nodes_and_clears_runtime_sessi
     assert_eq!(view_model.focused_asset_id, None);
     assert!(!view_model.context_menu_open);
     assert_eq!(view_model.context_target_asset_id, None);
+}
+
+#[test]
+fn snippets_create_actions_record_pending_request_without_mutating_console_tree() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Prod");
+    view_model.select_sidebar_destination(SidebarDestination::Snippets);
+    view_model.toggle_asset_create_menu();
+
+    view_model.handle_snippet_create_action("new-snippet-package");
+
+    assert_eq!(
+        view_model.pending_snippet_create_action(),
+        Some(SnippetCreateAction::NewPackage)
+    );
+    assert!(!view_model.asset_create_menu_open);
+    assert_eq!(view_model.visible_console_asset_rows().len(), 1);
+
+    view_model.toggle_asset_create_menu();
+    view_model.handle_snippet_create_action("new-snippet");
+
+    assert_eq!(
+        view_model.pending_snippet_create_action(),
+        Some(SnippetCreateAction::NewSnippet)
+    );
+    assert_eq!(view_model.visible_console_asset_rows().len(), 1);
+}
+
+#[test]
+fn snippets_activation_defaults_to_paste_for_snippet_rows() {
+    let mut view_model = ShellViewModel::default();
+    let mut snippet_tree = AssetTree::new();
+    let snippet_id = snippet_tree.insert_root_with_payload(
+        ConsoleAssetKind::Snippet,
+        "Restart API",
+        AssetNodePayload::Snippet(AssetSnippetSpec {
+            script: "kubectl rollout restart deploy/api".into(),
+            package_id: None,
+        }),
+    );
+    view_model.replace_snippet_asset_tree(snippet_tree);
+
+    view_model.begin_snippet_activation(&snippet_id, SnippetActivation::Paste);
+
+    assert_eq!(
+        view_model.pending_snippet_activation(),
+        Some(SnippetActivation::Paste)
+    );
 }

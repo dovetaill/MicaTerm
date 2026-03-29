@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::app::assets_catalog::model::{
     ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetCatalog, PersistedAssetKind, PersistedAssetNode,
     PersistedAssetPayload, PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec,
-    PersistedSshConnectionSpec,
+    PersistedSnippetSpec, PersistedSshConnectionSpec,
 };
 use crate::app::assets_catalog::repository::AssetCatalogRepository;
 
@@ -212,6 +212,8 @@ struct StoredPersistedAssetNode {
 enum StoredPersistedAssetKind {
     Folder,
     SshConnection,
+    SnippetPackage,
+    Snippet,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -219,6 +221,8 @@ enum StoredPersistedAssetKind {
 enum StoredPersistedAssetPayload {
     Folder,
     SshConnection(StoredPersistedSshConnectionSpec),
+    SnippetPackage,
+    Snippet(StoredPersistedSnippetSpec),
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -257,6 +261,12 @@ struct StoredPersistedSshConnectionSpec {
     remark: String,
     #[serde(default)]
     credential_ref: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct StoredPersistedSnippetSpec {
+    script: String,
+    package_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -349,6 +359,8 @@ impl From<&PersistedAssetNode> for StoredPersistedAssetNode {
             kind: match node.kind {
                 PersistedAssetKind::Folder => StoredPersistedAssetKind::Folder,
                 PersistedAssetKind::SshConnection => StoredPersistedAssetKind::SshConnection,
+                PersistedAssetKind::SnippetPackage => StoredPersistedAssetKind::SnippetPackage,
+                PersistedAssetKind::Snippet => StoredPersistedAssetKind::Snippet,
             },
             child_ids: node.child_ids.clone(),
             payload: match &node.payload {
@@ -367,6 +379,13 @@ impl From<&PersistedAssetNode> for StoredPersistedAssetNode {
                         credential_ref: spec.credential_ref.clone(),
                     })
                 }
+                PersistedAssetPayload::SnippetPackage => StoredPersistedAssetPayload::SnippetPackage,
+                PersistedAssetPayload::Snippet(spec) => {
+                    StoredPersistedAssetPayload::Snippet(StoredPersistedSnippetSpec {
+                        script: spec.script.clone(),
+                        package_id: spec.package_id.clone(),
+                    })
+                }
             },
         }
     }
@@ -381,6 +400,8 @@ impl From<StoredPersistedAssetNode> for PersistedAssetNode {
             kind: match node.kind {
                 StoredPersistedAssetKind::Folder => PersistedAssetKind::Folder,
                 StoredPersistedAssetKind::SshConnection => PersistedAssetKind::SshConnection,
+                StoredPersistedAssetKind::SnippetPackage => PersistedAssetKind::SnippetPackage,
+                StoredPersistedAssetKind::Snippet => PersistedAssetKind::Snippet,
             },
             child_ids: node.child_ids,
             payload: match node.payload {
@@ -397,6 +418,13 @@ impl From<StoredPersistedAssetNode> for PersistedAssetNode {
                         proxy: persisted_proxy(spec.proxy),
                         remark: spec.remark,
                         credential_ref: spec.credential_ref,
+                    })
+                }
+                StoredPersistedAssetPayload::SnippetPackage => PersistedAssetPayload::SnippetPackage,
+                StoredPersistedAssetPayload::Snippet(spec) => {
+                    PersistedAssetPayload::Snippet(PersistedSnippetSpec {
+                        script: spec.script,
+                        package_id: spec.package_id,
                     })
                 }
             },

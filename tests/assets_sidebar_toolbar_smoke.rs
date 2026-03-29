@@ -3,6 +3,7 @@
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store;
 use slint::Model;
+use std::fs;
 
 #[test]
 fn bootstrap_initializes_assets_toolbar_defaults() {
@@ -144,22 +145,25 @@ fn search_and_create_are_mutually_exclusive_in_window_contract() {
 }
 
 #[test]
-fn snippets_destination_keeps_direct_create_action_projection() {
+fn snippets_destination_uses_create_popover_with_dual_create_entries() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
     app.invoke_sidebar_destination_selected("snippets".into());
-    assert!(!app.get_asset_uses_create_popover());
-    assert_eq!(
-        app.get_asset_primary_create_action_id().as_str(),
-        "new-snippet"
-    );
+    assert!(app.get_asset_uses_create_popover());
+    assert_eq!(app.get_asset_primary_create_action_id().as_str(), "");
     assert_eq!(
         app.get_asset_primary_create_tooltip().as_str(),
-        "New Snippet"
+        "Create Snippet Asset"
     );
+
+    let create_menu =
+        fs::read_to_string("ui/components/assets-create-menu.slint").expect("read create menu");
+    assert!(create_menu.contains("in property <string> active-panel: \"console\";"));
+    assert!(create_menu.contains("label: \"New Snippet\""));
+    assert!(create_menu.contains("label: \"New Package\""));
 }
 
 #[test]

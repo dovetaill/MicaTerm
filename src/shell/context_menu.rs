@@ -3,8 +3,11 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContextTargetKind {
     BlankArea,
+    SnippetsBlankArea,
     SshConnection,
     Folder,
+    SnippetPackage,
+    Snippet,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,8 +97,11 @@ pub fn resolve_action_tree(
 ) -> Vec<ContextMenuActionNode> {
     match target {
         ContextTargetKind::BlankArea => resolve_blank_area_actions(selection),
+        ContextTargetKind::SnippetsBlankArea => resolve_snippets_blank_area_actions(selection),
         ContextTargetKind::SshConnection => resolve_ssh_actions(selection),
         ContextTargetKind::Folder => resolve_folder_actions(selection),
+        ContextTargetKind::SnippetPackage => resolve_snippet_package_actions(selection),
+        ContextTargetKind::Snippet => resolve_snippet_actions(selection),
     }
 }
 
@@ -219,6 +225,11 @@ fn lerp(start: f32, end: f32, progress: f32) -> f32 {
 fn resolve_blank_area_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
     let _ = selection;
     create_actions(false)
+}
+
+fn resolve_snippets_blank_area_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
+    let _ = selection;
+    snippet_create_actions(false)
 }
 
 fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
@@ -392,6 +403,60 @@ fn resolve_folder_actions(selection: &SelectionContext) -> Vec<ContextMenuAction
     actions
 }
 
+fn resolve_snippet_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
+    vec![
+        action_with_state(
+            "paste-snippet",
+            "Paste",
+            "clipboard",
+            selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "run-snippet",
+            "Run",
+            "play",
+            selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "edit-snippet",
+            "Edit",
+            "edit",
+            mutable_selection_state(selection),
+            true,
+        ),
+        action_with_state(
+            "delete-snippet",
+            "Delete",
+            "delete",
+            mutable_selection_state(selection),
+            false,
+        ),
+    ]
+}
+
+fn resolve_snippet_package_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
+    let mut actions = snippet_create_actions(false);
+    actions.extend([
+        action_with_state(
+            "edit-package",
+            "Edit",
+            "edit",
+            mutable_selection_state(selection),
+            true,
+        ),
+        action_with_state(
+            "delete-package",
+            "Delete",
+            "delete",
+            mutable_selection_state(selection),
+            false,
+        ),
+    ]);
+    actions
+}
+
 fn create_actions(divider_before: bool) -> Vec<ContextMenuActionNode> {
     vec![
         action_with_state(
@@ -405,6 +470,25 @@ fn create_actions(divider_before: bool) -> Vec<ContextMenuActionNode> {
             "new-ssh-connection",
             "New SSH Connection",
             "window-console",
+            ContextMenuActionState::Enabled,
+            false,
+        ),
+    ]
+}
+
+fn snippet_create_actions(divider_before: bool) -> Vec<ContextMenuActionNode> {
+    vec![
+        action_with_state(
+            "new-snippet",
+            "New Snippet",
+            "document-code",
+            ContextMenuActionState::Enabled,
+            divider_before,
+        ),
+        action_with_state(
+            "new-package",
+            "New Package",
+            "folder",
             ContextMenuActionState::Enabled,
             false,
         ),

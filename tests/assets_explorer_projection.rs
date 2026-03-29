@@ -1,8 +1,11 @@
 use mica_term::app::assets_catalog::{asset_tree_to_catalog, catalog_to_asset_tree};
 use mica_term::shell::assets::{
-    AssetDisclosureState, AssetNameValidation, AssetNodePayload, AssetSshConnectionSpec,
-    AssetSshProxySpec, AssetTree, AssetViewMode, ConsoleAssetKind, next_default_name_from_base,
+    AssetDisclosureState, AssetNameValidation, AssetNodePayload, AssetSnippetSpec,
+    AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, AssetViewMode, ConsoleAssetKind,
+    next_default_name_from_base,
 };
+use mica_term::shell::sidebar::SidebarDestination;
+use mica_term::shell::view_model::ShellViewModel;
 
 #[test]
 fn tree_projection_hides_children_until_folder_is_expanded() {
@@ -303,4 +306,46 @@ fn expanded_state_remains_runtime_only_after_catalog_mapping() {
 
     assert_eq!(tree.is_expanded(&folder_id), Some(true));
     assert_eq!(round_tripped.is_expanded(&folder_id), Some(false));
+}
+
+#[test]
+fn shell_view_model_projects_only_snippets_when_snippets_sidebar_is_selected() {
+    let mut view_model = ShellViewModel::default();
+
+    let mut console_tree = AssetTree::new();
+    console_tree.insert_root(ConsoleAssetKind::Folder, "Console Root");
+    view_model.replace_console_asset_tree(console_tree);
+
+    let mut snippet_tree = AssetTree::new();
+    let package_id = snippet_tree.insert_root(ConsoleAssetKind::SnippetPackage, "Deploy");
+    snippet_tree.insert_child_with_payload(
+        &package_id,
+        ConsoleAssetKind::Snippet,
+        "Deploy prod",
+        AssetNodePayload::Snippet(AssetSnippetSpec {
+            script: "kubectl apply -f prod.yaml".into(),
+            package_id: Some(package_id.clone()),
+        }),
+    );
+    snippet_tree.insert_root_with_payload(
+        ConsoleAssetKind::Snippet,
+        "Restart API",
+        AssetNodePayload::Snippet(AssetSnippetSpec {
+            script: "kubectl rollout restart deploy/api".into(),
+            package_id: None,
+        }),
+    );
+    snippet_tree.set_expanded(&package_id, true);
+    view_model.replace_snippet_asset_tree(snippet_tree);
+    view_model.select_sidebar_destination(SidebarDestination::Snippets);
+
+    let rows = view_model.visible_snippet_rows();
+
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].kind, ConsoleAssetKind::SnippetPackage);
+    assert_eq!(rows[1].kind, ConsoleAssetKind::Snippet);
+    assert_eq!(rows[1].depth, 1);
+    assert_eq!(rows[2].kind, ConsoleAssetKind::Snippet);
+    assert_eq!(rows[2].depth, 0);
+    assert_eq!(view_model.visible_console_asset_rows().len(), 1);
 }

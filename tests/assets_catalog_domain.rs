@@ -1,11 +1,12 @@
 use mica_term::app::assets_catalog::{
-    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetKind, PersistedAssetPayload,
-    PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec, PersistedSshConnectionSpec,
-    asset_tree_to_catalog, catalog_to_asset_tree,
+    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetDomain, PersistedAssetKind,
+    PersistedAssetPayload, PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec,
+    PersistedSnippetSpec, PersistedSshConnectionSpec, asset_tree_to_catalog,
+    catalog_to_asset_tree,
 };
 use mica_term::shell::assets::{
-    AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec, AssetTree,
-    ConsoleAssetKind,
+    AssetDomain, AssetNodePayload, AssetSnippetSpec, AssetSocks5ProxySpec,
+    AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, ConsoleAssetKind,
 };
 
 #[test]
@@ -347,4 +348,85 @@ fn empty_catalog_maps_to_empty_runtime_tree() {
     });
 
     assert!(tree.root_ids().is_empty());
+}
+
+#[test]
+fn snippets_round_trip_through_catalog_and_preserve_domain() {
+    let mut tree = AssetTree::new();
+    let package_id = tree.insert_root(ConsoleAssetKind::SnippetPackage, "Deploy");
+    let package_snippet_id = tree.insert_child_with_payload(
+        &package_id,
+        ConsoleAssetKind::Snippet,
+        "Deploy prod",
+        AssetNodePayload::Snippet(AssetSnippetSpec {
+            script: "kubectl apply -f prod.yaml".into(),
+            package_id: Some(package_id.clone()),
+        }),
+    );
+    let root_snippet_id = tree.insert_root_with_payload(
+        ConsoleAssetKind::Snippet,
+        "Restart API",
+        AssetNodePayload::Snippet(AssetSnippetSpec {
+            script: "kubectl rollout restart deploy/api".into(),
+            package_id: None,
+        }),
+    );
+
+    let catalog = asset_tree_to_catalog(&tree);
+    let package_node = catalog.nodes.get(&package_id).expect("snippet package node");
+    let root_snippet = catalog
+        .nodes
+        .get(&root_snippet_id)
+        .expect("root snippet node");
+
+    assert_eq!(package_node.kind, PersistedAssetKind::SnippetPackage);
+    assert_eq!(package_node.kind.domain(), PersistedAssetDomain::Snippets);
+    assert_eq!(package_node.child_ids, vec![package_snippet_id.clone()]);
+    assert_eq!(root_snippet.kind, PersistedAssetKind::Snippet);
+    assert_eq!(root_snippet.kind.domain(), PersistedAssetDomain::Snippets);
+    assert_eq!(
+        root_snippet.payload,
+        PersistedAssetPayload::Snippet(PersistedSnippetSpec {
+            script: "kubectl rollout restart deploy/api".into(),
+            package_id: None,
+        })
+    );
+
+    let round_tripped = catalog_to_asset_tree(&catalog);
+    let package_node = round_tripped
+        .node(&package_id)
+        .expect("runtime snippet package");
+    let package_snippet = round_tripped
+        .node(&package_snippet_id)
+        .expect("runtime package snippet");
+
+    assert_eq!(package_node.kind, ConsoleAssetKind::SnippetPackage);
+    assert_eq!(package_node.kind.domain(), AssetDomain::Snippets);
+    assert_eq!(package_snippet.kind, ConsoleAssetKind::Snippet);
+    assert_eq!(package_snippet.kind.domain(), AssetDomain::Snippets);
+    assert_eq!(
+        round_tripped.snippet_spec(&package_snippet_id),
+        Some(&AssetSnippetSpec {
+            script: "kubectl apply -f prod.yaml".into(),
+            package_id: Some(package_id.clone()),
+        })
+    );
+}
+
+#[test]
+fn snippet_package_rejects_nested_package_and_console_children() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let mut tree = AssetTree::new();
+    let package_id = tree.insert_root(ConsoleAssetKind::SnippetPackage, "Ops");
+
+    let nested_package = catch_unwind(AssertUnwindSafe(|| {
+        tree.insert_child(&package_id, ConsoleAssetKind::SnippetPackage, "Nested");
+    }));
+    let console_folder = catch_unwind(AssertUnwindSafe(|| {
+        tree.insert_child(&package_id, ConsoleAssetKind::Folder, "Console Folder");
+    }));
+
+    assert!(nested_package.is_err());
+    assert!(console_folder.is_err());
 }

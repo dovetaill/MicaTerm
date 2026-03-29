@@ -7,6 +7,8 @@ import { AssetsContextMenuOverlay } from "components/assets-context-menu-overlay
 import { AssetsDeleteConfirmModal } from "components/assets-delete-confirm-modal.slint";
 import { AssetsFolderCreateModal } from "components/assets-folder-create-modal.slint";
 import { AssetsRenameModal } from "components/assets-rename-modal.slint";
+import { AssetsSnippetModal } from "components/assets-snippet-modal.slint";
+import { AssetsSnippetPackageModal } from "components/assets-snippet-package-modal.slint";
 import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal.slint";
 import { BlockingModalShell } from "components/blocking-modal-shell.slint";
 import { SshHostKeyConfirmModal } from "components/ssh-host-key-confirm-modal.slint";
@@ -47,6 +49,10 @@ export component AppWindow inherits Window {
     in-out property <string> asset-modal-validation-message: "";
     in-out property <int> asset-modal-focus-sequence: 0;
     in-out property <string> asset-folder-modal-name: "";
+    in-out property <string> asset-snippet-modal-name: "";
+    in-out property <string> asset-snippet-modal-script: "";
+    in-out property <string> asset-snippet-modal-package: "";
+    in-out property <string> asset-snippet-package-modal-name: "";
     in-out property <bool> asset-rename-modal-open: false;
     in-out property <string> asset-rename-modal-name: "";
     in-out property <string> asset-rename-modal-validation-message: "";
@@ -99,6 +105,7 @@ export component AppWindow inherits Window {
     in-out property <length> blocking-modal-offset-x: 0px;
     in-out property <length> blocking-modal-offset-y: 0px;
     in-out property <[ConsoleAssetItem]> console-asset-items: [];
+    in-out property <[ConsoleAssetItem]> snippet-asset-items: [];
     in-out property <[WorkspaceTabItem]> workspace-tab-items: [];
     in-out property <string> active-workspace-session-id: "";
     in-out property <string> workspace-session-host-mode: "welcome";
@@ -220,6 +227,8 @@ export component AppWindow inherits Window {
     callback confirm-asset-rename-requested();
     callback confirm-delete-asset-requested();
     callback asset-folder-modal-name-changed(string);
+    callback asset-snippet-modal-draft-changed(string, string);
+    callback asset-snippet-package-modal-name-changed(string);
     callback asset-ssh-modal-draft-changed(string, string);
     callback asset-ssh-modal-action-requested(string);
     callback ssh-host-key-modal-accept-requested();
@@ -437,6 +446,7 @@ export component AppWindow inherits Window {
                         asset-show-tree-controls: root.asset-show-tree-controls;
                         asset-tree-controls-enabled: root.asset-tree-controls-enabled;
                         console-asset-items: root.console-asset-items;
+                        snippet-asset-items: root.snippet-asset-items;
 
                         toggle-assets-sidebar-requested => {
                             root.toggle-assets-sidebar-requested();
@@ -662,6 +672,7 @@ export component AppWindow inherits Window {
         visible: root.asset-create-menu-open;
         x: sidebar.create-menu-anchor-x + sidebar.create-menu-anchor-width - self.width;
         y: sidebar.create-menu-anchor-y + sidebar.create-menu-anchor-height + 6px;
+        active-panel: root.active-sidebar-destination;
 
         close-requested => {
             root.close-assets-create-menu-requested();
@@ -673,6 +684,14 @@ export component AppWindow inherits Window {
 
         new-ssh-connection-selected => {
             root.assets-create-action-selected("new-ssh-connection");
+        }
+
+        new-snippet-selected => {
+            root.assets-create-action-selected("new-snippet");
+        }
+
+        new-snippet-package-selected => {
+            root.assets-create-action-selected("new-snippet-package");
         }
     }
 
@@ -763,6 +782,118 @@ export component AppWindow inherits Window {
 
             folder-name-changed(value) => {
                 root.asset-folder-modal-name-changed(value);
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
+    }
+
+    if root.asset-modal-open && root.asset-modal-kind == "new-snippet" : asset-snippet-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 560px;
+        modal-height: 520px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        asset-snippet-modal-overlay := AssetsSnippetModal {
+            x: 0px;
+            y: 0px;
+            width: asset-snippet-modal-shell.content-width;
+            height: asset-snippet-modal-shell.content-height;
+            dialog-title: "New Snippet";
+            name: root.asset-snippet-modal-name;
+            script: root.asset-snippet-modal-script;
+            package: root.asset-snippet-modal-package;
+            validation-message: root.asset-modal-validation-message;
+            can-confirm: root.asset-modal-can-confirm;
+            focus-sequence: root.asset-modal-focus-sequence;
+
+            close-requested => {
+                root.close-asset-modal-requested();
+            }
+
+            confirm-requested => {
+                root.confirm-asset-modal-requested();
+            }
+
+            draft-changed(field, value) => {
+                root.asset-snippet-modal-draft-changed(field, value);
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
+    }
+
+    if root.asset-modal-open && root.asset-modal-kind == "new-snippet-package" : asset-snippet-package-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 420px;
+        modal-height: 230px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        asset-snippet-package-modal-overlay := AssetsSnippetPackageModal {
+            x: 0px;
+            y: 0px;
+            width: asset-snippet-package-modal-shell.content-width;
+            height: asset-snippet-package-modal-shell.content-height;
+            dialog-title: "New Package";
+            package-name: root.asset-snippet-package-modal-name;
+            validation-message: root.asset-modal-validation-message;
+            can-confirm: root.asset-modal-can-confirm;
+            focus-sequence: root.asset-modal-focus-sequence;
+
+            close-requested => {
+                root.close-asset-modal-requested();
+            }
+
+            confirm-requested => {
+                root.confirm-asset-modal-requested();
+            }
+
+            name-changed(value) => {
+                root.asset-snippet-package-modal-name-changed(value);
             }
 
             drag-requested(pointer-x, pointer-y) => {

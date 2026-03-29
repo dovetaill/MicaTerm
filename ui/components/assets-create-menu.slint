@@ -2,11 +2,16 @@ import { AssetsToolbarMenuRow } from "assets-toolbar-menu-row.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 
 export component AssetsCreateMenu inherits Rectangle {
+    in property <string> active-panel: "console";
     callback new-folder-selected;
     callback new-ssh-connection-selected;
+    callback new-snippet-selected;
+    callback new-snippet-package-selected;
     callback close-requested;
     private property <image> new-folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
     private property <image> new-ssh-connection-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
+    private property <image> new-snippet-icon: @image-url("../../assets/icons/fluent/document-code-16-regular.svg");
+    private property <image> new-snippet-package-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
 
     width: 216px;
     height: 88px;
@@ -37,7 +42,27 @@ export component AssetsCreateMenu inherits Rectangle {
             padding: 8px;
             spacing: 4px;
 
-            AssetsToolbarMenuRow {
+            if root.active-panel == "snippets" : AssetsToolbarMenuRow {
+                label: "New Snippet";
+                icon-source: root.new-snippet-icon;
+
+                invoked => {
+                    root.new-snippet-selected();
+                    root.close-requested();
+                }
+            }
+
+            if root.active-panel == "snippets" : AssetsToolbarMenuRow {
+                label: "New Package";
+                icon-source: root.new-snippet-package-icon;
+
+                invoked => {
+                    root.new-snippet-package-selected();
+                    root.close-requested();
+                }
+            }
+
+            if root.active-panel != "snippets" : AssetsToolbarMenuRow {
                 label: "New Folder";
                 icon-source: root.new-folder-icon;
 
@@ -47,7 +72,7 @@ export component AssetsCreateMenu inherits Rectangle {
                 }
             }
 
-            AssetsToolbarMenuRow {
+            if root.active-panel != "snippets" : AssetsToolbarMenuRow {
                 label: "New SSH Connection";
                 icon-source: root.new-ssh-connection-icon;
 

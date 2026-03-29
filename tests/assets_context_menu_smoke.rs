@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use mica_term::AppWindow;
@@ -22,7 +23,15 @@ use tokio::sync::mpsc;
 #[derive(Clone, Default)]
 struct FakeLauncher;
 
+#[derive(Clone, Default)]
+struct PasteProjectionLauncher;
+
 struct NoopRuntimeControl;
+
+struct PasteProjectionRuntimeControl {
+    session_id: uuid::Uuid,
+    event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+}
 
 impl SessionRuntimeControl for NoopRuntimeControl {
     fn disconnect(&self) -> Result<()> {
@@ -69,6 +78,84 @@ impl SessionRuntimeLauncher for FakeLauncher {
     }
 }
 
+impl SessionRuntimeLauncher for PasteProjectionLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                mica_term::app::ssh::runtime::TerminalSurfaceState::from_visible_lines(
+                    session_id,
+                    1,
+                    24,
+                    80,
+                    vec!["welcome to mica-term".into()],
+                ),
+            ));
+            Ok(Box::new(PasteProjectionRuntimeControl {
+                session_id,
+                event_tx,
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeControl for PasteProjectionRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, text: String) -> Result<()> {
+        let _ = self.event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+            mica_term::app::ssh::runtime::TerminalSurfaceState::from_visible_lines(
+                self.session_id,
+                2,
+                24,
+                80,
+                vec!["welcome to mica-term".into(), format!("text {}", text)],
+            ),
+        ));
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, text: String) -> Result<()> {
+        let _ = self.event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+            mica_term::app::ssh::runtime::TerminalSurfaceState::from_visible_lines(
+                self.session_id,
+                2,
+                24,
+                80,
+                vec!["welcome to mica-term".into(), format!("paste {}", text)],
+            ),
+        ));
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+}
+
 fn bind_with_fake_sessions(app: &AppWindow) {
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
         app,
@@ -92,6 +179,26 @@ fn create_root_ssh(app: &AppWindow, name: &str, host: &str) -> String {
         .unwrap()
         .id
         .to_string()
+}
+
+fn create_root_snippet(app: &AppWindow, name: &str, script: &str) -> String {
+    app.invoke_sidebar_destination_selected("snippets".into());
+    app.invoke_assets_create_action_selected("new-snippet".into());
+    app.invoke_asset_snippet_modal_draft_changed("name".into(), name.into());
+    app.invoke_asset_snippet_modal_draft_changed("script".into(), script.into());
+    app.invoke_confirm_asset_modal_requested();
+
+    app.get_snippet_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string()
+}
+
+fn flush_runtime_projection() {
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
 }
 
 #[test]
@@ -135,6 +242,70 @@ fn invoking_open_from_ssh_context_menu_creates_a_new_session_tab() {
     app.invoke_assets_context_menu_action_invoked("open-connection".into());
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+}
+
+#[test]
+fn invoking_paste_snippet_from_context_menu_forwards_script_to_active_session() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
+        &app,
+        None,
+        default_platform_window_effects(),
+        None,
+        Arc::new(PasteProjectionLauncher),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    let snippet_id =
+        create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+
+    app.invoke_asset_context_menu_requested(snippet_id.into(), "snippet".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("paste-snippet".into());
+    flush_runtime_projection();
+
+    let visible_lines = app.get_workspace_session_visible_lines();
+    assert_eq!(visible_lines.row_count(), 2);
+    assert_eq!(
+        visible_lines.row_data(1).unwrap().as_str(),
+        "paste kubectl rollout restart deploy/api"
+    );
+}
+
+#[test]
+fn invoking_run_snippet_from_context_menu_forwards_script_as_text_input() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
+        &app,
+        None,
+        default_platform_window_effects(),
+        None,
+        Arc::new(PasteProjectionLauncher),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    let snippet_id =
+        create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+
+    app.invoke_asset_context_menu_requested(snippet_id.into(), "snippet".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("run-snippet".into());
+    flush_runtime_projection();
+
+    let visible_lines = app.get_workspace_session_visible_lines();
+    assert_eq!(visible_lines.row_count(), 2);
+    assert_eq!(
+        visible_lines.row_data(1).unwrap().as_str(),
+        "text kubectl rollout restart deploy/api"
+    );
 }
 
 #[test]

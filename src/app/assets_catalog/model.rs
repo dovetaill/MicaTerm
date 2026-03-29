@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-pub const ASSET_CATALOG_SCHEMA_VERSION: u32 = 4;
+pub const ASSET_CATALOG_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistedAssetCatalog {
@@ -25,6 +25,23 @@ pub struct PersistedAssetNode {
 pub enum PersistedAssetKind {
     Folder,
     SshConnection,
+    SnippetPackage,
+    Snippet,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistedAssetDomain {
+    Console,
+    Snippets,
+}
+
+impl PersistedAssetKind {
+    pub fn domain(self) -> PersistedAssetDomain {
+        match self {
+            Self::Folder | Self::SshConnection => PersistedAssetDomain::Console,
+            Self::SnippetPackage | Self::Snippet => PersistedAssetDomain::Snippets,
+        }
+    }
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -32,6 +49,8 @@ pub enum PersistedAssetKind {
 pub enum PersistedAssetPayload {
     Folder,
     SshConnection(PersistedSshConnectionSpec),
+    SnippetPackage,
+    Snippet(PersistedSnippetSpec),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -65,4 +84,10 @@ pub struct PersistedSshConnectionSpec {
     pub proxy: PersistedAssetSshProxySpec,
     pub remark: String,
     pub credential_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PersistedSnippetSpec {
+    pub script: String,
+    pub package_id: Option<String>,
 }

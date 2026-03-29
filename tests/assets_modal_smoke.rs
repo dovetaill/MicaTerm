@@ -83,6 +83,97 @@ fn folder_modal_visibility_round_trips_through_window_properties() {
 }
 
 #[test]
+fn snippet_modal_visibility_round_trips_through_window_properties() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-snippet".into());
+    app.set_asset_snippet_modal_name("Deploy prod".into());
+    app.set_asset_snippet_modal_script("kubectl rollout restart deploy/api".into());
+    app.set_asset_snippet_modal_package("Operations".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-snippet");
+    assert_eq!(app.get_asset_snippet_modal_name().as_str(), "Deploy prod");
+    assert_eq!(
+        app.get_asset_snippet_modal_script().as_str(),
+        "kubectl rollout restart deploy/api"
+    );
+    assert_eq!(app.get_asset_snippet_modal_package().as_str(), "Operations");
+}
+
+#[test]
+fn snippet_modal_callback_contract_exposes_name_script_and_package_fields() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let changes = Rc::new(RefCell::new(Vec::<(String, String)>::new()));
+    let recorded_changes = Rc::clone(&changes);
+
+    app.on_asset_snippet_modal_draft_changed(move |field, value| {
+        recorded_changes
+            .borrow_mut()
+            .push((field.to_string(), value.to_string()));
+    });
+
+    app.invoke_asset_snippet_modal_draft_changed("name".into(), "Deploy prod".into());
+    app.invoke_asset_snippet_modal_draft_changed(
+        "script".into(),
+        "kubectl rollout restart deploy/api".into(),
+    );
+    app.invoke_asset_snippet_modal_draft_changed("package".into(), "Operations".into());
+
+    assert_eq!(
+        changes.borrow().as_slice(),
+        [
+            ("name".into(), "Deploy prod".into()),
+            (
+                "script".into(),
+                "kubectl rollout restart deploy/api".into()
+            ),
+            ("package".into(), "Operations".into()),
+        ]
+    );
+}
+
+#[test]
+fn snippet_package_modal_visibility_round_trips_through_window_properties() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-snippet-package".into());
+    app.set_asset_snippet_package_modal_name("Operations".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-snippet-package");
+    assert_eq!(
+        app.get_asset_snippet_package_modal_name().as_str(),
+        "Operations"
+    );
+}
+
+#[test]
+fn snippet_package_modal_name_callback_contract_is_exposed() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let names = Rc::new(RefCell::new(Vec::<String>::new()));
+    let recorded_names = Rc::clone(&names);
+
+    app.on_asset_snippet_package_modal_name_changed(move |value| {
+        recorded_names.borrow_mut().push(value.to_string());
+    });
+
+    app.invoke_asset_snippet_package_modal_name_changed("Operations".into());
+
+    assert_eq!(names.borrow().as_slice(), ["Operations"]);
+}
+
+#[test]
 fn ssh_modal_round_trips_grouped_form_fields_without_top_level_tab_state() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -692,7 +783,9 @@ fn ssh_modal_confirm_updates_runtime_tree_and_persists_ssh_fields() {
                 })
             );
         }
-        PersistedAssetPayload::Folder => panic!("expected ssh payload"),
+        PersistedAssetPayload::Folder
+        | PersistedAssetPayload::SnippetPackage
+        | PersistedAssetPayload::Snippet(_) => panic!("expected ssh payload"),
     }
 }
 
@@ -755,6 +848,8 @@ fn ssh_modal_confirm_persists_existing_ssh_connection_proxy_selection() {
                 }
             );
         }
-        PersistedAssetPayload::Folder => panic!("expected ssh payload"),
+        PersistedAssetPayload::Folder
+        | PersistedAssetPayload::SnippetPackage
+        | PersistedAssetPayload::Snippet(_) => panic!("expected ssh payload"),
     }
 }

@@ -84,6 +84,15 @@ pub enum AssetModalState {
         parent_id: Option<String>,
         draft_name: String,
     },
+    NewSnippet {
+        parent_package_id: Option<String>,
+        editing_asset_id: Option<String>,
+        draft: AssetSnippetDraft,
+    },
+    NewSnippetPackage {
+        editing_asset_id: Option<String>,
+        draft_name: String,
+    },
     NewSshConnection {
         parent_id: Option<String>,
         editing_asset_id: Option<String>,
@@ -125,6 +134,13 @@ pub struct AssetSshConnectionDraft {
     pub proxy_ssh_asset_id: String,
     pub proxy_method: String,
     pub validation_message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AssetSnippetDraft {
+    pub name: String,
+    pub script: String,
+    pub package: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +206,34 @@ pub struct PendingSshModalAction {
     pub draft: AssetSshConnectionDraft,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnippetCreateAction {
+    NewSnippet,
+    NewPackage,
+}
+
+impl SnippetCreateAction {
+    fn from_action_id(action_id: &str) -> Option<Self> {
+        match action_id {
+            "new-snippet" => Some(Self::NewSnippet),
+            "new-snippet-package" | "new-package" => Some(Self::NewPackage),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnippetActivation {
+    Paste,
+    Run,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingSnippetActivation {
+    snippet_id: String,
+    mode: SnippetActivation,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellViewModel {
     pub show_welcome: bool,
@@ -214,6 +258,8 @@ pub struct ShellViewModel {
     active_workspace_session_id: Option<String>,
     active_workspace_terminal_surface: Option<TerminalSurfaceState>,
     pending_ssh_modal_action: Option<PendingSshModalAction>,
+    pending_snippet_create_action: Option<SnippetCreateAction>,
+    pending_snippet_activation: Option<PendingSnippetActivation>,
     ssh_modal_action_state: SshModalActionState,
     pub editing_asset_id: Option<String>,
     pub editing_asset_text: String,
@@ -229,6 +275,7 @@ pub struct ShellViewModel {
     pub context_menu_feedback_text: String,
     vault_panel_state: VaultPanelViewState,
     console_asset_tree: AssetTree,
+    snippet_asset_tree: AssetTree,
     window_placement: WindowPlacementKind,
 }
 
@@ -257,6 +304,8 @@ impl Default for ShellViewModel {
             active_workspace_session_id: None,
             active_workspace_terminal_surface: None,
             pending_ssh_modal_action: None,
+            pending_snippet_create_action: None,
+            pending_snippet_activation: None,
             ssh_modal_action_state: SshModalActionState::Idle,
             editing_asset_id: None,
             editing_asset_text: String::new(),
@@ -272,6 +321,7 @@ impl Default for ShellViewModel {
             context_menu_feedback_text: String::new(),
             vault_panel_state: VaultPanelViewState::default(),
             console_asset_tree: AssetTree::new(),
+            snippet_asset_tree: AssetTree::new(),
             window_placement: WindowPlacementKind::Restored,
         }
     }
@@ -318,6 +368,25 @@ impl ShellViewModel {
             }) => asset_name_validation_message(
                 self.create_asset_modal_validation(parent_id.as_deref(), draft_name),
             ),
+            Some(AssetModalState::NewSnippet {
+                parent_package_id,
+                editing_asset_id,
+                draft,
+            }) => self.snippet_modal_validation_message(
+                parent_package_id.as_deref(),
+                editing_asset_id.as_deref(),
+                draft,
+            ),
+            Some(AssetModalState::NewSnippetPackage {
+                editing_asset_id,
+                draft_name,
+            }) => asset_name_validation_message(
+                self.snippet_asset_tree.validate_name_in_parent(
+                    None,
+                    draft_name,
+                    editing_asset_id.as_deref(),
+                ),
+            ),
             Some(AssetModalState::NewSshConnection {
                 parent_id,
                 editing_asset_id,
@@ -340,6 +409,28 @@ impl ShellViewModel {
             }) => {
                 self.create_asset_modal_validation(parent_id.as_deref(), draft_name)
                     == AssetNameValidation::Valid
+            }
+            Some(AssetModalState::NewSnippet {
+                parent_package_id,
+                editing_asset_id,
+                draft,
+            }) => {
+                self.snippet_modal_validation_message(
+                    parent_package_id.as_deref(),
+                    editing_asset_id.as_deref(),
+                    draft,
+                )
+                .is_empty()
+            }
+            Some(AssetModalState::NewSnippetPackage {
+                editing_asset_id,
+                draft_name,
+            }) => {
+                self.snippet_asset_tree.validate_name_in_parent(
+                    None,
+                    draft_name,
+                    editing_asset_id.as_deref(),
+                ) == AssetNameValidation::Valid
             }
             Some(AssetModalState::NewSshConnection {
                 parent_id,
@@ -696,8 +787,122 @@ impl ShellViewModel {
         });
     }
 
+    pub fn open_new_snippet_modal(&mut self, parent_package_id: Option<String>) {
+        let parent_package_id = self.normalize_snippet_package_parent_id(parent_package_id);
+        self.dismiss_active_asset_rename();
+        let draft_name = self
+            .snippet_asset_tree
+            .next_default_name_for_parent(parent_package_id.as_deref(), ConsoleAssetKind::Snippet);
+        let package = parent_package_id
+            .as_deref()
+            .and_then(|asset_id| self.snippet_asset_tree.title(asset_id))
+            .unwrap_or_default()
+            .to_string();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.context_target_asset_id = parent_package_id.clone();
+        self.asset_modal_state = Some(AssetModalState::NewSnippet {
+            parent_package_id,
+            editing_asset_id: None,
+            draft: AssetSnippetDraft {
+                name: draft_name,
+                script: String::new(),
+                package,
+            },
+        });
+    }
+
+    pub fn open_edit_snippet_modal(&mut self, asset_id: String) {
+        let Some(node) = self.snippet_asset_tree.node(&asset_id).cloned() else {
+            return;
+        };
+        let AssetNodePayload::Snippet(spec) = node.payload else {
+            return;
+        };
+
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.focused_asset_id = Some(asset_id.clone());
+        self.selected_asset_ids = vec![asset_id.clone()];
+        self.context_target_asset_id = Some(asset_id.clone());
+        self.asset_modal_state = Some(AssetModalState::NewSnippet {
+            parent_package_id: spec.package_id.clone(),
+            editing_asset_id: Some(asset_id),
+            draft: AssetSnippetDraft {
+                name: node.title,
+                script: spec.script,
+                package: spec
+                    .package_id
+                    .as_deref()
+                    .and_then(|package_id| self.snippet_asset_tree.title(package_id))
+                    .unwrap_or_default()
+                    .to_string(),
+            },
+        });
+    }
+
+    pub fn open_new_snippet_package_modal(&mut self) {
+        self.dismiss_active_asset_rename();
+        let draft_name = self
+            .snippet_asset_tree
+            .next_default_name_for_parent(None, ConsoleAssetKind::SnippetPackage);
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.context_target_asset_id = None;
+        self.asset_modal_state = Some(AssetModalState::NewSnippetPackage {
+            editing_asset_id: None,
+            draft_name,
+        });
+    }
+
+    pub fn open_edit_snippet_package_modal(&mut self, asset_id: String) {
+        if self.snippet_asset_tree.kind(&asset_id) != Some(ConsoleAssetKind::SnippetPackage) {
+            return;
+        }
+        let Some(original_name) = self.snippet_asset_tree.title(&asset_id).map(str::to_string)
+        else {
+            return;
+        };
+
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.focused_asset_id = Some(asset_id.clone());
+        self.selected_asset_ids = vec![asset_id.clone()];
+        self.context_target_asset_id = Some(asset_id.clone());
+        self.asset_modal_state = Some(AssetModalState::NewSnippetPackage {
+            editing_asset_id: Some(asset_id),
+            draft_name: original_name,
+        });
+    }
+
     pub fn update_new_folder_modal_name(&mut self, value: String) {
         let Some(AssetModalState::NewFolder { draft_name, .. }) = self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        *draft_name = value;
+    }
+
+    pub fn update_snippet_modal_field(&mut self, field: &str, value: String) {
+        let Some(AssetModalState::NewSnippet { draft, .. }) = self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        match field {
+            "name" => draft.name = value,
+            "script" => draft.script = value,
+            "package" => draft.package = value,
+            _ => {}
+        }
+    }
+
+    pub fn update_snippet_package_modal_name(&mut self, value: String) {
+        let Some(AssetModalState::NewSnippetPackage { draft_name, .. }) =
+            self.asset_modal_state.as_mut()
         else {
             return;
         };
@@ -874,14 +1079,31 @@ impl ShellViewModel {
     }
 
     pub fn open_delete_asset_confirm(&mut self, asset_id: String) {
-        if !self.console_asset_tree.contains(&asset_id) {
-            return;
-        }
-
-        let Some(label) = self.console_asset_tree.title(&asset_id).map(str::to_string) else {
-            return;
+        let snippet_first = self.active_sidebar_destination == SidebarDestination::Snippets;
+        let asset_summary = if snippet_first {
+            self.snippet_asset_tree
+                .title(&asset_id)
+                .map(str::to_string)
+                .zip(self.snippet_asset_tree.descendant_count(&asset_id))
+                .or_else(|| {
+                    self.console_asset_tree
+                        .title(&asset_id)
+                        .map(str::to_string)
+                        .zip(self.console_asset_tree.descendant_count(&asset_id))
+                })
+        } else {
+            self.console_asset_tree
+                .title(&asset_id)
+                .map(str::to_string)
+                .zip(self.console_asset_tree.descendant_count(&asset_id))
+                .or_else(|| {
+                    self.snippet_asset_tree
+                        .title(&asset_id)
+                        .map(str::to_string)
+                        .zip(self.snippet_asset_tree.descendant_count(&asset_id))
+                })
         };
-        let Some(descendant_count) = self.console_asset_tree.descendant_count(&asset_id) else {
+        let Some((label, descendant_count)) = asset_summary else {
             return;
         };
 
@@ -1034,6 +1256,8 @@ impl ShellViewModel {
     pub fn can_confirm_asset_modal(&self) -> bool {
         match &self.asset_modal_state {
             Some(AssetModalState::NewFolder { .. })
+            | Some(AssetModalState::NewSnippet { .. })
+            | Some(AssetModalState::NewSnippetPackage { .. })
             | Some(AssetModalState::NewSshConnection { .. }) => {
                 self.asset_create_modal_can_confirm()
             }
@@ -1065,6 +1289,82 @@ impl ShellViewModel {
                 draft_name,
                 AssetNodePayload::Folder,
             ),
+            AssetModalState::NewSnippet {
+                parent_package_id,
+                editing_asset_id,
+                draft,
+            } => {
+                if !self
+                    .snippet_modal_validation_message(
+                        parent_package_id.as_deref(),
+                        editing_asset_id.as_deref(),
+                        &draft,
+                    )
+                    .is_empty()
+                {
+                    return false;
+                }
+
+                let resolved_parent_id = self.resolve_snippet_package_id_by_label(draft.package.trim());
+                if let Some(asset_id) = editing_asset_id {
+                    self.snippet_asset_tree
+                        .set_title(&asset_id, draft.name.trim().to_string());
+                    if !self.snippet_asset_tree.set_snippet_spec(
+                        &asset_id,
+                        crate::shell::assets::AssetSnippetSpec {
+                            script: draft.script,
+                            package_id: resolved_parent_id,
+                        },
+                    ) {
+                        return false;
+                    }
+                    self.selected_asset_ids = vec![asset_id.clone()];
+                    self.focused_asset_id = Some(asset_id.clone());
+                    self.context_target_asset_id = Some(asset_id);
+                    self.asset_modal_state = None;
+                    return true;
+                }
+
+                (
+                    resolved_parent_id.clone(),
+                    ConsoleAssetKind::Snippet,
+                    draft.name,
+                    AssetNodePayload::Snippet(crate::shell::assets::AssetSnippetSpec {
+                        script: draft.script,
+                        package_id: resolved_parent_id.clone(),
+                    }),
+                )
+            }
+            AssetModalState::NewSnippetPackage {
+                editing_asset_id,
+                draft_name,
+            } => {
+                if self.snippet_asset_tree.validate_name_in_parent(
+                    None,
+                    &draft_name,
+                    editing_asset_id.as_deref(),
+                ) != AssetNameValidation::Valid
+                {
+                    return false;
+                }
+
+                if let Some(asset_id) = editing_asset_id {
+                    self.snippet_asset_tree
+                        .set_title(&asset_id, draft_name.trim().to_string());
+                    self.selected_asset_ids = vec![asset_id.clone()];
+                    self.focused_asset_id = Some(asset_id.clone());
+                    self.context_target_asset_id = Some(asset_id);
+                    self.asset_modal_state = None;
+                    return true;
+                }
+
+                (
+                    None,
+                    ConsoleAssetKind::SnippetPackage,
+                    draft_name,
+                    AssetNodePayload::SnippetPackage,
+                )
+            }
             AssetModalState::NewSshConnection {
                 parent_id,
                 editing_asset_id,
@@ -1141,26 +1441,53 @@ impl ShellViewModel {
             }
         };
 
+        let use_snippet_tree =
+            kind.domain() == crate::shell::assets::AssetDomain::Snippets;
         let label = if draft_label.trim().is_empty() {
-            self.console_asset_tree
-                .next_default_name_for_parent(parent_id.as_deref(), kind)
+            if use_snippet_tree {
+                self.snippet_asset_tree
+                    .next_default_name_for_parent(parent_id.as_deref(), kind)
+            } else {
+                self.console_asset_tree
+                    .next_default_name_for_parent(parent_id.as_deref(), kind)
+            }
         } else {
-            if self.create_asset_modal_validation(parent_id.as_deref(), &draft_label)
-                != AssetNameValidation::Valid
-            {
+            let validation = if use_snippet_tree {
+                self.snippet_asset_tree.validate_name_in_parent(
+                    parent_id.as_deref(),
+                    &draft_label,
+                    None,
+                )
+            } else {
+                self.create_asset_modal_validation(parent_id.as_deref(), &draft_label)
+            };
+            if validation != AssetNameValidation::Valid {
                 return false;
             }
             draft_label.trim().to_string()
         };
-        let asset_id = if let Some(parent_id) = parent_id.as_deref() {
-            let asset_id = self
-                .console_asset_tree
-                .insert_child_with_payload(parent_id, kind, label, payload);
-            self.console_asset_tree.set_expanded(parent_id, true);
-            asset_id
+        let asset_id = if use_snippet_tree {
+            if let Some(parent_id) = parent_id.as_deref() {
+                let asset_id = self
+                    .snippet_asset_tree
+                    .insert_child_with_payload(parent_id, kind, label, payload);
+                self.snippet_asset_tree.set_expanded(parent_id, true);
+                asset_id
+            } else {
+                self.snippet_asset_tree
+                    .insert_root_with_payload(kind, label, payload)
+            }
         } else {
-            self.console_asset_tree
-                .insert_root_with_payload(kind, label, payload)
+            if let Some(parent_id) = parent_id.as_deref() {
+                let asset_id = self
+                    .console_asset_tree
+                    .insert_child_with_payload(parent_id, kind, label, payload);
+                self.console_asset_tree.set_expanded(parent_id, true);
+                asset_id
+            } else {
+                self.console_asset_tree
+                    .insert_root_with_payload(kind, label, payload)
+            }
         };
 
         if let Some(AssetModalState::NewSshConnection { draft, .. }) = &self.asset_modal_state {
@@ -1186,8 +1513,31 @@ impl ShellViewModel {
             return false;
         };
 
-        if self.remove_asset_subtree(&asset_id) {
+        let snippet_first = self.active_sidebar_destination == SidebarDestination::Snippets;
+        let removed = if snippet_first {
+            if self.snippet_asset_tree.remove_subtree(&asset_id).is_some() {
+                self.selected_asset_ids.clear();
+                self.focused_asset_id = None;
+                self.context_target_asset_id = None;
+                true
+            } else {
+                self.remove_asset_subtree(&asset_id)
+            }
+        } else {
+            if self.remove_asset_subtree(&asset_id) {
+                true
+            } else if self.snippet_asset_tree.remove_subtree(&asset_id).is_some() {
+                self.selected_asset_ids.clear();
+                self.focused_asset_id = None;
+                self.context_target_asset_id = None;
+                true
+            } else {
+                false
+            }
+        };
+        if removed {
             self.asset_modal_state = None;
+            self.pending_snippet_activation = None;
             return true;
         }
 
@@ -1227,12 +1577,62 @@ impl ShellViewModel {
             .project_visible_rows(self.asset_view_mode, &self.asset_search_query)
     }
 
+    pub fn visible_snippet_rows(&self) -> Vec<VisibleAssetRow> {
+        self.snippet_asset_tree
+            .project_visible_rows(self.asset_view_mode, &self.asset_search_query)
+    }
+
     pub fn handle_assets_create_action(&mut self, action_id: &str) {
         match action_id {
             "new-folder" => self.open_new_folder_modal(None),
             "new-ssh-connection" => self.open_new_ssh_modal(None),
             _ => {}
         }
+    }
+
+    pub fn handle_snippet_create_action(&mut self, action_id: &str) {
+        let Some(action) = SnippetCreateAction::from_action_id(action_id) else {
+            return;
+        };
+
+        self.pending_snippet_create_action = Some(action);
+        self.close_context_menu();
+        self.close_asset_create_menu();
+    }
+
+    pub fn pending_snippet_create_action(&self) -> Option<SnippetCreateAction> {
+        self.pending_snippet_create_action
+    }
+
+    pub fn take_pending_snippet_create_action(&mut self) -> Option<SnippetCreateAction> {
+        self.pending_snippet_create_action.take()
+    }
+
+    pub fn begin_snippet_activation(&mut self, snippet_id: &str, mode: SnippetActivation) {
+        if self.snippet_asset_tree.kind(snippet_id) != Some(ConsoleAssetKind::Snippet) {
+            return;
+        }
+
+        self.pending_snippet_activation = Some(PendingSnippetActivation {
+            snippet_id: snippet_id.to_string(),
+            mode,
+        });
+    }
+
+    pub fn pending_snippet_activation(&self) -> Option<SnippetActivation> {
+        self.pending_snippet_activation.as_ref().map(|pending| pending.mode)
+    }
+
+    pub fn take_pending_snippet_activation(&mut self) -> Option<(String, SnippetActivation)> {
+        self.pending_snippet_activation
+            .take()
+            .map(|pending| (pending.snippet_id, pending.mode))
+    }
+
+    pub fn snippet_script(&self, snippet_id: &str) -> Option<&str> {
+        self.snippet_asset_tree
+            .snippet_spec(snippet_id)
+            .map(|spec| spec.script.as_str())
     }
 
     pub fn begin_asset_rename_session(&mut self, asset_id: String, initial_text: String) {
@@ -1341,7 +1741,13 @@ impl ShellViewModel {
     }
 
     pub fn select_asset(&mut self, asset_id: &str) {
-        if !self.console_asset_tree.contains(asset_id) {
+        let exists = match self.active_sidebar_destination {
+            SidebarDestination::Snippets => self.snippet_asset_tree.contains(asset_id),
+            SidebarDestination::Console | SidebarDestination::Keychain => {
+                self.console_asset_tree.contains(asset_id)
+            }
+        };
+        if !exists {
             return;
         }
 
@@ -1352,15 +1758,23 @@ impl ShellViewModel {
     }
 
     pub fn toggle_folder_expanded(&mut self, asset_id: &str) {
-        if self.console_asset_tree.kind(asset_id) != Some(ConsoleAssetKind::Folder) {
+        let Some(kind) = self.asset_kind(asset_id) else {
             return;
-        }
+        };
 
-        let next = !self
-            .console_asset_tree
-            .is_expanded(asset_id)
-            .unwrap_or(false);
-        self.console_asset_tree.set_expanded(asset_id, next);
+        let next = match kind {
+            ConsoleAssetKind::Folder => {
+                let next = !self.console_asset_tree.is_expanded(asset_id).unwrap_or(false);
+                self.console_asset_tree.set_expanded(asset_id, next);
+                next
+            }
+            ConsoleAssetKind::SnippetPackage => {
+                let next = !self.snippet_asset_tree.is_expanded(asset_id).unwrap_or(false);
+                self.snippet_asset_tree.set_expanded(asset_id, next);
+                next
+            }
+            ConsoleAssetKind::SshConnection | ConsoleAssetKind::Snippet => return,
+        };
         self.asset_tree_fully_expanded = self.asset_tree_fully_expanded && next;
     }
 
@@ -1470,6 +1884,28 @@ impl ShellViewModel {
     }
 
     pub fn handle_context_menu_leaf_action(&mut self, action_id: &str) {
+        if matches!(action_id, "new-snippet" | "new-package" | "new-snippet-package") {
+            match action_id {
+                "new-snippet" => {
+                    let parent_id = match (
+                        self.context_menu_target_kind,
+                        self.context_target_asset_id.as_deref(),
+                    ) {
+                        (Some(ContextTargetKind::SnippetPackage), Some(asset_id))
+                            if self.snippet_asset_tree.contains(asset_id) =>
+                        {
+                            Some(asset_id.to_string())
+                        }
+                        _ => None,
+                    };
+                    self.open_new_snippet_modal(parent_id);
+                }
+                "new-package" | "new-snippet-package" => self.open_new_snippet_package_modal(),
+                _ => {}
+            }
+            return;
+        }
+
         if ConsoleAssetKind::from_create_action_id(action_id).is_some() {
             let parent_id = match (
                 self.context_menu_target_kind,
@@ -1533,9 +1969,81 @@ impl ShellViewModel {
                     if let Some(asset_id) = self
                         .context_target_asset_id
                         .clone()
-                        .filter(|asset_id| self.console_asset_tree.contains(asset_id))
+                        .filter(|asset_id| {
+                            self.console_asset_tree.contains(asset_id)
+                                || self.snippet_asset_tree.contains(asset_id)
+                        })
                     {
                         self.open_delete_asset_confirm(asset_id);
+                    } else {
+                        self.close_context_menu();
+                    }
+                }
+                "edit-snippet" => {
+                    if let Some(asset_id) = self
+                        .context_target_asset_id
+                        .clone()
+                        .filter(|asset_id| {
+                            self.snippet_asset_tree.kind(asset_id)
+                                == Some(ConsoleAssetKind::Snippet)
+                        })
+                    {
+                        self.open_edit_snippet_modal(asset_id);
+                    } else {
+                        self.close_context_menu();
+                    }
+                }
+                "edit-package" => {
+                    if let Some(asset_id) = self
+                        .context_target_asset_id
+                        .clone()
+                        .filter(|asset_id| {
+                            self.snippet_asset_tree.kind(asset_id)
+                                == Some(ConsoleAssetKind::SnippetPackage)
+                        })
+                    {
+                        self.open_edit_snippet_package_modal(asset_id);
+                    } else {
+                        self.close_context_menu();
+                    }
+                }
+                "delete-snippet" | "delete-package" => {
+                    if let Some(asset_id) = self
+                        .context_target_asset_id
+                        .clone()
+                        .filter(|asset_id| self.snippet_asset_tree.contains(asset_id))
+                    {
+                        self.open_delete_asset_confirm(asset_id);
+                    } else {
+                        self.close_context_menu();
+                    }
+                }
+                "paste-snippet" => {
+                    if let Some(asset_id) = self
+                        .context_target_asset_id
+                        .clone()
+                        .filter(|asset_id| {
+                            self.snippet_asset_tree.kind(asset_id)
+                                == Some(ConsoleAssetKind::Snippet)
+                        })
+                    {
+                        self.begin_snippet_activation(&asset_id, SnippetActivation::Paste);
+                        self.close_context_menu();
+                    } else {
+                        self.close_context_menu();
+                    }
+                }
+                "run-snippet" => {
+                    if let Some(asset_id) = self
+                        .context_target_asset_id
+                        .clone()
+                        .filter(|asset_id| {
+                            self.snippet_asset_tree.kind(asset_id)
+                                == Some(ConsoleAssetKind::Snippet)
+                        })
+                    {
+                        self.begin_snippet_activation(&asset_id, SnippetActivation::Run);
+                        self.close_context_menu();
                     } else {
                         self.close_context_menu();
                     }
@@ -1577,6 +2085,29 @@ impl ShellViewModel {
 
     pub fn console_asset_tree(&self) -> &AssetTree {
         &self.console_asset_tree
+    }
+
+    pub fn snippet_asset_tree(&self) -> &AssetTree {
+        &self.snippet_asset_tree
+    }
+
+    pub fn asset_kind(&self, asset_id: &str) -> Option<ConsoleAssetKind> {
+        match self.active_sidebar_destination {
+            SidebarDestination::Snippets => self
+                .snippet_asset_tree
+                .kind(asset_id)
+                .or_else(|| self.console_asset_tree.kind(asset_id)),
+            SidebarDestination::Console | SidebarDestination::Keychain => self
+                .console_asset_tree
+                .kind(asset_id)
+                .or_else(|| self.snippet_asset_tree.kind(asset_id)),
+        }
+    }
+
+    pub fn replace_snippet_asset_tree(&mut self, tree: AssetTree) {
+        self.snippet_asset_tree = tree;
+        self.pending_snippet_create_action = None;
+        self.pending_snippet_activation = None;
     }
 
     pub fn ssh_proxy_target_option_labels(&self) -> Vec<String> {
@@ -1700,6 +2231,29 @@ impl ShellViewModel {
             self.console_asset_tree.kind(asset_id.as_str()) == Some(ConsoleAssetKind::Folder)
         })
     }
+
+    fn normalize_snippet_package_parent_id(&self, parent_id: Option<String>) -> Option<String> {
+        parent_id.filter(|asset_id| {
+            self.snippet_asset_tree.kind(asset_id.as_str()) == Some(ConsoleAssetKind::SnippetPackage)
+        })
+    }
+
+    fn resolve_snippet_package_id_by_label(&self, label: &str) -> Option<String> {
+        let trimmed = label.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        self.snippet_asset_tree
+            .root_ids()
+            .iter()
+            .find(|asset_id| {
+                self.snippet_asset_tree.kind(asset_id.as_str())
+                    == Some(ConsoleAssetKind::SnippetPackage)
+                    && self.snippet_asset_tree.title(asset_id.as_str()) == Some(trimmed)
+            })
+            .cloned()
+    }
 }
 
 fn asset_name_validation_message(validation: AssetNameValidation) -> String {
@@ -1711,6 +2265,36 @@ fn asset_name_validation_message(validation: AssetNameValidation) -> String {
 }
 
 impl ShellViewModel {
+    fn snippet_modal_validation_message(
+        &self,
+        parent_package_id: Option<&str>,
+        editing_asset_id: Option<&str>,
+        draft: &AssetSnippetDraft,
+    ) -> String {
+        let resolved_parent_id = match self.resolve_snippet_package_id_by_label(draft.package.trim()) {
+            Some(parent_id) => Some(parent_id),
+            None if draft.package.trim().is_empty() => None,
+            None if parent_package_id.is_some() => parent_package_id.map(ToOwned::to_owned),
+            None => return "Package does not exist.".into(),
+        };
+
+        let name_message = asset_name_validation_message(
+            self.snippet_asset_tree.validate_name_in_parent(
+                resolved_parent_id.as_deref(),
+                &draft.name,
+                editing_asset_id,
+            ),
+        );
+        if !name_message.is_empty() {
+            return name_message;
+        }
+        if draft.script.trim().is_empty() {
+            return "Script is required.".into();
+        }
+
+        String::new()
+    }
+
     fn ssh_modal_validation_message(
         &self,
         parent_id: Option<&str>,

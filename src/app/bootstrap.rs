@@ -24,7 +24,8 @@ use crate::WorkspaceTabItem;
 use crate::app::app_paths::{AppRootPathInputs, AppRootPaths, resolve_app_root_paths};
 use crate::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
-    RedbAssetCatalogStore, asset_tree_to_catalog, catalog_to_asset_tree,
+    RedbAssetCatalogStore, asset_tree_to_catalog, asset_trees_to_catalog,
+    catalog_to_asset_tree, catalog_to_asset_trees,
 };
 use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::runtime_profile::AppRuntimeProfile;
@@ -92,7 +93,8 @@ use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descriptor_for};
 use crate::shell::tabs::WorkspaceTab;
 use crate::shell::view_model::{
-    AssetModalState, AssetSshConnectionDraft, RightPanelView, ShellViewModel, SshModalAction,
+    AssetModalState, AssetSshConnectionDraft, RightPanelView, ShellViewModel, SnippetActivation,
+    SnippetCreateAction, SshModalAction,
 };
 use crate::theme::ThemeMode;
 use russh::keys::PublicKey;
@@ -595,6 +597,39 @@ fn sync_assets_context_menu_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_context_menu_feedback_text(state.context_menu_feedback_text.clone().into());
 }
 
+fn clear_asset_snippet_modal_fields(window: &AppWindow) {
+    window.set_asset_snippet_modal_name("".into());
+    window.set_asset_snippet_modal_script("".into());
+    window.set_asset_snippet_modal_package("".into());
+    window.set_asset_snippet_package_modal_name("".into());
+}
+
+fn clear_asset_ssh_modal_fields(window: &AppWindow) {
+    window.set_asset_ssh_modal_name("".into());
+    window.set_asset_ssh_modal_host("".into());
+    window.set_asset_ssh_modal_user("".into());
+    window.set_asset_ssh_modal_port("22".into());
+    window.set_asset_ssh_modal_auth_method("password".into());
+    window.set_asset_ssh_modal_private_key_source("content".into());
+    window.set_asset_ssh_modal_password("".into());
+    window.set_asset_ssh_modal_private_key_content("".into());
+    window.set_asset_ssh_modal_private_key_path("".into());
+    window.set_asset_ssh_modal_passphrase("".into());
+    window.set_asset_ssh_modal_password_visible(false);
+    window.set_asset_ssh_modal_remark("".into());
+    window.set_asset_ssh_modal_environment("".into());
+    window.set_asset_ssh_modal_proxy_type("none".into());
+    window.set_asset_ssh_modal_proxy_socks5_host("".into());
+    window.set_asset_ssh_modal_proxy_socks5_port("".into());
+    window.set_asset_ssh_modal_proxy_socks5_username("".into());
+    window.set_asset_ssh_modal_proxy_socks5_password("".into());
+    window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
+    window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
+    sync_ssh_proxy_target_options(window, Vec::new());
+    window.set_asset_ssh_modal_proxy_ssh_selected_label("".into());
+    window.set_asset_ssh_modal_proxy_method("".into());
+}
+
 fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
     match &state.asset_modal_state {
         Some(AssetModalState::NewFolder { draft_name, .. }) => {
@@ -609,6 +644,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_feedback_state("idle".into());
             window.set_asset_ssh_modal_feedback_message("".into());
             window.set_asset_folder_modal_name(draft_name.clone().into());
+            clear_asset_snippet_modal_fields(window);
             window.set_asset_rename_modal_open(false);
             window.set_asset_rename_modal_name("".into());
             window.set_asset_rename_modal_validation_message("".into());
@@ -616,29 +652,57 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_delete_confirm_modal_open(false);
             window.set_asset_delete_confirm_target_label("".into());
             window.set_asset_delete_confirm_descendant_count(0);
-            window.set_asset_ssh_modal_name("".into());
-            window.set_asset_ssh_modal_host("".into());
-            window.set_asset_ssh_modal_user("".into());
-            window.set_asset_ssh_modal_port("22".into());
-            window.set_asset_ssh_modal_auth_method("password".into());
-            window.set_asset_ssh_modal_private_key_source("content".into());
-            window.set_asset_ssh_modal_password("".into());
-            window.set_asset_ssh_modal_private_key_content("".into());
-            window.set_asset_ssh_modal_private_key_path("".into());
-            window.set_asset_ssh_modal_passphrase("".into());
-            window.set_asset_ssh_modal_password_visible(false);
-            window.set_asset_ssh_modal_remark("".into());
-            window.set_asset_ssh_modal_environment("".into());
-            window.set_asset_ssh_modal_proxy_type("none".into());
-            window.set_asset_ssh_modal_proxy_socks5_host("".into());
-            window.set_asset_ssh_modal_proxy_socks5_port("".into());
-            window.set_asset_ssh_modal_proxy_socks5_username("".into());
-            window.set_asset_ssh_modal_proxy_socks5_password("".into());
-            window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
-            window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
-            sync_ssh_proxy_target_options(window, Vec::new());
-            window.set_asset_ssh_modal_proxy_ssh_selected_label("".into());
-            window.set_asset_ssh_modal_proxy_method("".into());
+            clear_asset_ssh_modal_fields(window);
+        }
+        Some(AssetModalState::NewSnippet { draft, .. }) => {
+            window.set_asset_modal_open(true);
+            window.set_asset_modal_kind("new-snippet".into());
+            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
+            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
+            window.set_asset_modal_validation_message(
+                state.asset_create_modal_validation_message().into(),
+            );
+            window.set_asset_ssh_modal_connect_family_enabled(false);
+            window.set_asset_ssh_modal_feedback_state("idle".into());
+            window.set_asset_ssh_modal_feedback_message("".into());
+            window.set_asset_folder_modal_name("".into());
+            window.set_asset_snippet_modal_name(draft.name.clone().into());
+            window.set_asset_snippet_modal_script(draft.script.clone().into());
+            window.set_asset_snippet_modal_package(draft.package.clone().into());
+            window.set_asset_snippet_package_modal_name("".into());
+            window.set_asset_rename_modal_open(false);
+            window.set_asset_rename_modal_name("".into());
+            window.set_asset_rename_modal_validation_message("".into());
+            window.set_asset_rename_modal_can_confirm(false);
+            window.set_asset_delete_confirm_modal_open(false);
+            window.set_asset_delete_confirm_target_label("".into());
+            window.set_asset_delete_confirm_descendant_count(0);
+            clear_asset_ssh_modal_fields(window);
+        }
+        Some(AssetModalState::NewSnippetPackage { draft_name, .. }) => {
+            window.set_asset_modal_open(true);
+            window.set_asset_modal_kind("new-snippet-package".into());
+            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
+            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
+            window.set_asset_modal_validation_message(
+                state.asset_create_modal_validation_message().into(),
+            );
+            window.set_asset_ssh_modal_connect_family_enabled(false);
+            window.set_asset_ssh_modal_feedback_state("idle".into());
+            window.set_asset_ssh_modal_feedback_message("".into());
+            window.set_asset_folder_modal_name("".into());
+            window.set_asset_snippet_modal_name("".into());
+            window.set_asset_snippet_modal_script("".into());
+            window.set_asset_snippet_modal_package("".into());
+            window.set_asset_snippet_package_modal_name(draft_name.clone().into());
+            window.set_asset_rename_modal_open(false);
+            window.set_asset_rename_modal_name("".into());
+            window.set_asset_rename_modal_validation_message("".into());
+            window.set_asset_rename_modal_can_confirm(false);
+            window.set_asset_delete_confirm_modal_open(false);
+            window.set_asset_delete_confirm_target_label("".into());
+            window.set_asset_delete_confirm_descendant_count(0);
+            clear_asset_ssh_modal_fields(window);
         }
         Some(AssetModalState::NewSshConnection {
             draft,
@@ -660,6 +724,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
                 state.asset_create_modal_validation_message().into(),
             );
             window.set_asset_folder_modal_name("".into());
+            clear_asset_snippet_modal_fields(window);
             window.set_asset_rename_modal_open(false);
             window.set_asset_rename_modal_name("".into());
             window.set_asset_rename_modal_validation_message("".into());
@@ -715,6 +780,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_feedback_state("idle".into());
             window.set_asset_ssh_modal_feedback_message("".into());
             window.set_asset_folder_modal_name("".into());
+            clear_asset_snippet_modal_fields(window);
             window.set_asset_rename_modal_open(true);
             window.set_asset_rename_modal_name(draft_name.clone().into());
             window.set_asset_rename_modal_validation_message(
@@ -724,29 +790,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_delete_confirm_modal_open(false);
             window.set_asset_delete_confirm_target_label("".into());
             window.set_asset_delete_confirm_descendant_count(0);
-            window.set_asset_ssh_modal_name("".into());
-            window.set_asset_ssh_modal_host("".into());
-            window.set_asset_ssh_modal_user("".into());
-            window.set_asset_ssh_modal_port("22".into());
-            window.set_asset_ssh_modal_auth_method("password".into());
-            window.set_asset_ssh_modal_private_key_source("content".into());
-            window.set_asset_ssh_modal_password("".into());
-            window.set_asset_ssh_modal_private_key_content("".into());
-            window.set_asset_ssh_modal_private_key_path("".into());
-            window.set_asset_ssh_modal_passphrase("".into());
-            window.set_asset_ssh_modal_password_visible(false);
-            window.set_asset_ssh_modal_remark("".into());
-            window.set_asset_ssh_modal_environment("".into());
-            window.set_asset_ssh_modal_proxy_type("none".into());
-            window.set_asset_ssh_modal_proxy_socks5_host("".into());
-            window.set_asset_ssh_modal_proxy_socks5_port("".into());
-            window.set_asset_ssh_modal_proxy_socks5_username("".into());
-            window.set_asset_ssh_modal_proxy_socks5_password("".into());
-            window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
-            window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
-            sync_ssh_proxy_target_options(window, Vec::new());
-            window.set_asset_ssh_modal_proxy_ssh_selected_label("".into());
-            window.set_asset_ssh_modal_proxy_method("".into());
+            clear_asset_ssh_modal_fields(window);
         }
         Some(AssetModalState::DeleteAssetConfirm {
             label,
@@ -762,6 +806,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_feedback_state("idle".into());
             window.set_asset_ssh_modal_feedback_message("".into());
             window.set_asset_folder_modal_name("".into());
+            clear_asset_snippet_modal_fields(window);
             window.set_asset_rename_modal_open(false);
             window.set_asset_rename_modal_name("".into());
             window.set_asset_rename_modal_validation_message("".into());
@@ -769,29 +814,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_delete_confirm_modal_open(true);
             window.set_asset_delete_confirm_target_label(label.clone().into());
             window.set_asset_delete_confirm_descendant_count(*descendant_count as i32);
-            window.set_asset_ssh_modal_name("".into());
-            window.set_asset_ssh_modal_host("".into());
-            window.set_asset_ssh_modal_user("".into());
-            window.set_asset_ssh_modal_port("22".into());
-            window.set_asset_ssh_modal_auth_method("password".into());
-            window.set_asset_ssh_modal_private_key_source("content".into());
-            window.set_asset_ssh_modal_password("".into());
-            window.set_asset_ssh_modal_private_key_content("".into());
-            window.set_asset_ssh_modal_private_key_path("".into());
-            window.set_asset_ssh_modal_passphrase("".into());
-            window.set_asset_ssh_modal_password_visible(false);
-            window.set_asset_ssh_modal_remark("".into());
-            window.set_asset_ssh_modal_environment("".into());
-            window.set_asset_ssh_modal_proxy_type("none".into());
-            window.set_asset_ssh_modal_proxy_socks5_host("".into());
-            window.set_asset_ssh_modal_proxy_socks5_port("".into());
-            window.set_asset_ssh_modal_proxy_socks5_username("".into());
-            window.set_asset_ssh_modal_proxy_socks5_password("".into());
-            window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
-            window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
-            sync_ssh_proxy_target_options(window, Vec::new());
-            window.set_asset_ssh_modal_proxy_ssh_selected_label("".into());
-            window.set_asset_ssh_modal_proxy_method("".into());
+            clear_asset_ssh_modal_fields(window);
         }
         None => {
             window.set_asset_modal_open(false);
@@ -803,6 +826,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_ssh_modal_feedback_state("idle".into());
             window.set_asset_ssh_modal_feedback_message("".into());
             window.set_asset_folder_modal_name("".into());
+            clear_asset_snippet_modal_fields(window);
             window.set_asset_rename_modal_open(false);
             window.set_asset_rename_modal_name("".into());
             window.set_asset_rename_modal_validation_message("".into());
@@ -810,29 +834,7 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_delete_confirm_modal_open(false);
             window.set_asset_delete_confirm_target_label("".into());
             window.set_asset_delete_confirm_descendant_count(0);
-            window.set_asset_ssh_modal_name("".into());
-            window.set_asset_ssh_modal_host("".into());
-            window.set_asset_ssh_modal_user("".into());
-            window.set_asset_ssh_modal_port("22".into());
-            window.set_asset_ssh_modal_auth_method("password".into());
-            window.set_asset_ssh_modal_private_key_source("content".into());
-            window.set_asset_ssh_modal_password("".into());
-            window.set_asset_ssh_modal_private_key_content("".into());
-            window.set_asset_ssh_modal_private_key_path("".into());
-            window.set_asset_ssh_modal_passphrase("".into());
-            window.set_asset_ssh_modal_password_visible(false);
-            window.set_asset_ssh_modal_remark("".into());
-            window.set_asset_ssh_modal_environment("".into());
-            window.set_asset_ssh_modal_proxy_type("none".into());
-            window.set_asset_ssh_modal_proxy_socks5_host("".into());
-            window.set_asset_ssh_modal_proxy_socks5_port("".into());
-            window.set_asset_ssh_modal_proxy_socks5_username("".into());
-            window.set_asset_ssh_modal_proxy_socks5_password("".into());
-            window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
-            window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
-            sync_ssh_proxy_target_options(window, Vec::new());
-            window.set_asset_ssh_modal_proxy_ssh_selected_label("".into());
-            window.set_asset_ssh_modal_proxy_method("".into());
+            clear_asset_ssh_modal_fields(window);
         }
     }
 }
@@ -903,10 +905,53 @@ fn schedule_asset_modal_focus(window: &AppWindow) {
     });
 }
 
-fn parse_context_target_kind(value: &str) -> ContextTargetKind {
+fn open_pending_snippet_create_modal(state: &mut ShellViewModel) {
+    match state.take_pending_snippet_create_action() {
+        Some(SnippetCreateAction::NewSnippet) => state.open_new_snippet_modal(None),
+        Some(SnippetCreateAction::NewPackage) => state.open_new_snippet_package_modal(),
+        None => {}
+    }
+}
+
+fn apply_pending_snippet_activation(
+    window: &AppWindow,
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+) {
+    let Some((snippet_id, mode)) = state.take_pending_snippet_activation() else {
+        return;
+    };
+    let Some(script) = state.snippet_script(&snippet_id).map(str::to_owned) else {
+        return;
+    };
+
+    match mode {
+        SnippetActivation::Paste => {
+            let Some(session_id) = active_workspace_session_uuid(state) else {
+                return;
+            };
+            forward_workspace_session_paste(state, bridge, session_id, &script);
+        }
+        SnippetActivation::Run => {
+            forward_active_workspace_text_input(state, bridge, &script);
+        }
+    }
+
+    refresh_active_workspace_projection(window, state, bridge);
+}
+
+fn parse_context_target_kind(
+    value: &str,
+    active_sidebar_destination: SidebarDestination,
+) -> ContextTargetKind {
     match value {
         "ssh" => ContextTargetKind::SshConnection,
         "folder" => ContextTargetKind::Folder,
+        "snippet-package" => ContextTargetKind::SnippetPackage,
+        "snippet" => ContextTargetKind::Snippet,
+        "blank" if active_sidebar_destination == SidebarDestination::Snippets => {
+            ContextTargetKind::SnippetsBlankArea
+        }
         _ => ContextTargetKind::BlankArea,
     }
 }
@@ -2052,7 +2097,7 @@ fn activate_asset(
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
     asset_id: &str,
 ) {
-    match state.console_asset_tree().kind(asset_id) {
+    match state.asset_kind(asset_id) {
         Some(crate::shell::assets::ConsoleAssetKind::Folder) => {
             state.toggle_folder_expanded(asset_id);
         }
@@ -2095,6 +2140,12 @@ fn activate_asset(
                     );
                 }
             }
+        }
+        Some(crate::shell::assets::ConsoleAssetKind::SnippetPackage) => {
+            state.toggle_folder_expanded(asset_id);
+        }
+        Some(crate::shell::assets::ConsoleAssetKind::Snippet) => {
+            state.begin_snippet_activation(asset_id, SnippetActivation::Paste);
         }
         None => {}
     }
@@ -2402,30 +2453,35 @@ fn update_context_menu_placement(window: &AppWindow, state: &mut ShellViewModel)
 }
 
 fn sync_console_assets(window: &AppWindow, state: &ShellViewModel) {
-    let rows = state
-        .visible_console_asset_rows()
-        .into_iter()
-        .map(|row| ConsoleAssetItem {
-            id: row.id.clone().into(),
-            kind: row.kind.id().into(),
-            label: row.label.clone().into(),
-            depth: row.depth as i32,
-            has_children: row.has_children,
-            expanded: row.expanded,
-            selected: state.selected_asset_ids.iter().any(|id| id == &row.id),
-            focused: state.focused_asset_id.as_deref() == Some(row.id.as_str()),
-            disclosure_state: match row.disclosure_state {
-                AssetDisclosureState::None => "none",
-                AssetDisclosureState::Collapsed => "collapsed",
-                AssetDisclosureState::Expanded => "expanded",
-            }
-            .into(),
-            path_hint: row.path_hint.clone().unwrap_or_default().into(),
-            compact_flat_mode: state.asset_view_mode.id() == "flat",
-        })
-        .collect::<Vec<_>>();
+    let project_rows = |rows: Vec<crate::shell::assets::VisibleAssetRow>| {
+        rows.into_iter()
+            .map(|row| ConsoleAssetItem {
+                id: row.id.clone().into(),
+                kind: row.kind.id().into(),
+                label: row.label.clone().into(),
+                depth: row.depth as i32,
+                has_children: row.has_children,
+                expanded: row.expanded,
+                selected: state.selected_asset_ids.iter().any(|id| id == &row.id),
+                focused: state.focused_asset_id.as_deref() == Some(row.id.as_str()),
+                disclosure_state: match row.disclosure_state {
+                    AssetDisclosureState::None => "none",
+                    AssetDisclosureState::Collapsed => "collapsed",
+                    AssetDisclosureState::Expanded => "expanded",
+                }
+                .into(),
+                path_hint: row.path_hint.clone().unwrap_or_default().into(),
+                compact_flat_mode: state.asset_view_mode.id() == "flat",
+            })
+            .collect::<Vec<_>>()
+    };
 
-    window.set_console_asset_items(ModelRc::new(VecModel::from(rows)));
+    window.set_console_asset_items(ModelRc::new(VecModel::from(project_rows(
+        state.visible_console_asset_rows(),
+    ))));
+    window.set_snippet_asset_items(ModelRc::new(VecModel::from(project_rows(
+        state.visible_snippet_rows(),
+    ))));
 }
 
 fn sync_workspace_tab_items(window: &AppWindow, state: &ShellViewModel) {
@@ -2735,7 +2791,10 @@ fn apply_vault_snapshot_to_shell(
     known_hosts_path: &std::path::Path,
 ) -> Result<()> {
     let applied = apply_vault_snapshot(snapshot, credential_store, known_hosts_path)?;
-    state.replace_console_asset_tree(applied.asset_tree);
+    let (console_tree, snippet_tree) =
+        catalog_to_asset_trees(&asset_tree_to_catalog(&applied.asset_tree));
+    state.replace_console_asset_tree(console_tree);
+    state.replace_snippet_asset_tree(snippet_tree);
     state.theme_mode = applied.ui_preferences.theme_mode;
     state.is_always_on_top = applied.ui_preferences.always_on_top;
     Ok(())
@@ -2755,6 +2814,7 @@ fn clear_vault_decrypted_state(
         }
     }
     state.replace_console_asset_tree(AssetTree::new());
+    state.replace_snippet_asset_tree(AssetTree::new());
     Ok(())
 }
 
@@ -2773,7 +2833,7 @@ fn create_local_vault_from_shell_state(
     let wrapped_vault_key = serde_json::to_string(&wrap_vault_key(password, &kdf, &vault_key)?)
         .context("failed to encode wrapped vault key")?;
     let snapshot = export_vault_snapshot(
-        state.console_asset_tree(),
+        &combined_asset_tree(state),
         credential_store,
         vault.known_hosts_path().as_path(),
         sync_preferences_for_bundle(&bundle, None),
@@ -2870,7 +2930,7 @@ fn sync_local_vault(
         .map(|remote| vault.provider_factory.build_provider(remote))
         .collect::<Result<Vec<_>>>()?;
     let snapshot = export_vault_snapshot(
-        state.console_asset_tree(),
+        &combined_asset_tree(state),
         credential_store,
         known_hosts_path.as_path(),
         sync_preferences_for_bundle(&local_state.bundle, None),
@@ -3024,8 +3084,15 @@ fn load_asset_catalog(repo: &dyn AssetCatalogRepository) -> PersistedAssetCatalo
     }
 }
 
+fn combined_asset_tree(state: &ShellViewModel) -> AssetTree {
+    catalog_to_asset_tree(&asset_trees_to_catalog(
+        state.console_asset_tree(),
+        state.snippet_asset_tree(),
+    ))
+}
+
 fn save_asset_catalog(repo: &dyn AssetCatalogRepository, state: &ShellViewModel) -> Result<()> {
-    let catalog = asset_tree_to_catalog(state.console_asset_tree());
+    let catalog = asset_trees_to_catalog(state.console_asset_tree(), state.snippet_asset_tree());
     repo.save(&catalog)
 }
 
@@ -3272,8 +3339,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let prefs = load_ui_preferences(&store);
     let mut initial_view_model = ShellViewModel::default();
     if let Some(repo) = asset_repo.as_ref() {
-        initial_view_model
-            .replace_console_asset_tree(catalog_to_asset_tree(&load_asset_catalog(repo.as_ref())));
+        let (console_tree, snippet_tree) = catalog_to_asset_trees(&load_asset_catalog(repo.as_ref()));
+        initial_view_model.replace_console_asset_tree(console_tree);
+        initial_view_model.replace_snippet_asset_tree(snippet_tree);
     }
     initial_view_model.theme_mode = prefs.theme_mode;
     initial_view_model.is_always_on_top = prefs.always_on_top;
@@ -3703,7 +3771,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let mut state = state.borrow_mut();
         let was_modal_open = state.asset_modal_state.is_some();
         state.dismiss_empty_asset_search_on_shell_interaction();
-        state.handle_assets_create_action(action_id.as_str());
+        if state.active_sidebar_destination == SidebarDestination::Snippets {
+            state.handle_snippet_create_action(action_id.as_str());
+            open_pending_snippet_create_modal(&mut state);
+        } else {
+            state.handle_assets_create_action(action_id.as_str());
+        }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
         sync_asset_modal_state(&window, &state);
@@ -3787,6 +3860,24 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.update_new_folder_modal_name(value.to_string());
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_asset_snippet_modal_draft_changed(move |field, value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.update_snippet_modal_field(field.as_str(), value.to_string());
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_asset_snippet_package_modal_name_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.update_snippet_package_modal_name(value.to_string());
         sync_asset_modal_state(&window, &state);
     });
 
@@ -4325,10 +4416,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
+    let session_runtime_guard_ref = session_runtime_guard.clone();
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let asset_click_tracker_ref = Rc::clone(&asset_click_tracker);
     let pending_double_click_activation_ref = Rc::clone(&pending_double_click_activation);
     window.on_asset_selected(move |item_id| {
+        let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.select_asset(item_id.as_str());
@@ -4343,6 +4436,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 session_bridge_ref.as_deref(),
                 &pending_host_key_approval_ref,
                 item_id.as_str(),
+            );
+            apply_pending_snippet_activation(
+                &window,
+                &mut state,
+                session_bridge_ref.as_deref(),
             );
         }
         sync_assets_toolbar_state(&window, &state);
@@ -4378,6 +4476,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 &pending_host_key_approval_ref,
                 item_id.as_str(),
             );
+            apply_pending_snippet_activation(&window, &mut state, session_bridge_ref.as_deref());
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
@@ -4401,9 +4500,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_asset_context_menu_requested(move |target_id, target_kind, anchor_x, anchor_y| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let active_sidebar_destination = state.active_sidebar_destination;
         state.dismiss_empty_asset_search_on_shell_interaction();
         state.open_context_menu_for_target(
-            parse_context_target_kind(target_kind.as_str()),
+            parse_context_target_kind(target_kind.as_str(), active_sidebar_destination),
             if target_id.is_empty() {
                 None
             } else {
@@ -4465,6 +4565,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             }
         }
 
+        apply_pending_snippet_activation(&window, &mut state, session_bridge_ref.as_deref());
         hydrate_edit_ssh_modal_secret_from_store(&mut state, credential_store_ref.as_ref());
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);

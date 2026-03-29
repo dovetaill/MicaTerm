@@ -15,11 +15,13 @@ use mica_term::AppWindow;
 use mica_term::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
     PersistedAssetKind, PersistedAssetNode, PersistedAssetPayload, PersistedAssetSocks5ProxySpec,
-    PersistedAssetSshProxySpec, PersistedSshConnectionSpec, catalog_to_asset_tree,
+    PersistedAssetSshProxySpec, PersistedSnippetSpec, PersistedSshConnectionSpec,
+    catalog_to_asset_tree,
 };
 use mica_term::app::bootstrap::{
     ImportedPrivateKey, PrivateKeyImporter, app_title,
     build_shared_app_credential_store_for_paths,
+    bind_top_status_bar_with_store,
     bind_top_status_bar_with_injected_services_and_vault_runtime,
     bind_top_status_bar_with_store_and_effects_and_asset_repo,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store,
@@ -863,6 +865,104 @@ fn bind_with_vault_runtime(
     );
 }
 
+#[test]
+fn snippet_create_modal_projects_runtime_rows_through_window_callbacks() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_sidebar_destination_selected("snippets".into());
+    app.invoke_assets_create_action_selected("new-snippet".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-snippet");
+
+    app.invoke_asset_snippet_modal_draft_changed("name".into(), "Deploy prod".into());
+    app.invoke_asset_snippet_modal_draft_changed(
+        "script".into(),
+        "kubectl rollout restart deploy/api".into(),
+    );
+    app.invoke_confirm_asset_modal_requested();
+
+    let rows = app.get_snippet_asset_items();
+    assert_eq!(rows.row_count(), 1);
+    assert_eq!(rows.row_data(0).unwrap().kind.as_str(), "snippet");
+    assert_eq!(rows.row_data(0).unwrap().label.as_str(), "Deploy prod");
+    assert_eq!(app.get_console_asset_items().row_count(), 0);
+}
+
+#[test]
+fn snippet_edit_and_delete_actions_route_through_bootstrap_callbacks() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    let snippet_id =
+        create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+
+    app.invoke_asset_context_menu_requested(snippet_id.clone().into(), "snippet".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-snippet".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-snippet");
+    assert_eq!(app.get_asset_snippet_modal_name().as_str(), "Deploy prod");
+    assert_eq!(
+        app.get_asset_snippet_modal_script().as_str(),
+        "kubectl rollout restart deploy/api"
+    );
+
+    app.invoke_asset_snippet_modal_draft_changed("name".into(), "Restart api".into());
+    app.invoke_asset_snippet_modal_draft_changed(
+        "script".into(),
+        "kubectl rollout restart deploy/web".into(),
+    );
+    app.invoke_confirm_asset_modal_requested();
+
+    let rows = app.get_snippet_asset_items();
+    assert_eq!(rows.row_count(), 1);
+    assert_eq!(rows.row_data(0).unwrap().label.as_str(), "Restart api");
+
+    app.invoke_asset_context_menu_requested(snippet_id.into(), "snippet".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("delete-snippet".into());
+
+    assert!(app.get_asset_delete_confirm_modal_open());
+    assert_eq!(
+        app.get_asset_delete_confirm_target_label().as_str(),
+        "Restart api"
+    );
+
+    app.invoke_confirm_delete_asset_requested();
+    assert_eq!(app.get_snippet_asset_items().row_count(), 0);
+}
+
+#[test]
+fn snippet_double_click_activation_defaults_to_paste() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(PasteProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    let snippet_id =
+        create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+
+    app.invoke_asset_selected(snippet_id.clone().into());
+    app.invoke_asset_selected(snippet_id.into());
+    flush_runtime_projection();
+
+    let visible_lines = app.get_workspace_session_visible_lines();
+    assert_eq!(visible_lines.row_count(), 2);
+    assert_eq!(
+        visible_lines.row_data(1).unwrap().as_str(),
+        "paste kubectl rollout restart deploy/api"
+    );
+}
+
 fn sample_known_hosts_path(label: &str) -> std::path::PathBuf {
     let mut path = std::env::temp_dir();
     path.push(format!(
@@ -1054,6 +1154,26 @@ fn create_root_ssh(app: &AppWindow, name: &str, host: &str) -> String {
         .expect("saved ssh asset")
         .id
         .to_string()
+}
+
+fn create_root_snippet(app: &AppWindow, name: &str, script: &str) -> String {
+    app.invoke_sidebar_destination_selected("snippets".into());
+    app.invoke_assets_create_action_selected("new-snippet".into());
+    app.invoke_asset_snippet_modal_draft_changed("name".into(), name.into());
+    app.invoke_asset_snippet_modal_draft_changed("script".into(), script.into());
+    app.invoke_confirm_asset_modal_requested();
+
+    app.get_snippet_asset_items()
+        .row_data(0)
+        .unwrap()
+        .id
+        .to_string()
+}
+
+fn flush_runtime_projection() {
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
 }
 
 #[test]
@@ -1271,6 +1391,47 @@ fn locking_vault_clears_decrypted_assets_and_secrets_from_memory() {
     assert!(credential_store.get_secret(&credential_ref).unwrap().is_none());
 }
 
+#[test]
+fn locking_and_unlocking_vault_round_trips_snippet_assets() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("snippet-lock");
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+        },
+    );
+
+    create_root_snippet(&app, "Restart API", "kubectl rollout restart deploy/api");
+    app.invoke_open_settings_panel_requested();
+    app.invoke_vault_create_requested("vault-pass".into());
+
+    assert_eq!(app.get_snippet_asset_items().row_count(), 1);
+
+    app.invoke_vault_lock_requested();
+    assert_eq!(app.get_vault_lock_state_label().as_str(), "Locked");
+    assert_eq!(app.get_snippet_asset_items().row_count(), 0);
+
+    app.invoke_vault_unlock_requested("vault-pass".into());
+    assert_eq!(app.get_vault_lock_state_label().as_str(), "Unlocked");
+    assert_eq!(app.get_snippet_asset_items().row_count(), 1);
+    assert_eq!(
+        app.get_snippet_asset_items()
+            .row_data(0)
+            .expect("snippet row after unlock")
+            .kind
+            .as_str(),
+        "snippet"
+    );
+}
+
 fn loaded_catalog_for_bootstrap() -> PersistedAssetCatalog {
     PersistedAssetCatalog {
         schema_version: ASSET_CATALOG_SCHEMA_VERSION,
@@ -1306,6 +1467,92 @@ fn loaded_catalog_for_bootstrap() -> PersistedAssetCatalog {
                         proxy: PersistedAssetSshProxySpec::None,
                         remark: String::new(),
                         credential_ref: None,
+                    }),
+                },
+            ),
+        ]),
+    }
+}
+
+fn loaded_catalog_with_snippets_for_bootstrap() -> PersistedAssetCatalog {
+    PersistedAssetCatalog {
+        schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+        root_ids: vec![
+            "folder-root".into(),
+            "ssh-root".into(),
+            "snippet-package-root".into(),
+            "snippet-root".into(),
+        ],
+        nodes: BTreeMap::from([
+            (
+                "folder-root".into(),
+                PersistedAssetNode {
+                    id: "folder-root".into(),
+                    parent_id: None,
+                    title: "Team".into(),
+                    kind: PersistedAssetKind::Folder,
+                    child_ids: Vec::new(),
+                    payload: PersistedAssetPayload::Folder,
+                },
+            ),
+            (
+                "ssh-root".into(),
+                PersistedAssetNode {
+                    id: "ssh-root".into(),
+                    parent_id: None,
+                    title: "Gateway".into(),
+                    kind: PersistedAssetKind::SshConnection,
+                    child_ids: Vec::new(),
+                    payload: PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                        host: "gateway.example.com".into(),
+                        user: "ops".into(),
+                        port: "2022".into(),
+                        auth_method: "password".into(),
+                        private_key_source: "content".into(),
+                        private_key_path: String::new(),
+                        environment: "prod".into(),
+                        proxy: PersistedAssetSshProxySpec::None,
+                        remark: String::new(),
+                        credential_ref: None,
+                    }),
+                },
+            ),
+            (
+                "snippet-package-root".into(),
+                PersistedAssetNode {
+                    id: "snippet-package-root".into(),
+                    parent_id: None,
+                    title: "Deploy".into(),
+                    kind: PersistedAssetKind::SnippetPackage,
+                    child_ids: vec!["snippet-child".into()],
+                    payload: PersistedAssetPayload::SnippetPackage,
+                },
+            ),
+            (
+                "snippet-child".into(),
+                PersistedAssetNode {
+                    id: "snippet-child".into(),
+                    parent_id: Some("snippet-package-root".into()),
+                    title: "Deploy prod".into(),
+                    kind: PersistedAssetKind::Snippet,
+                    child_ids: Vec::new(),
+                    payload: PersistedAssetPayload::Snippet(PersistedSnippetSpec {
+                        script: "kubectl apply -f prod.yaml".into(),
+                        package_id: Some("snippet-package-root".into()),
+                    }),
+                },
+            ),
+            (
+                "snippet-root".into(),
+                PersistedAssetNode {
+                    id: "snippet-root".into(),
+                    parent_id: None,
+                    title: "Restart API".into(),
+                    kind: PersistedAssetKind::Snippet,
+                    child_ids: Vec::new(),
+                    payload: PersistedAssetPayload::Snippet(PersistedSnippetSpec {
+                        script: "kubectl rollout restart deploy/api".into(),
+                        package_id: None,
                     }),
                 },
             ),
@@ -1654,6 +1901,41 @@ fn bootstrap_loads_catalog_before_first_asset_projection_sync() {
     let state = repo_state.borrow();
     assert_eq!(state.load_calls, 1);
     assert!(state.save_attempts.is_empty());
+}
+
+#[test]
+fn bootstrap_loads_snippets_from_repository_without_leaking_them_into_console_projection() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_catalog_with_snippets_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+
+    bind_with_fake_sessions(&app, Some(asset_repo));
+
+    assert_eq!(repo_state.borrow().load_calls, 1);
+    assert_eq!(app.get_console_asset_items().row_count(), 2);
+    assert_eq!(app.get_snippet_asset_items().row_count(), 2);
+    assert_eq!(
+        app.get_console_asset_items()
+            .row_data(0)
+            .expect("console folder row")
+            .kind
+            .as_str(),
+        "folder"
+    );
+    assert_eq!(
+        app.get_snippet_asset_items()
+            .row_data(0)
+            .expect("snippet package row")
+            .kind
+            .as_str(),
+        "snippet-package"
+    );
 }
 
 #[test]
@@ -2493,6 +2775,45 @@ fn create_rename_delete_and_ssh_edit_trigger_repository_save() {
     app.invoke_assets_context_menu_action_invoked("delete-asset".into());
     app.invoke_confirm_delete_asset_requested();
     assert_eq!(repo_state.borrow().save_attempts.len(), 4);
+}
+
+#[test]
+fn snippet_create_persists_into_repository_catalog_alongside_console_assets() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+
+    bind_with_fake_sessions(&app, Some(asset_repo));
+
+    app.invoke_sidebar_destination_selected("snippets".into());
+    app.invoke_assets_create_action_selected("new-snippet".into());
+    app.invoke_asset_snippet_modal_draft_changed("name".into(), "Restart API".into());
+    app.invoke_asset_snippet_modal_draft_changed(
+        "script".into(),
+        "kubectl rollout restart deploy/api".into(),
+    );
+    app.invoke_confirm_asset_modal_requested();
+
+    let save_attempts = &repo_state.borrow().save_attempts;
+    assert_eq!(save_attempts.len(), 1);
+    assert!(
+        save_attempts[0]
+            .nodes
+            .values()
+            .any(|node| node.kind == PersistedAssetKind::Snippet)
+    );
+    assert!(
+        save_attempts[0]
+            .nodes
+            .values()
+            .any(|node| node.kind == PersistedAssetKind::Folder)
+    );
 }
 
 #[test]

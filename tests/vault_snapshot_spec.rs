@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+use mica_term::app::assets_catalog::asset_tree_to_vault_catalog;
 use mica_term::app::ssh::credentials::{
     CredentialStore, MemoryCredentialStore, StoredSshSecretBundle, persist_secret_bundle,
 };
@@ -9,11 +10,13 @@ use mica_term::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService};
 use mica_term::app::ui_preferences::UiPreferences;
 use mica_term::app::vault::snapshot::{apply_vault_snapshot, export_vault_snapshot};
 use mica_term::app::vault::model::{
-    SnapshotSyncPreferences, SnapshotUiPreferences, VaultAssetCatalog, VaultAssetKind,
-    VaultAssetNode, VaultAssetPayload, VaultKnownHostEntry, VaultSnapshot,
+    SnapshotSyncPreferences, SnapshotUiPreferences, VaultAssetCatalog, VaultAssetDomain,
+    VaultAssetKind, VaultAssetNode, VaultAssetPayload, VaultKnownHostEntry, VaultSnapshot,
+    VaultSnippetSpec,
 };
 use mica_term::shell::assets::{
-    AssetNodePayload, AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, ConsoleAssetKind,
+    AssetDomain, AssetNodePayload, AssetSnippetSpec, AssetSshConnectionSpec, AssetSshProxySpec,
+    AssetTree, ConsoleAssetKind,
 };
 use mica_term::theme::ThemeMode;
 use russh::keys::{HashAlg, PublicKey};
@@ -241,6 +244,142 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_pre
         .expect("check imported known_hosts entry");
     assert!(matches!(result, KnownHostCheck::Trusted));
     assert_eq!(public_key.fingerprint(HashAlg::Sha256).to_string().len() > 0, true);
+
+    let _ = fs::remove_file(known_hosts_path);
+}
+
+#[test]
+fn vault_snapshot_catalog_preserves_snippets_alongside_console_assets() {
+    let store = MemoryCredentialStore::default();
+    let known_hosts_path = temp_known_hosts_path("snippets");
+    let snapshot = VaultSnapshot {
+        schema_version: 1,
+        asset_catalog: VaultAssetCatalog {
+            root_ids: vec![
+                "folder-prod".into(),
+                "snippet-package-1".into(),
+                "snippet-root".into(),
+            ],
+            nodes: BTreeMap::from([
+                (
+                    "folder-prod".into(),
+                    VaultAssetNode {
+                        id: "folder-prod".into(),
+                        parent_id: None,
+                        title: "Production".into(),
+                        kind: VaultAssetKind::Folder,
+                        child_ids: vec!["asset-gateway".into()],
+                        payload: VaultAssetPayload::Folder,
+                    },
+                ),
+                (
+                    "asset-gateway".into(),
+                    VaultAssetNode {
+                        id: "asset-gateway".into(),
+                        parent_id: Some("folder-prod".into()),
+                        title: "Gateway".into(),
+                        kind: VaultAssetKind::SshConnection,
+                        child_ids: Vec::new(),
+                        payload: VaultAssetPayload::SshConnection(Box::new(
+                            mica_term::app::vault::model::VaultSshConnectionSpec {
+                                host: "prod.example.com".into(),
+                                user: "deploy".into(),
+                                port: "22".into(),
+                                auth_method: "private-key".into(),
+                                private_key_source: "content".into(),
+                                private_key_path: String::new(),
+                                environment: "prod".into(),
+                                proxy: mica_term::app::vault::model::VaultSshProxySpec::None,
+                                remark: String::new(),
+                                credential_ref: None,
+                            },
+                        )),
+                    },
+                ),
+                (
+                    "snippet-package-1".into(),
+                    VaultAssetNode {
+                        id: "snippet-package-1".into(),
+                        parent_id: None,
+                        title: "Deploy".into(),
+                        kind: VaultAssetKind::SnippetPackage,
+                        child_ids: vec!["snippet-child".into()],
+                        payload: VaultAssetPayload::SnippetPackage,
+                    },
+                ),
+                (
+                    "snippet-child".into(),
+                    VaultAssetNode {
+                        id: "snippet-child".into(),
+                        parent_id: Some("snippet-package-1".into()),
+                        title: "Deploy prod".into(),
+                        kind: VaultAssetKind::Snippet,
+                        child_ids: Vec::new(),
+                        payload: VaultAssetPayload::Snippet(VaultSnippetSpec {
+                            script: "kubectl apply -f prod.yaml".into(),
+                            package_id: Some("snippet-package-1".into()),
+                        }),
+                    },
+                ),
+                (
+                    "snippet-root".into(),
+                    VaultAssetNode {
+                        id: "snippet-root".into(),
+                        parent_id: None,
+                        title: "Restart API".into(),
+                        kind: VaultAssetKind::Snippet,
+                        child_ids: Vec::new(),
+                        payload: VaultAssetPayload::Snippet(VaultSnippetSpec {
+                            script: "kubectl rollout restart deploy/api".into(),
+                            package_id: None,
+                        }),
+                    },
+                ),
+            ]),
+        },
+        ssh_secret_bundles: BTreeMap::new(),
+        known_hosts: Vec::new(),
+        sync_preferences: SnapshotSyncPreferences::default(),
+        ui_preferences: SnapshotUiPreferences::default(),
+    };
+
+    let applied = apply_vault_snapshot(&snapshot, &store, &known_hosts_path).expect("apply");
+    let package_node = applied
+        .asset_tree
+        .node("snippet-package-1")
+        .expect("snippet package");
+
+    assert_eq!(package_node.kind, ConsoleAssetKind::SnippetPackage);
+    assert_eq!(package_node.kind.domain(), AssetDomain::Snippets);
+    assert_eq!(
+        applied.asset_tree.snippet_spec("snippet-child"),
+        Some(&AssetSnippetSpec {
+            script: "kubectl apply -f prod.yaml".into(),
+            package_id: Some("snippet-package-1".into()),
+        })
+    );
+
+    let round_tripped = asset_tree_to_vault_catalog(&applied.asset_tree);
+    assert_eq!(
+        round_tripped
+            .nodes
+            .get("snippet-root")
+            .expect("root snippet")
+            .kind
+            .domain(),
+        VaultAssetDomain::Snippets
+    );
+    assert_eq!(
+        round_tripped
+            .nodes
+            .get("snippet-root")
+            .expect("root snippet")
+            .payload,
+        VaultAssetPayload::Snippet(VaultSnippetSpec {
+            script: "kubectl rollout restart deploy/api".into(),
+            package_id: None,
+        })
+    );
 
     let _ = fs::remove_file(known_hosts_path);
 }
