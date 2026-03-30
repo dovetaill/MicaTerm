@@ -82,21 +82,13 @@ fn atlas_renderer_loads_sarasa_metrics_and_emits_a_surface_image() -> Result<()>
     let metrics = renderer.metrics();
     let frame = renderer.render(&surface)?;
 
-    assert!(
-        metrics.cell_width >= 9,
-        "terminal cell width should remain readable for the regular Sarasa atlas"
+    assert_eq!(
+        metrics.cell_width, 8,
+        "software atlas should stop forcing the bundled 7px Sarasa advance into a visibly loose 9px cell"
     );
-    assert!(
-        metrics.cell_height >= 21,
-        "terminal cell height should stay compact while leaving enough room for a sharper regular-weight atlas"
-    );
-    assert!(
-        metrics.cell_width <= 10,
-        "terminal cell width should stay compact so the terminal grid does not read too loose"
-    );
-    assert!(
-        metrics.cell_height <= 22,
-        "terminal cell height should tighten compared to the looser semi-bold tuning"
+    assert_eq!(
+        metrics.cell_height, 20,
+        "software atlas should tighten the bundled terminal line box instead of holding onto the older 22px minimum"
     );
     assert!(
         metrics.baseline_px > 0 && metrics.baseline_px < metrics.cell_height,

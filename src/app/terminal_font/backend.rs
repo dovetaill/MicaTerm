@@ -15,7 +15,7 @@ impl Default for FontRequest {
     fn default() -> Self {
         Self {
             family_name: None,
-            px_size: 17.5,
+            px_size: 18.0,
         }
     }
 }
