@@ -54,7 +54,6 @@ use crate::app::ssh::session_manager::{
     SessionState,
 };
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
-use crate::app::terminal_theme::preset_for_theme_mode;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
@@ -2890,16 +2889,10 @@ fn slint_color_from_rgba(rgba: u32) -> Color {
 }
 
 fn terminal_selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
-    let (red, green, blue, alpha) = preset_for_theme_mode(theme_mode).selection_bg;
-    let boosted_alpha = match theme_mode {
-        ThemeMode::Dark => (alpha * 1.35).clamp(0.0, 0.42),
-        ThemeMode::Light => (alpha * 1.5).clamp(0.0, 0.28),
-    };
-
-    ((boosted_alpha * 255.0).round() as u32) << 24
-        | (u32::from(red) << 16)
-        | (u32::from(green) << 8)
-        | u32::from(blue)
+    match theme_mode {
+        ThemeMode::Dark => 0xff25_63eb,
+        ThemeMode::Light => 0xff1d_4ed8,
+    }
 }
 
 fn active_workspace_terminal_selection(window: &AppWindow) -> Option<TerminalAtlasSelection> {

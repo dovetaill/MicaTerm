@@ -4039,6 +4039,12 @@ fn workspace_terminal_selection_updates_surface_image() {
         .get_workspace_session_surface_image()
         .to_rgba8()
         .expect("rgba image after selection");
+    let cell_width = after.width() / app.get_workspace_session_cols() as u32;
+    let cell_height = after.height() / app.get_workspace_session_rows() as u32;
+    let selected_space_x = 7 * cell_width + (cell_width / 2);
+    let selected_space_y = cell_height / 2;
+    let selected_pixel =
+        after.as_slice()[(selected_space_y * after.width() + selected_space_x) as usize];
 
     assert!(
         app.get_workspace_session_selection_active(),
@@ -4048,6 +4054,12 @@ fn workspace_terminal_selection_updates_surface_image() {
         before.as_slice(),
         after.as_slice(),
         "terminal selection should visibly repaint the atlas surface image"
+    );
+    assert!(
+        selected_pixel.b >= 150
+            && selected_pixel.b > selected_pixel.g + 35
+            && selected_pixel.b > selected_pixel.r + 70,
+        "selected blank cells should render with an obvious blue highlight, not a barely visible tint"
     );
 }
 
