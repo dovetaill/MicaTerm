@@ -21,8 +21,8 @@ fn startup_path_drops_legacy_terminal_font_imports() {
 #[test]
 fn bundled_terminal_font_contract_switches_to_sarasa_unhinted_only() {
     assert!(
-        Path::new("ui/fonts/SarasaTermSCNerd-Unhinted.ttf").exists(),
-        "the bundled terminal font should switch to SarasaTermSCNerd-Unhinted"
+        Path::new("ui/fonts/SarasaTermSCNerd-Regular.ttf").exists(),
+        "the bundled terminal font should switch to the regular Sarasa atlas face"
     );
     assert!(
         !Path::new("ui/fonts/IosevkaTerm-Regular.ttf").exists(),
@@ -52,7 +52,8 @@ fn terminal_host_drops_maple_and_legacy_font_stack_strings() {
 #[test]
 fn atlas_renderer_dependency_contract_uses_ab_glyph_instead_of_fontdue() {
     let cargo_toml = fs::read_to_string("Cargo.toml").expect("read Cargo.toml");
-    let atlas_source = fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");
+    let atlas_source =
+        fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");
 
     assert!(
         cargo_toml.contains("ab_glyph"),

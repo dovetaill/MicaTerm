@@ -1,7 +1,7 @@
 //! Renders the active terminal grid into a single image surface using a Sarasa-backed sprite atlas.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use ab_glyph::{Font, FontArc, GlyphId, PxScale, ScaleFont, point};
@@ -10,15 +10,15 @@ use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
 
-const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-SemiBold-Unhinted.ttf");
-const TERMINAL_FONT_SIZE_PX: f32 = 18.0;
+const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-Regular.ttf");
+const TERMINAL_FONT_SIZE_PX: f32 = 17.5;
 const MIN_CELL_WIDTH_PX: u32 = 9;
 const CELL_HORIZONTAL_PADDING_PX: u32 = 0;
-const CELL_VERTICAL_PADDING_PX: u32 = 2;
-const GLYPH_COVERAGE_GAMMA: f32 = 0.76;
-const GLYPH_ALPHA_GAIN: f32 = 1.14;
-const ASCII_LEFT_INSET_PX: f32 = -0.35;
-const MIXED_LEFT_INSET_PX: f32 = -0.15;
+const CELL_VERTICAL_PADDING_PX: u32 = 0;
+const GLYPH_COVERAGE_GAMMA: f32 = 0.92;
+const GLYPH_ALPHA_GAIN: f32 = 1.06;
+const ASCII_LEFT_INSET_PX: f32 = 0.0;
+const MIXED_LEFT_INSET_PX: f32 = 0.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalAtlasMetrics {
@@ -146,7 +146,7 @@ impl TerminalAtlasRenderer {
         if resized {
             self.surface_width_px = width_px;
             self.surface_height_px = height_px;
-            self.pixels = vec![rgba8(surface.default_bg_rgba); (width_px * height_px) as usize];
+            self.pixels = vec![rgba8(surface.row_bg_even_rgba); (width_px * height_px) as usize];
             self.row_hashes = vec![0; surface.rows as usize];
         } else if self.row_hashes.len() != surface.rows as usize {
             self.row_hashes.resize(surface.rows as usize, 0);
@@ -160,6 +160,7 @@ impl TerminalAtlasRenderer {
         }
 
         for row in 0..surface.rows {
+            let row_bg_rgba = row_background_rgba(surface, row);
             let row_selection = selection.and_then(|value| value.row_bounds(row, surface.cols));
             let row_selection_overlay_rgba = if row_selection.is_some() {
                 selection_overlay_rgba
@@ -170,6 +171,7 @@ impl TerminalAtlasRenderer {
                 surface.cols,
                 surface.default_fg_rgba,
                 surface.default_bg_rgba,
+                row_bg_rgba,
                 row_selection,
                 row_selection_overlay_rgba,
                 row_cells[row as usize].as_slice(),
@@ -180,6 +182,7 @@ impl TerminalAtlasRenderer {
                     surface.cols,
                     surface.default_fg_rgba,
                     surface.default_bg_rgba,
+                    row_bg_rgba,
                     row_selection,
                     row_selection_overlay_rgba,
                     &row_cells[row as usize],
@@ -190,7 +193,9 @@ impl TerminalAtlasRenderer {
         }
 
         let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(width_px, height_px);
-        buffer.make_mut_slice().copy_from_slice(self.pixels.as_slice());
+        buffer
+            .make_mut_slice()
+            .copy_from_slice(self.pixels.as_slice());
 
         Ok(TerminalSurfaceFrame {
             image: Image::from_rgba8(buffer),
@@ -206,12 +211,13 @@ impl TerminalAtlasRenderer {
         cols: u32,
         default_fg_rgba: u32,
         default_bg_rgba: u32,
+        row_bg_rgba: u32,
         row_selection: Option<(u32, u32)>,
         selection_overlay_rgba: u32,
         cells: &[&TerminalCellState],
     ) {
         let row_y = row * self.metrics.cell_height;
-        let row_bg = rgba8(default_bg_rgba);
+        let row_bg = rgba8(row_bg_rgba);
         let default_fg = rgba8(default_fg_rgba);
         fill_rect(
             &mut self.pixels,
@@ -241,8 +247,14 @@ impl TerminalAtlasRenderer {
             let cell_x = cell.col * self.metrics.cell_width;
             let span = cell.width.max(1);
             let span_width_px = span * self.metrics.cell_width;
-            let selected = row_selection.is_some_and(|value| selection_overlaps_cell(value, cell.col, span));
-            let cell_bg = rgba8(cell.bg_rgba);
+            let selected =
+                row_selection.is_some_and(|value| selection_overlaps_cell(value, cell.col, span));
+            let cell_bg_rgba = if cell.bg_rgba == default_bg_rgba {
+                row_bg_rgba
+            } else {
+                cell.bg_rgba
+            };
+            let cell_bg = rgba8(cell_bg_rgba);
             let background = if selected {
                 composite_color(cell_bg, rgba8(selection_overlay_rgba))
             } else {
@@ -301,6 +313,14 @@ impl TerminalAtlasRenderer {
     }
 }
 
+fn row_background_rgba(surface: &TerminalSurfaceState, row: u32) -> u32 {
+    if row % 2 == 0 {
+        surface.row_bg_even_rgba
+    } else {
+        surface.row_bg_odd_rgba
+    }
+}
+
 fn compute_terminal_metrics(font: &FontArc) -> TerminalAtlasMetrics {
     let scaled = font.as_scaled(PxScale::from(TERMINAL_FONT_SIZE_PX));
     let mono_advance = scaled
@@ -316,7 +336,7 @@ fn compute_terminal_metrics(font: &FontArc) -> TerminalAtlasMetrics {
 
     TerminalAtlasMetrics {
         cell_width: cell_width.max(MIN_CELL_WIDTH_PX),
-        cell_height: cell_height.max(TERMINAL_FONT_SIZE_PX.ceil() as u32 + 5),
+        cell_height: cell_height.max(TERMINAL_FONT_SIZE_PX.ceil() as u32 + 4),
         baseline_px,
     }
 }
@@ -347,7 +367,8 @@ fn rasterize_cluster_sprite(
             pen_x += scaled.kern(prev, glyph_id);
         }
 
-        let glyph = glyph_id.with_scale_and_position(PxScale::from(TERMINAL_FONT_SIZE_PX), point(pen_x, baseline));
+        let glyph = glyph_id
+            .with_scale_and_position(PxScale::from(TERMINAL_FONT_SIZE_PX), point(pen_x, baseline));
         if let Some(outlined) = font.outline_glyph(glyph) {
             let bounds = outlined.px_bounds();
             min_x = min_x.min(bounds.min.x);
@@ -371,7 +392,7 @@ fn rasterize_cluster_sprite(
         ClusterLayout::Ascii => ASCII_LEFT_INSET_PX,
         ClusterLayout::Wide => ((width as f32 - content_advance).max(0.0) / 2.0).floor(),
         ClusterLayout::Mixed => {
-            ((width as f32 - content_advance).max(0.0) / 2.5).floor() + MIXED_LEFT_INSET_PX
+            ((width as f32 - content_advance).max(0.0) / 2.0).floor() + MIXED_LEFT_INSET_PX
         }
     };
     let offset_x = left_padding + (-min_x).max(0.0);
@@ -404,6 +425,7 @@ fn hash_row(
     cols: u32,
     default_fg_rgba: u32,
     default_bg_rgba: u32,
+    row_bg_rgba: u32,
     selection: Option<(u32, u32)>,
     selection_overlay_rgba: u32,
     cells: &[&TerminalCellState],
@@ -412,6 +434,7 @@ fn hash_row(
     cols.hash(&mut hasher);
     default_fg_rgba.hash(&mut hasher);
     default_bg_rgba.hash(&mut hasher);
+    row_bg_rgba.hash(&mut hasher);
     selection.hash(&mut hasher);
     selection_overlay_rgba.hash(&mut hasher);
     for cell in cells {

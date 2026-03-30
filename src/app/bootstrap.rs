@@ -54,7 +54,7 @@ use crate::app::ssh::session_manager::{
     SessionState,
 };
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
-use crate::app::terminal_theme::preset_for_theme_mode;
+use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
@@ -2890,10 +2890,7 @@ fn slint_color_from_rgba(rgba: u32) -> Color {
 }
 
 fn terminal_selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
-    match theme_mode {
-        ThemeMode::Dark => 0xff6b_7692,
-        ThemeMode::Light => 0xffc7_d1e3,
-    }
+    selection_overlay_rgba(theme_mode)
 }
 
 fn active_workspace_terminal_selection(window: &AppWindow) -> Option<TerminalAtlasSelection> {
@@ -3032,10 +3029,16 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         window.set_workspace_session_cursor_visible(false);
         window.set_workspace_session_cursor_blinking(false);
         window.set_workspace_session_cursor_shape("block".into());
-        window.set_workspace_session_cursor_fg(slint_color_from_rgba(0xff00_0000 | preset.cursor_fg));
-        window.set_workspace_session_cursor_bg(slint_color_from_rgba(0xff00_0000 | preset.cursor_bg));
-        window.set_workspace_session_default_fg(slint_color_from_rgba(0xff00_0000 | preset.foreground));
-        window.set_workspace_session_default_bg(slint_color_from_rgba(0xff00_0000 | preset.background));
+        window
+            .set_workspace_session_cursor_fg(slint_color_from_rgba(0xff00_0000 | preset.cursor_fg));
+        window
+            .set_workspace_session_cursor_bg(slint_color_from_rgba(0xff00_0000 | preset.cursor_bg));
+        window.set_workspace_session_default_fg(slint_color_from_rgba(
+            0xff00_0000 | preset.foreground,
+        ));
+        window.set_workspace_session_default_bg(slint_color_from_rgba(
+            0xff00_0000 | preset.background,
+        ));
         window.set_workspace_session_surface_image(Image::default());
         window.set_workspace_session_mouse_grabbed(false);
         window.set_workspace_session_viewport_offset_lines(0);

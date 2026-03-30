@@ -52,7 +52,7 @@ Notes:
 - Generic development builds stay on the default packaged fallback unless a wrapper injects build flavor and renderer environment variables.
 - `./build-release.sh` remains the aggregate Linux x64 + Windows GNU release entrypoint, with the Windows leg routed through `./build-win-x64-software.sh` because `rust-skia` does not ship `x86_64-pc-windows-gnu` Skia binaries.
 - `[patch.crates-io]` in `Cargo.toml` still points to the vendored `i-slint-backend-winit` backend so the Windows partial-visibility fix stays active.
-- `ui/fonts/SarasaTermSCNerd-Unhinted.ttf` is the only bundled terminal face and is owned directly by the Rust atlas renderer.
+- `ui/fonts/SarasaTermSCNerd-Regular.ttf` is the only bundled terminal face and is owned directly by the Rust atlas renderer.
 - `src/app/terminal_atlas.rs` uses `ab_glyph` for lazy glyph loading and rasterization, avoiding the heavier pre-expanded `fontdue` path for the terminal font.
 - `ui/shell/terminal-session-host.slint` renders the terminal body through a single atlas-backed image surface; Slint keeps cursor, selection, scrollbar, and context-menu overlays only.
 

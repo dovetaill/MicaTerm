@@ -163,8 +163,8 @@ fn dark_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let default_fg_rgba = extract_debug_u32_field(&debug, "default_fg_rgba");
     let default_bg_rgba = extract_debug_u32_field(&debug, "default_bg_rgba");
 
-    assert_eq!(default_fg_rgba, 0xffd7_dee9);
-    assert_eq!(default_bg_rgba, 0xff11_161d);
+    assert_eq!(default_fg_rgba, 0xffd8_dfe8);
+    assert_eq!(default_bg_rgba, 0xff0c_1014);
 }
 
 #[test]
@@ -178,8 +178,8 @@ fn light_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let default_fg_rgba = extract_debug_u32_field(&debug, "default_fg_rgba");
     let default_bg_rgba = extract_debug_u32_field(&debug, "default_bg_rgba");
 
-    assert_eq!(default_fg_rgba, 0xff1f_2328);
-    assert_eq!(default_bg_rgba, 0xfff7_f9fc);
+    assert_eq!(default_fg_rgba, 0xff24_292f);
+    assert_eq!(default_bg_rgba, 0xfffc_fdff);
 }
 
 #[test]
@@ -190,8 +190,8 @@ fn dark_theme_surface_projection_exposes_mica_code_dark_cursor_palette() {
 
     let snapshot = session.surface_state(Uuid::new_v4());
 
-    assert_eq!(snapshot.cursor.fg_rgba, 0xff11_161d);
-    assert_eq!(snapshot.cursor.bg_rgba, 0xff7f_b7ff);
+    assert_eq!(snapshot.cursor.fg_rgba, 0xff0c_1014);
+    assert_eq!(snapshot.cursor.bg_rgba, 0xffd8_dfe8);
 }
 
 #[test]
@@ -203,8 +203,8 @@ fn light_theme_surface_projection_exposes_mica_code_light_cursor_palette() {
 
     let snapshot = session.surface_state(Uuid::new_v4());
 
-    assert_eq!(snapshot.cursor.fg_rgba, 0xffff_ffff);
-    assert_eq!(snapshot.cursor.bg_rgba, 0xff25_63eb);
+    assert_eq!(snapshot.cursor.fg_rgba, 0xfffc_fdff);
+    assert_eq!(snapshot.cursor.bg_rgba, 0xff4c_5561);
 }
 
 #[test]

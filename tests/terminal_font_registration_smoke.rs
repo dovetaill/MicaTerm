@@ -19,8 +19,8 @@ fn app_window_has_no_legacy_terminal_font_imports() {
 }
 
 #[test]
-fn terminal_font_assets_switch_to_sarasa_unhinted_only() {
-    assert!(Path::new("ui/fonts/SarasaTermSCNerd-Unhinted.ttf").exists());
+fn terminal_font_assets_switch_to_sarasa_regular_only() {
+    assert!(Path::new("ui/fonts/SarasaTermSCNerd-Regular.ttf").exists());
     assert!(!Path::new("ui/fonts/IosevkaTerm-Regular.ttf").exists());
     assert!(!Path::new("ui/fonts/MapleMonoNormalNL-NF-CN-Regular.ttf").exists());
 }
@@ -61,7 +61,8 @@ fn legacy_terminal_font_module_is_removed() {
 #[test]
 fn atlas_renderer_switches_off_fontdue() {
     let cargo_toml = fs::read_to_string("Cargo.toml").expect("read Cargo.toml");
-    let atlas_source = fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");
+    let atlas_source =
+        fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");
 
     assert!(cargo_toml.contains("ab_glyph"));
     assert!(!cargo_toml.contains("fontdue"));

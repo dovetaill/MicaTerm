@@ -29,7 +29,7 @@ use crate::app::ssh::credentials::{
 use crate::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, ResolvedProxyHop, SshAuthMethod};
 use crate::app::ssh::session_manager::SessionRuntimeControl;
-use crate::app::terminal_theme::palette_for_theme_mode;
+use crate::app::terminal_theme::{palette_for_theme_mode, preset_for_theme_mode};
 use crate::theme::ThemeMode;
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
@@ -581,6 +581,8 @@ pub struct TerminalSurfaceState {
     pub cols: u32,
     pub default_fg_rgba: u32,
     pub default_bg_rgba: u32,
+    pub row_bg_even_rgba: u32,
+    pub row_bg_odd_rgba: u32,
     pub viewport_offset_lines: u32,
     pub viewport_max_offset_lines: u32,
     pub viewport_at_bottom: bool,
@@ -600,6 +602,8 @@ pub struct TerminalSurfaceSignature {
     pub cols: u32,
     pub default_fg_rgba: u32,
     pub default_bg_rgba: u32,
+    pub row_bg_even_rgba: u32,
+    pub row_bg_odd_rgba: u32,
     pub viewport_offset_lines: u32,
     pub viewport_max_offset_lines: u32,
     pub viewport_at_bottom: bool,
@@ -1682,6 +1686,7 @@ impl TerminalSession {
     pub fn surface_state(&self, session_id: Uuid) -> TerminalSurfaceState {
         let size = self.terminal.get_size();
         let palette = self.terminal.palette();
+        let preset = preset_for_theme_mode(self.config.theme_mode());
         let visible_rows = self.visible_rows();
         let visible_lines = visible_lines_from_rows(&visible_rows);
         let cells = self.visible_cells(&palette);
@@ -1693,6 +1698,8 @@ impl TerminalSession {
             cols: size.cols as u32,
             default_fg_rgba: color_to_rgba_u32(palette.foreground),
             default_bg_rgba: color_to_rgba_u32(palette.background),
+            row_bg_even_rgba: 0xff00_0000 | preset.row_band_even,
+            row_bg_odd_rgba: 0xff00_0000 | preset.row_band_odd,
             viewport_offset_lines: self.viewport_offset_lines as u32,
             viewport_max_offset_lines: self.max_viewport_offset_lines() as u32,
             viewport_at_bottom: self.viewport_offset_lines == 0,
@@ -2217,6 +2224,8 @@ impl TerminalSurfaceState {
             cols: self.cols,
             default_fg_rgba: self.default_fg_rgba,
             default_bg_rgba: self.default_bg_rgba,
+            row_bg_even_rgba: self.row_bg_even_rgba,
+            row_bg_odd_rgba: self.row_bg_odd_rgba,
             viewport_offset_lines: self.viewport_offset_lines,
             viewport_max_offset_lines: self.viewport_max_offset_lines,
             viewport_at_bottom: self.viewport_at_bottom,
@@ -2246,6 +2255,8 @@ impl TerminalSurfaceState {
             cols,
             default_fg_rgba: 0xff00_0000,
             default_bg_rgba: 0xffff_ffff,
+            row_bg_even_rgba: 0xffff_ffff,
+            row_bg_odd_rgba: 0xffff_ffff,
             viewport_offset_lines: 0,
             viewport_max_offset_lines: 0,
             viewport_at_bottom: true,

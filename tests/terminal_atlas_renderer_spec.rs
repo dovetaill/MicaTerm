@@ -1,6 +1,7 @@
 use anyhow::Result;
-use mica_term::app::ssh::runtime::{TerminalSurfaceState, TerminalSession};
+use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
 use mica_term::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
+use mica_term::theme::ThemeMode;
 use slint::Rgba8Pixel;
 use uuid::Uuid;
 
@@ -19,6 +20,12 @@ fn unpack_rgba(color: u32) -> Rgba8Pixel {
     }
 }
 
+fn pixel_at(image: &slint::Image, x: u32, y: u32) -> Rgba8Pixel {
+    let buffer = image.to_rgba8().expect("rgba image");
+    let width = buffer.width();
+    buffer.as_slice()[(y * width + x) as usize]
+}
+
 #[test]
 fn atlas_renderer_loads_sarasa_metrics_and_emits_a_surface_image() -> Result<()> {
     let surface = render_surface(4, 12, "hello sarasa\r\n");
@@ -29,19 +36,19 @@ fn atlas_renderer_loads_sarasa_metrics_and_emits_a_surface_image() -> Result<()>
 
     assert!(
         metrics.cell_width >= 9,
-        "terminal cell width should grow slightly so the default Sarasa atlas no longer reads undersized"
+        "terminal cell width should remain readable for the regular Sarasa atlas"
     );
     assert!(
-        metrics.cell_height >= 23,
-        "terminal cell height should increase slightly so the default atlas text reads larger on standard-density displays"
+        metrics.cell_height >= 21,
+        "terminal cell height should stay compact while leaving enough room for a sharper regular-weight atlas"
     );
     assert!(
-        metrics.cell_width <= 9,
+        metrics.cell_width <= 10,
         "terminal cell width should stay compact so the terminal grid does not read too loose"
     );
     assert!(
-        metrics.cell_height <= 24,
-        "terminal cell height should stay compact even after increasing readability"
+        metrics.cell_height <= 22,
+        "terminal cell height should tighten compared to the looser semi-bold tuning"
     );
     assert!(
         metrics.baseline_px > 0 && metrics.baseline_px < metrics.cell_height,
@@ -56,6 +63,39 @@ fn atlas_renderer_loads_sarasa_metrics_and_emits_a_surface_image() -> Result<()>
         .into()
     );
     assert_eq!(frame.metrics, metrics);
+
+    Ok(())
+}
+
+#[test]
+fn atlas_renderer_default_background_rows_use_subtle_band_colors() -> Result<()> {
+    let dark_surface = render_surface(4, 12, "");
+    let mut dark_renderer = TerminalAtlasRenderer::new()?;
+    let dark_frame = dark_renderer.render(&dark_surface)?;
+    let dark_row0 = pixel_at(&dark_frame.image, 0, dark_frame.metrics.cell_height / 2);
+    let dark_row1 = pixel_at(
+        &dark_frame.image,
+        0,
+        dark_frame.metrics.cell_height + (dark_frame.metrics.cell_height / 2),
+    );
+
+    assert_eq!(dark_row0, unpack_rgba(0xff0c_1014));
+    assert_eq!(dark_row1, unpack_rgba(0xff13_181e));
+
+    let mut light_session = TerminalSession::new(4, 12);
+    light_session.set_theme_mode(ThemeMode::Light);
+    let light_surface = light_session.surface_state(Uuid::new_v4());
+    let mut light_renderer = TerminalAtlasRenderer::new()?;
+    let light_frame = light_renderer.render(&light_surface)?;
+    let light_row0 = pixel_at(&light_frame.image, 0, light_frame.metrics.cell_height / 2);
+    let light_row1 = pixel_at(
+        &light_frame.image,
+        0,
+        light_frame.metrics.cell_height + (light_frame.metrics.cell_height / 2),
+    );
+
+    assert_eq!(light_row0, unpack_rgba(0xfffc_fdff));
+    assert_eq!(light_row1, unpack_rgba(0xfff4_f8ff));
 
     Ok(())
 }
@@ -122,8 +162,16 @@ fn atlas_renderer_selection_changes_invalidate_and_repaint_rows() -> Result<()> 
         "re-rendering the same selected frame should reuse cached row hashes"
     );
     assert_ne!(
-        first.image.to_rgba8().expect("rgba image before").as_slice(),
-        second.image.to_rgba8().expect("rgba image after").as_slice(),
+        first
+            .image
+            .to_rgba8()
+            .expect("rgba image before")
+            .as_slice(),
+        second
+            .image
+            .to_rgba8()
+            .expect("rgba image after")
+            .as_slice(),
         "selection-aware rendering should visibly change the atlas pixel buffer"
     );
 
@@ -131,7 +179,8 @@ fn atlas_renderer_selection_changes_invalidate_and_repaint_rows() -> Result<()> 
 }
 
 #[test]
-fn atlas_renderer_handles_cjk_and_nerd_font_cells_without_falling_back_to_blank_rows() -> Result<()> {
+fn atlas_renderer_handles_cjk_and_nerd_font_cells_without_falling_back_to_blank_rows() -> Result<()>
+{
     let surface = render_surface(4, 20, "界  maple\r\n");
     let mut renderer = TerminalAtlasRenderer::new()?;
 

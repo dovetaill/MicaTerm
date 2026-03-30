@@ -9,6 +9,8 @@ pub struct TerminalThemePreset {
     pub name: &'static str,
     pub background: u32,
     pub foreground: u32,
+    pub row_band_even: u32,
+    pub row_band_odd: u32,
     pub cursor_bg: u32,
     pub cursor_fg: u32,
     pub selection_bg: (u8, u8, u8, f32),
@@ -41,13 +43,15 @@ impl TerminalThemePreset {
 pub fn mica_code_dark() -> TerminalThemePreset {
     TerminalThemePreset {
         name: "Mica Code Dark",
-        background: 0x11_16_1d,
-        foreground: 0xd7_de_e9,
-        cursor_bg: 0xcd_d2_db,
-        cursor_fg: 0x11_16_1d,
-        selection_bg: (0x6b, 0x76, 0x92, 1.0),
+        background: 0x0c_10_14,
+        foreground: 0xd8_df_e8,
+        row_band_even: 0x0c_10_14,
+        row_band_odd: 0x13_18_1e,
+        cursor_bg: 0xd8_df_e8,
+        cursor_fg: 0x0c_10_14,
+        selection_bg: (0x5d, 0x73, 0x8b, 1.0),
         ansi: [
-            (0x2a, 0x31, 0x3c),
+            (0x1f, 0x24, 0x2b),
             (0xe0, 0x6c, 0x75),
             (0x98, 0xc3, 0x79),
             (0xd7, 0xba, 0x7d),
@@ -64,21 +68,23 @@ pub fn mica_code_dark() -> TerminalThemePreset {
             (0x74, 0xca, 0xd6),
             (0xee, 0xf2, 0xf7),
         ],
-        scrollbar_thumb: (0x39, 0x41, 0x4d),
-        split: (0x24, 0x2c, 0x37),
+        scrollbar_thumb: (0x32, 0x38, 0x41),
+        split: (0x1d, 0x22, 0x29),
     }
 }
 
 pub fn mica_code_light() -> TerminalThemePreset {
     TerminalThemePreset {
         name: "Mica Code Light",
-        background: 0xf7_f9_fc,
-        foreground: 0x1f_23_28,
-        cursor_bg: 0x4b_50_58,
-        cursor_fg: 0xf7_f9_fc,
-        selection_bg: (0xc7, 0xd1, 0xe3, 1.0),
+        background: 0xfc_fd_ff,
+        foreground: 0x24_29_2f,
+        row_band_even: 0xfc_fd_ff,
+        row_band_odd: 0xf4_f8_ff,
+        cursor_bg: 0x4c_55_61,
+        cursor_fg: 0xfc_fd_ff,
+        selection_bg: (0xc6, 0xd8, 0xf5, 1.0),
         ansi: [
-            (0x1f, 0x23, 0x28),
+            (0x24, 0x29, 0x2f),
             (0xc7, 0x4e, 0x39),
             (0x2f, 0x85, 0x5a),
             (0xa1, 0x62, 0x07),
@@ -95,8 +101,8 @@ pub fn mica_code_light() -> TerminalThemePreset {
             (0x0f, 0x8b, 0x83),
             (0xff, 0xff, 0xff),
         ],
-        scrollbar_thumb: (0xc8, 0xd0, 0xdc),
-        split: (0xdc, 0xe3, 0xed),
+        scrollbar_thumb: (0xc6, 0xd0, 0xdd),
+        split: (0xe0, 0xe8, 0xf3),
     }
 }
 
@@ -111,6 +117,11 @@ pub fn palette_for_theme_mode(theme_mode: ThemeMode) -> ColorPalette {
     preset_for_theme_mode(theme_mode).to_color_palette()
 }
 
+pub fn selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
+    let preset = preset_for_theme_mode(theme_mode);
+    rgba_hex(preset.selection_bg)
+}
+
 fn rgb_hex(rgb: u32) -> SrgbaTuple {
     let red = ((rgb >> 16) & 0xff) as u8;
     let green = ((rgb >> 8) & 0xff) as u8;
@@ -121,6 +132,11 @@ fn rgb_hex(rgb: u32) -> SrgbaTuple {
 
 fn rgb_tuple((red, green, blue): (u8, u8, u8)) -> SrgbaTuple {
     RgbColor::new_8bpc(red, green, blue).into()
+}
+
+fn rgba_hex((red, green, blue, alpha): (u8, u8, u8, f32)) -> u32 {
+    let alpha = (alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
+    (alpha << 24) | (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
 }
 
 fn rgba_tuple((red, green, blue, alpha): (u8, u8, u8, f32)) -> SrgbaTuple {
