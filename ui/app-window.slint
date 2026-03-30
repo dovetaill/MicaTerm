@@ -18,6 +18,7 @@ import { WorkspacePasteWarningModal } from "components/workspace-paste-warning-m
 import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
 import { WindowResizeGrips } from "components/window-resize-grips.slint";
+import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "welcome/quick-launch-types.slint";
 import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { RightPanel } from "shell/right-panel.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
@@ -151,6 +152,21 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-session-host-key-prompt-fingerprint: "";
     in-out property <[ConnectionProgressStepRow]> workspace-session-connection-steps: [];
     in-out property <[ConnectionProgressDiagnosticRow]> workspace-session-connection-diagnostics: [];
+    in-out property <[QuickLaunchCardRow]> welcome-quick-launch-recent-items: [];
+    in-out property <[QuickLaunchCardRow]> welcome-quick-launch-favorite-items: [];
+    in-out property <[QuickLaunchGroupRow]> welcome-quick-launch-group-items: [];
+    in-out property <[QuickLaunchCardRow]> welcome-quick-launch-visible-group-items: [];
+    in-out property <QuickLaunchDetailRow> welcome-quick-launch-selected-detail: {
+        asset_id: "",
+        title: "",
+        subtitle: "",
+        environment: "",
+        auth_summary: "",
+        proxy_summary: "",
+        remark: "",
+        recent_label: "",
+    };
+    in-out property <string> welcome-quick-launch-search-query: "";
     in-out property <image> workspace-session-surface-image;
     in-out property <int> workspace-session-native-frame-token: 0;
     in-out property <int> workspace-session-rows: 24;
@@ -301,6 +317,12 @@ export component AppWindow inherits Window {
     callback workspace-session-scroll-jump-requested(float);
     callback workspace-session-jump-to-latest-requested();
     callback workspace-session-mouse-input(string, string, int, int, bool, bool, bool);
+    callback welcome-quick-launch-asset-selected(string);
+    callback welcome-quick-launch-search-changed(string);
+    callback welcome-quick-launch-connect-requested(string);
+    callback welcome-quick-launch-connect-in-new-tab-requested(string);
+    callback welcome-quick-launch-toggle-favorite-requested(string);
+    callback welcome-quick-launch-reveal-in-assets-requested(string);
     callback asset-selected(string);
     callback asset-activated(string);
     callback toggle-expanded-requested(string);
@@ -599,6 +621,12 @@ export component AppWindow inherits Window {
                         workspace-session-host-key-prompt-fingerprint: root.workspace-session-host-key-prompt-fingerprint;
                         workspace-session-connection-steps: root.workspace-session-connection-steps;
                         workspace-session-connection-diagnostics: root.workspace-session-connection-diagnostics;
+                        welcome-quick-launch-recent-items: root.welcome-quick-launch-recent-items;
+                        welcome-quick-launch-favorite-items: root.welcome-quick-launch-favorite-items;
+                        welcome-quick-launch-group-items: root.welcome-quick-launch-group-items;
+                        welcome-quick-launch-visible-group-items: root.welcome-quick-launch-visible-group-items;
+                        welcome-quick-launch-selected-detail: root.welcome-quick-launch-selected-detail;
+                        welcome-quick-launch-search-query: root.welcome-quick-launch-search-query;
                         workspace-session-surface-image: root.workspace-session-surface-image;
                         workspace-session-native-frame-token: root.workspace-session-native-frame-token;
                         workspace-session-rows: root.workspace-session-rows;
@@ -682,6 +710,30 @@ export component AppWindow inherits Window {
 
                         mouse-input(kind, button, row, col, shift, ctrl, alt) => {
                             root.workspace-session-mouse-input(kind, button, row, col, shift, ctrl, alt);
+                        }
+
+                        welcome-quick-launch-asset-selected(asset-id) => {
+                            root.welcome-quick-launch-asset-selected(asset-id);
+                        }
+
+                        welcome-quick-launch-search-changed(query) => {
+                            root.welcome-quick-launch-search-changed(query);
+                        }
+
+                        welcome-quick-launch-connect-requested(asset-id) => {
+                            root.welcome-quick-launch-connect-requested(asset-id);
+                        }
+
+                        welcome-quick-launch-connect-in-new-tab-requested(asset-id) => {
+                            root.welcome-quick-launch-connect-in-new-tab-requested(asset-id);
+                        }
+
+                        welcome-quick-launch-toggle-favorite-requested(asset-id) => {
+                            root.welcome-quick-launch-toggle-favorite-requested(asset-id);
+                        }
+
+                        welcome-quick-launch-reveal-in-assets-requested(asset-id) => {
+                            root.welcome-quick-launch-reveal-in-assets-requested(asset-id);
                         }
                     }
 

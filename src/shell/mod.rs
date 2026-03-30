@@ -5,6 +5,7 @@ pub mod context_menu;
 pub mod keychain;
 pub mod layout;
 pub mod metrics;
+pub mod quick_launch;
 pub mod sidebar;
 pub mod tabs;
 pub mod view_model;

@@ -1,7 +1,7 @@
 //! Wires the Slint window to runtime state, persisted preferences, and native window hooks during startup.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
@@ -23,6 +23,9 @@ use crate::AssetsContextMenuItem;
 use crate::ConnectionProgressDiagnosticRow;
 use crate::ConnectionProgressStepRow;
 use crate::ConsoleAssetItem;
+use crate::QuickLaunchCardRow;
+use crate::QuickLaunchDetailRow;
+use crate::QuickLaunchGroupRow;
 use crate::WorkspaceTabItem;
 use crate::app::app_paths::{AppRootPathInputs, AppRootPaths, resolve_app_root_paths};
 use crate::app::assets_catalog::{
@@ -67,6 +70,9 @@ use crate::app::terminal_renderer::{NativeTerminalSurface, NativeTerminalSurface
 #[cfg(all(target_os = "windows", feature = "terminal-native-renderer"))]
 use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
+use crate::app::quick_launch_preferences::{
+    QuickLaunchPreferences, QuickLaunchPreferencesStore, retain_known_ssh_asset_ids,
+};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
@@ -106,7 +112,7 @@ use crate::app::windows_frame::{
 };
 use crate::shell::assets::{
     AssetDisclosureState, AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec,
-    AssetTree, SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY,
+    AssetTree, ConsoleAssetKind, SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY,
 };
 use crate::shell::context_menu::{
     CONTEXT_MENU_COLUMN_GAP, CONTEXT_MENU_COLUMN_WIDTH, ContextMenuActionNode,
@@ -2568,6 +2574,58 @@ fn activate_asset(
     }
 }
 
+fn open_saved_ssh_asset_from_quick_launch(
+    state: &mut ShellViewModel,
+    session_bridge: Option<&ShellSessionBridge>,
+    pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    asset_id: &str,
+    mode: OpenSessionMode,
+) {
+    let had_existing_session = matches!(mode, OpenSessionMode::ActivateExisting)
+        && target_session_id_for_asset(state, asset_id).is_some();
+
+    match runtime_profile_for_saved_asset(state, asset_id) {
+        Ok(profile) => {
+            if let Some(session_bridge) = session_bridge {
+                if let Err(err) = attempt_open_session_with_profile(
+                    state,
+                    session_bridge,
+                    pending_host_key_approval,
+                    profile,
+                    mode,
+                ) {
+                    tracing::error!(
+                        target: "app.quick_launch",
+                        asset_id,
+                        error = %err,
+                        "failed to open saved ssh asset from quick launch"
+                    );
+                } else if had_existing_session || state.ssh_host_key_prompt_state.is_none() {
+                    state.record_recent_saved_ssh_asset(asset_id);
+                }
+            } else {
+                let message = "SSH session bridge is unavailable.";
+                show_failed_saved_asset_tab(state, asset_id, message);
+                tracing::error!(
+                    target: "app.quick_launch",
+                    asset_id,
+                    error = message,
+                    "failed to open saved ssh asset from quick launch"
+                );
+            }
+        }
+        Err(err) => {
+            show_failed_saved_asset_tab(state, asset_id, err.to_string());
+            tracing::error!(
+                target: "app.quick_launch",
+                asset_id,
+                error = %err,
+                "failed to resolve saved ssh profile for quick launch"
+            );
+        }
+    }
+}
+
 fn resolve_pending_host_key(
     state: &mut ShellViewModel,
     bridge: Option<&ShellSessionBridge>,
@@ -2899,6 +2957,7 @@ fn sync_console_assets(window: &AppWindow, state: &ShellViewModel) {
     window.set_snippet_asset_items(ModelRc::new(VecModel::from(project_rows(
         state.visible_snippet_rows(),
     ))));
+    sync_welcome_quick_launch_state(window, state);
 }
 
 fn sync_keychain_assets(window: &AppWindow, state: &ShellViewModel) {
@@ -2958,6 +3017,98 @@ fn sync_workspace_tab_items(window: &AppWindow, state: &ShellViewModel) {
         .collect::<Vec<_>>();
 
     window.set_workspace_tab_items(ModelRc::new(VecModel::from(tabs)));
+}
+
+fn sync_welcome_quick_launch_state(window: &AppWindow, state: &ShellViewModel) {
+    let selected_asset_id = state.quick_launch_selected_asset_id();
+    let active_group_id = state.quick_launch_active_group_id();
+    let project_card = |item: crate::shell::quick_launch::QuickLaunchCardItem| {
+        QuickLaunchCardRow {
+            asset_id: item.asset_id.clone().into(),
+            title: item.title.into(),
+            subtitle: item.subtitle.into(),
+            badge: item.badge.into(),
+            meta: item.meta.into(),
+            icon_kind: item.icon_kind.into(),
+            accent_kind: item.accent_kind.into(),
+            favorite: item.favorite,
+            selected: selected_asset_id == Some(item.asset_id.as_str()),
+        }
+    };
+    let project_group = |item: crate::shell::quick_launch::QuickLaunchGroupItem| {
+        QuickLaunchGroupRow {
+            group_id: item.group_id.clone().into(),
+            label: item.label.into(),
+            count: i32::try_from(item.count).unwrap_or(i32::MAX),
+            selected: active_group_id == Some(item.group_id.as_str()),
+        }
+    };
+    let project_detail = |item: crate::shell::quick_launch::QuickLaunchDetailItem| {
+        QuickLaunchDetailRow {
+            asset_id: item.asset_id.into(),
+            title: item.title.into(),
+            subtitle: item.subtitle.into(),
+            environment: item.environment.into(),
+            auth_summary: item.auth_summary.into(),
+            proxy_summary: item.proxy_summary.into(),
+            remark: item.remark.into(),
+            recent_label: item.recent_label.into(),
+        }
+    };
+    let empty_detail = || QuickLaunchDetailRow {
+        asset_id: "".into(),
+        title: "".into(),
+        subtitle: "".into(),
+        environment: "".into(),
+        auth_summary: "".into(),
+        proxy_summary: "".into(),
+        remark: "".into(),
+        recent_label: "".into(),
+    };
+
+    sync_vec_model(
+        window.get_welcome_quick_launch_recent_items(),
+        state
+            .quick_launch_recent_items()
+            .into_iter()
+            .map(project_card)
+            .collect::<Vec<_>>(),
+        |model| window.set_welcome_quick_launch_recent_items(model),
+    );
+    sync_vec_model(
+        window.get_welcome_quick_launch_favorite_items(),
+        state
+            .quick_launch_favorite_items()
+            .into_iter()
+            .map(project_card)
+            .collect::<Vec<_>>(),
+        |model| window.set_welcome_quick_launch_favorite_items(model),
+    );
+    sync_vec_model(
+        window.get_welcome_quick_launch_group_items(),
+        state
+            .quick_launch_group_items()
+            .into_iter()
+            .map(project_group)
+            .collect::<Vec<_>>(),
+        |model| window.set_welcome_quick_launch_group_items(model),
+    );
+    sync_vec_model(
+        window.get_welcome_quick_launch_visible_group_items(),
+        state
+            .quick_launch_visible_group_items()
+            .into_iter()
+            .map(project_card)
+            .collect::<Vec<_>>(),
+        |model| window.set_welcome_quick_launch_visible_group_items(model),
+    );
+    window.set_welcome_quick_launch_selected_detail(
+        state
+            .quick_launch_selected_detail()
+            .map(project_detail)
+            .unwrap_or_else(empty_detail),
+    );
+    window.set_welcome_quick_launch_search_query(state.quick_launch_search_query().into());
 }
 
 fn slint_color_from_rgba(rgba: u32) -> Color {
@@ -3992,6 +4143,25 @@ fn load_ui_preferences(store: &Option<Rc<UiPreferencesStore>>) -> UiPreferences 
     }
 }
 
+fn load_quick_launch_preferences(
+    store: &Option<Rc<QuickLaunchPreferencesStore>>,
+) -> QuickLaunchPreferences {
+    match store {
+        Some(store) => match store.load_or_default() {
+            Ok(prefs) => prefs,
+            Err(err) => {
+                tracing::error!(
+                    target: "config.quick_launch_preferences",
+                    error = %err,
+                    "failed to load quick launch preferences"
+                );
+                QuickLaunchPreferences::default()
+            }
+        },
+        None => QuickLaunchPreferences::default(),
+    }
+}
+
 fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellViewModel) {
     if let Some(store) = store
         && let Err(err) = store.save(&UiPreferences::from(state))
@@ -4002,6 +4172,28 @@ fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellView
             "failed to save ui preferences"
         );
     }
+}
+
+fn save_quick_launch_preferences(
+    store: &Option<Rc<QuickLaunchPreferencesStore>>,
+    prefs: &QuickLaunchPreferences,
+) {
+    if let Some(store) = store
+        && let Err(err) = store.save(prefs)
+    {
+        tracing::error!(
+            target: "config.quick_launch_preferences",
+            error = %err,
+            "failed to save quick launch preferences"
+        );
+    }
+}
+
+fn save_quick_launch_preferences_from_state(
+    store: &Option<Rc<QuickLaunchPreferencesStore>>,
+    state: &ShellViewModel,
+) {
+    save_quick_launch_preferences(store, state.quick_launch_preferences());
 }
 
 fn empty_asset_catalog() -> PersistedAssetCatalog {
@@ -4053,6 +4245,30 @@ fn save_asset_catalog_if_available(
     }
 }
 
+fn collect_saved_ssh_asset_ids(
+    tree: &AssetTree,
+    node_ids: &[String],
+    output: &mut BTreeSet<String>,
+) {
+    for node_id in node_ids {
+        let Some(node) = tree.node(node_id) else {
+            continue;
+        };
+
+        if node.kind == ConsoleAssetKind::SshConnection {
+            output.insert(node.id.clone());
+        }
+
+        collect_saved_ssh_asset_ids(tree, &node.children, output);
+    }
+}
+
+fn saved_ssh_asset_ids_for_tree(tree: &AssetTree) -> BTreeSet<String> {
+    let mut output = BTreeSet::new();
+    collect_saved_ssh_asset_ids(tree, tree.root_ids(), &mut output);
+    output
+}
+
 fn app_root_paths_for_app() -> Result<AppRootPaths> {
     let project_dirs = ProjectDirs::from("dev", "MicaTerm", "MicaTerm")
         .context("project directories are unavailable")?;
@@ -4071,6 +4287,13 @@ fn app_root_paths_for_app() -> Result<AppRootPaths> {
 fn asset_catalog_repository_for_app() -> Result<Rc<dyn AssetCatalogRepository>> {
     let app_paths = app_root_paths_for_app()?;
     Ok(Rc::new(RedbAssetCatalogStore::new(app_paths.data_dir)))
+}
+
+fn quick_launch_preferences_store_for_app() -> Result<QuickLaunchPreferencesStore> {
+    let app_paths = app_root_paths_for_app()?;
+    Ok(QuickLaunchPreferencesStore::new(
+        app_paths.data_dir.join("quick-launch-preferences.json"),
+    ))
 }
 
 pub fn bind_top_status_bar_with_store_and_effects(
@@ -4278,6 +4501,17 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     vault_runtime: VaultRuntimeOptions,
 ) {
     let store = store.map(Rc::new);
+    let quick_launch_store = match quick_launch_preferences_store_for_app() {
+        Ok(store) => Some(Rc::new(store)),
+        Err(err) => {
+            tracing::error!(
+                target: "config.quick_launch_preferences",
+                error = %err,
+                "failed to resolve quick launch preferences store"
+            );
+            None
+        }
+    };
     let prefs = load_ui_preferences(&store);
     let mut initial_view_model = ShellViewModel::default();
     if let Some(repo) = asset_repo.as_ref() {
@@ -4286,6 +4520,18 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         initial_view_model.replace_console_asset_tree(console_tree);
         initial_view_model.replace_snippet_asset_tree(snippet_tree);
     }
+    let quick_launch_preferences = {
+        let loaded = load_quick_launch_preferences(&quick_launch_store);
+        let filtered = retain_known_ssh_asset_ids(
+            &loaded,
+            &saved_ssh_asset_ids_for_tree(initial_view_model.console_asset_tree()),
+        );
+        if filtered != loaded {
+            save_quick_launch_preferences(&quick_launch_store, &filtered);
+        }
+        filtered
+    };
+    initial_view_model.apply_quick_launch_preferences(quick_launch_preferences);
     initial_view_model.theme_mode = prefs.theme_mode;
     initial_view_model.is_always_on_top = prefs.always_on_top;
     initial_view_model.set_right_panel_view(RightPanelView::from_id(&prefs.right_panel_view));
@@ -4744,6 +4990,112 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sync_sidebar_state(&window, &state);
         let (width, height) = current_window_size(&window);
         sync_shell_layout(&window, &mut state, width, height);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let quick_launch_store_ref = quick_launch_store.clone();
+    window.on_welcome_quick_launch_asset_selected(move |asset_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.select_quick_launch_asset(asset_id.to_string());
+        sync_welcome_quick_launch_state(&window, &state);
+        save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let quick_launch_store_ref = quick_launch_store.clone();
+    window.on_welcome_quick_launch_search_changed(move |query| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_quick_launch_search_query(query.to_string());
+        sync_welcome_quick_launch_state(&window, &state);
+        save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let quick_launch_store_ref = quick_launch_store.clone();
+    window.on_welcome_quick_launch_toggle_favorite_requested(move |asset_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_quick_launch_favorite(asset_id.as_str());
+        sync_welcome_quick_launch_state(&window, &state);
+        save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let session_runtime_guard_ref = session_runtime_guard.clone();
+    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let quick_launch_store_ref = quick_launch_store.clone();
+    window.on_welcome_quick_launch_connect_requested(move |asset_id| {
+        let _keep_runtime_alive = &session_runtime_guard_ref;
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        open_saved_ssh_asset_from_quick_launch(
+            &mut state,
+            session_bridge_ref.as_deref(),
+            &pending_host_key_approval_ref,
+            asset_id.as_str(),
+            OpenSessionMode::ActivateExisting,
+        );
+        sync_welcome_quick_launch_state(&window, &state);
+        sync_workspace_tabs_with_manager(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+        sync_ssh_host_key_modal_state(&window, &state);
+        save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let session_runtime_guard_ref = session_runtime_guard.clone();
+    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let quick_launch_store_ref = quick_launch_store.clone();
+    window.on_welcome_quick_launch_connect_in_new_tab_requested(move |asset_id| {
+        let _keep_runtime_alive = &session_runtime_guard_ref;
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        open_saved_ssh_asset_from_quick_launch(
+            &mut state,
+            session_bridge_ref.as_deref(),
+            &pending_host_key_approval_ref,
+            asset_id.as_str(),
+            OpenSessionMode::ForceNewTab,
+        );
+        sync_welcome_quick_launch_state(&window, &state);
+        sync_workspace_tabs_with_manager(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+        sync_ssh_host_key_modal_state(&window, &state);
+        save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let quick_launch_store_ref = quick_launch_store.clone();
+    window.on_welcome_quick_launch_reveal_in_assets_requested(move |asset_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.select_quick_launch_asset(asset_id.to_string());
+        state.select_sidebar_destination(SidebarDestination::Console);
+        state.select_asset(asset_id.as_str());
+        sync_sidebar_state(&window, &state);
+        let (width, height) = current_window_size(&window);
+        sync_shell_layout(&window, &mut state, width, height);
+        save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
     });
 
     let state = Rc::clone(&view_model);

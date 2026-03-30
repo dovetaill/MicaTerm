@@ -1,30 +1,301 @@
-// First-run placeholder content shown in the main workspace.
+// SSH-first quick launch dashboard shown while no workspace tab is active.
 
+import { ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
+import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "quick-launch-types.slint";
+import { QuickLaunchDetailPane } from "quick-launch-detail-pane.slint";
+import { QuickLaunchGroupSection, QuickLaunchSection } from "quick-launch-section.slint";
 
 export component WelcomeView inherits Rectangle {
+    in property <[QuickLaunchCardRow]> recent-items: [];
+    in property <[QuickLaunchCardRow]> favorite-items: [];
+    in property <[QuickLaunchGroupRow]> group-items: [];
+    in property <[QuickLaunchCardRow]> visible-group-items: [];
+    in property <QuickLaunchDetailRow> selected-detail: {
+        asset_id: "",
+        title: "",
+        subtitle: "",
+        environment: "",
+        auth_summary: "",
+        proxy_summary: "",
+        remark: "",
+        recent_label: "",
+    };
+    in property <string> search-query: "";
+    callback asset-selected(string);
+    callback search-changed(string);
+    callback connect-requested(string);
+    callback connect-in-new-tab-requested(string);
+    callback toggle-favorite-requested(string);
+    callback reveal-in-assets-requested(string);
+
+    private property <bool> compact-layout: root.width < 1040px;
+    private property <image> search-icon: @image-url("../../assets/icons/fluent/search-20-regular.svg");
+
     background: transparent;
 
-    VerticalLayout {
-        padding-top: 32px;
-        padding-left: 24px;
-        padding-right: 24px;
-        spacing: 8px;
+    body-scroll := ScrollView {
+        width: parent.width;
+        height: parent.height;
+        viewport-width: scroll-body.width;
+        viewport-height: scroll-body.height;
 
-        Text {
-            text: "Welcome to Mica Term";
-            color: ThemeTokens.text-primary;
-            font-size: 28px;
-        }
-
-        Text {
-            text: "Command-first SSH and SFTP workspace";
-            color: ThemeTokens.text-primary;
-        }
-
-        Rectangle {
-            vertical-stretch: 1;
+        scroll-body := Rectangle {
+            width: body-scroll.visible-width;
+            height: max(body-scroll.visible-height, body-column.preferred-height + 48px);
             background: transparent;
+
+            body-column := VerticalLayout {
+                x: 24px;
+                y: 28px;
+                width: parent.width - 48px;
+                spacing: 24px;
+
+                header-row := Rectangle {
+                    width: parent.width;
+                    height: 104px;
+                    border-radius: 0px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.divider-subtle;
+                    background: ThemeTokens.assets-surface;
+
+                    Text {
+                        x: 20px;
+                        y: 18px;
+                        text: "Quick Start";
+                        color: ThemeTokens.text-primary;
+                        font-size: 30px;
+                        font-weight: 700;
+                    }
+
+                    Text {
+                        x: 20px;
+                        y: 56px;
+                        width: parent.width - search-shell.width - 60px;
+                        text: "Open saved SSH connections fast";
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.70;
+                    }
+
+                    search-shell := Rectangle {
+                        x: parent.width - self.width - 20px;
+                        y: 20px;
+                        width: min(320px, parent.width - 40px);
+                        height: 42px;
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-subtle;
+                        background: ThemeTokens.inspector-surface;
+
+                        Image {
+                            x: 12px;
+                            y: 11px;
+                            width: 20px;
+                            height: 20px;
+                            source: root.search-icon;
+                            image-fit: contain;
+                            colorize: ThemeTokens.text-primary;
+                            opacity: 0.68;
+                        }
+
+                        TextInput {
+                            x: 42px;
+                            y: 9px;
+                            width: parent.width - 54px;
+                            height: 24px;
+                            text: root.search-query;
+                            color: ThemeTokens.text-primary;
+                            selection-background-color: ThemeTokens.accent;
+                            selection-foreground-color: ThemeTokens.text-primary;
+
+                            edited => {
+                                root.search-changed(self.text);
+                            }
+                        }
+                    }
+                }
+
+                if root.compact-layout : VerticalLayout {
+                    width: parent.width;
+                    spacing: 20px;
+
+                    QuickLaunchSection {
+                        width: parent.width;
+                        title: "Recent Connections";
+                        subtitle: "Most recently launched saved SSH sessions";
+                        items: root.recent-items;
+                        empty_text: "Open a saved SSH connection to build recent history.";
+
+                        item-selected(asset-id) => {
+                            root.asset-selected(asset-id);
+                        }
+
+                        item-activated(asset-id) => {
+                            root.connect-requested(asset-id);
+                        }
+
+                        toggle-favorite-requested(asset-id) => {
+                            root.toggle-favorite-requested(asset-id);
+                        }
+                    }
+
+                    QuickLaunchSection {
+                        width: parent.width;
+                        title: "Favorites";
+                        subtitle: "Pinned saved SSH connections";
+                        items: root.favorite-items;
+                        empty_text: "Pin high-frequency SSH targets to keep them here.";
+
+                        item-selected(asset-id) => {
+                            root.asset-selected(asset-id);
+                        }
+
+                        item-activated(asset-id) => {
+                            root.connect-requested(asset-id);
+                        }
+
+                        toggle-favorite-requested(asset-id) => {
+                            root.toggle-favorite-requested(asset-id);
+                        }
+                    }
+
+                    QuickLaunchGroupSection {
+                        width: parent.width;
+                        items: root.group-items;
+                    }
+
+                    QuickLaunchSection {
+                        width: parent.width;
+                        title: "Group Focus";
+                        subtitle: "Saved SSH connections from the active folder context";
+                        items: root.visible-group-items;
+                        empty_text: "Select a saved SSH connection to focus its group.";
+
+                        item-selected(asset-id) => {
+                            root.asset-selected(asset-id);
+                        }
+
+                        item-activated(asset-id) => {
+                            root.connect-requested(asset-id);
+                        }
+
+                        toggle-favorite-requested(asset-id) => {
+                            root.toggle-favorite-requested(asset-id);
+                        }
+                    }
+
+                    QuickLaunchDetailPane {
+                        width: parent.width;
+                        height: 340px;
+                        detail: root.selected-detail;
+
+                        connect-requested(asset-id) => {
+                            root.connect-requested(asset-id);
+                        }
+
+                        connect-in-new-tab-requested(asset-id) => {
+                            root.connect-in-new-tab-requested(asset-id);
+                        }
+
+                        reveal-in-assets-requested(asset-id) => {
+                            root.reveal-in-assets-requested(asset-id);
+                        }
+                    }
+                }
+
+                if !root.compact-layout : HorizontalLayout {
+                    width: parent.width;
+                    spacing: 24px;
+
+                    left-column := VerticalLayout {
+                        spacing: 20px;
+                        width: max(0px, parent.width - 360px);
+
+                        QuickLaunchSection {
+                            width: parent.width;
+                            title: "Recent Connections";
+                            subtitle: "Most recently launched saved SSH sessions";
+                            items: root.recent-items;
+                            empty_text: "Open a saved SSH connection to build recent history.";
+
+                            item-selected(asset-id) => {
+                                root.asset-selected(asset-id);
+                            }
+
+                            item-activated(asset-id) => {
+                                root.connect-requested(asset-id);
+                            }
+
+                            toggle-favorite-requested(asset-id) => {
+                                root.toggle-favorite-requested(asset-id);
+                            }
+                        }
+
+                        QuickLaunchSection {
+                            width: parent.width;
+                            title: "Favorites";
+                            subtitle: "Pinned saved SSH connections";
+                            items: root.favorite-items;
+                            empty_text: "Pin high-frequency SSH targets to keep them here.";
+
+                            item-selected(asset-id) => {
+                                root.asset-selected(asset-id);
+                            }
+
+                            item-activated(asset-id) => {
+                                root.connect-requested(asset-id);
+                            }
+
+                            toggle-favorite-requested(asset-id) => {
+                                root.toggle-favorite-requested(asset-id);
+                            }
+                        }
+
+                        QuickLaunchGroupSection {
+                            width: parent.width;
+                            items: root.group-items;
+                        }
+
+                        QuickLaunchSection {
+                            width: parent.width;
+                            title: "Group Focus";
+                            subtitle: "Saved SSH connections from the active folder context";
+                            items: root.visible-group-items;
+                            empty_text: "Select a saved SSH connection to focus its group.";
+
+                            item-selected(asset-id) => {
+                                root.asset-selected(asset-id);
+                            }
+
+                            item-activated(asset-id) => {
+                                root.connect-requested(asset-id);
+                            }
+
+                            toggle-favorite-requested(asset-id) => {
+                                root.toggle-favorite-requested(asset-id);
+                            }
+                        }
+                    }
+
+                    QuickLaunchDetailPane {
+                        width: 336px;
+                        vertical-stretch: 1;
+                        detail: root.selected-detail;
+
+                        connect-requested(asset-id) => {
+                            root.connect-requested(asset-id);
+                        }
+
+                        connect-in-new-tab-requested(asset-id) => {
+                            root.connect-in-new-tab-requested(asset-id);
+                        }
+
+                        reveal-in-assets-requested(asset-id) => {
+                            root.reveal-in-assets-requested(asset-id);
+                        }
+                    }
+                }
+            }
         }
     }
 }

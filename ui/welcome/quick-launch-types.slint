@@ -1,0 +1,29 @@
+export struct QuickLaunchCardRow {
+    asset_id: string,
+    title: string,
+    subtitle: string,
+    badge: string,
+    meta: string,
+    icon_kind: string,
+    accent_kind: string,
+    favorite: bool,
+    selected: bool,
+}
+
+export struct QuickLaunchGroupRow {
+    group_id: string,
+    label: string,
+    count: int,
+    selected: bool,
+}
+
+export struct QuickLaunchDetailRow {
+    asset_id: string,
+    title: string,
+    subtitle: string,
+    environment: string,
+    auth_summary: string,
+    proxy_summary: string,
+    remark: string,
+    recent_label: string,
+}

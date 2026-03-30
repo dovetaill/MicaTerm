@@ -92,6 +92,38 @@ fn sample_keychain_catalog_for_view_model() -> KeychainCatalog {
     }
 }
 
+fn sample_quick_launch_asset_tree() -> (AssetTree, String) {
+    let mut tree = AssetTree::new();
+    let folder_prod = tree.insert_root(ConsoleAssetKind::Folder, "Production");
+    let prod = tree.insert_child_with_payload(
+        &folder_prod,
+        ConsoleAssetKind::SshConnection,
+        "Prod Bastion",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: "prod.example.com".into(),
+            user: "ops".into(),
+            port: "22".into(),
+            auth_method: "password".into(),
+            auth_source: "manual".into(),
+            environment: "prod".into(),
+            remark: "Primary bastion".into(),
+            ..AssetSshConnectionSpec::default()
+        }),
+    );
+    let snippet_package = tree.insert_root(ConsoleAssetKind::SnippetPackage, "Ops Snippets");
+    let _snippet = tree.insert_child_with_payload(
+        &snippet_package,
+        ConsoleAssetKind::Snippet,
+        "Restart Service",
+        AssetNodePayload::Snippet(AssetSnippetSpec {
+            script: "systemctl restart app".into(),
+            package_id: Some(snippet_package.clone()),
+        }),
+    );
+
+    (tree, prod)
+}
+
 #[test]
 fn welcome_actions_match_the_approved_order() {
     assert_eq!(
@@ -114,6 +146,20 @@ fn shell_view_model_starts_in_welcome_mode_with_right_panel_hidden() {
     assert_eq!(
         view_model.active_sidebar_destination,
         SidebarDestination::Console
+    );
+}
+
+#[test]
+fn quick_launch_selection_falls_back_to_first_visible_item() {
+    let (tree, prod_asset_id) = sample_quick_launch_asset_tree();
+    let mut view_model = ShellViewModel::default();
+
+    view_model.replace_console_asset_tree(tree);
+    view_model.ensure_quick_launch_selection();
+
+    assert_eq!(
+        view_model.quick_launch_selected_asset_id(),
+        Some(prod_asset_id.as_str())
     );
 }
 

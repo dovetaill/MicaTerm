@@ -3897,6 +3897,121 @@ fn connect_action_reuses_existing_ephemeral_session_for_same_draft() {
 }
 
 #[test]
+fn quick_launch_connect_opens_saved_asset_session_and_updates_recent_order() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app, None);
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    create_root_ssh(&app, "DB Replica", "10.0.0.24");
+    let find_asset_id = |label: &str| {
+        let rows = app.get_console_asset_items();
+        (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .find(|row| row.label.as_str() == label)
+            .map(|row| row.id.to_string())
+            .expect("asset id by label")
+    };
+    let prod_id = find_asset_id("Prod Bastion");
+    let db_id = find_asset_id("DB Replica");
+
+    app.invoke_welcome_quick_launch_connect_requested(prod_id.clone().into());
+    app.invoke_welcome_quick_launch_connect_requested(db_id.clone().into());
+
+    let recent = app.get_welcome_quick_launch_recent_items();
+    assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+    assert_eq!(recent.row_count(), 2);
+    assert_eq!(
+        recent.row_data(0).expect("recent row 0").asset_id.as_str(),
+        db_id.as_str()
+    );
+    assert_eq!(
+        recent.row_data(1).expect("recent row 1").asset_id.as_str(),
+        prod_id.as_str()
+    );
+    assert_eq!(
+        app.get_welcome_quick_launch_selected_detail()
+            .asset_id
+            .as_str(),
+        db_id.as_str()
+    );
+}
+
+#[test]
+fn quick_launch_reveal_in_assets_selects_console_asset() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app, None);
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_sidebar_destination_selected("snippets".into());
+
+    app.invoke_welcome_quick_launch_reveal_in_assets_requested(ssh_id.clone().into());
+
+    let row = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("console row after reveal");
+    assert_eq!(app.get_active_sidebar_destination().as_str(), "console");
+    assert_eq!(row.id.as_str(), ssh_id.as_str());
+    assert!(row.selected);
+    assert!(row.focused);
+}
+
+#[test]
+fn quick_launch_toggle_favorite_and_search_refresh_dashboard_projection() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app, None);
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    create_root_ssh(&app, "DB Replica", "10.0.0.24");
+    let find_asset_id = |label: &str| {
+        let rows = app.get_console_asset_items();
+        (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .find(|row| row.label.as_str() == label)
+            .map(|row| row.id.to_string())
+            .expect("asset id by label")
+    };
+    let prod_id = find_asset_id("Prod Bastion");
+    let db_id = find_asset_id("DB Replica");
+
+    app.invoke_welcome_quick_launch_toggle_favorite_requested(prod_id.clone().into());
+
+    let favorites = app.get_welcome_quick_launch_favorite_items();
+    assert_eq!(favorites.row_count(), 1);
+    assert_eq!(
+        favorites.row_data(0).expect("favorite row 0").asset_id.as_str(),
+        prod_id.as_str()
+    );
+    assert!(favorites.row_data(0).expect("favorite row 0").favorite);
+
+    app.invoke_welcome_quick_launch_search_changed("db".into());
+
+    let visible_group_items = app.get_welcome_quick_launch_visible_group_items();
+    assert_eq!(app.get_welcome_quick_launch_search_query().as_str(), "db");
+    assert_eq!(visible_group_items.row_count(), 1);
+    assert_eq!(
+        visible_group_items
+            .row_data(0)
+            .expect("visible group row 0")
+            .asset_id
+            .as_str(),
+        db_id.as_str()
+    );
+    assert_eq!(
+        app.get_welcome_quick_launch_selected_detail()
+            .asset_id
+            .as_str(),
+        db_id.as_str()
+    );
+}
+
+#[test]
 fn save_and_connect_persists_saved_secret_before_probe() {
     i_slint_backend_testing::init_no_event_loop();
 

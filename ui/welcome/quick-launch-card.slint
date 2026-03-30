@@ -1,0 +1,161 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+import { QuickLaunchCardRow } from "quick-launch-types.slint";
+
+export component QuickLaunchCard inherits Rectangle {
+    in property <QuickLaunchCardRow> item;
+    callback selected(string);
+    callback activated(string);
+    callback toggle-favorite(string);
+
+    private property <image> console-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
+    private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
+    private property <image> gateway-icon: @image-url("../../assets/icons/fluent/navigation-24-regular.svg");
+    private property <image> pin-icon: @image-url("../../assets/icons/fluent/pin-20-regular.svg");
+    private property <image> pin-off-icon: @image-url("../../assets/icons/fluent/pin-off-20-regular.svg");
+
+    function accent-brush() -> brush {
+        if root.item.accent_kind == "danger" {
+            return ThemeTokens.status-error-surface;
+        } else if root.item.accent_kind == "warning" {
+            return ThemeTokens.status-busy-surface;
+        } else if root.item.accent_kind == "info" {
+            return ThemeTokens.accent;
+        }
+        return ThemeTokens.control-active-surface;
+    }
+
+    height: 96px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: root.item.selected ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    background: touch.pressed
+        ? ThemeTokens.control-pressed-surface
+        : root.item.selected
+            ? ThemeTokens.control-active-surface
+            : touch.has-hover
+                ? ThemeTokens.control-hover-surface
+                : ThemeTokens.assets-surface;
+
+    accent-strip := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 3px;
+        height: parent.height;
+        background: root.accent-brush();
+    }
+
+    icon-shell := Rectangle {
+        x: 18px;
+        y: 16px;
+        width: 44px;
+        height: 44px;
+        border-radius: 0px;
+        background: root.accent-brush();
+        opacity: ThemeTokens.dark-mode ? 0.88 : 0.94;
+
+        Image {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 20px;
+            height: 20px;
+            source: root.item.icon_kind == "folder"
+                ? root.folder-icon
+                : root.item.icon_kind == "gateway"
+                    ? root.gateway-icon
+                    : root.console-icon;
+            image-fit: contain;
+            colorize: ThemeTokens.text-primary;
+        }
+    }
+
+    title-text := Text {
+        x: 78px;
+        y: 16px;
+        width: parent.width - 162px;
+        text: root.item.title;
+        color: ThemeTokens.text-primary;
+        font-size: 15px;
+        font-weight: 700;
+        overflow: elide;
+    }
+
+    subtitle-text := Text {
+        x: 78px;
+        y: 40px;
+        width: parent.width - 162px;
+        text: root.item.subtitle;
+        color: ThemeTokens.text-primary;
+        opacity: 0.82;
+        overflow: elide;
+    }
+
+    meta-text := Text {
+        x: 78px;
+        y: 64px;
+        width: parent.width - 162px;
+        text: root.item.meta != "" ? root.item.meta : "Open saved SSH connection";
+        color: ThemeTokens.text-primary;
+        opacity: 0.58;
+        overflow: elide;
+    }
+
+    if root.item.badge != "" : badge-chip := Rectangle {
+        x: parent.width - self.width - 18px;
+        y: 18px;
+        width: max(56px, badge-label.preferred-width + 18px);
+        height: 24px;
+        border-radius: 0px;
+        background: ThemeTokens.inspector-surface;
+        border-width: 1px;
+        border-color: ThemeTokens.divider-subtle;
+
+        badge-label := Text {
+            x: 9px;
+            y: 0px;
+            width: parent.width - 18px;
+            height: parent.height;
+            text: root.item.badge;
+            color: ThemeTokens.text-primary;
+            font-size: 11px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    favorite-touch := TouchArea {
+        x: parent.width - 42px;
+        y: parent.height - 38px;
+        width: 24px;
+        height: 24px;
+
+        clicked => {
+            root.toggle-favorite(root.item.asset_id);
+        }
+    }
+
+    Image {
+        x: favorite-touch.x;
+        y: favorite-touch.y;
+        width: 20px;
+        height: 20px;
+        source: root.item.favorite ? root.pin-icon : root.pin-off-icon;
+        image-fit: contain;
+        colorize: ThemeTokens.text-primary;
+        opacity: root.item.favorite ? 1.0 : 0.62;
+    }
+
+    touch := TouchArea {
+        x: 0px;
+        y: 0px;
+        width: parent.width - 54px;
+        height: parent.height;
+
+        clicked => {
+            root.selected(root.item.asset_id);
+        }
+
+        double-clicked => {
+            root.activated(root.item.asset_id);
+        }
+    }
+}

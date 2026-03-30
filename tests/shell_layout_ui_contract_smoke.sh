@@ -28,6 +28,7 @@ grep -F 'visible: root.expanded;' "$RIGHT_PANEL" >/dev/null
 grep -F 'border-radius: 0px;' "$RIGHT_PANEL" >/dev/null
 grep -F 'border-width: 0px;' "$RIGHT_PANEL" >/dev/null
 grep -F 'VerticalLayout {' "$WELCOME" >/dev/null
+grep -F 'QuickLaunchDetailPane' "$WELCOME" >/dev/null
 grep -F 'activity-bar := Rectangle' "$SIDEBAR" >/dev/null
 
 ! grep -F 'border-radius: 14px;' "$RIGHT_PANEL" >/dev/null

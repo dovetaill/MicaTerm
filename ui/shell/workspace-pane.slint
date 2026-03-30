@@ -1,6 +1,7 @@
 // Workspace pane that owns the tab strip and content host width contract.
 
 import { ThemeTokens } from "../theme/tokens.slint";
+import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "../welcome/quick-launch-types.slint";
 import { TabBar, WorkspaceTabItem } from "./tabbar.slint";
 import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow, TerminalSessionHost } from "./terminal-session-host.slint";
 
@@ -21,6 +22,21 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-session-host-key-prompt-fingerprint: "";
     in property <[ConnectionProgressStepRow]> workspace-session-connection-steps: [];
     in property <[ConnectionProgressDiagnosticRow]> workspace-session-connection-diagnostics: [];
+    in property <[QuickLaunchCardRow]> welcome-quick-launch-recent-items: [];
+    in property <[QuickLaunchCardRow]> welcome-quick-launch-favorite-items: [];
+    in property <[QuickLaunchGroupRow]> welcome-quick-launch-group-items: [];
+    in property <[QuickLaunchCardRow]> welcome-quick-launch-visible-group-items: [];
+    in property <QuickLaunchDetailRow> welcome-quick-launch-selected-detail: {
+        asset_id: "",
+        title: "",
+        subtitle: "",
+        environment: "",
+        auth_summary: "",
+        proxy_summary: "",
+        remark: "",
+        recent_label: "",
+    };
+    in property <string> welcome-quick-launch-search-query: "";
     in property <image> workspace-session-surface-image;
     in property <int> workspace-session-native-frame-token: 0;
     in property <int> workspace-session-rows: 24;
@@ -71,6 +87,12 @@ export component WorkspacePane inherits Rectangle {
     callback scroll-jump-requested(float);
     callback jump-to-latest-requested();
     callback mouse-input(string, string, int, int, bool, bool, bool);
+    callback welcome-quick-launch-asset-selected(string);
+    callback welcome-quick-launch-search-changed(string);
+    callback welcome-quick-launch-connect-requested(string);
+    callback welcome-quick-launch-connect-in-new-tab-requested(string);
+    callback welcome-quick-launch-toggle-favorite-requested(string);
+    callback welcome-quick-launch-reveal-in-assets-requested(string);
 
     horizontal-stretch: 1;
     min-width: 0px;
@@ -119,6 +141,12 @@ export component WorkspacePane inherits Rectangle {
                 connection-progress-host-key-prompt-fingerprint: root.workspace-session-host-key-prompt-fingerprint;
                 connection-progress-steps: root.workspace-session-connection-steps;
                 connection-progress-diagnostics: root.workspace-session-connection-diagnostics;
+                welcome-quick-launch-recent-items: root.welcome-quick-launch-recent-items;
+                welcome-quick-launch-favorite-items: root.welcome-quick-launch-favorite-items;
+                welcome-quick-launch-group-items: root.welcome-quick-launch-group-items;
+                welcome-quick-launch-visible-group-items: root.welcome-quick-launch-visible-group-items;
+                welcome-quick-launch-selected-detail: root.welcome-quick-launch-selected-detail;
+                welcome-quick-launch-search-query: root.welcome-quick-launch-search-query;
                 session-surface-image: root.workspace-session-surface-image;
                 session-native-frame-token: root.workspace-session-native-frame-token;
                 session-rows: root.workspace-session-rows;
@@ -194,6 +222,30 @@ export component WorkspacePane inherits Rectangle {
 
                 mouse-input(kind, button, row, col, shift, ctrl, alt) => {
                     root.mouse-input(kind, button, row, col, shift, ctrl, alt);
+                }
+
+                welcome-quick-launch-asset-selected(asset-id) => {
+                    root.welcome-quick-launch-asset-selected(asset-id);
+                }
+
+                welcome-quick-launch-search-changed(query) => {
+                    root.welcome-quick-launch-search-changed(query);
+                }
+
+                welcome-quick-launch-connect-requested(asset-id) => {
+                    root.welcome-quick-launch-connect-requested(asset-id);
+                }
+
+                welcome-quick-launch-connect-in-new-tab-requested(asset-id) => {
+                    root.welcome-quick-launch-connect-in-new-tab-requested(asset-id);
+                }
+
+                welcome-quick-launch-toggle-favorite-requested(asset-id) => {
+                    root.welcome-quick-launch-toggle-favorite-requested(asset-id);
+                }
+
+                welcome-quick-launch-reveal-in-assets-requested(asset-id) => {
+                    root.welcome-quick-launch-reveal-in-assets-requested(asset-id);
                 }
             }
         }
