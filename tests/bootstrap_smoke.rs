@@ -209,6 +209,43 @@ struct InteractiveProjectionRuntimeControl {
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
 }
 
+#[derive(Clone, Default)]
+struct KeyboardMatrixState {
+    key_inputs: Arc<Mutex<Vec<TerminalKeyEvent>>>,
+    paste_inputs: Arc<Mutex<Vec<String>>>,
+}
+
+impl KeyboardMatrixState {
+    fn take_key_inputs(&self) -> Vec<TerminalKeyEvent> {
+        std::mem::take(
+            &mut *self
+                .key_inputs
+                .lock()
+                .expect("lock keyboard matrix key inputs"),
+        )
+    }
+
+    fn take_paste_inputs(&self) -> Vec<String> {
+        std::mem::take(
+            &mut *self
+                .paste_inputs
+                .lock()
+                .expect("lock keyboard matrix paste inputs"),
+        )
+    }
+}
+
+#[derive(Clone)]
+struct KeyboardMatrixLauncher {
+    state: KeyboardMatrixState,
+}
+
+impl KeyboardMatrixLauncher {
+    fn new(state: KeyboardMatrixState) -> Self {
+        Self { state }
+    }
+}
+
 struct PasteProjectionRuntimeControl {
     session_id: uuid::Uuid,
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
@@ -221,6 +258,10 @@ struct ScrollProjectionState {
 
 struct ScrollProjectionRuntimeControl {
     state: ScrollProjectionState,
+}
+
+struct KeyboardMatrixRuntimeControl {
+    state: KeyboardMatrixState,
 }
 
 impl SessionRuntimeControl for NoopRuntimeControl {
@@ -377,6 +418,38 @@ impl SessionRuntimeLauncher for InteractiveProjectionLauncher {
                 session_id,
                 event_tx,
             }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for KeyboardMatrixLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                terminal_surface_with_cells(
+                    session_id,
+                    1,
+                    24,
+                    80,
+                    vec!["welcome to mica-term".into()],
+                ),
+            ));
+            Ok(Box::new(KeyboardMatrixRuntimeControl { state }) as Box<dyn SessionRuntimeControl>)
         })
     }
 
@@ -561,6 +634,42 @@ impl SessionRuntimeControl for InteractiveProjectionRuntimeControl {
                 ],
             ),
         ));
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl SessionRuntimeControl for KeyboardMatrixRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()> {
+        self.state
+            .key_inputs
+            .lock()
+            .expect("lock keyboard matrix key inputs")
+            .push(event);
+        Ok(())
+    }
+
+    fn send_paste(&self, text: String) -> Result<()> {
+        self.state
+            .paste_inputs
+            .lock()
+            .expect("lock keyboard matrix paste inputs")
+            .push(text);
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
         Ok(())
     }
 
@@ -1115,6 +1224,103 @@ fn terminal_interaction_position(app: &AppWindow) -> LogicalPosition {
     )
 }
 
+fn dispatch_modifier_pressed(app: &AppWindow, modifier: Key) {
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: modifier.into(),
+    });
+}
+
+fn dispatch_modifier_released(app: &AppWindow, modifier: Key) {
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: modifier.into(),
+    });
+}
+
+fn dispatch_shared_key_chord(
+    app: &AppWindow,
+    key_text: slint::SharedString,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+) {
+    if shift {
+        dispatch_modifier_pressed(app, Key::Shift);
+    }
+    if ctrl {
+        dispatch_modifier_pressed(app, Key::Control);
+    }
+    if alt {
+        dispatch_modifier_pressed(app, Key::Alt);
+    }
+
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: key_text.clone(),
+    });
+    app.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: key_text });
+
+    if alt {
+        dispatch_modifier_released(app, Key::Alt);
+    }
+    if ctrl {
+        dispatch_modifier_released(app, Key::Control);
+    }
+    if shift {
+        dispatch_modifier_released(app, Key::Shift);
+    }
+}
+
+fn dispatch_text_key_chord(app: &AppWindow, key_text: &str, ctrl: bool, shift: bool, alt: bool) {
+    dispatch_shared_key_chord(app, key_text.into(), ctrl, shift, alt);
+}
+
+fn dispatch_named_key_chord(app: &AppWindow, key_name: &str, ctrl: bool, shift: bool, alt: bool) {
+    let key_text = match key_name {
+        "left" => Key::LeftArrow.into(),
+        "right" => Key::RightArrow.into(),
+        "up" => Key::UpArrow.into(),
+        "down" => Key::DownArrow.into(),
+        "home" => Key::Home.into(),
+        "end" => Key::End.into(),
+        "insert" => Key::Insert.into(),
+        "page-up" => Key::PageUp.into(),
+        "page-down" => Key::PageDown.into(),
+        other => panic!("unsupported named key `{other}`"),
+    };
+    dispatch_shared_key_chord(app, key_text, ctrl, shift, alt);
+}
+
+fn dispatch_function_key(app: &AppWindow, number: u8) {
+    let key_text = match number {
+        1 => Key::F1.into(),
+        2 => Key::F2.into(),
+        3 => Key::F3.into(),
+        4 => Key::F4.into(),
+        5 => Key::F5.into(),
+        6 => Key::F6.into(),
+        7 => Key::F7.into(),
+        8 => Key::F8.into(),
+        9 => Key::F9.into(),
+        10 => Key::F10.into(),
+        11 => Key::F11.into(),
+        12 => Key::F12.into(),
+        13 => Key::F13.into(),
+        14 => Key::F14.into(),
+        15 => Key::F15.into(),
+        16 => Key::F16.into(),
+        17 => Key::F17.into(),
+        18 => Key::F18.into(),
+        19 => Key::F19.into(),
+        20 => Key::F20.into(),
+        21 => Key::F21.into(),
+        22 => Key::F22.into(),
+        23 => Key::F23.into(),
+        24 => Key::F24.into(),
+        other => panic!("unsupported function key F{other}"),
+    };
+    dispatch_shared_key_chord(app, key_text, false, false, false);
+}
+
 fn focus_workspace_terminal(app: &AppWindow) {
     let position = terminal_interaction_position(app);
     app.window()
@@ -1126,6 +1332,32 @@ fn focus_workspace_terminal(app: &AppWindow) {
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
     app.window().dispatch_event(WindowEvent::PointerReleased {
         position,
+        button: PointerEventButton::Left,
+    });
+}
+
+fn select_terminal_welcome_span(app: &AppWindow) {
+    let selection_start = LogicalPosition::new(
+        app.get_layout_main_workspace_x() + 18.0,
+        app.get_layout_titlebar_height() + 56.0,
+    );
+    let selection_end = LogicalPosition::new(
+        app.get_layout_main_workspace_x() + 92.0,
+        app.get_layout_titlebar_height() + 56.0,
+    );
+
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: selection_start,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: selection_start,
+        button: PointerEventButton::Left,
+    });
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: selection_end,
+    });
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: selection_end,
         button: PointerEventButton::Left,
     });
 }
@@ -4182,6 +4414,242 @@ fn workspace_terminal_plain_ctrl_a_forwards_prefix_key_without_selecting_all() {
     assert!(
         !app.get_workspace_session_selection_active(),
         "plain Ctrl+A should not trigger a local select-all gesture inside the terminal host"
+    );
+}
+
+#[test]
+fn workspace_terminal_ctrl_key_matrix_forwards_common_shell_shortcuts() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = KeyboardMatrixState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(KeyboardMatrixLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    let cases = ['a', 'c', 'v', 'z', 'd', 'l'];
+    for key in cases {
+        dispatch_text_key_chord(&app, &key.to_string(), true, false, false);
+        settle_terminal_projection();
+        assert_eq!(
+            state.take_key_inputs(),
+            vec![TerminalKeyEvent::character(key, false, true, false)],
+            "Ctrl+{key} should be forwarded to the remote terminal as a control chord"
+        );
+        assert!(
+            state.take_paste_inputs().is_empty(),
+            "Ctrl+{key} should not be converted into a local paste action"
+        );
+    }
+}
+
+#[test]
+fn workspace_terminal_ctrl_shift_shortcut_matrix_keeps_local_contract() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = KeyboardMatrixState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(KeyboardMatrixLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+    select_terminal_welcome_span(&app);
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
+        Ok(())
+    })
+    .expect("clear clipboard");
+
+    dispatch_text_key_chord(&app, "C", true, true, false);
+    settle_terminal_projection();
+
+    let copied = i_slint_backend_selector::with_platform(|platform| {
+        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
+    })
+    .expect("read clipboard")
+    .expect("clipboard text after Ctrl+Shift+C");
+    assert!(
+        copied.contains("welcome"),
+        "Ctrl+Shift+C should still copy the active terminal selection"
+    );
+    assert!(
+        state.take_key_inputs().is_empty(),
+        "Ctrl+Shift+C should stay local and must not forward a remote key chord"
+    );
+    assert!(
+        state.take_paste_inputs().is_empty(),
+        "Ctrl+Shift+C should not touch the remote paste channel"
+    );
+
+    i_slint_backend_selector::with_platform(|platform| {
+        platform.set_clipboard_text(
+            "printf 'matrix paste'",
+            slint::platform::Clipboard::DefaultClipboard,
+        );
+        Ok(())
+    })
+    .expect("seed clipboard");
+
+    dispatch_text_key_chord(&app, "V", true, true, false);
+    settle_terminal_projection();
+
+    assert!(
+        state.take_key_inputs().is_empty(),
+        "Ctrl+Shift+V should not forward a remote key chord"
+    );
+    assert_eq!(
+        state.take_paste_inputs(),
+        vec!["printf 'matrix paste'".to_string()],
+        "Ctrl+Shift+V should use the terminal paste channel"
+    );
+
+    for key in ["T", "W", "P", "F"] {
+        dispatch_text_key_chord(&app, key, true, true, false);
+        settle_terminal_projection();
+        assert!(
+            state.take_key_inputs().is_empty(),
+            "reserved Ctrl+Shift+{key} should stay local and never forward to the remote terminal"
+        );
+        assert!(
+            state.take_paste_inputs().is_empty(),
+            "reserved Ctrl+Shift+{key} should not hit the terminal paste channel"
+        );
+    }
+}
+
+#[test]
+fn workspace_terminal_alt_arrow_matrix_forwards_modifier_aware_named_keys() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = KeyboardMatrixState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(KeyboardMatrixLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    let cases = [("left", "left"), ("right", "right"), ("up", "up"), ("down", "down")];
+    for (named_key, expected_name) in cases {
+        dispatch_named_key_chord(&app, named_key, false, false, true);
+        settle_terminal_projection();
+        assert_eq!(
+            state.take_key_inputs(),
+            vec![TerminalKeyEvent::named(expected_name, true, false, false)],
+            "Alt+{named_key} should preserve the alt modifier in the remote terminal event"
+        );
+    }
+}
+
+#[test]
+fn workspace_terminal_named_key_matrix_forwards_navigation_keys() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = KeyboardMatrixState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(KeyboardMatrixLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    let cases = [("home", "home"), ("end", "end"), ("insert", "insert")];
+    for (named_key, expected_name) in cases {
+        dispatch_named_key_chord(&app, named_key, false, false, false);
+        settle_terminal_projection();
+        assert_eq!(
+            state.take_key_inputs(),
+            vec![TerminalKeyEvent::named(expected_name, false, false, false)],
+            "{named_key} should forward as a named terminal key event"
+        );
+    }
+}
+
+#[test]
+fn workspace_terminal_function_key_matrix_forwards_f1_through_f24() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = KeyboardMatrixState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(KeyboardMatrixLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    for number in 1u8..=24 {
+        dispatch_function_key(&app, number);
+        settle_terminal_projection();
+        assert_eq!(
+            state.take_key_inputs(),
+            vec![TerminalKeyEvent::function(number, false, false, false)],
+            "F{number} should forward to the remote terminal function-key path"
+        );
+    }
+}
+
+#[test]
+fn workspace_terminal_shift_page_shortcuts_scroll_locally() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 3);
+
+    dispatch_named_key_chord(&app, "page-up", false, true, false);
+    settle_terminal_projection();
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        8,
+        "Shift+PageUp should move local scrollback toward the top"
+    );
+
+    dispatch_named_key_chord(&app, "page-down", false, true, false);
+    settle_terminal_projection();
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        0,
+        "Shift+PageDown should move local scrollback back toward the bottom"
     );
 }
 
