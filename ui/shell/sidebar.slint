@@ -29,6 +29,7 @@ export component Sidebar inherits Rectangle {
     in property <bool> asset-tree-controls-enabled: true;
     in property <[ConsoleAssetItem]> console-asset-items: [];
     in property <[ConsoleAssetItem]> snippet-asset-items: [];
+    in property <[ConsoleAssetItem]> keychain-asset-items: [];
     private property <string> tooltip-text-value: "";
     private property <bool> tooltip-visible-value: false;
     private property <string> tooltip-source-id-value: "";
@@ -192,6 +193,7 @@ export component Sidebar inherits Rectangle {
             asset-tree-controls-enabled: root.asset-tree-controls-enabled;
             console-asset-items: root.console-asset-items;
             snippet-asset-items: root.snippet-asset-items;
+            keychain-asset-items: root.keychain-asset-items;
 
             toggle-assets-search-requested => {
                 root.toggle-assets-search-requested();

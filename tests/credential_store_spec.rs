@@ -466,3 +466,11 @@ fn cached_credential_store_delete_clears_cache_and_backing_store() {
         None
     );
 }
+
+#[test]
+fn ssh_credential_ref_namespace_stays_unchanged() {
+    assert_eq!(
+        ssh_credential_ref("asset-prod", SshCredentialKind::SavedSecrets),
+        "ssh/saved-secrets/asset-prod"
+    );
+}

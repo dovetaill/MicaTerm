@@ -28,11 +28,13 @@ grep -F 'Sidebar {' "$APP_WINDOW" >/dev/null
 grep -F 'show-assets-sidebar: root.effective-show-assets-sidebar;' "$APP_WINDOW" >/dev/null
 grep -F 'active-sidebar-destination: root.active-sidebar-destination;' "$APP_WINDOW" >/dev/null
 grep -F 'Folder Open' "$ASSETS" >/dev/null || true
-grep -F 'Console Tree — Expanded' "$ASSETS" >/dev/null
-grep -F 'Console Tree — Collapsed' "$ASSETS" >/dev/null
-grep -F 'Console Flat List' "$ASSETS" >/dev/null
+grep -F 'No assets yet' "$ASSETS" >/dev/null
+grep -F 'Right-click or use Create to add a folder or SSH connection.' "$ASSETS" >/dev/null
 grep -F 'Snippets' "$ASSETS" >/dev/null
-grep -F 'Keychain' "$ASSETS" >/dev/null
+grep -F 'Groups, favorites, templates' "$ASSETS" >/dev/null
+grep -F 'active-panel == "keychain"' "$ASSETS" >/dev/null
+grep -F 'No keychain items yet' "$ASSETS" >/dev/null
+grep -F 'Use Create to add a folder, identity, or SSH key.' "$ASSETS" >/dev/null
 grep -F 'folder-open-20-regular.svg' "$BUTTON" >/dev/null
 grep -F 'window-console-20-regular.svg' "$BUTTON" >/dev/null
 grep -F 'document-code-16-regular.svg' "$BUTTON" >/dev/null

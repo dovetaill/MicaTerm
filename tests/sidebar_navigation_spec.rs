@@ -1,6 +1,8 @@
 //! Sidebar destination ordering and activation contracts.
 
-use mica_term::shell::sidebar::{SidebarDestination, sidebar_destinations};
+use mica_term::shell::sidebar::{
+    SidebarDestination, create_popover_actions_for, sidebar_destinations, toolbar_descriptor_for,
+};
 use mica_term::shell::view_model::ShellViewModel;
 
 #[test]
@@ -53,5 +55,23 @@ fn selecting_sidebar_destination_auto_expands_assets_sidebar() {
     assert_eq!(
         view_model.active_sidebar_destination,
         SidebarDestination::Keychain
+    );
+}
+
+#[test]
+fn keychain_toolbar_uses_create_popover_with_keychain_specific_actions() {
+    let mut view_model = ShellViewModel::default();
+    view_model.select_sidebar_destination(SidebarDestination::Keychain);
+
+    let descriptor = toolbar_descriptor_for(view_model.active_sidebar_destination, &view_model);
+    let actions = create_popover_actions_for(view_model.active_sidebar_destination);
+
+    assert!(descriptor.uses_create_popover);
+    assert_eq!(descriptor.primary_create_action_id, None);
+    assert_eq!(descriptor.primary_create_tooltip, "Create Keychain Item");
+    assert_eq!(descriptor.search_tooltip, "Search Keychain");
+    assert_eq!(
+        actions.iter().map(|action| action.id).collect::<Vec<_>>(),
+        vec!["new-folder", "new-identity", "new-ssh-key"]
     );
 }

@@ -1,0 +1,448 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+component DialogButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> primary: false;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 34px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: root.primary && root.enabled ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    background: !root.enabled ? ThemeTokens.control-disabled-surface
+        : button-touch.pressed ? ThemeTokens.control-pressed-surface
+        : button-touch.has-hover ? ThemeTokens.control-hover-surface
+        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+    opacity: root.enabled ? 1.0 : 0.56;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    button-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component TextField inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "";
+    in property <bool> required: false;
+    in property <bool> multiline: false;
+    in property <bool> password-mode: false;
+    callback value-changed(string);
+
+    min-width: 0px;
+    preferred-width: 0px;
+    height: root.multiline ? 138px : 72px;
+    background: transparent;
+
+    public function focus-input() {
+        field-input.focus();
+    }
+
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        spacing: 6px;
+
+        Text {
+            text: root.required ? root.label + " *" : root.label;
+            color: ThemeTokens.text-primary;
+            opacity: 0.8;
+        }
+
+        Rectangle {
+            height: root.multiline ? 104px : 40px;
+            border-radius: 0px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.inspector-surface;
+
+            field-input := TextInput {
+                x: 12px;
+                y: root.multiline ? 8px : 9px;
+                width: parent.width - 24px;
+                height: parent.height - (root.multiline ? 16px : 18px);
+                text: root.value;
+                color: ThemeTokens.text-primary;
+                single-line: !root.multiline;
+                input-type: root.password-mode ? InputType.password : InputType.text;
+                selection-background-color: ThemeTokens.accent;
+                selection-foreground-color: ThemeTokens.text-primary;
+
+                edited => {
+                    root.value-changed(self.text);
+                }
+            }
+        }
+    }
+}
+
+component AuthModeButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> active: false;
+    callback clicked();
+
+    min-width: 0px;
+    preferred-width: 0px;
+    horizontal-stretch: 1;
+    height: 34px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: root.active ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    background: auth-touch.pressed ? ThemeTokens.control-pressed-surface
+        : auth-touch.has-hover ? ThemeTokens.control-hover-surface
+        : root.active ? ThemeTokens.control-active-surface : ThemeTokens.assets-surface;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    auth-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component AssetsKeychainIdentityModal inherits Rectangle {
+    in property <string> dialog-title: "Identity";
+    in property <string> name: "";
+    in property <string> username: "";
+    in property <string> auth-kind: "password";
+    in property <string> password: "";
+    in property <string> ssh-key-label: "";
+    in property <string> remark: "";
+    in property <string> validation-message: "";
+    in property <bool> can-confirm: false;
+    in property <int> focus-sequence: 0;
+    callback close-requested();
+    callback confirm-requested();
+    callback draft-changed(string, string);
+    callback action-requested(string);
+    callback drag-requested(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended();
+    callback focus-restore-requested();
+    private property <length> footer-height: root.validation-message == "" ? 78px : 100px;
+
+    background: transparent;
+
+    public function focus-input() {
+        name-field.focus-input();
+    }
+
+    changed focus-sequence => {
+        root.focus-input();
+    }
+
+    modal-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.focus-restore-requested();
+                root.close-requested();
+                accept
+            } else if (event.text == Key.Return) {
+                if (root.can-confirm) {
+                    root.confirm-requested();
+                }
+                accept
+            } else {
+                reject
+            }
+        }
+
+        header := Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 56px;
+            background: ThemeTokens.assets-surface;
+
+            Text {
+                x: 20px;
+                y: 0px;
+                width: parent.width - 72px;
+                height: parent.height;
+                text: root.dialog-title;
+                color: ThemeTokens.text-primary;
+                font-size: 18px;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+
+            drag-touch := TouchArea {
+                width: parent.width - 48px;
+                height: parent.height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down
+                        && event.button == PointerEventButton.left
+                    {
+                        root.drag-requested(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.move {
+                        root.drag-moved(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.up {
+                        root.drag-ended();
+                    }
+                }
+            }
+
+            close-button := Rectangle {
+                x: parent.width - 40px;
+                y: 12px;
+                width: 28px;
+                height: 28px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.control-active-surface;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "×";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                close-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.close-requested();
+                    }
+                }
+            }
+        }
+
+        body := Rectangle {
+            x: 0px;
+            y: header.height;
+            width: parent.width;
+            height: parent.height - header.height - root.footer-height;
+            background: transparent;
+
+            VerticalLayout {
+                x: 20px;
+                y: 18px;
+                width: parent.width - 40px;
+                spacing: 12px;
+
+                name-field := TextField {
+                    width: parent.width;
+                    label: "Name";
+                    required: true;
+                    value: root.name;
+
+                    value-changed(value) => {
+                        root.draft-changed("name", value);
+                    }
+                }
+
+                TextField {
+                    width: parent.width;
+                    label: "Username";
+                    required: true;
+                    value: root.username;
+
+                    value-changed(value) => {
+                        root.draft-changed("username", value);
+                    }
+                }
+
+                Text {
+                    width: parent.width;
+                    text: "Authentication";
+                    color: ThemeTokens.text-primary;
+                    font-weight: 600;
+                }
+
+                HorizontalLayout {
+                    width: parent.width;
+                    spacing: 8px;
+
+                    AuthModeButton {
+                        label: "Password";
+                        active: root.auth-kind == "password";
+
+                        clicked => {
+                            root.draft-changed("auth_kind", "password");
+                        }
+                    }
+
+                    AuthModeButton {
+                        label: "SSH Key";
+                        active: root.auth-kind == "ssh-key";
+
+                        clicked => {
+                            root.draft-changed("auth_kind", "ssh-key");
+                        }
+                    }
+                }
+
+                if root.auth-kind == "password" : TextField {
+                    width: parent.width;
+                    label: "Password";
+                    required: true;
+                    value: root.password;
+                    password-mode: true;
+
+                    value-changed(value) => {
+                        root.draft-changed("password", value);
+                    }
+                }
+
+                if root.auth-kind == "ssh-key" : VerticalLayout {
+                    width: parent.width;
+                    spacing: 8px;
+
+                    Text {
+                        width: parent.width;
+                        text: "SSH Key";
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.8;
+                    }
+
+                    Rectangle {
+                        width: parent.width;
+                        height: 40px;
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-subtle;
+                        background: ThemeTokens.inspector-surface;
+
+                        Text {
+                            x: 12px;
+                            y: 0px;
+                            width: parent.width - 168px;
+                            height: parent.height;
+                            text: root.ssh-key-label == "" ? "No SSH Key selected." : root.ssh-key-label;
+                            color: ThemeTokens.text-primary;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
+                        DialogButton {
+                            x: parent.width - 144px;
+                            y: 3px;
+                            width: 132px;
+                            height: 34px;
+                            label: "Use Existing SSH Key";
+
+                            clicked => {
+                                root.action-requested("use-existing-ssh-key");
+                            }
+                        }
+                    }
+                }
+
+                TextField {
+                    width: parent.width;
+                    label: "Remark";
+                    value: root.remark;
+                    multiline: true;
+
+                    value-changed(value) => {
+                        root.draft-changed("remark", value);
+                    }
+                }
+            }
+        }
+
+        footer := Rectangle {
+            x: 0px;
+            y: parent.height - root.footer-height;
+            width: parent.width;
+            height: root.footer-height;
+            background: ThemeTokens.assets-surface;
+
+            VerticalLayout {
+                x: 20px;
+                y: 14px;
+                width: parent.width - 40px;
+                height: parent.height - 28px;
+                spacing: 8px;
+
+                if root.validation-message != "" : Text {
+                    width: parent.width;
+                    text: root.validation-message;
+                    color: ThemeTokens.text-primary;
+                    opacity: 0.72;
+                    wrap: word-wrap;
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: transparent;
+                }
+
+                HorizontalLayout {
+                    height: 34px;
+                    spacing: 12px;
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: transparent;
+                    }
+
+                    DialogButton {
+                        width: 88px;
+                        label: "Cancel";
+
+                        clicked => {
+                            root.focus-restore-requested();
+                            root.close-requested();
+                        }
+                    }
+
+                    DialogButton {
+                        width: 88px;
+                        label: "Save";
+                        primary: true;
+                        enabled: root.can-confirm;
+
+                        clicked => {
+                            root.confirm-requested();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

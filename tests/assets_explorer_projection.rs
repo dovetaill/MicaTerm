@@ -290,6 +290,8 @@ fn expanded_state_remains_runtime_only_after_catalog_mapping() {
             user: "ops".into(),
             port: "22".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "".into(),

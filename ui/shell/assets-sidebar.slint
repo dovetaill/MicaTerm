@@ -38,6 +38,7 @@ export component AssetsSidebar inherits Rectangle {
     in property <bool> asset-tree-controls-enabled: true;
     in property <[ConsoleAssetItem]> console-asset-items: [];
     in property <[ConsoleAssetItem]> snippet-asset-items: [];
+    in property <[ConsoleAssetItem]> keychain-asset-items: [];
     out property <length> search-row-height: search-row-host.height;
     out property <length> create-menu-anchor-x: create-button.absolute-position.x;
     out property <length> create-menu-anchor-y: create-button.absolute-position.y;
@@ -212,7 +213,7 @@ export component AssetsSidebar inherits Rectangle {
                 vertical-stretch: 1;
                 background: transparent;
 
-                empty-state-context-touch := TouchArea {
+                keychain-empty-state-touch := TouchArea {
                     width: parent.width;
                     height: parent.height;
 
@@ -440,18 +441,86 @@ export component AssetsSidebar inherits Rectangle {
                 }
             }
 
-            if root.active-panel == "keychain" : VerticalLayout {
-                padding: 16px;
-                spacing: 8px;
+            if root.active-panel == "keychain" && root.keychain-asset-items.length == 0 : Rectangle {
+                vertical-stretch: 1;
+                background: transparent;
 
-                Text {
-                    text: "Keychain";
-                    color: ThemeTokens.text-primary;
+                empty-state-context-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        root.shell-interaction-requested();
+                    }
                 }
 
-                Text {
-                    text: "Accounts, identities, SSH keys";
-                    color: ThemeTokens.text-primary;
+                VerticalLayout {
+                    x: 16px;
+                    y: 24px;
+                    width: parent.width - 32px;
+                    spacing: 6px;
+
+                    Text {
+                        width: parent.width;
+                        text: "No keychain items yet";
+                        color: ThemeTokens.text-primary;
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        width: parent.width;
+                        text: "Use Create to add a folder, identity, or SSH key.";
+                        color: ThemeTokens.text-primary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            if root.active-panel == "keychain" && root.keychain-asset-items.length > 0 : Rectangle {
+                vertical-stretch: 1;
+                background: transparent;
+
+                keychain-list-host := ListView {
+                    x: 12px;
+                    y: 12px;
+                    width: parent.width - 24px;
+                    height: min(parent.height - 24px, root.keychain-asset-items.length * 28px);
+
+                    for item in root.keychain-asset-items : AssetNodeRow {
+                        width: keychain-list-host.width;
+                        item-id: item.id;
+                        item-kind: item.kind;
+                        label: item.label;
+                        depth: item.depth;
+                        has-children: item.has_children;
+                        expanded: item.expanded;
+                        selected: item.selected;
+                        focused: item.focused;
+                        disclosure-state: item.disclosure_state;
+                        path-hint: item.path_hint;
+                        compact-flat-mode: item.compact_flat_mode;
+
+                        selected-requested(item-id) => {
+                            root.asset-selected(item-id);
+                        }
+
+                        activated-requested(item-id) => {
+                            root.asset-activated(item-id);
+                        }
+
+                        toggle-expanded-requested(item-id) => {
+                            root.toggle-expanded-requested(item-id);
+                        }
+
+                        context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
+                            root.asset-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
+                        }
+
+                        pointer-activity-requested => {
+                            root.shell-interaction-requested();
+                        }
+                    }
                 }
             }
         }

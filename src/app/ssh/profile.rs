@@ -5,7 +5,10 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use crate::app::ssh::credentials::{SshCredentialKind, ssh_credential_ref};
-use crate::shell::assets::{AssetSshConnectionSpec, AssetSshProxySpec};
+use crate::shell::assets::{
+    AssetSshConnectionSpec, AssetSshProxySpec, SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY,
+    SSH_AUTH_SOURCE_MANUAL, normalized_ssh_auth_source,
+};
 use crate::shell::view_model::AssetSshConnectionDraft;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,6 +183,16 @@ impl ConnectionProfile {
         title: &str,
         spec: &AssetSshConnectionSpec,
     ) -> anyhow::Result<Self> {
+        match normalized_ssh_auth_source(&spec.auth_source) {
+            SSH_AUTH_SOURCE_MANUAL => {}
+            SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY => {
+                bail!(
+                    "SSH asset `{title}` requires keychain identity resolution before runtime normalization"
+                );
+            }
+            other => bail!("unsupported ssh auth source: {other}"),
+        }
+
         let host = spec.host.trim().to_string();
         let user = spec.user.trim().to_string();
         let name = title.trim().to_string();

@@ -1,5 +1,9 @@
 use std::collections::BTreeMap;
 
+use mica_term::app::keychain::model::{
+    KeychainCatalog, KeychainIdentityAuthKind, KeychainIdentitySpec, KeychainNode,
+    KeychainNodeKind, KeychainNodePayload, KeychainSshKeySpec,
+};
 use mica_term::app::ssh::credentials::StoredSshSecretBundle;
 use mica_term::app::vault::model::{
     BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind,
@@ -10,6 +14,60 @@ use mica_term::app::vault::model::{
     VaultSocks5ProxySpec, VaultSshConnectionSpec, VaultSshProxySpec,
 };
 use serde_json::json;
+
+fn sample_keychain_catalog() -> KeychainCatalog {
+    KeychainCatalog {
+        root_ids: vec!["folder-prod".into(), "identity-prod".into()],
+        nodes: BTreeMap::from([
+            (
+                "folder-prod".into(),
+                KeychainNode {
+                    id: "folder-prod".into(),
+                    parent_id: None,
+                    title: "Production".into(),
+                    kind: KeychainNodeKind::Folder,
+                    child_ids: vec!["key-prod".into()],
+                    payload: KeychainNodePayload::Folder,
+                },
+            ),
+            (
+                "identity-prod".into(),
+                KeychainNode {
+                    id: "identity-prod".into(),
+                    parent_id: None,
+                    title: "Ops".into(),
+                    kind: KeychainNodeKind::Identity,
+                    child_ids: Vec::new(),
+                    payload: KeychainNodePayload::Identity(KeychainIdentitySpec {
+                        username: "ops".into(),
+                        auth_kind: KeychainIdentityAuthKind::SshKey,
+                        ssh_key_id: Some("key-prod".into()),
+                        credential_ref: None,
+                        remark: "prod identity".into(),
+                    }),
+                },
+            ),
+            (
+                "key-prod".into(),
+                KeychainNode {
+                    id: "key-prod".into(),
+                    parent_id: Some("folder-prod".into()),
+                    title: "Prod SSH Key".into(),
+                    kind: KeychainNodeKind::SshKey,
+                    child_ids: Vec::new(),
+                    payload: KeychainNodePayload::SshKey(KeychainSshKeySpec {
+                        algorithm: "ed25519".into(),
+                        fingerprint: "SHA256:key-prod".into(),
+                        public_key: "ssh-ed25519 AAAAC3NzaKeyProd".into(),
+                        comment: "prod@example".into(),
+                        credential_ref: Some("keychain/key/key-prod".into()),
+                        remark: "generated key".into(),
+                    }),
+                },
+            ),
+        ]),
+    }
+}
 
 #[test]
 fn vault_head_roundtrip_preserves_core_revision_fields() {
@@ -118,6 +176,8 @@ fn vault_snapshot_roundtrip_preserves_assets_secrets_hosts_and_preferences() {
                             user: "ops".into(),
                             port: "22".into(),
                             auth_method: "private-key".into(),
+                            auth_source: "manual".into(),
+                            keychain_identity_id: None,
                             private_key_source: "content".into(),
                             private_key_path: String::new(),
                             environment: "prod".into(),
@@ -145,6 +205,25 @@ fn vault_snapshot_roundtrip_preserves_assets_secrets_hosts_and_preferences() {
                 proxy_socks5_password: Some("proxy-pass".into()),
             },
         )]),
+        keychain_catalog: sample_keychain_catalog(),
+        keychain_identity_secret_bundles: BTreeMap::from([(
+            "identity-prod".into(),
+            StoredSshSecretBundle {
+                password: Some("ops-password".into()),
+                private_key_content: None,
+                passphrase: None,
+                proxy_socks5_password: None,
+            },
+        )]),
+        keychain_key_secret_bundles: BTreeMap::from([(
+            "key-prod".into(),
+            StoredSshSecretBundle {
+                password: None,
+                private_key_content: Some("-----BEGIN OPENSSH PRIVATE KEY-----".into()),
+                passphrase: Some("key-passphrase".into()),
+                proxy_socks5_password: None,
+            },
+        )]),
         known_hosts: vec![VaultKnownHostEntry {
             host_pattern: "[jump.example.com]:22".into(),
             public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBastion".into(),
@@ -166,6 +245,19 @@ fn vault_snapshot_roundtrip_preserves_assets_secrets_hosts_and_preferences() {
 
     assert_eq!(decoded.asset_catalog.root_ids, vec!["folder-prod"]);
     assert_eq!(decoded.asset_catalog.nodes["ssh-jump"].title, "Jump Host");
+    assert_eq!(decoded.keychain_catalog.root_ids.len(), 2);
+    assert_eq!(
+        decoded.keychain_identity_secret_bundles["identity-prod"]
+            .password
+            .as_deref(),
+        Some("ops-password")
+    );
+    assert_eq!(
+        decoded.keychain_key_secret_bundles["key-prod"]
+            .private_key_content
+            .as_deref(),
+        Some("-----BEGIN OPENSSH PRIVATE KEY-----")
+    );
     assert_eq!(
         decoded.ssh_secret_bundles["ssh-jump"].passphrase.as_deref(),
         Some("vault-passphrase")
@@ -177,6 +269,17 @@ fn vault_snapshot_roundtrip_preserves_assets_secrets_hosts_and_preferences() {
         Some("remote-s3")
     );
     assert_eq!(decoded.ui_preferences.theme_mode.as_deref(), Some("dark"));
+
+    let defaults: VaultSnapshot = serde_json::from_value(json!({
+        "asset_catalog": {
+            "root_ids": [],
+            "nodes": {}
+        }
+    }))
+    .unwrap();
+    assert!(defaults.keychain_catalog.root_ids.is_empty());
+    assert!(defaults.keychain_identity_secret_bundles.is_empty());
+    assert!(defaults.keychain_key_secret_bundles.is_empty());
 }
 
 #[test]

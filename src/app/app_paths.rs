@@ -29,6 +29,12 @@ pub struct AppRootPaths {
     pub crash_dir: PathBuf,
 }
 
+impl AppRootPaths {
+    pub fn keychain_catalog_database_path(&self) -> PathBuf {
+        self.data_dir.join("keychain.redb")
+    }
+}
+
 pub fn resolve_app_root_paths(inputs: &AppRootPathInputs) -> Result<AppRootPaths> {
     let (root_source, root_dir) = if let Some(path) = &inputs.env_root_dir {
         (AppRootSource::EnvOverride, path.clone())

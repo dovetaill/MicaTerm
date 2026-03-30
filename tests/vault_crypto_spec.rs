@@ -32,6 +32,8 @@ fn sample_snapshot() -> VaultSnapshot {
                         user: "deploy".into(),
                         port: "22".into(),
                         auth_method: "private-key".into(),
+                        auth_source: "manual".into(),
+                        keychain_identity_id: None,
                         private_key_source: "content".into(),
                         private_key_path: String::new(),
                         environment: "prod".into(),
@@ -51,6 +53,9 @@ fn sample_snapshot() -> VaultSnapshot {
                 proxy_socks5_password: None,
             },
         )]),
+        keychain_catalog: Default::default(),
+        keychain_identity_secret_bundles: BTreeMap::new(),
+        keychain_key_secret_bundles: BTreeMap::new(),
         known_hosts: vec![VaultKnownHostEntry {
             host_pattern: "[prod.example.com]:22".into(),
             public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPROD".into(),

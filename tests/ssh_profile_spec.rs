@@ -27,6 +27,8 @@ fn saved_password_spec(proxy: AssetSshProxySpec) -> AssetSshConnectionSpec {
         user: "ops".into(),
         port: "2022".into(),
         auth_method: "password".into(),
+        auth_source: "manual".into(),
+        keychain_identity_id: None,
         private_key_source: "content".into(),
         private_key_path: String::new(),
         environment: "prod".into(),
@@ -150,6 +152,8 @@ fn ssh_profile_can_be_built_from_saved_asset_and_credential_reference() {
             user: "ops".into(),
             port: "2022".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: "".into(),
             environment: "prod".into(),
@@ -176,6 +180,38 @@ fn ssh_profile_can_be_built_from_saved_asset_and_credential_reference() {
 }
 
 #[test]
+fn ssh_profile_saved_manual_asset_accepts_explicit_manual_auth_source() {
+    let profile = ConnectionProfile::from_saved_asset(
+        "asset-prod",
+        "Prod Bastion",
+        &AssetSshConnectionSpec {
+            host: "10.0.0.12".into(),
+            user: "ops".into(),
+            port: "2022".into(),
+            auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
+            private_key_source: "content".into(),
+            private_key_path: "".into(),
+            environment: "prod".into(),
+            proxy: AssetSshProxySpec::None,
+            proxy_method: "jump-host".into(),
+            remark: "Primary entry point".into(),
+            credential_ref: Some("ssh/password/asset-prod".into()),
+        },
+    )
+    .expect("build saved ssh profile with explicit manual auth source");
+
+    assert_eq!(profile.asset_id.as_deref(), Some("asset-prod"));
+    assert_eq!(profile.user, "ops");
+    assert_eq!(profile.auth_method, SshAuthMethod::Password);
+    assert_eq!(
+        profile.credential_ref.as_deref(),
+        Some("ssh/password/asset-prod")
+    );
+}
+
+#[test]
 fn ssh_profile_preserves_saved_upstream_ssh_proxy_reference() {
     let profile = ConnectionProfile::from_saved_asset(
         "asset-prod",
@@ -185,6 +221,8 @@ fn ssh_profile_preserves_saved_upstream_ssh_proxy_reference() {
             user: "ops".into(),
             port: "2022".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: "".into(),
             environment: "prod".into(),
@@ -217,6 +255,8 @@ fn ssh_profile_private_key_path_saved_asset_preserves_saved_credential_reference
             user: "ops".into(),
             port: "2022".into(),
             auth_method: "private-key".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "path".into(),
             private_key_path: "/tmp/id_ed25519".into(),
             environment: "prod".into(),
@@ -260,6 +300,8 @@ fn ssh_profile_normalizes_saved_socks5_proxy_reference() {
             user: "ops".into(),
             port: "2022".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: "".into(),
             environment: "prod".into(),
@@ -325,6 +367,8 @@ fn ssh_profile_normalizes_saved_http_proxy_reference() {
             user: "ops".into(),
             port: "2022".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: "".into(),
             environment: "prod".into(),

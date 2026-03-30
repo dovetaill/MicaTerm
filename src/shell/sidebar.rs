@@ -6,6 +6,32 @@ use crate::SidebarNavItem;
 use crate::shell::assets::AssetViewMode;
 use crate::shell::view_model::ShellViewModel;
 
+const CONSOLE_CREATE_ACTIONS: &[ToolbarCreateActionDescriptor] = &[
+    ToolbarCreateActionDescriptor {
+        id: "new-folder",
+        label: "New Folder",
+    },
+    ToolbarCreateActionDescriptor {
+        id: "new-ssh-connection",
+        label: "New SSH Connection",
+    },
+];
+
+const KEYCHAIN_CREATE_ACTIONS: &[ToolbarCreateActionDescriptor] = &[
+    ToolbarCreateActionDescriptor {
+        id: "new-folder",
+        label: "New Folder",
+    },
+    ToolbarCreateActionDescriptor {
+        id: "new-identity",
+        label: "New Identity",
+    },
+    ToolbarCreateActionDescriptor {
+        id: "new-ssh-key",
+        label: "New SSH Key",
+    },
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarDestination {
     Console,
@@ -23,6 +49,12 @@ pub struct AssetsToolbarDescriptor {
     pub tree_expansion_tooltip: &'static str,
     pub show_tree_controls: bool,
     pub tree_controls_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolbarCreateActionDescriptor {
+    pub id: &'static str,
+    pub label: &'static str,
 }
 
 impl SidebarDestination {
@@ -91,9 +123,9 @@ pub fn toolbar_descriptor_for(
             false,
         ),
         SidebarDestination::Keychain => (
-            false,
-            Some("new-keychain"),
-            "New Keychain",
+            true,
+            None,
+            "Create Keychain Item",
             "Search Keychain",
             false,
         ),
@@ -123,5 +155,15 @@ pub fn toolbar_descriptor_for(
         tree_expansion_tooltip,
         show_tree_controls,
         tree_controls_enabled,
+    }
+}
+
+pub fn create_popover_actions_for(
+    destination: SidebarDestination,
+) -> &'static [ToolbarCreateActionDescriptor] {
+    match destination {
+        SidebarDestination::Console => CONSOLE_CREATE_ACTIONS,
+        SidebarDestination::Keychain => KEYCHAIN_CREATE_ACTIONS,
+        SidebarDestination::Snippets => &[],
     }
 }

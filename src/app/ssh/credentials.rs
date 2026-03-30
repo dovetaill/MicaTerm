@@ -32,6 +32,14 @@ pub fn ssh_credential_ref(asset_id: &str, kind: SshCredentialKind) -> String {
     }
 }
 
+pub fn keychain_identity_credential_ref(identity_id: &str) -> String {
+    format!("keychain/identity/{identity_id}")
+}
+
+pub fn keychain_key_credential_ref(key_id: &str) -> String {
+    format!("keychain/key/{key_id}")
+}
+
 pub trait CredentialStore: Send + Sync {
     fn put_secret(&self, key: &str, value: &str) -> Result<()>;
     fn get_secret(&self, key: &str) -> Result<Option<String>>;
@@ -86,6 +94,37 @@ impl StoredSshSecretBundle {
                 .is_none_or(|value| value.trim().is_empty())
             && self
                 .proxy_socks5_password
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredKeychainIdentitySecretBundle {
+    pub password: Option<String>,
+}
+
+impl StoredKeychainIdentitySecretBundle {
+    pub fn is_empty(&self) -> bool {
+        self.password
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoredKeychainKeySecretBundle {
+    pub private_key_content: Option<String>,
+    pub passphrase: Option<String>,
+}
+
+impl StoredKeychainKeySecretBundle {
+    pub fn is_empty(&self) -> bool {
+        self.private_key_content
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+            && self
+                .passphrase
                 .as_deref()
                 .is_none_or(|value| value.trim().is_empty())
     }
@@ -198,6 +237,77 @@ pub fn restore_snapshot_secret_bundle(
         Some(bundle) if !bundle.is_empty() => persist_secret_bundle(store, credential_ref, bundle),
         _ => store.delete_secret(credential_ref),
     }
+}
+
+pub fn persist_keychain_identity_secret_bundle(
+    store: &dyn CredentialStore,
+    credential_ref: &str,
+    bundle: &StoredKeychainIdentitySecretBundle,
+) -> Result<()> {
+    persist_secret_bundle(store, credential_ref, &StoredSshSecretBundle::from(bundle))
+}
+
+pub fn load_keychain_identity_secret_bundle(
+    store: &dyn CredentialStore,
+    credential_ref: &str,
+) -> Result<StoredKeychainIdentitySecretBundle> {
+    Ok(StoredKeychainIdentitySecretBundle::from(
+        load_secret_bundle(store, credential_ref)?,
+    ))
+}
+
+pub fn snapshot_keychain_identity_secret_bundle(
+    store: &dyn CredentialStore,
+    credential_ref: Option<&str>,
+) -> Result<Option<StoredKeychainIdentitySecretBundle>> {
+    Ok(snapshot_secret_bundle(store, credential_ref)?
+        .map(StoredKeychainIdentitySecretBundle::from)
+        .filter(|bundle| !bundle.is_empty()))
+}
+
+pub fn restore_keychain_identity_secret_bundle(
+    store: &dyn CredentialStore,
+    credential_ref: Option<&str>,
+    bundle: Option<&StoredKeychainIdentitySecretBundle>,
+) -> Result<()> {
+    let stored = bundle.map(StoredSshSecretBundle::from);
+    restore_snapshot_secret_bundle(store, credential_ref, stored.as_ref())
+}
+
+pub fn persist_keychain_key_secret_bundle(
+    store: &dyn CredentialStore,
+    credential_ref: &str,
+    bundle: &StoredKeychainKeySecretBundle,
+) -> Result<()> {
+    persist_secret_bundle(store, credential_ref, &StoredSshSecretBundle::from(bundle))
+}
+
+pub fn load_keychain_key_secret_bundle(
+    store: &dyn CredentialStore,
+    credential_ref: &str,
+) -> Result<StoredKeychainKeySecretBundle> {
+    Ok(StoredKeychainKeySecretBundle::from(load_secret_bundle(
+        store,
+        credential_ref,
+    )?))
+}
+
+pub fn snapshot_keychain_key_secret_bundle(
+    store: &dyn CredentialStore,
+    credential_ref: Option<&str>,
+) -> Result<Option<StoredKeychainKeySecretBundle>> {
+    Ok(snapshot_secret_bundle(store, credential_ref)?
+        .map(StoredKeychainKeySecretBundle::from)
+        .filter(|bundle| !bundle.is_empty()))
+}
+
+pub fn restore_keychain_key_secret_bundle(
+    store: &dyn CredentialStore,
+    credential_ref: Option<&str>,
+    bundle: Option<&StoredKeychainKeySecretBundle>,
+) -> Result<()> {
+    let stored = bundle.map(StoredSshSecretBundle::from);
+    restore_snapshot_secret_bundle(store, credential_ref, stored.as_ref())
 }
 
 pub fn load_secret_bundle_with_diagnostics(
@@ -566,6 +676,45 @@ impl CredentialStore for FallbackCredentialStore {
             (Err(primary_err), Err(fallback_err)) => Err(fallback_err).with_context(|| {
                 format!("primary credential store failed to delete key `{key}`: {primary_err}")
             }),
+        }
+    }
+}
+
+impl From<&StoredKeychainIdentitySecretBundle> for StoredSshSecretBundle {
+    fn from(bundle: &StoredKeychainIdentitySecretBundle) -> Self {
+        Self {
+            password: bundle.password.clone(),
+            private_key_content: None,
+            passphrase: None,
+            proxy_socks5_password: None,
+        }
+    }
+}
+
+impl From<StoredSshSecretBundle> for StoredKeychainIdentitySecretBundle {
+    fn from(bundle: StoredSshSecretBundle) -> Self {
+        Self {
+            password: bundle.password,
+        }
+    }
+}
+
+impl From<&StoredKeychainKeySecretBundle> for StoredSshSecretBundle {
+    fn from(bundle: &StoredKeychainKeySecretBundle) -> Self {
+        Self {
+            password: None,
+            private_key_content: bundle.private_key_content.clone(),
+            passphrase: bundle.passphrase.clone(),
+            proxy_socks5_password: None,
+        }
+    }
+}
+
+impl From<StoredSshSecretBundle> for StoredKeychainKeySecretBundle {
+    fn from(bundle: StoredSshSecretBundle) -> Self {
+        Self {
+            private_key_content: bundle.private_key_content,
+            passphrase: bundle.passphrase,
         }
     }
 }

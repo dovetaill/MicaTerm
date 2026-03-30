@@ -439,6 +439,9 @@ In `tests/keychain_ui_contract_smoke.sh`, assert that rendered UI text includes:
 - `Generate Key Pair`
 - `Copy Public Key`
 - `Use Existing Keychain Identity`
+- `Manual`
+- `Keychain Identity`
+- `Authentication Summary`
 
 **Step 2: Run the focused tests to confirm failure**
 
@@ -574,6 +577,7 @@ git commit -m "feat: add keychain key actions"
 - Modify: `tests/assets_modal_ui_contract_smoke.sh`
 - Modify: `tests/shell_view_model.rs`
 - Modify: `tests/ssh_session_manager_spec.rs`
+- Modify: `tests/bootstrap_smoke.rs`
 - Modify: `tests/ssh_profile_spec.rs`
 
 **Step 1: Write the failing host-modal tests**
@@ -600,6 +604,7 @@ Run:
 cargo test --test assets_modal_smoke -- --nocapture
 bash tests/assets_modal_ui_contract_smoke.sh
 cargo test --test ssh_session_manager_spec -- --nocapture
+cargo test --test bootstrap_smoke -- --nocapture
 ```
 
 Expected:
@@ -625,6 +630,7 @@ Run:
 cargo test --test assets_modal_smoke -- --nocapture
 bash tests/assets_modal_ui_contract_smoke.sh
 cargo test --test ssh_session_manager_spec -- --nocapture
+cargo test --test bootstrap_smoke -- --nocapture
 cargo test --test ssh_profile_spec -- --nocapture
 ```
 
@@ -636,6 +642,7 @@ Expected:
 
 ```bash
 git add ui/components/assets-ssh-connection-modal.slint ui/app-window.slint src/app/bootstrap.rs src/shell/view_model.rs tests/assets_modal_smoke.rs tests/assets_modal_ui_contract_smoke.sh tests/shell_view_model.rs tests/ssh_session_manager_spec.rs tests/ssh_profile_spec.rs
+git add ui/components/assets-ssh-connection-modal.slint ui/app-window.slint src/app/bootstrap.rs src/shell/view_model.rs tests/assets_modal_smoke.rs tests/assets_modal_ui_contract_smoke.sh tests/shell_view_model.rs tests/ssh_session_manager_spec.rs tests/bootstrap_smoke.rs tests/ssh_profile_spec.rs
 git commit -m "feat: support ssh hosts backed by keychain identities"
 ```
 
@@ -679,6 +686,7 @@ cargo test --test assets_modal_smoke -- --nocapture
 cargo test --test shell_view_model -- --nocapture
 cargo test --test ssh_profile_spec -- --nocapture
 cargo test --test ssh_session_manager_spec -- --nocapture
+cargo test --test bootstrap_smoke -- --nocapture
 cargo test --test vault_snapshot_spec -- --nocapture
 bash tests/keychain_ui_contract_smoke.sh
 bash tests/assets_modal_ui_contract_smoke.sh

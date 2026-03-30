@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::app::keychain::model::KeychainCatalog;
 use crate::app::ssh::credentials::StoredSshSecretBundle;
 
 const fn default_format_version() -> u32 {
@@ -140,18 +141,41 @@ pub enum VaultSshProxySpec {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VaultSshConnectionSpec {
     pub host: String,
     pub user: String,
     pub port: String,
     pub auth_method: String,
+    #[serde(default = "default_vault_ssh_auth_source")]
+    pub auth_source: String,
+    #[serde(default)]
+    pub keychain_identity_id: Option<String>,
     pub private_key_source: String,
     pub private_key_path: String,
     pub environment: String,
     pub proxy: VaultSshProxySpec,
     pub remark: String,
     pub credential_ref: Option<String>,
+}
+
+impl Default for VaultSshConnectionSpec {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            user: String::new(),
+            port: String::new(),
+            auth_method: String::new(),
+            auth_source: default_vault_ssh_auth_source(),
+            keychain_identity_id: None,
+            private_key_source: String::new(),
+            private_key_path: String::new(),
+            environment: String::new(),
+            proxy: VaultSshProxySpec::None,
+            remark: String::new(),
+            credential_ref: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -216,6 +240,12 @@ pub struct VaultSnapshot {
     #[serde(default)]
     pub ssh_secret_bundles: BTreeMap<String, StoredSshSecretBundle>,
     #[serde(default)]
+    pub keychain_catalog: KeychainCatalog,
+    #[serde(default)]
+    pub keychain_identity_secret_bundles: BTreeMap<String, StoredSshSecretBundle>,
+    #[serde(default)]
+    pub keychain_key_secret_bundles: BTreeMap<String, StoredSshSecretBundle>,
+    #[serde(default)]
     pub known_hosts: Vec<VaultKnownHostEntry>,
     #[serde(default)]
     pub sync_preferences: SnapshotSyncPreferences,
@@ -229,11 +259,18 @@ impl Default for VaultSnapshot {
             schema_version: default_snapshot_schema_version(),
             asset_catalog: VaultAssetCatalog::default(),
             ssh_secret_bundles: BTreeMap::new(),
+            keychain_catalog: KeychainCatalog::default(),
+            keychain_identity_secret_bundles: BTreeMap::new(),
+            keychain_key_secret_bundles: BTreeMap::new(),
             known_hosts: Vec::new(),
             sync_preferences: SnapshotSyncPreferences::default(),
             ui_preferences: SnapshotUiPreferences::default(),
         }
     }
+}
+
+fn default_vault_ssh_auth_source() -> String {
+    "manual".into()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

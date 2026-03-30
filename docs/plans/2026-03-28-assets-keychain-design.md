@@ -4,6 +4,7 @@
 功能: `assets-keychain`
 状态: 方案已确认，可进入 implementation planning
 
+注：本设计文档保留 2026-03-28 的方案决策；“当前实现现状”章节描述的是立项时基线，不作为最终实现盘点。
 ## 背景
 
 当前仓库已经完成了资产侧边栏的一级导航壳体、`Window Console` 资产树、SSH 连接表单、`CredentialStore`、`VaultSnapshot` 与 SSH vault sync 主路径，但 `Keychain` 仍然只是导航占位。
