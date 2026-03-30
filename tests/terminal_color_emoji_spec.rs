@@ -24,10 +24,26 @@ fn unpack_rgba(color: u32) -> Rgba8Pixel {
     }
 }
 
+fn fake_color_emoji_renderer() -> TerminalEmojiRenderer {
+    TerminalEmojiRenderer::with_backend(
+        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(
+            ResolvedEmojiFont {
+                face_id: fontdb::ID::dummy(),
+                family_name: "Noto Color Emoji".to_string(),
+            },
+        )),
+        Box::new(FakeAtlasEmojiBackend),
+    )
+}
+
+fn atlas_renderer_with_fake_color_emoji() -> Result<TerminalAtlasRenderer> {
+    TerminalAtlasRenderer::with_emoji_renderer_for_tests(fake_color_emoji_renderer())
+}
+
 #[test]
 fn emoji_clusters_are_not_treated_as_blank_terminal_cells() -> Result<()> {
     let surface = render_surface(4, 12, "🦀\r\n");
-    let mut renderer = TerminalAtlasRenderer::new()?;
+    let mut renderer = atlas_renderer_with_fake_color_emoji()?;
     let frame = renderer.render(&surface)?;
     let buffer = frame.image.to_rgba8().expect("rgba image");
     let default_bg = unpack_rgba(surface.default_bg_rgba);
@@ -55,7 +71,7 @@ fn emoji_clusters_are_not_treated_as_blank_terminal_cells() -> Result<()> {
 #[test]
 fn repeated_emoji_cells_use_cached_color_sprite_entries() -> Result<()> {
     let surface = render_surface(4, 12, "🦀🦀\r\n");
-    let mut renderer = TerminalAtlasRenderer::new()?;
+    let mut renderer = atlas_renderer_with_fake_color_emoji()?;
 
     let first = renderer.render(&surface)?;
     let second = renderer.render(&surface)?;
@@ -134,6 +150,36 @@ impl EmojiRasterizerBackend for FakeEmojiRasterizerBackend {
         assert_eq!(request.cell_width, 10);
         assert_eq!(request.cell_height, 22);
         self.sprite.clone()
+    }
+}
+
+struct FakeAtlasEmojiBackend;
+
+impl EmojiRasterizerBackend for FakeAtlasEmojiBackend {
+    fn rasterize(&self, request: EmojiFontRasterizeRequest<'_>) -> Option<EmojiSprite> {
+        if request.text != "🦀" {
+            return None;
+        }
+
+        let width = request.span.max(1) * request.cell_width;
+        let height = request.cell_height;
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
+
+        for y in 1..height.saturating_sub(1) {
+            for x in 1..width.saturating_sub(1) {
+                let index = ((y * width + x) * 4) as usize;
+                rgba[index] = 0xf4;
+                rgba[index + 1] = 0x43;
+                rgba[index + 2] = 0x36;
+                rgba[index + 3] = 0xff;
+            }
+        }
+
+        Some(EmojiSprite {
+            width,
+            height,
+            rgba,
+        })
     }
 }
 

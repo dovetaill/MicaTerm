@@ -3,6 +3,10 @@ use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
 use mica_term::app::terminal_atlas::{
     ClusterSpriteKind, TerminalAtlasRenderer, TerminalAtlasSelection,
 };
+use mica_term::app::terminal_emoji::{
+    EmojiFontRasterizeRequest, EmojiFontResolution, EmojiRasterizerBackend, EmojiSprite,
+    ResolvedEmojiFont, TerminalEmojiRenderer, TerminalEmojiResolver,
+};
 use mica_term::theme::ThemeMode;
 use slint::Rgba8Pixel;
 use uuid::Uuid;
@@ -26,6 +30,48 @@ fn pixel_at(image: &slint::Image, x: u32, y: u32) -> Rgba8Pixel {
     let buffer = image.to_rgba8().expect("rgba image");
     let width = buffer.width();
     buffer.as_slice()[(y * width + x) as usize]
+}
+
+fn renderer_with_fake_color_emoji() -> Result<TerminalAtlasRenderer> {
+    TerminalAtlasRenderer::with_emoji_renderer_for_tests(TerminalEmojiRenderer::with_backend(
+        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(
+            ResolvedEmojiFont {
+                face_id: fontdb::ID::dummy(),
+                family_name: "Noto Color Emoji".to_string(),
+            },
+        )),
+        Box::new(FakeAtlasEmojiBackend),
+    ))
+}
+
+struct FakeAtlasEmojiBackend;
+
+impl EmojiRasterizerBackend for FakeAtlasEmojiBackend {
+    fn rasterize(&self, request: EmojiFontRasterizeRequest<'_>) -> Option<EmojiSprite> {
+        if request.text != "🦀" {
+            return None;
+        }
+
+        let width = request.span.max(1) * request.cell_width;
+        let height = request.cell_height;
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
+
+        for y in 2..height.saturating_sub(2) {
+            for x in 2..width.saturating_sub(2) {
+                let index = ((y * width + x) * 4) as usize;
+                rgba[index] = 0xff;
+                rgba[index + 1] = 0x7a;
+                rgba[index + 2] = 0x00;
+                rgba[index + 3] = 0xff;
+            }
+        }
+
+        Some(EmojiSprite {
+            width,
+            height,
+            rgba,
+        })
+    }
 }
 
 #[test]
@@ -217,6 +263,49 @@ fn atlas_renderer_handles_cjk_and_nerd_font_cells_without_falling_back_to_blank_
             pixel.r != default_bg.r || pixel.g != default_bg.g || pixel.b != default_bg.b
         }),
         "rendered image should contain glyph pixels beyond the default terminal background"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn atlas_renderer_composites_color_emoji_sprites_and_preserves_them_under_selection() -> Result<()>
+{
+    let surface = render_surface(4, 12, "🦀\r\n");
+    let mut renderer = renderer_with_fake_color_emoji()?;
+
+    let before = renderer.render(&surface)?;
+    let selected = renderer.render_with_selection(
+        &surface,
+        Some(TerminalAtlasSelection::new(0, 0, 0, 0)),
+        0x6625_63eb,
+    )?;
+    let center_x = before.metrics.cell_width / 2;
+    let center_y = before.metrics.cell_height / 2;
+    let selected_center = pixel_at(&selected.image, center_x, center_y);
+
+    assert!(
+        before
+            .rendered_clusters
+            .iter()
+            .any(|cluster| cluster.text == "🦀" && cluster.sprite_kind == ClusterSpriteKind::ColorRgba),
+        "emoji clusters should be composited through the RGBA sprite path"
+    );
+    assert_eq!(selected.rerendered_rows, vec![0]);
+    assert_ne!(
+        before.image.to_rgba8().expect("before rgba").as_slice(),
+        selected.image.to_rgba8().expect("selected rgba").as_slice(),
+        "selection-aware rendering should still repaint around an emoji cell"
+    );
+    assert_eq!(
+        selected_center,
+        Rgba8Pixel {
+            a: 255,
+            r: 255,
+            g: 122,
+            b: 0,
+        },
+        "selection repainting must not erase previously composited emoji pixels"
     );
 
     Ok(())
