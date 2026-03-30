@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Confirms the Windows x64 wrapper now targets the mainline Skia packaging route.
+# Confirms the Windows x64 Skia wrapper advertises the supported MSVC-first contract.
 
 set -euo pipefail
 
@@ -18,19 +18,21 @@ HELP_OUTPUT="$("$SCRIPT_PATH" --help)"
 
 grep -F "./build-win-x64.sh" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "Windows Skia wrapper." <<<"$HELP_OUTPUT" >/dev/null
-grep -F "x86_64-pc-windows-gnu" <<<"$HELP_OUTPUT" >/dev/null
-grep -F "nasm" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "x86_64-pc-windows-msvc" <<<"$HELP_OUTPUT" >/dev/null
-grep -F "TARGET=x86_64-pc-windows-msvc ./build-win-x64.sh" <<<"$HELP_OUTPUT" >/dev/null
+grep -F "Git Bash environment" <<<"$HELP_OUTPUT" >/dev/null
+grep -F "winit-skia-software" <<<"$HELP_OUTPUT" >/dev/null
+grep -F "./build-win-x64-software.sh" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "winit-skia-software" <<<"$HELP_OUTPUT" >/dev/null
 grep -F ".zip" <<<"$HELP_OUTPUT" >/dev/null
 
 grep -F 'Windows wrapper target:' "$SCRIPT_PATH" >/dev/null
+grep -F 'TARGET="${TARGET:-x86_64-pc-windows-msvc}"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export CARGO_NO_DEFAULT_FEATURES=1' "$SCRIPT_PATH" >/dev/null
 grep -F 'export CARGO_FEATURES="slint-renderer-skia"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export MICA_TERM_BUILD_FLAVOR="windows-mainline"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export MICA_TERM_PACKAGE_RENDERER="skia-software"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export PACKAGE_FLAVOR_SUFFIX="-skia"' "$SCRIPT_PATH" >/dev/null
+grep -F 'rust-skia does not ship Windows GNU Skia binaries' "$SCRIPT_PATH" >/dev/null
 
 if grep -F 'femtovg-wgpu-experimental' "$SCRIPT_PATH" >/dev/null; then
   echo "build-win-x64.sh should now target the default mainline route only" >&2

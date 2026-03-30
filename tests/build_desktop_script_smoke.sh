@@ -21,7 +21,7 @@ grep -F "x86_64-apple-darwin" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "aarch64-apple-darwin" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "nasm" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "aarch64-pc-windows-msvc" <<<"$HELP_OUTPUT" >/dev/null
-grep -F "dist/<app>-<target>-<profile>.tar.gz" <<<"$HELP_OUTPUT" >/dev/null
-grep -F "dist/<app>-<target>-<profile>.zip" <<<"$HELP_OUTPUT" >/dev/null
+grep -F "dist/<app>-<target>-<profile><package flavor suffix>.tar.gz" <<<"$HELP_OUTPUT" >/dev/null
+grep -F "dist/<app>-<target>-<profile><package flavor suffix>.zip" <<<"$HELP_OUTPUT" >/dev/null
 
 grep -F 'require_cmd nasm' "$SCRIPT_PATH" >/dev/null

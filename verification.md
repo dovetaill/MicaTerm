@@ -11,9 +11,9 @@ Date: 2026-03-28 CST
 
 ### Current Contract
 
-- `./build-win-x64.sh` is the Windows Skia mainline wrapper and packages the `winit-skia-software` route.
+- `./build-win-x64.sh` is the Windows Skia wrapper and packages the `winit-skia-software` route on `x86_64-pc-windows-msvc`.
 - `./build-win-x64-software.sh` is the Windows compatibility wrapper and packages the `winit-software` route.
-- `./build-release.sh` keeps the Linux x64 leg on the current default path and routes the Windows GNU leg through the Skia mainline wrapper settings.
+- `./build-release.sh` keeps the Linux x64 leg on the current default path and routes the Windows GNU leg through the software compatibility wrapper because `rust-skia` does not ship `x86_64-pc-windows-gnu` Skia binaries.
 - `Cargo.toml` still pins `i-slint-backend-winit` to `vendor/i-slint-backend-winit`, so the vendored Windows partial-visibility patch remains active.
 - `SarasaTermSCNerd-Regular.ttf` remains embedded in the executable and is registered through `src/app/terminal_font.rs` only when the workspace session host mode becomes `terminal`.
 - `ui/app-window.slint` keeps the startup import path on `IosevkaTerm-Regular.ttf`, so the heavier Sarasa font is not globally imported during app startup.

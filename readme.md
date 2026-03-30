@@ -15,7 +15,7 @@ Project planning is in `docs/plans/`.
 ## Mainline Build Entry Points
 
 - `./build-release.sh`
-  - Runs the Linux x64 release path and the Windows Skia mainline release path for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu`
+  - Runs the Linux x64 release path and the Windows GNU software release path for `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-gnu`
   - Default mode: `MODE=fail-fast`
   - Optional mode: `MODE=best-effort`
 
@@ -32,10 +32,10 @@ Project planning is in `docs/plans/`.
   - Windows ARM64 build on Windows MSVC environments
 - `./build-win-x64.sh`
   - Windows Skia mainline wrapper
-  - Default target: `x86_64-pc-windows-gnu`
-  - Override target: `TARGET=x86_64-pc-windows-msvc ./build-win-x64.sh`
+  - Default target: `x86_64-pc-windows-msvc`
+  - Host requirement: Windows MSVC shell or Git Bash environment
+  - Linux-host alternative: `./build-win-x64-software.sh`
   - Outputs:
-    `dist/mica-term-x86_64-pc-windows-gnu-release-skia.zip`
     `dist/mica-term-x86_64-pc-windows-msvc-release-skia.zip`
 - `./build-win-x64-software.sh`
   - Windows software compatibility wrapper
@@ -47,10 +47,10 @@ Project planning is in `docs/plans/`.
 
 Notes:
 
-- `./build-win-x64.sh` packages the Windows mainline route as `winit-skia-software`.
+- `./build-win-x64.sh` packages the Windows Skia route as `winit-skia-software` on `x86_64-pc-windows-msvc`.
 - `./build-win-x64-software.sh` packages the Windows compatibility route as `winit-software`.
 - Generic development builds stay on the default packaged fallback unless a wrapper injects build flavor and renderer environment variables.
-- `./build-release.sh` remains the aggregate Linux x64 + Windows GNU release entrypoint, with the Windows leg routed through the Skia mainline wrapper settings.
+- `./build-release.sh` remains the aggregate Linux x64 + Windows GNU release entrypoint, with the Windows leg routed through `./build-win-x64-software.sh` because `rust-skia` does not ship `x86_64-pc-windows-gnu` Skia binaries.
 - `[patch.crates-io]` in `Cargo.toml` still points to the vendored `i-slint-backend-winit` backend so the Windows partial-visibility fix stays active.
 - `SarasaTermSCNerd-Regular.ttf` stays embedded in the executable and is registered lazily when the workspace session host enters `terminal` mode.
 - `ui/app-window.slint` still imports only `IosevkaTerm-Regular.ttf` at startup to keep the initial font path lightweight.
@@ -76,9 +76,11 @@ Prerequisites by target:
   - available linker: `x86_64-w64-mingw32-gcc`
   - available assembler: `nasm`
   - override supported via `CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER`
+  - used by `./build-win-x64-software.sh` and `./build-release.sh`
 - Windows MSVC x64 / ARM64:
   - installed Rust target: `rustup target add x86_64-pc-windows-msvc` or `rustup target add aarch64-pc-windows-msvc`
   - must be built from a Windows MSVC shell or Git Bash environment
+  - required for `./build-win-x64.sh`
 
 ## Windows Logging
 
@@ -88,7 +90,7 @@ file in the packaged app directory before launching the app.
 PowerShell example:
 
 ```powershell
-cd .\dist\mica-term-x86_64-pc-windows-gnu-release-skia
+cd .\dist\mica-term-x86_64-pc-windows-msvc-release-skia
 ni .mica-term-portable -ItemType File -Force
 $env:MICA_TERM_LOG = "debug"
 .\mica-term.exe

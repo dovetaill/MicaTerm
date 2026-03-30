@@ -18,9 +18,9 @@ These packages are directly evidenced by the current repo notes and verification
 These are the apt-managed packages that are currently useful for the active local build paths and their supporting tooling:
 
 - `gcc-mingw-w64-x86-64-posix`
-  - Required for `./build-win-x64.sh` when targeting `x86_64-pc-windows-gnu`.
+  - Required for `./build-win-x64-software.sh` and `./build-release.sh` when targeting `x86_64-pc-windows-gnu`.
 - `nasm`
-  - Required by `aws-lc-sys` on the `x86_64-pc-windows-gnu` cross-build path used by `./build-win-x64.sh`.
+  - Required by `aws-lc-sys` on the `x86_64-pc-windows-gnu` cross-build path used by `./build-win-x64-software.sh` and `./build-release.sh`.
 - `zip`
   - Required by `build-desktop.sh` for Windows archive packaging.
 - `libwayland-dev`

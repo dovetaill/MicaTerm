@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Aggregates the Linux software mainline and Windows Skia mainline packages and reports failures consistently.
+# Aggregates the Linux software mainline and Windows GNU software packages and reports failures consistently.
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ usage() {
   cat <<EOF
 Usage: $(basename "$0") [--help]
 
-Mainline Linux software + Windows Skia release aggregator.
+Mainline Linux software + Windows GNU software release aggregator.
 
 Modes:
   MODE=fail-fast   Stop on first failure (default)
@@ -20,7 +20,7 @@ Mainline targets:
   x86_64-unknown-linux-gnu
   x86_64-pc-windows-gnu
 
-Windows x64 packages default to winit-skia-software.
+Windows GNU packages default to winit-software.
 EOF
 }
 
@@ -38,13 +38,7 @@ run_target() {
       TARGET="$target" "$ROOT_DIR/build-desktop.sh"
       ;;
     x86_64-pc-windows-gnu)
-      TARGET="$target" \
-      CARGO_NO_DEFAULT_FEATURES=1 \
-      CARGO_FEATURES="slint-renderer-skia" \
-      MICA_TERM_BUILD_FLAVOR="windows-mainline" \
-      MICA_TERM_PACKAGE_RENDERER="skia-software" \
-      PACKAGE_FLAVOR_SUFFIX="-skia" \
-      "$ROOT_DIR/build-desktop.sh"
+      TARGET="$target" "$ROOT_DIR/build-win-x64-software.sh"
       ;;
     *)
       fail "unsupported release target '$target'"

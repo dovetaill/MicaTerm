@@ -104,6 +104,18 @@ fi
 require_cmd cargo
 require_cmd rustup
 
+USES_WINDOWS_SKIA=0
+if [[ "${MICA_TERM_PACKAGE_RENDERER:-}" == "skia-software" ]]; then
+  USES_WINDOWS_SKIA=1
+fi
+if [[ "${CARGO_FEATURES:-}" == *"slint-renderer-skia"* ]]; then
+  USES_WINDOWS_SKIA=1
+fi
+
+if [[ "$TARGET" == "x86_64-pc-windows-gnu" && "$USES_WINDOWS_SKIA" -eq 1 ]]; then
+  fail "Skia Windows GNU packaging is unsupported by rust-skia upstream. Use ./build-win-x64-software.sh for Linux-host Windows packages, or switch to x86_64-pc-windows-msvc from a Windows MSVC shell."
+fi
+
 case "$PROFILE" in
   release)
     PROFILE_ARGS=(--release)
