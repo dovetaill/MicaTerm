@@ -308,6 +308,28 @@ fn ssh_modal_exposes_private_key_import_guidance() {
 }
 
 #[test]
+fn ssh_modal_contract_exposes_auth_source_switch_and_keychain_identity_summary() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let ssh_modal = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
+
+    assert!(app_window.contains("asset-ssh-modal-auth-source"));
+    assert!(app_window.contains("asset-ssh-modal-keychain-identity-options"));
+    assert!(app_window.contains("asset-ssh-modal-keychain-identity-selected-label"));
+    assert!(app_window.contains("asset-ssh-modal-keychain-identity-username"));
+    assert!(app_window.contains("asset-ssh-modal-keychain-identity-auth-summary"));
+
+    assert!(ssh_modal.contains("Manual"));
+    assert!(ssh_modal.contains("Keychain Identity"));
+    assert!(ssh_modal.contains("text: \"Identity\""));
+    assert!(ssh_modal.contains("text: \"Username\""));
+    assert!(ssh_modal.contains("text: \"Authentication Summary\""));
+    assert!(ssh_modal.contains("root.draft-changed(\"auth_source\""));
+    assert!(ssh_modal.contains("root.draft-changed(\"keychain_identity_label\""));
+    assert!(!ssh_modal.contains("Use Existing Keychain Identity"));
+}
+
+#[test]
 fn ssh_modal_labels_saved_path_mode_as_legacy_file_path() {
     let ssh_modal = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
         .expect("read ssh modal");
@@ -319,6 +341,80 @@ fn ssh_modal_labels_saved_path_mode_as_legacy_file_path() {
     assert!(
         ssh_modal.contains("Paste or import a new private key to replace the legacy path."),
         "ssh modal should explain how a legacy path asset migrates to imported key content"
+    );
+}
+
+#[test]
+fn app_window_and_create_menu_contract_wire_keychain_modal_entries() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let create_menu =
+        fs::read_to_string("ui/components/assets-create-menu.slint").expect("read create menu");
+
+    assert!(app_window.contains(
+        "import { AssetsKeychainIdentityModal } from \"components/assets-keychain-identity-modal.slint\";"
+    ));
+    assert!(app_window.contains(
+        "import { AssetsKeychainSshKeyModal } from \"components/assets-keychain-ssh-key-modal.slint\";"
+    ));
+    assert!(create_menu.contains("callback new-identity-selected;"));
+    assert!(create_menu.contains("callback new-ssh-key-selected;"));
+    assert!(create_menu.contains("label: \"New Identity\""));
+    assert!(create_menu.contains("label: \"New SSH Key\""));
+    assert!(app_window.contains("new-identity-selected => {"));
+    assert!(app_window.contains("root.assets-create-action-selected(\"new-identity\");"));
+    assert!(app_window.contains("new-ssh-key-selected => {"));
+    assert!(app_window.contains("root.assets-create-action-selected(\"new-ssh-key\");"));
+    assert!(app_window.contains("root.asset-modal-kind == \"new-keychain-identity\""));
+    assert!(app_window.contains("root.asset-modal-kind == \"new-keychain-ssh-key\""));
+}
+
+#[test]
+fn keychain_ssh_key_modal_round_trips_fields_and_action_callbacks() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let actions = Rc::new(RefCell::new(Vec::<String>::new()));
+    let recorded_actions = Rc::clone(&actions);
+
+    app.on_keychain_ssh_key_modal_action_requested(move |action| {
+        recorded_actions.borrow_mut().push(action.to_string());
+    });
+
+    app.set_asset_modal_open(true);
+    app.set_asset_modal_kind("new-keychain-ssh-key".into());
+    app.set_keychain_ssh_key_modal_name("Prod Bastion Key".into());
+    app.set_keychain_ssh_key_modal_private_key("PRIVATE".into());
+    app.set_keychain_ssh_key_modal_public_key("ssh-ed25519 AAAATEST".into());
+    app.set_keychain_ssh_key_modal_fingerprint("SHA256:test".into());
+
+    app.invoke_keychain_ssh_key_modal_action_requested("import-private-key".into());
+    app.invoke_keychain_ssh_key_modal_action_requested("import-public-key".into());
+    app.invoke_keychain_ssh_key_modal_action_requested("generate-key-pair".into());
+    app.invoke_keychain_ssh_key_modal_action_requested("copy-public-key".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-keychain-ssh-key");
+    assert_eq!(
+        app.get_keychain_ssh_key_modal_name().as_str(),
+        "Prod Bastion Key"
+    );
+    assert_eq!(app.get_keychain_ssh_key_modal_private_key().as_str(), "PRIVATE");
+    assert_eq!(
+        app.get_keychain_ssh_key_modal_public_key().as_str(),
+        "ssh-ed25519 AAAATEST"
+    );
+    assert_eq!(
+        app.get_keychain_ssh_key_modal_fingerprint().as_str(),
+        "SHA256:test"
+    );
+    assert_eq!(
+        actions.borrow().as_slice(),
+        [
+            "import-private-key",
+            "import-public-key",
+            "generate-key-pair",
+            "copy-public-key"
+        ]
     );
 }
 

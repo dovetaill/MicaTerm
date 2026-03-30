@@ -1,18 +1,29 @@
 //! Central shell state mirrored into Slint properties and mutated by UI callbacks.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
-use crate::app::ssh::credentials::{SshCredentialKind, ssh_credential_ref};
+use crate::app::keychain::{
+    KeychainCatalog, KeychainIdentityAuthKind, KeychainNodePayload, KeychainSshKeySpec,
+};
+use crate::app::ssh::credentials::{
+    SshCredentialKind, keychain_key_credential_ref, ssh_credential_ref,
+};
 use crate::app::ssh::runtime::TerminalSurfaceState;
 use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::{
     AssetNameValidation, AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec,
-    AssetSshProxySpec, AssetTree, AssetViewMode, ConsoleAssetKind, VisibleAssetRow,
-    resolve_committed_name,
+    AssetSshProxySpec, AssetTree, AssetViewMode, ConsoleAssetKind,
+    SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY, SSH_AUTH_SOURCE_MANUAL, VisibleAssetRow,
+    normalized_ssh_auth_source, resolve_committed_name,
 };
 use crate::shell::context_menu::{
     ContextMenuActionNode, ContextMenuActionState, ContextTargetKind, SelectionContext,
     resolve_action_tree,
+};
+use crate::shell::keychain::{
+    KeychainDeleteError, KeychainItemKind, create_keychain_node, delete_keychain_node,
+    next_default_name_for_parent as next_default_keychain_name_for_parent, project_keychain_rows,
+    rename_keychain_node,
 };
 use crate::shell::sidebar::SidebarDestination;
 use crate::shell::tabs::WorkspaceTab;
@@ -84,6 +95,10 @@ pub enum AssetModalState {
         parent_id: Option<String>,
         draft_name: String,
     },
+    NewKeychainSshKey {
+        parent_id: Option<String>,
+        draft: KeychainSshKeyDraft,
+    },
     NewSshConnection {
         parent_id: Option<String>,
         editing_asset_id: Option<String>,
@@ -107,6 +122,8 @@ pub struct AssetSshConnectionDraft {
     pub host: String,
     pub user: String,
     pub port: String,
+    pub auth_source: String,
+    pub keychain_identity_id: String,
     pub auth_method: String,
     pub private_key_source: String,
     pub password: String,
@@ -127,9 +144,23 @@ pub struct AssetSshConnectionDraft {
     pub validation_message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct KeychainSshKeyDraft {
+    pub name: String,
+    pub private_key: String,
+    pub public_key: String,
+    pub fingerprint: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SshProxyTargetOption {
     asset_id: String,
+    label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SshKeychainIdentityOption {
+    identity_id: String,
     label: String,
 }
 
@@ -140,6 +171,8 @@ impl Default for AssetSshConnectionDraft {
             host: String::new(),
             user: String::new(),
             port: "22".into(),
+            auth_source: SSH_AUTH_SOURCE_MANUAL.into(),
+            keychain_identity_id: String::new(),
             auth_method: "password".into(),
             private_key_source: "content".into(),
             password: String::new(),
@@ -204,12 +237,15 @@ pub struct ShellViewModel {
     pub asset_view_mode: AssetViewMode,
     pub asset_search_expanded: bool,
     pub asset_search_query: String,
+    pub keychain_search_query: String,
     pub asset_create_menu_open: bool,
     pub asset_modal_state: Option<AssetModalState>,
     pub ssh_host_key_prompt_state: Option<SshHostKeyPromptState>,
     pub asset_tree_fully_expanded: bool,
     pub selected_asset_ids: Vec<String>,
     pub focused_asset_id: Option<String>,
+    pub selected_keychain_ids: Vec<String>,
+    pub focused_keychain_id: Option<String>,
     workspace_tabs: Vec<WorkspaceTab>,
     active_workspace_session_id: Option<String>,
     active_workspace_terminal_surface: Option<TerminalSurfaceState>,
@@ -229,6 +265,8 @@ pub struct ShellViewModel {
     pub context_menu_feedback_text: String,
     vault_panel_state: VaultPanelViewState,
     console_asset_tree: AssetTree,
+    keychain_catalog: KeychainCatalog,
+    keychain_expanded_ids: BTreeSet<String>,
     window_placement: WindowPlacementKind,
 }
 
@@ -247,12 +285,15 @@ impl Default for ShellViewModel {
             asset_view_mode: AssetViewMode::Tree,
             asset_search_expanded: false,
             asset_search_query: String::new(),
+            keychain_search_query: String::new(),
             asset_create_menu_open: false,
             asset_modal_state: None,
             ssh_host_key_prompt_state: None,
             asset_tree_fully_expanded: false,
             selected_asset_ids: Vec::new(),
             focused_asset_id: None,
+            selected_keychain_ids: Vec::new(),
+            focused_keychain_id: None,
             workspace_tabs: Vec::new(),
             active_workspace_session_id: None,
             active_workspace_terminal_surface: None,
@@ -272,6 +313,8 @@ impl Default for ShellViewModel {
             context_menu_feedback_text: String::new(),
             vault_panel_state: VaultPanelViewState::default(),
             console_asset_tree: AssetTree::new(),
+            keychain_catalog: KeychainCatalog::default(),
+            keychain_expanded_ids: BTreeSet::new(),
             window_placement: WindowPlacementKind::Restored,
         }
     }
@@ -318,6 +361,9 @@ impl ShellViewModel {
             }) => asset_name_validation_message(
                 self.create_asset_modal_validation(parent_id.as_deref(), draft_name),
             ),
+            Some(AssetModalState::NewKeychainSshKey { parent_id, draft }) => {
+                self.keychain_ssh_key_modal_validation_message(parent_id.as_deref(), draft)
+            }
             Some(AssetModalState::NewSshConnection {
                 parent_id,
                 editing_asset_id,
@@ -340,6 +386,9 @@ impl ShellViewModel {
             }) => {
                 self.create_asset_modal_validation(parent_id.as_deref(), draft_name)
                     == AssetNameValidation::Valid
+            }
+            Some(AssetModalState::NewKeychainSshKey { parent_id, draft }) => {
+                self.keychain_ssh_key_modal_can_confirm(parent_id.as_deref(), draft)
             }
             Some(AssetModalState::NewSshConnection {
                 parent_id,
@@ -696,6 +745,24 @@ impl ShellViewModel {
         });
     }
 
+    pub fn open_new_keychain_ssh_key_modal(&mut self, parent_id: Option<String>) {
+        let parent_id = self.normalize_keychain_folder_parent_id(parent_id);
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.asset_modal_state = Some(AssetModalState::NewKeychainSshKey {
+            draft: KeychainSshKeyDraft {
+                name: next_default_keychain_name_for_parent(
+                    &self.keychain_catalog,
+                    parent_id.as_deref(),
+                    KeychainItemKind::SshKey,
+                ),
+                ..KeychainSshKeyDraft::default()
+            },
+            parent_id,
+        });
+    }
+
     pub fn update_new_folder_modal_name(&mut self, value: String) {
         let Some(AssetModalState::NewFolder { draft_name, .. }) = self.asset_modal_state.as_mut()
         else {
@@ -703,6 +770,21 @@ impl ShellViewModel {
         };
 
         *draft_name = value;
+    }
+
+    pub fn update_keychain_ssh_key_modal_field(&mut self, field: &str, value: String) {
+        let Some(AssetModalState::NewKeychainSshKey { draft, .. }) = self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        match field {
+            "name" => draft.name = value,
+            "private_key" => draft.private_key = value,
+            "public_key" => draft.public_key = value,
+            "fingerprint" => draft.fingerprint = value,
+            _ => {}
+        }
     }
 
     pub fn open_new_ssh_modal(&mut self, parent_id: Option<String>) {
@@ -738,6 +820,7 @@ impl ShellViewModel {
         } else {
             spec.auth_method.clone()
         };
+        let auth_source = normalized_ssh_auth_source(&spec.auth_source).to_string();
         let private_key_source = if spec.private_key_source.trim().is_empty() {
             "content".to_string()
         } else {
@@ -795,6 +878,8 @@ impl ShellViewModel {
                 host: spec.host,
                 user: spec.user,
                 port: spec.port,
+                auth_source,
+                keychain_identity_id: spec.keychain_identity_id.unwrap_or_default(),
                 auth_method,
                 private_key_source,
                 password: String::new(),
@@ -901,6 +986,8 @@ impl ShellViewModel {
     pub fn update_ssh_modal_field(&mut self, field: &str, value: String) {
         let selected_proxy_asset_id = if field == "proxy_ssh_asset_label" {
             self.resolve_ssh_proxy_target_asset_id_from_label(value.as_str())
+        } else if field == "keychain_identity_label" {
+            self.resolve_ssh_keychain_identity_id_from_label(value.as_str())
         } else {
             None
         };
@@ -913,6 +1000,23 @@ impl ShellViewModel {
             "host" => draft.host = value,
             "user" => draft.user = value,
             "port" => draft.port = value,
+            "auth_source" => {
+                if value == SSH_AUTH_SOURCE_MANUAL
+                    || value == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY
+                {
+                    draft.auth_source = value;
+                    if draft.auth_source == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY {
+                        draft.password.clear();
+                        draft.private_key_content.clear();
+                        draft.passphrase.clear();
+                        draft.password_visible = false;
+                    }
+                }
+            }
+            "keychain_identity_label" => {
+                draft.keychain_identity_id = selected_proxy_asset_id.unwrap_or_default();
+            }
+            "keychain_identity_id" => draft.keychain_identity_id = value,
             "auth_method" => {
                 if matches!(value.as_str(), "password" | "private-key") {
                     draft.auth_method = value;
@@ -1034,6 +1138,7 @@ impl ShellViewModel {
     pub fn can_confirm_asset_modal(&self) -> bool {
         match &self.asset_modal_state {
             Some(AssetModalState::NewFolder { .. })
+            | Some(AssetModalState::NewKeychainSshKey { .. })
             | Some(AssetModalState::NewSshConnection { .. }) => {
                 self.asset_create_modal_can_confirm()
             }
@@ -1065,6 +1170,51 @@ impl ShellViewModel {
                 draft_name,
                 AssetNodePayload::Folder,
             ),
+            AssetModalState::NewKeychainSshKey { parent_id, draft } => {
+                if !self.keychain_ssh_key_modal_can_confirm(parent_id.as_deref(), &draft) {
+                    return false;
+                }
+
+                let item_id = create_keychain_node(
+                    &mut self.keychain_catalog,
+                    parent_id.as_deref(),
+                    KeychainItemKind::SshKey,
+                    Some(draft.name.trim()),
+                );
+                let trimmed_public_key = draft.public_key.trim().to_string();
+                let credential_ref = (!draft.private_key.trim().is_empty())
+                    .then(|| keychain_key_credential_ref(item_id.as_str()));
+                let comment = trimmed_public_key
+                    .split_whitespace()
+                    .nth(2)
+                    .unwrap_or_default()
+                    .to_string();
+                let algorithm = trimmed_public_key
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                let spec = KeychainSshKeySpec {
+                    algorithm,
+                    fingerprint: draft.fingerprint.trim().to_string(),
+                    public_key: trimmed_public_key,
+                    comment,
+                    credential_ref,
+                    remark: String::new(),
+                };
+                if let Some(node) = self.keychain_catalog.nodes.get_mut(&item_id) {
+                    node.payload = KeychainNodePayload::SshKey(spec);
+                }
+                if let Some(parent_id) = parent_id {
+                    self.keychain_expanded_ids.insert(parent_id);
+                }
+                self.selected_keychain_ids = vec![item_id.clone()];
+                self.focused_keychain_id = Some(item_id);
+                self.asset_modal_state = None;
+                self.pending_ssh_modal_action = None;
+                self.ssh_modal_action_state = SshModalActionState::Idle;
+                return true;
+            }
             AssetModalState::NewSshConnection {
                 parent_id,
                 editing_asset_id,
@@ -1109,6 +1259,8 @@ impl ShellViewModel {
                     user: draft.user,
                     port: draft.port,
                     auth_method: draft.auth_method,
+                    auth_source: SSH_AUTH_SOURCE_MANUAL.into(),
+                    keychain_identity_id: None,
                     private_key_source: draft.private_key_source,
                     private_key_path: draft.private_key_path,
                     environment: draft.environment,
@@ -1227,8 +1379,25 @@ impl ShellViewModel {
             .project_visible_rows(self.asset_view_mode, &self.asset_search_query)
     }
 
+    pub fn visible_keychain_rows(&self) -> Vec<crate::shell::keychain::VisibleKeychainRow> {
+        project_keychain_rows(
+            &self.keychain_catalog,
+            &self.keychain_expanded_ids,
+            &self.keychain_search_query,
+        )
+    }
+
     pub fn handle_assets_create_action(&mut self, action_id: &str) {
         match action_id {
+            "new-folder" if self.active_sidebar_destination == SidebarDestination::Keychain => {
+                self.create_keychain_item(None, KeychainItemKind::Folder);
+            }
+            "new-identity" => {
+                self.create_keychain_item(None, KeychainItemKind::Identity);
+            }
+            "new-ssh-key" => {
+                self.open_new_keychain_ssh_key_modal(None);
+            }
             "new-folder" => self.open_new_folder_modal(None),
             "new-ssh-connection" => self.open_new_ssh_modal(None),
             _ => {}
@@ -1579,11 +1748,160 @@ impl ShellViewModel {
         &self.console_asset_tree
     }
 
+    pub fn keychain_catalog(&self) -> &KeychainCatalog {
+        &self.keychain_catalog
+    }
+
+    pub fn replace_keychain_catalog(&mut self, catalog: KeychainCatalog) {
+        self.keychain_expanded_ids = catalog
+            .root_ids
+            .iter()
+            .filter(|node_id| {
+                catalog
+                    .nodes
+                    .get(*node_id)
+                    .is_some_and(|node| matches!(node.payload, crate::app::keychain::KeychainNodePayload::Folder))
+            })
+            .cloned()
+            .collect();
+        self.keychain_catalog = catalog;
+        self.selected_keychain_ids.clear();
+        self.focused_keychain_id = None;
+        self.keychain_search_query.clear();
+    }
+
+    pub fn set_keychain_search_query(&mut self, query: String) {
+        self.keychain_search_query = query;
+    }
+
+    pub fn toggle_keychain_folder_expanded(&mut self, item_id: &str) {
+        if !self
+            .keychain_catalog
+            .nodes
+            .get(item_id)
+            .is_some_and(|node| matches!(node.payload, crate::app::keychain::KeychainNodePayload::Folder))
+        {
+            return;
+        }
+
+        if !self.keychain_expanded_ids.insert(item_id.to_string()) {
+            self.keychain_expanded_ids.remove(item_id);
+        }
+    }
+
+    pub fn select_keychain_item(&mut self, item_id: &str) {
+        if !self.keychain_catalog.nodes.contains_key(item_id) {
+            return;
+        }
+
+        self.selected_keychain_ids = vec![item_id.to_string()];
+        self.focused_keychain_id = Some(item_id.to_string());
+        self.asset_create_menu_open = false;
+    }
+
+    pub fn create_keychain_item(
+        &mut self,
+        parent_id: Option<String>,
+        kind: KeychainItemKind,
+    ) -> String {
+        let parent_id = self.normalize_keychain_folder_parent_id(parent_id);
+        let item_id = create_keychain_node(
+            &mut self.keychain_catalog,
+            parent_id.as_deref(),
+            kind,
+            None,
+        );
+        if let Some(parent_id) = parent_id {
+            self.keychain_expanded_ids.insert(parent_id);
+        }
+        self.selected_keychain_ids = vec![item_id.clone()];
+        self.focused_keychain_id = Some(item_id.clone());
+        self.asset_create_menu_open = false;
+        item_id
+    }
+
+    pub fn rename_keychain_item(&mut self, item_id: &str, title: &str) -> anyhow::Result<()> {
+        rename_keychain_node(&mut self.keychain_catalog, item_id, title)
+    }
+
+    pub fn delete_keychain_item(
+        &mut self,
+        item_id: &str,
+    ) -> Result<bool, KeychainDeleteError> {
+        let removed = delete_keychain_node(&mut self.keychain_catalog, item_id, &self.console_asset_tree)?;
+        if removed.removed_ids.is_empty() {
+            return Ok(false);
+        }
+
+        self.selected_keychain_ids.retain(|selected_id| {
+            !removed
+                .removed_ids
+                .iter()
+                .any(|removed_id| removed_id == selected_id)
+        });
+        if self
+            .focused_keychain_id
+            .as_deref()
+            .is_some_and(|focused_id| removed.removed_ids.iter().any(|removed_id| removed_id == focused_id))
+        {
+            self.focused_keychain_id = None;
+        }
+        Ok(true)
+    }
+
     pub fn ssh_proxy_target_option_labels(&self) -> Vec<String> {
         self.ssh_proxy_target_options()
             .into_iter()
             .map(|option| option.label)
             .collect()
+    }
+
+    pub fn ssh_keychain_identity_option_labels(&self) -> Vec<String> {
+        self.ssh_keychain_identity_options()
+            .into_iter()
+            .map(|option| option.label)
+            .collect()
+    }
+
+    pub fn ssh_keychain_identity_selected_label(&self) -> String {
+        let Some(AssetModalState::NewSshConnection { draft, .. }) = &self.asset_modal_state else {
+            return String::new();
+        };
+
+        self.ssh_keychain_identity_options()
+            .into_iter()
+            .find(|option| option.identity_id == draft.keychain_identity_id.trim())
+            .map(|option| option.label)
+            .unwrap_or_default()
+    }
+
+    pub fn ssh_keychain_identity_selected_username(&self) -> String {
+        let Some(identity) = self.selected_ssh_keychain_identity() else {
+            return String::new();
+        };
+        identity.username.clone()
+    }
+
+    pub fn ssh_keychain_identity_selected_auth_summary(&self) -> String {
+        let Some(identity) = self.selected_ssh_keychain_identity() else {
+            return String::new();
+        };
+
+        match identity.auth_kind {
+            KeychainIdentityAuthKind::Password => "Password".into(),
+            KeychainIdentityAuthKind::SshKey => {
+                let key_title = identity
+                    .ssh_key_id
+                    .as_deref()
+                    .and_then(|key_id| self.keychain_catalog.nodes.get(key_id))
+                    .map(|node| node.title.clone())
+                    .filter(|title| !title.trim().is_empty());
+                match key_title {
+                    Some(title) => format!("SSH Key · {title}"),
+                    None => "SSH Key".into(),
+                }
+            }
+        }
     }
 
     pub fn ssh_proxy_target_selected_label(&self) -> String {
@@ -1609,11 +1927,33 @@ impl ShellViewModel {
         ssh_proxy_target_options_for_tree(&self.console_asset_tree, editing_asset_id)
     }
 
+    fn ssh_keychain_identity_options(&self) -> Vec<SshKeychainIdentityOption> {
+        ssh_keychain_identity_options_for_catalog(&self.keychain_catalog)
+    }
+
+    fn selected_ssh_keychain_identity(&self) -> Option<&crate::app::keychain::KeychainIdentitySpec> {
+        let Some(AssetModalState::NewSshConnection { draft, .. }) = &self.asset_modal_state else {
+            return None;
+        };
+        let identity_id = draft.keychain_identity_id.trim();
+        match self.keychain_catalog.nodes.get(identity_id).map(|node| &node.payload) {
+            Some(KeychainNodePayload::Identity(identity)) => Some(identity),
+            _ => None,
+        }
+    }
+
     fn resolve_ssh_proxy_target_asset_id_from_label(&self, label: &str) -> Option<String> {
         self.ssh_proxy_target_options()
             .into_iter()
             .find(|option| option.label == label.trim())
             .map(|option| option.asset_id)
+    }
+
+    fn resolve_ssh_keychain_identity_id_from_label(&self, label: &str) -> Option<String> {
+        self.ssh_keychain_identity_options()
+            .into_iter()
+            .find(|option| option.label == label.trim())
+            .map(|option| option.identity_id)
     }
 
     fn context_menu_roots(&self) -> Vec<ContextMenuActionNode> {
@@ -1700,6 +2040,15 @@ impl ShellViewModel {
             self.console_asset_tree.kind(asset_id.as_str()) == Some(ConsoleAssetKind::Folder)
         })
     }
+
+    fn normalize_keychain_folder_parent_id(&self, parent_id: Option<String>) -> Option<String> {
+        parent_id.filter(|node_id| {
+            self.keychain_catalog
+                .nodes
+                .get(node_id)
+                .is_some_and(|node| matches!(node.payload, crate::app::keychain::KeychainNodePayload::Folder))
+        })
+    }
 }
 
 fn asset_name_validation_message(validation: AssetNameValidation) -> String {
@@ -1711,6 +2060,48 @@ fn asset_name_validation_message(validation: AssetNameValidation) -> String {
 }
 
 impl ShellViewModel {
+    fn keychain_name_validation(
+        &self,
+        parent_id: Option<&str>,
+        candidate: &str,
+        exclude_id: Option<&str>,
+    ) -> AssetNameValidation {
+        let trimmed = candidate.trim();
+        if trimmed.is_empty() {
+            return AssetNameValidation::Empty;
+        }
+
+        let sibling_ids = parent_id
+            .and_then(|parent_id| self.keychain_catalog.nodes.get(parent_id).map(|node| node.child_ids.as_slice()))
+            .unwrap_or(self.keychain_catalog.root_ids.as_slice());
+        if sibling_ids.iter().filter(|node_id| Some(node_id.as_str()) != exclude_id).any(|node_id| {
+            self.keychain_catalog
+                .nodes
+                .get(node_id)
+                .is_some_and(|node| node.title.trim() == trimmed)
+        }) {
+            AssetNameValidation::Duplicate
+        } else {
+            AssetNameValidation::Valid
+        }
+    }
+
+    fn keychain_ssh_key_modal_validation_message(
+        &self,
+        parent_id: Option<&str>,
+        draft: &KeychainSshKeyDraft,
+    ) -> String {
+        asset_name_validation_message(self.keychain_name_validation(parent_id, &draft.name, None))
+    }
+
+    fn keychain_ssh_key_modal_can_confirm(
+        &self,
+        parent_id: Option<&str>,
+        draft: &KeychainSshKeyDraft,
+    ) -> bool {
+        self.keychain_name_validation(parent_id, &draft.name, None) == AssetNameValidation::Valid
+    }
+
     fn ssh_modal_validation_message(
         &self,
         parent_id: Option<&str>,
@@ -1725,6 +2116,12 @@ impl ShellViewModel {
             ));
         if !name_message.is_empty() {
             return name_message;
+        }
+
+        if draft.auth_source == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY
+            && draft.keychain_identity_id.trim().is_empty()
+        {
+            return "Keychain identity is required.".into();
         }
 
         draft.validation_message.clone()
@@ -1764,30 +2161,45 @@ impl ShellViewModel {
             return Some("Host is required.".into());
         }
 
-        if draft.user.trim().is_empty() {
+        if draft.auth_source == SSH_AUTH_SOURCE_MANUAL && draft.user.trim().is_empty() {
             return Some("User is required.".into());
         }
 
-        match draft.auth_method.as_str() {
-            "password" => {
-                if draft.password.trim().is_empty() {
-                    return Some("Password is required.".into());
+        if draft.auth_source == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY {
+            if draft.keychain_identity_id.trim().is_empty() {
+                return Some("Keychain identity is required.".into());
+            }
+        } else {
+            match draft.auth_method.as_str() {
+                "password" => {
+                    if draft.password.trim().is_empty() {
+                        return Some("Password is required.".into());
+                    }
+                }
+                "private-key" => match draft.private_key_source.as_str() {
+                    "path" => {
+                        if draft.private_key_path.trim().is_empty() {
+                            return Some("Private key path is required.".into());
+                        }
+                    }
+                    "content" => {
+                        if draft.private_key_content.trim().is_empty() {
+                            return Some("Private key content is required.".into());
+                        }
+                    }
+                    _ => return Some("Private key source is required.".into()),
+                },
+                _ => return Some("Authentication method is required.".into()),
+            }
+        }
+
+        if draft.auth_source == SSH_AUTH_SOURCE_MANUAL {
+            match draft.auth_method.as_str() {
+                "password" | "private-key" => {}
+                _ => {
+                    return Some("Authentication method is required.".into());
                 }
             }
-            "private-key" => match draft.private_key_source.as_str() {
-                "path" => {
-                    if draft.private_key_path.trim().is_empty() {
-                        return Some("Private key path is required.".into());
-                    }
-                }
-                "content" => {
-                    if draft.private_key_content.trim().is_empty() {
-                        return Some("Private key content is required.".into());
-                    }
-                }
-                _ => return Some("Private key source is required.".into()),
-            },
-            _ => return Some("Authentication method is required.".into()),
         }
 
         match draft.proxy_type.as_str() {
@@ -1837,13 +2249,19 @@ fn build_saved_ssh_connection_spec(
     draft: &AssetSshConnectionDraft,
     existing_spec: Option<&AssetSshConnectionSpec>,
 ) -> AssetSshConnectionSpec {
-    let uses_saved_auth_secret = match draft.auth_method.as_str() {
-        "password" => !draft.password.trim().is_empty(),
-        "private-key" if draft.private_key_source == "content" => {
-            !draft.private_key_content.trim().is_empty()
+    let uses_saved_auth_secret = if draft.auth_source == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY {
+        false
+    } else {
+        match draft.auth_method.as_str() {
+            "password" => !draft.password.trim().is_empty(),
+            "private-key" if draft.private_key_source == "content" => {
+                !draft.private_key_content.trim().is_empty()
+            }
+            "private-key" if draft.private_key_source == "path" => {
+                !draft.passphrase.trim().is_empty()
+            }
+            _ => false,
         }
-        "private-key" if draft.private_key_source == "path" => !draft.passphrase.trim().is_empty(),
-        _ => false,
     };
     let uses_saved_proxy_secret = matches!(draft.proxy_type.as_str(), "socks5" | "http")
         && !draft.proxy_socks5_password.trim().is_empty();
@@ -1868,11 +2286,21 @@ fn build_saved_ssh_connection_spec(
 
     AssetSshConnectionSpec {
         host: draft.host.clone(),
-        user: draft.user.clone(),
+        user: if draft.auth_source == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY {
+            String::new()
+        } else {
+            draft.user.clone()
+        },
         port: draft.port.clone(),
         auth_method: draft.auth_method.clone(),
+        auth_source: draft.auth_source.clone(),
+        keychain_identity_id: (draft.auth_source == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY)
+            .then(|| draft.keychain_identity_id.trim().to_string())
+            .filter(|value| !value.is_empty()),
         private_key_source: draft.private_key_source.clone(),
-        private_key_path: if draft.private_key_source == "content" {
+        private_key_path: if draft.auth_source == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY
+            || draft.private_key_source == "content"
+        {
             String::new()
         } else {
             draft.private_key_path.clone()
@@ -1945,6 +2373,37 @@ fn ssh_proxy_target_options_for_tree(
                 title
             },
             asset_id,
+        })
+        .collect()
+}
+
+fn ssh_keychain_identity_options_for_catalog(
+    catalog: &KeychainCatalog,
+) -> Vec<SshKeychainIdentityOption> {
+    let mut entries = catalog
+        .nodes
+        .values()
+        .filter_map(|node| match node.payload {
+            KeychainNodePayload::Identity(_) => Some((node.id.clone(), node.title.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+
+    let mut title_counts = HashMap::<String, usize>::new();
+    for (_, title) in &entries {
+        *title_counts.entry(title.clone()).or_default() += 1;
+    }
+
+    entries
+        .into_iter()
+        .map(|(identity_id, title)| SshKeychainIdentityOption {
+            label: if title_counts.get(&title).copied().unwrap_or_default() > 1 {
+                format!("{title} · {identity_id}")
+            } else {
+                title
+            },
+            identity_id,
         })
         .collect()
 }

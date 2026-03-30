@@ -6,6 +6,32 @@ use crate::SidebarNavItem;
 use crate::shell::assets::AssetViewMode;
 use crate::shell::view_model::ShellViewModel;
 
+const CONSOLE_CREATE_ACTIONS: &[ToolbarCreateActionDescriptor] = &[
+    ToolbarCreateActionDescriptor {
+        id: "new-folder",
+        label: "New Folder",
+    },
+    ToolbarCreateActionDescriptor {
+        id: "new-ssh-connection",
+        label: "New SSH Connection",
+    },
+];
+
+const KEYCHAIN_CREATE_ACTIONS: &[ToolbarCreateActionDescriptor] = &[
+    ToolbarCreateActionDescriptor {
+        id: "new-folder",
+        label: "New Folder",
+    },
+    ToolbarCreateActionDescriptor {
+        id: "new-identity",
+        label: "New Identity",
+    },
+    ToolbarCreateActionDescriptor {
+        id: "new-ssh-key",
+        label: "New SSH Key",
+    },
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarDestination {
     Console,
@@ -23,6 +49,12 @@ pub struct AssetsToolbarDescriptor {
     pub tree_expansion_tooltip: &'static str,
     pub show_tree_controls: bool,
     pub tree_controls_enabled: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolbarCreateActionDescriptor {
+    pub id: &'static str,
+    pub label: &'static str,
 }
 
 impl SidebarDestination {
@@ -81,23 +113,23 @@ pub fn toolbar_descriptor_for(
         primary_create_tooltip,
         search_tooltip,
         base_show_tree_controls,
-    ) = match destination {
-        SidebarDestination::Console => (true, None, "Create Asset", "Search Console Assets", true),
-        SidebarDestination::Snippets => (
-            false,
-            Some("new-snippet"),
-            "New Snippet",
-            "Search Snippets",
-            false,
-        ),
-        SidebarDestination::Keychain => (
-            false,
-            Some("new-keychain"),
-            "New Keychain",
-            "Search Keychain",
-            false,
-        ),
-    };
+        ) = match destination {
+            SidebarDestination::Console => (true, None, "Create Asset", "Search Console Assets", true),
+            SidebarDestination::Snippets => (
+                false,
+                Some("new-snippet"),
+                "New Snippet",
+                "Search Snippets",
+                false,
+            ),
+            SidebarDestination::Keychain => (
+                true,
+                None,
+                "Create Keychain Item",
+                "Search Keychain",
+                false,
+            ),
+        };
 
     let view_mode_tooltip = match view_model.asset_view_mode {
         AssetViewMode::Tree => "Switch to Flat List",
@@ -123,5 +155,15 @@ pub fn toolbar_descriptor_for(
         tree_expansion_tooltip,
         show_tree_controls,
         tree_controls_enabled,
+    }
+}
+
+pub fn create_popover_actions_for(
+    destination: SidebarDestination,
+) -> &'static [ToolbarCreateActionDescriptor] {
+    match destination {
+        SidebarDestination::Console => CONSOLE_CREATE_ACTIONS,
+        SidebarDestination::Keychain => KEYCHAIN_CREATE_ACTIONS,
+        SidebarDestination::Snippets => &[],
     }
 }

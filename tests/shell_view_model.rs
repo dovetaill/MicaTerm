@@ -3,10 +3,14 @@
 use std::fs;
 
 use mica_term::app::window_state::WindowPlacementKind;
+use mica_term::app::keychain::{
+    KeychainCatalog, KeychainNode, KeychainNodeKind, KeychainNodePayload,
+};
 use mica_term::shell::assets::{
     AssetNameValidation, AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec,
     AssetSshProxySpec, AssetTree, AssetViewMode, ConsoleAssetKind,
 };
+use mica_term::shell::keychain::KeychainItemKind;
 use mica_term::shell::context_menu::{
     ContextTargetKind, SelectionContext, resolve_action_tree, visible_columns_for_path,
 };
@@ -16,6 +20,77 @@ use mica_term::shell::view_model::{
     welcome_actions,
 };
 use mica_term::theme::ThemeMode;
+
+fn sample_keychain_catalog_for_view_model() -> KeychainCatalog {
+    KeychainCatalog {
+        root_ids: vec!["folder-team".into()],
+        nodes: std::collections::BTreeMap::from([
+            (
+                "folder-team".into(),
+                KeychainNode {
+                    id: "folder-team".into(),
+                    parent_id: None,
+                    title: "Team".into(),
+                    kind: KeychainNodeKind::Folder,
+                    child_ids: vec!["identity-prod".into(), "identity-ops".into()],
+                    payload: KeychainNodePayload::Folder,
+                },
+            ),
+            (
+                "identity-prod".into(),
+                KeychainNode {
+                    id: "identity-prod".into(),
+                    parent_id: Some("folder-team".into()),
+                    title: "Identity 1".into(),
+                    kind: KeychainNodeKind::Identity,
+                    child_ids: Vec::new(),
+                    payload: KeychainNodePayload::Identity(mica_term::app::keychain::KeychainIdentitySpec {
+                        username: "ops".into(),
+                        auth_kind: mica_term::app::keychain::KeychainIdentityAuthKind::Password,
+                        ssh_key_id: None,
+                        credential_ref: None,
+                        remark: String::new(),
+                    }),
+                },
+            ),
+            (
+                "identity-ops".into(),
+                KeychainNode {
+                    id: "identity-ops".into(),
+                    parent_id: Some("folder-team".into()),
+                    title: "Ops Key".into(),
+                    kind: KeychainNodeKind::Identity,
+                    child_ids: Vec::new(),
+                    payload: KeychainNodePayload::Identity(mica_term::app::keychain::KeychainIdentitySpec {
+                        username: "deploy".into(),
+                        auth_kind: mica_term::app::keychain::KeychainIdentityAuthKind::SshKey,
+                        ssh_key_id: Some("key-prod".into()),
+                        credential_ref: None,
+                        remark: String::new(),
+                    }),
+                },
+            ),
+            (
+                "key-prod".into(),
+                KeychainNode {
+                    id: "key-prod".into(),
+                    parent_id: None,
+                    title: "Prod Key".into(),
+                    kind: KeychainNodeKind::SshKey,
+                    child_ids: Vec::new(),
+                    payload: KeychainNodePayload::SshKey(mica_term::app::keychain::KeychainSshKeySpec {
+                        algorithm: "ssh-ed25519".into(),
+                        fingerprint: "SHA256:key-prod".into(),
+                        public_key: "ssh-ed25519 AAAAC3NzaKeyProd".into(),
+                        comment: "prod@example.com".into(),
+                        credential_ref: None,
+                        remark: String::new(),
+                    }),
+                },
+            ),
+        ]),
+    }
+}
 
 #[test]
 fn welcome_actions_match_the_approved_order() {
@@ -402,6 +477,8 @@ fn editing_connection_cannot_proxy_through_itself() {
             user: "ops".into(),
             port: "22".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "prod".into(),
@@ -535,6 +612,61 @@ fn switching_auth_method_clears_irrelevant_validation_errors() {
         "-----BEGIN OPENSSH PRIVATE KEY-----".into(),
     );
     assert!(view_model.can_confirm_asset_modal());
+}
+
+#[test]
+fn switching_auth_source_to_keychain_identity_clears_manual_secrets_and_requires_identity() {
+    let mut view_model = ShellViewModel::default();
+    view_model.replace_keychain_catalog(sample_keychain_catalog_for_view_model());
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_field("host", "10.0.0.12".into());
+    view_model.update_ssh_modal_field("user", "ops".into());
+    view_model.update_ssh_modal_field("auth_method", "private-key".into());
+    view_model.update_ssh_modal_field(
+        "private_key_content",
+        "-----BEGIN OPENSSH PRIVATE KEY-----".into(),
+    );
+    view_model.update_ssh_modal_field("passphrase", "hunter2".into());
+
+    view_model.update_ssh_modal_field("auth_source", "keychain-identity".into());
+
+    assert!(matches!(
+        view_model.asset_modal_state,
+        Some(AssetModalState::NewSshConnection { ref draft, .. })
+            if draft.auth_source == "keychain-identity"
+            && draft.password.is_empty()
+            && draft.private_key_content.is_empty()
+            && draft.passphrase.is_empty()
+    ));
+    assert_eq!(
+        view_model.asset_create_modal_validation_message(),
+        "Keychain identity is required."
+    );
+    assert!(!view_model.can_confirm_asset_modal());
+}
+
+#[test]
+fn selecting_keychain_identity_allows_ssh_modal_to_save_identity_backed_host() {
+    let mut view_model = ShellViewModel::default();
+    view_model.replace_keychain_catalog(sample_keychain_catalog_for_view_model());
+    view_model.open_new_ssh_modal(None);
+    view_model.update_ssh_modal_name("Identity Bastion".into());
+    view_model.update_ssh_modal_field("host", "10.0.0.12".into());
+    view_model.update_ssh_modal_field("auth_source", "keychain-identity".into());
+    view_model.update_ssh_modal_field("keychain_identity_id", "identity-prod".into());
+
+    assert!(view_model.can_confirm_asset_modal());
+    assert!(view_model.confirm_asset_modal());
+
+    let rows = view_model.visible_console_asset_rows();
+    let asset_id = rows[0].id.clone();
+    let spec = view_model
+        .console_asset_tree()
+        .ssh_connection_spec(asset_id.as_str())
+        .expect("saved ssh spec");
+
+    assert_eq!(spec.auth_source, "keychain-identity");
+    assert_eq!(spec.keychain_identity_id.as_deref(), Some("identity-prod"));
 }
 
 #[test]
@@ -1008,6 +1140,8 @@ fn edit_connection_opens_modal_with_prefilled_non_secret_fields() {
             user: "ops".into(),
             port: "2022".into(),
             auth_method: "private-key".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "path".into(),
             private_key_path: "/tmp/id_ed25519".into(),
             environment: "prod".into(),
@@ -1059,6 +1193,8 @@ fn edit_connection_opens_modal_with_prefilled_socks5_proxy_fields() {
             user: "ops".into(),
             port: "2022".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "prod".into(),
@@ -1104,6 +1240,8 @@ fn editing_saved_path_modal_switches_to_inline_content_when_private_key_content_
             user: "ops".into(),
             port: "2022".into(),
             auth_method: "private-key".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "path".into(),
             private_key_path: "/tmp/id_ed25519".into(),
             environment: String::new(),
@@ -1146,6 +1284,8 @@ fn editing_saved_ssh_modal_keeps_password_fields_hidden_until_secret_hydration_e
             user: "ops".into(),
             port: "22".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: String::new(),
@@ -1181,6 +1321,8 @@ fn editing_saved_ssh_modal_allows_direct_password_editing_after_secret_hydration
             user: "ops".into(),
             port: "22".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: String::new(),
@@ -1219,6 +1361,8 @@ fn hydrating_edit_ssh_modal_secret_updates_active_draft_and_inline_error() {
             user: "ops".into(),
             port: "22".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: String::new(),
@@ -1265,6 +1409,8 @@ fn edit_connection_context_action_routes_to_ssh_edit_modal() {
             user: "ops".into(),
             port: "2022".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "prod".into(),
@@ -1390,6 +1536,68 @@ fn selecting_an_asset_updates_focus_without_opening_context_menu() {
     );
     assert_eq!(view_model.selected_asset_ids, vec![asset_id]);
     assert!(!view_model.asset_create_menu_open);
+}
+
+#[test]
+fn keychain_selection_state_is_independent_from_console_asset_tree_state() {
+    let mut view_model = ShellViewModel::default();
+    view_model.seed_test_asset(ConsoleAssetKind::Folder, "Console Folder");
+    let console_asset_id = view_model.visible_console_asset_rows()[0].id.clone();
+    view_model.select_asset(&console_asset_id);
+    view_model.replace_keychain_catalog(sample_keychain_catalog_for_view_model());
+
+    view_model.select_keychain_item("identity-prod");
+
+    assert_eq!(view_model.selected_asset_ids, vec![console_asset_id.clone()]);
+    assert_eq!(
+        view_model.focused_asset_id.as_deref(),
+        Some(console_asset_id.as_str())
+    );
+    assert_eq!(view_model.selected_keychain_ids, vec!["identity-prod"]);
+    assert_eq!(
+        view_model.focused_keychain_id.as_deref(),
+        Some("identity-prod")
+    );
+}
+
+#[test]
+fn keychain_search_query_is_independent_from_console_asset_search_query() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.set_asset_search_query("gateway".into());
+    view_model.set_keychain_search_query("ops".into());
+
+    assert_eq!(view_model.asset_search_query, "gateway");
+    assert_eq!(view_model.keychain_search_query, "ops");
+}
+
+#[test]
+fn keychain_default_create_names_are_scoped_within_parent_folder() {
+    let mut view_model = ShellViewModel::default();
+    view_model.replace_keychain_catalog(sample_keychain_catalog_for_view_model());
+
+    let second_folder_id = view_model.create_keychain_item(None, KeychainItemKind::Folder);
+    view_model.rename_keychain_item(&second_folder_id, "Other Team").unwrap();
+
+    let first_identity_id = view_model.create_keychain_item(Some("folder-team".into()), KeychainItemKind::Identity);
+    let second_identity_id = view_model.create_keychain_item(Some(second_folder_id.clone()), KeychainItemKind::Identity);
+
+    let rows = view_model.visible_keychain_rows();
+    let first_label = rows
+        .iter()
+        .find(|row| row.id == first_identity_id)
+        .expect("first identity row")
+        .label
+        .clone();
+    let second_label = rows
+        .iter()
+        .find(|row| row.id == second_identity_id)
+        .expect("second identity row")
+        .label
+        .clone();
+
+    assert_eq!(first_label, "Identity 1-1");
+    assert_eq!(second_label, "Identity 1");
 }
 
 #[test]

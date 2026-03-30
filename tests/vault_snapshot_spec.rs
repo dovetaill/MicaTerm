@@ -2,6 +2,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+use mica_term::app::keychain::{
+    KeychainCatalog, KeychainIdentityAuthKind, KeychainIdentitySpec, KeychainNode,
+    KeychainNodeKind, KeychainNodePayload, KeychainSshKeySpec,
+};
 use mica_term::app::ssh::credentials::{
     CredentialStore, MemoryCredentialStore, StoredSshSecretBundle, persist_secret_bundle,
 };
@@ -45,6 +49,8 @@ fn sample_asset_tree(credential_ref: &str) -> AssetTree {
             user: "deploy".into(),
             port: "22".into(),
             auth_method: "private-key".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "prod".into(),
@@ -62,11 +68,68 @@ fn sample_asset_tree(credential_ref: &str) -> AssetTree {
     tree
 }
 
+fn sample_keychain_catalog(identity_credential_ref: &str, key_credential_ref: &str) -> KeychainCatalog {
+    KeychainCatalog {
+        root_ids: vec!["folder-team".into(), "identity-ops".into()],
+        nodes: BTreeMap::from([
+            (
+                "folder-team".into(),
+                KeychainNode {
+                    id: "folder-team".into(),
+                    parent_id: None,
+                    title: "Team".into(),
+                    kind: KeychainNodeKind::Folder,
+                    child_ids: vec!["key-prod".into()],
+                    payload: KeychainNodePayload::Folder,
+                },
+            ),
+            (
+                "identity-ops".into(),
+                KeychainNode {
+                    id: "identity-ops".into(),
+                    parent_id: None,
+                    title: "Ops".into(),
+                    kind: KeychainNodeKind::Identity,
+                    child_ids: Vec::new(),
+                    payload: KeychainNodePayload::Identity(KeychainIdentitySpec {
+                        username: "ops".into(),
+                        auth_kind: KeychainIdentityAuthKind::Password,
+                        ssh_key_id: None,
+                        credential_ref: Some(identity_credential_ref.into()),
+                        remark: "shared ops login".into(),
+                    }),
+                },
+            ),
+            (
+                "key-prod".into(),
+                KeychainNode {
+                    id: "key-prod".into(),
+                    parent_id: Some("folder-team".into()),
+                    title: "Prod Key".into(),
+                    kind: KeychainNodeKind::SshKey,
+                    child_ids: Vec::new(),
+                    payload: KeychainNodePayload::SshKey(KeychainSshKeySpec {
+                        algorithm: "ed25519".into(),
+                        fingerprint: "SHA256:key-prod".into(),
+                        public_key: "ssh-ed25519 AAAAC3NzaKeyProd".into(),
+                        comment: "prod@example".into(),
+                        credential_ref: Some(key_credential_ref.into()),
+                        remark: "generated".into(),
+                    }),
+                },
+            ),
+        ]),
+    }
+}
+
 #[test]
 fn export_vault_snapshot_includes_assets_secret_bundles_known_hosts_and_preferences() {
     let credential_ref = "ssh/saved-secrets/asset-2";
+    let identity_credential_ref = "keychain/identity/identity-ops";
+    let key_credential_ref = "keychain/key/key-prod";
     let store = MemoryCredentialStore::default();
     let tree = sample_asset_tree(credential_ref);
+    let keychain_catalog = sample_keychain_catalog(identity_credential_ref, key_credential_ref);
     let known_hosts_path = temp_known_hosts_path("export");
     let known_hosts = KnownHostsService::new(&known_hosts_path);
     let public_key = sample_public_key();
@@ -82,6 +145,28 @@ fn export_vault_snapshot_includes_assets_secret_bundles_known_hosts_and_preferen
         },
     )
     .expect("persist secret bundle");
+    persist_secret_bundle(
+        &store,
+        identity_credential_ref,
+        &StoredSshSecretBundle {
+            password: Some("ops-password".into()),
+            private_key_content: None,
+            passphrase: None,
+            proxy_socks5_password: None,
+        },
+    )
+    .expect("persist identity secret bundle");
+    persist_secret_bundle(
+        &store,
+        key_credential_ref,
+        &StoredSshSecretBundle {
+            password: None,
+            private_key_content: Some("-----BEGIN OPENSSH PRIVATE KEY-----".into()),
+            passphrase: Some("key-passphrase".into()),
+            proxy_socks5_password: None,
+        },
+    )
+    .expect("persist key secret bundle");
     known_hosts
         .accept_unknown("prod.example.com", 22, &public_key)
         .expect("persist known_hosts entry");
@@ -100,6 +185,7 @@ fn export_vault_snapshot_includes_assets_secret_bundles_known_hosts_and_preferen
 
     let snapshot = export_vault_snapshot(
         &tree,
+        &keychain_catalog,
         &store,
         &known_hosts_path,
         sync_preferences.clone(),
@@ -109,6 +195,9 @@ fn export_vault_snapshot_includes_assets_secret_bundles_known_hosts_and_preferen
 
     assert_eq!(snapshot.asset_catalog.root_ids.len(), 2);
     assert_eq!(snapshot.ssh_secret_bundles.len(), 1);
+    assert_eq!(snapshot.keychain_catalog.root_ids.len(), 2);
+    assert_eq!(snapshot.keychain_identity_secret_bundles.len(), 1);
+    assert_eq!(snapshot.keychain_key_secret_bundles.len(), 1);
     assert_eq!(
         snapshot
             .ssh_secret_bundles
@@ -118,6 +207,18 @@ fn export_vault_snapshot_includes_assets_secret_bundles_known_hosts_and_preferen
             .passphrase
             .as_deref(),
         Some("hunter2")
+    );
+    assert_eq!(
+        snapshot.keychain_identity_secret_bundles["identity-ops"]
+            .password
+            .as_deref(),
+        Some("ops-password")
+    );
+    assert_eq!(
+        snapshot.keychain_key_secret_bundles["key-prod"]
+            .private_key_content
+            .as_deref(),
+        Some("-----BEGIN OPENSSH PRIVATE KEY-----")
     );
     assert_eq!(snapshot.known_hosts.len(), 1);
     assert_eq!(
@@ -139,6 +240,8 @@ fn export_vault_snapshot_includes_assets_secret_bundles_known_hosts_and_preferen
 #[test]
 fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_preferences() {
     let credential_ref = "ssh/saved-secrets/gateway";
+    let identity_credential_ref = "keychain/identity/identity-ops";
+    let key_credential_ref = "keychain/key/key-prod";
     let store = MemoryCredentialStore::default();
     let known_hosts_path = temp_known_hosts_path("import");
     let public_key = sample_public_key();
@@ -170,6 +273,8 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_pre
                             user: "deploy".into(),
                             port: "22".into(),
                             auth_method: "private-key".into(),
+                            auth_source: "manual".into(),
+                            keychain_identity_id: None,
                             private_key_source: "content".into(),
                             private_key_path: String::new(),
                             environment: "prod".into(),
@@ -194,6 +299,25 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_pre
                 proxy_socks5_password: None,
             },
         )]),
+        keychain_catalog: sample_keychain_catalog(identity_credential_ref, key_credential_ref),
+        keychain_identity_secret_bundles: BTreeMap::from([(
+            "identity-ops".into(),
+            StoredSshSecretBundle {
+                password: Some("ops-password".into()),
+                private_key_content: None,
+                passphrase: None,
+                proxy_socks5_password: None,
+            },
+        )]),
+        keychain_key_secret_bundles: BTreeMap::from([(
+            "key-prod".into(),
+            StoredSshSecretBundle {
+                password: None,
+                private_key_content: Some("-----BEGIN OPENSSH PRIVATE KEY-----".into()),
+                passphrase: Some("key-passphrase".into()),
+                proxy_socks5_password: None,
+            },
+        )]),
         known_hosts: vec![VaultKnownHostEntry {
             host_pattern: "[prod.example.com]:22".into(),
             public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILM+rvN+ot98qgEN796jTiQfZfG1KaT0PtFDJ/XFSqti snapshot@example.com".into(),
@@ -214,6 +338,7 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_pre
         .expect("apply vault snapshot");
 
     assert_eq!(applied.asset_tree.root_ids().len(), 2);
+    assert_eq!(applied.keychain_catalog.root_ids.len(), 2);
     assert_eq!(
         applied.asset_tree.node("asset-gateway").expect("gateway node").title,
         "Gateway"
@@ -230,6 +355,20 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_pre
     assert_eq!(
         store.get_secret(credential_ref).expect("load secret").as_deref(),
         Some("{\"password\":null,\"private_key_content\":\"-----BEGIN OPENSSH PRIVATE KEY-----\",\"passphrase\":\"hunter2\",\"proxy_socks5_password\":null}")
+    );
+    assert_eq!(
+        store
+            .get_secret(identity_credential_ref)
+            .expect("load identity secret")
+            .as_deref(),
+        Some("{\"password\":\"ops-password\",\"private_key_content\":null,\"passphrase\":null,\"proxy_socks5_password\":null}")
+    );
+    assert_eq!(
+        store
+            .get_secret(key_credential_ref)
+            .expect("load key secret")
+            .as_deref(),
+        Some("{\"password\":null,\"private_key_content\":\"-----BEGIN OPENSSH PRIVATE KEY-----\",\"passphrase\":\"key-passphrase\",\"proxy_socks5_password\":null}")
     );
     assert_eq!(applied.sync_preferences, snapshot.sync_preferences);
     assert_eq!(applied.ui_preferences.theme_mode, ThemeMode::Light);
@@ -248,12 +387,20 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_pre
 #[test]
 fn apply_vault_snapshot_keeps_empty_secret_entries_absent() {
     let credential_ref = "ssh/saved-secrets/asset-empty";
+    let identity_credential_ref = "keychain/identity/identity-empty";
+    let key_credential_ref = "keychain/key/key-empty";
     let store = MemoryCredentialStore::default();
     let known_hosts_path = temp_known_hosts_path("empty-secrets");
 
     store
         .put_secret(credential_ref, "stale-secret")
         .expect("persist stale secret");
+    store
+        .put_secret(identity_credential_ref, "stale-identity-secret")
+        .expect("persist stale identity secret");
+    store
+        .put_secret(key_credential_ref, "stale-key-secret")
+        .expect("persist stale key secret");
 
     let snapshot = VaultSnapshot {
         schema_version: 1,
@@ -273,6 +420,8 @@ fn apply_vault_snapshot_keeps_empty_secret_entries_absent() {
                             user: "deploy".into(),
                             port: "22".into(),
                             auth_method: "password".into(),
+                            auth_source: "manual".into(),
+                            keychain_identity_id: None,
                             private_key_source: "content".into(),
                             private_key_path: String::new(),
                             environment: "prod".into(),
@@ -285,6 +434,9 @@ fn apply_vault_snapshot_keeps_empty_secret_entries_absent() {
             )]),
         },
         ssh_secret_bundles: BTreeMap::new(),
+        keychain_catalog: sample_keychain_catalog(identity_credential_ref, key_credential_ref),
+        keychain_identity_secret_bundles: BTreeMap::new(),
+        keychain_key_secret_bundles: BTreeMap::new(),
         known_hosts: Vec::new(),
         sync_preferences: SnapshotSyncPreferences::default(),
         ui_preferences: SnapshotUiPreferences::default(),
@@ -293,6 +445,8 @@ fn apply_vault_snapshot_keeps_empty_secret_entries_absent() {
     apply_vault_snapshot(&snapshot, &store, &known_hosts_path).expect("apply snapshot");
 
     assert_eq!(store.get_secret(credential_ref).unwrap(), None);
+    assert_eq!(store.get_secret(identity_credential_ref).unwrap(), None);
+    assert_eq!(store.get_secret(key_credential_ref).unwrap(), None);
 
     let _ = fs::remove_file(known_hosts_path);
 }

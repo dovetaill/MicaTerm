@@ -134,12 +134,26 @@ pub enum AssetSshProxySpec {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub const SSH_AUTH_SOURCE_MANUAL: &str = "manual";
+pub const SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY: &str = "keychain-identity";
+
+pub fn normalized_ssh_auth_source(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        SSH_AUTH_SOURCE_MANUAL
+    } else {
+        trimmed
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetSshConnectionSpec {
     pub host: String,
     pub user: String,
     pub port: String,
     pub auth_method: String,
+    pub auth_source: String,
+    pub keychain_identity_id: Option<String>,
     pub private_key_source: String,
     pub private_key_path: String,
     pub environment: String,
@@ -148,6 +162,26 @@ pub struct AssetSshConnectionSpec {
     pub proxy_method: String,
     pub remark: String,
     pub credential_ref: Option<String>,
+}
+
+impl Default for AssetSshConnectionSpec {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            user: String::new(),
+            port: String::new(),
+            auth_method: String::new(),
+            auth_source: SSH_AUTH_SOURCE_MANUAL.into(),
+            keychain_identity_id: None,
+            private_key_source: String::new(),
+            private_key_path: String::new(),
+            environment: String::new(),
+            proxy: AssetSshProxySpec::None,
+            proxy_method: String::new(),
+            remark: String::new(),
+            credential_ref: None,
+        }
+    }
 }
 
 #[allow(clippy::large_enum_variant)]

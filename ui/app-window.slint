@@ -6,6 +6,8 @@ import { AssetsContextMenuItem } from "components/assets-context-menu-column.sli
 import { AssetsContextMenuOverlay } from "components/assets-context-menu-overlay.slint";
 import { AssetsDeleteConfirmModal } from "components/assets-delete-confirm-modal.slint";
 import { AssetsFolderCreateModal } from "components/assets-folder-create-modal.slint";
+import { AssetsKeychainIdentityModal } from "components/assets-keychain-identity-modal.slint";
+import { AssetsKeychainSshKeyModal } from "components/assets-keychain-ssh-key-modal.slint";
 import { AssetsRenameModal } from "components/assets-rename-modal.slint";
 import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal.slint";
 import { BlockingModalShell } from "components/blocking-modal-shell.slint";
@@ -66,6 +68,11 @@ export component AppWindow inherits Window {
     in-out property <string> asset-ssh-modal-host: "";
     in-out property <string> asset-ssh-modal-user: "";
     in-out property <string> asset-ssh-modal-port: "22";
+    in-out property <string> asset-ssh-modal-auth-source: "manual";
+    in-out property <[string]> asset-ssh-modal-keychain-identity-options: [];
+    in-out property <string> asset-ssh-modal-keychain-identity-selected-label: "";
+    in-out property <string> asset-ssh-modal-keychain-identity-username: "";
+    in-out property <string> asset-ssh-modal-keychain-identity-auth-summary: "";
     in-out property <string> asset-ssh-modal-auth-method: "password";
     in-out property <string> asset-ssh-modal-private-key-source: "content";
     in-out property <string> asset-ssh-modal-password: "";
@@ -99,6 +106,17 @@ export component AppWindow inherits Window {
     in-out property <length> blocking-modal-offset-x: 0px;
     in-out property <length> blocking-modal-offset-y: 0px;
     in-out property <[ConsoleAssetItem]> console-asset-items: [];
+    in-out property <[ConsoleAssetItem]> keychain-asset-items: [];
+    in-out property <string> keychain-identity-modal-name: "";
+    in-out property <string> keychain-identity-modal-username: "";
+    in-out property <string> keychain-identity-modal-auth-kind: "password";
+    in-out property <string> keychain-identity-modal-password: "";
+    in-out property <string> keychain-identity-modal-ssh-key-label: "";
+    in-out property <string> keychain-identity-modal-remark: "";
+    in-out property <string> keychain-ssh-key-modal-name: "";
+    in-out property <string> keychain-ssh-key-modal-private-key: "";
+    in-out property <string> keychain-ssh-key-modal-public-key: "";
+    in-out property <string> keychain-ssh-key-modal-fingerprint: "";
     in-out property <[WorkspaceTabItem]> workspace-tab-items: [];
     in-out property <string> active-workspace-session-id: "";
     in-out property <string> workspace-session-host-mode: "welcome";
@@ -222,6 +240,10 @@ export component AppWindow inherits Window {
     callback asset-folder-modal-name-changed(string);
     callback asset-ssh-modal-draft-changed(string, string);
     callback asset-ssh-modal-action-requested(string);
+    callback keychain-identity-modal-draft-changed(string, string);
+    callback keychain-identity-modal-action-requested(string);
+    callback keychain-ssh-key-modal-draft-changed(string, string);
+    callback keychain-ssh-key-modal-action-requested(string);
     callback ssh-host-key-modal-accept-requested();
     callback ssh-host-key-modal-reject-requested();
     callback workspace-paste-warning-confirm-requested();
@@ -437,6 +459,7 @@ export component AppWindow inherits Window {
                         asset-show-tree-controls: root.asset-show-tree-controls;
                         asset-tree-controls-enabled: root.asset-tree-controls-enabled;
                         console-asset-items: root.console-asset-items;
+                        keychain-asset-items: root.keychain-asset-items;
 
                         toggle-assets-sidebar-requested => {
                             root.toggle-assets-sidebar-requested();
@@ -662,6 +685,7 @@ export component AppWindow inherits Window {
         visible: root.asset-create-menu-open;
         x: sidebar.create-menu-anchor-x + sidebar.create-menu-anchor-width - self.width;
         y: sidebar.create-menu-anchor-y + sidebar.create-menu-anchor-height + 6px;
+        active-sidebar-destination: root.active-sidebar-destination;
 
         close-requested => {
             root.close-assets-create-menu-requested();
@@ -673,6 +697,14 @@ export component AppWindow inherits Window {
 
         new-ssh-connection-selected => {
             root.assets-create-action-selected("new-ssh-connection");
+        }
+
+        new-identity-selected => {
+            root.assets-create-action-selected("new-identity");
+        }
+
+        new-ssh-key-selected => {
+            root.assets-create-action-selected("new-ssh-key");
         }
     }
 
@@ -807,6 +839,11 @@ export component AppWindow inherits Window {
             host: root.asset-ssh-modal-host;
             user: root.asset-ssh-modal-user;
             port: root.asset-ssh-modal-port;
+            auth-source: root.asset-ssh-modal-auth-source;
+            keychain-identity-options: root.asset-ssh-modal-keychain-identity-options;
+            keychain-identity-selected-label: root.asset-ssh-modal-keychain-identity-selected-label;
+            keychain-identity-username: root.asset-ssh-modal-keychain-identity-username;
+            keychain-identity-auth-summary: root.asset-ssh-modal-keychain-identity-auth-summary;
             auth-method: root.asset-ssh-modal-auth-method;
             private-key-source: root.asset-ssh-modal-private-key-source;
             password: root.asset-ssh-modal-password;
@@ -843,6 +880,130 @@ export component AppWindow inherits Window {
 
             action-requested(action-id) => {
                 root.asset-ssh-modal-action-requested(action-id);
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
+    }
+
+    if root.asset-modal-open && root.asset-modal-kind == "new-keychain-identity" : keychain-identity-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 520px;
+        modal-height: 520px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        keychain-identity-modal-overlay := AssetsKeychainIdentityModal {
+            x: 0px;
+            y: 0px;
+            width: keychain-identity-modal-shell.content-width;
+            height: keychain-identity-modal-shell.content-height;
+            name: root.keychain-identity-modal-name;
+            username: root.keychain-identity-modal-username;
+            auth-kind: root.keychain-identity-modal-auth-kind;
+            password: root.keychain-identity-modal-password;
+            ssh-key-label: root.keychain-identity-modal-ssh-key-label;
+            remark: root.keychain-identity-modal-remark;
+            validation-message: root.asset-modal-validation-message;
+            can-confirm: root.asset-modal-can-confirm;
+            focus-sequence: root.asset-modal-focus-sequence;
+
+            close-requested => {
+                root.close-asset-modal-requested();
+            }
+
+            confirm-requested => {
+                root.confirm-asset-modal-requested();
+            }
+
+            draft-changed(field, value) => {
+                root.keychain-identity-modal-draft-changed(field, value);
+            }
+
+            action-requested(action-id) => {
+                root.keychain-identity-modal-action-requested(action-id);
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
+    }
+
+    if root.asset-modal-open && root.asset-modal-kind == "new-keychain-ssh-key" : keychain-ssh-key-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 720px;
+        modal-height: 620px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        keychain-ssh-key-modal-overlay := AssetsKeychainSshKeyModal {
+            x: 0px;
+            y: 0px;
+            width: keychain-ssh-key-modal-shell.content-width;
+            height: keychain-ssh-key-modal-shell.content-height;
+            name: root.keychain-ssh-key-modal-name;
+            private-key: root.keychain-ssh-key-modal-private-key;
+            public-key: root.keychain-ssh-key-modal-public-key;
+            fingerprint: root.keychain-ssh-key-modal-fingerprint;
+            validation-message: root.asset-modal-validation-message;
+            can-confirm: root.asset-modal-can-confirm;
+            focus-sequence: root.asset-modal-focus-sequence;
+
+            close-requested => {
+                root.close-asset-modal-requested();
+            }
+
+            confirm-requested => {
+                root.confirm-asset-modal-requested();
+            }
+
+            draft-changed(field, value) => {
+                root.keychain-ssh-key-modal-draft-changed(field, value);
+            }
+
+            action-requested(action-id) => {
+                root.keychain-ssh-key-modal-action-requested(action-id);
             }
 
             drag-requested(pointer-x, pointer-y) => {

@@ -30,6 +30,11 @@ grep -F 'in-out property <bool> asset-ssh-modal-proxy-socks5-password-visible: f
 grep -F 'in-out property <string> asset-ssh-modal-proxy-ssh-asset-id: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <[string]> asset-ssh-modal-proxy-ssh-options: [];' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-ssh-modal-proxy-ssh-selected-label: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> asset-ssh-modal-auth-source: "manual";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <[string]> asset-ssh-modal-keychain-identity-options: [];' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> asset-ssh-modal-keychain-identity-selected-label: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> asset-ssh-modal-keychain-identity-username: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> asset-ssh-modal-keychain-identity-auth-summary: "";' "$APP_WINDOW" >/dev/null
 grep -F 'callback drag-requested(length, length);' "$MODAL_SHELL" >/dev/null
 ! grep -F 'in property <string> dialog-title: "";' "$MODAL_SHELL" >/dev/null
 ! grep -F 'callback close-requested();' "$MODAL_SHELL" >/dev/null
@@ -121,10 +126,15 @@ grep -F 'drag-touch := TouchArea {' "$SSH_MODAL" >/dev/null
 grep -F 'close-button := Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> validation-message: "";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm: false;' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> auth-source: "manual";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> auth-method:' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> private-key-source:' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> password:' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> remark:' "$SSH_MODAL" >/dev/null
+grep -F 'in property <[string]> keychain-identity-options: [];' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> keychain-identity-selected-label: "";' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> keychain-identity-username: "";' "$SSH_MODAL" >/dev/null
+grep -F 'in property <string> keychain-identity-auth-summary: "";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> proxy-type: "none";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> proxy-socks5-host: "";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> proxy-socks5-port: "";' "$SSH_MODAL" >/dev/null
@@ -189,6 +199,17 @@ grep -F 'ComboBox {' "$SSH_MODAL" >/dev/null
 ! grep -F 'label: "Test Connection";' "$SSH_MODAL" >/dev/null
 grep -F 'label: "Test";' "$SSH_MODAL" >/dev/null
 grep -F 'label: "Save";' "$SSH_MODAL" >/dev/null
+grep -F 'Manual' "$SSH_MODAL" >/dev/null
+grep -F 'Keychain Identity' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Identity";' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Username";' "$SSH_MODAL" >/dev/null
+grep -F 'text: "Authentication Summary";' "$SSH_MODAL" >/dev/null
+grep -F 'root.draft-changed("auth_source"' "$SSH_MODAL" >/dev/null
+grep -F 'root.draft-changed("keychain_identity_label"' "$SSH_MODAL" >/dev/null
+if grep -F 'Use Existing Keychain Identity' "$SSH_MODAL" >/dev/null; then
+  echo "ssh modal must replace the temporary keychain identity button with a real source picker" >&2
+  exit 1
+fi
 grep -F 'InputType.password' "$SSH_MODAL" >/dev/null
 grep -F 'password_visibility' "$SSH_MODAL" >/dev/null
 grep -F 'busy' "$SSH_MODAL" >/dev/null
@@ -209,7 +230,12 @@ grep -F 'callback close-requested();' "$DELETE_MODAL" >/dev/null
 ! rg -n '[一-龥]' "$RENAME_MODAL" >/dev/null
 ! rg -n '[一-龥]' "$DELETE_MODAL" >/dev/null
 grep -F 'dialog-title: root.asset-ssh-modal-dialog-title;' "$APP_WINDOW" >/dev/null
+grep -F 'auth-source: root.asset-ssh-modal-auth-source;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-type: root.asset-ssh-modal-proxy-type;' "$APP_WINDOW" >/dev/null
+grep -F 'keychain-identity-options: root.asset-ssh-modal-keychain-identity-options;' "$APP_WINDOW" >/dev/null
+grep -F 'keychain-identity-selected-label: root.asset-ssh-modal-keychain-identity-selected-label;' "$APP_WINDOW" >/dev/null
+grep -F 'keychain-identity-username: root.asset-ssh-modal-keychain-identity-username;' "$APP_WINDOW" >/dev/null
+grep -F 'keychain-identity-auth-summary: root.asset-ssh-modal-keychain-identity-auth-summary;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-socks5-host: root.asset-ssh-modal-proxy-socks5-host;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-socks5-port: root.asset-ssh-modal-proxy-socks5-port;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-socks5-username: root.asset-ssh-modal-proxy-socks5-username;' "$APP_WINDOW" >/dev/null

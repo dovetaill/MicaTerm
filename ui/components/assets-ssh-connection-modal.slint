@@ -198,6 +198,11 @@ export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> host: "";
     in property <string> user: "";
     in property <string> port: "22";
+    in property <string> auth-source: "manual";
+    in property <[string]> keychain-identity-options: [];
+    in property <string> keychain-identity-selected-label: "";
+    in property <string> keychain-identity-username: "";
+    in property <string> keychain-identity-auth-summary: "";
     in property <string> auth-method: "password";
     in property <string> private-key-source: "content";
     in property <string> password: "";
@@ -498,26 +503,105 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
                         Rectangle {
                             width: parent.width;
-                            height: 34px;
+                            height: root.auth-source == "keychain-identity" ? 164px : 118px;
                             background: transparent;
 
-                            HorizontalLayout {
+                            VerticalLayout {
                                 width: parent.width;
                                 height: parent.height;
                                 spacing: 8px;
 
-                                for auth-option in ["password", "private-key"] : ModalTabButton {
-                                    label: auth-option == "password" ? "Password" : "Private Key";
-                                    active: root.auth-method == auth-option;
+                                VerticalLayout {
+                                    width: parent.width;
+                                    spacing: 8px;
 
-                                    clicked => {
-                                        root.draft-changed("auth_method", auth-option);
+                                    Text {
+                                        width: parent.width;
+                                        text: "Source";
+                                        color: ThemeTokens.text-primary;
+                                        opacity: 0.8;
+                                    }
+
+                                    ComboBox {
+                                        width: parent.width;
+                                        height: 34px;
+                                        model: ["Manual", "Keychain Identity"];
+                                        current-value: root.auth-source == "keychain-identity" ? "Keychain Identity" : "Manual";
+
+                                        selected(value) => {
+                                            root.draft-changed("auth_source", value == "Keychain Identity" ? "keychain-identity" : "manual");
+                                        }
+                                    }
+                                }
+
+                                if root.auth-source == "manual" : HorizontalLayout {
+                                    width: parent.width;
+                                    height: 34px;
+                                    spacing: 8px;
+
+                                    for auth-option in ["password", "private-key"] : ModalTabButton {
+                                        label: auth-option == "password" ? "Password" : "Private Key";
+                                        active: root.auth-method == auth-option;
+
+                                        clicked => {
+                                            root.draft-changed("auth_method", auth-option);
+                                        }
+                                    }
+                                }
+
+                                if root.auth-source == "keychain-identity" : VerticalLayout {
+                                    width: parent.width;
+                                    spacing: 8px;
+
+                                    Text {
+                                        width: parent.width;
+                                        text: "Identity";
+                                        color: ThemeTokens.text-primary;
+                                        opacity: 0.8;
+                                    }
+
+                                    ComboBox {
+                                        width: parent.width;
+                                        height: 34px;
+                                        model: root.keychain-identity-options;
+                                        current-value: root.keychain-identity-selected-label;
+
+                                        selected(value) => {
+                                            root.draft-changed("keychain_identity_label", value);
+                                        }
+                                    }
+
+                                    Text {
+                                        width: parent.width;
+                                        text: "Username";
+                                        color: ThemeTokens.text-primary;
+                                        opacity: 0.8;
+                                    }
+
+                                    Text {
+                                        width: parent.width;
+                                        text: root.keychain-identity-username == "" ? "Not selected" : root.keychain-identity-username;
+                                        color: ThemeTokens.text-primary;
+                                    }
+
+                                    Text {
+                                        width: parent.width;
+                                        text: "Authentication Summary";
+                                        color: ThemeTokens.text-primary;
+                                        opacity: 0.8;
+                                    }
+
+                                    Text {
+                                        width: parent.width;
+                                        text: root.keychain-identity-auth-summary == "" ? "Not selected" : root.keychain-identity-auth-summary;
+                                        color: ThemeTokens.text-primary;
+                                        wrap: word-wrap;
                                     }
                                 }
                             }
                         }
 
-                        if root.auth-method == "password" : FormField {
+                        if root.auth-source == "manual" && root.auth-method == "password" : FormField {
                             width: parent.width;
                             label: "Password";
                             required: true;
@@ -537,7 +621,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
 
-                        if root.auth-method == "private-key" : VerticalLayout {
+                        if root.auth-source == "manual" && root.auth-method == "private-key" : VerticalLayout {
                             width: parent.width;
                             spacing: 12px;
 

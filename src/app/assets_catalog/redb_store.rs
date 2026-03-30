@@ -247,6 +247,10 @@ struct StoredPersistedSshConnectionSpec {
     port: String,
     #[serde(default)]
     auth_method: String,
+    #[serde(default = "default_stored_ssh_auth_source")]
+    auth_source: String,
+    #[serde(default)]
+    keychain_identity_id: Option<String>,
     #[serde(default)]
     private_key_source: String,
     #[serde(default)]
@@ -280,6 +284,48 @@ enum LegacyStoredPersistedAssetKind {
 enum LegacyStoredPersistedAssetPayload {
     Folder,
     SshConnection(LegacyStoredPersistedSshConnectionSpec),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CompatStoredPersistedAssetNodeV4 {
+    id: String,
+    parent_id: Option<String>,
+    title: String,
+    kind: CompatStoredPersistedAssetKindV4,
+    child_ids: Vec<String>,
+    payload: CompatStoredPersistedAssetPayloadV4,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+enum CompatStoredPersistedAssetKindV4 {
+    Folder,
+    SshConnection,
+}
+
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Serialize, Deserialize)]
+enum CompatStoredPersistedAssetPayloadV4 {
+    Folder,
+    SshConnection(CompatStoredPersistedSshConnectionSpecV4),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CompatStoredPersistedSshConnectionSpecV4 {
+    host: String,
+    user: String,
+    port: String,
+    #[serde(default)]
+    auth_method: String,
+    #[serde(default)]
+    private_key_source: String,
+    #[serde(default)]
+    private_key_path: String,
+    environment: String,
+    proxy: StoredPersistedAssetSshProxySpec,
+    #[serde(default)]
+    remark: String,
+    #[serde(default)]
+    credential_ref: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -329,6 +375,10 @@ fn decode_node(bytes: &[u8]) -> Result<PersistedAssetNode> {
         return Ok(stored.into());
     }
 
+    if let Ok(compat) = bincode::deserialize::<CompatStoredPersistedAssetNodeV4>(bytes) {
+        return Ok(compat.into());
+    }
+
     let legacy: LegacyStoredPersistedAssetNode = bincode::deserialize(bytes)?;
     Ok(legacy.into())
 }
@@ -359,6 +409,8 @@ impl From<&PersistedAssetNode> for StoredPersistedAssetNode {
                         user: spec.user.clone(),
                         port: spec.port.clone(),
                         auth_method: spec.auth_method.clone(),
+                        auth_source: spec.auth_source.clone(),
+                        keychain_identity_id: spec.keychain_identity_id.clone(),
                         private_key_source: spec.private_key_source.clone(),
                         private_key_path: spec.private_key_path.clone(),
                         environment: spec.environment.clone(),
@@ -391,6 +443,42 @@ impl From<StoredPersistedAssetNode> for PersistedAssetNode {
                         user: spec.user,
                         port: spec.port,
                         auth_method: default_ssh_auth_method(spec.auth_method),
+                        auth_source: default_ssh_auth_source(spec.auth_source),
+                        keychain_identity_id: spec.keychain_identity_id,
+                        private_key_source: default_private_key_source(spec.private_key_source),
+                        private_key_path: spec.private_key_path,
+                        environment: spec.environment,
+                        proxy: persisted_proxy(spec.proxy),
+                        remark: spec.remark,
+                        credential_ref: spec.credential_ref,
+                    })
+                }
+            },
+        }
+    }
+}
+
+impl From<CompatStoredPersistedAssetNodeV4> for PersistedAssetNode {
+    fn from(node: CompatStoredPersistedAssetNodeV4) -> Self {
+        Self {
+            id: node.id,
+            parent_id: node.parent_id,
+            title: node.title,
+            kind: match node.kind {
+                CompatStoredPersistedAssetKindV4::Folder => PersistedAssetKind::Folder,
+                CompatStoredPersistedAssetKindV4::SshConnection => PersistedAssetKind::SshConnection,
+            },
+            child_ids: node.child_ids,
+            payload: match node.payload {
+                CompatStoredPersistedAssetPayloadV4::Folder => PersistedAssetPayload::Folder,
+                CompatStoredPersistedAssetPayloadV4::SshConnection(spec) => {
+                    PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                        host: spec.host,
+                        user: spec.user,
+                        port: spec.port,
+                        auth_method: default_ssh_auth_method(spec.auth_method),
+                        auth_source: default_ssh_auth_source(String::new()),
+                        keychain_identity_id: None,
                         private_key_source: default_private_key_source(spec.private_key_source),
                         private_key_path: spec.private_key_path,
                         environment: spec.environment,
@@ -424,6 +512,8 @@ impl From<LegacyStoredPersistedAssetNode> for PersistedAssetNode {
                         user: spec.user,
                         port: spec.port,
                         auth_method: default_ssh_auth_method(spec.auth_method),
+                        auth_source: default_ssh_auth_source(String::new()),
+                        keychain_identity_id: None,
                         private_key_source: default_private_key_source(spec.private_key_source),
                         private_key_path: spec.private_key_path,
                         environment: spec.environment,
@@ -500,6 +590,18 @@ fn default_ssh_auth_method(value: String) -> String {
 fn default_private_key_source(value: String) -> String {
     if value.trim().is_empty() {
         "content".into()
+    } else {
+        value
+    }
+}
+
+fn default_stored_ssh_auth_source() -> String {
+    "manual".into()
+}
+
+fn default_ssh_auth_source(value: String) -> String {
+    if value.trim().is_empty() {
+        "manual".into()
     } else {
         value
     }

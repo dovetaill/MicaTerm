@@ -2,14 +2,19 @@ import { AssetsToolbarMenuRow } from "assets-toolbar-menu-row.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 
 export component AssetsCreateMenu inherits Rectangle {
+    in property <string> active-sidebar-destination: "console";
     callback new-folder-selected;
     callback new-ssh-connection-selected;
+    callback new-identity-selected;
+    callback new-ssh-key-selected;
     callback close-requested;
     private property <image> new-folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
     private property <image> new-ssh-connection-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
+    private property <image> new-identity-icon: @image-url("../../assets/icons/fluent/key-multiple-20-regular.svg");
+    private property <image> new-ssh-key-icon: @image-url("../../assets/icons/fluent/copy-20-regular.svg");
 
     width: 216px;
-    height: 88px;
+    height: root.active-sidebar-destination == "keychain" ? 128px : 88px;
     border-radius: 0px;
     border-width: 1px;
     border-color: ThemeTokens.divider-strong;
@@ -47,12 +52,32 @@ export component AssetsCreateMenu inherits Rectangle {
                 }
             }
 
-            AssetsToolbarMenuRow {
+            if root.active-sidebar-destination != "keychain" : AssetsToolbarMenuRow {
                 label: "New SSH Connection";
                 icon-source: root.new-ssh-connection-icon;
 
                 invoked => {
                     root.new-ssh-connection-selected();
+                    root.close-requested();
+                }
+            }
+
+            if root.active-sidebar-destination == "keychain" : AssetsToolbarMenuRow {
+                label: "New Identity";
+                icon-source: root.new-identity-icon;
+
+                invoked => {
+                    root.new-identity-selected();
+                    root.close-requested();
+                }
+            }
+
+            if root.active-sidebar-destination == "keychain" : AssetsToolbarMenuRow {
+                label: "New SSH Key";
+                icon-source: root.new-ssh-key-icon;
+
+                invoked => {
+                    root.new-ssh-key-selected();
                     root.close-requested();
                 }
             }

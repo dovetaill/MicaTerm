@@ -27,6 +27,7 @@ use mica_term::app::bootstrap::{
     default_window_size,
     VaultProviderFactory, VaultRuntimeOptions,
 };
+use mica_term::app::keychain::KeychainCatalog;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::build_test_logging_runtime;
@@ -937,6 +938,8 @@ fn sample_vault_asset_tree(host: &str) -> (AssetTree, String) {
             user: "ops".into(),
             port: "22".into(),
             auth_method: "password".into(),
+            auth_source: "manual".into(),
+            keychain_identity_id: None,
             private_key_source: "content".into(),
             private_key_path: String::new(),
             environment: "prod".into(),
@@ -1105,6 +1108,7 @@ fn unlocking_existing_vault_restores_cached_snapshot_without_loading_while_locke
     let known_hosts_path = sample_known_hosts_path("vault-unlock");
     let snapshot = export_vault_snapshot(
         &asset_tree,
+        &KeychainCatalog::default(),
         source_store.as_ref(),
         &known_hosts_path,
         SnapshotSyncPreferences::default(),
@@ -1300,6 +1304,8 @@ fn loaded_catalog_for_bootstrap() -> PersistedAssetCatalog {
                         user: "ops".into(),
                         port: "2022".into(),
                         auth_method: "password".into(),
+                        auth_source: "manual".into(),
+                        keychain_identity_id: None,
                         private_key_source: "content".into(),
                         private_key_path: String::new(),
                         environment: "prod".into(),
@@ -1330,6 +1336,8 @@ fn loaded_legacy_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
                     user: "ops".into(),
                     port: "22".into(),
                     auth_method: String::new(),
+                    auth_source: String::new(),
+                    keychain_identity_id: None,
                     private_key_source: String::new(),
                     private_key_path: String::new(),
                     environment: String::new(),
@@ -1359,12 +1367,45 @@ fn loaded_saved_password_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
                     user: "ops".into(),
                     port: "22".into(),
                     auth_method: "password".into(),
+                    auth_source: "manual".into(),
+                    keychain_identity_id: None,
                     private_key_source: "content".into(),
                     private_key_path: String::new(),
                     environment: String::new(),
                     proxy: PersistedAssetSshProxySpec::None,
                     remark: "Saved credential".into(),
                     credential_ref: Some("ssh/saved-secrets/ssh-prod".into()),
+                }),
+            },
+        )]),
+    }
+}
+
+fn loaded_keychain_identity_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
+    PersistedAssetCatalog {
+        schema_version: ASSET_CATALOG_SCHEMA_VERSION,
+        root_ids: vec!["ssh-identity".into()],
+        nodes: BTreeMap::from([(
+            "ssh-identity".into(),
+            PersistedAssetNode {
+                id: "ssh-identity".into(),
+                parent_id: None,
+                title: "Identity Bastion".into(),
+                kind: PersistedAssetKind::SshConnection,
+                child_ids: Vec::new(),
+                payload: PersistedAssetPayload::SshConnection(PersistedSshConnectionSpec {
+                    host: "10.0.0.99".into(),
+                    user: String::new(),
+                    port: "22".into(),
+                    auth_method: String::new(),
+                    auth_source: "keychain-identity".into(),
+                    keychain_identity_id: Some("identity-prod".into()),
+                    private_key_source: String::new(),
+                    private_key_path: String::new(),
+                    environment: "prod".into(),
+                    proxy: PersistedAssetSshProxySpec::None,
+                    remark: "Identity-backed".into(),
+                    credential_ref: None,
                 }),
             },
         )]),
@@ -1388,6 +1429,8 @@ fn loaded_saved_private_key_path_ssh_catalog_for_bootstrap() -> PersistedAssetCa
                     user: "ops".into(),
                     port: "22".into(),
                     auth_method: "private-key".into(),
+                    auth_source: "manual".into(),
+                    keychain_identity_id: None,
                     private_key_source: "path".into(),
                     private_key_path: "/tmp/id_ed25519".into(),
                     environment: String::new(),
@@ -1417,6 +1460,8 @@ fn loaded_saved_socks5_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
                     user: "ops".into(),
                     port: "22".into(),
                     auth_method: "password".into(),
+                    auth_source: "manual".into(),
+                    keychain_identity_id: None,
                     private_key_source: "content".into(),
                     private_key_path: String::new(),
                     environment: "prod".into(),
@@ -1452,6 +1497,8 @@ fn loaded_saved_upstream_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
                         user: "ops".into(),
                         port: "22".into(),
                         auth_method: "password".into(),
+                        auth_source: "manual".into(),
+                        keychain_identity_id: None,
                         private_key_source: "content".into(),
                         private_key_path: String::new(),
                         environment: "prod".into(),
@@ -1474,6 +1521,8 @@ fn loaded_saved_upstream_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
                         user: "ops".into(),
                         port: "22".into(),
                         auth_method: "password".into(),
+                        auth_source: "manual".into(),
+                        keychain_identity_id: None,
                         private_key_source: "content".into(),
                         private_key_path: String::new(),
                         environment: "prod".into(),
@@ -1506,6 +1555,8 @@ fn loaded_saved_http_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog {
                     user: "ops".into(),
                     port: "22".into(),
                     auth_method: "password".into(),
+                    auth_source: "manual".into(),
+                    keychain_identity_id: None,
                     private_key_source: "content".into(),
                     private_key_path: String::new(),
                     environment: "prod".into(),
@@ -1540,6 +1591,8 @@ fn loaded_missing_upstream_ssh_catalog_for_bootstrap() -> PersistedAssetCatalog 
                     user: "ops".into(),
                     port: "22".into(),
                     auth_method: "password".into(),
+                    auth_source: "manual".into(),
+                    keychain_identity_id: None,
                     private_key_source: "content".into(),
                     private_key_path: String::new(),
                     environment: "prod".into(),
@@ -1654,6 +1707,47 @@ fn bootstrap_loads_catalog_before_first_asset_projection_sync() {
     let state = repo_state.borrow();
     assert_eq!(state.load_calls, 1);
     assert!(state.save_attempts.is_empty());
+}
+
+#[test]
+fn unrelated_catalog_saves_preserve_keychain_identity_host_fields() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_keychain_identity_ssh_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+
+    bind_top_status_bar_with_store_and_effects_and_asset_repo(
+        &app,
+        None,
+        default_platform_window_effects(),
+        Some(asset_repo),
+    );
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Scratch".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let persisted_catalog = repo_state
+        .borrow()
+        .save_attempts
+        .last()
+        .expect("persisted catalog after unrelated save")
+        .clone();
+    let PersistedAssetPayload::SshConnection(spec) = &persisted_catalog
+        .nodes
+        .get("ssh-identity")
+        .expect("persisted keychain-backed ssh node")
+        .payload
+    else {
+        panic!("expected persisted ssh connection payload");
+    };
+    assert_eq!(spec.auth_source, "keychain-identity");
+    assert_eq!(spec.keychain_identity_id.as_deref(), Some("identity-prod"));
 }
 
 #[test]
@@ -2391,6 +2485,38 @@ fn importing_private_key_can_be_cancelled_without_mutating_modal_state() {
     assert_eq!(app.get_asset_ssh_modal_private_key_content().as_str(), "");
     assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "idle");
     assert_eq!(app.get_asset_ssh_modal_feedback_message().as_str(), "");
+}
+
+#[test]
+fn manual_ssh_modal_private_key_import_still_populates_inline_content() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_launcher_and_credential_store_and_private_key_importer(
+        &app,
+        None,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+        Arc::new(SuccessfulPrivateKeyImporter {
+            path: std::path::PathBuf::from("/tmp/id_ed25519"),
+            content: "-----BEGIN OPENSSH PRIVATE KEY-----\nimported\n-----END OPENSSH PRIVATE KEY-----\n",
+        }),
+    );
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_action_requested("import-private-key".into());
+
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-ssh-connection");
+    assert_eq!(
+        app.get_asset_ssh_modal_private_key_content().as_str(),
+        "-----BEGIN OPENSSH PRIVATE KEY-----\nimported\n-----END OPENSSH PRIVATE KEY-----\n"
+    );
+    assert_eq!(app.get_asset_ssh_modal_auth_method().as_str(), "private-key");
+    assert_eq!(
+        app.get_asset_ssh_modal_private_key_source().as_str(),
+        "content"
+    );
 }
 
 #[test]
