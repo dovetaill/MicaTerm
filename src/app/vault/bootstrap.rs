@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 use crate::app::ssh::credentials::CredentialStore;
-use crate::app::vault::model::{BootstrapBundle, CipherKind, KdfConfig, RemoteRole};
+use crate::app::vault::model::{BootstrapBundle, CipherKind, KdfConfig};
 
 const BOOTSTRAP_FORMAT_VERSION: u32 = 1;
 const BOOTSTRAP_KEY_LEN: usize = 32;
@@ -225,10 +225,7 @@ pub fn validate_bootstrap_bundle(bundle: &BootstrapBundle) -> Result<()> {
         "bootstrap bundle requires a non-empty vault_id"
     );
     ensure!(
-        bundle
-            .remotes
-            .iter()
-            .any(|remote| remote.role == RemoteRole::Primary),
+        bundle.primary_remote().is_some(),
         "bootstrap bundle requires at least one primary remote"
     );
 

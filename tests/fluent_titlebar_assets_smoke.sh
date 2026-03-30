@@ -9,6 +9,7 @@ for file in \
   assets/icons/fluent/menu-20-regular.svg \
   assets/icons/fluent/menu-20-filled.svg \
   assets/icons/fluent/navigation-24-regular.svg \
+  assets/icons/fluent/arrow-clockwise-20-regular.svg \
   assets/icons/fluent/dark-theme-20-regular.svg \
   assets/icons/fluent/weather-sunny-20-regular.svg \
   assets/icons/fluent/panel-right-20-regular.svg \

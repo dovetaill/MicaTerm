@@ -1,6 +1,5 @@
 use anyhow::{Result, anyhow};
 
-use crate::app::vault::auth::oauth::{OAuthCodeBootstrap, gitee_oauth_code_bootstrap};
 use crate::app::vault::model::{
     BootstrapRemoteConfig, BootstrapRemoteLocator, PackLayout, ProviderAuthKind, ProviderKind,
 };
@@ -13,10 +12,6 @@ const GITEE_MAX_PACK_COUNT: usize = 4;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GiteeGistAuth {
     PersonalAccessToken {
-        credential_ref: Option<String>,
-    },
-    OAuthCode {
-        oauth: OAuthCodeBootstrap,
         credential_ref: Option<String>,
     },
 }
@@ -50,13 +45,9 @@ impl TryFrom<&BootstrapRemoteConfig> for GiteeGistProviderConfig {
             ProviderAuthKind::Pat => GiteeGistAuth::PersonalAccessToken {
                 credential_ref: remote.credential_ref.clone(),
             },
-            ProviderAuthKind::Pkce => GiteeGistAuth::OAuthCode {
-                oauth: gitee_oauth_code_bootstrap(),
-                credential_ref: remote.credential_ref.clone(),
-            },
             other => {
                 return Err(anyhow!(
-                    "bootstrap remote `{}` uses unsupported Gitee auth kind `{other:?}`",
+                    "bootstrap remote `{}` uses unsupported Gitee auth kind `{other:?}`; first release supports PAT only",
                     remote.remote_id
                 ));
             }
@@ -78,10 +69,6 @@ impl GiteeGistProvider {
     pub fn new(config: GiteeGistProviderConfig) -> Result<Self> {
         if config.gist_id.trim().is_empty() {
             return Err(anyhow!("Gitee gist_id must not be empty"));
-        }
-
-        if let GiteeGistAuth::OAuthCode { oauth, .. } = &config.auth {
-            oauth.validate(Some("mica-term-gitee-client"))?;
         }
 
         Ok(Self { config })

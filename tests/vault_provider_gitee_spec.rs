@@ -22,21 +22,18 @@ fn sample_gitee_remote(auth_kind: ProviderAuthKind) -> BootstrapRemoteConfig {
 }
 
 #[test]
-fn gitee_bootstrap_config_supports_pat_and_standard_oauth_code_flow() {
+fn gitee_bootstrap_config_supports_pat_only_for_first_release() {
     let pat_config =
         GiteeGistProviderConfig::try_from(&sample_gitee_remote(ProviderAuthKind::Pat))
             .expect("parse gitee pat config");
-    let oauth_config =
-        GiteeGistProviderConfig::try_from(&sample_gitee_remote(ProviderAuthKind::Pkce))
-            .expect("parse gitee oauth code config");
 
     assert!(matches!(
         pat_config.auth,
         GiteeGistAuth::PersonalAccessToken { .. }
     ));
     assert!(matches!(
-        oauth_config.auth,
-        GiteeGistAuth::OAuthCode { .. }
+        GiteeGistProviderConfig::try_from(&sample_gitee_remote(ProviderAuthKind::Pkce)),
+        Err(_)
     ));
 }
 
@@ -57,7 +54,7 @@ fn gitee_provider_defaults_to_bundled_files_layout() {
 #[test]
 fn gitee_provider_capabilities_report_non_conditional_writes() {
     let provider = GiteeGistProvider::new(
-        GiteeGistProviderConfig::try_from(&sample_gitee_remote(ProviderAuthKind::Pkce))
+        GiteeGistProviderConfig::try_from(&sample_gitee_remote(ProviderAuthKind::Pat))
             .expect("parse gitee provider config"),
     )
     .expect("build gitee provider");

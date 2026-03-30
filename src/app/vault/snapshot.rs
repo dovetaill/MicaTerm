@@ -11,7 +11,7 @@ use crate::app::ssh::credentials::{
     snapshot_secret_bundle,
 };
 use crate::app::ssh::known_hosts::KnownHostsService;
-use crate::app::ui_preferences::{UiPreferences, ui_preferences_from_snapshot};
+use crate::app::ui_preferences::UiPreferences;
 use crate::app::vault::model::{SnapshotSyncPreferences, VaultAssetPayload, VaultSnapshot};
 use crate::shell::assets::AssetTree;
 
@@ -29,7 +29,7 @@ pub fn export_vault_snapshot(
     credential_store: &dyn CredentialStore,
     known_hosts_path: &Path,
     sync_preferences: SnapshotSyncPreferences,
-    ui_preferences: &UiPreferences,
+    _ui_preferences: &UiPreferences,
 ) -> Result<VaultSnapshot> {
     let asset_catalog = asset_tree_to_vault_catalog(asset_tree);
     let mut ssh_secret_bundles = std::collections::BTreeMap::new();
@@ -81,7 +81,7 @@ pub fn export_vault_snapshot(
         keychain_key_secret_bundles,
         known_hosts,
         sync_preferences,
-        ui_preferences: ui_preferences.into(),
+        ui_preferences: Default::default(),
     })
 }
 
@@ -126,7 +126,7 @@ pub fn apply_vault_snapshot(
         asset_tree,
         keychain_catalog: snapshot.keychain_catalog.clone(),
         sync_preferences: snapshot.sync_preferences.clone(),
-        ui_preferences: ui_preferences_from_snapshot(&snapshot.ui_preferences),
+        ui_preferences: UiPreferences::default(),
     })
 }
 

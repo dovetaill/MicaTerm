@@ -1789,10 +1789,10 @@ fn settings_panel_can_create_a_vault_and_persist_local_bootstrap_state() {
         },
     );
 
-    app.invoke_open_settings_panel_requested();
-    app.invoke_vault_create_requested("correct horse battery staple".into());
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("correct horse battery staple".into());
 
-    assert_eq!(app.get_vault_lock_state_label().as_str(), "Unlocked");
+    assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
     assert!(
         load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
             .unwrap()
@@ -1865,9 +1865,10 @@ fn unlocking_existing_vault_restores_cached_snapshot_without_loading_while_locke
             .is_none()
     );
 
-    app.invoke_vault_unlock_requested("vault-pass".into());
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
 
-    assert_eq!(app.get_vault_lock_state_label().as_str(), "Unlocked");
+    assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
     assert_eq!(app.get_console_asset_items().row_count(), 1);
     assert!(
         credential_store
@@ -1908,17 +1909,17 @@ fn manual_vault_sync_reports_mirror_degradation_after_primary_commit() {
         },
     );
     create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-    app.invoke_open_settings_panel_requested();
-    app.invoke_vault_create_requested("vault-pass".into());
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
 
-    app.invoke_vault_sync_now_requested();
+    app.invoke_sync_modal_sync_now_requested();
 
     assert_eq!(primary.recorded_writes().len(), 1);
     assert_eq!(mirror.recorded_writes().len(), 0);
     assert!(
-        app.get_vault_primary_status_label()
+        app.get_sync_modal_status_text()
             .as_str()
-            .contains("Mirror degraded")
+            .contains("mirror unavailable")
     );
 }
 
@@ -1953,15 +1954,15 @@ fn manual_vault_sync_surfaces_provider_auth_errors_in_panel_state() {
         },
     );
     create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-    app.invoke_open_settings_panel_requested();
-    app.invoke_vault_create_requested("vault-pass".into());
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
 
-    app.invoke_vault_sync_now_requested();
+    app.invoke_sync_modal_sync_now_requested();
 
     assert!(
-        app.get_vault_primary_status_label()
+        app.get_sync_modal_error_text()
             .as_str()
-            .contains("Provider auth error")
+            .contains("token expired")
     );
 }
 
@@ -1984,8 +1985,8 @@ fn locking_vault_clears_decrypted_assets_and_secrets_from_memory() {
     );
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
     let credential_ref = ssh_credential_ref(&ssh_id, SshCredentialKind::SavedSecrets);
-    app.invoke_open_settings_panel_requested();
-    app.invoke_vault_create_requested("vault-pass".into());
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
 
     assert_eq!(app.get_console_asset_items().row_count(), 1);
     assert!(
@@ -1995,9 +1996,9 @@ fn locking_vault_clears_decrypted_assets_and_secrets_from_memory() {
             .is_some()
     );
 
-    app.invoke_vault_lock_requested();
+    app.invoke_sync_modal_lock_requested();
 
-    assert_eq!(app.get_vault_lock_state_label().as_str(), "Locked");
+    assert_eq!(app.get_sync_modal_mode().as_str(), "locked");
     assert_eq!(app.get_console_asset_items().row_count(), 0);
     assert!(
         credential_store
@@ -2026,17 +2027,17 @@ fn locking_and_unlocking_vault_round_trips_snippet_assets() {
     );
 
     create_root_snippet(&app, "Restart API", "kubectl rollout restart deploy/api");
-    app.invoke_open_settings_panel_requested();
-    app.invoke_vault_create_requested("vault-pass".into());
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
 
     assert_eq!(app.get_snippet_asset_items().row_count(), 1);
 
-    app.invoke_vault_lock_requested();
-    assert_eq!(app.get_vault_lock_state_label().as_str(), "Locked");
+    app.invoke_sync_modal_lock_requested();
+    assert_eq!(app.get_sync_modal_mode().as_str(), "locked");
     assert_eq!(app.get_snippet_asset_items().row_count(), 0);
 
-    app.invoke_vault_unlock_requested("vault-pass".into());
-    assert_eq!(app.get_vault_lock_state_label().as_str(), "Unlocked");
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
     assert_eq!(app.get_snippet_asset_items().row_count(), 1);
     assert_eq!(
         app.get_snippet_asset_items()

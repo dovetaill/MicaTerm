@@ -10,7 +10,7 @@ impl ShellMetrics {
     pub const TITLEBAR_HEIGHT: u32 = 48;
     pub const TITLEBAR_NAV_WIDTH: u32 = 44;
     pub const TITLEBAR_BRAND_WIDTH: u32 = 188;
-    pub const TITLEBAR_UTILITY_WIDTH: u32 = 136;
+    pub const TITLEBAR_UTILITY_WIDTH: u32 = 176;
     pub const TITLEBAR_WINDOW_CONTROL_WIDTH: u32 = 138;
     pub const TITLEBAR_MIN_DRAG_WIDTH: u32 = 96;
     pub const TITLEBAR_TOOL_BUTTON_SIZE: u32 = 36;

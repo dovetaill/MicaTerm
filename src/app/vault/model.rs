@@ -273,6 +273,10 @@ fn default_vault_ssh_auth_source() -> String {
     "manual".into()
 }
 
+const fn default_create_new_gist() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RemoteRole {
@@ -296,6 +300,36 @@ pub enum ProviderAuthKind {
     DeviceFlow,
     Pkce,
     Pat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GiteeRemoteDraft {
+    #[serde(default)]
+    pub personal_access_token: String,
+    #[serde(default)]
+    pub gist_id: String,
+    #[serde(default = "default_create_new_gist")]
+    pub create_new_gist: bool,
+}
+
+impl GiteeRemoteDraft {
+    pub fn setup_summary(&self) -> String {
+        if self.create_new_gist {
+            "Configure a Gitee Personal Access Token and a Gist ID target, or create a new Gist, to enable sync.".into()
+        } else {
+            "Configure a Gitee Personal Access Token and Gist ID to enable sync.".into()
+        }
+    }
+}
+
+impl Default for GiteeRemoteDraft {
+    fn default() -> Self {
+        Self {
+            personal_access_token: String::new(),
+            gist_id: String::new(),
+            create_new_gist: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -359,6 +393,14 @@ pub struct BootstrapBundle {
     #[serde(default)]
     pub bootstrap_cipher: CipherKind,
     pub bootstrap_kdf: Option<KdfConfig>,
+}
+
+impl BootstrapBundle {
+    pub fn primary_remote(&self) -> Option<&BootstrapRemoteConfig> {
+        self.remotes
+            .iter()
+            .find(|remote| remote.role == RemoteRole::Primary)
+    }
 }
 
 impl Default for BootstrapBundle {

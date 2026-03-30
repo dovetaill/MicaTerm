@@ -11,6 +11,7 @@ import { AssetsSnippetModal } from "components/assets-snippet-modal.slint";
 import { AssetsSnippetPackageModal } from "components/assets-snippet-package-modal.slint";
 import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal.slint";
 import { BlockingModalShell } from "components/blocking-modal-shell.slint";
+import { SyncVaultModal } from "components/sync-vault-modal.slint";
 import { SshHostKeyConfirmModal } from "components/ssh-host-key-confirm-modal.slint";
 import { StatusPill } from "components/status-pill.slint";
 import { WorkspacePasteWarningModal } from "components/workspace-paste-warning-modal.slint";
@@ -27,6 +28,16 @@ import { WorkspacePane } from "shell/workspace-pane.slint";
 
 export component AppWindow inherits Window {
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
+    in-out property <bool> sync-modal-open: false;
+    in-out property <string> sync-modal-mode: "not-configured";
+    in-out property <string> sync-modal-title: "Sync";
+    in-out property <string> sync-modal-headline: "";
+    in-out property <string> sync-modal-status-text: "";
+    in-out property <string> sync-modal-error-text: "";
+    in-out property <string> sync-modal-provider-label: "";
+    in-out property <string> sync-modal-target-label: "";
+    in-out property <string> sync-modal-primary-action-label: "Set up sync";
+    in-out property <string> sync-modal-secondary-action-label: "";
     in-out property <bool> show-right-panel: false;
     in-out property <string> right-panel-view: "appearance";
     in-out property <bool> show-global-menu: false;
@@ -178,15 +189,6 @@ export component AppWindow inherits Window {
     in-out property <[AssetsContextMenuItem]> assets-context-menu-secondary-items: [];
     in-out property <[AssetsContextMenuItem]> assets-context-menu-tertiary-items: [];
     in-out property <string> context-menu-feedback-text: "";
-    in-out property <string> vault-panel-title: "Sync & Vault";
-    in-out property <string> vault-lock-state-label: "Locked";
-    in-out property <string> vault-primary-status-label: "Primary not configured";
-    in-out property <string> vault-primary-action-label: "Set";
-    in-out property <string> vault-secondary-action-label: "Change";
-    in-out property <string> vault-tertiary-action-label: "Lock now";
-    in-out property <string> vault-sync-now-label: "Sync now";
-    in-out property <string> vault-export-bootstrap-label: "Export bootstrap";
-    in-out property <string> vault-import-bootstrap-label: "Import bootstrap";
     in-out property <[SidebarNavItem]> sidebar-items: [];
     in-out property <length> shell-body-height-cache: 852px;
     out property <length> layout-titlebar-content-width: titlebar.layout-content-width;
@@ -239,12 +241,15 @@ export component AppWindow inherits Window {
     callback maximize-toggle-requested();
     callback close-requested();
     callback toggle-right-panel-requested();
+    callback open-sync-modal-requested();
+    callback sync-modal-close-requested();
+    callback sync-modal-submit-master-password(string);
+    callback sync-modal-sync-now-requested();
+    callback sync-modal-lock-requested();
+    callback sync-modal-primary-action-requested();
+    callback sync-modal-secondary-action-requested();
     callback open-settings-panel-requested();
     callback open-appearance-panel-requested();
-    callback vault-create-requested(string);
-    callback vault-unlock-requested(string);
-    callback vault-sync-now-requested();
-    callback vault-lock-requested();
     callback toggle-global-menu-requested();
     callback close-global-menu-requested();
     callback toggle-theme-mode-requested();
@@ -347,6 +352,13 @@ export component AppWindow inherits Window {
         }
     }
 
+    changed sync-modal-open => {
+        if root.sync-modal-open {
+            root.blocking-modal-offset-x = 0px;
+            root.blocking-modal-offset-y = 0px;
+        }
+    }
+
     changed asset-rename-modal-open => {
         if root.asset-rename-modal-open {
             root.blocking-modal-offset-x = 0px;
@@ -404,6 +416,7 @@ export component AppWindow inherits Window {
                 y: 0px;
                 width: parent.width;
                 dark-mode: root.dark-mode;
+                sync-modal-open: root.sync-modal-open;
                 show-right-panel: root.effective-show-right-panel;
                 show-global-menu: root.show-global-menu;
                 is-window-maximized: root.is-window-maximized;
@@ -432,6 +445,10 @@ export component AppWindow inherits Window {
 
                 toggle-right-panel-requested => {
                     root.toggle-right-panel-requested();
+                }
+
+                open-sync-modal-requested => {
+                    root.open-sync-modal-requested();
                 }
 
                 toggle-global-menu-requested => {
@@ -673,15 +690,6 @@ export component AppWindow inherits Window {
                         y: 0px;
                         height: parent.height;
                         expanded: root.effective-show-right-panel;
-                        panel-view: root.right-panel-view;
-                        vault-lock-state-label: root.vault-lock-state-label;
-                        vault-primary-status-label: root.vault-primary-status-label;
-                        vault-primary-action-label: root.vault-primary-action-label;
-                        vault-secondary-action-label: root.vault-secondary-action-label;
-                        vault-tertiary-action-label: root.vault-tertiary-action-label;
-                        vault-sync-now-label: root.vault-sync-now-label;
-                        vault-export-bootstrap-label: root.vault-export-bootstrap-label;
-                        vault-import-bootstrap-label: root.vault-import-bootstrap-label;
                     }
                 }
             }
@@ -822,9 +830,68 @@ export component AppWindow inherits Window {
         y: titlebar.height;
         width: root.width;
         height: root.height - titlebar.height;
-        enabled: root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open;
+        enabled: root.sync-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open;
 
         clicked => { }
+    }
+
+    if root.sync-modal-open : sync-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 560px;
+        modal-height: 360px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        sync-vault-modal-overlay := SyncVaultModal {
+            x: 0px;
+            y: 0px;
+            width: sync-modal-shell.content-width;
+            height: sync-modal-shell.content-height;
+            mode: root.sync-modal-mode;
+            title: root.sync-modal-title;
+            headline: root.sync-modal-headline;
+            status-text: root.sync-modal-status-text;
+            error-text: root.sync-modal-error-text;
+            provider-label: root.sync-modal-provider-label;
+            target-label: root.sync-modal-target-label;
+            primary-action-label: root.sync-modal-primary-action-label;
+            secondary-action-label: root.sync-modal-secondary-action-label;
+
+            close-requested => {
+                root.sync-modal-close-requested();
+            }
+
+            primary-action-requested => {
+                root.sync-modal-primary-action-requested();
+            }
+
+            secondary-action-requested => {
+                root.sync-modal-secondary-action-requested();
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
     }
 
     if root.asset-modal-open && root.asset-modal-kind == "new-folder" : asset-folder-modal-shell := BlockingModalShell {
