@@ -80,6 +80,7 @@ export component TerminalSessionHost inherits Rectangle {
     callback copy-selection-requested(int, int, int, int);
     callback selection-changed();
     callback paste-requested();
+    callback local-action-requested(string);
     callback scroll-requested(int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
@@ -206,6 +207,22 @@ export component TerminalSessionHost inherits Rectangle {
 
     function is-paste-shortcut-key(text: string) -> bool {
         return text == "v" || text == "V" || text == "\u{16}";
+    }
+
+    function terminal-local-action-id(text: string) -> string {
+        if text == "t" || text == "T" {
+            return "new-tab";
+        }
+        if text == "w" || text == "W" {
+            return "close-tab";
+        }
+        if text == "p" || text == "P" {
+            return "toggle-global-menu";
+        }
+        if text == "f" || text == "F" {
+            return "toggle-asset-search";
+        }
+        return "";
     }
 
     function emit-surface-resize() {
@@ -441,6 +458,10 @@ export component TerminalSessionHost inherits Rectangle {
                     && root.is-paste-shortcut-key(event.text)) {
                     root.paste-requested();
                     accept
+                } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
+                    && root.terminal-local-action-id(event.text) != "") {
+                    root.local-action-requested(root.terminal-local-action-id(event.text));
+                    accept
                 } else if (event.modifiers.control && event.text == Key.Insert
                     && !event.modifiers.shift && !event.modifiers.alt) {
                     if root.has-selection() {
@@ -465,28 +486,13 @@ export component TerminalSessionHost inherits Rectangle {
                     && !event.modifiers.control && !event.modifiers.alt) {
                     root.scroll-requested(-max(1, root.session-rows - 2), 0, 0, true, false, false);
                     accept
-                } else if (event.modifiers.control && event.modifiers.shift && event.text == Key.Home
-                    && !event.modifiers.alt) {
+                } else if (event.modifiers.shift && event.text == Key.Home
+                    && !event.modifiers.control && !event.modifiers.alt) {
                     root.scroll-jump-requested(1.0);
                     accept
-                } else if (event.modifiers.control && event.modifiers.shift && event.text == Key.End
-                    && !event.modifiers.alt) {
+                } else if (event.modifiers.shift && event.text == Key.End
+                    && !event.modifiers.control && !event.modifiers.alt) {
                     root.scroll-jump-requested(0.0);
-                    accept
-                } else if (event.modifiers.control && event.modifiers.shift && !event.modifiers.alt
-                    && (
-                        event.text == "a" || event.text == "A"
-                        || event.text == "b" || event.text == "B"
-                        || event.text == "f" || event.text == "F"
-                        || event.text == "k" || event.text == "K"
-                        || event.text == "l" || event.text == "L"
-                        || event.text == "n" || event.text == "N"
-                        || event.text == "o" || event.text == "O"
-                        || event.text == "p" || event.text == "P"
-                        || event.text == "r" || event.text == "R"
-                        || event.text == "t" || event.text == "T"
-                        || event.text == "w" || event.text == "W"
-                    )) {
                     accept
                 } else if (event.text == Key.Return) {
                     root.key-input("enter", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
@@ -606,7 +612,7 @@ export component TerminalSessionHost inherits Rectangle {
                 } else if (event.text == Key.F24) {
                     root.key-input("f24", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
-                } else if ((event.modifiers.control || event.modifiers.alt) && !event.modifiers.shift && event.text != "") {
+                } else if ((event.modifiers.control || event.modifiers.alt) && event.text != "") {
                     root.key-input(event.text, event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
                 } else {

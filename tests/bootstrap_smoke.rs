@@ -4407,7 +4407,10 @@ fn workspace_terminal_plain_ctrl_a_forwards_prefix_key_without_selecting_all() {
 
     let visible_lines = app.get_workspace_session_visible_lines();
     assert_eq!(
-        visible_lines.row_data(1).expect("forwarded Ctrl+A line").as_str(),
+        visible_lines
+            .row_data(1)
+            .expect("forwarded Ctrl+A line")
+            .as_str(),
         "$ a",
         "plain Ctrl+A should stay in the terminal input stream so screen/tmux prefix chords still work"
     );
@@ -4534,6 +4537,172 @@ fn workspace_terminal_ctrl_shift_shortcut_matrix_keeps_local_contract() {
 }
 
 #[test]
+fn workspace_terminal_ctrl_shift_t_opens_new_tab_from_active_terminal_asset() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = KeyboardMatrixState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(KeyboardMatrixLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    let first_session_id = app.get_active_workspace_session_id().to_string();
+
+    dispatch_text_key_chord(&app, "T", true, true, false);
+    settle_terminal_projection();
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+    assert_ne!(
+        app.get_active_workspace_session_id().as_str(),
+        first_session_id,
+        "Ctrl+Shift+T should create and activate a fresh workspace tab"
+    );
+    assert!(
+        state.take_key_inputs().is_empty(),
+        "Ctrl+Shift+T should stay local and must not forward a remote key chord"
+    );
+    assert!(
+        state.take_paste_inputs().is_empty(),
+        "Ctrl+Shift+T should not hit the terminal paste channel"
+    );
+}
+
+#[test]
+fn workspace_terminal_ctrl_shift_w_closes_active_terminal_tab_locally() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = KeyboardMatrixState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(KeyboardMatrixLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.clone().into());
+    settle_terminal_projection();
+    let first_session_id = app.get_active_workspace_session_id().to_string();
+
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 2);
+    assert_ne!(
+        app.get_active_workspace_session_id().as_str(),
+        first_session_id
+    );
+
+    dispatch_text_key_chord(&app, "W", true, true, false);
+    settle_terminal_projection();
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        first_session_id,
+        "Ctrl+Shift+W should close the active workspace tab and fall back to the previous one"
+    );
+    assert!(
+        state.take_key_inputs().is_empty(),
+        "Ctrl+Shift+W should stay local and must not forward a remote key chord"
+    );
+    assert!(
+        state.take_paste_inputs().is_empty(),
+        "Ctrl+Shift+W should not hit the terminal paste channel"
+    );
+}
+
+#[test]
+fn workspace_terminal_ctrl_shift_f_expands_asset_search_locally() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = KeyboardMatrixState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(KeyboardMatrixLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    assert!(
+        !app.get_asset_search_expanded(),
+        "asset search should start collapsed"
+    );
+
+    dispatch_text_key_chord(&app, "F", true, true, false);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_asset_search_expanded(),
+        "Ctrl+Shift+F should expand the local asset search"
+    );
+    assert!(
+        state.take_key_inputs().is_empty(),
+        "Ctrl+Shift+F should stay local and must not forward a remote key chord"
+    );
+    assert!(
+        state.take_paste_inputs().is_empty(),
+        "Ctrl+Shift+F should not hit the terminal paste channel"
+    );
+}
+
+#[test]
+fn workspace_terminal_ctrl_shift_p_opens_global_menu_locally() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = KeyboardMatrixState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(KeyboardMatrixLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    assert!(
+        !app.get_show_global_menu(),
+        "global menu should start closed"
+    );
+
+    dispatch_text_key_chord(&app, "P", true, true, false);
+    settle_terminal_projection();
+    assert!(
+        app.get_show_global_menu(),
+        "Ctrl+Shift+P should open the local global menu"
+    );
+    assert!(
+        state.take_key_inputs().is_empty(),
+        "Ctrl+Shift+P should stay local and must not forward a remote key chord"
+    );
+    assert!(
+        state.take_paste_inputs().is_empty(),
+        "Ctrl+Shift+P should not hit the terminal paste channel"
+    );
+}
+
+#[test]
 fn workspace_terminal_alt_arrow_matrix_forwards_modifier_aware_named_keys() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -4551,7 +4720,12 @@ fn workspace_terminal_alt_arrow_matrix_forwards_modifier_aware_named_keys() {
     settle_terminal_projection();
     focus_workspace_terminal(&app);
 
-    let cases = [("left", "left"), ("right", "right"), ("up", "up"), ("down", "down")];
+    let cases = [
+        ("left", "left"),
+        ("right", "right"),
+        ("up", "up"),
+        ("down", "down"),
+    ];
     for (named_key, expected_name) in cases {
         dispatch_named_key_chord(&app, named_key, false, false, true);
         settle_terminal_projection();
@@ -4651,6 +4825,39 @@ fn workspace_terminal_shift_page_shortcuts_scroll_locally() {
         0,
         "Shift+PageDown should move local scrollback back toward the bottom"
     );
+}
+
+#[test]
+fn workspace_terminal_shift_home_end_shortcuts_jump_scrollback_locally() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 3);
+
+    dispatch_named_key_chord(&app, "home", false, true, false);
+    settle_terminal_projection();
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        8,
+        "Shift+Home should jump local scrollback to the top"
+    );
+    assert!(!app.get_workspace_session_viewport_at_bottom());
+
+    dispatch_named_key_chord(&app, "end", false, true, false);
+    settle_terminal_projection();
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        0,
+        "Shift+End should jump local scrollback back to the bottom"
+    );
+    assert!(app.get_workspace_session_viewport_at_bottom());
 }
 
 #[test]
@@ -4839,6 +5046,39 @@ fn ctrl_shift_letter_shortcuts_do_not_forward_remote_terminal_input() {
             .as_str(),
         "welcome to mica-term"
     );
+}
+
+#[test]
+fn ctrl_shift_non_reserved_letter_shortcuts_forward_remote_terminal_input() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let state = KeyboardMatrixState::default();
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(KeyboardMatrixLauncher::new(state.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    for key in ['A', 'B', 'K', 'L', 'N', 'O', 'R'] {
+        dispatch_text_key_chord(&app, &key.to_string(), true, true, false);
+        settle_terminal_projection();
+        assert_eq!(
+            state.take_key_inputs(),
+            vec![TerminalKeyEvent::character(key, false, true, true)],
+            "Ctrl+Shift+{key} should forward to the remote terminal once it is no longer reserved locally"
+        );
+        assert!(
+            state.take_paste_inputs().is_empty(),
+            "Ctrl+Shift+{key} should not hit the terminal paste channel"
+        );
+    }
 }
 
 #[test]

@@ -46,6 +46,7 @@ export component WorkspacePane inherits Rectangle {
     callback copy-selection-requested(int, int, int, int);
     callback selection-changed();
     callback paste-requested();
+    callback local-action-requested(string);
     callback scroll-requested(int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
@@ -138,6 +139,10 @@ export component WorkspacePane inherits Rectangle {
 
                 paste-requested() => {
                     root.paste-requested();
+                }
+
+                local-action-requested(action-id) => {
+                    root.local-action-requested(action-id);
                 }
 
                 scroll-requested(delta-lines, row, col, shift, ctrl, alt) => {

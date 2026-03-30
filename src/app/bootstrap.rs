@@ -4771,6 +4771,71 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    window.on_workspace_session_local_action_requested(move |action_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        match action_id.as_str() {
+            "new-tab" => {
+                let Some(asset_id) = state
+                    .active_workspace_tab()
+                    .map(|tab| tab.asset_id.clone())
+                    .filter(|asset_id| !asset_id.is_empty())
+                else {
+                    return;
+                };
+                activate_asset(
+                    &mut state,
+                    session_bridge_ref.as_deref(),
+                    &pending_host_key_approval_ref,
+                    asset_id.as_str(),
+                );
+                sync_workspace_tabs(&window, &state);
+                sync_assets_context_menu_state(&window, &state);
+                sync_ssh_host_key_modal_state(&window, &state);
+            }
+            "close-tab" => {
+                let Some(session_id) = state.active_workspace_session_id().map(str::to_owned)
+                else {
+                    return;
+                };
+                if close_session_by_id(
+                    &mut state,
+                    session_bridge_ref.as_deref(),
+                    session_id.as_str(),
+                ) {
+                    if let Some(session_bridge) = session_bridge_ref.as_ref() {
+                        let _ = sync_workspace_projection_from_manager(
+                            &mut state,
+                            &session_bridge.manager,
+                        );
+                        let (rows, cols) = state
+                            .active_workspace_terminal_surface()
+                            .map(|surface| (surface.rows as i32, surface.cols as i32))
+                            .unwrap_or((24, 80));
+                        forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
+                    }
+                    sync_workspace_tabs(&window, &state);
+                    sync_assets_context_menu_state(&window, &state);
+                }
+            }
+            "toggle-asset-search" => {
+                state.activate_asset_search();
+                sync_assets_toolbar_state(&window, &state);
+                sync_console_assets(&window, &state);
+                sync_keychain_assets(&window, &state);
+            }
+            "toggle-global-menu" => {
+                state.toggle_global_menu();
+                window.set_show_global_menu(state.show_global_menu);
+            }
+            _ => {}
+        }
+    });
+
+    let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
     window.on_workspace_session_text_input(move |text| {
