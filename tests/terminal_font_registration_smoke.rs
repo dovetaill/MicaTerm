@@ -1,43 +1,55 @@
-use std::fs;
+use std::{fs, path::Path};
 
 #[test]
-fn app_window_keeps_sarasa_out_of_startup_imports() {
+fn app_window_has_no_legacy_terminal_font_imports() {
     let content = fs::read_to_string("ui/app-window.slint").expect("read app window");
 
     assert!(
         !content.contains("SarasaTermSCNerd-Regular.ttf"),
-        "Sarasa should stay out of the global startup import path"
+        "Sarasa should be gone from the startup path"
+    );
+    assert!(
+        !content.contains("IosevkaTerm-Regular.ttf"),
+        "Iosevka should be gone from the startup path"
     );
 }
 
 #[test]
-fn terminal_host_font_contract_prefers_sarasa() {
+fn terminal_font_assets_switch_to_maple_only() {
+    assert!(Path::new("ui/fonts/MapleMonoNormalNL-NF-CN-Regular.ttf").exists());
+    assert!(!Path::new("ui/fonts/IosevkaTerm-Regular.ttf").exists());
+    assert!(!Path::new("ui/fonts/SarasaTermSCNerd-Regular.ttf").exists());
+}
+
+#[test]
+fn terminal_host_font_contract_drops_legacy_faces() {
     let content =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        content.contains(
-            "in property <string> terminal-font-family: \"Sarasa Term SC Nerd, Iosevka Term, Cascadia Mono, Consolas, monospace\";"
-        ),
-        "terminal host should expose Sarasa-first terminal font contract"
+        !content.contains("Sarasa Term SC Nerd"),
+        "terminal host should stop exposing the retired Sarasa face"
+    );
+    assert!(
+        !content.contains("Iosevka Term"),
+        "terminal host should stop exposing the retired Iosevka face"
     );
 }
 
 #[test]
-fn bootstrap_registers_terminal_font_when_terminal_host_is_visible() {
+fn bootstrap_no_longer_uses_lazy_terminal_font_registration() {
     let content = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
-        content.contains("crate::app::terminal_font::ensure_terminal_font_registered()"),
-        "bootstrap should trigger lazy terminal font registration"
+        !content.contains("ensure_terminal_font_registered"),
+        "bootstrap should not rely on lazy terminal font registration once the atlas renderer owns Maple directly"
     );
 }
 
 #[test]
-fn terminal_font_module_embeds_sarasa_and_uses_shared_fontique_collection() {
-    let content = fs::read_to_string("src/app/terminal_font.rs").expect("read terminal_font");
-
-    assert!(content.contains("SarasaTermSCNerd-Regular.ttf"));
-    assert!(content.contains("slint::fontique_07::shared_collection()"));
-    assert!(content.contains("fontique::Blob::new"));
+fn legacy_terminal_font_module_is_removed() {
+    assert!(
+        !Path::new("src/app/terminal_font.rs").exists(),
+        "the legacy lazy-registration terminal font module should be removed"
+    );
 }

@@ -2,7 +2,7 @@
 
 import { ThemeTokens } from "../theme/tokens.slint";
 import { TabBar, WorkspaceTabItem } from "./tabbar.slint";
-import { TerminalCellItem, TerminalSessionHost } from "./terminal-session-host.slint";
+import { TerminalSessionHost } from "./terminal-session-host.slint";
 
 export component WorkspacePane inherits Rectangle {
     in property <[WorkspaceTabItem]> workspace-tab-items: [];
@@ -13,9 +13,11 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-session-state: "";
     in property <string> workspace-session-error-detail: "";
     in property <bool> workspace-session-can-reconnect: false;
-    in property <[TerminalCellItem]> workspace-session-cells: [];
+    in property <image> workspace-session-surface-image;
     in property <int> workspace-session-rows: 24;
     in property <int> workspace-session-cols: 80;
+    in property <length> workspace-session-cell-width: 10px;
+    in property <length> workspace-session-cell-height: 22px;
     in property <int> workspace-session-cursor-row: 0;
     in property <int> workspace-session-cursor-col: 0;
     in property <bool> workspace-session-cursor-visible: false;
@@ -87,9 +89,11 @@ export component WorkspacePane inherits Rectangle {
                 session-state: root.workspace-session-state;
                 session-error-detail: root.workspace-session-error-detail;
                 can-reconnect: root.workspace-session-can-reconnect;
-                session-cells: root.workspace-session-cells;
+                session-surface-image: root.workspace-session-surface-image;
                 session-rows: root.workspace-session-rows;
                 session-cols: root.workspace-session-cols;
+                session-cell-width: root.workspace-session-cell-width;
+                session-cell-height: root.workspace-session-cell-height;
                 session-cursor-row: root.workspace-session-cursor-row;
                 session-cursor-col: root.workspace-session-cursor-col;
                 session-cursor-visible: root.workspace-session-cursor-visible;

@@ -12,14 +12,13 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use directories::ProjectDirs;
-use slint::{Color, ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
+use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::AppWindow;
 use crate::AssetsContextMenuItem;
 use crate::ConsoleAssetItem;
-use crate::TerminalCellItem;
 use crate::WorkspaceTabItem;
 use crate::app::app_paths::{AppRootPathInputs, AppRootPaths, resolve_app_root_paths};
 use crate::app::assets_catalog::{
@@ -52,6 +51,7 @@ use crate::app::ssh::session_manager::{
     OpenSessionMode, SessionHandle, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
     SessionState,
 };
+use crate::app::terminal_atlas::TerminalAtlasRenderer;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
@@ -115,6 +115,12 @@ struct ShellSessionBridge {
 
 const MAX_SSH_PROXY_CHAIN_DEPTH: usize = 8;
 const WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD: usize = 4;
+
+thread_local! {
+    static WORKSPACE_TERMINAL_ATLAS_RENDERER: RefCell<TerminalAtlasRenderer> = RefCell::new(
+        TerminalAtlasRenderer::new().expect("bundled Maple atlas renderer should initialize")
+    );
+}
 
 #[derive(Clone)]
 struct PendingHostKeyApproval {
@@ -2878,9 +2884,6 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
     window.set_workspace_session_host_mode(state.workspace_session_host_mode().into());
-    if state.workspace_session_host_mode() == "terminal" {
-        let _ = crate::app::terminal_font::ensure_terminal_font_registered();
-    }
     let visible_lines = state
         .workspace_terminal_visible_lines()
         .into_iter()
@@ -2892,21 +2895,31 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         |model| window.set_workspace_session_visible_lines(model),
     );
 
+    WORKSPACE_TERMINAL_ATLAS_RENDERER.with(|renderer| {
+        let metrics = renderer.borrow().metrics();
+        window.set_workspace_session_cell_width(metrics.cell_width as f32);
+        window.set_workspace_session_cell_height(metrics.cell_height as f32);
+    });
+
     if let Some(surface) = state.active_workspace_terminal_surface() {
-        let cells = surface
-            .cells
-            .iter()
-            .map(|cell| TerminalCellItem {
-                row: i32::try_from(cell.row).unwrap_or(i32::MAX),
-                col: i32::try_from(cell.col).unwrap_or(i32::MAX),
-                width: i32::try_from(cell.width).unwrap_or(i32::MAX),
-                text: cell.text.clone().into(),
-                fg: slint_color_from_rgba(cell.fg_rgba),
-                bg: slint_color_from_rgba(cell.bg_rgba),
-            })
-            .collect::<Vec<_>>();
-        sync_vec_model(window.get_workspace_session_cells(), cells, |model| {
-            window.set_workspace_session_cells(model);
+        WORKSPACE_TERMINAL_ATLAS_RENDERER.with(|renderer| {
+            let mut renderer = renderer.borrow_mut();
+            match renderer.render(surface) {
+                Ok(frame) => {
+                    window.set_workspace_session_surface_image(frame.image);
+                    window.set_workspace_session_cell_width(frame.metrics.cell_width as f32);
+                    window.set_workspace_session_cell_height(frame.metrics.cell_height as f32);
+                }
+                Err(err) => {
+                    tracing::error!(
+                        target: "app.terminal",
+                        session_id = surface.session_id.to_string(),
+                        error = %err,
+                        "failed to render workspace terminal atlas surface"
+                    );
+                    window.set_workspace_session_surface_image(Image::default());
+                }
+            }
         });
         window.set_workspace_session_rows(i32::try_from(surface.rows).unwrap_or(i32::MAX));
         window.set_workspace_session_cols(i32::try_from(surface.cols).unwrap_or(i32::MAX));
@@ -2950,13 +2963,11 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         window.set_workspace_session_cursor_bg(Color::from_argb_u8(255, 0x52, 0xad, 0x70));
         window.set_workspace_session_default_fg(Color::from_argb_u8(255, 0, 0, 0));
         window.set_workspace_session_default_bg(Color::from_argb_u8(255, 255, 255, 255));
+        window.set_workspace_session_surface_image(Image::default());
         window.set_workspace_session_mouse_grabbed(false);
         window.set_workspace_session_viewport_offset_lines(0);
         window.set_workspace_session_viewport_max_offset_lines(0);
         window.set_workspace_session_viewport_at_bottom(true);
-        sync_vec_model(window.get_workspace_session_cells(), Vec::new(), |model| {
-            window.set_workspace_session_cells(model);
-        });
     }
 
     if let Some(active_tab) = state.active_workspace_tab() {
@@ -5415,7 +5426,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_session_state_reuses_terminal_models_across_surface_refreshes() {
+    fn workspace_session_state_refreshes_terminal_image_across_surface_updates() {
         i_slint_backend_testing::init_no_event_loop();
 
         let window = AppWindow::new().expect("create app window");
@@ -5445,7 +5456,7 @@ mod tests {
 
         sync_workspace_session_state(&window, &state);
         let initial_lines_model = window.get_workspace_session_visible_lines();
-        let initial_cells_model = window.get_workspace_session_cells();
+        let initial_image = window.get_workspace_session_surface_image();
 
         let mut updated_surface = TerminalSurfaceState::from_visible_lines(
             session_id,
@@ -5471,15 +5482,22 @@ mod tests {
             initial_lines_model,
             "terminal visible line projection should reuse the same VecModel instance"
         );
-        assert_eq!(
-            window.get_workspace_session_cells(),
-            initial_cells_model,
-            "terminal cell projection should reuse the same VecModel instance"
+        assert_ne!(
+            window
+                .get_workspace_session_surface_image()
+                .to_rgba8()
+                .expect("updated terminal atlas image")
+                .as_bytes(),
+            initial_image
+                .to_rgba8()
+                .expect("initial terminal atlas image")
+                .as_bytes(),
+            "terminal atlas image should refresh when the active surface changes"
         );
     }
 
     #[test]
-    fn workspace_session_state_reuses_terminal_models_when_surface_clears() {
+    fn workspace_session_state_clears_terminal_image_when_surface_clears() {
         i_slint_backend_testing::init_no_event_loop();
 
         let window = AppWindow::new().expect("create app window");
@@ -5509,7 +5527,11 @@ mod tests {
 
         sync_workspace_session_state(&window, &state);
         let initial_lines_model = window.get_workspace_session_visible_lines();
-        let initial_cells_model = window.get_workspace_session_cells();
+        assert_ne!(
+            window.get_workspace_session_surface_image(),
+            Image::default(),
+            "rendered terminal surfaces should publish a non-empty atlas image"
+        );
 
         state.set_active_workspace_terminal_surface(None);
         sync_workspace_session_state(&window, &state);
@@ -5520,12 +5542,11 @@ mod tests {
             "clearing the surface should keep reusing the visible line model"
         );
         assert_eq!(
-            window.get_workspace_session_cells(),
-            initial_cells_model,
-            "clearing the surface should keep reusing the terminal cell model"
+            window.get_workspace_session_surface_image(),
+            Image::default(),
+            "clearing the surface should reset the atlas image"
         );
         assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
-        assert_eq!(window.get_workspace_session_cells().row_count(), 0);
     }
 
     #[test]

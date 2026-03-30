@@ -1,6 +1,4 @@
 // Root desktop window that composes chrome, sidebars, workspace content, overlays, and resize grips.
-
-import "fonts/IosevkaTerm-Regular.ttf";
 import { AssetsCreateMenu } from "components/assets-create-menu.slint";
 import { AssetsContextMenuItem } from "components/assets-context-menu-column.slint";
 import { AssetsContextMenuOverlay } from "components/assets-context-menu-overlay.slint";
@@ -22,7 +20,6 @@ import { WindowResizeGrips } from "components/window-resize-grips.slint";
 import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
 import { RightPanel } from "shell/right-panel.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
-import { TerminalCellItem } from "shell/terminal-session-host.slint";
 import { WorkspaceTabItem } from "shell/tabbar.slint";
 import { Titlebar } from "shell/titlebar.slint";
 import { WorkspacePane } from "shell/workspace-pane.slint";
@@ -132,9 +129,11 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-session-state: "";
     in-out property <string> workspace-session-error-detail: "";
     in-out property <bool> workspace-session-can-reconnect: false;
-    in-out property <[TerminalCellItem]> workspace-session-cells: [];
+    in-out property <image> workspace-session-surface-image;
     in-out property <int> workspace-session-rows: 24;
     in-out property <int> workspace-session-cols: 80;
+    in-out property <length> workspace-session-cell-width: 10px;
+    in-out property <length> workspace-session-cell-height: 22px;
     in-out property <int> workspace-session-cursor-row: 0;
     in-out property <int> workspace-session-cursor-col: 0;
     in-out property <bool> workspace-session-cursor-visible: false;
@@ -550,9 +549,11 @@ export component AppWindow inherits Window {
                         workspace-session-state: root.workspace-session-state;
                         workspace-session-error-detail: root.workspace-session-error-detail;
                         workspace-session-can-reconnect: root.workspace-session-can-reconnect;
-                        workspace-session-cells: root.workspace-session-cells;
+                        workspace-session-surface-image: root.workspace-session-surface-image;
                         workspace-session-rows: root.workspace-session-rows;
                         workspace-session-cols: root.workspace-session-cols;
+                        workspace-session-cell-width: root.workspace-session-cell-width;
+                        workspace-session-cell-height: root.workspace-session-cell-height;
                         workspace-session-cursor-row: root.workspace-session-cursor-row;
                         workspace-session-cursor-col: root.workspace-session-cursor-col;
                         workspace-session-cursor-visible: root.workspace-session-cursor-visible;

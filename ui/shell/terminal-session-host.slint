@@ -3,15 +3,6 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 import { WelcomeView } from "../welcome/welcome-view.slint";
 
-export struct TerminalCellItem {
-    row: int,
-    col: int,
-    width: int,
-    text: string,
-    fg: color,
-    bg: color,
-}
-
 component TerminalContextMenuRow inherits Rectangle {
     in property <string> label;
     in property <bool> enabled: true;
@@ -58,9 +49,11 @@ export component TerminalSessionHost inherits Rectangle {
     in property <string> session-state: "";
     in property <string> session-error-detail: "";
     in property <bool> can-reconnect: false;
-    in property <[TerminalCellItem]> session-cells: [];
+    in property <image> session-surface-image;
     in property <int> session-rows: 24;
     in property <int> session-cols: 80;
+    in property <length> session-cell-width: 10px;
+    in property <length> session-cell-height: 22px;
     in property <int> session-cursor-row: 0;
     in property <int> session-cursor-col: 0;
     in property <bool> session-cursor-visible: false;
@@ -76,7 +69,6 @@ export component TerminalSessionHost inherits Rectangle {
     in property <int> session-viewport-offset-lines: 0;
     in property <int> session-viewport-max-offset-lines: 0;
     in property <bool> session-viewport-at-bottom: true;
-    in property <string> terminal-font-family: "Sarasa Term SC Nerd, Iosevka Term, Cascadia Mono, Consolas, monospace";
     in-out property <bool> selection-active: false;
     in-out property <int> selection-start-row: -1;
     in-out property <int> selection-start-col: -1;
@@ -93,17 +85,8 @@ export component TerminalSessionHost inherits Rectangle {
     callback mouse-input(string, string, int, int, bool, bool, bool);
 
     private property <length> terminal-font-size: 16px;
-    private property <int> terminal-cell-measure-count: 16;
-    private property <length> terminal-cell-width:
-        max(
-            9px,
-            min(9.5px, latin-cell-metric-probe.width / root.terminal-cell-measure-count),
-        );
-    private property <length> terminal-cell-height:
-        max(
-            root.terminal-font-size + 6px,
-            max(latin-cell-metric-probe.height + 4px, cjk-cell-metric-probe.height + 4px),
-        );
+    private property <length> terminal-cell-width: max(1px, root.session-cell-width);
+    private property <length> terminal-cell-height: max(1px, root.session-cell-height);
     private property <length> terminal-cursor-thickness: 1px;
     private property <length> terminal-padding-left: 12px;
     private property <length> terminal-padding-top: 10px;
@@ -382,26 +365,6 @@ export component TerminalSessionHost inherits Rectangle {
         root.emit-surface-resize();
     }
 
-    latin-cell-metric-probe := Text {
-        x: -10000px;
-        y: -10000px;
-        text: "0000000000000000";
-        color: transparent;
-        font-size: root.terminal-font-size;
-        font-family: root.terminal-font-family;
-        wrap: no-wrap;
-    }
-
-    cjk-cell-metric-probe := Text {
-        x: -10000px;
-        y: -10000px;
-        text: "界";
-        color: transparent;
-        font-size: root.terminal-font-size;
-        font-family: root.terminal-font-family;
-        wrap: no-wrap;
-    }
-
     cursor-blink-timer := Timer {
         interval: 520ms;
         running: false;
@@ -658,6 +621,15 @@ export component TerminalSessionHost inherits Rectangle {
                 background: root.session-default-bg;
             }
 
+            Image {
+                x: blank-surface.x;
+                y: blank-surface.y;
+                width: blank-surface.width;
+                height: blank-surface.height;
+                source: root.session-surface-image;
+                image-fit: fill;
+            }
+
             input-capture := TouchArea {
                 width: parent.width;
                 height: parent.height;
@@ -782,32 +754,6 @@ export component TerminalSessionHost inherits Rectangle {
                             event.modifiers.alt,
                         );
                     }
-                }
-            }
-
-            for cell in root.session-cells : Rectangle {
-                x: root.terminal-cell-x(cell.col);
-                y: root.terminal-cell-y(cell.row);
-                width: max(root.terminal-cell-width, cell.width * root.terminal-cell-width);
-                height: root.terminal-cell-height;
-                background: root.cell-selected(cell.row, cell.col, cell.width)
-                    ? ThemeTokens.accent
-                    : cell.bg;
-
-                Text {
-                    x: 0px;
-                    y: 0px;
-                    width: parent.width;
-                    height: parent.height;
-                    text: cell.text;
-                    color: root.cell-selected(cell.row, cell.col, cell.width)
-                        ? (ThemeTokens.dark-mode ? #0b1117 : #ffffff)
-                        : cell.fg;
-                    font-size: root.terminal-font-size;
-                    font-family: root.terminal-font-family;
-                    horizontal-alignment: left;
-                    vertical-alignment: center;
-                    wrap: no-wrap;
                 }
             }
 

@@ -1,13 +1,13 @@
 # Verification Reports
 
-## Windows Skia Mainline and Terminal Font Notes
+## Maple Atlas Terminal Renderer Notes
 
-Date: 2026-03-28 CST
+Date: 2026-03-30 CST
 
 ### Source Documents
 
-- Design: `docs/plans/2026-03-28-windows-skia-mainline-and-terminal-font-design.md`
-- Implementation Plan: `docs/plans/2026-03-28-windows-skia-mainline-and-terminal-font-implementation-plan.md`
+- Design: `docs/plans/2026-03-30-maple-atlas-terminal-renderer-design.md`
+- Implementation Plan: `docs/plans/2026-03-30-maple-atlas-terminal-renderer-implementation-plan.md`
 
 ### Current Contract
 
@@ -15,12 +15,13 @@ Date: 2026-03-28 CST
 - `./build-win-x64-software.sh` is the Windows compatibility wrapper and packages the `winit-software` route.
 - `./build-release.sh` keeps the Linux x64 leg on the current default path and routes the Windows GNU leg through the software compatibility wrapper because `rust-skia` does not ship `x86_64-pc-windows-gnu` Skia binaries.
 - `Cargo.toml` still pins `i-slint-backend-winit` to `vendor/i-slint-backend-winit`, so the vendored Windows partial-visibility patch remains active.
-- `SarasaTermSCNerd-Regular.ttf` remains embedded in the executable and is registered through `src/app/terminal_font.rs` only when the workspace session host mode becomes `terminal`.
-- `ui/app-window.slint` keeps the startup import path on `IosevkaTerm-Regular.ttf`, so the heavier Sarasa font is not globally imported during app startup.
+- `ui/fonts/MapleMonoNormalNL-NF-CN-Regular.ttf` is now the only bundled terminal font asset.
+- `src/app/terminal_atlas.rs` owns Maple font loading, cell metrics, sprite caching, dirty-row redraws, and `slint::Image` frame output.
+- `ui/shell/terminal-session-host.slint` no longer renders one `Text` node per cell; it now consumes a single rendered image surface plus overlay metadata.
 
 ### Verification Status
 
-- The final feature-wide verification matrix for this design is deferred to the dedicated Task 5 pass.
+- The focused renderer/font verification matrix completed on 2026-03-30 and the active tests passed.
 
 ## Top Status Bar Style Bugfix3 Verification
 
@@ -290,16 +291,18 @@ Date: 2026-03-27 15:25:44 CST
 - [x] `Ctrl+Shift+<letter>` 保留命名空间已从远端输入路径剥离
 - [x] 单独按 `Ctrl` / `Shift` / `Alt` 不再进入远端输入
 - [x] wheel 已改为累积式、多行本地 scrollback，并保留 `mouse_grabbed` 远端鼠标优先级
-- [x] terminal 默认字体已切换到 bundled `Iosevka Term`
-- [x] terminal 默认 metrics 已从原型值收紧到更接近 IDE 风格的紧凑配置
+- [x] terminal 默认字体已切换到 bundled `Maple Mono Normal NL NF CN`
+- [x] terminal 文本主路径已切换到 Rust atlas renderer + 单张 `slint::Image`
+- [x] UI 侧逐 cell `Rectangle/Text` repeater 已移除
+- [x] terminal cell metrics 已由 Rust atlas renderer 直接提供给 overlay 命中测试与 resize 计算
 - [x] 本轮 follow-up 目标测试矩阵全部通过
 
 ### Manual Follow-up
 
-- [ ] Windows 11 实机核对 `Iosevka Term` 在常见 SSH/TUI 场景下的字宽、行高、cursor 对齐
+- [ ] Windows 11 实机核对 `Maple Mono Normal NL NF CN` 在常见 SSH/TUI 场景下的字宽、行高、cursor 对齐
 - [ ] Windows 11 实机核对 light / dark mode 下 blank canvas 与 ANSI 背景拼接是否完全连续
 - [ ] Windows 11 实机核对高分辨率触控板与普通鼠标在 wheel accumulation 下的体感差异
-- [ ] 长时间会话下观察 unbounded channel 在高频输出与频繁滚轮交互下的消息堆积情况
+- [ ] 长时间会话下观察 atlas sprite cache、surface buffer 与高频输出场景下的内存曲线
 - [x] `cargo check --workspace`
 - [x] `cargo clippy --workspace -- -D warnings`
 

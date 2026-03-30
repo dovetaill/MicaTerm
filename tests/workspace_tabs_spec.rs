@@ -474,8 +474,20 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        app_window.contains("workspace-session-cells"),
-        "AppWindow should expose a terminal cell projection model instead of only string lines"
+        app_window.contains("workspace-session-surface-image"),
+        "AppWindow should expose a rendered terminal image surface for atlas-backed terminal output"
+    );
+    assert!(
+        app_window.contains("workspace-session-cell-width"),
+        "AppWindow should expose terminal cell width so overlays can track atlas geometry"
+    );
+    assert!(
+        app_window.contains("workspace-session-cell-height"),
+        "AppWindow should expose terminal cell height so overlays can track atlas geometry"
+    );
+    assert!(
+        !app_window.contains("workspace-session-cells"),
+        "AppWindow should not keep the old per-cell terminal model once atlas rendering owns the text surface"
     );
     assert!(
         app_window.contains("workspace-session-cursor-row"),
@@ -532,8 +544,16 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose terminal selection state for native clipboard shortcut fallbacks"
     );
     assert!(
-        workspace_pane.contains("workspace-session-cells"),
-        "WorkspacePane should forward the terminal cell model into TerminalSessionHost"
+        workspace_pane.contains("workspace-session-surface-image"),
+        "WorkspacePane should forward the rendered terminal image surface into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-cell-width"),
+        "WorkspacePane should forward terminal cell width into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-cell-height"),
+        "WorkspacePane should forward terminal cell height into TerminalSessionHost"
     );
     assert!(
         workspace_pane.contains("session-cursor-fg: root.workspace-session-cursor-fg;"),
@@ -609,8 +629,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should default to a desktop-readable font size"
     );
     assert!(
-        terminal_host.contains("in property <string> terminal-font-family"),
-        "TerminalSessionHost should accept the terminal font family as a root-level contract"
+        terminal_host.contains("in property <image> session-surface-image"),
+        "TerminalSessionHost should accept a rendered terminal surface image as a root-level contract"
     );
     assert!(
         terminal_host.contains("function terminal-cell-x("),
@@ -641,33 +661,16 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should paint the cursor from the runtime-projected cursor background"
     );
     assert!(
-        terminal_host.contains("font-family: root.terminal-font-family;"),
-        "TerminalSessionHost should keep the terminal surface on a monospace font contract"
+        terminal_host.contains("Image {"),
+        "TerminalSessionHost should display the terminal body through a single image surface"
     );
     assert!(
-        terminal_host.contains("Sarasa Term SC Nerd, Iosevka Term, Cascadia Mono, Consolas, monospace"),
-        "TerminalSessionHost should expose the Sarasa-first terminal font stack once lazy registration is available"
+        !terminal_host.contains("for cell in root.session-cells"),
+        "TerminalSessionHost should stop expanding one UI node per terminal cell"
     );
     assert!(
-        terminal_host.contains(
-            "in property <string> terminal-font-family: \"Sarasa Term SC Nerd, Iosevka Term, Cascadia Mono, Consolas, monospace\";"
-        ),
-        "TerminalSessionHost should expose the Sarasa-first font contract for terminal rendering"
-    );
-    assert!(
-        terminal_host.contains("Sarasa Term SC Nerd"),
-        "TerminalSessionHost should prefer Sarasa in the terminal font contract after lazy registration"
-    );
-    assert!(
-        !terminal_host
-            .contains("private property <string> terminal-font-family: \"Cascadia Mono\";"),
-        "TerminalSessionHost should not hardcode the terminal font family in a private property"
-    );
-    assert!(
-        !terminal_host.contains(
-            "in property <string> terminal-font-family: \"Cascadia Code, Cascadia Mono, Consolas, JetBrains Mono\";"
-        ),
-        "TerminalSessionHost should stop treating the old system fallback stack as the primary terminal font contract"
+        !terminal_host.contains("font-family: root.terminal-font-family;"),
+        "TerminalSessionHost should no longer depend on Slint text nodes for terminal body rendering"
     );
     assert!(
         terminal_host.contains("event.modifiers.control && event.modifiers.shift"),

@@ -214,26 +214,16 @@ fn terminal_host_uses_startup_safe_font_stack_and_stable_clipboard_shortcut_toke
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        terminal_host.contains(
-            "in property <string> terminal-font-family: \"Sarasa Term SC Nerd, Iosevka Term, Cascadia Mono, Consolas, monospace\";"
-        ),
-        "TerminalSessionHost should default to the Sarasa-first font stack once lazy registration is available"
-    );
-    assert!(
-        terminal_host.contains("Sarasa Term SC Nerd"),
-        "TerminalSessionHost should prefer the Sarasa face in the terminal font contract"
+        terminal_host.contains("in property <image> session-surface-image"),
+        "TerminalSessionHost should accept a rendered image surface instead of a font stack contract"
     );
     assert!(
         terminal_host.contains("private property <length> terminal-font-size: 16px;"),
         "TerminalSessionHost should ship with a desktop-sized default font instead of the current too-small compact size"
     );
     assert!(
-        terminal_host.contains("latin-cell-metric-probe := Text {"),
-        "TerminalSessionHost should measure latin cell width with a dedicated probe"
-    );
-    assert!(
-        terminal_host.contains("cjk-cell-metric-probe := Text {"),
-        "TerminalSessionHost should measure line height with a dedicated CJK probe to avoid clipped fallback glyphs"
+        !terminal_host.contains("for cell in root.session-cells"),
+        "TerminalSessionHost should not render terminal text through a per-cell repeater"
     );
     assert!(
         terminal_host.contains("\\u{3}"),
