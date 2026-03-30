@@ -5,6 +5,7 @@ use mica_term::app::terminal_emoji::{
     ClusterRenderKind, EmojiFallbackReason, EmojiFontRasterizeRequest, EmojiRasterizerBackend,
     EmojiRenderOutcome, EmojiSprite, EmojiFontResolution, ResolvedEmojiFont,
     TerminalEmojiRenderer, TerminalEmojiResolver, classify_cluster_render_kind,
+    recommended_emoji_font_size_px,
 };
 use slint::Rgba8Pixel;
 use uuid::Uuid;
@@ -123,6 +124,51 @@ fn classify_cluster_render_kind_keeps_private_use_and_ascii_clusters_on_mono_pat
             "`{text}` should stay on the mono terminal atlas path"
         );
     }
+}
+
+#[test]
+fn classify_cluster_render_kind_keeps_plain_keycap_bases_on_mono_path() {
+    for text in ["0", "1", "2", "#", "*"] {
+        assert_eq!(
+            classify_cluster_render_kind(text),
+            ClusterRenderKind::Mono,
+            "`{text}` should stay on the mono terminal atlas path"
+        );
+    }
+}
+
+#[test]
+fn classify_cluster_render_kind_routes_explicit_keycap_sequences_to_color_rendering() {
+    for text in ["1️⃣", "#️⃣", "*️⃣"] {
+        assert_eq!(
+            classify_cluster_render_kind(text),
+            ClusterRenderKind::Emoji,
+            "`{text}` should classify as an emoji-rendered cluster"
+        );
+    }
+}
+
+#[test]
+fn recommended_emoji_font_size_stays_within_terminal_cell_bounds() {
+    let single_cell_size = recommended_emoji_font_size_px(1, 10, 22);
+    let double_cell_size = recommended_emoji_font_size_px(2, 10, 22);
+
+    assert!(
+        single_cell_size <= 10.0,
+        "single-cell emoji should fit the cell width"
+    );
+    assert!(
+        single_cell_size < 22.0,
+        "single-cell emoji should keep vertical padding inside the cell"
+    );
+    assert!(
+        double_cell_size <= 20.0,
+        "double-cell emoji should stay within the available span width"
+    );
+    assert!(
+        double_cell_size < 22.0,
+        "double-cell emoji should keep vertical padding inside the cell"
+    );
 }
 
 #[test]

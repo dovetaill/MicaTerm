@@ -188,7 +188,9 @@ pub fn classify_cluster_render_kind(text: &str) -> ClusterRenderKind {
         return ClusterRenderKind::Mono;
     }
 
-    let saw_emoji = text.chars().any(|ch| ch.is_emoji_char());
+    let saw_emoji = text
+        .chars()
+        .any(|ch| ch.is_emoji_char() && !is_plain_keycap_base(ch));
     let has_emoji_presentation_markers =
         text.contains('\u{fe0f}') || text.contains('\u{200d}') || text.contains('\u{20e3}');
 
@@ -197,6 +199,14 @@ pub fn classify_cluster_render_kind(text: &str) -> ClusterRenderKind {
     } else {
         ClusterRenderKind::Mono
     }
+}
+
+pub fn recommended_emoji_font_size_px(span: u32, cell_width: u32, cell_height: u32) -> f32 {
+    let available_width = span.max(1).saturating_mul(cell_width).max(1);
+    let available_height = cell_height.max(1);
+    let fit_box = available_width.min(available_height) as f32;
+
+    (fit_box * 0.9).max(1.0)
 }
 
 pub fn preferred_emoji_families() -> &'static [&'static str] {
@@ -256,6 +266,10 @@ fn contains_private_use(text: &str) -> bool {
     })
 }
 
+fn is_plain_keycap_base(ch: char) -> bool {
+    matches!(ch, '0'..='9' | '#' | '*')
+}
+
 struct SwashEmojiRasterizerBackend;
 
 impl EmojiRasterizerBackend for SwashEmojiRasterizerBackend {
@@ -263,16 +277,15 @@ impl EmojiRasterizerBackend for SwashEmojiRasterizerBackend {
         let font_data = request.font_data?;
         let face_index = request.face_index? as usize;
         let font = FontRef::from_index(font_data, face_index)?;
-        let glyphs = shape_emoji_glyphs(font, request.text, request.cell_height as f32);
+        let font_size =
+            recommended_emoji_font_size_px(request.span, request.cell_width, request.cell_height);
+        let glyphs = shape_emoji_glyphs(font, request.text, font_size);
         if glyphs.is_empty() {
             return None;
         }
 
         let mut scale_context = ScaleContext::new();
-        let mut scaler = scale_context
-            .builder(font)
-            .size(request.cell_height as f32)
-            .build();
+        let mut scaler = scale_context.builder(font).size(font_size).build();
         let mut rendered_glyphs = Vec::new();
 
         for glyph in glyphs {
