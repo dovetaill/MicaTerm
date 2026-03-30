@@ -44,6 +44,7 @@ export component WorkspacePane inherits Rectangle {
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
     callback copy-selection-requested(int, int, int, int);
+    callback selection-changed();
     callback paste-requested();
     callback scroll-requested(int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
@@ -129,6 +130,10 @@ export component WorkspacePane inherits Rectangle {
 
                 copy-selection-requested(start-row, start-col, end-row, end-col) => {
                     root.copy-selection-requested(start-row, start-col, end-row, end-col);
+                }
+
+                selection-changed() => {
+                    root.selection-changed();
                 }
 
                 paste-requested() => {

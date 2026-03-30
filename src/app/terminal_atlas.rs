@@ -1,7 +1,7 @@
 //! Renders the active terminal grid into a single image surface using a Sarasa-backed sprite atlas.
 
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use ab_glyph::{Font, FontArc, GlyphId, PxScale, ScaleFont, point};
@@ -11,16 +11,68 @@ use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
 
 const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-Unhinted.ttf");
-const TERMINAL_FONT_SIZE_PX: f32 = 16.0;
-const MIN_CELL_WIDTH_PX: u32 = 8;
+const TERMINAL_FONT_SIZE_PX: f32 = 18.0;
+const MIN_CELL_WIDTH_PX: u32 = 9;
 const CELL_HORIZONTAL_PADDING_PX: u32 = 0;
-const CELL_VERTICAL_PADDING_PX: u32 = 2;
+const CELL_VERTICAL_PADDING_PX: u32 = 3;
+const GLYPH_COVERAGE_GAMMA: f32 = 0.82;
+const GLYPH_ALPHA_GAIN: f32 = 1.08;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalAtlasMetrics {
     pub cell_width: u32,
     pub cell_height: u32,
     pub baseline_px: u32,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct TerminalAtlasSelection {
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+}
+
+impl TerminalAtlasSelection {
+    pub fn new(start_row: u32, start_col: u32, end_row: u32, end_col: u32) -> Self {
+        if (start_row, start_col) <= (end_row, end_col) {
+            Self {
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            }
+        } else {
+            Self {
+                start_row: end_row,
+                start_col: end_col,
+                end_row: start_row,
+                end_col: start_col,
+            }
+        }
+    }
+
+    fn row_bounds(self, row: u32, cols: u32) -> Option<(u32, u32)> {
+        if cols == 0 || row < self.start_row || row > self.end_row {
+            return None;
+        }
+
+        let start_col = if row == self.start_row {
+            self.start_col
+        } else {
+            0
+        };
+        let end_col = if row == self.end_row {
+            self.end_col
+        } else {
+            cols.saturating_sub(1)
+        };
+
+        Some((
+            start_col.min(cols.saturating_sub(1)),
+            end_col.min(cols.saturating_sub(1)),
+        ))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -75,6 +127,15 @@ impl TerminalAtlasRenderer {
     }
 
     pub fn render(&mut self, surface: &TerminalSurfaceState) -> Result<TerminalSurfaceFrame> {
+        self.render_with_selection(surface, None, 0)
+    }
+
+    pub fn render_with_selection(
+        &mut self,
+        surface: &TerminalSurfaceState,
+        selection: Option<TerminalAtlasSelection>,
+        selection_overlay_rgba: u32,
+    ) -> Result<TerminalSurfaceFrame> {
         let width_px = surface.cols.max(1) * self.metrics.cell_width;
         let height_px = surface.rows.max(1) * self.metrics.cell_height;
         let mut rerendered_rows = Vec::new();
@@ -97,10 +158,30 @@ impl TerminalAtlasRenderer {
         }
 
         for row in 0..surface.rows {
-            let next_hash =
-                hash_row(surface.cols, surface.default_bg_rgba, row_cells[row as usize].as_slice());
+            let row_selection = selection.and_then(|value| value.row_bounds(row, surface.cols));
+            let row_selection_overlay_rgba = if row_selection.is_some() {
+                selection_overlay_rgba
+            } else {
+                0
+            };
+            let next_hash = hash_row(
+                surface.cols,
+                surface.default_fg_rgba,
+                surface.default_bg_rgba,
+                row_selection,
+                row_selection_overlay_rgba,
+                row_cells[row as usize].as_slice(),
+            );
             if resized || self.row_hashes[row as usize] != next_hash {
-                self.render_row(row, surface.cols, surface.default_bg_rgba, &row_cells[row as usize]);
+                self.render_row(
+                    row,
+                    surface.cols,
+                    surface.default_fg_rgba,
+                    surface.default_bg_rgba,
+                    row_selection,
+                    row_selection_overlay_rgba,
+                    &row_cells[row as usize],
+                );
                 self.row_hashes[row as usize] = next_hash;
                 rerendered_rows.push(row);
             }
@@ -121,28 +202,61 @@ impl TerminalAtlasRenderer {
         &mut self,
         row: u32,
         cols: u32,
+        default_fg_rgba: u32,
         default_bg_rgba: u32,
+        row_selection: Option<(u32, u32)>,
+        selection_overlay_rgba: u32,
         cells: &[&TerminalCellState],
     ) {
         let row_y = row * self.metrics.cell_height;
         let row_bg = rgba8(default_bg_rgba);
-        for y in row_y..row_y + self.metrics.cell_height {
-            for x in 0..cols * self.metrics.cell_width {
-                self.pixels[(y * self.surface_width_px + x) as usize] = row_bg;
-            }
+        let default_fg = rgba8(default_fg_rgba);
+        fill_rect(
+            &mut self.pixels,
+            self.surface_width_px,
+            self.surface_height_px,
+            0,
+            row_y,
+            cols * self.metrics.cell_width,
+            self.metrics.cell_height,
+            row_bg,
+        );
+
+        if let Some((start_col, end_col)) = row_selection {
+            fill_rect(
+                &mut self.pixels,
+                self.surface_width_px,
+                self.surface_height_px,
+                start_col * self.metrics.cell_width,
+                row_y,
+                (end_col - start_col + 1) * self.metrics.cell_width,
+                self.metrics.cell_height,
+                composite_color(row_bg, rgba8(selection_overlay_rgba)),
+            );
         }
 
         for cell in cells {
             let cell_x = cell.col * self.metrics.cell_width;
             let span = cell.width.max(1);
             let span_width_px = span * self.metrics.cell_width;
-            let background = rgba8(cell.bg_rgba);
+            let selected = row_selection.is_some_and(|value| selection_overlaps_cell(value, cell.col, span));
+            let cell_bg = rgba8(cell.bg_rgba);
+            let background = if selected {
+                composite_color(cell_bg, rgba8(selection_overlay_rgba))
+            } else {
+                cell_bg
+            };
 
-            for y in row_y..row_y + self.metrics.cell_height {
-                for x in cell_x..(cell_x + span_width_px).min(self.surface_width_px) {
-                    self.pixels[(y * self.surface_width_px + x) as usize] = background;
-                }
-            }
+            fill_rect(
+                &mut self.pixels,
+                self.surface_width_px,
+                self.surface_height_px,
+                cell_x,
+                row_y,
+                span_width_px,
+                self.metrics.cell_height,
+                background,
+            );
 
             if cell.text.chars().all(char::is_whitespace) {
                 continue;
@@ -153,6 +267,11 @@ impl TerminalAtlasRenderer {
                 .sprite_cache
                 .get(&key)
                 .expect("sprite cache entry must exist after insertion");
+            let foreground = if selected {
+                resolve_selected_foreground(rgba8(cell.fg_rgba), cell_bg, default_fg, background)
+            } else {
+                rgba8(cell.fg_rgba)
+            };
             blit_sprite(
                 &mut self.pixels,
                 self.surface_width_px,
@@ -160,7 +279,7 @@ impl TerminalAtlasRenderer {
                 cell_x,
                 row_y,
                 sprite,
-                rgba8(cell.fg_rgba),
+                foreground,
             );
         }
     }
@@ -195,7 +314,7 @@ fn compute_terminal_metrics(font: &FontArc) -> TerminalAtlasMetrics {
 
     TerminalAtlasMetrics {
         cell_width: cell_width.max(MIN_CELL_WIDTH_PX),
-        cell_height: cell_height.max(TERMINAL_FONT_SIZE_PX.ceil() as u32 + 4),
+        cell_height: cell_height.max(TERMINAL_FONT_SIZE_PX.ceil() as u32 + 5),
         baseline_px,
     }
 }
@@ -246,7 +365,11 @@ fn rasterize_cluster_sprite(
     }
 
     let content_advance = pen_x.ceil().max(0.0);
-    let left_padding = ((width as f32 - content_advance).max(0.0) / 2.0).floor();
+    let left_padding = match classify_cluster_layout(text, span) {
+        ClusterLayout::Ascii => 0.0,
+        ClusterLayout::Wide => ((width as f32 - content_advance).max(0.0) / 2.0).floor(),
+        ClusterLayout::Mixed => ((width as f32 - content_advance).max(0.0) / 2.5).floor(),
+    };
     let offset_x = left_padding + (-min_x).max(0.0);
 
     for outlined in outlined_glyphs {
@@ -261,7 +384,7 @@ fn rasterize_cluster_sprite(
             }
 
             let mask_index = target_y as usize * width + target_x as usize;
-            let next_alpha = (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
+            let next_alpha = map_coverage_to_alpha(coverage);
             alpha[mask_index] = alpha[mask_index].max(next_alpha);
         });
     }
@@ -273,10 +396,20 @@ fn rasterize_cluster_sprite(
     }
 }
 
-fn hash_row(cols: u32, default_bg_rgba: u32, cells: &[&TerminalCellState]) -> u64 {
+fn hash_row(
+    cols: u32,
+    default_fg_rgba: u32,
+    default_bg_rgba: u32,
+    selection: Option<(u32, u32)>,
+    selection_overlay_rgba: u32,
+    cells: &[&TerminalCellState],
+) -> u64 {
     let mut hasher = DefaultHasher::new();
     cols.hash(&mut hasher);
+    default_fg_rgba.hash(&mut hasher);
     default_bg_rgba.hash(&mut hasher);
+    selection.hash(&mut hasher);
+    selection_overlay_rgba.hash(&mut hasher);
     for cell in cells {
         cell.col.hash(&mut hasher);
         cell.width.hash(&mut hasher);
@@ -296,6 +429,26 @@ fn rgba8(color: u32) -> Rgba8Pixel {
     }
 }
 
+fn fill_rect(
+    pixels: &mut [Rgba8Pixel],
+    surface_width_px: u32,
+    surface_height_px: u32,
+    start_x: u32,
+    start_y: u32,
+    width: u32,
+    height: u32,
+    color: Rgba8Pixel,
+) {
+    let end_x = (start_x + width).min(surface_width_px);
+    let end_y = (start_y + height).min(surface_height_px);
+
+    for y in start_y.min(surface_height_px)..end_y {
+        for x in start_x.min(surface_width_px)..end_x {
+            pixels[(y * surface_width_px + x) as usize] = color;
+        }
+    }
+}
+
 fn blend(dst: &mut Rgba8Pixel, fg: Rgba8Pixel, alpha: u8) {
     let alpha = alpha as u16;
     let inv_alpha = 255 - alpha;
@@ -304,6 +457,105 @@ fn blend(dst: &mut Rgba8Pixel, fg: Rgba8Pixel, alpha: u8) {
     dst.g = ((fg.g as u16 * alpha + dst.g as u16 * inv_alpha) / 255) as u8;
     dst.b = ((fg.b as u16 * alpha + dst.b as u16 * inv_alpha) / 255) as u8;
     dst.a = 255;
+}
+
+fn composite_color(base: Rgba8Pixel, overlay: Rgba8Pixel) -> Rgba8Pixel {
+    let mut color = base;
+    blend(&mut color, overlay, overlay.a);
+    color
+}
+
+fn selection_overlaps_cell(selection: (u32, u32), col: u32, width: u32) -> bool {
+    let cell_end = col + width.saturating_sub(1);
+    cell_end >= selection.0 && col <= selection.1
+}
+
+fn resolve_selected_foreground(
+    original_fg: Rgba8Pixel,
+    original_bg: Rgba8Pixel,
+    default_fg: Rgba8Pixel,
+    selected_bg: Rgba8Pixel,
+) -> Rgba8Pixel {
+    if rgb_triplet(original_fg) == rgb_triplet(original_bg) {
+        return selected_bg;
+    }
+
+    let candidates = [
+        original_fg,
+        default_fg,
+        Rgba8Pixel {
+            a: 255,
+            r: 255,
+            g: 255,
+            b: 255,
+        },
+        Rgba8Pixel {
+            a: 255,
+            r: 0,
+            g: 0,
+            b: 0,
+        },
+    ];
+
+    candidates
+        .into_iter()
+        .max_by(|left, right| {
+            contrast_ratio(*left, selected_bg)
+                .partial_cmp(&contrast_ratio(*right, selected_bg))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or(original_fg)
+}
+
+fn rgb_triplet(color: Rgba8Pixel) -> (u8, u8, u8) {
+    (color.r, color.g, color.b)
+}
+
+fn contrast_ratio(fg: Rgba8Pixel, bg: Rgba8Pixel) -> f32 {
+    let fg_luma = relative_luminance(fg);
+    let bg_luma = relative_luminance(bg);
+    let (lighter, darker) = if fg_luma >= bg_luma {
+        (fg_luma, bg_luma)
+    } else {
+        (bg_luma, fg_luma)
+    };
+
+    (lighter + 0.05) / (darker + 0.05)
+}
+
+fn relative_luminance(color: Rgba8Pixel) -> f32 {
+    let channel = |value: u8| {
+        let normalized = f32::from(value) / 255.0;
+        if normalized <= 0.04045 {
+            normalized / 12.92
+        } else {
+            ((normalized + 0.055) / 1.055).powf(2.4)
+        }
+    };
+
+    0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
+}
+
+fn map_coverage_to_alpha(coverage: f32) -> u8 {
+    let adjusted = coverage.clamp(0.0, 1.0).powf(GLYPH_COVERAGE_GAMMA) * GLYPH_ALPHA_GAIN;
+    (adjusted.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ClusterLayout {
+    Ascii,
+    Wide,
+    Mixed,
+}
+
+fn classify_cluster_layout(text: &str, span: u32) -> ClusterLayout {
+    if span > 1 {
+        ClusterLayout::Wide
+    } else if text.is_ascii() {
+        ClusterLayout::Ascii
+    } else {
+        ClusterLayout::Mixed
+    }
 }
 
 fn blit_sprite(

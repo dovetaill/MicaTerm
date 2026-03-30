@@ -1,6 +1,6 @@
 use anyhow::Result;
 use mica_term::app::ssh::runtime::{TerminalSurfaceState, TerminalSession};
-use mica_term::app::terminal_atlas::TerminalAtlasRenderer;
+use mica_term::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
 use slint::Rgba8Pixel;
 use uuid::Uuid;
 
@@ -27,15 +27,21 @@ fn atlas_renderer_loads_sarasa_metrics_and_emits_a_surface_image() -> Result<()>
     let metrics = renderer.metrics();
     let frame = renderer.render(&surface)?;
 
-    assert!(metrics.cell_width >= 8);
-    assert!(metrics.cell_height >= 16);
     assert!(
-        metrics.cell_width <= 9,
+        metrics.cell_width >= 9,
+        "terminal cell width should grow slightly so the default Sarasa atlas no longer reads undersized"
+    );
+    assert!(
+        metrics.cell_height >= 23,
+        "terminal cell height should increase slightly so the default atlas text reads larger on standard-density displays"
+    );
+    assert!(
+        metrics.cell_width <= 10,
         "terminal cell width should stay compact for a monospace terminal grid"
     );
     assert!(
-        metrics.cell_height <= 22,
-        "terminal cell height should not keep the current overly loose vertical padding"
+        metrics.cell_height <= 24,
+        "terminal cell height should stay compact even after increasing readability"
     );
     assert!(
         metrics.baseline_px > 0 && metrics.baseline_px < metrics.cell_height,
@@ -84,6 +90,41 @@ fn atlas_renderer_only_redraws_rows_that_changed() -> Result<()> {
         second.rerendered_rows,
         vec![1],
         "only the modified row should be rerasterized between sequential frames"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn atlas_renderer_selection_changes_invalidate_and_repaint_rows() -> Result<()> {
+    let surface = render_surface(4, 24, "selected text\r\nnext row\r\n");
+    let mut renderer = TerminalAtlasRenderer::new()?;
+
+    let first = renderer.render(&surface)?;
+    let second = renderer.render_with_selection(
+        &surface,
+        Some(TerminalAtlasSelection::new(0, 0, 0, 7)),
+        0x6625_63eb,
+    )?;
+    let third = renderer.render_with_selection(
+        &surface,
+        Some(TerminalAtlasSelection::new(0, 0, 0, 7)),
+        0x6625_63eb,
+    )?;
+
+    assert_eq!(
+        second.rerendered_rows,
+        vec![0],
+        "selection-only changes should invalidate just the selected row"
+    );
+    assert!(
+        third.rerendered_rows.is_empty(),
+        "re-rendering the same selected frame should reuse cached row hashes"
+    );
+    assert_ne!(
+        first.image.to_rgba8().expect("rgba image before").as_slice(),
+        second.image.to_rgba8().expect("rgba image after").as_slice(),
+        "selection-aware rendering should visibly change the atlas pixel buffer"
     );
 
     Ok(())

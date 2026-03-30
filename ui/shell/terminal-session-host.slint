@@ -78,6 +78,7 @@ export component TerminalSessionHost inherits Rectangle {
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
     callback copy-selection-requested(int, int, int, int);
+    callback selection-changed();
     callback paste-requested();
     callback scroll-requested(int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
@@ -226,18 +227,33 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function sync-selection-state() {
+        let next-active = root.has-selection();
+        let next-start-row = next-active ? root.normalized-selection-start-row() : -1;
+        let next-start-col = next-active ? root.normalized-selection-start-col() : -1;
+        let next-end-row = next-active ? root.normalized-selection-end-row() : -1;
+        let next-end-col = next-active ? root.normalized-selection-end-col() : -1;
+        let changed = root.selection-active != next-active
+            || root.selection-start-row != next-start-row
+            || root.selection-start-col != next-start-col
+            || root.selection-end-row != next-end-row
+            || root.selection-end-col != next-end-col;
+
         if root.has-selection() {
-            root.selection-active = true;
-            root.selection-start-row = root.normalized-selection-start-row();
-            root.selection-start-col = root.normalized-selection-start-col();
-            root.selection-end-row = root.normalized-selection-end-row();
-            root.selection-end-col = root.normalized-selection-end-col();
+            root.selection-active = next-active;
+            root.selection-start-row = next-start-row;
+            root.selection-start-col = next-start-col;
+            root.selection-end-row = next-end-row;
+            root.selection-end-col = next-end-col;
         } else {
-            root.selection-active = false;
-            root.selection-start-row = -1;
-            root.selection-start-col = -1;
-            root.selection-end-row = -1;
-            root.selection-end-col = -1;
+            root.selection-active = next-active;
+            root.selection-start-row = next-start-row;
+            root.selection-start-col = next-start-col;
+            root.selection-end-row = next-end-row;
+            root.selection-end-col = next-end-col;
+        }
+
+        if changed {
+            root.selection-changed();
         }
     }
 

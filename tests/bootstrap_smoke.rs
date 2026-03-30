@@ -3993,6 +3993,65 @@ fn workspace_terminal_ctrl_shift_c_copies_selected_text_to_clipboard() {
 }
 
 #[test]
+fn workspace_terminal_selection_updates_surface_image() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    let before = app
+        .get_workspace_session_surface_image()
+        .to_rgba8()
+        .expect("rgba image before selection");
+
+    let selection_start = LogicalPosition::new(
+        app.get_layout_main_workspace_x() + 18.0,
+        app.get_layout_titlebar_height() + 56.0,
+    );
+    let selection_end = LogicalPosition::new(
+        app.get_layout_main_workspace_x() + 92.0,
+        app.get_layout_titlebar_height() + 56.0,
+    );
+
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: selection_start,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: selection_start,
+        button: PointerEventButton::Left,
+    });
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: selection_end,
+    });
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: selection_end,
+        button: PointerEventButton::Left,
+    });
+    settle_terminal_projection();
+
+    let after = app
+        .get_workspace_session_surface_image()
+        .to_rgba8()
+        .expect("rgba image after selection");
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "pointer drag should activate terminal selection state"
+    );
+    assert_ne!(
+        before.as_slice(),
+        after.as_slice(),
+        "terminal selection should visibly repaint the atlas surface image"
+    );
+}
+
+#[test]
 fn workspace_terminal_ctrl_shift_c_copies_selected_text_when_backend_emits_etx() {
     i_slint_backend_testing::init_no_event_loop();
 

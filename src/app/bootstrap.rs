@@ -53,7 +53,8 @@ use crate::app::ssh::session_manager::{
     OpenSessionMode, SessionHandle, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
     SessionState,
 };
-use crate::app::terminal_atlas::TerminalAtlasRenderer;
+use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
+use crate::app::terminal_theme::preset_for_theme_mode;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
@@ -2888,6 +2889,40 @@ fn slint_color_from_rgba(rgba: u32) -> Color {
     Color::from_argb_u8(a, r, g, b)
 }
 
+fn terminal_selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
+    let (red, green, blue, alpha) = preset_for_theme_mode(theme_mode).selection_bg;
+    let boosted_alpha = match theme_mode {
+        ThemeMode::Dark => (alpha * 1.35).clamp(0.0, 0.42),
+        ThemeMode::Light => (alpha * 1.5).clamp(0.0, 0.28),
+    };
+
+    ((boosted_alpha * 255.0).round() as u32) << 24
+        | (u32::from(red) << 16)
+        | (u32::from(green) << 8)
+        | u32::from(blue)
+}
+
+fn active_workspace_terminal_selection(window: &AppWindow) -> Option<TerminalAtlasSelection> {
+    if !window.get_workspace_session_selection_active() {
+        return None;
+    }
+
+    let start_row = window.get_workspace_session_selection_start_row();
+    let start_col = window.get_workspace_session_selection_start_col();
+    let end_row = window.get_workspace_session_selection_end_row();
+    let end_col = window.get_workspace_session_selection_end_col();
+    if start_row < 0 || start_col < 0 || end_row < 0 || end_col < 0 {
+        return None;
+    }
+
+    Some(TerminalAtlasSelection::new(
+        start_row as u32,
+        start_col as u32,
+        end_row as u32,
+        end_col as u32,
+    ))
+}
+
 fn sync_vec_model<T>(current: ModelRc<T>, next_rows: Vec<T>, replace: impl FnOnce(ModelRc<T>))
 where
     T: Clone + PartialEq + 'static,
@@ -2943,9 +2978,11 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
     });
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
+        let selection = active_workspace_terminal_selection(window);
+        let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
         WORKSPACE_TERMINAL_ATLAS_RENDERER.with(|renderer| {
             let mut renderer = renderer.borrow_mut();
-            match renderer.render(surface) {
+            match renderer.render_with_selection(surface, selection, selection_overlay_rgba) {
                 Ok(frame) => {
                     window.set_workspace_session_surface_image(frame.image);
                     window.set_workspace_session_cell_width(frame.metrics.cell_width as f32);
@@ -4769,6 +4806,16 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_workspace_session_resize_requested(move |rows, cols| {
         let state = state.borrow();
         forward_active_workspace_resize(&state, session_bridge_ref.as_deref(), rows, cols);
+    });
+
+    let state = Rc::clone(&view_model);
+    let window_handle = window.as_weak();
+    window.on_workspace_session_selection_changed(move || {
+        let Some(window) = window_handle.upgrade() else {
+            return;
+        };
+        let state = state.borrow();
+        sync_workspace_session_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
