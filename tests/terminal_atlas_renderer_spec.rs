@@ -20,8 +20,8 @@ fn unpack_rgba(color: u32) -> Rgba8Pixel {
 }
 
 #[test]
-fn atlas_renderer_loads_maple_metrics_and_emits_a_surface_image() -> Result<()> {
-    let surface = render_surface(4, 12, "hello maple\r\n");
+fn atlas_renderer_loads_sarasa_metrics_and_emits_a_surface_image() -> Result<()> {
+    let surface = render_surface(4, 12, "hello sarasa\r\n");
     let mut renderer = TerminalAtlasRenderer::new()?;
 
     let metrics = renderer.metrics();

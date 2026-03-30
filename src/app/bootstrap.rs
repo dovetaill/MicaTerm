@@ -120,7 +120,7 @@ const WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD: usize = 4;
 
 thread_local! {
     static WORKSPACE_TERMINAL_ATLAS_RENDERER: RefCell<TerminalAtlasRenderer> = RefCell::new(
-        TerminalAtlasRenderer::new().expect("bundled Maple atlas renderer should initialize")
+        TerminalAtlasRenderer::new().expect("bundled Sarasa atlas renderer should initialize")
     );
 }
 

@@ -1,6 +1,6 @@
 # Verification Reports
 
-## Maple Atlas Terminal Renderer Notes
+## Sarasa Atlas Terminal Renderer Notes
 
 Date: 2026-03-30 CST
 
@@ -15,8 +15,9 @@ Date: 2026-03-30 CST
 - `./build-win-x64-software.sh` is the Windows compatibility wrapper and packages the `winit-software` route.
 - `./build-release.sh` keeps the Linux x64 leg on the current default path and routes the Windows GNU leg through the software compatibility wrapper because `rust-skia` does not ship `x86_64-pc-windows-gnu` Skia binaries.
 - `Cargo.toml` still pins `i-slint-backend-winit` to `vendor/i-slint-backend-winit`, so the vendored Windows partial-visibility patch remains active.
-- `ui/fonts/MapleMonoNormalNL-NF-CN-Regular.ttf` is now the only bundled terminal font asset.
-- `src/app/terminal_atlas.rs` owns Maple font loading, cell metrics, sprite caching, dirty-row redraws, and `slint::Image` frame output.
+- `ui/fonts/SarasaTermSCNerd-Unhinted.ttf` is now the only bundled terminal font asset.
+- `src/app/terminal_atlas.rs` owns Sarasa font loading, cell metrics, sprite caching, dirty-row redraws, and `slint::Image` frame output.
+- `src/app/terminal_atlas.rs` now uses `ab_glyph` so glyph parsing stays lazy instead of paying `fontdue`'s larger upfront font expansion cost.
 - `ui/shell/terminal-session-host.slint` no longer renders one `Text` node per cell; it now consumes a single rendered image surface plus overlay metadata.
 
 ### Verification Status
@@ -291,15 +292,16 @@ Date: 2026-03-27 15:25:44 CST
 - [x] `Ctrl+Shift+<letter>` 保留命名空间已从远端输入路径剥离
 - [x] 单独按 `Ctrl` / `Shift` / `Alt` 不再进入远端输入
 - [x] wheel 已改为累积式、多行本地 scrollback，并保留 `mouse_grabbed` 远端鼠标优先级
-- [x] terminal 默认字体已切换到 bundled `Maple Mono Normal NL NF CN`
+- [x] terminal 默认字体已切换到 bundled `SarasaTermSCNerd-Unhinted`
 - [x] terminal 文本主路径已切换到 Rust atlas renderer + 单张 `slint::Image`
+- [x] terminal atlas 内核已从 `fontdue` 切换到 `ab_glyph`
 - [x] UI 侧逐 cell `Rectangle/Text` repeater 已移除
 - [x] terminal cell metrics 已由 Rust atlas renderer 直接提供给 overlay 命中测试与 resize 计算
 - [x] 本轮 follow-up 目标测试矩阵全部通过
 
 ### Manual Follow-up
 
-- [ ] Windows 11 实机核对 `Maple Mono Normal NL NF CN` 在常见 SSH/TUI 场景下的字宽、行高、cursor 对齐
+- [ ] Windows 11 实机核对 `SarasaTermSCNerd-Unhinted` 在常见 SSH/TUI 场景下的字宽、行高、cursor 对齐
 - [ ] Windows 11 实机核对 light / dark mode 下 blank canvas 与 ANSI 背景拼接是否完全连续
 - [ ] Windows 11 实机核对高分辨率触控板与普通鼠标在 wheel accumulation 下的体感差异
 - [ ] 长时间会话下观察 atlas sprite cache、surface buffer 与高频输出场景下的内存曲线

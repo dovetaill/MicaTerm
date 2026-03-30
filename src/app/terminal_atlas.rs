@@ -1,18 +1,16 @@
-//! Renders the active terminal grid into a single image surface using a Maple-backed sprite atlas.
+//! Renders the active terminal grid into a single image surface using a Sarasa-backed sprite atlas.
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use ab_glyph::{Font, FontArc, GlyphId, PxScale, ScaleFont, point};
 use anyhow::{Result, anyhow};
-use fontdue::layout::{CoordinateSystem, Layout, LayoutSettings, TextStyle};
-use fontdue::{Font, FontSettings};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
 
-const MAPLE_FONT_BYTES: &[u8] =
-    include_bytes!("../../ui/fonts/MapleMonoNormalNL-NF-CN-Regular.ttf");
+const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-Unhinted.ttf");
 const TERMINAL_FONT_SIZE_PX: f32 = 16.0;
 const MIN_CELL_WIDTH_PX: u32 = 9;
 const CELL_HORIZONTAL_PADDING_PX: u32 = 2;
@@ -33,7 +31,7 @@ pub struct TerminalSurfaceFrame {
 }
 
 pub struct TerminalAtlasRenderer {
-    font: Font,
+    font: FontArc,
     metrics: TerminalAtlasMetrics,
     sprite_cache: HashMap<ClusterKey, CachedClusterSprite>,
     row_hashes: Vec<u64>,
@@ -57,8 +55,8 @@ struct CachedClusterSprite {
 
 impl TerminalAtlasRenderer {
     pub fn new() -> Result<Self> {
-        let font = Font::from_bytes(MAPLE_FONT_BYTES, FontSettings::default())
-            .map_err(|error| anyhow!("failed to load bundled Maple terminal font: {error}"))?;
+        let font = FontArc::try_from_slice(SARASA_FONT_BYTES)
+            .map_err(|error| anyhow!("failed to load bundled Sarasa terminal font: {error}"))?;
         let metrics = compute_terminal_metrics(&font);
         Ok(Self {
             font,
@@ -101,7 +99,7 @@ impl TerminalAtlasRenderer {
             let next_hash =
                 hash_row(surface.cols, surface.default_bg_rgba, row_cells[row as usize].as_slice());
             if resized || self.row_hashes[row as usize] != next_hash {
-                self.render_row(row, surface.cols, surface.default_bg_rgba, &row_cells[row as usize])?;
+                self.render_row(row, surface.cols, surface.default_bg_rgba, &row_cells[row as usize]);
                 self.row_hashes[row as usize] = next_hash;
                 rerendered_rows.push(row);
             }
@@ -124,7 +122,7 @@ impl TerminalAtlasRenderer {
         cols: u32,
         default_bg_rgba: u32,
         cells: &[&TerminalCellState],
-    ) -> Result<()> {
+    ) {
         let row_y = row * self.metrics.cell_height;
         let row_bg = rgba8(default_bg_rgba);
         for y in row_y..row_y + self.metrics.cell_height {
@@ -164,8 +162,6 @@ impl TerminalAtlasRenderer {
                 rgba8(cell.fg_rgba),
             );
         }
-
-        Ok(())
     }
 
     fn ensure_cluster_sprite(&mut self, text: &str, span: u32) -> ClusterKey {
@@ -183,28 +179,16 @@ impl TerminalAtlasRenderer {
     }
 }
 
-fn compute_terminal_metrics(font: &Font) -> TerminalAtlasMetrics {
-    let line_metrics = font
-        .horizontal_line_metrics(TERMINAL_FONT_SIZE_PX)
-        .unwrap_or_else(|| {
-            let ascent = TERMINAL_FONT_SIZE_PX.ceil();
-            fontdue::LineMetrics {
-                ascent,
-                descent: 0.0,
-                line_gap: 0.0,
-                new_line_size: ascent,
-            }
-        });
-    let latin = font.metrics('M', TERMINAL_FONT_SIZE_PX);
-    let digit = font.metrics('0', TERMINAL_FONT_SIZE_PX);
-    let cjk = font.metrics('界', TERMINAL_FONT_SIZE_PX);
-    let cell_width = latin
-        .advance_width
-        .max(digit.advance_width)
-        .max(cjk.advance_width / 2.0)
+fn compute_terminal_metrics(font: &FontArc) -> TerminalAtlasMetrics {
+    let scaled = font.as_scaled(PxScale::from(TERMINAL_FONT_SIZE_PX));
+    let cell_width = scaled
+        .h_advance(scaled.glyph_id('M'))
+        .max(scaled.h_advance(scaled.glyph_id('0')))
+        .max(scaled.h_advance(scaled.glyph_id('界')) / 2.0)
         .ceil() as u32
         + CELL_HORIZONTAL_PADDING_PX;
-    let cell_height = line_metrics.new_line_size.ceil() as u32 + CELL_VERTICAL_PADDING_PX;
+    let line_height = (scaled.ascent() - scaled.descent() + scaled.line_gap()).ceil() as u32;
+    let cell_height = line_height + CELL_VERTICAL_PADDING_PX;
 
     TerminalAtlasMetrics {
         cell_width: cell_width.max(MIN_CELL_WIDTH_PX),
@@ -213,7 +197,7 @@ fn compute_terminal_metrics(font: &Font) -> TerminalAtlasMetrics {
 }
 
 fn rasterize_cluster_sprite(
-    font: &Font,
+    font: &FontArc,
     metrics: TerminalAtlasMetrics,
     text: &str,
     span: u32,
@@ -221,13 +205,41 @@ fn rasterize_cluster_sprite(
     let width = (span.max(1) * metrics.cell_width) as usize;
     let height = metrics.cell_height as usize;
     let mut alpha = vec![0u8; width * height];
+    let scaled = font.as_scaled(PxScale::from(TERMINAL_FONT_SIZE_PX));
+    let baseline = scaled.ascent();
+    let mut pen_x = 0.0f32;
+    let mut previous_id = None::<GlyphId>;
+    let mut outlined_glyphs = Vec::new();
+    let mut min_x = f32::MAX;
+    let mut min_y = f32::MAX;
+    let mut max_x = f32::MIN;
+    let mut max_y = f32::MIN;
 
-    let mut layout = Layout::new(CoordinateSystem::PositiveYDown);
-    layout.reset(&LayoutSettings::default());
-    layout.append(&[font], &TextStyle::new(text, TERMINAL_FONT_SIZE_PX, 0));
+    for ch in text.chars() {
+        if ch.is_control() {
+            continue;
+        }
 
-    let glyphs = layout.glyphs();
-    if glyphs.is_empty() {
+        let glyph_id = scaled.glyph_id(ch);
+        if let Some(prev) = previous_id {
+            pen_x += scaled.kern(prev, glyph_id);
+        }
+
+        let glyph = glyph_id.with_scale_and_position(PxScale::from(TERMINAL_FONT_SIZE_PX), point(pen_x, baseline));
+        if let Some(outlined) = font.outline_glyph(glyph) {
+            let bounds = outlined.px_bounds();
+            min_x = min_x.min(bounds.min.x);
+            min_y = min_y.min(bounds.min.y);
+            max_x = max_x.max(bounds.max.x);
+            max_y = max_y.max(bounds.max.y);
+            outlined_glyphs.push(outlined);
+        }
+
+        pen_x += scaled.h_advance(glyph_id);
+        previous_id = Some(glyph_id);
+    }
+
+    if outlined_glyphs.is_empty() {
         return CachedClusterSprite {
             width: width as u32,
             height: height as u32,
@@ -235,44 +247,26 @@ fn rasterize_cluster_sprite(
         };
     }
 
-    let mut min_x = f32::MAX;
-    let mut min_y = f32::MAX;
-    let mut max_x = f32::MIN;
-    let mut max_y = f32::MIN;
-    for glyph in glyphs {
-        min_x = min_x.min(glyph.x);
-        min_y = min_y.min(glyph.y);
-        max_x = max_x.max(glyph.x + glyph.width as f32);
-        max_y = max_y.max(glyph.y + glyph.height as f32);
-    }
+    let content_width = (max_x - min_x).ceil().max(0.0);
+    let content_height = (max_y - min_y).ceil().max(0.0);
+    let offset_x = ((width as f32 - content_width).max(0.0) / 2.0) - min_x;
+    let offset_y = ((height as f32 - content_height).max(0.0) / 2.0) - min_y;
 
-    let content_width = (max_x - min_x).ceil().max(0.0) as i32;
-    let content_height = (max_y - min_y).ceil().max(0.0) as i32;
-    let x_offset = ((width as i32 - content_width).max(0) / 2) - min_x.floor() as i32;
-    let y_offset = ((height as i32 - content_height).max(0) / 2) - min_y.floor() as i32;
-
-    for glyph in glyphs {
-        let (glyph_metrics, glyph_alpha) = font.rasterize_config(glyph.key);
-        let glyph_x = glyph.x.floor() as i32 + x_offset;
-        let glyph_y = glyph.y.floor() as i32 + y_offset;
-
-        for local_y in 0..glyph_metrics.height {
-            let target_y = glyph_y + local_y as i32;
-            if !(0..height as i32).contains(&target_y) {
-                continue;
+    for outlined in outlined_glyphs {
+        let bounds = outlined.px_bounds();
+        let glyph_origin_x = (offset_x + bounds.min.x).round() as i32;
+        let glyph_origin_y = (offset_y + bounds.min.y).round() as i32;
+        outlined.draw(|x, y, coverage| {
+            let target_x = glyph_origin_x + x as i32;
+            let target_y = glyph_origin_y + y as i32;
+            if !(0..width as i32).contains(&target_x) || !(0..height as i32).contains(&target_y) {
+                return;
             }
 
-            for local_x in 0..glyph_metrics.width {
-                let target_x = glyph_x + local_x as i32;
-                if !(0..width as i32).contains(&target_x) {
-                    continue;
-                }
-
-                let mask_index = target_y as usize * width + target_x as usize;
-                let source_index = local_y * glyph_metrics.width + local_x;
-                alpha[mask_index] = alpha[mask_index].max(glyph_alpha[source_index]);
-            }
-        }
+            let mask_index = target_y as usize * width + target_x as usize;
+            let next_alpha = (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
+            alpha[mask_index] = alpha[mask_index].max(next_alpha);
+        });
     }
 
     CachedClusterSprite {
