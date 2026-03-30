@@ -1,6 +1,10 @@
 use anyhow::Result;
 use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
 use mica_term::app::terminal_atlas::{ClusterSpriteKind, TerminalAtlasRenderer};
+use mica_term::app::terminal_emoji::{
+    ClusterRenderKind, EmojiFallbackReason, EmojiFontResolution, TerminalEmojiResolver,
+    classify_cluster_render_kind,
+};
 use slint::Rgba8Pixel;
 use uuid::Uuid;
 
@@ -80,4 +84,39 @@ fn repeated_emoji_cells_use_cached_color_sprite_entries() -> Result<()> {
     );
 
     Ok(())
+}
+
+#[test]
+fn classify_cluster_render_kind_routes_emoji_clusters_to_color_rendering() {
+    for text in ["🦀", "📦", "🌐", "❤️", "👨‍💻"] {
+        assert_eq!(
+            classify_cluster_render_kind(text),
+            ClusterRenderKind::Emoji,
+            "`{text}` should classify as an emoji-rendered cluster"
+        );
+    }
+}
+
+#[test]
+fn classify_cluster_render_kind_keeps_private_use_and_ascii_clusters_on_mono_path() {
+    for text in ["", "ascii", "git"] {
+        assert_eq!(
+            classify_cluster_render_kind(text),
+            ClusterRenderKind::Mono,
+            "`{text}` should stay on the mono terminal atlas path"
+        );
+    }
+}
+
+#[test]
+fn emoji_resolver_reports_a_visible_fallback_when_no_preferred_font_is_available() {
+    let resolver = TerminalEmojiResolver::from_database(fontdb::Database::new());
+
+    assert_eq!(
+        resolver.resolve_preferred_font(),
+        EmojiFontResolution::VisibleFallback {
+            replacement_text: "�".to_string(),
+            reason: EmojiFallbackReason::MissingPreferredFont,
+        }
+    );
 }
