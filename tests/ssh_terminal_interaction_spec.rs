@@ -1,6 +1,7 @@
 use std::fs;
 
 use mica_term::app::ssh::runtime::{TerminalKeyEvent, TerminalSession};
+use mica_term::app::terminal_theme::preset_for_theme_mode;
 use mica_term::theme::ThemeMode;
 use uuid::Uuid;
 
@@ -159,6 +160,7 @@ fn light_theme_palette_changes_default_background_projection() {
 #[test]
 fn light_theme_palette_preserves_mica_code_light_ansi_black_bright_white_and_default_backgrounds() {
     let mut session = TerminalSession::new(24, 80);
+    let preset = preset_for_theme_mode(ThemeMode::Light);
 
     session.set_theme_mode(ThemeMode::Light);
     session.apply_remote_bytes(b"\x1b[40mA\x1b[0m\x1b[107mB\x1b[0mC");
@@ -180,9 +182,16 @@ fn light_theme_palette_preserves_mica_code_light_ansi_black_bright_white_and_def
         .find(|cell| cell.col == 2)
         .expect("default background cell after reset");
 
-    assert_eq!(ansi_black.bg_rgba, 0xff1f_2328);
+    let (ansi_black_r, ansi_black_g, ansi_black_b) = preset.ansi[0];
+    assert_eq!(
+        ansi_black.bg_rgba,
+        0xff00_0000
+            | (u32::from(ansi_black_r) << 16)
+            | (u32::from(ansi_black_g) << 8)
+            | u32::from(ansi_black_b)
+    );
     assert_eq!(ansi_bright_white.bg_rgba, 0xffff_ffff);
-    assert_eq!(default_after_reset.bg_rgba, 0xfff7_f9fc);
+    assert_eq!(default_after_reset.bg_rgba, 0xff00_0000 | preset.background);
 }
 
 #[test]

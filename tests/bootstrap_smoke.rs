@@ -43,6 +43,7 @@ use mica_term::app::ssh::runtime::{
     TerminalSurfaceState, UnknownHostKeyError,
 };
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
+use mica_term::app::terminal_theme::preset_for_theme_mode;
 use mica_term::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
 };
@@ -66,6 +67,7 @@ use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, Model};
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use mica_term::theme::ThemeMode;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -4961,7 +4963,7 @@ fn bootstrap_projects_dark_terminal_cursor_as_light_grey() {
 
     assert_eq!(
         app.get_workspace_session_cursor_bg().as_argb_encoded(),
-        0xffcd_d2db
+        0xff00_0000 | preset_for_theme_mode(ThemeMode::Dark).cursor_bg
     );
 }
 
