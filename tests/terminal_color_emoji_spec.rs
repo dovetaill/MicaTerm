@@ -2,8 +2,9 @@ use anyhow::Result;
 use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
 use mica_term::app::terminal_atlas::{ClusterSpriteKind, TerminalAtlasRenderer};
 use mica_term::app::terminal_emoji::{
-    ClusterRenderKind, EmojiFallbackReason, EmojiFontResolution, TerminalEmojiResolver,
-    classify_cluster_render_kind,
+    ClusterRenderKind, EmojiFallbackReason, EmojiFontRasterizeRequest, EmojiRasterizerBackend,
+    EmojiRenderOutcome, EmojiSprite, EmojiFontResolution, ResolvedEmojiFont,
+    TerminalEmojiRenderer, TerminalEmojiResolver, classify_cluster_render_kind,
 };
 use slint::Rgba8Pixel;
 use uuid::Uuid;
@@ -117,6 +118,70 @@ fn emoji_resolver_reports_a_visible_fallback_when_no_preferred_font_is_available
         EmojiFontResolution::VisibleFallback {
             replacement_text: "�".to_string(),
             reason: EmojiFallbackReason::MissingPreferredFont,
+        }
+    );
+}
+
+#[derive(Clone)]
+struct FakeEmojiRasterizerBackend {
+    sprite: Option<EmojiSprite>,
+}
+
+impl EmojiRasterizerBackend for FakeEmojiRasterizerBackend {
+    fn rasterize(&self, request: EmojiFontRasterizeRequest<'_>) -> Option<EmojiSprite> {
+        assert_eq!(request.text, "🦀");
+        assert_eq!(request.span, 1);
+        assert_eq!(request.cell_width, 10);
+        assert_eq!(request.cell_height, 22);
+        self.sprite.clone()
+    }
+}
+
+#[test]
+fn emoji_rasterizer_returns_rgba_sprite_data_from_backend() {
+    let renderer = TerminalEmojiRenderer::with_backend(
+        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(
+            ResolvedEmojiFont {
+                face_id: fontdb::ID::dummy(),
+                family_name: "Noto Color Emoji".to_string(),
+            },
+        )),
+        Box::new(FakeEmojiRasterizerBackend {
+            sprite: Some(EmojiSprite {
+                width: 2,
+                height: 1,
+                rgba: vec![255, 0, 0, 255, 0, 255, 0, 255],
+            }),
+        }),
+    );
+
+    assert_eq!(
+        renderer.rasterize_cluster("🦀", 1, 10, 22),
+        EmojiRenderOutcome::Sprite(EmojiSprite {
+            width: 2,
+            height: 1,
+            rgba: vec![255, 0, 0, 255, 0, 255, 0, 255],
+        })
+    );
+}
+
+#[test]
+fn emoji_rasterizer_returns_visible_fallback_on_backend_failure() {
+    let renderer = TerminalEmojiRenderer::with_backend(
+        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(
+            ResolvedEmojiFont {
+                face_id: fontdb::ID::dummy(),
+                family_name: "Noto Color Emoji".to_string(),
+            },
+        )),
+        Box::new(FakeEmojiRasterizerBackend { sprite: None }),
+    );
+
+    assert_eq!(
+        renderer.rasterize_cluster("🦀", 1, 10, 22),
+        EmojiRenderOutcome::VisibleFallback {
+            replacement_text: "�".to_string(),
+            reason: EmojiFallbackReason::RasterizationFailed,
         }
     );
 }
