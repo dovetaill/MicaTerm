@@ -24,6 +24,18 @@ Date: 2026-03-30 CST
 
 - The focused renderer/font verification matrix completed on 2026-03-30 and the active tests passed.
 
+### Migration Status
+
+- Windows-first native renderer:
+  - presenter -> model -> layout -> renderer chain is active for the staged native path
+  - runtime logging now emits both Slint `renderer_mode` and terminal `terminal_render_mode`
+- bitmap fallback:
+  - non-Windows builds remain on the bitmap presenter
+  - Windows native presenter setup failure falls back to bitmap instead of leaving the surface blank
+- Follow-up scope:
+  - Linux/macOS native renderer work is still pending
+  - Windows 11 visual QA is still required for final text quality sign-off
+
 ## Top Status Bar Style Bugfix3 Verification
 
 Date: 2026-03-11 14:33:42 CST

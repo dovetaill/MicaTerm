@@ -14,9 +14,25 @@ pub enum RendererMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalRenderMode {
+    Bitmap,
+    Native,
+}
+
+impl TerminalRenderMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bitmap => "bitmap",
+            Self::Native => "native",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppRuntimeProfile {
     pub build_flavor: AppBuildFlavor,
     pub renderer_mode: RendererMode,
+    pub terminal_render_mode: TerminalRenderMode,
 }
 
 impl AppRuntimeProfile {
@@ -24,6 +40,7 @@ impl AppRuntimeProfile {
         Self {
             build_flavor: AppBuildFlavor::Development,
             renderer_mode: RendererMode::Software,
+            terminal_render_mode: TerminalRenderMode::Bitmap,
         }
     }
 
@@ -31,6 +48,15 @@ impl AppRuntimeProfile {
         Self {
             build_flavor: AppBuildFlavor::WindowsMainline,
             renderer_mode: RendererMode::SkiaSoftware,
+            terminal_render_mode: TerminalRenderMode::Bitmap,
+        }
+    }
+
+    pub fn mainline_native() -> Self {
+        Self {
+            build_flavor: AppBuildFlavor::WindowsMainline,
+            renderer_mode: RendererMode::SkiaSoftware,
+            terminal_render_mode: TerminalRenderMode::Native,
         }
     }
 
@@ -38,6 +64,7 @@ impl AppRuntimeProfile {
         Self {
             build_flavor: AppBuildFlavor::WindowsSoftwareCompat,
             renderer_mode: RendererMode::Software,
+            terminal_render_mode: TerminalRenderMode::Bitmap,
         }
     }
 
@@ -46,7 +73,7 @@ impl AppRuntimeProfile {
             option_env!("MICA_TERM_BUILD_FLAVOR"),
             option_env!("MICA_TERM_PACKAGE_RENDERER"),
         ) {
-            (Some("windows-mainline"), Some("skia-software")) => Self::mainline(),
+            (Some("windows-mainline"), Some("skia-software")) => Self::mainline_native(),
             (Some("windows-software-compat"), Some("software")) => Self::software_compat(),
             _ => Self::development(),
         }
@@ -68,5 +95,13 @@ impl AppRuntimeProfile {
             RendererMode::Software => "winit-software",
             RendererMode::SkiaSoftware => "winit-skia-software",
         }
+    }
+
+    pub fn terminal_render_mode(self) -> TerminalRenderMode {
+        self.terminal_render_mode
+    }
+
+    pub fn terminal_render_mode_label(self) -> &'static str {
+        self.terminal_render_mode().as_str()
     }
 }

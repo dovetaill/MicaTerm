@@ -18,8 +18,9 @@ fn apply_renderer_selector(profile: AppRuntimeProfile) -> anyhow::Result<()> {
         .map_err(anyhow::Error::from)
         .with_context(|| {
             format!(
-                "failed to select {} backend for packaged runtime",
-                profile.selector_label()
+                "failed to select {} backend for packaged runtime with {} terminal rendering",
+                profile.selector_label(),
+                profile.terminal_render_mode_label(),
             )
         })
 }

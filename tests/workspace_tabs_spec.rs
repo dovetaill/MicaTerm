@@ -5,7 +5,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use mica_term::AppWindow;
-use mica_term::app::bootstrap::bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher;
+use mica_term::app::bootstrap::{
+    bind_top_status_bar_with_profile,
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher,
+};
+use mica_term::app::runtime_profile::AppRuntimeProfile;
 use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::runtime::{
     SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceState,
@@ -210,6 +214,33 @@ fn workspace_tab_projection_does_not_encode_container_width_behavior() {
 }
 
 #[test]
+fn runtime_profile_source_exposes_terminal_render_mode_accessor() {
+    let runtime_profile =
+        fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
+
+    assert!(
+        runtime_profile.contains("pub fn terminal_render_mode(self) -> TerminalRenderMode"),
+        "runtime profile should expose an accessor for the selected terminal render mode"
+    );
+}
+
+#[test]
+fn native_profile_falls_back_to_bitmap_terminal_render_mode_off_windows() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().expect("create app window");
+    bind_top_status_bar_with_profile(&app, AppRuntimeProfile::mainline_native());
+
+    let expected = if cfg!(target_os = "windows") {
+        "native"
+    } else {
+        "bitmap"
+    };
+
+    assert_eq!(app.get_workspace_session_render_mode(), expected);
+}
+
+#[test]
 fn closing_active_tab_falls_back_to_right_then_left_then_welcome() {
     let first = WorkspaceTab::from_session(&sample_handle(
         "Prod Bastion",
@@ -396,6 +427,34 @@ fn connected_session_projects_terminal_surface_state_without_placeholder_copy() 
             .workspace_terminal_visible_lines()
             .iter()
             .any(|line| line.contains("last login"))
+    );
+
+    view_model.set_active_workspace_terminal_surface(Some(
+        TerminalSurfaceState::from_visible_lines(
+            handle.session_id,
+            4,
+            24,
+            80,
+            vec!["last login: Tue Mar 24".into(), "$ pwd".into()],
+        ),
+    ));
+
+    assert_eq!(view_model.workspace_terminal_surface_seqno(), 4);
+    assert!(
+        view_model
+            .workspace_terminal_visible_lines()
+            .iter()
+            .any(|line| line.contains("$ pwd")),
+        "active terminal surface refreshes should update the visible terminal output projection"
+    );
+
+    view_model.set_active_workspace_terminal_surface(None);
+
+    assert!(!view_model.workspace_terminal_surface_ready());
+    assert_eq!(
+        view_model.workspace_terminal_visible_lines(),
+        Vec::<String>::new(),
+        "clearing the active terminal surface should clear the published terminal frame state"
     );
     assert!(
         !terminal_host.contains("Interactive terminal ready."),

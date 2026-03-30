@@ -2,6 +2,7 @@ use mica_term::app::ssh::runtime::{
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
 };
 use uuid::Uuid;
+use std::fs;
 
 #[test]
 fn wheel_without_mouse_grab_scrolls_local_viewport() {
@@ -76,4 +77,27 @@ fn remote_output_keeps_following_when_viewport_is_at_bottom() {
     assert!(before.viewport_at_bottom);
     assert!(after.viewport_at_bottom);
     assert!(after.visible_lines.iter().any(|line| line == "7"));
+}
+
+#[test]
+fn renderer_migration_docs_describe_windows_native_status_and_bitmap_fallback() {
+    let readme = fs::read_to_string("readme.md").expect("read readme");
+    let verification = fs::read_to_string("verification.md").expect("read verification");
+
+    assert!(
+        readme.contains("Windows-first native renderer"),
+        "readme should document the current Windows-first native renderer status"
+    );
+    assert!(
+        readme.contains("Linux/macOS"),
+        "readme should document the pending Linux/macOS follow-up work"
+    );
+    assert!(
+        verification.contains("bitmap fallback"),
+        "verification notes should call out the bitmap fallback path"
+    );
+    assert!(
+        verification.contains("Windows-first native renderer"),
+        "verification notes should include the Windows-first native renderer verification status"
+    );
 }

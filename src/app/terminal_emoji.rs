@@ -147,6 +147,12 @@ impl TerminalEmojiRenderer {
     }
 }
 
+impl Default for TerminalEmojiRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TerminalEmojiResolver {
     pub fn new() -> Self {
         let mut database = Database::new();
@@ -180,6 +186,12 @@ impl TerminalEmojiResolver {
             ResolverSource::Database(database) => database.with_face_data(face_id, f),
             ResolverSource::Fixed(_) => None,
         }
+    }
+}
+
+impl Default for TerminalEmojiResolver {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -379,8 +391,8 @@ fn compose_rendered_glyphs(
         return None;
     }
 
-    let content_width = (max_x - min_x) as i32;
-    let content_height = (max_y - min_y) as i32;
+    let content_width = max_x - min_x;
+    let content_height = max_y - min_y;
     let pad_x = ((sprite_width as i32 - content_width).max(0)) / 2;
     let pad_y = ((sprite_height as i32 - content_height).max(0)) / 2;
     let mut rgba = vec![0u8; (sprite_width * sprite_height * 4) as usize];
@@ -411,6 +423,7 @@ fn compose_rendered_glyphs(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn blit_rgba_glyph(
     dst: &mut [u8],
     dst_width: u32,

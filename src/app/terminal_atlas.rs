@@ -258,6 +258,7 @@ impl TerminalAtlasRenderer {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_row(
         &mut self,
         row: u32,
@@ -436,7 +437,7 @@ impl TerminalAtlasRenderer {
 }
 
 fn row_background_rgba(surface: &TerminalSurfaceState, row: u32) -> u32 {
-    if row % 2 == 0 {
+    if row.is_multiple_of(2) {
         surface.row_bg_even_rgba
     } else {
         surface.row_bg_odd_rgba
@@ -578,6 +579,7 @@ fn rgba8(color: u32) -> Rgba8Pixel {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fill_rect(
     pixels: &mut [Rgba8Pixel],
     surface_width_px: u32,

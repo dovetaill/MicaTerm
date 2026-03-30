@@ -1,3 +1,5 @@
+use std::fs;
+
 use mica_term::app::ssh::runtime::{
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
 };
@@ -240,6 +242,26 @@ fn terminal_surface_projection_tracks_cursor_colors_and_filters_bracketed_paste_
     assert_ne!(
         prompt_prefix.fg_rgba, prompt_prefix.bg_rgba,
         "ANSI-colored prompt text should retain distinct foreground/background colors in the surface projection"
+    );
+}
+
+#[test]
+fn terminal_font_backend_owns_cell_metrics_contract_beyond_legacy_atlas_renderer() {
+    let atlas_source = fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");
+    let font_backend =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read terminal font backend");
+
+    assert!(
+        atlas_source.contains("compute_terminal_metrics"),
+        "legacy atlas renderer still computes bitmap metrics during the migration"
+    );
+    assert!(
+        font_backend.contains("pub struct FontMetrics"),
+        "terminal font backend should expose a shared FontMetrics contract outside the legacy atlas renderer"
+    );
+    assert!(
+        font_backend.contains("pub cell_width_px"),
+        "shared font metrics should own cell width information for the shaping pipeline"
     );
 }
 

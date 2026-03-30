@@ -499,6 +499,24 @@ Slint 只保留：
 
 > 不再继续调 atlas 参数，而是把当前“整屏 bitmap 终端”升级为“成熟文本后端 + per-glyph renderer”的终端。
 
+## 当前落地状态（2026-03-30）
+
+- Windows-first native renderer 已完成 presenter / model / layout / staged renderer 骨架接线
+- Windows mainline 打包配置可请求 native terminal render mode，但运行时仍保留 bitmap fallback
+- Linux/macOS 目前继续走 bitmap presenter，后续再补 native backend
+- 当前版本的重点不是一次性替换所有平台，而是先把 Windows 文本链路与回退路径稳定下来
+
+## Follow-up Backlog
+
+- Follow-up backlog document: `docs/plans/2026-03-30-terminal-rendering-stack-follow-up.md`
+- The backlog explicitly tracks `linux_freetype_fontconfig.rs`, `macos_coretext.rs`, moving
+  cursor/selection fully into the renderer, and the trigger conditions for switching to the
+  `libghostty` stop-loss route.
+- Trigger conditions for switching to the `libghostty` stop-loss route:
+  - Slint native surface integration remains unstable for redraw, resize, or input mapping
+  - Linux/macOS native backend work would require another architecture rewrite
+  - Windows-first native renderer still misses the required text quality after reasonable iteration
+
 ## 参考资料
 
 - [Ghostty README](https://github.com/ghostty-org/ghostty)

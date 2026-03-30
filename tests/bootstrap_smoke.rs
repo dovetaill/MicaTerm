@@ -71,6 +71,60 @@ use mica_term::theme::ThemeMode;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
 
+#[test]
+fn bootstrap_source_uses_terminal_presenter_contract() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("TerminalPresenter"),
+        "bootstrap should depend on a terminal presenter seam instead of calling the atlas renderer directly"
+    );
+    assert!(
+        bootstrap_source.contains("PresentedTerminalFrame"),
+        "bootstrap should project presenter output through a PresentedTerminalFrame contract"
+    );
+    assert!(
+        !bootstrap_source.contains("TerminalAtlasRenderer::new()"),
+        "bootstrap should stop constructing TerminalAtlasRenderer directly once the presenter boundary exists"
+    );
+}
+
+#[test]
+fn bootstrap_source_threads_native_terminal_surface_contract() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("NativeTerminalSurface"),
+        "bootstrap should depend on a native terminal surface hook once native terminal rendering is introduced"
+    );
+    assert!(
+        bootstrap_source.contains("set_workspace_session_render_mode"),
+        "bootstrap should publish the active terminal render mode to the Slint window"
+    );
+    assert!(
+        bootstrap_source.contains("set_workspace_session_native_frame_token"),
+        "bootstrap should publish native frame tokens for the renderer hook path"
+    );
+}
+
+#[test]
+fn bootstrap_source_uses_windows_native_terminal_presenter_for_native_frames() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("WindowsNativePresenter"),
+        "bootstrap should install a Windows native terminal presenter once the native text path exists"
+    );
+    assert!(
+        bootstrap_source.contains("PresentedTerminalFrame::Native(frame)"),
+        "bootstrap should consume native terminal frames from the presenter seam"
+    );
+    assert!(
+        !bootstrap_source.contains("frame_token: u64::try_from(surface.seqno)"),
+        "bootstrap should stop synthesizing native frame tokens directly from surface seqno once the native renderer owns frame preparation"
+    );
+}
+
 #[derive(Default)]
 struct AssetRepoState {
     load_calls: usize,

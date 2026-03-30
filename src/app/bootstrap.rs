@@ -33,7 +33,7 @@ use crate::app::keychain::{
     derive_public_key_material_from_private_key, derive_public_key_material_from_public_key,
     resolve_saved_ssh_profile,
 };
-use crate::app::runtime_profile::AppRuntimeProfile;
+use crate::app::runtime_profile::{AppRuntimeProfile, TerminalRenderMode};
 use crate::app::ssh::credentials::{
     CachedCredentialStore, CredentialStore, EncryptedFileCredentialStore, FallbackCredentialStore,
     FileCredentialStore, MirroredCredentialStore, StoredKeychainKeySecretBundle,
@@ -53,7 +53,12 @@ use crate::app::ssh::session_manager::{
     OpenSessionMode, SessionHandle, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
     SessionState,
 };
-use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
+use crate::app::terminal_atlas::TerminalAtlasSelection;
+use crate::app::terminal_presenter::{
+    BitmapAtlasPresenter, NativeTerminalFrame, PresentedTerminalFrame,
+    TerminalPresentationOptions, TerminalPresenter, WindowsNativePresenter,
+};
+use crate::app::terminal_renderer::{NativeTerminalSurface, NativeTerminalSurfaceRect};
 use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
@@ -120,9 +125,14 @@ const MAX_SSH_PROXY_CHAIN_DEPTH: usize = 8;
 const WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD: usize = 4;
 
 thread_local! {
-    static WORKSPACE_TERMINAL_ATLAS_RENDERER: RefCell<TerminalAtlasRenderer> = RefCell::new(
-        TerminalAtlasRenderer::new().expect("bundled Sarasa atlas renderer should initialize")
+    static WORKSPACE_TERMINAL_PRESENTER: RefCell<Box<dyn TerminalPresenter>> = RefCell::new(
+        Box::new(
+            BitmapAtlasPresenter::new().expect("bundled Sarasa presenter should initialize")
+        )
     );
+    static WORKSPACE_NATIVE_TERMINAL_SURFACE: RefCell<Option<NativeTerminalSurface>> = const {
+        RefCell::new(None)
+    };
 }
 
 #[derive(Clone)]
@@ -3000,6 +3010,91 @@ where
     }
 }
 
+fn build_workspace_terminal_presenter(
+    profile: AppRuntimeProfile,
+) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)> {
+    if cfg!(target_os = "windows") && matches!(profile.terminal_render_mode, TerminalRenderMode::Native)
+    {
+        return Ok((
+            Box::new(WindowsNativePresenter::new()?),
+            TerminalRenderMode::Native,
+        ));
+    }
+
+    Ok((
+        Box::new(BitmapAtlasPresenter::new()?),
+        TerminalRenderMode::Bitmap,
+    ))
+}
+
+fn install_workspace_terminal_presenter(window: &AppWindow, profile: AppRuntimeProfile) {
+    let (presenter, active_render_mode) = match build_workspace_terminal_presenter(profile) {
+        Ok(presenter) => presenter,
+        Err(err) => {
+            tracing::error!(
+                target: "app.terminal",
+                error = %err,
+                "failed to build requested terminal presenter; falling back to bitmap presenter"
+            );
+            (
+                Box::new(
+                    BitmapAtlasPresenter::new()
+                        .expect("bundled Sarasa presenter should initialize after fallback"),
+                ) as Box<dyn TerminalPresenter>,
+                TerminalRenderMode::Bitmap,
+            )
+        }
+    };
+
+    WORKSPACE_TERMINAL_PRESENTER.with(|cell| {
+        *cell.borrow_mut() = presenter;
+    });
+    window.set_workspace_session_render_mode(active_render_mode.as_str().into());
+    if matches!(active_render_mode, TerminalRenderMode::Bitmap) {
+        window.set_workspace_session_native_frame_token(0);
+    }
+}
+
+fn workspace_native_terminal_rect(window: &AppWindow) -> NativeTerminalSurfaceRect {
+    NativeTerminalSurfaceRect {
+        x: window.get_layout_workspace_session_native_surface_x() as i32,
+        y: window.get_layout_workspace_session_native_surface_y() as i32,
+        width: window.get_layout_workspace_session_native_surface_width() as i32,
+        height: window.get_layout_workspace_session_native_surface_height() as i32,
+    }
+}
+
+fn sync_workspace_native_terminal_surface_geometry(window: &AppWindow) {
+    let rect = workspace_native_terminal_rect(window);
+    WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
+        if let Some(surface) = surface.borrow().as_ref() {
+            surface.update_terminal_rect(rect);
+        }
+    });
+}
+
+fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerminalFrame) {
+    window.set_workspace_session_surface_image(Image::default());
+    window.set_workspace_session_native_frame_token(
+        i32::try_from(frame.frame_token).unwrap_or(i32::MAX),
+    );
+    WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
+        if let Some(surface) = surface.borrow().as_ref() {
+            surface.present(frame);
+        }
+    });
+}
+
+fn clear_workspace_native_terminal_frame(window: &AppWindow) {
+    window.set_workspace_session_surface_image(Image::default());
+    window.set_workspace_session_native_frame_token(0);
+    WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
+        if let Some(surface) = surface.borrow().as_ref() {
+            surface.clear_frame();
+        }
+    });
+}
+
 fn sync_workspace_session_state(
     window: &AppWindow,
     state: &ShellViewModel,
@@ -3019,24 +3114,38 @@ fn sync_workspace_session_state(
         |model| window.set_workspace_session_visible_lines(model),
     );
 
-    WORKSPACE_TERMINAL_ATLAS_RENDERER.with(|renderer| {
-        let metrics = renderer.borrow().metrics();
-        window.set_workspace_session_cell_width(metrics.cell_width as f32);
-        window.set_workspace_session_cell_height(metrics.cell_height as f32);
-    });
+    let (default_cell_width_px, default_cell_height_px) =
+        WORKSPACE_TERMINAL_PRESENTER.with(|presenter| presenter.borrow().default_cell_size());
+    window.set_workspace_session_cell_width(default_cell_width_px as f32);
+    window.set_workspace_session_cell_height(default_cell_height_px as f32);
+    sync_workspace_native_terminal_surface_geometry(window);
 
     let follow_indicator = follow_tracker.indicator_for_surface(state.active_workspace_terminal_surface());
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
         let selection = active_workspace_terminal_selection(window);
         let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
-        WORKSPACE_TERMINAL_ATLAS_RENDERER.with(|renderer| {
-            let mut renderer = renderer.borrow_mut();
-            match renderer.render_with_selection(surface, selection, selection_overlay_rgba) {
-                Ok(frame) => {
+        WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
+            let mut presenter = presenter.borrow_mut();
+            match presenter.present(
+                surface,
+                TerminalPresentationOptions {
+                    selection,
+                    selection_overlay_rgba,
+                },
+            ) {
+                Ok(PresentedTerminalFrame::Bitmap(frame)) => {
+                    window.set_workspace_session_render_mode(TerminalRenderMode::Bitmap.as_str().into());
                     window.set_workspace_session_surface_image(frame.image);
-                    window.set_workspace_session_cell_width(frame.metrics.cell_width as f32);
-                    window.set_workspace_session_cell_height(frame.metrics.cell_height as f32);
+                    window.set_workspace_session_native_frame_token(0);
+                    window.set_workspace_session_cell_width(frame.cell_width_px as f32);
+                    window.set_workspace_session_cell_height(frame.cell_height_px as f32);
+                }
+                Ok(PresentedTerminalFrame::Native(frame)) => {
+                    window.set_workspace_session_render_mode(TerminalRenderMode::Native.as_str().into());
+                    window.set_workspace_session_cell_width(frame.cell_width_px as f32);
+                    window.set_workspace_session_cell_height(frame.cell_height_px as f32);
+                    present_workspace_native_terminal_frame(window, frame);
                 }
                 Err(err) => {
                     tracing::error!(
@@ -3045,7 +3154,10 @@ fn sync_workspace_session_state(
                         error = %err,
                         "failed to render workspace terminal atlas surface"
                     );
-                    window.set_workspace_session_surface_image(Image::default());
+                    window.set_workspace_session_render_mode(TerminalRenderMode::Bitmap.as_str().into());
+                    window.set_workspace_session_cell_width(default_cell_width_px as f32);
+                    window.set_workspace_session_cell_height(default_cell_height_px as f32);
+                    clear_workspace_native_terminal_frame(window);
                 }
             }
         });
@@ -3102,7 +3214,7 @@ fn sync_workspace_session_state(
         window.set_workspace_session_default_bg(slint_color_from_rgba(
             0xff00_0000 | preset.background,
         ));
-        window.set_workspace_session_surface_image(Image::default());
+        clear_workspace_native_terminal_frame(window);
         window.set_workspace_session_mouse_grabbed(false);
         window.set_workspace_session_viewport_offset_lines(0);
         window.set_workspace_session_viewport_max_offset_lines(0);
@@ -3173,6 +3285,7 @@ fn sync_shell_layout(
     window.set_shell_body_height_cache(
         logical_height.saturating_sub(ShellMetrics::TITLEBAR_HEIGHT) as f32,
     );
+    sync_workspace_native_terminal_surface_geometry(window);
     update_context_menu_placement(window, state);
     sync_assets_context_menu_state(window, state);
 }
@@ -3822,7 +3935,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
 fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window: &AppWindow,
     store: Option<UiPreferencesStore>,
-    _profile: AppRuntimeProfile,
+    profile: AppRuntimeProfile,
     effects: Rc<dyn PlatformWindowEffects>,
     asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
     session_bridge: Option<Rc<ShellSessionBridge>>,
@@ -3886,6 +3999,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         Rc::new(RefCell::new(None::<PendingWorkspacePasteWarning>));
     let asset_click_tracker = Rc::new(RefCell::new(None::<PendingAssetClick>));
     let pending_double_click_activation = Rc::new(RefCell::new(None::<String>));
+    WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
+        *surface.borrow_mut() = Some(NativeTerminalSurface::attach_or_detach(window));
+    });
+    install_workspace_terminal_presenter(window, profile);
 
     apply_restored_window_size(window, default_window_size());
     bind_windows_window_state_tracking(

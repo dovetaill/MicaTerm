@@ -49,7 +49,9 @@ export component TerminalSessionHost inherits Rectangle {
     in property <string> session-state: "";
     in property <string> session-error-detail: "";
     in property <bool> can-reconnect: false;
+    in property <string> session-render-mode: "bitmap";
     in property <image> session-surface-image;
+    in property <int> session-native-frame-token: 0;
     in property <int> session-rows: 24;
     in property <int> session-cols: 80;
     in property <length> session-cell-width: 10px;
@@ -76,6 +78,10 @@ export component TerminalSessionHost inherits Rectangle {
     in-out property <int> selection-start-col: -1;
     in-out property <int> selection-end-row: -1;
     in-out property <int> selection-end-col: -1;
+    out property <length> native-surface-x: root.terminal-padding-left;
+    out property <length> native-surface-y: root.terminal-padding-top;
+    out property <length> native-surface-width: root.terminal-grid-width();
+    out property <length> native-surface-height: root.terminal-grid-height();
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
@@ -667,6 +673,7 @@ export component TerminalSessionHost inherits Rectangle {
                 height: blank-surface.height;
                 source: root.session-surface-image;
                 image-fit: fill;
+                visible: root.session-render-mode == "bitmap";
             }
 
             input-capture := TouchArea {

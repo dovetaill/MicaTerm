@@ -13,7 +13,9 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-session-state: "";
     in property <string> workspace-session-error-detail: "";
     in property <bool> workspace-session-can-reconnect: false;
+    in property <string> workspace-session-render-mode: "bitmap";
     in property <image> workspace-session-surface-image;
+    in property <int> workspace-session-native-frame-token: 0;
     in property <int> workspace-session-rows: 24;
     in property <int> workspace-session-cols: 80;
     in property <length> workspace-session-cell-width: 10px;
@@ -40,6 +42,14 @@ export component WorkspacePane inherits Rectangle {
     in-out property <int> workspace-session-selection-start-col: -1;
     in-out property <int> workspace-session-selection-end-row: -1;
     in-out property <int> workspace-session-selection-end-col: -1;
+    out property <length> layout-workspace-session-native-surface-x:
+        content-host.x + session-host.native-surface-x;
+    out property <length> layout-workspace-session-native-surface-y:
+        content-host.y + session-host.native-surface-y;
+    out property <length> layout-workspace-session-native-surface-width:
+        session-host.native-surface-width;
+    out property <length> layout-workspace-session-native-surface-height:
+        session-host.native-surface-height;
     callback workspace-tab-selected(string);
     callback workspace-tab-close-requested(string);
     callback text-input(string);
@@ -84,7 +94,7 @@ export component WorkspacePane inherits Rectangle {
             vertical-stretch: 1;
             background: transparent;
 
-            TerminalSessionHost {
+            session-host := TerminalSessionHost {
                 width: 100%;
                 height: 100%;
                 session-id: root.active-workspace-session-id;
@@ -94,7 +104,9 @@ export component WorkspacePane inherits Rectangle {
                 session-state: root.workspace-session-state;
                 session-error-detail: root.workspace-session-error-detail;
                 can-reconnect: root.workspace-session-can-reconnect;
+                session-render-mode: root.workspace-session-render-mode;
                 session-surface-image: root.workspace-session-surface-image;
+                session-native-frame-token: root.workspace-session-native-frame-token;
                 session-rows: root.workspace-session-rows;
                 session-cols: root.workspace-session-cols;
                 session-cell-width: root.workspace-session-cell-width;

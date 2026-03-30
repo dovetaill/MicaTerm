@@ -59,6 +59,20 @@ Notes:
 - If no preferred system color emoji font is available, or if emoji rasterization fails, the terminal atlas falls back to a visible replacement glyph and emits a diagnostic warning instead of silently painting transparent cells.
 - `ui/shell/terminal-session-host.slint` renders the terminal body through a single atlas-backed image surface; Slint keeps cursor, selection, scrollbar, and context-menu overlays only.
 
+## Terminal Renderer Migration Status
+
+- Windows-first native renderer:
+  - packaged `windows-mainline` builds now opt into the staged native presenter path
+  - if native presenter setup fails, runtime falls back to the bitmap presenter instead of leaving the terminal blank
+- Platform support matrix:
+  - Windows mainline: staged native renderer with bitmap fallback
+  - Windows software compatibility: bitmap presenter
+  - Linux/macOS: bitmap presenter today; Linux/macOS native renderer follow-up work is still pending
+- Migration scope today:
+  - text shaping and frame preparation are split behind the presenter boundary
+  - Slint still owns the terminal host, cursor, selection, scrollbar, and input routing
+  - Linux/macOS native renderer work remains follow-up, not part of the current release slice
+
 Archive formats:
 
 - Linux and macOS targets produce `dist/<app>-<target>-<profile>.tar.gz`

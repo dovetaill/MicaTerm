@@ -277,3 +277,14 @@ fn winit_backend_maps_named_copy_and_paste_keys_into_terminal_shortcut_chars() {
         "the patched winit backend should translate NamedKey::Paste into a textual paste shortcut token"
     );
 }
+
+#[test]
+fn logging_runtime_source_emits_terminal_render_mode_metadata() {
+    let logging_runtime =
+        fs::read_to_string("src/app/logging/runtime.rs").expect("read logging runtime");
+
+    assert!(
+        logging_runtime.contains("terminal_render_mode = ?profile.terminal_render_mode()"),
+        "runtime logging should emit the configured terminal render mode alongside the Slint renderer metadata"
+    );
+}
