@@ -1078,8 +1078,8 @@ fn bootstrap_surface_with_viewport(
     surface.viewport_at_bottom = offset == 0;
     surface.default_fg_rgba = 0xff1f_2328;
     surface.default_bg_rgba = 0xfff7_f9fc;
-    surface.cursor.fg_rgba = 0xffff_ffff;
-    surface.cursor.bg_rgba = 0xff25_63eb;
+    surface.cursor.fg_rgba = 0xfff7_f9fc;
+    surface.cursor.bg_rgba = 0xff4b_5058;
     surface
 }
 
@@ -4056,10 +4056,15 @@ fn workspace_terminal_selection_updates_surface_image() {
         "terminal selection should visibly repaint the atlas surface image"
     );
     assert!(
-        selected_pixel.b >= 150
-            && selected_pixel.b > selected_pixel.g + 35
-            && selected_pixel.b > selected_pixel.r + 70,
-        "selected blank cells should render with an obvious blue highlight, not a barely visible tint"
+        selected_pixel.r >= 90
+            && selected_pixel.r <= 140
+            && selected_pixel.g >= 100
+            && selected_pixel.g <= 150
+            && selected_pixel.b >= 130
+            && selected_pixel.b <= 175
+            && selected_pixel.b > selected_pixel.g
+            && selected_pixel.g >= selected_pixel.r,
+        "selected blank cells should render as a muted iris-blue highlight instead of a saturated bright blue"
     );
 }
 
@@ -4218,11 +4223,28 @@ fn bootstrap_projects_terminal_canvas_palette_into_window_properties() {
     );
     assert_eq!(
         app.get_workspace_session_cursor_fg().as_argb_encoded(),
-        0xffff_ffff
+        0xfff7_f9fc
     );
     assert_eq!(
         app.get_workspace_session_cursor_bg().as_argb_encoded(),
-        0xff25_63eb
+        0xff4b_5058
+    );
+}
+
+#[test]
+fn bootstrap_projects_dark_terminal_cursor_as_light_grey() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    assert_eq!(
+        app.get_workspace_session_cursor_bg().as_argb_encoded(),
+        0xffcd_d2db
     );
 }
 

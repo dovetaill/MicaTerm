@@ -54,6 +54,7 @@ use crate::app::ssh::session_manager::{
     SessionState,
 };
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
+use crate::app::terminal_theme::preset_for_theme_mode;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
@@ -2890,8 +2891,8 @@ fn slint_color_from_rgba(rgba: u32) -> Color {
 
 fn terminal_selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
     match theme_mode {
-        ThemeMode::Dark => 0xff25_63eb,
-        ThemeMode::Light => 0xff1d_4ed8,
+        ThemeMode::Dark => 0xff6b_7692,
+        ThemeMode::Light => 0xffc7_d1e3,
     }
 }
 
@@ -3023,6 +3024,7 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         );
         window.set_workspace_session_viewport_at_bottom(surface.viewport_at_bottom);
     } else {
+        let preset = preset_for_theme_mode(state.theme_mode);
         window.set_workspace_session_rows(24);
         window.set_workspace_session_cols(80);
         window.set_workspace_session_cursor_row(0);
@@ -3030,10 +3032,10 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         window.set_workspace_session_cursor_visible(false);
         window.set_workspace_session_cursor_blinking(false);
         window.set_workspace_session_cursor_shape("block".into());
-        window.set_workspace_session_cursor_fg(Color::from_argb_u8(255, 0, 0, 0));
-        window.set_workspace_session_cursor_bg(Color::from_argb_u8(255, 0x52, 0xad, 0x70));
-        window.set_workspace_session_default_fg(Color::from_argb_u8(255, 0, 0, 0));
-        window.set_workspace_session_default_bg(Color::from_argb_u8(255, 255, 255, 255));
+        window.set_workspace_session_cursor_fg(slint_color_from_rgba(0xff00_0000 | preset.cursor_fg));
+        window.set_workspace_session_cursor_bg(slint_color_from_rgba(0xff00_0000 | preset.cursor_bg));
+        window.set_workspace_session_default_fg(slint_color_from_rgba(0xff00_0000 | preset.foreground));
+        window.set_workspace_session_default_bg(slint_color_from_rgba(0xff00_0000 | preset.background));
         window.set_workspace_session_surface_image(Image::default());
         window.set_workspace_session_mouse_grabbed(false);
         window.set_workspace_session_viewport_offset_lines(0);

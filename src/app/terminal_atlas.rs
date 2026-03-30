@@ -10,13 +10,15 @@ use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
 
-const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-Unhinted.ttf");
+const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-SemiBold-Unhinted.ttf");
 const TERMINAL_FONT_SIZE_PX: f32 = 18.0;
 const MIN_CELL_WIDTH_PX: u32 = 9;
 const CELL_HORIZONTAL_PADDING_PX: u32 = 0;
-const CELL_VERTICAL_PADDING_PX: u32 = 3;
-const GLYPH_COVERAGE_GAMMA: f32 = 0.82;
-const GLYPH_ALPHA_GAIN: f32 = 1.08;
+const CELL_VERTICAL_PADDING_PX: u32 = 2;
+const GLYPH_COVERAGE_GAMMA: f32 = 0.76;
+const GLYPH_ALPHA_GAIN: f32 = 1.14;
+const ASCII_LEFT_INSET_PX: f32 = -0.35;
+const MIXED_LEFT_INSET_PX: f32 = -0.15;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalAtlasMetrics {
@@ -366,9 +368,11 @@ fn rasterize_cluster_sprite(
 
     let content_advance = pen_x.ceil().max(0.0);
     let left_padding = match classify_cluster_layout(text, span) {
-        ClusterLayout::Ascii => 0.0,
+        ClusterLayout::Ascii => ASCII_LEFT_INSET_PX,
         ClusterLayout::Wide => ((width as f32 - content_advance).max(0.0) / 2.0).floor(),
-        ClusterLayout::Mixed => ((width as f32 - content_advance).max(0.0) / 2.5).floor(),
+        ClusterLayout::Mixed => {
+            ((width as f32 - content_advance).max(0.0) / 2.5).floor() + MIXED_LEFT_INSET_PX
+        }
     };
     let offset_x = left_padding + (-min_x).max(0.0);
 

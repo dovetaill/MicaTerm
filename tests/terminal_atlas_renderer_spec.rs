@@ -36,8 +36,8 @@ fn atlas_renderer_loads_sarasa_metrics_and_emits_a_surface_image() -> Result<()>
         "terminal cell height should increase slightly so the default atlas text reads larger on standard-density displays"
     );
     assert!(
-        metrics.cell_width <= 10,
-        "terminal cell width should stay compact for a monospace terminal grid"
+        metrics.cell_width <= 9,
+        "terminal cell width should stay compact so the terminal grid does not read too loose"
     );
     assert!(
         metrics.cell_height <= 24,
