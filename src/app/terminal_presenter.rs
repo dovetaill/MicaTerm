@@ -4,10 +4,15 @@ use anyhow::Result;
 use slint::Image;
 
 use crate::app::ssh::runtime::TerminalSurfaceState;
-use crate::app::terminal_font::{DirectWriteFontSystem, FontFaceKey, FontMetrics, FontRequest, FontSystem};
-use crate::app::terminal_layout::{HarfBuzzTextShaper, TextShaper};
 use crate::app::terminal_model::TerminalModelFrame;
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
+#[cfg(feature = "terminal-native-renderer")]
+use crate::app::terminal_font::{
+    DirectWriteFontSystem, FontFaceKey, FontMetrics, FontRequest, FontSystem,
+};
+#[cfg(feature = "terminal-native-renderer")]
+use crate::app::terminal_layout::{HarfBuzzTextShaper, TextShaper};
+#[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 
 #[derive(Clone, Debug)]
@@ -88,6 +93,7 @@ impl TerminalPresenter for BitmapAtlasPresenter {
     }
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 pub struct WindowsNativePresenter {
     font_system: DirectWriteFontSystem,
     shaper: HarfBuzzTextShaper,
@@ -98,6 +104,7 @@ pub struct WindowsNativePresenter {
     previous_frame: Option<TerminalModelFrame>,
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 impl WindowsNativePresenter {
     pub fn new() -> Result<Self> {
         let request = FontRequest::default();
@@ -117,6 +124,7 @@ impl WindowsNativePresenter {
     }
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 impl TerminalPresenter for WindowsNativePresenter {
     fn present(
         &mut self,

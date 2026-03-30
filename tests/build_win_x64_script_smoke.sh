@@ -28,7 +28,7 @@ grep -F ".zip" <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'Windows wrapper target:' "$SCRIPT_PATH" >/dev/null
 grep -F 'TARGET="${TARGET:-x86_64-pc-windows-msvc}"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export CARGO_NO_DEFAULT_FEATURES=1' "$SCRIPT_PATH" >/dev/null
-grep -F 'export CARGO_FEATURES="slint-renderer-skia"' "$SCRIPT_PATH" >/dev/null
+grep -F 'export CARGO_FEATURES="slint-renderer-skia,terminal-native-renderer"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export MICA_TERM_BUILD_FLAVOR="windows-mainline"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export MICA_TERM_PACKAGE_RENDERER="skia-software"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export PACKAGE_FLAVOR_SUFFIX="-skia"' "$SCRIPT_PATH" >/dev/null

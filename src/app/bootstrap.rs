@@ -55,10 +55,12 @@ use crate::app::ssh::session_manager::{
 };
 use crate::app::terminal_atlas::TerminalAtlasSelection;
 use crate::app::terminal_presenter::{
-    BitmapAtlasPresenter, NativeTerminalFrame, PresentedTerminalFrame,
-    TerminalPresentationOptions, TerminalPresenter, WindowsNativePresenter,
+    BitmapAtlasPresenter, NativeTerminalFrame, PresentedTerminalFrame, TerminalPresentationOptions,
+    TerminalPresenter,
 };
 use crate::app::terminal_renderer::{NativeTerminalSurface, NativeTerminalSurfaceRect};
+#[cfg(all(target_os = "windows", feature = "terminal-native-renderer"))]
+use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
@@ -3015,15 +3017,24 @@ fn build_workspace_terminal_presenter(
 ) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)> {
     if cfg!(target_os = "windows") && matches!(profile.terminal_render_mode, TerminalRenderMode::Native)
     {
-        return Ok((
-            Box::new(WindowsNativePresenter::new()?),
-            TerminalRenderMode::Native,
-        ));
+        return Ok((build_native_terminal_presenter()?, TerminalRenderMode::Native));
     }
 
     Ok((
         Box::new(BitmapAtlasPresenter::new()?),
         TerminalRenderMode::Bitmap,
+    ))
+}
+
+#[cfg(all(target_os = "windows", feature = "terminal-native-renderer"))]
+fn build_native_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
+    Ok(Box::new(WindowsNativePresenter::new()?))
+}
+
+#[cfg(not(all(target_os = "windows", feature = "terminal-native-renderer")))]
+fn build_native_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
+    Err(anyhow!(
+        "native terminal renderer is unavailable in this build"
     ))
 }
 

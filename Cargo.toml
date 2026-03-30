@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["slint-renderer-software"]
+default = ["slint-renderer-software", "terminal-native-renderer"]
 slint-renderer-software = ["slint/renderer-software"]
 slint-renderer-skia = ["slint/renderer-skia"]
+terminal-native-renderer = ["dep:harfbuzz_rs"]
 
 [dependencies]
 anyhow = "1.0.102"
@@ -18,7 +19,7 @@ chacha20poly1305 = "0.10.1"
 directories = "5"
 ab_glyph = "0.2.32"
 fontdb = "0.23.0"
-harfbuzz_rs = "2.0.1"
+harfbuzz_rs = { version = "2.0.1", optional = true }
 keyring = "3.6.3"
 oauth2 = "5"
 rand_core = { version = "0.6.4", features = ["getrandom"] }

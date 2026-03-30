@@ -53,7 +53,7 @@ esac
 echo "==> Windows wrapper target: $TARGET"
 export TARGET
 export CARGO_NO_DEFAULT_FEATURES=1
-export CARGO_FEATURES="slint-renderer-skia"
+export CARGO_FEATURES="slint-renderer-skia,terminal-native-renderer"
 export MICA_TERM_BUILD_FLAVOR="windows-mainline"
 export MICA_TERM_PACKAGE_RENDERER="skia-software"
 export PACKAGE_FLAVOR_SUFFIX="-skia"
