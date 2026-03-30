@@ -717,14 +717,12 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should handle Shift+PageDown as a local scrollback shortcut"
     );
     assert!(
-        terminal_host
-            .contains("event.modifiers.control && event.modifiers.shift && event.text == Key.Home"),
-        "TerminalSessionHost should handle Ctrl+Shift+Home as a jump-to-top shortcut"
+        terminal_host.contains("event.modifiers.shift && event.text == Key.Home"),
+        "TerminalSessionHost should handle Shift+Home as a jump-to-top shortcut"
     );
     assert!(
-        terminal_host
-            .contains("event.modifiers.control && event.modifiers.shift && event.text == Key.End"),
-        "TerminalSessionHost should handle Ctrl+Shift+End as a jump-to-bottom shortcut"
+        terminal_host.contains("event.modifiers.shift && event.text == Key.End"),
+        "TerminalSessionHost should handle Shift+End as a jump-to-bottom shortcut"
     );
     assert!(
         !terminal_host.contains("event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == \"c\""),
@@ -792,12 +790,24 @@ fn terminal_session_host_keeps_reserved_ctrl_shift_shortcuts_local_contract() {
         "TerminalSessionHost should explicitly ignore bare modifier keys before any remote forwarding branch"
     );
     assert!(
-        terminal_host.contains("event.text == \"f\" || event.text == \"F\""),
+        terminal_host.contains("text == \"f\" || text == \"F\""),
         "TerminalSessionHost should reserve Ctrl+Shift+F inside the local shortcut namespace"
     );
     assert!(
-        terminal_host.contains("&& !event.modifiers.shift && event.text != \"\""),
-        "TerminalSessionHost should exclude shifted modifier chords from the generic remote forwarding branch"
+        terminal_host.contains("root.terminal-local-action-id(event.text) != \"\""),
+        "TerminalSessionHost should route reserved Ctrl+Shift local actions through the centralized local action resolver"
+    );
+    assert!(
+        terminal_host.contains(
+            "} else if ((event.modifiers.control || event.modifiers.alt) && event.text != \"\")"
+        ),
+        "TerminalSessionHost should forward generic control and alt modified text through the shared remote forwarding branch"
+    );
+    assert!(
+        terminal_host.contains(
+            "root.key-input(event.text, event.modifiers.alt, event.modifiers.control, event.modifiers.shift);"
+        ),
+        "TerminalSessionHost should preserve the shift modifier when forwarding generic control and alt text input"
     );
 }
 

@@ -9,6 +9,10 @@ use anyhow::{Result, anyhow};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
 use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
+use crate::app::terminal_emoji::{
+    ClusterRenderKind as EmojiClusterRenderKind, EmojiRenderOutcome, TerminalEmojiRenderer,
+    classify_cluster_render_kind,
+};
 
 const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-Regular.ttf");
 const TERMINAL_FONT_SIZE_PX: f32 = 17.5;
@@ -25,6 +29,12 @@ pub struct TerminalAtlasMetrics {
     pub cell_width: u32,
     pub cell_height: u32,
     pub baseline_px: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClusterSpriteKind {
+    MonoAlpha,
+    ColorRgba,
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -83,10 +93,20 @@ pub struct TerminalSurfaceFrame {
     pub metrics: TerminalAtlasMetrics,
     pub cache_entries: usize,
     pub rerendered_rows: Vec<u32>,
+    pub rendered_clusters: Vec<RenderedCluster>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenderedCluster {
+    pub row: u32,
+    pub col: u32,
+    pub text: String,
+    pub sprite_kind: ClusterSpriteKind,
 }
 
 pub struct TerminalAtlasRenderer {
     font: FontArc,
+    emoji_renderer: TerminalEmojiRenderer,
     metrics: TerminalAtlasMetrics,
     sprite_cache: HashMap<ClusterKey, CachedClusterSprite>,
     row_hashes: Vec<u64>,
@@ -102,19 +122,44 @@ struct ClusterKey {
 }
 
 #[derive(Clone, Debug)]
-struct CachedClusterSprite {
-    width: u32,
-    height: u32,
-    alpha: Vec<u8>,
+enum CachedClusterSprite {
+    MonoAlpha {
+        width: u32,
+        height: u32,
+        alpha: Vec<u8>,
+    },
+    ColorRgba {
+        width: u32,
+        height: u32,
+        rgba: Vec<Rgba8Pixel>,
+    },
+}
+
+impl CachedClusterSprite {
+    fn kind(&self) -> ClusterSpriteKind {
+        match self {
+            Self::MonoAlpha { .. } => ClusterSpriteKind::MonoAlpha,
+            Self::ColorRgba { .. } => ClusterSpriteKind::ColorRgba,
+        }
+    }
 }
 
 impl TerminalAtlasRenderer {
     pub fn new() -> Result<Self> {
+        Self::with_emoji_renderer(TerminalEmojiRenderer::new())
+    }
+
+    pub fn with_emoji_renderer_for_tests(emoji_renderer: TerminalEmojiRenderer) -> Result<Self> {
+        Self::with_emoji_renderer(emoji_renderer)
+    }
+
+    fn with_emoji_renderer(emoji_renderer: TerminalEmojiRenderer) -> Result<Self> {
         let font = FontArc::try_from_slice(SARASA_FONT_BYTES)
             .map_err(|error| anyhow!("failed to load bundled Sarasa terminal font: {error}"))?;
         let metrics = compute_terminal_metrics(&font);
         Ok(Self {
             font,
+            emoji_renderer,
             metrics,
             sprite_cache: HashMap::new(),
             row_hashes: Vec::new(),
@@ -141,6 +186,7 @@ impl TerminalAtlasRenderer {
         let width_px = surface.cols.max(1) * self.metrics.cell_width;
         let height_px = surface.rows.max(1) * self.metrics.cell_height;
         let mut rerendered_rows = Vec::new();
+        let mut rendered_clusters = Vec::new();
         let resized = self.surface_width_px != width_px || self.surface_height_px != height_px;
 
         if resized {
@@ -186,9 +232,15 @@ impl TerminalAtlasRenderer {
                     row_selection,
                     row_selection_overlay_rgba,
                     &row_cells[row as usize],
+                    &mut rendered_clusters,
                 );
                 self.row_hashes[row as usize] = next_hash;
                 rerendered_rows.push(row);
+            } else {
+                self.record_rendered_clusters_from_cache(
+                    &row_cells[row as usize],
+                    &mut rendered_clusters,
+                );
             }
         }
 
@@ -202,6 +254,7 @@ impl TerminalAtlasRenderer {
             metrics: self.metrics,
             cache_entries: self.sprite_cache.len(),
             rerendered_rows,
+            rendered_clusters,
         })
     }
 
@@ -215,6 +268,7 @@ impl TerminalAtlasRenderer {
         row_selection: Option<(u32, u32)>,
         selection_overlay_rgba: u32,
         cells: &[&TerminalCellState],
+        rendered_clusters: &mut Vec<RenderedCluster>,
     ) {
         let row_y = row * self.metrics.cell_height;
         let row_bg = rgba8(row_bg_rgba);
@@ -281,12 +335,18 @@ impl TerminalAtlasRenderer {
                 .sprite_cache
                 .get(&key)
                 .expect("sprite cache entry must exist after insertion");
+            rendered_clusters.push(RenderedCluster {
+                row: cell.row,
+                col: cell.col,
+                text: cell.text.clone(),
+                sprite_kind: sprite.kind(),
+            });
             let foreground = if selected {
                 resolve_selected_foreground(rgba8(cell.fg_rgba), cell_bg, default_fg, background)
             } else {
                 rgba8(cell.fg_rgba)
             };
-            blit_sprite(
+            blit_cached_sprite(
                 &mut self.pixels,
                 self.surface_width_px,
                 self.surface_height_px,
@@ -305,11 +365,73 @@ impl TerminalAtlasRenderer {
         };
 
         if !self.sprite_cache.contains_key(&key) {
-            let sprite = rasterize_cluster_sprite(&self.font, self.metrics, text, span);
+            let sprite = self.rasterize_cluster_sprite(text, span);
             self.sprite_cache.insert(key.clone(), sprite);
         }
 
         key
+    }
+
+    fn rasterize_cluster_sprite(&self, text: &str, span: u32) -> CachedClusterSprite {
+        if classify_cluster_render_kind(text) == EmojiClusterRenderKind::Emoji {
+            match self.emoji_renderer.rasterize_cluster(
+                text,
+                span,
+                self.metrics.cell_width,
+                self.metrics.cell_height,
+            ) {
+                EmojiRenderOutcome::Sprite(sprite) => {
+                    return CachedClusterSprite::ColorRgba {
+                        width: sprite.width,
+                        height: sprite.height,
+                        rgba: rgba_pixels_from_bytes(&sprite.rgba),
+                    };
+                }
+                EmojiRenderOutcome::VisibleFallback {
+                    replacement_text,
+                    reason,
+                } => {
+                    tracing::warn!(
+                        ?reason,
+                        text = %text,
+                        "terminal emoji rasterization fell back to a visible mono replacement"
+                    );
+                    return rasterize_mono_cluster_sprite(
+                        &self.font,
+                        self.metrics,
+                        &replacement_text,
+                        span,
+                    );
+                }
+            }
+        }
+
+        rasterize_mono_cluster_sprite(&self.font, self.metrics, text, span)
+    }
+
+    fn record_rendered_clusters_from_cache(
+        &mut self,
+        cells: &[&TerminalCellState],
+        rendered_clusters: &mut Vec<RenderedCluster>,
+    ) {
+        for cell in cells {
+            if cell.text.chars().all(char::is_whitespace) {
+                continue;
+            }
+
+            let key = self.ensure_cluster_sprite(&cell.text, cell.width.max(1));
+            let sprite_kind = self
+                .sprite_cache
+                .get(&key)
+                .map(CachedClusterSprite::kind)
+                .unwrap_or(ClusterSpriteKind::MonoAlpha);
+            rendered_clusters.push(RenderedCluster {
+                row: cell.row,
+                col: cell.col,
+                text: cell.text.clone(),
+                sprite_kind,
+            });
+        }
     }
 }
 
@@ -341,7 +463,7 @@ fn compute_terminal_metrics(font: &FontArc) -> TerminalAtlasMetrics {
     }
 }
 
-fn rasterize_cluster_sprite(
+fn rasterize_mono_cluster_sprite(
     font: &FontArc,
     metrics: TerminalAtlasMetrics,
     text: &str,
@@ -380,7 +502,7 @@ fn rasterize_cluster_sprite(
     }
 
     if outlined_glyphs.is_empty() {
-        return CachedClusterSprite {
+        return CachedClusterSprite::MonoAlpha {
             width: width as u32,
             height: height as u32,
             alpha,
@@ -414,7 +536,7 @@ fn rasterize_cluster_sprite(
         });
     }
 
-    CachedClusterSprite {
+    CachedClusterSprite::MonoAlpha {
         width: width as u32,
         height: height as u32,
         alpha,
@@ -585,7 +707,7 @@ fn classify_cluster_layout(text: &str, span: u32) -> ClusterLayout {
     }
 }
 
-fn blit_sprite(
+fn blit_cached_sprite(
     pixels: &mut [Rgba8Pixel],
     surface_width_px: u32,
     surface_height_px: u32,
@@ -594,21 +716,63 @@ fn blit_sprite(
     sprite: &CachedClusterSprite,
     fg: Rgba8Pixel,
 ) {
-    let start_x = cell_x.min(surface_width_px);
-    let start_y = row_y.min(surface_height_px);
-    let end_x = (start_x + sprite.width).min(surface_width_px);
-    let end_y = (start_y + sprite.height).min(surface_height_px);
+    match sprite {
+        CachedClusterSprite::MonoAlpha {
+            width,
+            height,
+            alpha,
+        } => {
+            let start_x = cell_x.min(surface_width_px);
+            let start_y = row_y.min(surface_height_px);
+            let end_x = (start_x + *width).min(surface_width_px);
+            let end_y = (start_y + *height).min(surface_height_px);
 
-    for y in start_y..end_y {
-        let sprite_y = (y - start_y) as usize;
-        for x in start_x..end_x {
-            let sprite_x = (x - start_x) as usize;
-            let alpha = sprite.alpha[sprite_y * sprite.width as usize + sprite_x];
-            if alpha == 0 {
-                continue;
+            for y in start_y..end_y {
+                let sprite_y = (y - start_y) as usize;
+                for x in start_x..end_x {
+                    let sprite_x = (x - start_x) as usize;
+                    let alpha = alpha[sprite_y * *width as usize + sprite_x];
+                    if alpha == 0 {
+                        continue;
+                    }
+                    let pixel = &mut pixels[(y * surface_width_px + x) as usize];
+                    blend(pixel, fg, alpha);
+                }
             }
-            let pixel = &mut pixels[(y * surface_width_px + x) as usize];
-            blend(pixel, fg, alpha);
+        }
+        CachedClusterSprite::ColorRgba {
+            width,
+            height,
+            rgba,
+        } => {
+            let start_x = cell_x.min(surface_width_px);
+            let start_y = row_y.min(surface_height_px);
+            let end_x = (start_x + *width).min(surface_width_px);
+            let end_y = (start_y + *height).min(surface_height_px);
+
+            for y in start_y..end_y {
+                let sprite_y = (y - start_y) as usize;
+                for x in start_x..end_x {
+                    let sprite_x = (x - start_x) as usize;
+                    let source = rgba[sprite_y * *width as usize + sprite_x];
+                    if source.a == 0 {
+                        continue;
+                    }
+                    let pixel = &mut pixels[(y * surface_width_px + x) as usize];
+                    blend(pixel, source, source.a);
+                }
+            }
         }
     }
+}
+
+fn rgba_pixels_from_bytes(bytes: &[u8]) -> Vec<Rgba8Pixel> {
+    bytes.chunks_exact(4)
+        .map(|chunk| Rgba8Pixel {
+            r: chunk[0],
+            g: chunk[1],
+            b: chunk[2],
+            a: chunk[3],
+        })
+        .collect()
 }

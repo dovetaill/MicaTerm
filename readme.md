@@ -54,6 +54,9 @@ Notes:
 - `[patch.crates-io]` in `Cargo.toml` still points to the vendored `i-slint-backend-winit` backend so the Windows partial-visibility fix stays active.
 - `ui/fonts/SarasaTermSCNerd-Regular.ttf` is the only bundled terminal face and is owned directly by the Rust atlas renderer.
 - `src/app/terminal_atlas.rs` uses `ab_glyph` for lazy glyph loading and rasterization, avoiding the heavier pre-expanded `fontdue` path for the terminal font.
+- Terminal body text stays on the bundled Sarasa mono atlas path, while emoji-presenting clusters use system color emoji fonts and are composited into the same atlas surface as RGBA sprites.
+- Windows expects `Segoe UI Emoji` for terminal body color emoji rendering, and Linux expects an installed color emoji family such as `Noto Color Emoji`.
+- If no preferred system color emoji font is available, or if emoji rasterization fails, the terminal atlas falls back to a visible replacement glyph and emits a diagnostic warning instead of silently painting transparent cells.
 - `ui/shell/terminal-session-host.slint` renders the terminal body through a single atlas-backed image surface; Slint keeps cursor, selection, scrollbar, and context-menu overlays only.
 
 Archive formats:

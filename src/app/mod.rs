@@ -10,6 +10,7 @@ pub mod memory;
 pub mod runtime_profile;
 pub mod ssh;
 pub mod terminal_atlas;
+pub mod terminal_emoji;
 pub mod terminal_theme;
 pub mod ui_preferences;
 pub mod vault;

@@ -5702,10 +5702,9 @@ mod tests {
             initial_lines_model,
             "clearing the surface should keep reusing the visible line model"
         );
-        assert_eq!(
-            window.get_workspace_session_surface_image(),
-            Image::default(),
-            "clearing the surface should reset the atlas image"
+        assert!(
+            window.get_workspace_session_surface_image().to_rgba8().is_none(),
+            "clearing the surface should reset the atlas image to an empty handle"
         );
         assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
     }
