@@ -12,14 +12,15 @@ use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
 
 const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-Unhinted.ttf");
 const TERMINAL_FONT_SIZE_PX: f32 = 16.0;
-const MIN_CELL_WIDTH_PX: u32 = 9;
-const CELL_HORIZONTAL_PADDING_PX: u32 = 2;
-const CELL_VERTICAL_PADDING_PX: u32 = 6;
+const MIN_CELL_WIDTH_PX: u32 = 8;
+const CELL_HORIZONTAL_PADDING_PX: u32 = 0;
+const CELL_VERTICAL_PADDING_PX: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalAtlasMetrics {
     pub cell_width: u32,
     pub cell_height: u32,
+    pub baseline_px: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -181,18 +182,21 @@ impl TerminalAtlasRenderer {
 
 fn compute_terminal_metrics(font: &FontArc) -> TerminalAtlasMetrics {
     let scaled = font.as_scaled(PxScale::from(TERMINAL_FONT_SIZE_PX));
-    let cell_width = scaled
+    let mono_advance = scaled
         .h_advance(scaled.glyph_id('M'))
         .max(scaled.h_advance(scaled.glyph_id('0')))
-        .max(scaled.h_advance(scaled.glyph_id('界')) / 2.0)
-        .ceil() as u32
-        + CELL_HORIZONTAL_PADDING_PX;
+        .max(scaled.h_advance(scaled.glyph_id('W')))
+        .max(scaled.h_advance(scaled.glyph_id('界')) / 2.0);
+    let cell_width = mono_advance.ceil() as u32 + CELL_HORIZONTAL_PADDING_PX;
     let line_height = (scaled.ascent() - scaled.descent() + scaled.line_gap()).ceil() as u32;
     let cell_height = line_height + CELL_VERTICAL_PADDING_PX;
+    let top_padding = cell_height.saturating_sub(line_height) / 2;
+    let baseline_px = top_padding + scaled.ascent().ceil() as u32;
 
     TerminalAtlasMetrics {
         cell_width: cell_width.max(MIN_CELL_WIDTH_PX),
         cell_height: cell_height.max(TERMINAL_FONT_SIZE_PX.ceil() as u32 + 4),
+        baseline_px,
     }
 }
 
@@ -206,14 +210,11 @@ fn rasterize_cluster_sprite(
     let height = metrics.cell_height as usize;
     let mut alpha = vec![0u8; width * height];
     let scaled = font.as_scaled(PxScale::from(TERMINAL_FONT_SIZE_PX));
-    let baseline = scaled.ascent();
+    let baseline = metrics.baseline_px as f32;
     let mut pen_x = 0.0f32;
     let mut previous_id = None::<GlyphId>;
     let mut outlined_glyphs = Vec::new();
     let mut min_x = f32::MAX;
-    let mut min_y = f32::MAX;
-    let mut max_x = f32::MIN;
-    let mut max_y = f32::MIN;
 
     for ch in text.chars() {
         if ch.is_control() {
@@ -229,9 +230,6 @@ fn rasterize_cluster_sprite(
         if let Some(outlined) = font.outline_glyph(glyph) {
             let bounds = outlined.px_bounds();
             min_x = min_x.min(bounds.min.x);
-            min_y = min_y.min(bounds.min.y);
-            max_x = max_x.max(bounds.max.x);
-            max_y = max_y.max(bounds.max.y);
             outlined_glyphs.push(outlined);
         }
 
@@ -247,15 +245,14 @@ fn rasterize_cluster_sprite(
         };
     }
 
-    let content_width = (max_x - min_x).ceil().max(0.0);
-    let content_height = (max_y - min_y).ceil().max(0.0);
-    let offset_x = ((width as f32 - content_width).max(0.0) / 2.0) - min_x;
-    let offset_y = ((height as f32 - content_height).max(0.0) / 2.0) - min_y;
+    let content_advance = pen_x.ceil().max(0.0);
+    let left_padding = ((width as f32 - content_advance).max(0.0) / 2.0).floor();
+    let offset_x = left_padding + (-min_x).max(0.0);
 
     for outlined in outlined_glyphs {
         let bounds = outlined.px_bounds();
         let glyph_origin_x = (offset_x + bounds.min.x).round() as i32;
-        let glyph_origin_y = (offset_y + bounds.min.y).round() as i32;
+        let glyph_origin_y = bounds.min.y.round() as i32;
         outlined.draw(|x, y, coverage| {
             let target_x = glyph_origin_x + x as i32;
             let target_y = glyph_origin_y + y as i32;

@@ -29,6 +29,18 @@ fn atlas_renderer_loads_sarasa_metrics_and_emits_a_surface_image() -> Result<()>
 
     assert!(metrics.cell_width >= 8);
     assert!(metrics.cell_height >= 16);
+    assert!(
+        metrics.cell_width <= 9,
+        "terminal cell width should stay compact for a monospace terminal grid"
+    );
+    assert!(
+        metrics.cell_height <= 22,
+        "terminal cell height should not keep the current overly loose vertical padding"
+    );
+    assert!(
+        metrics.baseline_px > 0 && metrics.baseline_px < metrics.cell_height,
+        "atlas metrics should expose a shared baseline so ASCII and CJK glyphs align vertically"
+    );
     assert_eq!(
         frame.image.size(),
         [
