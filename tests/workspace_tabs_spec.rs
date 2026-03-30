@@ -55,6 +55,7 @@ impl SessionRuntimeLauncher for FakeLauncher {
         &self,
         _profile: ConnectionProfile,
         _session_id: Uuid,
+        _attempt_id: Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -183,6 +184,25 @@ fn disconnected_session_stays_visible_and_can_reconnect() {
     assert_eq!(view_model.workspace_tabs().len(), 1);
     assert_eq!(view_model.workspace_session_host_mode(), "session-error");
     assert!(view_model.active_workspace_session_can_reconnect());
+}
+
+#[test]
+fn opening_slow_connecting_workspace_session_uses_connection_progress_mode() {
+    let mut connecting = WorkspaceTab::from_session(&sample_handle(
+        "Prod Bastion",
+        "ops@example.com:22",
+        SessionState::Connecting,
+    ));
+    connecting.active = true;
+    assert!(
+        !connecting.uses_terminal_surface(),
+        "connecting tabs should stop claiming the terminal host before the runtime is ready"
+    );
+
+    let mut view_model = ShellViewModel::default();
+    view_model.set_workspace_tabs(vec![connecting]);
+
+    assert_eq!(view_model.workspace_session_host_mode(), "connection-progress");
 }
 
 #[test]
@@ -931,6 +951,98 @@ fn workspace_pane_only_renders_tabbar_when_tabs_exist() {
     assert!(
         workspace.contains("if root.workspace-tab-items.length > 0 : tab-strip := TabBar {"),
         "workspace pane should only render the tab strip when at least one tab exists"
+    );
+}
+
+#[test]
+fn connection_progress_workspace_host_contract_exposes_timeline_models_and_footer_actions() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        app_window.contains("workspace-session-connection-steps"),
+        "AppWindow should expose a connection timeline steps model for the active workspace session"
+    );
+    assert!(
+        app_window.contains("workspace-session-connection-diagnostics"),
+        "AppWindow should expose a connection diagnostics model for the active workspace session"
+    );
+    assert!(
+        app_window.contains("workspace-session-connection-current-detail"),
+        "AppWindow should expose the current connection detail line for the timeline host"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-connection-steps"),
+        "WorkspacePane should forward connection timeline rows into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-connection-diagnostics"),
+        "WorkspacePane should forward connection diagnostics into TerminalSessionHost"
+    );
+    assert!(
+        terminal_host.contains("if root.mode == \"connection-progress\""),
+        "TerminalSessionHost should render a dedicated connection-progress branch"
+    );
+    assert!(
+        terminal_host.contains("Show Diagnostics"),
+        "connection-progress host should expose a diagnostics disclosure control"
+    );
+    assert!(
+        terminal_host.contains("Copy Diagnostics"),
+        "connection-progress host should expose a copy diagnostics footer action"
+    );
+    assert!(
+        terminal_host.contains("Cancel"),
+        "connection-progress host should expose a cancel footer action while connecting"
+    );
+    assert!(
+        terminal_host.contains("Retry"),
+        "connection-progress host should expose a retry footer action for failed attempts"
+    );
+}
+
+#[test]
+fn connection_progress_workspace_host_contract_exposes_inline_host_key_actions() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        app_window.contains("workspace-session-host-key-prompt-host"),
+        "AppWindow should expose the active workspace host-key prompt host"
+    );
+    assert!(
+        app_window.contains("workspace-session-host-key-prompt-fingerprint"),
+        "AppWindow should expose the active workspace host-key prompt fingerprint"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-host-key-prompt-host"),
+        "WorkspacePane should forward host-key prompt host state into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-host-key-prompt-fingerprint"),
+        "WorkspacePane should forward host-key prompt fingerprint state into TerminalSessionHost"
+    );
+    assert!(
+        terminal_host.contains("Trust and Continue"),
+        "connection-progress host should expose an inline trust action for unknown host keys"
+    );
+    assert!(
+        terminal_host.contains("Reject"),
+        "connection-progress host should expose an inline reject action for unknown host keys"
+    );
+    assert!(
+        terminal_host.contains("trust-host-key"),
+        "host-key trust should route back through the workspace local-action callback"
+    );
+    assert!(
+        terminal_host.contains("reject-host-key"),
+        "host-key rejection should route back through the workspace local-action callback"
     );
 }
 

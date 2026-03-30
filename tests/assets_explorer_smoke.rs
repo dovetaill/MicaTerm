@@ -50,6 +50,7 @@ impl SessionRuntimeLauncher for FakeLauncher {
         &self,
         _profile: ConnectionProfile,
         _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {

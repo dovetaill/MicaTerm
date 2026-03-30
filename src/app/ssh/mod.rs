@@ -1,5 +1,6 @@
 //! SSH application services and connection domain models.
 
+pub mod connection_progress;
 pub mod credentials;
 pub mod known_hosts;
 pub mod profile;

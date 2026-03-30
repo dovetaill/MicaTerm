@@ -324,7 +324,7 @@ Implement workspace-session controls:
   - persist the key through `KnownHostsService`;
   - start a fresh asynchronous retry attempt;
 - on reject:
-  - finalize the attempt as cancelled or error with the step pinned as blocked/failed;
+  - finalize the attempt as cancelled with preserved diagnostics while keeping the same tab on the timeline surface;
 - add cancel and retry callbacks from the connection timeline footer back into bootstrap/session-manager actions.
 
 Do not change modal `Test Connection` in this task.
@@ -388,6 +388,13 @@ Verify these scenarios against real hosts or controlled repro targets:
 **Step 4: Update any final notes if verification changed details**
 
 If any implementation detail differs from the design or plan, update the docs to match the shipped behavior before closing the work.
+
+Shipped alignment notes:
+
+- workspace unknown-host-key prompts now stay inline in `connection-progress`; modal host-key confirmation remains only for modal `Test Connection`;
+- `cancelled` workspace attempts keep rendering on the timeline page so `Retry` stays local to the same tab;
+- generic asynchronous launch failures may project as `connecting` until the next workspace sync tick, then settle into `session-error`;
+- automated verification is complete in-repo; manual real-host verification remains an external follow-up.
 
 **Step 5: Commit**
 

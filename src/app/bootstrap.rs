@@ -20,6 +20,8 @@ use uuid::Uuid;
 
 use crate::AppWindow;
 use crate::AssetsContextMenuItem;
+use crate::ConnectionProgressDiagnosticRow;
+use crate::ConnectionProgressStepRow;
 use crate::ConsoleAssetItem;
 use crate::WorkspaceTabItem;
 use crate::app::app_paths::{AppRootPathInputs, AppRootPaths, resolve_app_root_paths};
@@ -34,6 +36,9 @@ use crate::app::keychain::{
     resolve_saved_ssh_profile,
 };
 use crate::app::runtime_profile::AppRuntimeProfile;
+use crate::app::ssh::connection_progress::{
+    ConnectionAttemptState, ConnectionHeadlineState, ConnectionStepState, ConnectionStepStateItem,
+};
 use crate::app::ssh::credentials::{
     CachedCredentialStore, CredentialStore, EncryptedFileCredentialStore, FallbackCredentialStore,
     FileCredentialStore, MirroredCredentialStore, StoredKeychainKeySecretBundle,
@@ -301,6 +306,7 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
         &self,
         profile: ConnectionProfile,
         session_id: Uuid,
+        attempt_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -309,6 +315,7 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
             let session = SshSessionRuntime::connect_with_credential_store(
                 profile,
                 session_id,
+                attempt_id,
                 event_tx,
                 credential_store,
             )
@@ -326,6 +333,7 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
             let (event_tx, _event_rx) = mpsc::unbounded_channel();
             let runtime = SshSessionRuntime::connect_with_credential_store(
                 profile,
+                Uuid::new_v4(),
                 Uuid::new_v4(),
                 event_tx,
                 credential_store,
@@ -1875,7 +1883,7 @@ fn refresh_active_workspace_projection(
 
     let projection = sync_workspace_projection_from_manager(state, &bridge.manager);
     if projection.any_changed() {
-        sync_workspace_tabs(window, state, follow_tracker);
+        sync_workspace_tabs_with_manager(window, state, follow_tracker, Some(&bridge.manager));
     }
 }
 
@@ -2485,7 +2493,7 @@ fn register_asset_click(
 fn activate_asset(
     state: &mut ShellViewModel,
     session_bridge: Option<&ShellSessionBridge>,
-    pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    _pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
     asset_id: &str,
 ) {
     match state.asset_kind(asset_id) {
@@ -2496,10 +2504,9 @@ fn activate_asset(
             match runtime_profile_for_saved_asset(state, asset_id) {
                 Ok(profile) => {
                     if let Some(session_bridge) = session_bridge {
-                        if let Err(err) = attempt_open_session_with_profile(
+                        if let Err(err) = open_session_with_profile(
                             state,
                             session_bridge,
-                            pending_host_key_approval,
                             profile,
                             OpenSessionMode::ForceNewTab,
                         ) {
@@ -3000,10 +3007,170 @@ where
     }
 }
 
+#[cfg(test)]
 fn sync_workspace_session_state(
     window: &AppWindow,
     state: &ShellViewModel,
     follow_tracker: &mut WorkspaceFollowTracker,
+) {
+    sync_workspace_session_state_with_manager(window, state, follow_tracker, None);
+}
+
+fn connection_progress_headline_token(headline: ConnectionHeadlineState) -> &'static str {
+    match headline {
+        ConnectionHeadlineState::Connecting => "connecting",
+        ConnectionHeadlineState::WaitingUser => "waiting-user",
+        ConnectionHeadlineState::Connected => "connected",
+        ConnectionHeadlineState::Cancelled => "cancelled",
+        ConnectionHeadlineState::Error => "error",
+    }
+}
+
+fn connection_progress_step_state_token(state: ConnectionStepState) -> &'static str {
+    match state {
+        ConnectionStepState::Pending => "pending",
+        ConnectionStepState::Running => "running",
+        ConnectionStepState::Done => "done",
+        ConnectionStepState::Blocked => "blocked",
+        ConnectionStepState::Failed => "failed",
+        ConnectionStepState::Cancelled => "cancelled",
+    }
+}
+
+fn active_connection_progress_step(
+    attempt: &ConnectionAttemptState,
+) -> Option<&ConnectionStepStateItem> {
+    attempt
+        .steps
+        .iter()
+        .rfind(|step| {
+            matches!(
+                step.state,
+                ConnectionStepState::Running
+                    | ConnectionStepState::Blocked
+                    | ConnectionStepState::Failed
+            )
+        })
+        .or_else(|| attempt.steps.last())
+}
+
+fn default_connection_progress_detail(headline: ConnectionHeadlineState) -> &'static str {
+    match headline {
+        ConnectionHeadlineState::Connecting => "Preparing SSH connection timeline...",
+        ConnectionHeadlineState::WaitingUser => "Waiting for SSH connection input.",
+        ConnectionHeadlineState::Connected => "SSH session is ready.",
+        ConnectionHeadlineState::Cancelled => "SSH connection attempt was cancelled.",
+        ConnectionHeadlineState::Error => "SSH connection attempt failed.",
+    }
+}
+
+fn clear_workspace_connection_progress_state(window: &AppWindow) {
+    window.set_workspace_session_connection_headline("".into());
+    window.set_workspace_session_connection_current_hop("".into());
+    window.set_workspace_session_connection_current_detail("".into());
+    window.set_workspace_session_host_key_prompt_host("".into());
+    window.set_workspace_session_host_key_prompt_fingerprint("".into());
+    sync_vec_model(
+        window.get_workspace_session_connection_steps(),
+        Vec::<ConnectionProgressStepRow>::new(),
+        |model| window.set_workspace_session_connection_steps(model),
+    );
+    sync_vec_model(
+        window.get_workspace_session_connection_diagnostics(),
+        Vec::<ConnectionProgressDiagnosticRow>::new(),
+        |model| window.set_workspace_session_connection_diagnostics(model),
+    );
+}
+
+fn sync_workspace_connection_progress_state(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    manager: Option<&SessionManager>,
+) {
+    if state.workspace_session_host_mode() != "connection-progress" {
+        clear_workspace_connection_progress_state(window);
+        return;
+    }
+
+    let Some(manager) = manager else {
+        clear_workspace_connection_progress_state(window);
+        return;
+    };
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        clear_workspace_connection_progress_state(window);
+        return;
+    };
+    let Some(attempt) = manager.connection_attempt(session_id) else {
+        clear_workspace_connection_progress_state(window);
+        return;
+    };
+
+    let current_step = active_connection_progress_step(&attempt);
+    let steps = attempt
+        .steps
+        .iter()
+        .map(|step| ConnectionProgressStepRow {
+            state: connection_progress_step_state_token(step.state).into(),
+            hop_label: step.hop_label.clone().into(),
+            title: step.title.clone().into(),
+            detail: step.detail.clone().into(),
+        })
+        .collect::<Vec<_>>();
+    let diagnostics = attempt
+        .diagnostics
+        .iter()
+        .map(|line| ConnectionProgressDiagnosticRow {
+            text: line.message.clone().into(),
+        })
+        .collect::<Vec<_>>();
+
+    window.set_workspace_session_connection_headline(
+        connection_progress_headline_token(attempt.headline).into(),
+    );
+    window.set_workspace_session_connection_current_hop(
+        current_step
+            .map(|step| step.hop_label.clone())
+            .unwrap_or_default()
+            .into(),
+    );
+    window.set_workspace_session_connection_current_detail(
+        current_step
+            .map(|step| step.detail.clone())
+            .or_else(|| attempt.diagnostics.last().map(|line| line.message.clone()))
+            .unwrap_or_else(|| default_connection_progress_detail(attempt.headline).into())
+            .into(),
+    );
+    window.set_workspace_session_host_key_prompt_host(
+        attempt
+            .prompt
+            .as_ref()
+            .map(|prompt| format!("{}:{}", prompt.host, prompt.port))
+            .unwrap_or_default()
+            .into(),
+    );
+    window.set_workspace_session_host_key_prompt_fingerprint(
+        attempt
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.fingerprint.clone())
+            .unwrap_or_default()
+            .into(),
+    );
+    sync_vec_model(window.get_workspace_session_connection_steps(), steps, |model| {
+        window.set_workspace_session_connection_steps(model)
+    });
+    sync_vec_model(
+        window.get_workspace_session_connection_diagnostics(),
+        diagnostics,
+        |model| window.set_workspace_session_connection_diagnostics(model),
+    );
+}
+
+fn sync_workspace_session_state_with_manager(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    follow_tracker: &mut WorkspaceFollowTracker,
+    manager: Option<&SessionManager>,
 ) {
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
@@ -3128,6 +3295,8 @@ fn sync_workspace_session_state(
         window.set_workspace_session_can_reconnect(false);
         window.set_workspace_session_surface_seqno(0);
     }
+
+    sync_workspace_connection_progress_state(window, state, manager);
 }
 
 fn sync_workspace_tabs(
@@ -3135,8 +3304,17 @@ fn sync_workspace_tabs(
     state: &ShellViewModel,
     follow_tracker: &mut WorkspaceFollowTracker,
 ) {
+    sync_workspace_tabs_with_manager(window, state, follow_tracker, None);
+}
+
+fn sync_workspace_tabs_with_manager(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    follow_tracker: &mut WorkspaceFollowTracker,
+    manager: Option<&SessionManager>,
+) {
     sync_workspace_tab_items(window, state);
-    sync_workspace_session_state(window, state, follow_tracker);
+    sync_workspace_session_state_with_manager(window, state, follow_tracker, manager);
 }
 
 fn sync_shell_state(
@@ -3940,10 +4118,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 sync_assets_context_menu_state(&window, &state);
             }
             if projection_delta.any_changed() {
-                sync_workspace_session_state(
+                sync_workspace_session_state_with_manager(
                     &window,
                     &state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
+                    Some(&manager),
                 );
             }
         });
@@ -3953,6 +4132,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let session_projection_timer_ref = Rc::clone(&session_projection_timer);
     let effects_ref = Rc::clone(&effects);
+    let session_bridge_ref = session_bridge.clone();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_toggle_right_panel_requested(move || {
         let _keep_session_projection_timer_alive = &session_projection_timer_ref;
@@ -3963,10 +4143,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_right_panel_state(&window, &state);
         sync_shell_layout(&window, &mut state, width, height);
-        sync_workspace_session_state(
+        sync_workspace_session_state_with_manager(
             &window,
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
     });
 
@@ -4158,10 +4339,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             let projection =
                 sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
             if projection.tabs_changed || projection.surface_changed {
-                sync_workspace_tabs(
+                sync_workspace_tabs_with_manager(
                     &window,
                     &state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
+                    Some(&session_bridge.manager),
                 );
             }
         }
@@ -4685,10 +4867,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
-        sync_workspace_tabs(
+        sync_workspace_tabs_with_manager(
             &window,
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
         sync_assets_context_menu_state(&window, &state);
         sync_asset_modal_state(&window, &state);
@@ -4714,10 +4897,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
         window.set_blocking_modal_offset_x(0.0);
         window.set_blocking_modal_offset_y(0.0);
-        sync_workspace_tabs(
+        sync_workspace_tabs_with_manager(
             &window,
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
         sync_ssh_host_key_modal_state(&window, &state);
         sync_asset_modal_state(&window, &state);
@@ -4773,10 +4957,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         resolve_pending_host_key(&mut state, None, &pending_host_key_approval_ref, false);
         window.set_blocking_modal_offset_x(0.0);
         window.set_blocking_modal_offset_y(0.0);
-        sync_workspace_tabs(
+        sync_workspace_tabs_with_manager(
             &window,
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
+            None,
         );
         sync_ssh_host_key_modal_state(&window, &state);
         sync_asset_modal_state(&window, &state);
@@ -4877,10 +5062,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     .unwrap_or((24, 80));
                 forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
             }
-            sync_workspace_tabs(
+            sync_workspace_tabs_with_manager(
                 &window,
                 &state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
+                session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
             sync_assets_context_menu_state(&window, &state);
         }
@@ -4908,10 +5094,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     .unwrap_or((24, 80));
                 forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
             }
-            sync_workspace_tabs(
+            sync_workspace_tabs_with_manager(
                 &window,
                 &state,
                 &mut workspace_follow_tracker_ref.borrow_mut(),
+                session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
             sync_assets_context_menu_state(&window, &state);
         }
@@ -4940,10 +5127,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &pending_host_key_approval_ref,
                     asset_id.as_str(),
                 );
-                sync_workspace_tabs(
+                sync_workspace_tabs_with_manager(
                     &window,
                     &state,
                     &mut workspace_follow_tracker_ref.borrow_mut(),
+                    session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                 );
                 sync_assets_context_menu_state(&window, &state);
                 sync_ssh_host_key_modal_state(&window, &state);
@@ -4969,10 +5157,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                             .unwrap_or((24, 80));
                         forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
                     }
-                    sync_workspace_tabs(
+                    sync_workspace_tabs_with_manager(
                         &window,
                         &state,
                         &mut workspace_follow_tracker_ref.borrow_mut(),
+                        session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                     );
                     sync_assets_context_menu_state(&window, &state);
                 }
@@ -4986,6 +5175,101 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             "toggle-global-menu" => {
                 state.toggle_global_menu();
                 window.set_show_global_menu(state.show_global_menu);
+            }
+            "cancel-connection-attempt" => {
+                let Some(session_bridge) = session_bridge_ref.as_ref() else {
+                    return;
+                };
+                let Some(session_id) = active_workspace_session_uuid(&state) else {
+                    return;
+                };
+                let _ = session_bridge.manager.cancel_connection_attempt(session_id);
+                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                sync_workspace_tabs_with_manager(
+                    &window,
+                    &state,
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                    Some(&session_bridge.manager),
+                );
+            }
+            "retry-connection-attempt" => {
+                let Some(session_bridge) = session_bridge_ref.as_ref() else {
+                    return;
+                };
+                let Some(session_id) = active_workspace_session_uuid(&state) else {
+                    return;
+                };
+                if let Err(err) = session_bridge.manager.retry_session(session_id) {
+                    tracing::error!(
+                        target: "app.ssh",
+                        session_id = session_id.to_string(),
+                        error = %err,
+                        "failed to retry workspace ssh connection attempt"
+                    );
+                    return;
+                }
+                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                sync_workspace_tabs_with_manager(
+                    &window,
+                    &state,
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                    Some(&session_bridge.manager),
+                );
+            }
+            "trust-host-key" => {
+                let Some(session_bridge) = session_bridge_ref.as_ref() else {
+                    return;
+                };
+                let Some(session_id) = active_workspace_session_uuid(&state) else {
+                    return;
+                };
+                let Some(prompt) = session_bridge
+                    .manager
+                    .connection_attempt(session_id)
+                    .and_then(|attempt| attempt.prompt)
+                else {
+                    return;
+                };
+                let accept_result = (|| -> anyhow::Result<()> {
+                    let public_key = PublicKey::from_openssh(prompt.public_key_openssh.as_str())
+                        .context("failed to parse accepted SSH host key")?;
+                    let known_hosts = KnownHostsService::new(default_known_hosts_path()?);
+                    known_hosts.accept_unknown(prompt.host.as_str(), prompt.port, &public_key)?;
+                    let _ = session_bridge.manager.retry_session(session_id)?;
+                    Ok(())
+                })();
+                if let Err(err) = accept_result {
+                    tracing::error!(
+                        target: "app.ssh",
+                        session_id = session_id.to_string(),
+                        error = %err,
+                        "failed to trust workspace ssh host key"
+                    );
+                    return;
+                }
+                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                sync_workspace_tabs_with_manager(
+                    &window,
+                    &state,
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                    Some(&session_bridge.manager),
+                );
+            }
+            "reject-host-key" => {
+                let Some(session_bridge) = session_bridge_ref.as_ref() else {
+                    return;
+                };
+                let Some(session_id) = active_workspace_session_uuid(&state) else {
+                    return;
+                };
+                let _ = session_bridge.manager.reject_host_key_prompt(session_id);
+                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                sync_workspace_tabs_with_manager(
+                    &window,
+                    &state,
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                    Some(&session_bridge.manager),
+                );
             }
             _ => {}
         }
@@ -5041,16 +5325,18 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let window_handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_selection_changed(move || {
         let Some(window) = window_handle.upgrade() else {
             return;
         };
         let state = state.borrow();
-        sync_workspace_session_state(
+        sync_workspace_session_state_with_manager(
             &window,
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
     });
 
@@ -5254,10 +5540,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
         sync_keychain_assets(&window, &state);
-        sync_workspace_tabs(
+        sync_workspace_tabs_with_manager(
             &window,
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
         sync_assets_context_menu_state(&window, &state);
         sync_ssh_host_key_modal_state(&window, &state);
@@ -5306,10 +5593,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
         sync_keychain_assets(&window, &state);
-        sync_workspace_tabs(
+        sync_workspace_tabs_with_manager(
             &window,
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
         sync_assets_context_menu_state(&window, &state);
         sync_ssh_host_key_modal_state(&window, &state);
@@ -5410,10 +5698,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         hydrate_edit_ssh_modal_secret_from_store(&mut state, credential_store_ref.as_ref());
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
-        sync_workspace_tabs(
+        sync_workspace_tabs_with_manager(
             &window,
             &state,
             &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
         sync_asset_modal_state(&window, &state);
         update_context_menu_placement(&window, &mut state);
@@ -5681,6 +5970,7 @@ mod tests {
             &self,
             _profile: ConnectionProfile,
             _session_id: Uuid,
+            _attempt_id: Uuid,
             _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
         ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
         {
@@ -5702,6 +5992,7 @@ mod tests {
             &self,
             _profile: ConnectionProfile,
             session_id: Uuid,
+            _attempt_id: Uuid,
             event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
         ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
         {

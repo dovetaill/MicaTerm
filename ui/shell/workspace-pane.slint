@@ -2,7 +2,7 @@
 
 import { ThemeTokens } from "../theme/tokens.slint";
 import { TabBar, WorkspaceTabItem } from "./tabbar.slint";
-import { TerminalSessionHost } from "./terminal-session-host.slint";
+import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow, TerminalSessionHost } from "./terminal-session-host.slint";
 
 export component WorkspacePane inherits Rectangle {
     in property <[WorkspaceTabItem]> workspace-tab-items: [];
@@ -13,6 +13,13 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-session-state: "";
     in property <string> workspace-session-error-detail: "";
     in property <bool> workspace-session-can-reconnect: false;
+    in property <string> workspace-session-connection-headline: "";
+    in property <string> workspace-session-connection-current-hop: "";
+    in property <string> workspace-session-connection-current-detail: "";
+    in property <string> workspace-session-host-key-prompt-host: "";
+    in property <string> workspace-session-host-key-prompt-fingerprint: "";
+    in property <[ConnectionProgressStepRow]> workspace-session-connection-steps: [];
+    in property <[ConnectionProgressDiagnosticRow]> workspace-session-connection-diagnostics: [];
     in property <image> workspace-session-surface-image;
     in property <int> workspace-session-rows: 24;
     in property <int> workspace-session-cols: 80;
@@ -94,6 +101,13 @@ export component WorkspacePane inherits Rectangle {
                 session-state: root.workspace-session-state;
                 session-error-detail: root.workspace-session-error-detail;
                 can-reconnect: root.workspace-session-can-reconnect;
+                connection-progress-headline: root.workspace-session-connection-headline;
+                connection-progress-current-hop: root.workspace-session-connection-current-hop;
+                connection-progress-current-detail: root.workspace-session-connection-current-detail;
+                connection-progress-host-key-prompt-host: root.workspace-session-host-key-prompt-host;
+                connection-progress-host-key-prompt-fingerprint: root.workspace-session-host-key-prompt-fingerprint;
+                connection-progress-steps: root.workspace-session-connection-steps;
+                connection-progress-diagnostics: root.workspace-session-connection-diagnostics;
                 session-surface-image: root.workspace-session-surface-image;
                 session-rows: root.workspace-session-rows;
                 session-cols: root.workspace-session-cols;

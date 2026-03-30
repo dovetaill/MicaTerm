@@ -72,6 +72,17 @@ pub struct TerminalEmojiRenderer {
     backend: Box<dyn EmojiRasterizerBackend>,
 }
 
+struct BlitRgbaGlyphRequest<'a> {
+    dst: &'a mut [u8],
+    dst_width: u32,
+    dst_height: u32,
+    dest_x: i32,
+    dest_y: i32,
+    glyph_width: u32,
+    glyph_height: u32,
+    src: &'a [u8],
+}
+
 enum ResolverSource {
     Database(Database),
     Fixed(EmojiFontResolution),
@@ -147,6 +158,12 @@ impl TerminalEmojiRenderer {
     }
 }
 
+impl Default for TerminalEmojiRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TerminalEmojiResolver {
     pub fn new() -> Self {
         let mut database = Database::new();
@@ -180,6 +197,12 @@ impl TerminalEmojiResolver {
             ResolverSource::Database(database) => database.with_face_data(face_id, f),
             ResolverSource::Fixed(_) => None,
         }
+    }
+}
+
+impl Default for TerminalEmojiResolver {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -379,8 +402,8 @@ fn compose_rendered_glyphs(
         return None;
     }
 
-    let content_width = (max_x - min_x) as i32;
-    let content_height = (max_y - min_y) as i32;
+    let content_width = max_x - min_x;
+    let content_height = max_y - min_y;
     let pad_x = ((sprite_width as i32 - content_width).max(0)) / 2;
     let pad_y = ((sprite_height as i32 - content_height).max(0)) / 2;
     let mut rgba = vec![0u8; (sprite_width * sprite_height * 4) as usize];
@@ -388,16 +411,16 @@ fn compose_rendered_glyphs(
     for glyph in glyphs {
         let dest_x = pad_x + glyph.left - min_x;
         let dest_y = pad_y + max_y - glyph.top;
-        blit_rgba_glyph(
-            &mut rgba,
-            sprite_width,
-            sprite_height,
+        blit_rgba_glyph(BlitRgbaGlyphRequest {
+            dst: &mut rgba,
+            dst_width: sprite_width,
+            dst_height: sprite_height,
             dest_x,
             dest_y,
-            glyph.width,
-            glyph.height,
-            &glyph.rgba,
-        );
+            glyph_width: glyph.width,
+            glyph_height: glyph.height,
+            src: &glyph.rgba,
+        });
     }
 
     if rgba.chunks_exact(4).all(|pixel| pixel[3] == 0) {
@@ -411,31 +434,26 @@ fn compose_rendered_glyphs(
     })
 }
 
-fn blit_rgba_glyph(
-    dst: &mut [u8],
-    dst_width: u32,
-    dst_height: u32,
-    dest_x: i32,
-    dest_y: i32,
-    glyph_width: u32,
-    glyph_height: u32,
-    src: &[u8],
-) {
-    for y in 0..glyph_height as i32 {
-        let target_y = dest_y + y;
-        if !(0..dst_height as i32).contains(&target_y) {
+fn blit_rgba_glyph(request: BlitRgbaGlyphRequest<'_>) {
+    for y in 0..request.glyph_height as i32 {
+        let target_y = request.dest_y + y;
+        if !(0..request.dst_height as i32).contains(&target_y) {
             continue;
         }
 
-        for x in 0..glyph_width as i32 {
-            let target_x = dest_x + x;
-            if !(0..dst_width as i32).contains(&target_x) {
+        for x in 0..request.glyph_width as i32 {
+            let target_x = request.dest_x + x;
+            if !(0..request.dst_width as i32).contains(&target_x) {
                 continue;
             }
 
-            let src_index = ((y as u32 * glyph_width + x as u32) * 4) as usize;
-            let dst_index = ((target_y as u32 * dst_width + target_x as u32) * 4) as usize;
-            composite_rgba_pixel(&mut dst[dst_index..dst_index + 4], &src[src_index..src_index + 4]);
+            let src_index = ((y as u32 * request.glyph_width + x as u32) * 4) as usize;
+            let dst_index =
+                ((target_y as u32 * request.dst_width + target_x as u32) * 4) as usize;
+            composite_rgba_pixel(
+                &mut request.dst[dst_index..dst_index + 4],
+                &request.src[src_index..src_index + 4],
+            );
         }
     }
 }

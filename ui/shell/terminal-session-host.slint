@@ -41,6 +41,58 @@ component TerminalContextMenuRow inherits Rectangle {
     }
 }
 
+export struct ConnectionProgressStepRow {
+    state: string,
+    hop_label: string,
+    title: string,
+    detail: string,
+}
+
+export struct ConnectionProgressDiagnosticRow {
+    text: string,
+}
+
+component ConnectionProgressActionButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    callback clicked();
+
+    height: 32px;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.primary ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    background: !root.enabled
+        ? ThemeTokens.control-disabled-surface
+        : button-touch.pressed
+            ? ThemeTokens.control-pressed-surface
+            : button-touch.has-hover
+                ? ThemeTokens.control-hover-surface
+                : root.primary
+                    ? ThemeTokens.accent
+                    : ThemeTokens.control-active-surface;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        opacity: root.enabled ? 1.0 : 0.48;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    button-touch := TouchArea {
+        enabled: root.enabled;
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
 export component TerminalSessionHost inherits Rectangle {
     in property <string> session-id: "";
     in property <string> mode: "welcome";
@@ -49,6 +101,13 @@ export component TerminalSessionHost inherits Rectangle {
     in property <string> session-state: "";
     in property <string> session-error-detail: "";
     in property <bool> can-reconnect: false;
+    in property <string> connection-progress-headline: "";
+    in property <string> connection-progress-current-hop: "";
+    in property <string> connection-progress-current-detail: "";
+    in property <string> connection-progress-host-key-prompt-host: "";
+    in property <string> connection-progress-host-key-prompt-fingerprint: "";
+    in property <[ConnectionProgressStepRow]> connection-progress-steps: [];
+    in property <[ConnectionProgressDiagnosticRow]> connection-progress-diagnostics: [];
     in property <image> session-surface-image;
     in property <int> session-rows: 24;
     in property <int> session-cols: 80;
@@ -114,6 +173,7 @@ export component TerminalSessionHost inherits Rectangle {
     private property <bool> terminal-context-menu-open: false;
     private property <length> terminal-context-menu-x: 12px;
     private property <length> terminal-context-menu-y: 12px;
+    private property <bool> connection-progress-diagnostics-expanded: false;
 
     function terminal-content-width() -> length {
         return max(
@@ -377,6 +437,36 @@ export component TerminalSessionHost inherits Rectangle {
         );
     }
 
+    function connection-progress-headline-label() -> string {
+        if root.connection-progress-headline == "waiting-user" {
+            return "Waiting for Your Input";
+        }
+        if root.connection-progress-headline == "connected" {
+            return "Connected";
+        }
+        if root.connection-progress-headline == "cancelled" {
+            return "Cancelled";
+        }
+        if root.connection-progress-headline == "error" {
+            return "Connection Failed";
+        }
+        return "Connecting";
+    }
+
+    function connection-progress-shows-cancel() -> bool {
+        return root.connection-progress-headline == "connecting"
+            || root.connection-progress-headline == "waiting-user";
+    }
+
+    function connection-progress-shows-retry() -> bool {
+        return root.connection-progress-headline == "error"
+            || root.connection-progress-headline == "cancelled";
+    }
+
+    function connection-progress-has-host-key-prompt() -> bool {
+        return root.connection-progress-host-key-prompt-host != "";
+    }
+
     width: 100%;
     height: 100%;
     min-width: 0px;
@@ -385,6 +475,7 @@ export component TerminalSessionHost inherits Rectangle {
     changed mode => {
         root.close-context-menu();
         root.clear-selection();
+        root.connection-progress-diagnostics-expanded = false;
         if root.mode == "terminal" {
             root.emit-surface-resize();
         }
@@ -393,6 +484,7 @@ export component TerminalSessionHost inherits Rectangle {
     changed session-id => {
         root.close-context-menu();
         root.clear-selection();
+        root.connection-progress-diagnostics-expanded = false;
         if root.mode == "terminal" && root.session-id != "" {
             root.emit-surface-resize();
         }
@@ -984,6 +1076,321 @@ export component TerminalSessionHost inherits Rectangle {
                             terminal-input.focus();
                         }
                     }
+                }
+            }
+        }
+    }
+
+    if root.mode == "connection-progress" : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+        VerticalLayout {
+            width: parent.width;
+            height: parent.height;
+            padding-left: 20px;
+            padding-top: 20px;
+            padding-right: 20px;
+            padding-bottom: 20px;
+            spacing: 14px;
+
+            header-card := Rectangle {
+                width: parent.width;
+                height: 92px;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.titlebar-surface;
+
+                VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: 18px;
+                    padding-top: 16px;
+                    padding-right: 18px;
+                    padding-bottom: 16px;
+                    spacing: 6px;
+
+                    Text {
+                        text: root.session-title != "" ? root.session-title : "SSH Session";
+                        color: ThemeTokens.text-primary;
+                        font-size: 18px;
+                        font-weight: 700;
+                    }
+
+                    Text {
+                        text: root.session-subtitle != "" ? root.session-subtitle : root.connection-progress-headline-label();
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.72;
+                        font-size: 12px;
+                    }
+
+                    Text {
+                        text: root.connection-progress-current-hop != ""
+                            ? root.connection-progress-headline-label() + " · " + root.connection-progress-current-hop
+                            : root.connection-progress-headline-label();
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.84;
+                        font-size: 12px;
+                    }
+                }
+            }
+
+            timeline-card := Rectangle {
+                width: parent.width;
+                vertical-stretch: 1;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.titlebar-surface;
+                clip: true;
+
+                VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: 18px;
+                    padding-top: 18px;
+                    padding-right: 18px;
+                    padding-bottom: 18px;
+                    spacing: 12px;
+
+                    for step in root.connection-progress-steps : Rectangle {
+                        width: parent.width;
+                        height: 56px;
+                        border-radius: 10px;
+                        border-width: 1px;
+                        border-color: step.state == "running"
+                            ? ThemeTokens.accent
+                            : ThemeTokens.divider-subtle;
+                        background: step.state == "running"
+                            ? ThemeTokens.control-hover-surface
+                            : step.state == "failed"
+                                ? ThemeTokens.status-error-surface
+                                : step.state == "done"
+                                    ? ThemeTokens.status-success-surface
+                                    : ThemeTokens.control-active-surface;
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: parent.height;
+                            padding-left: 14px;
+                            padding-top: 10px;
+                            padding-right: 14px;
+                            padding-bottom: 10px;
+                            spacing: 12px;
+
+                            Rectangle {
+                                width: 10px;
+                                height: 10px;
+                                border-radius: 5px;
+                                y: 6px;
+                                background: step.state == "running"
+                                    ? ThemeTokens.accent
+                                    : step.state == "failed"
+                                        ? #d46a78
+                                        : step.state == "done"
+                                            ? #5bb37f
+                                            : ThemeTokens.divider-strong;
+                            }
+
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+
+                                Text {
+                                    text: step.hop_label + " · " + step.title;
+                                    color: ThemeTokens.text-primary;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    overflow: elide;
+                                }
+
+                                Text {
+                                    text: step.detail;
+                                    color: ThemeTokens.text-primary;
+                                    opacity: 0.72;
+                                    font-size: 11px;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            current-detail-card := Rectangle {
+                width: parent.width;
+                height: 54px;
+                border-radius: 10px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.control-active-surface;
+
+                Text {
+                    x: 16px;
+                    y: 0px;
+                    width: parent.width - 32px;
+                    height: parent.height;
+                    text: root.connection-progress-current-detail != ""
+                        ? root.connection-progress-current-detail
+                        : "Preparing SSH connection timeline...";
+                    color: ThemeTokens.text-primary;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+
+            if root.connection-progress-has-host-key-prompt() : host-key-card := Rectangle {
+                width: parent.width;
+                height: 118px;
+                border-radius: 10px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.control-active-surface;
+
+                VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: 16px;
+                    padding-top: 14px;
+                    padding-right: 16px;
+                    padding-bottom: 14px;
+                    spacing: 10px;
+
+                    Text {
+                        text: "Verify Host Key";
+                        color: ThemeTokens.text-primary;
+                        font-size: 12px;
+                        font-weight: 700;
+                    }
+
+                    Text {
+                        text: root.connection-progress-host-key-prompt-host;
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.84;
+                        font-size: 11px;
+                    }
+
+                    Text {
+                        text: root.connection-progress-host-key-prompt-fingerprint;
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.64;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 10px;
+
+                        ConnectionProgressActionButton {
+                            width: 144px;
+                            label: "Trust and Continue";
+                            primary: true;
+
+                            clicked => {
+                                root.local-action-requested("trust-host-key");
+                            }
+                        }
+
+                        ConnectionProgressActionButton {
+                            width: 88px;
+                            label: "Reject";
+
+                            clicked => {
+                                root.local-action-requested("reject-host-key");
+                            }
+                        }
+                    }
+                }
+            }
+
+            if root.connection-progress-diagnostics.length > 0 : diagnostics-card := Rectangle {
+                width: parent.width;
+                height: root.connection-progress-diagnostics-expanded
+                    ? min(180px, 44px + (root.connection-progress-diagnostics.length * 24px))
+                    : 0px;
+                clip: true;
+                border-radius: 10px;
+                border-width: root.connection-progress-diagnostics-expanded ? 1px : 0px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.control-active-surface;
+
+                VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: 16px;
+                    padding-top: 12px;
+                    padding-right: 16px;
+                    padding-bottom: 12px;
+                    spacing: 6px;
+
+                    for line in root.connection-progress-diagnostics : Text {
+                        text: line.text;
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.72;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            footer-row := HorizontalLayout {
+                width: parent.width;
+                spacing: 10px;
+
+                if root.connection-progress-shows-cancel() : ConnectionProgressActionButton {
+                    width: 88px;
+                    label: "Cancel";
+                    primary: false;
+
+                    clicked => {
+                        root.local-action-requested("cancel-connection-attempt");
+                    }
+                }
+
+                if root.connection-progress-shows-retry() : ConnectionProgressActionButton {
+                    width: 84px;
+                    label: "Retry";
+                    primary: true;
+
+                    clicked => {
+                        root.local-action-requested("retry-connection-attempt");
+                    }
+                }
+
+                if root.connection-progress-shows-retry() : ConnectionProgressActionButton {
+                    width: 124px;
+                    label: "Edit Connection";
+
+                    clicked => {
+                        root.local-action-requested("edit-connection");
+                    }
+                }
+
+                ConnectionProgressActionButton {
+                    width: 134px;
+                    enabled: root.connection-progress-diagnostics.length > 0;
+                    label: root.connection-progress-diagnostics-expanded ? "Hide Diagnostics" : "Show Diagnostics";
+
+                    clicked => {
+                        root.connection-progress-diagnostics-expanded = !root.connection-progress-diagnostics-expanded;
+                    }
+                }
+
+                ConnectionProgressActionButton {
+                    width: 128px;
+                    enabled: root.connection-progress-diagnostics.length > 0;
+                    label: "Copy Diagnostics";
+
+                    clicked => {
+                        root.local-action-requested("copy-connection-diagnostics");
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
                 }
             }
         }

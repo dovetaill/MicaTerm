@@ -45,6 +45,16 @@ grep -F 'callback text-input(string);' "$WORKSPACE_HOST" >/dev/null
 grep -F 'callback key-input(string, bool, bool, bool);' "$WORKSPACE_HOST" >/dev/null
 grep -F 'callback surface-resize-requested(int, int);' "$WORKSPACE_HOST" >/dev/null
 grep -F 'in property <string> session-error-detail: "";' "$WORKSPACE_HOST" >/dev/null
+grep -F 'workspace-session-connection-steps' "$APP_WINDOW" >/dev/null
+grep -F 'workspace-session-connection-diagnostics' "$APP_WINDOW" >/dev/null
+grep -F 'workspace-session-connection-current-detail' "$APP_WINDOW" >/dev/null
+grep -F 'workspace-session-connection-steps' "$WORKSPACE_PANE" >/dev/null
+grep -F 'workspace-session-connection-diagnostics' "$WORKSPACE_PANE" >/dev/null
+grep -F 'if root.mode == "connection-progress"' "$WORKSPACE_HOST" >/dev/null
+grep -F 'Show Diagnostics' "$WORKSPACE_HOST" >/dev/null
+grep -F 'Copy Diagnostics' "$WORKSPACE_HOST" >/dev/null
+grep -F 'Cancel' "$WORKSPACE_HOST" >/dev/null
+grep -F 'Retry' "$WORKSPACE_HOST" >/dev/null
 ! grep -F 'Interactive terminal ready.' "$WORKSPACE_HOST" >/dev/null
 ! grep -F 'Terminal Session' "$WORKSPACE_HOST" >/dev/null
 ! grep -F 'if root.session-subtitle != ""' "$WORKSPACE_HOST" >/dev/null
