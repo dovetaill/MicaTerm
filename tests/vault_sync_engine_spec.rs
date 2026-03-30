@@ -193,3 +193,22 @@ fn sync_engine_surfaces_primary_read_failures_without_touching_mirrors() {
     assert!(primary.recorded_writes().is_empty());
     assert!(mirror.recorded_writes().is_empty());
 }
+
+#[test]
+fn sync_engine_allows_the_first_commit_against_an_empty_primary_head() {
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    let engine = SyncEngine::new(primary.clone() as Arc<dyn VaultProvider>, Vec::new());
+
+    let result = engine
+        .sync(sample_request("rev-0001", None))
+        .expect("initial sync should succeed against an empty head");
+
+    assert_eq!(result.primary_revision, "rev-0001");
+    let writes = primary.recorded_writes();
+    assert_eq!(writes.len(), 1);
+    assert!(writes[0].conditional_head_write);
+    assert_eq!(writes[0].expected_parent_revision, None);
+}

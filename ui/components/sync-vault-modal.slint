@@ -1,0 +1,312 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+component SyncModalActionButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> primary: false;
+    callback clicked();
+
+    min-width: 0px;
+    preferred-width: 0px;
+    horizontal-stretch: 1;
+    height: 34px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: root.primary ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    background: action-touch.pressed ? ThemeTokens.control-pressed-surface
+        : action-touch.has-hover ? ThemeTokens.control-hover-surface
+        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+
+    Text {
+        x: 8px;
+        width: parent.width - 16px;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    action-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component SyncVaultModal inherits Rectangle {
+    in property <string> mode: "not-configured";
+    in property <string> title: "Sync";
+    in property <string> headline: "";
+    in property <string> status-text: "";
+    in property <string> error-text: "";
+    in property <string> provider-label: "";
+    in property <string> target-label: "";
+    in property <string> primary-action-label: "Set up sync";
+    in property <string> secondary-action-label: "";
+    callback close-requested();
+    callback primary-action-requested();
+    callback secondary-action-requested();
+    callback drag-requested(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended();
+    callback focus-restore-requested();
+
+    private property <length> header-height: 56px;
+    private property <length> footer-height: root.secondary-action-label == "" ? 76px : 84px;
+    private property <length> body-height: max(0px, root.height - root.header-height - root.footer-height);
+
+    background: transparent;
+
+    modal-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.focus-restore-requested();
+                root.close-requested();
+                accept
+            } else {
+                reject
+            }
+        }
+
+        header := Rectangle {
+            width: parent.width;
+            height: root.header-height;
+            border-radius: 0px;
+            border-width: 0px;
+            background: ThemeTokens.assets-surface;
+
+            drag-touch := TouchArea {
+                width: parent.width - 48px;
+                height: parent.height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down
+                        && event.button == PointerEventButton.left
+                    {
+                        root.drag-requested(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.move {
+                        root.drag-moved(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.up {
+                        root.drag-ended();
+                    }
+                }
+            }
+
+            Text {
+                x: 20px;
+                y: 18px;
+                width: parent.width - 84px;
+                text: root.title;
+                color: ThemeTokens.text-primary;
+                font-size: 22px;
+                font-weight: 700;
+                overflow: elide;
+            }
+
+            close-button := Rectangle {
+                x: parent.width - 44px;
+                y: 12px;
+                width: 32px;
+                height: 32px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.control-active-surface;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "x";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    font-size: 18px;
+                }
+
+                close-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        root.close-requested();
+                    }
+                }
+            }
+        }
+
+        body := Rectangle {
+            y: root.header-height;
+            width: parent.width;
+            height: root.body-height;
+            border-radius: 0px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.inspector-surface;
+
+            content := VerticalLayout {
+                x: 20px;
+                y: 20px;
+                width: parent.width - 40px;
+                spacing: 12px;
+
+                Text {
+                    text: root.headline;
+                    color: ThemeTokens.text-primary;
+                    font-size: 20px;
+                    font-weight: 700;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: root.status-text;
+                    color: ThemeTokens.text-primary;
+                    opacity: 0.82;
+                    wrap: word-wrap;
+                }
+
+                if root.provider-label != "" : provider-row := Rectangle {
+                    width: parent.width;
+                    height: 36px;
+                    border-radius: 0px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.divider-subtle;
+                    background: ThemeTokens.control-active-surface;
+
+                    Text {
+                        x: 12px;
+                        y: 8px;
+                        width: parent.width - 24px;
+                        text: "Provider: " + root.provider-label;
+                        color: ThemeTokens.text-primary;
+                        overflow: elide;
+                    }
+                }
+
+                if root.target-label != "" : target-row := Rectangle {
+                    width: parent.width;
+                    height: 36px;
+                    border-radius: 0px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.divider-subtle;
+                    background: ThemeTokens.control-active-surface;
+
+                    Text {
+                        x: 12px;
+                        y: 8px;
+                        width: parent.width - 24px;
+                        text: "Target: " + root.target-label;
+                        color: ThemeTokens.text-primary;
+                        overflow: elide;
+                    }
+                }
+
+                if root.mode == "not-configured" : mode-copy-not-configured := Text {
+                    text: "Remote-first setup is required before sync can be enabled.";
+                    color: ThemeTokens.text-primary;
+                    opacity: 0.72;
+                    wrap: word-wrap;
+                }
+
+                if root.mode == "locked" : mode-copy-locked := Text {
+                    text: "The vault is configured, but it must be unlocked before sync details are shown.";
+                    color: ThemeTokens.text-primary;
+                    opacity: 0.72;
+                    wrap: word-wrap;
+                }
+
+                if root.mode == "unlocked-but-remote-incomplete" : mode-copy-unlocked := Text {
+                    text: "The local vault is available, but the primary remote is still incomplete.";
+                    color: ThemeTokens.text-primary;
+                    opacity: 0.72;
+                    wrap: word-wrap;
+                }
+
+                if root.mode == "ready" : mode-copy-ready := Text {
+                    text: "The current sync configuration is ready and can be managed from this modal.";
+                    color: ThemeTokens.text-primary;
+                    opacity: 0.72;
+                    wrap: word-wrap;
+                }
+
+                if root.mode == "sync-error" : mode-copy-error := Text {
+                    text: "Sync state could not be resolved. Close the modal and try again.";
+                    color: ThemeTokens.text-primary;
+                    opacity: 0.72;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        footer := Rectangle {
+            y: root.height - root.footer-height;
+            width: parent.width;
+            height: root.footer-height;
+            border-radius: 0px;
+            border-width: 0px;
+            background: ThemeTokens.assets-surface;
+
+            footer-content := VerticalLayout {
+                x: 20px;
+                y: 12px;
+                width: parent.width - 40px;
+                spacing: 8px;
+
+                if root.error-text != "" : error-banner := Rectangle {
+                    width: parent.width;
+                    height: 28px;
+                    border-radius: 0px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.divider-strong;
+                    background: ThemeTokens.status-error-surface;
+
+                    Text {
+                        x: 10px;
+                        y: 5px;
+                        width: parent.width - 20px;
+                        text: root.error-text;
+                        color: ThemeTokens.text-primary;
+                        overflow: elide;
+                    }
+                }
+
+                HorizontalLayout {
+                    width: parent.width;
+                    spacing: 8px;
+
+                    if root.secondary-action-label != "" : secondary-button := SyncModalActionButton {
+                        label: root.secondary-action-label;
+                        primary: false;
+
+                        clicked => {
+                            root.secondary-action-requested();
+                        }
+                    }
+
+                    primary-button := SyncModalActionButton {
+                        label: root.primary-action-label;
+                        primary: true;
+
+                        clicked => {
+                            root.primary-action-requested();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

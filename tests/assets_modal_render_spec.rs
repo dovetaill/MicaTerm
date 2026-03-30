@@ -260,3 +260,47 @@ fn new_ssh_modal_renders_footer_actions_and_balanced_top_row() {
         "ssh modal leading field should not starve the sibling field; left={left_field_pixels}, right={right_field_pixels}"
     );
 }
+
+#[test]
+fn sync_modal_renders_state_driven_content_and_footer_actions() {
+    let modal = blocking_modal_rect(560, 360);
+    let buffer = render_app(|app| {
+        app.set_sync_modal_open(true);
+        app.set_sync_modal_mode("not-configured".into());
+        app.set_sync_modal_title("Sync".into());
+        app.set_sync_modal_headline("Set up sync".into());
+        app.set_sync_modal_status_text("Configure a Gitee remote to enable sync.".into());
+        app.set_sync_modal_primary_action_label("Set up sync".into());
+        app.set_sync_modal_secondary_action_label("Close".into());
+    });
+    write_ppm(&buffer, "/tmp/sync-vault-modal.ppm");
+
+    let modal_surface = pixel_at(&buffer, modal.x + 10, modal.y + 10);
+    let body_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 28,
+        modal.y + 72,
+        modal.width - 56,
+        modal.height - 156,
+        modal_surface,
+        14,
+    );
+    let footer_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 24,
+        modal.y + modal.height - 60,
+        modal.width - 48,
+        40,
+        modal_surface,
+        14,
+    );
+
+    assert!(
+        body_pixels >= 2200,
+        "sync modal body should render visible state-driven content, only found {body_pixels} distinct pixels"
+    );
+    assert!(
+        footer_pixels >= 1100,
+        "sync modal footer should render visible action controls, only found {footer_pixels} distinct pixels"
+    );
+}

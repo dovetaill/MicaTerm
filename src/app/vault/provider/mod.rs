@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::app::vault::crypto::EncryptedSnapshot;
-use crate::app::vault::model::{PackLayout, VaultHead, VaultManifest};
+use crate::app::vault::model::{PackLayout, ProviderKind, VaultHead, VaultManifest};
 
 pub mod gitee_gist;
 pub mod github_gist;
@@ -56,4 +56,16 @@ pub trait VaultProvider: Send + Sync {
     fn capabilities(&self) -> ProviderCapabilities;
     fn read_head(&self) -> Result<ProviderReadResult>;
     fn write_revision(&self, request: &ProviderWriteRequest) -> Result<()>;
+}
+
+pub fn first_release_formal_provider_kind() -> ProviderKind {
+    ProviderKind::GiteeGist
+}
+
+pub fn first_release_formal_provider_label() -> &'static str {
+    "Gitee"
+}
+
+pub fn first_release_formal_auth_label() -> &'static str {
+    "Personal Access Token"
 }

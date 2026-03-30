@@ -6,6 +6,7 @@ APP_WINDOW="$ROOT_DIR/ui/app-window.slint"
 CREATE_MENU="$ROOT_DIR/ui/components/assets-create-menu.slint"
 FOLDER_MODAL="$ROOT_DIR/ui/components/assets-folder-create-modal.slint"
 SSH_MODAL="$ROOT_DIR/ui/components/assets-ssh-connection-modal.slint"
+SYNC_MODAL="$ROOT_DIR/ui/components/sync-vault-modal.slint"
 RENAME_MODAL="$ROOT_DIR/ui/components/assets-rename-modal.slint"
 DELETE_MODAL="$ROOT_DIR/ui/components/assets-delete-confirm-modal.slint"
 SNIPPET_MODAL="$ROOT_DIR/ui/components/assets-snippet-modal.slint"
@@ -17,6 +18,16 @@ ASSETS_SIDEBAR="$ROOT_DIR/ui/shell/assets-sidebar.slint"
 SIDEBAR="$ROOT_DIR/ui/shell/sidebar.slint"
 
 grep -F 'in-out property <bool> asset-modal-open: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <bool> sync-modal-open: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-mode: "not-configured";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-title: "Sync";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-headline: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-status-text: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-error-text: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-provider-label: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-target-label: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-primary-action-label: "Set up sync";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-secondary-action-label: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-modal-kind: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <int> asset-modal-focus-sequence: 0;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-snippet-modal-name: "";' "$APP_WINDOW" >/dev/null
@@ -53,6 +64,9 @@ grep -F 'callback drag-requested(length, length);' "$MODAL_SHELL" >/dev/null
 ! grep -F 'close-button := Rectangle {' "$MODAL_SHELL" >/dev/null
 grep -F 'clicked => { }' "$APP_WINDOW" >/dev/null
 grep -F 'callback close-asset-modal-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback sync-modal-close-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback sync-modal-primary-action-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback sync-modal-secondary-action-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback confirm-asset-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback asset-snippet-modal-draft-changed(string, string);' "$APP_WINDOW" >/dev/null
 grep -F 'callback asset-snippet-package-modal-name-changed(string);' "$APP_WINDOW" >/dev/null
@@ -60,6 +74,10 @@ grep -F 'callback asset-rename-modal-name-changed(string);' "$APP_WINDOW" >/dev/
 grep -F 'callback confirm-asset-rename-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback confirm-delete-asset-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'host-titlebar-height: titlebar.height;' "$APP_WINDOW" >/dev/null
+grep -F 'if root.sync-modal-open : sync-modal-shell := BlockingModalShell {' "$APP_WINDOW" >/dev/null
+grep -F 'sync-vault-modal-overlay := SyncVaultModal {' "$APP_WINDOW" >/dev/null
+grep -F -A4 'sync-vault-modal-overlay := SyncVaultModal {' "$APP_WINDOW" | grep -F 'width: sync-modal-shell.content-width;' >/dev/null
+grep -F -A5 'sync-vault-modal-overlay := SyncVaultModal {' "$APP_WINDOW" | grep -F 'height: sync-modal-shell.content-height;' >/dev/null
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 520px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
@@ -90,6 +108,14 @@ grep -F -A5 'ssh-host-key-modal-overlay := SshHostKeyConfirmModal {' "$APP_WINDO
 grep -F 'x: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'y: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'export component AssetsSnippetModal inherits Rectangle {' "$SNIPPET_MODAL" >/dev/null
+grep -F 'export component SyncVaultModal inherits Rectangle {' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <string> mode: "not-configured";' "$SYNC_MODAL" >/dev/null
+grep -F 'callback close-requested();' "$SYNC_MODAL" >/dev/null
+grep -F 'callback primary-action-requested();' "$SYNC_MODAL" >/dev/null
+grep -F 'callback secondary-action-requested();' "$SYNC_MODAL" >/dev/null
+grep -F 'if root.mode == "not-configured"' "$SYNC_MODAL" >/dev/null
+grep -F 'if root.mode == "locked"' "$SYNC_MODAL" >/dev/null
+grep -F 'if root.mode == "ready"' "$SYNC_MODAL" >/dev/null
 grep -F 'export component AssetsSnippetPackageModal inherits Rectangle {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'export component AssetsFolderCreateModal inherits Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsSshConnectionModal inherits Rectangle {' "$SSH_MODAL" >/dev/null
@@ -238,6 +264,9 @@ fi
 ! grep -F 'in-out property <bool> asset-ssh-modal-can-clear-saved-secret: false;' "$APP_WINDOW" >/dev/null
 ! grep -F 'in-out property <bool> asset-ssh-modal-clear-saved-secret-requested: false;' "$APP_WINDOW" >/dev/null
 ! grep -F 'secret-retention-message: root.asset-ssh-modal-secret-retention-message;' "$APP_WINDOW" >/dev/null
+! grep -F 'Primary remote' "$SYNC_MODAL" >/dev/null
+! grep -F 'Mirror remote' "$SYNC_MODAL" >/dev/null
+! grep -F 'primary-action := Rectangle' "$SYNC_MODAL" >/dev/null
 ! grep -F 'can-clear-saved-secret: root.asset-ssh-modal-can-clear-saved-secret;' "$APP_WINDOW" >/dev/null
 ! grep -F 'clear-saved-secret-requested: root.asset-ssh-modal-clear-saved-secret-requested;' "$APP_WINDOW" >/dev/null
 grep -F 'import { ComboBox, ScrollView } from "std-widgets.slint";' "$SSH_MODAL" >/dev/null

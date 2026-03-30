@@ -30,8 +30,8 @@ use crate::app::assets_catalog::{
 };
 use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::keychain::{
-    derive_public_key_material_from_private_key, derive_public_key_material_from_public_key,
-    resolve_saved_ssh_profile,
+    KeychainNodePayload, derive_public_key_material_from_private_key,
+    derive_public_key_material_from_public_key, resolve_saved_ssh_profile,
 };
 use crate::app::runtime_profile::{AppRuntimeProfile, TerminalRenderMode};
 use crate::app::ssh::credentials::{
@@ -73,10 +73,13 @@ use crate::app::vault::crypto::{
 };
 use crate::app::vault::engine::{SyncEngine, SyncError, SyncRequest};
 use crate::app::vault::model::{
-    BootstrapBundle, BootstrapRemoteConfig, KdfConfig, ProviderKind, RemoteRole,
+    BootstrapBundle, BootstrapRemoteConfig, GiteeRemoteDraft, KdfConfig, ProviderKind, RemoteRole,
     SnapshotSyncPreferences, VaultAssetPayload, VaultSnapshot,
 };
-use crate::app::vault::provider::VaultProvider;
+use crate::app::vault::provider::{
+    VaultProvider, first_release_formal_auth_label, first_release_formal_provider_kind,
+    first_release_formal_provider_label,
+};
 use crate::app::vault::provider::gitee_gist::{GiteeGistProvider, GiteeGistProviderConfig};
 use crate::app::vault::provider::github_gist::{GitHubGistProvider, GitHubGistProviderConfig};
 use crate::app::vault::provider::gitlab_snippet::{
@@ -112,7 +115,7 @@ use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descr
 use crate::shell::tabs::WorkspaceTab;
 use crate::shell::view_model::{
     AssetModalState, AssetSshConnectionDraft, KeychainSshKeyDraft, RightPanelView, ShellViewModel,
-    SnippetActivation, SnippetCreateAction, SshModalAction,
+    SnippetActivation, SnippetCreateAction, SshModalAction, SyncModalMode,
 };
 use crate::theme::ThemeMode;
 use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
@@ -566,19 +569,23 @@ fn sync_top_status_bar_state(
     window.set_is_window_always_on_top(state.is_always_on_top);
 }
 
-fn sync_right_panel_state(window: &AppWindow, state: &ShellViewModel) {
-    let vault_panel = state.vault_panel_state();
+fn sync_sync_modal_state(window: &AppWindow, state: &ShellViewModel) {
+    let modal = state.sync_modal_state();
 
+    window.set_sync_modal_open(modal.open);
+    window.set_sync_modal_mode(modal.mode.id().into());
+    window.set_sync_modal_title(modal.title.clone().into());
+    window.set_sync_modal_headline(modal.headline.clone().into());
+    window.set_sync_modal_status_text(modal.status_text.clone().into());
+    window.set_sync_modal_error_text(modal.error_text.clone().into());
+    window.set_sync_modal_provider_label(modal.provider_label.clone().into());
+    window.set_sync_modal_target_label(modal.target_label.clone().into());
+    window.set_sync_modal_primary_action_label(modal.primary_action_label.clone().into());
+    window.set_sync_modal_secondary_action_label(modal.secondary_action_label.clone().into());
+}
+
+fn sync_right_panel_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_right_panel_view(state.right_panel_view_id().into());
-    window.set_vault_panel_title(vault_panel.title.clone().into());
-    window.set_vault_lock_state_label(vault_panel.lock_state_label.clone().into());
-    window.set_vault_primary_status_label(vault_panel.primary_status_label.clone().into());
-    window.set_vault_primary_action_label(vault_panel.primary_action_label.clone().into());
-    window.set_vault_secondary_action_label(vault_panel.secondary_action_label.clone().into());
-    window.set_vault_tertiary_action_label(vault_panel.tertiary_action_label.clone().into());
-    window.set_vault_sync_now_label(vault_panel.sync_now_label.clone().into());
-    window.set_vault_export_bootstrap_label(vault_panel.export_bootstrap_label.clone().into());
-    window.set_vault_import_bootstrap_label(vault_panel.import_bootstrap_label.clone().into());
 }
 
 fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
@@ -3269,6 +3276,7 @@ fn sync_shell_state(
     follow_tracker: &mut WorkspaceFollowTracker,
 ) {
     sync_top_status_bar_state(window, state, effects);
+    sync_sync_modal_state(window, state);
     sync_right_panel_state(window, state);
     sync_sidebar_state(window, state);
     sync_workspace_tabs(window, state, follow_tracker);
@@ -3380,17 +3388,126 @@ fn update_vault_panel_for_local_state(state: &mut ShellViewModel, vault: &VaultS
     }
 }
 
+fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vault: &VaultSessionState) {
+    let has_primary_remote = vault_primary_remote(vault).is_some();
+    let gitee_setup = GiteeRemoteDraft::default();
+    let modal = state.sync_modal_state_mut();
+
+    modal.title = "Sync".into();
+    debug_assert_eq!(first_release_formal_provider_kind(), ProviderKind::GiteeGist);
+    modal.provider_label = first_release_formal_provider_label().into();
+    modal.target_label = vault_primary_remote(vault)
+        .map(|remote| remote.remote_id.clone())
+        .unwrap_or_default();
+    modal.error_text.clear();
+
+    match (&vault.local_state, vault.unlocked_vault_key.is_some(), has_primary_remote) {
+        (None, false, false) => {
+            modal.mode = SyncModalMode::NotConfigured;
+            modal.headline = "Set up sync".into();
+            modal.status_text = gitee_setup.setup_summary();
+            modal.primary_action_label = "Set up sync".into();
+            modal.secondary_action_label = "Close".into();
+        }
+        (None, false, true) => {
+            modal.mode = SyncModalMode::NotConfigured;
+            modal.headline = "Set up sync".into();
+            modal.status_text = format!(
+                "Submit a master password to finish {} {} setup for the configured Gist target.",
+                first_release_formal_provider_label(),
+                first_release_formal_auth_label()
+            );
+            modal.primary_action_label = "Set up sync".into();
+            modal.secondary_action_label = "Close".into();
+        }
+        (Some(_), false, false) | (Some(_), false, true) => {
+            modal.mode = SyncModalMode::Locked;
+            modal.headline = "Unlock sync".into();
+            modal.status_text = "Unlock the local vault to inspect and manage sync.".into();
+            modal.primary_action_label = "Unlock".into();
+            modal.secondary_action_label = "Close".into();
+        }
+        (Some(_), true, false) => {
+            modal.mode = SyncModalMode::UnlockedButRemoteIncomplete;
+            modal.headline = "Finish sync setup".into();
+            modal.status_text = format!(
+                "Add a {} target authenticated with {} before sync can run.",
+                first_release_formal_provider_label(),
+                first_release_formal_auth_label()
+            );
+            modal.primary_action_label = "Set up sync".into();
+            modal.secondary_action_label = "Lock".into();
+        }
+        (Some(_), true, true) => {
+            modal.mode = SyncModalMode::Ready;
+            modal.headline = "Sync is ready".into();
+            modal.status_text = "Primary remote is configured and ready to use.".into();
+            modal.primary_action_label = "Sync now".into();
+            modal.secondary_action_label = "Lock".into();
+        }
+        (None, true, _) => {
+            modal.mode = SyncModalMode::SyncError;
+            modal.headline = "Sync state is inconsistent".into();
+            modal.status_text = "The local vault state could not be resolved.".into();
+            modal.error_text = "Missing local bootstrap state".into();
+            modal.primary_action_label = "Close".into();
+            modal.secondary_action_label.clear();
+        }
+    }
+}
+
+fn vault_primary_remote(vault: &VaultSessionState) -> Option<&BootstrapRemoteConfig> {
+    vault
+        .local_state
+        .as_ref()
+        .and_then(|local_state| local_state.bundle.primary_remote())
+        .or_else(|| {
+            vault
+                .bootstrap_template
+                .as_ref()
+                .and_then(BootstrapBundle::primary_remote)
+        })
+}
+
+fn set_sync_modal_error(
+    state: &mut ShellViewModel,
+    vault: &VaultSessionState,
+    error: impl Into<String>,
+) {
+    update_sync_modal_for_local_state(state, vault);
+    state.set_sync_modal_error(error);
+}
+
+fn sync_modal_password_prompt(vault: &VaultSessionState) -> &'static str {
+    if vault.local_state.is_some() {
+        "Submit a master password to unlock sync."
+    } else if vault_primary_remote(vault).is_some() {
+        "Submit a master password to finish sync setup."
+    } else {
+        "Configure a Gitee remote first"
+    }
+}
+
+fn submit_sync_modal_master_password(
+    state: &mut ShellViewModel,
+    vault: &mut VaultSessionState,
+    credential_store: &dyn CredentialStore,
+    password: &secrecy::SecretString,
+) -> Result<()> {
+    if vault.local_state.is_some() {
+        unlock_local_vault_into_shell(state, vault, credential_store, password)
+    } else {
+        create_local_vault_from_shell_state(state, vault, credential_store, password)
+    }
+}
+
 fn sync_preferences_for_bundle(
     bundle: &BootstrapBundle,
     last_sync_result: Option<String>,
 ) -> SnapshotSyncPreferences {
     SnapshotSyncPreferences {
         auto_sync_enabled: bundle.auto_sync_enabled,
-        selected_primary_remote_id: bundle
-            .remotes
-            .iter()
-            .find(|remote| remote.role == RemoteRole::Primary)
-            .map(|remote| remote.remote_id.clone()),
+        selected_primary_remote_id: bundle.primary_remote().map(|remote| remote.remote_id.clone()),
         selected_mirror_remote_ids: bundle
             .remotes
             .iter()
@@ -3410,10 +3527,7 @@ fn apply_vault_snapshot_to_shell(
     let applied = apply_vault_snapshot(snapshot, credential_store, known_hosts_path)?;
     let (console_tree, snippet_tree) =
         catalog_to_asset_trees(&asset_tree_to_catalog(&applied.asset_tree));
-    state.replace_console_asset_tree(console_tree);
-    state.replace_snippet_asset_tree(snippet_tree);
-    state.theme_mode = applied.ui_preferences.theme_mode;
-    state.is_always_on_top = applied.ui_preferences.always_on_top;
+    state.replace_vault_projection(console_tree, snippet_tree, applied.keychain_catalog);
     Ok(())
 }
 
@@ -3429,9 +3543,24 @@ fn clear_vault_decrypted_state(
             };
             restore_snapshot_secret_bundle(credential_store, spec.credential_ref.as_deref(), None)?;
         }
+
+        for node in snapshot.keychain_catalog.nodes.values() {
+            match &node.payload {
+                KeychainNodePayload::Folder => {}
+                KeychainNodePayload::Identity(spec) => restore_snapshot_secret_bundle(
+                    credential_store,
+                    spec.credential_ref.as_deref(),
+                    None,
+                )?,
+                KeychainNodePayload::SshKey(spec) => restore_snapshot_secret_bundle(
+                    credential_store,
+                    spec.credential_ref.as_deref(),
+                    None,
+                )?,
+            }
+        }
     }
-    state.replace_console_asset_tree(AssetTree::new());
-    state.replace_snippet_asset_tree(AssetTree::new());
+    state.clear_vault_projection();
     Ok(())
 }
 
@@ -3441,7 +3570,13 @@ fn create_local_vault_from_shell_state(
     credential_store: &dyn CredentialStore,
     password: &secrecy::SecretString,
 ) -> Result<()> {
-    let mut bundle = vault.bootstrap_template.clone().unwrap_or_default();
+    let mut bundle = vault
+        .bootstrap_template
+        .clone()
+        .ok_or_else(|| anyhow!("Configure a Gitee remote first"))?;
+    if bundle.primary_remote().is_none() {
+        return Err(anyhow!("Configure a Gitee remote first"));
+    }
     if bundle.vault_id.trim().is_empty() {
         bundle.vault_id = format!("vault-{}", Uuid::new_v4().simple());
     }
@@ -3474,6 +3609,7 @@ fn create_local_vault_from_shell_state(
     vault.unlocked_vault_key = Some(vault_key);
     vault.decrypted_snapshot = Some(snapshot);
     update_vault_panel_for_local_state(state, vault);
+    update_sync_modal_for_local_state(state, vault);
 
     Ok(())
 }
@@ -3504,6 +3640,7 @@ fn unlock_local_vault_into_shell(
     vault.unlocked_vault_key = Some(vault_key);
     vault.decrypted_snapshot = Some(snapshot);
     update_vault_panel_for_local_state(state, vault);
+    update_sync_modal_for_local_state(state, vault);
     Ok(())
 }
 
@@ -3516,6 +3653,7 @@ fn lock_local_vault(
     vault.unlocked_vault_key = None;
     vault.decrypted_snapshot = None;
     update_vault_panel_for_local_state(state, vault);
+    update_sync_modal_for_local_state(state, vault);
     Ok(())
 }
 
@@ -3535,9 +3673,7 @@ fn sync_local_vault(
         .ok_or_else(|| anyhow!("vault is locked"))?;
     let primary_remote = local_state
         .bundle
-        .remotes
-        .iter()
-        .find(|remote| remote.role == RemoteRole::Primary)
+        .primary_remote()
         .cloned()
         .ok_or_else(|| anyhow!("primary remote is not configured"))?;
     let primary_provider = vault.provider_factory.build_provider(&primary_remote)?;
@@ -3580,14 +3716,20 @@ fn sync_local_vault(
             local_state.current_revision = Some(report.primary_revision.clone());
             vault.decrypted_snapshot = Some(snapshot);
             update_vault_panel_for_local_state(state, vault);
+            update_sync_modal_for_local_state(state, vault);
             if report.is_mirror_degraded() {
-                state.vault_panel_state_mut().primary_status_label = format!(
+                let mirror_degraded_message = format!(
                     "Mirror degraded: {}",
                     report
                         .mirror_failures
                         .first()
                         .map(|failure| failure.message.as_str())
                         .unwrap_or("unknown mirror failure")
+                );
+                state.vault_panel_state_mut().primary_status_label = mirror_degraded_message.clone();
+                state.sync_modal_state_mut().status_text = format!(
+                    "Primary synced {}. {}",
+                    report.primary_revision, mirror_degraded_message
                 );
             } else {
                 state.vault_panel_state_mut().primary_status_label =
@@ -3597,6 +3739,7 @@ fn sync_local_vault(
         }
         Err(err) => {
             update_vault_panel_for_local_state(state, vault);
+            update_sync_modal_for_local_state(state, vault);
             state.vault_panel_state_mut().primary_status_label = match &err {
                 SyncError::PrimaryReadFailed { message, .. }
                 | SyncError::PrimaryWriteFailed { message, .. } => {
@@ -3607,6 +3750,7 @@ fn sync_local_vault(
                     format!("Vault decrypt error: {message}")
                 }
             };
+            state.set_sync_modal_error(err.to_string());
             Err(anyhow!(err.to_string()))
         }
     }
@@ -3989,6 +4133,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         initial_local_vault_state,
     );
     update_vault_panel_for_local_state(&mut initial_view_model, &initial_vault_session);
+    update_sync_modal_for_local_state(&mut initial_view_model, &initial_vault_session);
     let view_model = Rc::new(RefCell::new(initial_view_model));
     let workspace_follow_tracker = Rc::new(RefCell::new(WorkspaceFollowTracker::default()));
     let vault_session = Rc::new(RefCell::new(initial_vault_session));
@@ -4102,6 +4247,188 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(&effects);
+    window.on_open_sync_modal_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.open_sync_modal();
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_sync_modal_state(&window, &state);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(&effects);
+    window.on_sync_modal_close_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_sync_modal();
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_sync_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    let vault_session_ref = Rc::clone(&vault_session);
+    let credential_store_ref = Arc::clone(&credential_store);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_sync_modal_submit_master_password(move |password| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let mut vault = vault_session_ref.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        let secret = secrecy::SecretString::new(password.to_string().into());
+        if let Err(err) = submit_sync_modal_master_password(
+            &mut state,
+            &mut vault,
+            credential_store_ref.as_ref(),
+            &secret,
+        ) {
+            tracing::error!(target: "app.vault", error = %err, "failed to submit sync modal password");
+            set_sync_modal_error(&mut state, &vault, err.to_string());
+        }
+        sync_shell_state(
+            &window,
+            &state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    let vault_session_ref = Rc::clone(&vault_session);
+    let credential_store_ref = Arc::clone(&credential_store);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_sync_modal_sync_now_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let mut vault = vault_session_ref.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        if let Err(err) = sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()) {
+            tracing::error!(target: "app.vault", error = %err, "failed to sync local vault from sync modal");
+            set_sync_modal_error(&mut state, &vault, err.to_string());
+        }
+        sync_shell_state(
+            &window,
+            &state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    let vault_session_ref = Rc::clone(&vault_session);
+    let credential_store_ref = Arc::clone(&credential_store);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_sync_modal_lock_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let mut vault = vault_session_ref.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        if let Err(err) = lock_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()) {
+            tracing::error!(target: "app.vault", error = %err, "failed to lock local vault from sync modal");
+            set_sync_modal_error(&mut state, &vault, format!("Vault lock failed: {err}"));
+        }
+        sync_shell_state(
+            &window,
+            &state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    let vault_session_ref = Rc::clone(&vault_session);
+    let credential_store_ref = Arc::clone(&credential_store);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_sync_modal_primary_action_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let mut vault = vault_session_ref.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        match state.sync_modal_state().mode {
+            SyncModalMode::NotConfigured | SyncModalMode::Locked => {
+                state.set_sync_modal_error(sync_modal_password_prompt(&vault));
+            }
+            SyncModalMode::UnlockedButRemoteIncomplete => {
+                set_sync_modal_error(&mut state, &vault, "Configure a Gitee remote first");
+            }
+            SyncModalMode::Ready => {
+                if let Err(err) =
+                    sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref())
+                {
+                    tracing::error!(target: "app.vault", error = %err, "failed to sync local vault from primary sync modal action");
+                    set_sync_modal_error(&mut state, &vault, err.to_string());
+                }
+            }
+            SyncModalMode::SyncError => state.close_sync_modal(),
+        }
+        sync_shell_state(
+            &window,
+            &state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    let vault_session_ref = Rc::clone(&vault_session);
+    let credential_store_ref = Arc::clone(&credential_store);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_sync_modal_secondary_action_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let mut vault = vault_session_ref.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        match state.sync_modal_state().mode {
+            SyncModalMode::UnlockedButRemoteIncomplete | SyncModalMode::Ready => {
+                if let Err(err) =
+                    lock_local_vault(&mut state, &mut vault, credential_store_ref.as_ref())
+                {
+                    tracing::error!(target: "app.vault", error = %err, "failed to lock local vault from secondary sync modal action");
+                    set_sync_modal_error(&mut state, &vault, format!("Vault lock failed: {err}"));
+                }
+            }
+            SyncModalMode::NotConfigured | SyncModalMode::Locked | SyncModalMode::SyncError => {
+                state.close_sync_modal();
+            }
+        }
+        sync_shell_state(
+            &window,
+            &state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
     window.on_open_settings_panel_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -4124,124 +4451,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         state.open_appearance_panel();
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_right_panel_state(&window, &state);
-        sync_shell_layout(&window, &mut state, width, height);
-        save_ui_preferences(&store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let store_ref = store.clone();
-    let effects_ref = Rc::clone(&effects);
-    let vault_session_ref = Rc::clone(&vault_session);
-    let credential_store_ref = Arc::clone(&credential_store);
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    window.on_vault_create_requested(move |password| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let mut vault = vault_session_ref.borrow_mut();
-        let (width, height) = current_window_size(&window);
-        let secret = secrecy::SecretString::new(password.to_string().into());
-        if let Err(err) = create_local_vault_from_shell_state(
-            &mut state,
-            &mut vault,
-            credential_store_ref.as_ref(),
-            &secret,
-        ) {
-            tracing::error!(target: "app.vault", error = %err, "failed to create local vault");
-            state.vault_panel_state_mut().primary_status_label =
-                format!("Vault create failed: {err}");
-        }
-        sync_shell_state(
-            &window,
-            &state,
-            effects_ref.as_ref(),
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-        );
-        sync_shell_layout(&window, &mut state, width, height);
-        save_ui_preferences(&store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let store_ref = store.clone();
-    let effects_ref = Rc::clone(&effects);
-    let vault_session_ref = Rc::clone(&vault_session);
-    let credential_store_ref = Arc::clone(&credential_store);
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    window.on_vault_unlock_requested(move |password| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let mut vault = vault_session_ref.borrow_mut();
-        let (width, height) = current_window_size(&window);
-        let secret = secrecy::SecretString::new(password.to_string().into());
-        if let Err(err) = unlock_local_vault_into_shell(
-            &mut state,
-            &mut vault,
-            credential_store_ref.as_ref(),
-            &secret,
-        ) {
-            tracing::error!(target: "app.vault", error = %err, "failed to unlock local vault");
-            state.vault_panel_state_mut().primary_status_label =
-                format!("Vault decrypt error: {err}");
-        }
-        sync_shell_state(
-            &window,
-            &state,
-            effects_ref.as_ref(),
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-        );
-        sync_shell_layout(&window, &mut state, width, height);
-        save_ui_preferences(&store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let store_ref = store.clone();
-    let effects_ref = Rc::clone(&effects);
-    let vault_session_ref = Rc::clone(&vault_session);
-    let credential_store_ref = Arc::clone(&credential_store);
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    window.on_vault_sync_now_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let mut vault = vault_session_ref.borrow_mut();
-        let (width, height) = current_window_size(&window);
-        if let Err(err) = sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()) {
-            tracing::error!(target: "app.vault", error = %err, "failed to sync local vault");
-        }
-        sync_shell_state(
-            &window,
-            &state,
-            effects_ref.as_ref(),
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-        );
-        sync_shell_layout(&window, &mut state, width, height);
-        save_ui_preferences(&store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let store_ref = store.clone();
-    let effects_ref = Rc::clone(&effects);
-    let vault_session_ref = Rc::clone(&vault_session);
-    let credential_store_ref = Arc::clone(&credential_store);
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    window.on_vault_lock_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let mut vault = vault_session_ref.borrow_mut();
-        let (width, height) = current_window_size(&window);
-        if let Err(err) = lock_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()) {
-            tracing::error!(target: "app.vault", error = %err, "failed to lock local vault");
-            state.vault_panel_state_mut().primary_status_label =
-                format!("Vault lock failed: {err}");
-        }
-        sync_shell_state(
-            &window,
-            &state,
-            effects_ref.as_ref(),
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-        );
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
     });

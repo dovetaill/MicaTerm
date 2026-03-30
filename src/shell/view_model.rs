@@ -40,21 +40,66 @@ pub enum WelcomeAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightPanelView {
     Appearance,
-    Vault,
 }
 
 impl RightPanelView {
     pub fn id(self) -> &'static str {
-        match self {
-            Self::Appearance => "appearance",
-            Self::Vault => "vault",
-        }
+        "appearance"
     }
 
-    pub fn from_id(value: &str) -> Self {
-        match value {
-            "vault" => Self::Vault,
-            _ => Self::Appearance,
+    pub fn from_id(_value: &str) -> Self {
+        Self::Appearance
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncModalMode {
+    NotConfigured,
+    Locked,
+    UnlockedButRemoteIncomplete,
+    Ready,
+    SyncError,
+}
+
+impl SyncModalMode {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::NotConfigured => "not-configured",
+            Self::Locked => "locked",
+            Self::UnlockedButRemoteIncomplete => "unlocked-but-remote-incomplete",
+            Self::Ready => "ready",
+            Self::SyncError => "sync-error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncModalViewState {
+    pub open: bool,
+    pub mode: SyncModalMode,
+    pub title: String,
+    pub headline: String,
+    pub status_text: String,
+    pub error_text: String,
+    pub provider_label: String,
+    pub target_label: String,
+    pub primary_action_label: String,
+    pub secondary_action_label: String,
+}
+
+impl Default for SyncModalViewState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            mode: SyncModalMode::NotConfigured,
+            title: "Sync".into(),
+            headline: "Set up sync".into(),
+            status_text: "Configure a Gitee remote to enable sync.".into(),
+            error_text: String::new(),
+            provider_label: "Gitee".into(),
+            target_label: String::new(),
+            primary_action_label: "Set up sync".into(),
+            secondary_action_label: String::new(),
         }
     }
 }
@@ -309,6 +354,7 @@ pub struct ShellViewModel {
     pub context_menu_child_flows_left: bool,
     pub context_menu_open_path: Vec<usize>,
     pub context_menu_feedback_text: String,
+    sync_modal_state: SyncModalViewState,
     vault_panel_state: VaultPanelViewState,
     console_asset_tree: AssetTree,
     snippet_asset_tree: AssetTree,
@@ -360,6 +406,7 @@ impl Default for ShellViewModel {
             context_menu_child_flows_left: false,
             context_menu_open_path: Vec::new(),
             context_menu_feedback_text: String::new(),
+            sync_modal_state: SyncModalViewState::default(),
             vault_panel_state: VaultPanelViewState::default(),
             console_asset_tree: AssetTree::new(),
             snippet_asset_tree: AssetTree::new(),
@@ -498,6 +545,18 @@ impl ShellViewModel {
         self.show_right_panel
     }
 
+    pub fn sync_modal_open(&self) -> bool {
+        self.sync_modal_state.open
+    }
+
+    pub fn sync_modal_state(&self) -> &SyncModalViewState {
+        &self.sync_modal_state
+    }
+
+    pub fn sync_modal_state_mut(&mut self) -> &mut SyncModalViewState {
+        &mut self.sync_modal_state
+    }
+
     pub fn right_panel_view_id(&self) -> &'static str {
         self.right_panel_view.id()
     }
@@ -507,8 +566,27 @@ impl ShellViewModel {
     }
 
     pub fn open_settings_panel(&mut self) {
-        self.right_panel_view = RightPanelView::Vault;
+        self.right_panel_view = RightPanelView::Appearance;
         self.show_right_panel = true;
+        self.show_global_menu = false;
+    }
+
+    pub fn open_sync_modal(&mut self) {
+        self.sync_modal_state.open = true;
+        self.show_global_menu = false;
+    }
+
+    pub fn set_sync_modal_error(&mut self, error: impl Into<String>) {
+        self.sync_modal_state.open = true;
+        self.sync_modal_state.error_text = error.into();
+    }
+
+    pub fn clear_sync_modal_error(&mut self) {
+        self.sync_modal_state.error_text.clear();
+    }
+
+    pub fn close_sync_modal(&mut self) {
+        self.sync_modal_state.open = false;
         self.show_global_menu = false;
     }
 
@@ -2286,6 +2364,25 @@ impl ShellViewModel {
         self.snippet_asset_tree = tree;
         self.pending_snippet_create_action = None;
         self.pending_snippet_activation = None;
+    }
+
+    pub fn replace_vault_projection(
+        &mut self,
+        console_tree: AssetTree,
+        snippet_tree: AssetTree,
+        keychain_catalog: KeychainCatalog,
+    ) {
+        self.replace_console_asset_tree(console_tree);
+        self.replace_snippet_asset_tree(snippet_tree);
+        self.replace_keychain_catalog(keychain_catalog);
+    }
+
+    pub fn clear_vault_projection(&mut self) {
+        self.replace_vault_projection(
+            AssetTree::new(),
+            AssetTree::new(),
+            KeychainCatalog::default(),
+        );
     }
 
     pub fn keychain_catalog(&self) -> &KeychainCatalog {

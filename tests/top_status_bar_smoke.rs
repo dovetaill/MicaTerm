@@ -156,7 +156,19 @@ fn bootstrap_binds_top_status_bar_callbacks_to_window_state() {
 }
 
 #[test]
-fn opening_settings_routes_right_panel_to_sync_and_vault_panel() {
+fn titlebar_exposes_sync_as_a_first_class_action() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    assert!(!app.get_sync_modal_open());
+    app.invoke_open_sync_modal_requested();
+    assert!(app.get_sync_modal_open());
+}
+
+#[test]
+fn settings_no_longer_routes_into_vault_flow() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -164,9 +176,7 @@ fn opening_settings_routes_right_panel_to_sync_and_vault_panel() {
 
     app.invoke_open_settings_panel_requested();
 
-    assert!(app.get_show_right_panel());
-    assert_eq!(app.get_right_panel_view().as_str(), "vault");
-    assert_eq!(app.get_vault_panel_title().as_str(), "Sync & Vault");
+    assert_ne!(app.get_right_panel_view().as_str(), "vault");
 }
 
 #[test]
@@ -318,7 +328,7 @@ fn bootstrap_logs_backdrop_error_details_when_native_sync_fails() {
 }
 
 #[test]
-fn pointer_click_on_panel_toggle_flips_right_panel_request_state() {
+fn pointer_click_on_panel_toggle_flips_right_panel_request_state_after_sync_button_is_promoted() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -330,7 +340,7 @@ fn pointer_click_on_panel_toggle_flips_right_panel_request_state() {
     let utility_zone_x =
         6.0 + content_width - window_controls_width - ShellMetrics::TITLEBAR_UTILITY_WIDTH as f32;
     let position = LogicalPosition::new(
-        utility_zone_x + 40.0 + (ShellMetrics::TITLEBAR_TOOL_BUTTON_SIZE as f32 / 2.0),
+        utility_zone_x + 80.0 + (ShellMetrics::TITLEBAR_TOOL_BUTTON_SIZE as f32 / 2.0),
         6.0 + (ShellMetrics::TITLEBAR_TOOL_BUTTON_SIZE as f32 / 2.0),
     );
 

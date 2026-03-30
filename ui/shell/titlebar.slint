@@ -7,6 +7,7 @@ import { WindowControlButton } from "../components/window-control-button.slint";
 
 export component Titlebar inherits Rectangle {
     in property <bool> dark-mode: true;
+    in property <bool> sync-modal-open: false;
     in property <bool> show-right-panel: false;
     in property <bool> show-global-menu: false;
     in property <bool> is-window-maximized: false;
@@ -17,6 +18,7 @@ export component Titlebar inherits Rectangle {
     private property <image> header-logotype: @image-url("../../assets/icons/mica-term-header-logotype.svg");
     private property <image> dark-theme-icon: @image-url("../../assets/icons/fluent/dark-theme-20-regular.svg");
     private property <image> weather-sunny-icon: @image-url("../../assets/icons/fluent/weather-sunny-20-regular.svg");
+    private property <image> sync-icon: @image-url("../../assets/icons/fluent/arrow-clockwise-20-regular.svg");
     private property <image> panel-right-icon-regular: @image-url("../../assets/icons/fluent/panel-right-20-regular.svg");
     private property <image> panel-right-icon-filled: @image-url("../../assets/icons/fluent/panel-right-20-filled.svg");
     private property <image> pin-icon: @image-url("../../assets/icons/fluent/pin-20-regular.svg");
@@ -48,6 +50,7 @@ export component Titlebar inherits Rectangle {
     callback drag-requested;
     callback drag-double-clicked;
     callback toggle-theme-mode-requested;
+    callback open-sync-modal-requested;
     callback toggle-right-panel-requested;
     callback open-settings-panel-requested;
     callback open-appearance-panel-requested;
@@ -187,7 +190,7 @@ export component Titlebar inherits Rectangle {
         }
 
         utility-zone := Rectangle {
-            width: 136px;
+            width: 176px;
             height: parent.height;
             background: transparent;
             opacity: root.is-window-active ? 1 : 0.72;
@@ -212,8 +215,29 @@ export component Titlebar inherits Rectangle {
                 }
             }
 
-            panel-toggle-button := TitlebarIconButton {
+            sync-button := TitlebarIconButton {
                 x: 40px;
+                y: 0px;
+                icon-source: root.sync-icon;
+                active: root.sync-modal-open;
+                tooltip-text: "Open sync";
+                tooltip-source-id: "sync-button";
+
+                clicked => {
+                    root.open-sync-modal-requested();
+                }
+
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y);
+                }
+
+                tooltip-close-requested(source-id) => {
+                    root.queue-tooltip-close(source-id);
+                }
+            }
+
+            panel-toggle-button := TitlebarIconButton {
+                x: 80px;
                 y: 0px;
                 icon-source: root.panel-right-icon-regular;
                 active-icon-source: root.panel-right-icon-filled;
@@ -235,7 +259,7 @@ export component Titlebar inherits Rectangle {
             }
 
             divider-line := Rectangle {
-                x: 84px;
+                x: 124px;
                 y: 8px;
                 width: 1px;
                 height: 20px;
@@ -244,7 +268,7 @@ export component Titlebar inherits Rectangle {
             }
 
             pin-button := TitlebarIconButton {
-                x: 100px;
+                x: 140px;
                 y: 0px;
                 icon-source: root.is-window-always-on-top ? root.pin-icon : root.pin-off-icon;
                 active: root.is-window-always-on-top;

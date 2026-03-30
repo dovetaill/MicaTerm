@@ -36,7 +36,7 @@ export component TitlebarMenu inherits PopupWindow {
     callback close-requested;
 
     width: 196px;
-    height: 132px;
+    height: 92px;
     close-policy: PopupClosePolicy.close-on-click;
 
     background-layer := Rectangle {
@@ -55,15 +55,6 @@ export component TitlebarMenu inherits PopupWindow {
                 label: "Settings";
                 invoked => {
                     root.settings-selected();
-                    root.close-requested();
-                    root.close();
-                }
-            }
-
-            MenuActionItem {
-                label: "Appearance";
-                invoked => {
-                    root.appearance-selected();
                     root.close-requested();
                     root.close();
                 }

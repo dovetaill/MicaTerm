@@ -126,7 +126,7 @@ fn sample_keychain_catalog(identity_credential_ref: &str, key_credential_ref: &s
 }
 
 #[test]
-fn export_vault_snapshot_includes_assets_secret_bundles_known_hosts_and_preferences() {
+fn export_vault_snapshot_excludes_ui_preferences_for_first_release() {
     let credential_ref = "ssh/saved-secrets/asset-2";
     let identity_credential_ref = "keychain/identity/identity-ops";
     let key_credential_ref = "keychain/key/key-prod";
@@ -229,19 +229,14 @@ fn export_vault_snapshot_includes_assets_secret_bundles_known_hosts_and_preferen
         "[prod.example.com]:22"
     );
     assert_eq!(snapshot.sync_preferences, sync_preferences);
-    assert_eq!(
-        snapshot.ui_preferences,
-        SnapshotUiPreferences {
-            theme_mode: Some("light".into()),
-            always_on_top: Some(true),
-        }
-    );
+    assert_eq!(snapshot.ui_preferences, SnapshotUiPreferences::default());
 
     let _ = fs::remove_file(known_hosts_path);
 }
 
 #[test]
-fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_preferences() {
+fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_defaults_ui_preferences()
+{
     let credential_ref = "ssh/saved-secrets/gateway";
     let identity_credential_ref = "keychain/identity/identity-ops";
     let key_credential_ref = "keychain/key/key-prod";
@@ -374,8 +369,8 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_pre
         Some("{\"password\":null,\"private_key_content\":\"-----BEGIN OPENSSH PRIVATE KEY-----\",\"passphrase\":\"key-passphrase\",\"proxy_socks5_password\":null}")
     );
     assert_eq!(applied.sync_preferences, snapshot.sync_preferences);
-    assert_eq!(applied.ui_preferences.theme_mode, ThemeMode::Light);
-    assert!(applied.ui_preferences.always_on_top);
+    assert_eq!(applied.ui_preferences.theme_mode, ThemeMode::Dark);
+    assert!(!applied.ui_preferences.always_on_top);
 
     let known_hosts = KnownHostsService::new(&known_hosts_path);
     let result = known_hosts
