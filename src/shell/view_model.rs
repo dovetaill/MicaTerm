@@ -707,6 +707,7 @@ impl ShellViewModel {
         match self.active_workspace_tab() {
             None => "welcome",
             Some(tab) if tab.uses_terminal_surface() => "terminal",
+            Some(tab) if tab.uses_connection_progress_surface() => "connection-progress",
             Some(_) => "session-error",
         }
     }

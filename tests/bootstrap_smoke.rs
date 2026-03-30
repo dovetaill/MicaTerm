@@ -8,7 +8,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use mica_term::AppWindow;
@@ -33,6 +33,9 @@ use mica_term::app::logging::runtime::build_test_logging_runtime;
 use mica_term::app::ssh::credentials::{
     CredentialStore, MemoryCredentialStore, SshCredentialKind, StoredSshSecretBundle,
     load_secret_bundle, persist_secret_bundle, ssh_credential_ref,
+};
+use mica_term::app::ssh::connection_progress::{
+    ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
 };
 use mica_term::app::ssh::known_hosts::{
     KnownHostCheck, KnownHostsService, default_known_hosts_path,
@@ -175,6 +178,9 @@ struct TofuAwareLauncher {
     host_key: PublicKey,
 }
 
+#[derive(Clone, Default)]
+struct PendingConnectionLauncher;
+
 #[derive(Clone)]
 struct AsyncProjectionLauncher;
 
@@ -220,6 +226,13 @@ struct RecordingLauncher {
 }
 
 #[derive(Clone)]
+struct SlowOpeningLauncher {
+    state: Arc<Mutex<RecordingLauncherState>>,
+    probe_delay: Duration,
+    launch_delay: Duration,
+}
+
+#[derive(Clone)]
 struct SuccessfulPrivateKeyImporter {
     path: std::path::PathBuf,
     content: &'static str,
@@ -237,6 +250,10 @@ struct FailingPrivateKeyImporter {
 struct UnavailableCredentialStore;
 
 struct NoopRuntimeControl;
+
+struct PendingConnectionRuntimeControl {
+    event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+}
 
 #[derive(Clone, Default)]
 struct RecordingVaultProviderFactory {
@@ -419,11 +436,39 @@ impl SessionRuntimeControl for NoopRuntimeControl {
     }
 }
 
+impl SessionRuntimeControl for PendingConnectionRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        let _ = self.event_tx.send(SessionRuntimeEvent::Disconnected);
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+}
+
 impl SessionRuntimeLauncher for FakeLauncher {
     fn launch(
         &self,
         _profile: ConnectionProfile,
         _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -470,6 +515,7 @@ impl SessionRuntimeLauncher for TofuAwareLauncher {
         &self,
         profile: ConnectionProfile,
         _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -490,11 +536,48 @@ impl SessionRuntimeLauncher for TofuAwareLauncher {
     }
 }
 
+impl SessionRuntimeLauncher for PendingConnectionLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: uuid::Uuid,
+        attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::ConnectionProgress(
+                ConnectionProgressEvent::StepUpdated {
+                    attempt_id,
+                    step: ConnectionStepStateItem {
+                        step_id: "00-connect-target".into(),
+                        step_kind: "connect-target".into(),
+                        title: "Connect Target".into(),
+                        detail: "Opening SSH transport to 10.0.0.12".into(),
+                        hop_label: "Target".into(),
+                        state: ConnectionStepState::Running,
+                    },
+                },
+            ));
+            Ok(Box::new(PendingConnectionRuntimeControl { event_tx })
+                as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeLauncher for AsyncProjectionLauncher {
     fn launch(
         &self,
         _profile: ConnectionProfile,
         session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -529,6 +612,7 @@ impl SessionRuntimeLauncher for InteractiveProjectionLauncher {
         &self,
         _profile: ConnectionProfile,
         session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -563,6 +647,7 @@ impl SessionRuntimeLauncher for KeyboardMatrixLauncher {
         &self,
         _profile: ConnectionProfile,
         session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -595,6 +680,7 @@ impl SessionRuntimeLauncher for PasteProjectionLauncher {
         &self,
         _profile: ConnectionProfile,
         session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -629,6 +715,7 @@ impl SessionRuntimeLauncher for PasteWarningProjectionLauncher {
         &self,
         _profile: ConnectionProfile,
         session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -664,6 +751,7 @@ impl SessionRuntimeLauncher for ScrollProjectionLauncher {
         &self,
         _profile: ConnectionProfile,
         session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -694,6 +782,7 @@ impl SessionRuntimeLauncher for FollowProjectionLauncher {
         &self,
         _profile: ConnectionProfile,
         session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -727,6 +816,7 @@ impl SessionRuntimeLauncher for FailingProbeLauncher {
         &self,
         _profile: ConnectionProfile,
         _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -1012,6 +1102,7 @@ impl SessionRuntimeLauncher for StoredSecretProbeLauncher {
         &self,
         _profile: ConnectionProfile,
         _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -1056,6 +1147,7 @@ impl SessionRuntimeLauncher for RecordingLauncher {
         &self,
         profile: ConnectionProfile,
         _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -1082,6 +1174,47 @@ impl SessionRuntimeLauncher for RecordingLauncher {
                 .expect("lock recording launcher state")
                 .probe_profiles
                 .push(profile);
+            Ok(())
+        })
+    }
+}
+
+impl SessionRuntimeLauncher for SlowOpeningLauncher {
+    fn launch(
+        &self,
+        profile: ConnectionProfile,
+        _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = Arc::clone(&self.state);
+        let launch_delay = self.launch_delay;
+        Box::pin(async move {
+            state
+                .lock()
+                .expect("lock slow opening launcher state")
+                .launch_profiles
+                .push(profile);
+            tokio::time::sleep(launch_delay).await;
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        let state = Arc::clone(&self.state);
+        let probe_delay = self.probe_delay;
+        Box::pin(async move {
+            state
+                .lock()
+                .expect("lock slow opening launcher state")
+                .probe_profiles
+                .push(profile);
+            tokio::time::sleep(probe_delay).await;
             Ok(())
         })
     }
@@ -1630,6 +1763,12 @@ fn flush_runtime_projection() {
     std::thread::sleep(Duration::from_millis(20));
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
     slint::platform::update_timers_and_animations();
+}
+
+fn lock_known_hosts_env() -> std::sync::MutexGuard<'static, ()> {
+    KNOWN_HOSTS_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
 }
 
 #[test]
@@ -2574,8 +2713,47 @@ fn activating_legacy_saved_ssh_asset_defaults_missing_auth_fields_and_opens_sess
     app.invoke_asset_activated(ssh_id.into());
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
     assert_eq!(app.get_workspace_session_state().as_str(), "connecting");
+}
+
+#[test]
+fn opening_slow_saved_ssh_asset_returns_before_probe_completes() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let launcher_state = Arc::new(Mutex::new(RecordingLauncherState::default()));
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(SlowOpeningLauncher {
+            state: Arc::clone(&launcher_state),
+            probe_delay: Duration::from_millis(250),
+            launch_delay: Duration::from_millis(250),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    let started = Instant::now();
+    app.invoke_asset_activated(ssh_id.into());
+
+    assert!(
+        started.elapsed() < Duration::from_millis(120),
+        "opening a workspace SSH asset should not block on probe_connection()"
+    );
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_workspace_session_state().as_str(), "connecting");
+    assert!(
+        launcher_state
+            .lock()
+            .expect("lock slow opening launcher state")
+            .probe_profiles
+            .is_empty(),
+        "opening a workspace SSH asset should create the tab before any synchronous probe runs"
+    );
 }
 
 #[test]
@@ -3981,7 +4159,7 @@ fn ssh_context_menu_keeps_open_as_the_only_connection_action() {
 fn accepting_unknown_host_key_retries_test_connection_and_persists_known_host() {
     i_slint_backend_testing::init_no_event_loop();
 
-    let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
+    let _env_lock = lock_known_hosts_env();
     let known_hosts_path = sample_known_hosts_path("accept-test");
     let host_key = sample_public_key();
     let expected_fingerprint = host_key.fingerprint(HashAlg::Sha256).to_string();
@@ -4035,11 +4213,11 @@ fn accepting_unknown_host_key_retries_test_connection_and_persists_known_host() 
 }
 
 #[test]
-fn rejecting_unknown_host_key_for_open_session_surfaces_error_tab() {
+fn unknown_host_key_blocks_connection_in_workspace_timeline() {
     i_slint_backend_testing::init_no_event_loop();
 
-    let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
-    let known_hosts_path = sample_known_hosts_path("reject-open");
+    let _env_lock = lock_known_hosts_env();
+    let known_hosts_path = sample_known_hosts_path("workspace-host-key-block");
     let host_key = sample_public_key();
     let _ = fs::remove_file(&known_hosts_path);
     unsafe {
@@ -4056,17 +4234,121 @@ fn rejecting_unknown_host_key_for_open_session_surfaces_error_tab() {
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
 
     app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
 
-    assert!(app.get_ssh_host_key_modal_open());
-    app.invoke_ssh_host_key_modal_reject_requested();
-
-    assert!(!app.get_ssh_host_key_modal_open());
-    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_workspace_session_state().as_str(), "error");
-    assert_eq!(
-        app.get_workspace_session_error_detail().as_str(),
-        "Rejected unknown SSH host key for `10.0.0.12`:22."
+    assert!(
+        !app.get_ssh_host_key_modal_open(),
+        "workspace session host-key confirmation should stay inline instead of reusing the modal flow"
     );
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(
+        app.get_workspace_session_connection_headline().as_str(),
+        "waiting-user"
+    );
+
+    let _ = fs::remove_file(known_hosts_path);
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+}
+
+#[test]
+fn trusting_unknown_host_key_retries_connection_in_same_workspace_tab() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let _env_lock = lock_known_hosts_env();
+    let known_hosts_path = sample_known_hosts_path("workspace-host-key-trust");
+    let host_key = sample_public_key();
+    let _ = fs::remove_file(&known_hosts_path);
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TofuAwareLauncher::new(host_key.clone())),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    let session_id = app.get_active_workspace_session_id().to_string();
+
+    assert_eq!(
+        app.get_workspace_session_connection_headline().as_str(),
+        "waiting-user"
+    );
+    app.invoke_workspace_session_local_action_requested("trust-host-key".into());
+    flush_runtime_projection();
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert_eq!(app.get_workspace_session_state().as_str(), "connected");
+    assert_eq!(
+        KnownHostsService::new(&known_hosts_path)
+            .check("10.0.0.12", 22, &host_key)
+            .expect("check trusted host after inline confirmation"),
+        KnownHostCheck::Trusted
+    );
+
+    let _ = fs::remove_file(known_hosts_path);
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+}
+
+#[test]
+fn rejecting_unknown_host_key_keeps_connection_timeline_in_same_tab() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let _env_lock = lock_known_hosts_env();
+    let known_hosts_path = sample_known_hosts_path("workspace-host-key-reject");
+    let host_key = sample_public_key();
+    let _ = fs::remove_file(&known_hosts_path);
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TofuAwareLauncher::new(host_key.clone())),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    let session_id = app.get_active_workspace_session_id().to_string();
+
+    assert_eq!(
+        app.get_workspace_session_connection_headline().as_str(),
+        "waiting-user"
+    );
+    app.invoke_workspace_session_local_action_requested("reject-host-key".into());
+    flush_runtime_projection();
+
+    let headline = app.get_workspace_session_connection_headline().to_string();
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert!(
+        matches!(headline.as_str(), "cancelled" | "error"),
+        "rejecting the host key should keep the timeline surface active with a terminal-free final state"
+    );
+    assert!(
+        app.get_workspace_session_connection_current_detail()
+            .as_str()
+            .contains("Rejected unknown SSH host key"),
+        "rejecting the host key should preserve a useful rejection detail in the timeline"
+    );
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
     assert_eq!(
         KnownHostsService::new(&known_hosts_path)
             .check("10.0.0.12", 22, &host_key)
@@ -4080,6 +4362,37 @@ fn rejecting_unknown_host_key_for_open_session_surfaces_error_tab() {
     unsafe {
         std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
     }
+}
+
+#[test]
+fn cancelling_running_connection_attempt_marks_timeline_cancelled() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(PendingConnectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    let session_id = app.get_active_workspace_session_id().to_string();
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(
+        app.get_workspace_session_connection_headline().as_str(),
+        "connecting"
+    );
+
+    app.invoke_workspace_session_local_action_requested("cancel-connection-attempt".into());
+    flush_runtime_projection();
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(
+        app.get_workspace_session_connection_headline().as_str(),
+        "cancelled"
+    );
 }
 
 #[test]
@@ -5437,7 +5750,7 @@ fn workspace_terminal_live_input_resumes_follow_and_clears_pending_output() {
 }
 
 #[test]
-fn probe_failure_keeps_visible_error_tab_after_projection_timer_ticks() {
+fn async_launch_failure_projects_error_tab_after_projection_timer_ticks() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -5453,10 +5766,10 @@ fn probe_failure_keeps_visible_error_tab_after_projection_timer_ticks() {
     app.invoke_asset_activated(ssh_id.into());
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_workspace_session_state().as_str(), "error");
+    assert_eq!(app.get_workspace_session_state().as_str(), "connecting");
     assert_eq!(
-        app.get_workspace_session_error_detail().as_str(),
-        "missing SSH password secret for `SSH Connection 1`"
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
     );
 
     std::thread::sleep(Duration::from_millis(80));

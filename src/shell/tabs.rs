@@ -27,11 +27,18 @@ impl WorkspaceTab {
     }
 
     pub fn can_reconnect(&self) -> bool {
-        matches!(self.state.as_str(), "disconnected" | "error")
+        matches!(self.state.as_str(), "cancelled" | "disconnected" | "error")
     }
 
     pub fn uses_terminal_surface(&self) -> bool {
-        matches!(self.state.as_str(), "connecting" | "connected")
+        matches!(self.state.as_str(), "connected")
+    }
+
+    pub fn uses_connection_progress_surface(&self) -> bool {
+        matches!(
+            self.state.as_str(),
+            "connecting" | "waiting-user" | "cancelled"
+        )
     }
 }
 
@@ -45,7 +52,9 @@ fn session_error_detail(state: &SessionState) -> &str {
 fn session_state_id(state: &SessionState) -> &'static str {
     match state {
         SessionState::Connecting => "connecting",
+        SessionState::WaitingUser => "waiting-user",
         SessionState::Connected => "connected",
+        SessionState::Cancelled => "cancelled",
         SessionState::Disconnected => "disconnected",
         SessionState::Error(_) => "error",
     }

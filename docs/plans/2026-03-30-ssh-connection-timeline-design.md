@@ -219,7 +219,7 @@ This design is intentionally focused on the workspace open path.
    - `Trust and Continue`;
    - `Reject`.
 5. `Trust and Continue` stores the key and restarts the attempt asynchronously.
-6. `Reject` ends the attempt as cancelled or error, preserving diagnostics.
+6. `Reject` ends the attempt as `cancelled`, preserves diagnostics, and keeps the same tab on the connection-progress surface so `Retry` stays local to the timeline.
 
 ### Failure
 
@@ -296,11 +296,15 @@ The workspace projection should distinguish these content modes:
 
 Mapping:
 
-- `connecting` or `waiting-user` -> `connection-progress`
+- `connecting`, `waiting-user`, or `cancelled` -> `connection-progress`
 - `connected` -> `terminal`
-- `error`, `disconnected`, `cancelled` without an active timeline page -> `session-error`
+- `error` or `disconnected` -> `session-error`
 
 The connection page itself can still live inside [`ui/shell/terminal-session-host.slint`](../../ui/shell/terminal-session-host.slint), but it must be rendered via a dedicated visual branch, not as an empty terminal frame.
+
+Shipped alignment note:
+
+- asynchronous launch failures can render one projection tick as `connecting` before the workspace sync loop projects the final `error` state into `session-error`; this keeps the open path non-blocking while still converging to the correct failure surface.
 
 ## Files
 
@@ -335,4 +339,5 @@ Likely touched files for implementation:
 - Unknown host key handling must stay within the workspace connection page for open-session UX.
 - Failure must preserve step context and diagnostics.
 - Connected state must transition cleanly into the real terminal without blank intermediate frames.
-- Focused automated tests plus targeted manual verification on slow or multi-hop hosts must pass before calling the feature complete.
+- Focused automated tests passed in-repo.
+- Targeted manual verification on slow or multi-hop hosts still needs to be executed against real or controlled repro targets outside this repository environment.

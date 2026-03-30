@@ -9,10 +9,15 @@ use anyhow::{Context, Result, anyhow};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::app::ssh::connection_progress::{
+    ConnectionAttemptState, ConnectionDiagnosticLine, ConnectionHeadlineState,
+    ConnectionHostKeyPrompt, ConnectionProgressEvent, ConnectionStepState,
+    ConnectionStepStateItem,
+};
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::ssh::runtime::{
     SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceSignature,
-    TerminalSurfaceState,
+    TerminalSurfaceState, UnknownHostKeyError,
 };
 use crate::theme::ThemeMode;
 
@@ -25,7 +30,9 @@ pub enum OpenSessionMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionState {
     Connecting,
+    WaitingUser,
     Connected,
+    Cancelled,
     Disconnected,
     Error(String),
 }
@@ -69,6 +76,7 @@ pub trait SessionRuntimeLauncher: Send + Sync {
         &self,
         profile: ConnectionProfile,
         session_id: Uuid,
+        attempt_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> LaunchFuture;
 
@@ -114,6 +122,7 @@ impl SessionManager {
         }
 
         let session_id = Uuid::new_v4();
+        let attempt_id = Uuid::new_v4();
         let handle = SessionHandle {
             session_id,
             asset_id: asset_id.clone(),
@@ -127,72 +136,18 @@ impl SessionManager {
             let mut registry = self.registry.lock().expect("lock session registry");
             registry.asset_sessions.insert(asset_id, session_id);
             registry.sessions.insert(session_id, handle.clone());
+            registry.session_profiles.insert(session_id, profile.clone());
+            registry.connection_attempts.insert(
+                session_id,
+                ConnectionAttemptState::with_attempt_id(
+                    attempt_id,
+                    ConnectionHeadlineState::Connecting,
+                ),
+            );
             registry.open_order.push(session_id);
         }
 
-        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-        let registry_for_events = Arc::clone(&self.registry);
-        self.runtime_handle.spawn(async move {
-            let mut pending_events = VecDeque::new();
-
-            loop {
-                let event = if let Some(event) = pending_events.pop_front() {
-                    Some(event)
-                } else {
-                    event_rx.recv().await
-                };
-                let Some(event) = event else {
-                    break;
-                };
-
-                match event {
-                    SessionRuntimeEvent::SurfaceChanged(surface) => {
-                        let mut backlog = VecDeque::new();
-                        while let Ok(next) = event_rx.try_recv() {
-                            backlog.push_back(next);
-                        }
-                        let (surface, remaining) = coalesce_surface_backlog(surface, backlog);
-                        pending_events.extend(remaining);
-                        apply_runtime_event(
-                            &registry_for_events,
-                            session_id,
-                            SessionRuntimeEvent::SurfaceChanged(surface),
-                        );
-                    }
-                    SessionRuntimeEvent::SurfaceDirty => {
-                        let mut backlog = VecDeque::new();
-                        while let Ok(next) = event_rx.try_recv() {
-                            backlog.push_back(next);
-                        }
-                        pending_events.extend(coalesce_surface_dirty_backlog(backlog));
-                        apply_runtime_event(
-                            &registry_for_events,
-                            session_id,
-                            SessionRuntimeEvent::SurfaceDirty,
-                        );
-                    }
-                    other => apply_runtime_event(&registry_for_events, session_id, other),
-                }
-            }
-        });
-
-        let launcher = Arc::clone(&self.launcher);
-        let registry_for_launch = Arc::clone(&self.registry);
-        self.runtime_handle.spawn(async move {
-            match launcher.launch(profile, session_id, event_tx).await {
-                Ok(runtime_control) => {
-                    attach_runtime_control(&registry_for_launch, session_id, runtime_control);
-                }
-                Err(error) => {
-                    update_session(
-                        &registry_for_launch,
-                        session_id,
-                        SessionState::Error(error.to_string()),
-                        true,
-                    );
-                }
-            }
-        });
+        self.spawn_session_attempt(session_id, profile, attempt_id);
 
         Ok(handle)
     }
@@ -202,6 +157,15 @@ impl SessionManager {
             .lock()
             .expect("lock session registry")
             .sessions
+            .get(&session_id)
+            .cloned()
+    }
+
+    pub fn connection_attempt(&self, session_id: Uuid) -> Option<ConnectionAttemptState> {
+        self.registry
+            .lock()
+            .expect("lock session registry")
+            .connection_attempts
             .get(&session_id)
             .cloned()
     }
@@ -248,6 +212,98 @@ impl SessionManager {
             ),
         }
         result
+    }
+
+    pub fn retry_session(&self, session_id: Uuid) -> Result<SessionHandle> {
+        let (profile, attempt_id, updated, runtime_control) = {
+            let mut registry = self.registry.lock().expect("lock session registry");
+            let profile = registry
+                .session_profiles
+                .get(&session_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("session profile is not available for `{session_id}`"))?;
+            let session = registry
+                .sessions
+                .get_mut(&session_id)
+                .ok_or_else(|| anyhow!("session `{session_id}` does not exist"))?;
+            session.state = SessionState::Connecting;
+            session.can_reconnect = false;
+            let updated = session.clone();
+            let attempt_id = Uuid::new_v4();
+            registry.connection_attempts.insert(
+                session_id,
+                ConnectionAttemptState::with_attempt_id(
+                    attempt_id,
+                    ConnectionHeadlineState::Connecting,
+                ),
+            );
+            registry.terminal_surfaces.remove(&session_id);
+            registry.terminal_surface_revisions.remove(&session_id);
+            let runtime_control = registry.runtime_controls.remove(&session_id);
+            registry.pending_disconnects.remove(&session_id);
+            (profile, attempt_id, updated, runtime_control)
+        };
+
+        if let Some(runtime_control) = runtime_control {
+            let _ = runtime_control.disconnect();
+        }
+
+        self.spawn_session_attempt(session_id, profile, attempt_id);
+
+        Ok(updated)
+    }
+
+    pub fn cancel_connection_attempt(&self, session_id: Uuid) -> Option<SessionHandle> {
+        let (updated, runtime_control) = {
+            let mut registry = self.registry.lock().expect("lock session registry");
+            if let Some(attempt) = registry.connection_attempts.get_mut(&session_id) {
+                finalize_connection_attempt(
+                    attempt,
+                    ConnectionHeadlineState::Cancelled,
+                    ConnectionStepState::Cancelled,
+                    "SSH connection attempt cancelled.",
+                );
+            }
+            let session = registry.sessions.get_mut(&session_id)?;
+            session.state = SessionState::Cancelled;
+            session.can_reconnect = true;
+            let updated = session.clone();
+            let runtime_control = registry.runtime_controls.remove(&session_id);
+            registry.pending_disconnects.remove(&session_id);
+            (updated, runtime_control)
+        };
+
+        if let Some(runtime_control) = runtime_control {
+            let _ = runtime_control.disconnect();
+        }
+
+        Some(updated)
+    }
+
+    pub fn reject_host_key_prompt(&self, session_id: Uuid) -> Option<SessionHandle> {
+        let mut registry = self.registry.lock().expect("lock session registry");
+        let prompt = registry
+            .connection_attempts
+            .get(&session_id)
+            .and_then(|attempt| attempt.prompt.clone())?;
+        let message = format!(
+            "Rejected unknown SSH host key for `{}`:{}.",
+            prompt.host, prompt.port
+        );
+
+        if let Some(attempt) = registry.connection_attempts.get_mut(&session_id) {
+            finalize_connection_attempt(
+                attempt,
+                ConnectionHeadlineState::Cancelled,
+                ConnectionStepState::Failed,
+                message,
+            );
+        }
+        let session = registry.sessions.get_mut(&session_id)?;
+        session.state = SessionState::Cancelled;
+        session.can_reconnect = true;
+
+        Some(session.clone())
     }
 
     pub fn disconnect_session(&self, session_id: Uuid) -> Option<SessionHandle> {
@@ -412,6 +468,8 @@ impl SessionManager {
             registry
                 .open_order
                 .retain(|existing_id| *existing_id != session_id);
+            registry.connection_attempts.remove(&session_id);
+            registry.session_profiles.remove(&session_id);
             registry.terminal_surfaces.remove(&session_id);
             registry.terminal_surface_revisions.remove(&session_id);
             registry.pending_disconnects.remove(&session_id);
@@ -448,12 +506,115 @@ impl SessionManager {
 
         Some(removed)
     }
+
+    fn spawn_session_attempt(
+        &self,
+        session_id: Uuid,
+        profile: ConnectionProfile,
+        attempt_id: Uuid,
+    ) {
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let registry_for_events = Arc::clone(&self.registry);
+        self.runtime_handle.spawn(async move {
+            let mut pending_events = VecDeque::new();
+
+            loop {
+                let event = if let Some(event) = pending_events.pop_front() {
+                    Some(event)
+                } else {
+                    event_rx.recv().await
+                };
+                let Some(event) = event else {
+                    break;
+                };
+
+                match event {
+                    SessionRuntimeEvent::SurfaceChanged(surface) => {
+                        let mut backlog = VecDeque::new();
+                        while let Ok(next) = event_rx.try_recv() {
+                            backlog.push_back(next);
+                        }
+                        let (surface, remaining) = coalesce_surface_backlog(surface, backlog);
+                        pending_events.extend(remaining);
+                        apply_runtime_event(
+                            &registry_for_events,
+                            session_id,
+                            attempt_id,
+                            SessionRuntimeEvent::SurfaceChanged(surface),
+                        );
+                    }
+                    SessionRuntimeEvent::SurfaceDirty => {
+                        let mut backlog = VecDeque::new();
+                        while let Ok(next) = event_rx.try_recv() {
+                            backlog.push_back(next);
+                        }
+                        pending_events.extend(coalesce_surface_dirty_backlog(backlog));
+                        apply_runtime_event(
+                            &registry_for_events,
+                            session_id,
+                            attempt_id,
+                            SessionRuntimeEvent::SurfaceDirty,
+                        );
+                    }
+                    other => apply_runtime_event(
+                        &registry_for_events,
+                        session_id,
+                        attempt_id,
+                        other,
+                    ),
+                }
+            }
+        });
+
+        let launcher = Arc::clone(&self.launcher);
+        let registry_for_launch = Arc::clone(&self.registry);
+        self.runtime_handle.spawn(async move {
+            match launcher.launch(profile, session_id, attempt_id, event_tx).await {
+                Ok(runtime_control) => {
+                    attach_runtime_control(
+                        &registry_for_launch,
+                        session_id,
+                        attempt_id,
+                        runtime_control,
+                    );
+                }
+                Err(error) => {
+                    if let Some(unknown) = error.downcast_ref::<UnknownHostKeyError>() {
+                        apply_unknown_host_key_prompt(
+                            &registry_for_launch,
+                            session_id,
+                            attempt_id,
+                            unknown,
+                        );
+                        return;
+                    }
+
+                    if !current_attempt_matches(&registry_for_launch, session_id, attempt_id) {
+                        return;
+                    }
+                    update_connection_attempt_headline(
+                        &registry_for_launch,
+                        session_id,
+                        ConnectionHeadlineState::Error,
+                    );
+                    update_session(
+                        &registry_for_launch,
+                        session_id,
+                        SessionState::Error(error.to_string()),
+                        true,
+                    );
+                }
+            }
+        });
+    }
 }
 
 struct SessionRegistry {
     sessions: HashMap<Uuid, SessionHandle>,
     asset_sessions: HashMap<String, Uuid>,
     open_order: Vec<Uuid>,
+    session_profiles: HashMap<Uuid, ConnectionProfile>,
+    connection_attempts: HashMap<Uuid, ConnectionAttemptState>,
     terminal_surfaces: HashMap<Uuid, TerminalSurfaceState>,
     terminal_surface_revisions: HashMap<Uuid, usize>,
     runtime_controls: HashMap<Uuid, Box<dyn SessionRuntimeControl>>,
@@ -468,6 +629,8 @@ impl Default for SessionRegistry {
             sessions: HashMap::new(),
             asset_sessions: HashMap::new(),
             open_order: Vec::new(),
+            session_profiles: HashMap::new(),
+            connection_attempts: HashMap::new(),
             terminal_surfaces: HashMap::new(),
             terminal_surface_revisions: HashMap::new(),
             runtime_controls: HashMap::new(),
@@ -481,14 +644,29 @@ impl Default for SessionRegistry {
 fn apply_runtime_event(
     registry: &Arc<Mutex<SessionRegistry>>,
     session_id: Uuid,
+    attempt_id: Uuid,
     event: SessionRuntimeEvent,
 ) {
+    if !current_attempt_matches(registry, session_id, attempt_id) {
+        return;
+    }
+
     match event {
         SessionRuntimeEvent::Connected => {
+            update_connection_attempt_headline(
+                registry,
+                session_id,
+                ConnectionHeadlineState::Connected,
+            );
             update_session(registry, session_id, SessionState::Connected, false);
         }
         SessionRuntimeEvent::Disconnected => {
             clear_runtime_control(registry, session_id);
+            update_connection_attempt_headline(
+                registry,
+                session_id,
+                ConnectionHeadlineState::Cancelled,
+            );
             update_session(registry, session_id, SessionState::Disconnected, true);
         }
         SessionRuntimeEvent::Error(message) => {
@@ -499,7 +677,11 @@ fn apply_runtime_event(
                 "session manager received runtime error event"
             );
             clear_runtime_control(registry, session_id);
+            update_connection_attempt_headline(registry, session_id, ConnectionHeadlineState::Error);
             update_session(registry, session_id, SessionState::Error(message), true);
+        }
+        SessionRuntimeEvent::ConnectionProgress(progress_event) => {
+            apply_connection_progress_event(registry, session_id, progress_event);
         }
         SessionRuntimeEvent::SurfaceChanged(surface) => {
             update_terminal_surface(registry, session_id, surface);
@@ -524,6 +706,90 @@ fn update_session(
     {
         session.state = state;
         session.can_reconnect = can_reconnect;
+    }
+}
+
+fn update_connection_attempt_headline(
+    registry: &Arc<Mutex<SessionRegistry>>,
+    session_id: Uuid,
+    headline: ConnectionHeadlineState,
+) {
+    if let Some(attempt) = registry
+        .lock()
+        .expect("lock session registry")
+        .connection_attempts
+        .get_mut(&session_id)
+    {
+        attempt.headline = headline;
+    }
+}
+
+fn apply_connection_progress_event(
+    registry: &Arc<Mutex<SessionRegistry>>,
+    session_id: Uuid,
+    event: ConnectionProgressEvent,
+) {
+    let mut registry = registry.lock().expect("lock session registry");
+    let Some(attempt) = registry.connection_attempts.get_mut(&session_id) else {
+        return;
+    };
+
+    let mut next_session_state = None::<(SessionState, bool)>;
+
+    match event {
+        ConnectionProgressEvent::AttemptStarted {
+            attempt_id,
+            headline,
+        } => {
+            *attempt = ConnectionAttemptState::with_attempt_id(attempt_id, headline);
+            next_session_state = session_state_for_headline(headline);
+        }
+        ConnectionProgressEvent::HeadlineChanged {
+            attempt_id,
+            headline,
+        } => {
+            if attempt.attempt_id == attempt_id {
+                attempt.headline = headline;
+                next_session_state = session_state_for_headline(headline);
+            }
+        }
+        ConnectionProgressEvent::StepUpdated { attempt_id, step } => {
+            if attempt.attempt_id != attempt_id {
+                return;
+            }
+            upsert_connection_step(&mut attempt.steps, step);
+        }
+        ConnectionProgressEvent::DiagnosticAppended {
+            attempt_id,
+            message,
+        } => {
+            if attempt.attempt_id != attempt_id {
+                return;
+            }
+            attempt.diagnostics.push(ConnectionDiagnosticLine {
+                attempt_id,
+                message,
+            });
+        }
+    }
+
+    if let Some((state, can_reconnect)) = next_session_state
+        && let Some(session) = registry.sessions.get_mut(&session_id)
+    {
+        session.state = state;
+        session.can_reconnect = can_reconnect;
+    }
+}
+
+fn upsert_connection_step(steps: &mut Vec<ConnectionStepStateItem>, step: ConnectionStepStateItem) {
+    if let Some(existing) = steps.iter_mut().find(|item| item.step_id == step.step_id) {
+        *existing = step;
+    } else if let Some(existing) = steps.iter_mut().find(|item| {
+        item.step_id == "verify-host-key" && step.step_kind == "verify-host-key"
+    }) {
+        *existing = step;
+    } else {
+        steps.push(step);
     }
 }
 
@@ -640,12 +906,18 @@ fn coalesce_surface_dirty_backlog(
 fn attach_runtime_control(
     registry: &Arc<Mutex<SessionRegistry>>,
     session_id: Uuid,
+    attempt_id: Uuid,
     runtime_control: Box<dyn SessionRuntimeControl>,
 ) {
     let mut runtime_control = Some(runtime_control);
     let (should_disconnect, pending_resize, theme_mode) = {
         let mut registry = registry.lock().expect("lock session registry");
         if !registry.sessions.contains_key(&session_id)
+            || registry
+                .connection_attempts
+                .get(&session_id)
+                .map(|attempt| attempt.attempt_id != attempt_id)
+                .unwrap_or(true)
             || registry.pending_disconnects.remove(&session_id)
         {
             (true, None, registry.theme_mode)
@@ -708,6 +980,113 @@ fn clear_runtime_control(registry: &Arc<Mutex<SessionRegistry>>, session_id: Uui
     }
 }
 
+fn current_attempt_matches(
+    registry: &Arc<Mutex<SessionRegistry>>,
+    session_id: Uuid,
+    attempt_id: Uuid,
+) -> bool {
+    registry
+        .lock()
+        .expect("lock session registry")
+        .connection_attempts
+        .get(&session_id)
+        .map(|attempt| attempt.attempt_id == attempt_id)
+        .unwrap_or(false)
+}
+
+fn session_state_for_headline(headline: ConnectionHeadlineState) -> Option<(SessionState, bool)> {
+    match headline {
+        ConnectionHeadlineState::Connecting => Some((SessionState::Connecting, false)),
+        ConnectionHeadlineState::WaitingUser => Some((SessionState::WaitingUser, false)),
+        ConnectionHeadlineState::Connected => Some((SessionState::Connected, false)),
+        ConnectionHeadlineState::Cancelled => Some((SessionState::Cancelled, true)),
+        ConnectionHeadlineState::Error => None,
+    }
+}
+
+fn finalize_connection_attempt(
+    attempt: &mut ConnectionAttemptState,
+    headline: ConnectionHeadlineState,
+    step_state: ConnectionStepState,
+    message: impl Into<String>,
+) {
+    let message = message.into();
+    let final_attempt_id = Uuid::new_v4();
+    attempt.attempt_id = final_attempt_id;
+    attempt.headline = headline;
+    attempt.prompt = None;
+    if let Some(step) = attempt.steps.iter_mut().rfind(|step| {
+        matches!(
+            step.state,
+            ConnectionStepState::Running | ConnectionStepState::Blocked
+        )
+    }) {
+        step.state = step_state;
+        step.detail = message.clone();
+    }
+    attempt.diagnostics.push(ConnectionDiagnosticLine {
+        attempt_id: final_attempt_id,
+        message,
+    });
+}
+
+fn apply_unknown_host_key_prompt(
+    registry: &Arc<Mutex<SessionRegistry>>,
+    session_id: Uuid,
+    attempt_id: Uuid,
+    error: &UnknownHostKeyError,
+) {
+    let mut registry = registry.lock().expect("lock session registry");
+    let Some(attempt) = registry.connection_attempts.get_mut(&session_id) else {
+        return;
+    };
+    if attempt.attempt_id != attempt_id {
+        return;
+    }
+
+    let message = format!(
+        "Host key verification required for {}:{} ({})",
+        error.host, error.port, error.fingerprint
+    );
+    attempt.headline = ConnectionHeadlineState::WaitingUser;
+    attempt.prompt = Some(ConnectionHostKeyPrompt {
+        host: error.host.clone(),
+        port: error.port,
+        fingerprint: error.fingerprint.clone(),
+        public_key_openssh: error.public_key_openssh.clone(),
+    });
+    if let Some(step) = attempt
+        .steps
+        .iter_mut()
+        .rfind(|step| step.step_kind == "verify-host-key")
+    {
+        step.state = ConnectionStepState::Blocked;
+        step.detail = message.clone();
+    } else {
+        attempt.steps.push(ConnectionStepStateItem {
+            step_id: "verify-host-key".into(),
+            step_kind: "verify-host-key".into(),
+            title: "Verify Host Key".into(),
+            detail: message.clone(),
+            hop_label: "Target".into(),
+            state: ConnectionStepState::Blocked,
+        });
+    }
+    let should_append_diagnostic = attempt
+        .diagnostics
+        .last()
+        .map(|line| line.message.as_str())
+        != Some(message.as_str());
+    if should_append_diagnostic {
+        attempt.diagnostics.push(ConnectionDiagnosticLine { attempt_id, message });
+    }
+
+    if let Some(session) = registry.sessions.get_mut(&session_id) {
+        session.state = SessionState::WaitingUser;
+        session.can_reconnect = false;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -718,10 +1097,10 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        SessionHandle, SessionRegistry, SessionRuntimeControl, SessionRuntimeEvent, SessionState,
-        apply_runtime_event, coalesce_surface_backlog, coalesce_surface_dirty_backlog,
-        refresh_runtime_surface, terminal_surface_signature_for_registry, terminal_surface_stale,
-        update_terminal_surface,
+        ConnectionAttemptState, ConnectionHeadlineState, SessionHandle, SessionRegistry,
+        SessionRuntimeControl, SessionRuntimeEvent, SessionState, apply_runtime_event,
+        coalesce_surface_backlog, coalesce_surface_dirty_backlog, refresh_runtime_surface,
+        terminal_surface_signature_for_registry, terminal_surface_stale, update_terminal_surface,
     };
     use crate::app::ssh::runtime::{TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceState};
 
@@ -806,6 +1185,7 @@ mod tests {
     #[test]
     fn surface_dirty_does_not_pull_runtime_snapshot_immediately() {
         let session_id = Uuid::new_v4();
+        let attempt_id = Uuid::new_v4();
         let registry = Arc::new(Mutex::new(SessionRegistry::default()));
         let initial_surface =
             TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["one".into()]);
@@ -825,6 +1205,13 @@ mod tests {
                     state: SessionState::Connected,
                     can_reconnect: false,
                 },
+            );
+            registry_guard.connection_attempts.insert(
+                session_id,
+                ConnectionAttemptState::with_attempt_id(
+                    attempt_id,
+                    ConnectionHeadlineState::Connected,
+                ),
             );
             registry_guard.runtime_controls.insert(
                 session_id,
@@ -836,7 +1223,12 @@ mod tests {
         }
         update_terminal_surface(&registry, session_id, initial_surface);
 
-        apply_runtime_event(&registry, session_id, SessionRuntimeEvent::SurfaceDirty);
+        apply_runtime_event(
+            &registry,
+            session_id,
+            attempt_id,
+            SessionRuntimeEvent::SurfaceDirty,
+        );
 
         assert_eq!(terminal_surface_calls.load(Ordering::SeqCst), 0);
     }
@@ -844,6 +1236,7 @@ mod tests {
     #[test]
     fn surface_dirty_marks_snapshot_stale_until_on_demand_refresh() {
         let session_id = Uuid::new_v4();
+        let attempt_id = Uuid::new_v4();
         let registry = Arc::new(Mutex::new(SessionRegistry::default()));
         let initial_surface =
             TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["one".into()]);
@@ -864,6 +1257,13 @@ mod tests {
                     can_reconnect: false,
                 },
             );
+            registry_guard.connection_attempts.insert(
+                session_id,
+                ConnectionAttemptState::with_attempt_id(
+                    attempt_id,
+                    ConnectionHeadlineState::Connected,
+                ),
+            );
             registry_guard.runtime_controls.insert(
                 session_id,
                 Box::new(CountingRuntimeControl::new(
@@ -874,7 +1274,12 @@ mod tests {
         }
         update_terminal_surface(&registry, session_id, initial_surface);
 
-        apply_runtime_event(&registry, session_id, SessionRuntimeEvent::SurfaceDirty);
+        apply_runtime_event(
+            &registry,
+            session_id,
+            attempt_id,
+            SessionRuntimeEvent::SurfaceDirty,
+        );
 
         {
             let registry_guard = registry.lock().expect("lock session registry");

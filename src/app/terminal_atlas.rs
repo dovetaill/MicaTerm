@@ -121,6 +121,25 @@ struct ClusterKey {
     span: u32,
 }
 
+#[derive(Clone, Copy)]
+struct RowRenderRequest {
+    row: u32,
+    cols: u32,
+    default_fg_rgba: u32,
+    default_bg_rgba: u32,
+    row_bg_rgba: u32,
+    row_selection: Option<(u32, u32)>,
+    selection_overlay_rgba: u32,
+}
+
+#[derive(Clone, Copy)]
+struct PixelRect {
+    start_x: u32,
+    start_y: u32,
+    width: u32,
+    height: u32,
+}
+
 #[derive(Clone, Debug)]
 enum CachedClusterSprite {
     MonoAlpha {
@@ -224,13 +243,15 @@ impl TerminalAtlasRenderer {
             );
             if resized || self.row_hashes[row as usize] != next_hash {
                 self.render_row(
-                    row,
-                    surface.cols,
-                    surface.default_fg_rgba,
-                    surface.default_bg_rgba,
-                    row_bg_rgba,
-                    row_selection,
-                    row_selection_overlay_rgba,
+                    RowRenderRequest {
+                        row,
+                        cols: surface.cols,
+                        default_fg_rgba: surface.default_fg_rgba,
+                        default_bg_rgba: surface.default_bg_rgba,
+                        row_bg_rgba,
+                        row_selection,
+                        selection_overlay_rgba: row_selection_overlay_rgba,
+                    },
                     &row_cells[row as usize],
                     &mut rendered_clusters,
                 );
@@ -261,40 +282,38 @@ impl TerminalAtlasRenderer {
     #[allow(clippy::too_many_arguments)]
     fn render_row(
         &mut self,
-        row: u32,
-        cols: u32,
-        default_fg_rgba: u32,
-        default_bg_rgba: u32,
-        row_bg_rgba: u32,
-        row_selection: Option<(u32, u32)>,
-        selection_overlay_rgba: u32,
+        request: RowRenderRequest,
         cells: &[&TerminalCellState],
         rendered_clusters: &mut Vec<RenderedCluster>,
     ) {
-        let row_y = row * self.metrics.cell_height;
-        let row_bg = rgba8(row_bg_rgba);
-        let default_fg = rgba8(default_fg_rgba);
+        let row_y = request.row * self.metrics.cell_height;
+        let row_bg = rgba8(request.row_bg_rgba);
+        let default_fg = rgba8(request.default_fg_rgba);
         fill_rect(
             &mut self.pixels,
             self.surface_width_px,
             self.surface_height_px,
-            0,
-            row_y,
-            cols * self.metrics.cell_width,
-            self.metrics.cell_height,
+            PixelRect {
+                start_x: 0,
+                start_y: row_y,
+                width: request.cols * self.metrics.cell_width,
+                height: self.metrics.cell_height,
+            },
             row_bg,
         );
 
-        if let Some((start_col, end_col)) = row_selection {
+        if let Some((start_col, end_col)) = request.row_selection {
             fill_rect(
                 &mut self.pixels,
                 self.surface_width_px,
                 self.surface_height_px,
-                start_col * self.metrics.cell_width,
-                row_y,
-                (end_col - start_col + 1) * self.metrics.cell_width,
-                self.metrics.cell_height,
-                composite_color(row_bg, rgba8(selection_overlay_rgba)),
+                PixelRect {
+                    start_x: start_col * self.metrics.cell_width,
+                    start_y: row_y,
+                    width: (end_col - start_col + 1) * self.metrics.cell_width,
+                    height: self.metrics.cell_height,
+                },
+                composite_color(row_bg, rgba8(request.selection_overlay_rgba)),
             );
         }
 
@@ -302,16 +321,17 @@ impl TerminalAtlasRenderer {
             let cell_x = cell.col * self.metrics.cell_width;
             let span = cell.width.max(1);
             let span_width_px = span * self.metrics.cell_width;
-            let selected =
-                row_selection.is_some_and(|value| selection_overlaps_cell(value, cell.col, span));
-            let cell_bg_rgba = if cell.bg_rgba == default_bg_rgba {
-                row_bg_rgba
+            let selected = request
+                .row_selection
+                .is_some_and(|value| selection_overlaps_cell(value, cell.col, span));
+            let cell_bg_rgba = if cell.bg_rgba == request.default_bg_rgba {
+                request.row_bg_rgba
             } else {
                 cell.bg_rgba
             };
             let cell_bg = rgba8(cell_bg_rgba);
             let background = if selected {
-                composite_color(cell_bg, rgba8(selection_overlay_rgba))
+                composite_color(cell_bg, rgba8(request.selection_overlay_rgba))
             } else {
                 cell_bg
             };
@@ -320,10 +340,12 @@ impl TerminalAtlasRenderer {
                 &mut self.pixels,
                 self.surface_width_px,
                 self.surface_height_px,
-                cell_x,
-                row_y,
-                span_width_px,
-                self.metrics.cell_height,
+                PixelRect {
+                    start_x: cell_x,
+                    start_y: row_y,
+                    width: span_width_px,
+                    height: self.metrics.cell_height,
+                },
                 background,
             );
 
@@ -584,17 +606,14 @@ fn fill_rect(
     pixels: &mut [Rgba8Pixel],
     surface_width_px: u32,
     surface_height_px: u32,
-    start_x: u32,
-    start_y: u32,
-    width: u32,
-    height: u32,
+    rect: PixelRect,
     color: Rgba8Pixel,
 ) {
-    let end_x = (start_x + width).min(surface_width_px);
-    let end_y = (start_y + height).min(surface_height_px);
+    let end_x = (rect.start_x + rect.width).min(surface_width_px);
+    let end_y = (rect.start_y + rect.height).min(surface_height_px);
 
-    for y in start_y.min(surface_height_px)..end_y {
-        for x in start_x.min(surface_width_px)..end_x {
+    for y in rect.start_y.min(surface_height_px)..end_y {
+        for x in rect.start_x.min(surface_width_px)..end_x {
             pixels[(y * surface_width_px + x) as usize] = color;
         }
     }

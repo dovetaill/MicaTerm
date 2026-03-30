@@ -3,10 +3,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use mica_term::app::async_runtime::AppAsyncRuntime;
+use mica_term::app::ssh::connection_progress::{
+    ConnectionHeadlineState, ConnectionProgressEvent, ConnectionStepState,
+};
 use mica_term::app::ssh::known_hosts::KnownHostsService;
 use mica_term::app::ssh::profile::{
     ConnectionProfile, ConnectionProxyProfile, ResolvedProxyHop, SshAuthMethod,
@@ -233,6 +236,7 @@ impl SessionRuntimeLauncher for FakeLauncher {
         &self,
         _profile: ConnectionProfile,
         _session_id: Uuid,
+        _attempt_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -274,11 +278,12 @@ impl SessionRuntimeLauncher for RuntimeBackedLauncher {
         &self,
         profile: ConnectionProfile,
         session_id: Uuid,
+        attempt_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
         Box::pin(async move {
-            let runtime = SshSessionRuntime::connect(profile, session_id, event_tx).await?;
+            let runtime = SshSessionRuntime::connect(profile, session_id, attempt_id, event_tx).await?;
             Ok(Box::new(runtime) as Box<dyn SessionRuntimeControl>)
         })
     }
@@ -289,7 +294,13 @@ impl SessionRuntimeLauncher for RuntimeBackedLauncher {
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
         Box::pin(async move {
             let (event_tx, _event_rx) = mpsc::unbounded_channel();
-            let runtime = SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx).await?;
+            let runtime = SshSessionRuntime::connect(
+                profile,
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                event_tx,
+            )
+            .await?;
             runtime.disconnect()?;
             Ok(())
         })
@@ -301,6 +312,7 @@ impl SessionRuntimeLauncher for TrackingLauncher {
         &self,
         _profile: ConnectionProfile,
         _session_id: Uuid,
+        _attempt_id: Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -323,6 +335,7 @@ impl SessionRuntimeLauncher for InteractiveTrackingLauncher {
         &self,
         _profile: ConnectionProfile,
         _session_id: Uuid,
+        _attempt_id: Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -346,6 +359,7 @@ impl SessionRuntimeLauncher for DelayedTrackingLauncher {
         &self,
         _profile: ConnectionProfile,
         _session_id: Uuid,
+        _attempt_id: Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -370,6 +384,7 @@ impl SessionRuntimeLauncher for DelayedInteractiveTrackingLauncher {
         &self,
         _profile: ConnectionProfile,
         _session_id: Uuid,
+        _attempt_id: Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -395,6 +410,7 @@ impl SessionRuntimeLauncher for ScrollTrackingLauncher {
         &self,
         _profile: ConnectionProfile,
         session_id: Uuid,
+        _attempt_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -421,6 +437,7 @@ impl SessionRuntimeLauncher for SurfacePullLauncher {
         &self,
         _profile: ConnectionProfile,
         _session_id: Uuid,
+        _attempt_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
@@ -1219,6 +1236,35 @@ fn temp_known_hosts_path(label: &str) -> std::path::PathBuf {
     path
 }
 
+fn completed_timeline_steps(events: &[SessionRuntimeEvent]) -> Vec<(String, String)> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            SessionRuntimeEvent::ConnectionProgress(ConnectionProgressEvent::StepUpdated {
+                step,
+                ..
+            }) if step.state == ConnectionStepState::Done => {
+                Some((step.step_kind.clone(), step.hop_label.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn failed_timeline_step(events: &[SessionRuntimeEvent]) -> Option<(String, String, String)> {
+    events.iter().find_map(|event| match event {
+        SessionRuntimeEvent::ConnectionProgress(ConnectionProgressEvent::StepUpdated {
+            step,
+            ..
+        }) if step.state == ConnectionStepState::Failed => Some((
+            step.step_kind.clone(),
+            step.hop_label.clone(),
+            step.detail.clone(),
+        )),
+        _ => None,
+    })
+}
+
 #[test]
 fn session_manager_creates_connecting_session_handle() {
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
@@ -1238,6 +1284,63 @@ fn session_manager_creates_connecting_session_handle() {
     assert_eq!(handle.title, "Prod Bastion");
     assert_eq!(handle.subtitle, "ops@example.com:22");
     assert_eq!(handle.state, SessionState::Connecting);
+}
+
+#[test]
+fn opening_slow_ssh_session_returns_before_runtime_attaches() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let disconnects = Arc::new(AtomicUsize::new(0));
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(DelayedTrackingLauncher::new(
+            Arc::clone(&disconnects),
+            Duration::from_millis(250),
+        )),
+    );
+
+    let started = Instant::now();
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open delayed session");
+
+    assert!(
+        started.elapsed() < Duration::from_millis(120),
+        "opening a delayed SSH session should return before runtime attachment finishes"
+    );
+    assert_eq!(handle.state, SessionState::Connecting);
+    assert_eq!(
+        manager
+            .session(handle.session_id)
+            .expect("stored delayed session")
+            .state,
+        SessionState::Connecting
+    );
+}
+
+#[test]
+fn connection_progress_new_session_starts_with_empty_connecting_attempt() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(FakeLauncher::stay_connecting()),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    let attempt = manager
+        .connection_attempt(handle.session_id)
+        .expect("connection progress attempt");
+    assert_eq!(attempt.headline, ConnectionHeadlineState::Connecting);
+    assert!(attempt.steps.is_empty());
+    assert!(attempt.diagnostics.is_empty());
 }
 
 #[test]
@@ -1503,6 +1606,7 @@ fn ssh_runtime_negotiates_truecolor_environment_before_requesting_shell() {
                 private_key_path.display().to_string(),
             ),
             Uuid::new_v4(),
+            Uuid::new_v4(),
             event_tx,
         )
         .await
@@ -1601,7 +1705,7 @@ fn ssh_runtime_connects_through_unauthenticated_socks5_proxy() {
     );
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let runtime_handle = runtime.block_on(async {
-        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), Uuid::new_v4(), event_tx)
             .await
             .expect("connect ssh runtime through unauthenticated socks5 proxy")
     });
@@ -1678,7 +1782,7 @@ fn ssh_runtime_connects_through_username_password_socks5_proxy() {
     );
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let runtime_handle = runtime.block_on(async {
-        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), Uuid::new_v4(), event_tx)
             .await
             .expect("connect ssh runtime through username/password socks5 proxy")
     });
@@ -1750,7 +1854,7 @@ fn ssh_runtime_connects_through_http_connect_proxy() {
     );
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let runtime_handle = runtime.block_on(async {
-        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), Uuid::new_v4(), event_tx)
             .await
             .expect("connect ssh runtime through http proxy")
     });
@@ -1826,7 +1930,7 @@ fn ssh_runtime_connects_through_http_connect_proxy_with_basic_auth() {
     );
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let runtime_handle = runtime.block_on(async {
-        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), Uuid::new_v4(), event_tx)
             .await
             .expect("connect ssh runtime through authenticated http proxy")
     });
@@ -1898,6 +2002,7 @@ fn ssh_runtime_surfaces_http_proxy_authentication_rejection() {
                 Some("bad-secret".into()),
             ),
             Uuid::new_v4(),
+            Uuid::new_v4(),
             mpsc::unbounded_channel().0,
         )
         .await
@@ -1957,6 +2062,7 @@ fn ssh_runtime_surfaces_socks5_authentication_rejection() {
                 Some("secret-pass".into()),
             ),
             Uuid::new_v4(),
+            Uuid::new_v4(),
             event_tx,
         )
         .await
@@ -1968,7 +2074,7 @@ fn ssh_runtime_surfaces_socks5_authentication_rejection() {
 
     let message = err.to_string();
     assert!(
-        message.contains("failed to connect to SOCKS5 proxy"),
+        message.contains("failed to negotiate SOCKS5 proxy"),
         "expected SOCKS5 proxy error, got: {message}"
     );
 
@@ -2049,7 +2155,7 @@ fn ssh_runtime_connects_through_single_direct_tcpip_upstream() {
     );
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let runtime_handle = runtime.block_on(async {
-        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), Uuid::new_v4(), event_tx)
             .await
             .expect("connect ssh runtime through direct-tcpip upstream")
     });
@@ -2096,7 +2202,7 @@ fn ssh_runtime_connects_through_single_direct_tcpip_upstream() {
 }
 
 #[test]
-fn ssh_runtime_connects_through_multi_hop_socks5_and_ssh_chain() {
+fn multi_hop_connection_emits_timeline_steps_in_order() {
     let _env_lock = lock_known_hosts_env();
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let (client_public, private_key_path) = create_publickey_auth_material("multi-hop");
@@ -2213,27 +2319,55 @@ fn ssh_runtime_connects_through_multi_hop_socks5_and_ssh_chain() {
     );
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let runtime_handle = runtime.block_on(async {
-        SshSessionRuntime::connect(profile, Uuid::new_v4(), event_tx)
+        SshSessionRuntime::connect(profile, Uuid::new_v4(), Uuid::new_v4(), event_tx)
             .await
             .expect("connect ssh runtime through multi-hop proxy chain")
     });
 
-    let saw_connected = runtime.block_on(async {
+    let events = runtime.block_on(async {
         tokio::time::timeout(Duration::from_secs(1), async {
+            let mut events = Vec::new();
             while let Some(event) = event_rx.recv().await {
-                if matches!(event, SessionRuntimeEvent::Connected) {
-                    return true;
+                let is_connected = matches!(event, SessionRuntimeEvent::Connected);
+                events.push(event);
+                if is_connected {
+                    return events;
                 }
             }
-            false
+            events
         })
         .await
-        .expect("wait for connected event")
+        .expect("wait for connected event stream")
     });
 
     assert!(
-        saw_connected,
+        events
+            .iter()
+            .any(|event| matches!(event, SessionRuntimeEvent::Connected)),
         "runtime should emit Connected after SOCKS5 -> SSH -> SSH chain"
+    );
+    assert_eq!(
+        completed_timeline_steps(&events),
+        vec![
+            ("resolve-profile".into(), "Target".into()),
+            ("connect-proxy".into(), "Proxy".into()),
+            ("proxy-negotiate".into(), "Proxy".into()),
+            ("connect-jump-host".into(), "Jump Host 1".into()),
+            ("verify-host-key".into(), "Jump Host 1".into()),
+            ("authenticate-jump-host".into(), "Jump Host 1".into()),
+            ("open-direct-tcpip".into(), "Jump Host 1".into()),
+            ("connect-jump-host".into(), "Jump Host 2".into()),
+            ("verify-host-key".into(), "Jump Host 2".into()),
+            ("authenticate-jump-host".into(), "Jump Host 2".into()),
+            ("open-direct-tcpip".into(), "Jump Host 2".into()),
+            ("connect-target".into(), "Target".into()),
+            ("verify-host-key".into(), "Target".into()),
+            ("authenticate-target".into(), "Target".into()),
+            ("open-session-channel".into(), "Target".into()),
+            ("request-pty".into(), "Target".into()),
+            ("request-shell".into(), "Target".into()),
+        ],
+        "runtime should expose ordered hop-aware completion steps for the full chain"
     );
     let upstream_b_requests = upstream_b_state
         .direct_tcpip_requests
@@ -2271,7 +2405,7 @@ fn ssh_runtime_connects_through_multi_hop_socks5_and_ssh_chain() {
 }
 
 #[test]
-fn ssh_runtime_surfaces_direct_tcpip_rejection_from_upstream() {
+fn multi_hop_connection_failure_is_reported_on_the_failing_hop() {
     let _env_lock = lock_known_hosts_env();
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let (client_public, private_key_path) = create_publickey_auth_material("direct-tcpip-reject");
@@ -2320,8 +2454,8 @@ fn ssh_runtime_surfaces_direct_tcpip_rejection_from_upstream() {
         private_key_path.display().to_string(),
     );
     upstream_profile.name = "Proxy A".into();
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let err = runtime.block_on(async {
-        let (event_tx, _event_rx) = mpsc::unbounded_channel();
         match SshSessionRuntime::connect(
             sample_publickey_profile_with_proxy_hops(
                 "asset-prod",
@@ -2333,6 +2467,7 @@ fn ssh_runtime_surfaces_direct_tcpip_rejection_from_upstream() {
                 },
                 vec![ResolvedProxyHop::Ssh(Box::new(upstream_profile))],
             ),
+            Uuid::new_v4(),
             Uuid::new_v4(),
             event_tx,
         )
@@ -2347,6 +2482,22 @@ fn ssh_runtime_surfaces_direct_tcpip_rejection_from_upstream() {
     assert!(
         message.contains("SSH upstream 'Proxy A' rejected direct-tcpip forwarding"),
         "expected direct-tcpip error, got: {message}"
+    );
+    let events = runtime.block_on(async {
+        let mut events = Vec::new();
+        while let Some(event) = event_rx.recv().await {
+            events.push(event);
+        }
+        events
+    });
+    assert_eq!(
+        failed_timeline_step(&events),
+        Some((
+            "open-direct-tcpip".into(),
+            "Jump Host 1".into(),
+            "SSH upstream 'Proxy A' rejected direct-tcpip forwarding".into(),
+        )),
+        "runtime should pin the failure to the failing hop instead of collapsing it into a generic error"
     );
 
     runtime.block_on(async {

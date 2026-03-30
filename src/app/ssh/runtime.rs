@@ -22,6 +22,9 @@ use wezterm_surface::{CursorShape, CursorVisibility};
 use wezterm_term::color::{ColorAttribute, ColorPalette, SrgbaTuple};
 use wezterm_term::{Line, Terminal, TerminalConfiguration, TerminalSize};
 
+use crate::app::ssh::connection_progress::{
+    ConnectionHeadlineState, ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
+};
 use crate::app::ssh::credentials::{
     CredentialStore, StoredSecretLookupError, StoredSshSecretBundle, SystemCredentialStore,
     load_secret_bundle_with_diagnostics, required_secret_bundle_field,
@@ -98,14 +101,13 @@ async fn connect_ssh_handle_over_stream(
     config: Arc<client::Config>,
     stream: BoxedTransportStream,
     profile: &ConnectionProfile,
-    credential_store: &dyn CredentialStore,
 ) -> Result<client::Handle<RuntimeClientHandler>> {
     let handler = RuntimeClientHandler {
         host: profile.host.clone(),
         port: profile.port,
         known_hosts: KnownHostsService::new(default_known_hosts_path()?),
     };
-    let mut handle = client::connect_stream(config, stream, handler)
+    let handle = client::connect_stream(config, stream, handler)
         .await
         .with_context(|| {
             format!(
@@ -113,7 +115,6 @@ async fn connect_ssh_handle_over_stream(
                 profile.host, profile.port
             )
         })?;
-    authenticate_client(&mut handle, profile, credential_store).await?;
     Ok(handle)
 }
 
@@ -143,10 +144,26 @@ async fn open_direct_tcpip_stream(
     }
 }
 
+async fn connect_proxy_tcp_stream(
+    proxy_host: &str,
+    proxy_port: u16,
+    enable_nodelay: bool,
+    proxy_kind: &str,
+) -> Result<TcpStream> {
+    let stream = TcpStream::connect((proxy_host, proxy_port))
+        .await
+        .with_context(|| {
+            format!("failed to open TCP stream to {proxy_kind} proxy `{proxy_host}:{proxy_port}`")
+        })?;
+    configure_transport_nodelay(&stream, enable_nodelay);
+    Ok(stream)
+}
+
 async fn connect_target_handle_for_profile(
     config: Arc<client::Config>,
     profile: &ConnectionProfile,
     credential_store: &dyn CredentialStore,
+    progress: &mut ConnectionProgressReporter,
 ) -> Result<(TransportChainGuard, client::Handle<RuntimeClientHandler>)> {
     let mut chain_guard = TransportChainGuard::default();
 
@@ -157,22 +174,56 @@ async fn connect_target_handle_for_profile(
             username,
             password,
         }) => {
+            let connect_step = progress.start_step(
+                "connect-proxy",
+                "Connect Proxy",
+                format!("Connecting to SOCKS5 proxy {host}:{port}"),
+                "Proxy",
+            );
             let (next_host, next_port) = next_chain_target(profile, 0)?;
-            Box::new(
-                connect_via_socks5(
-                    host,
-                    *port,
-                    username.as_deref(),
-                    password.as_deref(),
-                    next_host,
-                    next_port,
-                    config.as_ref().nodelay,
-                )
-                .await
-                .with_context(|| {
-                    format!("failed to connect to SOCKS5 proxy `{}:{}`", host, port)
-                })?,
+            let mut stream = match connect_proxy_tcp_stream(
+                host,
+                *port,
+                config.as_ref().nodelay,
+                "SOCKS5",
             )
+            .await
+            {
+                Ok(stream) => {
+                    connect_step.finish(format!("Connected to SOCKS5 proxy {host}:{port}"));
+                    stream
+                }
+                Err(err) => {
+                    connect_step.fail(err.to_string());
+                    return Err(err);
+                }
+            };
+            let negotiate_step = progress.start_step(
+                "proxy-negotiate",
+                "Negotiate Proxy Tunnel",
+                format!("Negotiating SOCKS5 tunnel to {next_host}:{next_port}"),
+                "Proxy",
+            );
+            match negotiate_socks5_proxy_tunnel(
+                &mut stream,
+                username.as_deref(),
+                password.as_deref(),
+                next_host,
+                next_port,
+            )
+            .await
+            .with_context(|| format!("failed to negotiate SOCKS5 proxy `{}:{}`", host, port))
+            {
+                Ok(()) => {
+                    negotiate_step
+                        .finish(format!("Established SOCKS5 tunnel to {next_host}:{next_port}"));
+                    Box::new(stream)
+                }
+                Err(err) => {
+                    negotiate_step.fail(err.to_string());
+                    return Err(err);
+                }
+            }
         }
         Some(ResolvedProxyHop::Http {
             host,
@@ -180,20 +231,57 @@ async fn connect_target_handle_for_profile(
             username,
             password,
         }) => {
+            let connect_step = progress.start_step(
+                "connect-proxy",
+                "Connect Proxy",
+                format!("Connecting to HTTP proxy {host}:{port}"),
+                "Proxy",
+            );
             let (next_host, next_port) = next_chain_target(profile, 0)?;
-            Box::new(
-                connect_via_http_proxy(
-                    host,
-                    *port,
-                    username.as_deref(),
-                    password.as_deref(),
-                    next_host,
-                    next_port,
-                    config.as_ref().nodelay,
-                )
-                .await
-                .with_context(|| format!("failed to connect to HTTP proxy `{}:{}`", host, port))?,
+            let mut stream = match connect_proxy_tcp_stream(
+                host,
+                *port,
+                config.as_ref().nodelay,
+                "HTTP",
             )
+            .await
+            {
+                Ok(stream) => {
+                    connect_step.finish(format!("Connected to HTTP proxy {host}:{port}"));
+                    stream
+                }
+                Err(err) => {
+                    connect_step.fail(err.to_string());
+                    return Err(err);
+                }
+            };
+            let negotiate_step = progress.start_step(
+                "proxy-negotiate",
+                "Negotiate Proxy Tunnel",
+                format!("Negotiating HTTP CONNECT tunnel to {next_host}:{next_port}"),
+                "Proxy",
+            );
+            match negotiate_http_connect_tunnel(
+                &mut stream,
+                username.as_deref(),
+                password.as_deref(),
+                next_host,
+                next_port,
+            )
+            .await
+            .with_context(|| format!("failed to negotiate HTTP proxy `{}:{}`", host, port))
+            {
+                Ok(()) => {
+                    negotiate_step.finish(format!(
+                        "Established HTTP CONNECT tunnel to {next_host}:{next_port}"
+                    ));
+                    Box::new(stream)
+                }
+                Err(err) => {
+                    negotiate_step.fail(err.to_string());
+                    return Err(err);
+                }
+            }
         }
         Some(ResolvedProxyHop::Ssh(upstream)) => Box::new(
             connect_direct_tcp_stream(
@@ -209,6 +297,7 @@ async fn connect_target_handle_for_profile(
         ),
     };
 
+    let mut jump_host_index = 0usize;
     for (hop_index, hop) in profile.resolved_proxy_hops.iter().enumerate() {
         match hop {
             ResolvedProxyHop::Socks5 { .. } | ResolvedProxyHop::Http { .. } => {
@@ -219,48 +308,178 @@ async fn connect_target_handle_for_profile(
                 }
             }
             ResolvedProxyHop::Ssh(upstream) => {
+                jump_host_index = jump_host_index.saturating_add(1);
                 let upstream_profile = upstream.as_ref();
-                let upstream_handle = connect_ssh_handle_over_stream(
+                let hop_label = format!("Jump Host {jump_host_index}");
+                let connect_step = progress.start_step(
+                    "connect-jump-host",
+                    "Connect Jump Host",
+                    format!("Opening SSH transport to {}", upstream_profile.host),
+                    hop_label.clone(),
+                );
+                let mut upstream_handle = match connect_ssh_handle_over_stream(
                     Arc::clone(&config),
                     current_stream,
                     upstream_profile,
-                    credential_store,
                 )
-                .await?;
+                .await
+                {
+                    Ok(handle) => {
+                        connect_step.finish(format!(
+                            "Connected to jump host {}:{}",
+                            upstream_profile.host, upstream_profile.port
+                        ));
+                        handle
+                    }
+                    Err(err) => {
+                        if let Some(unknown) = err.downcast_ref::<UnknownHostKeyError>() {
+                            connect_step.finish(format!(
+                                "Connected to jump host {}:{}",
+                                upstream_profile.host, upstream_profile.port
+                            ));
+                            progress.set_headline(ConnectionHeadlineState::WaitingUser);
+                            let verify_step = progress.start_step(
+                                "verify-host-key",
+                                "Verify Host Key",
+                                format!("Verifying host key for {}", upstream_profile.host),
+                                hop_label.clone(),
+                            );
+                            verify_step.block(format!(
+                                "Host key verification required for {}:{} ({})",
+                                unknown.host, unknown.port, unknown.fingerprint
+                            ));
+                        } else {
+                        connect_step.fail(err.to_string());
+                        }
+                        return Err(err);
+                    }
+                };
+                let verify_step = progress.start_step(
+                    "verify-host-key",
+                    "Verify Host Key",
+                    format!("Verifying host key for {}", upstream_profile.host),
+                    hop_label.clone(),
+                );
+                verify_step.finish(format!(
+                    "Verified host key for {}:{}",
+                    upstream_profile.host, upstream_profile.port
+                ));
+                let auth_step = progress.start_step(
+                    "authenticate-jump-host",
+                    "Authenticate Jump Host",
+                    format!("Authenticating to {}", upstream_profile.user),
+                    hop_label.clone(),
+                );
+                if let Err(err) =
+                    authenticate_client(&mut upstream_handle, upstream_profile, credential_store)
+                        .await
+                {
+                    auth_step.fail(err.to_string());
+                    return Err(err);
+                }
+                auth_step.finish(format!(
+                    "Authenticated jump host {} as {}",
+                    upstream_profile.host, upstream_profile.user
+                ));
                 let (next_host, next_port) = next_chain_target(profile, hop_index)?;
-                current_stream = open_direct_tcpip_stream(
+                let direct_tcpip_step = progress.start_step(
+                    "open-direct-tcpip",
+                    "Open Direct TCPIP",
+                    format!("Opening SSH tunnel to {next_host}:{next_port}"),
+                    hop_label,
+                );
+                current_stream = match open_direct_tcpip_stream(
                     &upstream_handle,
                     upstream_profile,
                     next_host,
                     next_port,
                 )
-                .await?;
+                .await
+                {
+                    Ok(stream) => {
+                        direct_tcpip_step.finish(format!(
+                            "Opened direct-tcpip tunnel to {next_host}:{next_port}"
+                        ));
+                        stream
+                    }
+                    Err(err) => {
+                        direct_tcpip_step.fail(err.to_string());
+                        return Err(err);
+                    }
+                };
                 chain_guard.upstream_handles.push(upstream_handle);
             }
         }
     }
 
-    let handle =
-        connect_ssh_handle_over_stream(config, current_stream, profile, credential_store).await?;
+    let connect_target_step = progress.start_step(
+        "connect-target",
+        "Connect Target",
+        format!("Opening SSH transport to {}", profile.host),
+        "Target",
+    );
+    let mut handle = match connect_ssh_handle_over_stream(config, current_stream, profile).await {
+        Ok(handle) => {
+            connect_target_step.finish(format!(
+                "Connected to target {}:{}",
+                profile.host, profile.port
+            ));
+            handle
+        }
+        Err(err) => {
+            if let Some(unknown) = err.downcast_ref::<UnknownHostKeyError>() {
+                connect_target_step.finish(format!(
+                    "Connected to target {}:{}",
+                    profile.host, profile.port
+                ));
+                progress.set_headline(ConnectionHeadlineState::WaitingUser);
+                let verify_step = progress.start_step(
+                    "verify-host-key",
+                    "Verify Host Key",
+                    format!("Verifying host key for {}", profile.host),
+                    "Target",
+                );
+                verify_step.block(format!(
+                    "Host key verification required for {}:{} ({})",
+                    unknown.host, unknown.port, unknown.fingerprint
+                ));
+            } else {
+                connect_target_step.fail(err.to_string());
+            }
+            return Err(err);
+        }
+    };
+    let verify_step = progress.start_step(
+        "verify-host-key",
+        "Verify Host Key",
+        format!("Verifying host key for {}", profile.host),
+        "Target",
+    );
+    verify_step.finish(format!("Verified host key for {}:{}", profile.host, profile.port));
+    let auth_step = progress.start_step(
+        "authenticate-target",
+        "Authenticate Target",
+        format!("Authenticating to {}", profile.user),
+        "Target",
+    );
+    if let Err(err) = authenticate_client(&mut handle, profile, credential_store).await {
+        auth_step.fail(err.to_string());
+        return Err(err);
+    }
+    auth_step.finish(format!(
+        "Authenticated target {} as {}",
+        profile.host, profile.user
+    ));
     Ok((chain_guard, handle))
 }
 
-async fn connect_via_socks5(
-    proxy_host: &str,
-    proxy_port: u16,
+async fn negotiate_socks5_proxy_tunnel(
+    stream: &mut TcpStream,
     username: Option<&str>,
     password: Option<&str>,
     target_host: &str,
     target_port: u16,
-    enable_nodelay: bool,
-) -> Result<TcpStream> {
-    let mut stream = TcpStream::connect((proxy_host, proxy_port))
-        .await
-        .with_context(|| {
-            format!("failed to open TCP stream to SOCKS5 proxy `{proxy_host}:{proxy_port}`")
-        })?;
-    configure_transport_nodelay(&stream, enable_nodelay);
-
+) -> Result<()> {
     let requires_password_auth = username.is_some() || password.is_some();
     let mut methods = vec![0x00];
     if requires_password_auth {
@@ -296,34 +515,25 @@ async fn connect_via_socks5(
         0x02 => {
             let username = username.expect("username/password auth validated above");
             let password = password.expect("username/password auth validated above");
-            authenticate_socks5_username_password(&mut stream, username, password).await?;
+            authenticate_socks5_username_password(stream, username, password).await?;
         }
         0xFF => bail!("SOCKS5 proxy rejected all advertised authentication methods"),
         other => bail!("SOCKS5 proxy selected unsupported auth method: {other:#04x}"),
     }
 
-    write_socks5_connect_request(&mut stream, target_host, target_port).await?;
-    read_socks5_connect_reply(&mut stream).await?;
+    write_socks5_connect_request(stream, target_host, target_port).await?;
+    read_socks5_connect_reply(stream).await?;
 
-    Ok(stream)
+    Ok(())
 }
 
-async fn connect_via_http_proxy(
-    proxy_host: &str,
-    proxy_port: u16,
+async fn negotiate_http_connect_tunnel(
+    stream: &mut TcpStream,
     username: Option<&str>,
     password: Option<&str>,
     target_host: &str,
     target_port: u16,
-    enable_nodelay: bool,
-) -> Result<TcpStream> {
-    let mut stream = TcpStream::connect((proxy_host, proxy_port))
-        .await
-        .with_context(|| {
-            format!("failed to open TCP stream to HTTP proxy `{proxy_host}:{proxy_port}`")
-        })?;
-    configure_transport_nodelay(&stream, enable_nodelay);
-
+) -> Result<()> {
     let target_authority = format_proxy_authority(target_host, target_port);
     let mut request =
         format!("CONNECT {target_authority} HTTP/1.1\r\nHost: {target_authority}\r\n");
@@ -344,13 +554,13 @@ async fn connect_via_http_proxy(
         .await
         .context("failed to write HTTP CONNECT request")?;
 
-    let response = read_http_connect_response(&mut stream).await?;
+    let response = read_http_connect_response(stream).await?;
     let status = parse_http_connect_status(response.as_str())?;
     if !(200..300).contains(&status) {
         bail!("HTTP CONNECT request failed with status: {status}");
     }
 
-    Ok(stream)
+    Ok(())
 }
 
 fn format_proxy_authority(target_host: &str, target_port: u16) -> String {
@@ -729,6 +939,7 @@ impl TerminalKeyEvent {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionRuntimeEvent {
     Connected,
+    ConnectionProgress(ConnectionProgressEvent),
     SurfaceChanged(TerminalSurfaceState),
     SurfaceDirty,
     Disconnected,
@@ -741,6 +952,21 @@ pub struct SshSessionRuntime {
     profile: ConnectionProfile,
     terminal: Arc<Mutex<TerminalSession>>,
     command_tx: mpsc::UnboundedSender<RuntimeCommand>,
+}
+
+struct ConnectionProgressReporter {
+    attempt_id: Uuid,
+    next_step_index: usize,
+    event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+}
+
+struct ConnectionProgressStep {
+    attempt_id: Uuid,
+    event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    step_id: String,
+    step_kind: String,
+    title: String,
+    hop_label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -779,6 +1005,157 @@ struct RuntimeClientHandler {
     known_hosts: KnownHostsService,
 }
 
+impl ConnectionProgressReporter {
+    fn new(
+        attempt_id: Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+        headline: ConnectionHeadlineState,
+    ) -> Self {
+        let reporter = Self {
+            attempt_id,
+            next_step_index: 0,
+            event_tx,
+        };
+        let _ = reporter
+            .event_tx
+            .send(SessionRuntimeEvent::ConnectionProgress(
+                ConnectionProgressEvent::AttemptStarted {
+                    attempt_id,
+                    headline,
+                },
+            ));
+        reporter
+    }
+
+    fn start_step(
+        &mut self,
+        step_kind: &str,
+        title: impl Into<String>,
+        detail: impl Into<String>,
+        hop_label: impl Into<String>,
+    ) -> ConnectionProgressStep {
+        let step = ConnectionStepStateItem {
+            step_id: format!("{:02}-{}", self.next_step_index, step_kind),
+            step_kind: step_kind.to_string(),
+            title: title.into(),
+            detail: detail.into(),
+            hop_label: hop_label.into(),
+            state: ConnectionStepState::Running,
+        };
+        self.next_step_index = self.next_step_index.saturating_add(1);
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::ConnectionProgress(
+                ConnectionProgressEvent::StepUpdated {
+                    attempt_id: self.attempt_id,
+                    step: step.clone(),
+                },
+            ));
+        ConnectionProgressStep {
+            attempt_id: self.attempt_id,
+            event_tx: self.event_tx.clone(),
+            step_id: step.step_id,
+            step_kind: step.step_kind,
+            title: step.title,
+            hop_label: step.hop_label,
+        }
+    }
+
+    fn set_headline(&self, headline: ConnectionHeadlineState) {
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::ConnectionProgress(
+                ConnectionProgressEvent::HeadlineChanged {
+                    attempt_id: self.attempt_id,
+                    headline,
+                },
+            ));
+    }
+}
+
+impl ConnectionProgressStep {
+    fn finish(self, detail: impl Into<String>) {
+        let detail = detail.into();
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::ConnectionProgress(
+                ConnectionProgressEvent::StepUpdated {
+                    attempt_id: self.attempt_id,
+                    step: ConnectionStepStateItem {
+                        step_id: self.step_id.clone(),
+                        step_kind: self.step_kind.clone(),
+                        title: self.title.clone(),
+                        detail: detail.clone(),
+                        hop_label: self.hop_label.clone(),
+                        state: ConnectionStepState::Done,
+                    },
+                },
+            ));
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::ConnectionProgress(
+                ConnectionProgressEvent::DiagnosticAppended {
+                    attempt_id: self.attempt_id,
+                    message: detail,
+                },
+            ));
+    }
+
+    fn fail(self, detail: impl Into<String>) {
+        let detail = detail.into();
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::ConnectionProgress(
+                ConnectionProgressEvent::StepUpdated {
+                    attempt_id: self.attempt_id,
+                    step: ConnectionStepStateItem {
+                        step_id: self.step_id.clone(),
+                        step_kind: self.step_kind.clone(),
+                        title: self.title.clone(),
+                        detail: detail.clone(),
+                        hop_label: self.hop_label.clone(),
+                        state: ConnectionStepState::Failed,
+                    },
+                },
+            ));
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::ConnectionProgress(
+                ConnectionProgressEvent::DiagnosticAppended {
+                    attempt_id: self.attempt_id,
+                    message: detail,
+                },
+            ));
+    }
+
+    fn block(self, detail: impl Into<String>) {
+        let detail = detail.into();
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::ConnectionProgress(
+                ConnectionProgressEvent::StepUpdated {
+                    attempt_id: self.attempt_id,
+                    step: ConnectionStepStateItem {
+                        step_id: self.step_id.clone(),
+                        step_kind: self.step_kind.clone(),
+                        title: self.title.clone(),
+                        detail: detail.clone(),
+                        hop_label: self.hop_label.clone(),
+                        state: ConnectionStepState::Blocked,
+                    },
+                },
+            ));
+        let _ = self
+            .event_tx
+            .send(SessionRuntimeEvent::ConnectionProgress(
+                ConnectionProgressEvent::DiagnosticAppended {
+                    attempt_id: self.attempt_id,
+                    message: detail,
+                },
+            ));
+    }
+}
+
 impl client::Handler for RuntimeClientHandler {
     type Error = anyhow::Error;
 
@@ -815,11 +1192,13 @@ impl SshSessionRuntime {
     pub async fn connect(
         profile: ConnectionProfile,
         session_id: Uuid,
+        attempt_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
     ) -> Result<Self> {
         Self::connect_with_credential_store(
             profile,
             session_id,
+            attempt_id,
             event_tx,
             Arc::new(SystemCredentialStore),
         )
@@ -829,26 +1208,53 @@ impl SshSessionRuntime {
     pub async fn connect_with_credential_store(
         profile: ConnectionProfile,
         session_id: Uuid,
+        attempt_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
         credential_store: Arc<dyn CredentialStore>,
     ) -> Result<Self> {
+        let mut progress = ConnectionProgressReporter::new(
+            attempt_id,
+            event_tx.clone(),
+            ConnectionHeadlineState::Connecting,
+        );
+        let resolve_step = progress.start_step(
+            "resolve-profile",
+            "Resolve Profile",
+            format!("Resolving connection profile for {}", profile.name),
+            "Target",
+        );
         let terminal = Arc::new(Mutex::new(TerminalSession::new(
             DEFAULT_TERMINAL_ROWS,
             DEFAULT_TERMINAL_COLS,
         )));
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let config = Arc::new(ssh_client_config());
+        resolve_step.finish(format!("Resolved connection profile for {}", profile.name));
         let (transport_chain_guard, handle) = connect_target_handle_for_profile(
             Arc::clone(&config),
             &profile,
             credential_store.as_ref(),
+            &mut progress,
         )
         .await?;
 
+        let open_session_step = progress.start_step(
+            "open-session-channel",
+            "Open Session Channel",
+            format!("Opening SSH session channel for {}", profile.host),
+            "Target",
+        );
         let mut channel = handle
             .channel_open_session()
             .await
             .context("failed to open SSH session channel")?;
+        open_session_step.finish(format!("Opened SSH session channel for {}", profile.host));
+        let pty_step = progress.start_step(
+            "request-pty",
+            "Request PTY",
+            "Requesting terminal PTY".to_string(),
+            "Target",
+        );
         channel
             .request_pty(
                 true,
@@ -864,14 +1270,23 @@ impl SshSessionRuntime {
 
         let mut pending_output = Vec::new();
         await_channel_success(&mut channel, "pty", &mut pending_output).await?;
+        pty_step.finish("SSH PTY request accepted");
         negotiate_terminal_environment(&mut channel, &mut pending_output).await;
 
+        let shell_step = progress.start_step(
+            "request-shell",
+            "Request Shell",
+            "Requesting interactive shell".to_string(),
+            "Target",
+        );
         channel
             .request_shell(true)
             .await
             .context("failed to request remote shell")?;
         await_channel_success(&mut channel, "shell", &mut pending_output).await?;
+        shell_step.finish("Interactive shell request accepted");
 
+        progress.set_headline(ConnectionHeadlineState::Connected);
         let _ = event_tx.send(SessionRuntimeEvent::Connected);
         if !pending_output.is_empty() {
             apply_remote_output(&terminal, &pending_output);
