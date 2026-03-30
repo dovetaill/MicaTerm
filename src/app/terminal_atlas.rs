@@ -27,6 +27,12 @@ pub struct TerminalAtlasMetrics {
     pub baseline_px: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClusterSpriteKind {
+    MonoAlpha,
+    ColorRgba,
+}
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct TerminalAtlasSelection {
     pub start_row: u32,
@@ -83,6 +89,15 @@ pub struct TerminalSurfaceFrame {
     pub metrics: TerminalAtlasMetrics,
     pub cache_entries: usize,
     pub rerendered_rows: Vec<u32>,
+    pub rendered_clusters: Vec<RenderedCluster>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenderedCluster {
+    pub row: u32,
+    pub col: u32,
+    pub text: String,
+    pub sprite_kind: ClusterSpriteKind,
 }
 
 pub struct TerminalAtlasRenderer {
@@ -106,6 +121,12 @@ struct CachedClusterSprite {
     width: u32,
     height: u32,
     alpha: Vec<u8>,
+}
+
+impl CachedClusterSprite {
+    fn kind(&self) -> ClusterSpriteKind {
+        ClusterSpriteKind::MonoAlpha
+    }
 }
 
 impl TerminalAtlasRenderer {
@@ -141,6 +162,7 @@ impl TerminalAtlasRenderer {
         let width_px = surface.cols.max(1) * self.metrics.cell_width;
         let height_px = surface.rows.max(1) * self.metrics.cell_height;
         let mut rerendered_rows = Vec::new();
+        let mut rendered_clusters = Vec::new();
         let resized = self.surface_width_px != width_px || self.surface_height_px != height_px;
 
         if resized {
@@ -186,9 +208,16 @@ impl TerminalAtlasRenderer {
                     row_selection,
                     row_selection_overlay_rgba,
                     &row_cells[row as usize],
+                    &mut rendered_clusters,
                 );
                 self.row_hashes[row as usize] = next_hash;
                 rerendered_rows.push(row);
+            } else {
+                record_rendered_clusters(
+                    &row_cells[row as usize],
+                    ClusterSpriteKind::MonoAlpha,
+                    &mut rendered_clusters,
+                );
             }
         }
 
@@ -202,6 +231,7 @@ impl TerminalAtlasRenderer {
             metrics: self.metrics,
             cache_entries: self.sprite_cache.len(),
             rerendered_rows,
+            rendered_clusters,
         })
     }
 
@@ -215,6 +245,7 @@ impl TerminalAtlasRenderer {
         row_selection: Option<(u32, u32)>,
         selection_overlay_rgba: u32,
         cells: &[&TerminalCellState],
+        rendered_clusters: &mut Vec<RenderedCluster>,
     ) {
         let row_y = row * self.metrics.cell_height;
         let row_bg = rgba8(row_bg_rgba);
@@ -281,6 +312,12 @@ impl TerminalAtlasRenderer {
                 .sprite_cache
                 .get(&key)
                 .expect("sprite cache entry must exist after insertion");
+            rendered_clusters.push(RenderedCluster {
+                row: cell.row,
+                col: cell.col,
+                text: cell.text.clone(),
+                sprite_kind: sprite.kind(),
+            });
             let foreground = if selected {
                 resolve_selected_foreground(rgba8(cell.fg_rgba), cell_bg, default_fg, background)
             } else {
@@ -445,6 +482,25 @@ fn hash_row(
         cell.bg_rgba.hash(&mut hasher);
     }
     hasher.finish()
+}
+
+fn record_rendered_clusters(
+    cells: &[&TerminalCellState],
+    sprite_kind: ClusterSpriteKind,
+    rendered_clusters: &mut Vec<RenderedCluster>,
+) {
+    for cell in cells {
+        if cell.text.chars().all(char::is_whitespace) {
+            continue;
+        }
+
+        rendered_clusters.push(RenderedCluster {
+            row: cell.row,
+            col: cell.col,
+            text: cell.text.clone(),
+            sprite_kind,
+        });
+    }
 }
 
 fn rgba8(color: u32) -> Rgba8Pixel {

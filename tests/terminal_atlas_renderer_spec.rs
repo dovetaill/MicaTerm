@@ -1,6 +1,8 @@
 use anyhow::Result;
 use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
-use mica_term::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
+use mica_term::app::terminal_atlas::{
+    ClusterSpriteKind, TerminalAtlasRenderer, TerminalAtlasSelection,
+};
 use mica_term::theme::ThemeMode;
 use slint::Rgba8Pixel;
 use uuid::Uuid;
@@ -197,9 +199,19 @@ fn atlas_renderer_handles_cjk_and_nerd_font_cells_without_falling_back_to_blank_
         .iter()
         .find(|cell| cell.text == "")
         .expect("nerd font icon cell");
+    let rendered_icon = frame
+        .rendered_clusters
+        .iter()
+        .find(|cluster| cluster.text == "")
+        .expect("nerd font icon should be observed in the rendered cluster list");
 
     assert_eq!(wide.width, 2);
     assert_eq!(icon.width, 1);
+    assert_eq!(
+        rendered_icon.sprite_kind,
+        ClusterSpriteKind::MonoAlpha,
+        "private-use Nerd Font cells must remain on the Sarasa mono sprite path"
+    );
     assert!(
         buffer.as_slice().iter().any(|pixel| {
             pixel.r != default_bg.r || pixel.g != default_bg.g || pixel.b != default_bg.b
