@@ -56,6 +56,11 @@ pub struct FallbackCredentialStore {
     fallback: Arc<dyn CredentialStore>,
 }
 
+pub struct MirroredCredentialStore {
+    primary: Arc<dyn CredentialStore>,
+    mirror: Arc<dyn CredentialStore>,
+}
+
 impl CachedCredentialStore {
     pub fn new(backing: Arc<dyn CredentialStore>) -> Self {
         Self {
@@ -68,6 +73,12 @@ impl CachedCredentialStore {
 impl FallbackCredentialStore {
     pub fn new(primary: Arc<dyn CredentialStore>, fallback: Arc<dyn CredentialStore>) -> Self {
         Self { primary, fallback }
+    }
+}
+
+impl MirroredCredentialStore {
+    pub fn new(primary: Arc<dyn CredentialStore>, mirror: Arc<dyn CredentialStore>) -> Self {
+        Self { primary, mirror }
     }
 }
 
@@ -680,6 +691,39 @@ impl CredentialStore for FallbackCredentialStore {
     }
 }
 
+impl CredentialStore for MirroredCredentialStore {
+    fn put_secret(&self, key: &str, value: &str) -> Result<()> {
+        let primary_result = self.primary.put_secret(key, value);
+        let mirror_result = self.mirror.put_secret(key, value);
+
+        match (primary_result, mirror_result) {
+            (Ok(()), Ok(())) | (Ok(()), Err(_)) | (Err(_), Ok(())) => Ok(()),
+            (Err(primary_err), Err(mirror_err)) => Err(mirror_err).with_context(|| {
+                format!("primary credential store failed for key `{key}`: {primary_err}")
+            }),
+        }
+    }
+
+    fn get_secret(&self, key: &str) -> Result<Option<String>> {
+        match self.primary.get_secret(key) {
+            Ok(Some(secret)) => Ok(Some(secret)),
+            Ok(None) | Err(_) => self.mirror.get_secret(key),
+        }
+    }
+
+    fn delete_secret(&self, key: &str) -> Result<()> {
+        let primary_result = self.primary.delete_secret(key);
+        let mirror_result = self.mirror.delete_secret(key);
+
+        match (primary_result, mirror_result) {
+            (Ok(()), Ok(())) | (Ok(()), Err(_)) | (Err(_), Ok(())) => Ok(()),
+            (Err(primary_err), Err(mirror_err)) => Err(mirror_err).with_context(|| {
+                format!("primary credential store failed to delete key `{key}`: {primary_err}")
+            }),
+        }
+    }
+}
+
 impl From<&StoredKeychainIdentitySecretBundle> for StoredSshSecretBundle {
     fn from(bundle: &StoredKeychainIdentitySecretBundle) -> Self {
         Self {
@@ -755,8 +799,7 @@ fn derive_local_encryption_key(root_dir: &Path) -> [u8; ENCRYPTED_CREDENTIAL_KEY
     if let Some(user) = std::env::var_os("USER").or_else(|| std::env::var_os("USERNAME")) {
         hasher.update(user.to_string_lossy().as_bytes());
     }
-    if let Some(host) = std::env::var_os("HOSTNAME").or_else(|| std::env::var_os("COMPUTERNAME"))
-    {
+    if let Some(host) = std::env::var_os("HOSTNAME").or_else(|| std::env::var_os("COMPUTERNAME")) {
         hasher.update(host.to_string_lossy().as_bytes());
     }
 

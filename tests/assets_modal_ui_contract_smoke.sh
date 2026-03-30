@@ -22,6 +22,8 @@ grep -F 'in-out property <int> asset-modal-focus-sequence: 0;' "$APP_WINDOW" >/d
 grep -F 'in-out property <string> asset-snippet-modal-name: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-snippet-modal-script: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-snippet-modal-package: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <[string]> asset-snippet-modal-package-options: [];' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> asset-snippet-modal-package-selected-label: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-snippet-package-modal-name: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> asset-rename-modal-open: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-rename-modal-name: "";' "$APP_WINDOW" >/dev/null
@@ -92,11 +94,20 @@ grep -F 'export component AssetsSnippetPackageModal inherits Rectangle {' "$SNIP
 grep -F 'export component AssetsFolderCreateModal inherits Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsSshConnectionModal inherits Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New Snippet";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'import { ComboBox, ScrollView } from "std-widgets.slint";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'in property <[string]> package-options: [];' "$SNIPPET_MODAL" >/dev/null
+grep -F 'in property <string> package-selected-label: "";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New Package";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'text: "Name";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'text: "Script";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'text: "Package";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'text: "Package name";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
+grep -F 'body-scroll := ScrollView {' "$SNIPPET_MODAL" >/dev/null
+grep -F 'ComboBox {' "$SNIPPET_MODAL" >/dev/null
+grep -F 'model: root.package-options;' "$SNIPPET_MODAL" >/dev/null
+grep -F 'current-value: root.package-selected-label;' "$SNIPPET_MODAL" >/dev/null
+grep -F 'footer-content := VerticalLayout {' "$SNIPPET_MODAL" >/dev/null
+! grep -F 'package-input := TextInput {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SNIPPET_MODAL" >/dev/null
 grep -F 'callback name-changed(string);' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'in property <string> validation-message: "";' "$SNIPPET_MODAL" >/dev/null
@@ -270,6 +281,8 @@ grep -F 'dialog-title: root.asset-ssh-modal-dialog-title;' "$APP_WINDOW" >/dev/n
 grep -F 'name: root.asset-snippet-modal-name;' "$APP_WINDOW" >/dev/null
 grep -F 'script: root.asset-snippet-modal-script;' "$APP_WINDOW" >/dev/null
 grep -F 'package: root.asset-snippet-modal-package;' "$APP_WINDOW" >/dev/null
+grep -F 'package-options: root.asset-snippet-modal-package-options;' "$APP_WINDOW" >/dev/null
+grep -F 'package-selected-label: root.asset-snippet-modal-package-selected-label;' "$APP_WINDOW" >/dev/null
 grep -F 'package-name: root.asset-snippet-package-modal-name;' "$APP_WINDOW" >/dev/null
 grep -F 'auth-source: root.asset-ssh-modal-auth-source;' "$APP_WINDOW" >/dev/null
 grep -F 'proxy-type: root.asset-ssh-modal-proxy-type;' "$APP_WINDOW" >/dev/null

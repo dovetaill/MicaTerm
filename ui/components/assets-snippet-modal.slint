@@ -1,3 +1,4 @@
+import { ComboBox, ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 
 component DialogButton inherits Rectangle {
@@ -41,6 +42,8 @@ export component AssetsSnippetModal inherits Rectangle {
     in property <string> name: "";
     in property <string> script: "";
     in property <string> package: "";
+    in property <[string]> package-options: [];
+    in property <string> package-selected-label: "";
     in property <string> validation-message: "";
     in property <bool> can-confirm: false;
     in property <int> focus-sequence: 0;
@@ -52,7 +55,7 @@ export component AssetsSnippetModal inherits Rectangle {
     callback drag-ended();
     callback focus-restore-requested();
     private property <length> header-height: 56px;
-    private property <length> footer-height: root.validation-message == "" ? 84px : 108px;
+    private property <length> footer-height: root.validation-message == "" ? 88px : 118px;
     private property <length> body-height: max(0px, root.height - root.header-height - root.footer-height);
 
     background: transparent;
@@ -162,126 +165,133 @@ export component AssetsSnippetModal inherits Rectangle {
             }
         }
 
-        body := Rectangle {
+        body-scroll := ScrollView {
             x: 0px;
             y: root.header-height;
             width: parent.width;
             height: root.body-height;
-            background: transparent;
+            viewport-width: scroll-body.width;
+            viewport-height: scroll-body.height;
 
-            content := VerticalLayout {
-                x: 20px;
-                y: 18px;
-                width: parent.width - 40px;
-                spacing: 14px;
+            scroll-body := Rectangle {
+                width: body-scroll.visible-width;
+                height: max(body-scroll.visible-height, content.preferred-height + 36px);
+                background: transparent;
 
-                Rectangle {
-                    width: parent.width;
-                    height: 72px;
-                    background: transparent;
-
-                    Text {
-                        text: "Name";
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.78;
-                    }
+                content := VerticalLayout {
+                    x: 20px;
+                    y: 18px;
+                    width: parent.width - 40px;
+                    spacing: 16px;
 
                     Rectangle {
-                        y: 28px;
                         width: parent.width;
-                        height: 40px;
-                        border-radius: 0px;
-                        border-width: 1px;
-                        border-color: ThemeTokens.divider-subtle;
-                        background: ThemeTokens.inspector-surface;
+                        height: 72px;
+                        background: transparent;
 
-                        name-input := TextInput {
-                            x: 12px;
-                            y: 9px;
-                            width: parent.width - 24px;
-                            height: 22px;
-                            text: root.name;
+                        Text {
+                            text: "Name";
                             color: ThemeTokens.text-primary;
-                            selection-background-color: ThemeTokens.accent;
-                            selection-foreground-color: ThemeTokens.text-primary;
+                            opacity: 0.78;
+                        }
 
-                            edited => {
-                                root.draft-changed("name", self.text);
+                        Rectangle {
+                            y: 28px;
+                            width: parent.width;
+                            height: 40px;
+                            border-radius: 0px;
+                            border-width: 1px;
+                            border-color: ThemeTokens.divider-subtle;
+                            background: ThemeTokens.inspector-surface;
+
+                            name-input := TextInput {
+                                x: 12px;
+                                y: 9px;
+                                width: parent.width - 24px;
+                                height: 22px;
+                                text: root.name;
+                                color: ThemeTokens.text-primary;
+                                selection-background-color: ThemeTokens.accent;
+                                selection-foreground-color: ThemeTokens.text-primary;
+
+                                edited => {
+                                    root.draft-changed("name", self.text);
+                                }
                             }
                         }
                     }
-                }
-
-                Rectangle {
-                    width: parent.width;
-                    height: 178px;
-                    background: transparent;
-
-                    Text {
-                        text: "Script";
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.78;
-                    }
 
                     Rectangle {
-                        y: 28px;
                         width: parent.width;
-                        height: 146px;
-                        border-radius: 0px;
-                        border-width: 1px;
-                        border-color: ThemeTokens.divider-subtle;
-                        background: ThemeTokens.inspector-surface;
+                        height: 178px;
+                        background: transparent;
 
-                        script-input := TextInput {
-                            x: 12px;
-                            y: 8px;
-                            width: parent.width - 24px;
-                            height: parent.height - 16px;
-                            text: root.script;
+                        Text {
+                            text: "Script";
                             color: ThemeTokens.text-primary;
-                            single-line: false;
-                            selection-background-color: ThemeTokens.accent;
-                            selection-foreground-color: ThemeTokens.text-primary;
+                            opacity: 0.78;
+                        }
 
-                            edited => {
-                                root.draft-changed("script", self.text);
+                        Rectangle {
+                            y: 28px;
+                            width: parent.width;
+                            height: 146px;
+                            border-radius: 0px;
+                            border-width: 1px;
+                            border-color: ThemeTokens.divider-subtle;
+                            background: ThemeTokens.inspector-surface;
+
+                            script-input := TextInput {
+                                x: 12px;
+                                y: 8px;
+                                width: parent.width - 24px;
+                                height: parent.height - 16px;
+                                text: root.script;
+                                color: ThemeTokens.text-primary;
+                                single-line: false;
+                                selection-background-color: ThemeTokens.accent;
+                                selection-foreground-color: ThemeTokens.text-primary;
+
+                                edited => {
+                                    root.draft-changed("script", self.text);
+                                }
                             }
                         }
                     }
-                }
-
-                Rectangle {
-                    width: parent.width;
-                    height: 72px;
-                    background: transparent;
-
-                    Text {
-                        text: "Package";
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.78;
-                    }
 
                     Rectangle {
-                        y: 28px;
                         width: parent.width;
-                        height: 40px;
-                        border-radius: 0px;
-                        border-width: 1px;
-                        border-color: ThemeTokens.divider-subtle;
-                        background: ThemeTokens.inspector-surface;
+                        height: 102px;
+                        background: transparent;
 
-                        package-input := TextInput {
-                            x: 12px;
-                            y: 9px;
-                            width: parent.width - 24px;
-                            height: 22px;
-                            text: root.package;
-                            color: ThemeTokens.text-primary;
-                            selection-background-color: ThemeTokens.accent;
-                            selection-foreground-color: ThemeTokens.text-primary;
+                        VerticalLayout {
+                            width: parent.width;
+                            height: parent.height;
+                            spacing: 8px;
 
-                            edited => {
-                                root.draft-changed("package", self.text);
+                            Text {
+                                text: "Package";
+                                color: ThemeTokens.text-primary;
+                                opacity: 0.78;
+                            }
+
+                            ComboBox {
+                                width: parent.width;
+                                height: 34px;
+                                model: root.package-options;
+                                current-value: root.package-selected-label;
+
+                                selected(value) => {
+                                    root.draft-changed("package", value == "No Package" ? "" : value);
+                                }
+                            }
+
+                            Text {
+                                width: parent.width;
+                                text: "Optional. Choose a package or keep the snippet at the root level.";
+                                color: ThemeTokens.text-primary;
+                                opacity: 0.62;
+                                wrap: word-wrap;
                             }
                         }
                     }
@@ -302,39 +312,57 @@ export component AssetsSnippetModal inherits Rectangle {
                 background: ThemeTokens.divider-subtle;
             }
 
-            validation-copy := Text {
+            footer-content := VerticalLayout {
                 x: 20px;
                 y: 12px;
                 width: parent.width - 40px;
-                text: root.validation-message;
-                color: ThemeTokens.text-primary;
-                opacity: 0.72;
-                visible: root.validation-message != "";
-                wrap: word-wrap;
-            }
+                spacing: 12px;
 
-            cancel-button := DialogButton {
-                x: parent.width - 204px;
-                y: parent.height - 50px;
-                width: 88px;
-                label: "Cancel";
-
-                clicked => {
-                    root.focus-restore-requested();
-                    root.close-requested();
+                validation-copy := Text {
+                    width: parent.width;
+                    text: root.validation-message;
+                    color: ThemeTokens.text-primary;
+                    opacity: 0.72;
+                    visible: root.validation-message != "";
+                    wrap: word-wrap;
                 }
-            }
 
-            confirm-button := DialogButton {
-                x: parent.width - 104px;
-                y: parent.height - 50px;
-                width: 84px;
-                label: "Create";
-                primary: true;
-                enabled: root.can-confirm;
+                Rectangle {
+                    width: parent.width;
+                    height: 34px;
+                    background: transparent;
 
-                clicked => {
-                    root.confirm-requested();
+                    HorizontalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 12px;
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            background: transparent;
+                        }
+
+                        cancel-button := DialogButton {
+                            width: 88px;
+                            label: "Cancel";
+
+                            clicked => {
+                                root.focus-restore-requested();
+                                root.close-requested();
+                            }
+                        }
+
+                        confirm-button := DialogButton {
+                            width: 84px;
+                            label: "Create";
+                            primary: true;
+                            enabled: root.can-confirm;
+
+                            clicked => {
+                                root.confirm-requested();
+                            }
+                        }
+                    }
                 }
             }
         }

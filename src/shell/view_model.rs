@@ -423,13 +423,11 @@ impl ShellViewModel {
             Some(AssetModalState::NewSnippetPackage {
                 editing_asset_id,
                 draft_name,
-            }) => asset_name_validation_message(
-                self.snippet_asset_tree.validate_name_in_parent(
-                    None,
-                    draft_name,
-                    editing_asset_id.as_deref(),
-                ),
-            ),
+            }) => asset_name_validation_message(self.snippet_asset_tree.validate_name_in_parent(
+                None,
+                draft_name,
+                editing_asset_id.as_deref(),
+            )),
             Some(AssetModalState::NewKeychainSshKey { parent_id, draft }) => {
                 self.keychain_ssh_key_modal_validation_message(parent_id.as_deref(), draft)
             }
@@ -460,14 +458,13 @@ impl ShellViewModel {
                 parent_package_id,
                 editing_asset_id,
                 draft,
-            }) => {
-                self.snippet_modal_validation_message(
+            }) => self
+                .snippet_modal_validation_message(
                     parent_package_id.as_deref(),
                     editing_asset_id.as_deref(),
                     draft,
                 )
-                .is_empty()
-            }
+                .is_empty(),
             Some(AssetModalState::NewSnippetPackage {
                 editing_asset_id,
                 draft_name,
@@ -967,7 +964,8 @@ impl ShellViewModel {
     }
 
     pub fn update_keychain_ssh_key_modal_field(&mut self, field: &str, value: String) {
-        let Some(AssetModalState::NewKeychainSshKey { draft, .. }) = self.asset_modal_state.as_mut()
+        let Some(AssetModalState::NewKeychainSshKey { draft, .. }) =
+            self.asset_modal_state.as_mut()
         else {
             return;
         };
@@ -1222,9 +1220,7 @@ impl ShellViewModel {
             "user" => draft.user = value,
             "port" => draft.port = value,
             "auth_source" => {
-                if value == SSH_AUTH_SOURCE_MANUAL
-                    || value == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY
-                {
+                if value == SSH_AUTH_SOURCE_MANUAL || value == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY {
                     draft.auth_source = value;
                     if draft.auth_source == SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY {
                         draft.password.clear();
@@ -1409,7 +1405,8 @@ impl ShellViewModel {
                     return false;
                 }
 
-                let resolved_parent_id = self.resolve_snippet_package_id_by_label(draft.package.trim());
+                let resolved_parent_id =
+                    self.resolve_snippet_package_id_by_label(draft.package.trim());
                 if let Some(asset_id) = editing_asset_id {
                     self.snippet_asset_tree
                         .set_title(&asset_id, draft.name.trim().to_string());
@@ -1592,8 +1589,7 @@ impl ShellViewModel {
             }
         };
 
-        let use_snippet_tree =
-            kind.domain() == crate::shell::assets::AssetDomain::Snippets;
+        let use_snippet_tree = kind.domain() == crate::shell::assets::AssetDomain::Snippets;
         let label = if draft_label.trim().is_empty() {
             if use_snippet_tree {
                 self.snippet_asset_tree
@@ -1788,7 +1784,9 @@ impl ShellViewModel {
     }
 
     pub fn pending_snippet_activation(&self) -> Option<SnippetActivation> {
-        self.pending_snippet_activation.as_ref().map(|pending| pending.mode)
+        self.pending_snippet_activation
+            .as_ref()
+            .map(|pending| pending.mode)
     }
 
     pub fn take_pending_snippet_activation(&mut self) -> Option<(String, SnippetActivation)> {
@@ -1801,6 +1799,19 @@ impl ShellViewModel {
         self.snippet_asset_tree
             .snippet_spec(snippet_id)
             .map(|spec| spec.script.as_str())
+    }
+
+    pub fn snippet_package_option_labels(&self) -> Vec<String> {
+        self.snippet_asset_tree
+            .root_ids()
+            .iter()
+            .filter(|asset_id| {
+                self.snippet_asset_tree.kind(asset_id.as_str())
+                    == Some(ConsoleAssetKind::SnippetPackage)
+            })
+            .filter_map(|asset_id| self.snippet_asset_tree.title(asset_id.as_str()))
+            .map(ToString::to_string)
+            .collect()
     }
 
     pub fn begin_asset_rename_session(&mut self, asset_id: String, initial_text: String) {
@@ -1932,12 +1943,18 @@ impl ShellViewModel {
 
         let next = match kind {
             ConsoleAssetKind::Folder => {
-                let next = !self.console_asset_tree.is_expanded(asset_id).unwrap_or(false);
+                let next = !self
+                    .console_asset_tree
+                    .is_expanded(asset_id)
+                    .unwrap_or(false);
                 self.console_asset_tree.set_expanded(asset_id, next);
                 next
             }
             ConsoleAssetKind::SnippetPackage => {
-                let next = !self.snippet_asset_tree.is_expanded(asset_id).unwrap_or(false);
+                let next = !self
+                    .snippet_asset_tree
+                    .is_expanded(asset_id)
+                    .unwrap_or(false);
                 self.snippet_asset_tree.set_expanded(asset_id, next);
                 next
             }
@@ -2052,7 +2069,10 @@ impl ShellViewModel {
     }
 
     pub fn handle_context_menu_leaf_action(&mut self, action_id: &str) {
-        if matches!(action_id, "new-snippet" | "new-package" | "new-snippet-package") {
+        if matches!(
+            action_id,
+            "new-snippet" | "new-package" | "new-snippet-package"
+        ) {
             match action_id {
                 "new-snippet" => {
                     let parent_id = match (
@@ -2134,10 +2154,8 @@ impl ShellViewModel {
                     }
                 }
                 "delete-asset" => {
-                    if let Some(asset_id) = self
-                        .context_target_asset_id
-                        .clone()
-                        .filter(|asset_id| {
+                    if let Some(asset_id) =
+                        self.context_target_asset_id.clone().filter(|asset_id| {
                             self.console_asset_tree.contains(asset_id)
                                 || self.snippet_asset_tree.contains(asset_id)
                         })
@@ -2148,10 +2166,8 @@ impl ShellViewModel {
                     }
                 }
                 "edit-snippet" => {
-                    if let Some(asset_id) = self
-                        .context_target_asset_id
-                        .clone()
-                        .filter(|asset_id| {
+                    if let Some(asset_id) =
+                        self.context_target_asset_id.clone().filter(|asset_id| {
                             self.snippet_asset_tree.kind(asset_id)
                                 == Some(ConsoleAssetKind::Snippet)
                         })
@@ -2162,10 +2178,8 @@ impl ShellViewModel {
                     }
                 }
                 "edit-package" => {
-                    if let Some(asset_id) = self
-                        .context_target_asset_id
-                        .clone()
-                        .filter(|asset_id| {
+                    if let Some(asset_id) =
+                        self.context_target_asset_id.clone().filter(|asset_id| {
                             self.snippet_asset_tree.kind(asset_id)
                                 == Some(ConsoleAssetKind::SnippetPackage)
                         })
@@ -2187,10 +2201,8 @@ impl ShellViewModel {
                     }
                 }
                 "paste-snippet" => {
-                    if let Some(asset_id) = self
-                        .context_target_asset_id
-                        .clone()
-                        .filter(|asset_id| {
+                    if let Some(asset_id) =
+                        self.context_target_asset_id.clone().filter(|asset_id| {
                             self.snippet_asset_tree.kind(asset_id)
                                 == Some(ConsoleAssetKind::Snippet)
                         })
@@ -2202,10 +2214,8 @@ impl ShellViewModel {
                     }
                 }
                 "run-snippet" => {
-                    if let Some(asset_id) = self
-                        .context_target_asset_id
-                        .clone()
-                        .filter(|asset_id| {
+                    if let Some(asset_id) =
+                        self.context_target_asset_id.clone().filter(|asset_id| {
                             self.snippet_asset_tree.kind(asset_id)
                                 == Some(ConsoleAssetKind::Snippet)
                         })
@@ -2287,10 +2297,12 @@ impl ShellViewModel {
             .root_ids
             .iter()
             .filter(|node_id| {
-                catalog
-                    .nodes
-                    .get(*node_id)
-                    .is_some_and(|node| matches!(node.payload, crate::app::keychain::KeychainNodePayload::Folder))
+                catalog.nodes.get(*node_id).is_some_and(|node| {
+                    matches!(
+                        node.payload,
+                        crate::app::keychain::KeychainNodePayload::Folder
+                    )
+                })
             })
             .cloned()
             .collect();
@@ -2309,7 +2321,12 @@ impl ShellViewModel {
             .keychain_catalog
             .nodes
             .get(item_id)
-            .is_some_and(|node| matches!(node.payload, crate::app::keychain::KeychainNodePayload::Folder))
+            .is_some_and(|node| {
+                matches!(
+                    node.payload,
+                    crate::app::keychain::KeychainNodePayload::Folder
+                )
+            })
         {
             return;
         }
@@ -2335,12 +2352,8 @@ impl ShellViewModel {
         kind: KeychainItemKind,
     ) -> String {
         let parent_id = self.normalize_keychain_folder_parent_id(parent_id);
-        let item_id = create_keychain_node(
-            &mut self.keychain_catalog,
-            parent_id.as_deref(),
-            kind,
-            None,
-        );
+        let item_id =
+            create_keychain_node(&mut self.keychain_catalog, parent_id.as_deref(), kind, None);
         if let Some(parent_id) = parent_id {
             self.keychain_expanded_ids.insert(parent_id);
         }
@@ -2354,11 +2367,12 @@ impl ShellViewModel {
         rename_keychain_node(&mut self.keychain_catalog, item_id, title)
     }
 
-    pub fn delete_keychain_item(
-        &mut self,
-        item_id: &str,
-    ) -> Result<bool, KeychainDeleteError> {
-        let removed = delete_keychain_node(&mut self.keychain_catalog, item_id, &self.console_asset_tree)?;
+    pub fn delete_keychain_item(&mut self, item_id: &str) -> Result<bool, KeychainDeleteError> {
+        let removed = delete_keychain_node(
+            &mut self.keychain_catalog,
+            item_id,
+            &self.console_asset_tree,
+        )?;
         if removed.removed_ids.is_empty() {
             return Ok(false);
         }
@@ -2372,7 +2386,12 @@ impl ShellViewModel {
         if self
             .focused_keychain_id
             .as_deref()
-            .is_some_and(|focused_id| removed.removed_ids.iter().any(|removed_id| removed_id == focused_id))
+            .is_some_and(|focused_id| {
+                removed
+                    .removed_ids
+                    .iter()
+                    .any(|removed_id| removed_id == focused_id)
+            })
         {
             self.focused_keychain_id = None;
         }
@@ -2461,12 +2480,19 @@ impl ShellViewModel {
         ssh_keychain_identity_options_for_catalog(&self.keychain_catalog)
     }
 
-    fn selected_ssh_keychain_identity(&self) -> Option<&crate::app::keychain::KeychainIdentitySpec> {
+    fn selected_ssh_keychain_identity(
+        &self,
+    ) -> Option<&crate::app::keychain::KeychainIdentitySpec> {
         let Some(AssetModalState::NewSshConnection { draft, .. }) = &self.asset_modal_state else {
             return None;
         };
         let identity_id = draft.keychain_identity_id.trim();
-        match self.keychain_catalog.nodes.get(identity_id).map(|node| &node.payload) {
+        match self
+            .keychain_catalog
+            .nodes
+            .get(identity_id)
+            .map(|node| &node.payload)
+        {
             Some(KeychainNodePayload::Identity(identity)) => Some(identity),
             _ => None,
         }
@@ -2573,7 +2599,8 @@ impl ShellViewModel {
 
     fn normalize_snippet_package_parent_id(&self, parent_id: Option<String>) -> Option<String> {
         parent_id.filter(|asset_id| {
-            self.snippet_asset_tree.kind(asset_id.as_str()) == Some(ConsoleAssetKind::SnippetPackage)
+            self.snippet_asset_tree.kind(asset_id.as_str())
+                == Some(ConsoleAssetKind::SnippetPackage)
         })
     }
 
@@ -2599,7 +2626,12 @@ impl ShellViewModel {
             self.keychain_catalog
                 .nodes
                 .get(node_id)
-                .is_some_and(|node| matches!(node.payload, crate::app::keychain::KeychainNodePayload::Folder))
+                .is_some_and(|node| {
+                    matches!(
+                        node.payload,
+                        crate::app::keychain::KeychainNodePayload::Folder
+                    )
+                })
         })
     }
 }
@@ -2619,20 +2651,20 @@ impl ShellViewModel {
         editing_asset_id: Option<&str>,
         draft: &AssetSnippetDraft,
     ) -> String {
-        let resolved_parent_id = match self.resolve_snippet_package_id_by_label(draft.package.trim()) {
-            Some(parent_id) => Some(parent_id),
-            None if draft.package.trim().is_empty() => None,
-            None if parent_package_id.is_some() => parent_package_id.map(ToOwned::to_owned),
-            None => return "Package does not exist.".into(),
-        };
+        let resolved_parent_id =
+            match self.resolve_snippet_package_id_by_label(draft.package.trim()) {
+                Some(parent_id) => Some(parent_id),
+                None if draft.package.trim().is_empty() => None,
+                None if parent_package_id.is_some() => parent_package_id.map(ToOwned::to_owned),
+                None => return "Package does not exist.".into(),
+            };
 
-        let name_message = asset_name_validation_message(
-            self.snippet_asset_tree.validate_name_in_parent(
+        let name_message =
+            asset_name_validation_message(self.snippet_asset_tree.validate_name_in_parent(
                 resolved_parent_id.as_deref(),
                 &draft.name,
                 editing_asset_id,
-            ),
-        );
+            ));
         if !name_message.is_empty() {
             return name_message;
         }
@@ -2655,14 +2687,23 @@ impl ShellViewModel {
         }
 
         let sibling_ids = parent_id
-            .and_then(|parent_id| self.keychain_catalog.nodes.get(parent_id).map(|node| node.child_ids.as_slice()))
+            .and_then(|parent_id| {
+                self.keychain_catalog
+                    .nodes
+                    .get(parent_id)
+                    .map(|node| node.child_ids.as_slice())
+            })
             .unwrap_or(self.keychain_catalog.root_ids.as_slice());
-        if sibling_ids.iter().filter(|node_id| Some(node_id.as_str()) != exclude_id).any(|node_id| {
-            self.keychain_catalog
-                .nodes
-                .get(node_id)
-                .is_some_and(|node| node.title.trim() == trimmed)
-        }) {
+        if sibling_ids
+            .iter()
+            .filter(|node_id| Some(node_id.as_str()) != exclude_id)
+            .any(|node_id| {
+                self.keychain_catalog
+                    .nodes
+                    .get(node_id)
+                    .is_some_and(|node| node.title.trim() == trimmed)
+            })
+        {
             AssetNameValidation::Duplicate
         } else {
             AssetNameValidation::Valid

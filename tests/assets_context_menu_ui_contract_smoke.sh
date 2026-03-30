@@ -21,6 +21,10 @@ grep -F 'in property <bool> focused: false;' "$ROW" >/dev/null
 grep -F 'callback selected-requested(string);' "$ROW" >/dev/null
 grep -F 'callback toggle-expanded-requested(string);' "$ROW" >/dev/null
 grep -F 'callback context-menu-requested(string, string, length, length);' "$ROW" >/dev/null
+grep -F 'private property <image> snippet-package-icon:' "$ROW" >/dev/null
+grep -F 'private property <image> snippet-icon:' "$ROW" >/dev/null
+grep -F 'root.item-kind == "snippet-package"' "$ROW" >/dev/null
+grep -F 'root.item-kind == "snippet"' "$ROW" >/dev/null
 ! grep -F 'rename-input := TextInput {' "$ROW" >/dev/null
 grep -F 'pointer-event(event) => {' "$ROW" >/dev/null
 grep -F 'event.button == PointerEventButton.right' "$ROW" >/dev/null
@@ -58,6 +62,12 @@ grep -F 'export component AssetsContextMenuRow inherits Rectangle' "$MENU_ROW" >
 grep -F 'in property <image> icon-source;' "$MENU_ROW" >/dev/null
 grep -F 'icon-slot := Rectangle {' "$MENU_ROW" >/dev/null
 grep -F 'export component AssetsContextMenuColumn inherits Rectangle' "$MENU_COLUMN" >/dev/null
+grep -F 'private property <image> clipboard-icon:' "$MENU_COLUMN" >/dev/null
+grep -F 'private property <image> document-code-icon:' "$MENU_COLUMN" >/dev/null
+grep -F 'private property <image> play-icon:' "$MENU_COLUMN" >/dev/null
+grep -F 'item.icon_id == "clipboard"' "$MENU_COLUMN" >/dev/null
+grep -F 'item.icon_id == "document-code"' "$MENU_COLUMN" >/dev/null
+grep -F 'item.icon_id == "play"' "$MENU_COLUMN" >/dev/null
 grep -F 'export component AssetsContextMenuOverlay inherits Rectangle' "$MENU_OVERLAY" >/dev/null
 grep -F 'out property <brush> explorer-row-hover-surface:' "$TOKENS" >/dev/null
 grep -F 'out property <brush> explorer-row-selected-surface:' "$TOKENS" >/dev/null

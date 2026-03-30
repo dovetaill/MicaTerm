@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
 use directories::ProjectDirs;
-use slint::{Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
+use slint::{
+    Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
+};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -23,8 +25,8 @@ use crate::WorkspaceTabItem;
 use crate::app::app_paths::{AppRootPathInputs, AppRootPaths, resolve_app_root_paths};
 use crate::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
-    RedbAssetCatalogStore, asset_tree_to_catalog, asset_trees_to_catalog,
-    catalog_to_asset_tree, catalog_to_asset_trees,
+    RedbAssetCatalogStore, asset_tree_to_catalog, asset_trees_to_catalog, catalog_to_asset_tree,
+    catalog_to_asset_trees,
 };
 use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::keychain::{
@@ -33,11 +35,11 @@ use crate::app::keychain::{
 };
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::ssh::credentials::{
-    CachedCredentialStore, CredentialStore, EncryptedFileCredentialStore,
-    FallbackCredentialStore, FileCredentialStore, StoredSecretLookupError,
-    StoredKeychainKeySecretBundle, StoredSshSecretBundle, SystemCredentialStore,
-    load_secret_bundle_with_diagnostics, persist_keychain_key_secret_bundle,
-    persist_secret_bundle, required_secret_bundle_field, restore_snapshot_secret_bundle,
+    CachedCredentialStore, CredentialStore, EncryptedFileCredentialStore, FallbackCredentialStore,
+    FileCredentialStore, MirroredCredentialStore, StoredKeychainKeySecretBundle,
+    StoredSecretLookupError, StoredSshSecretBundle, SystemCredentialStore,
+    load_secret_bundle_with_diagnostics, persist_keychain_key_secret_bundle, persist_secret_bundle,
+    required_secret_bundle_field, restore_snapshot_secret_bundle,
 };
 use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, SshAuthMethod};
@@ -101,8 +103,8 @@ use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descriptor_for};
 use crate::shell::tabs::WorkspaceTab;
 use crate::shell::view_model::{
-    AssetModalState, AssetSshConnectionDraft, KeychainSshKeyDraft, RightPanelView,
-    ShellViewModel, SnippetActivation, SnippetCreateAction, SshModalAction,
+    AssetModalState, AssetSshConnectionDraft, KeychainSshKeyDraft, RightPanelView, ShellViewModel,
+    SnippetActivation, SnippetCreateAction, SshModalAction,
 };
 use crate::theme::ThemeMode;
 use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
@@ -622,6 +624,8 @@ fn clear_asset_snippet_modal_fields(window: &AppWindow) {
     window.set_asset_snippet_modal_name("".into());
     window.set_asset_snippet_modal_script("".into());
     window.set_asset_snippet_modal_package("".into());
+    sync_snippet_package_options(window, Vec::new());
+    window.set_asset_snippet_modal_package_selected_label("".into());
     window.set_asset_snippet_package_modal_name("".into());
 }
 
@@ -696,6 +700,17 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_snippet_modal_name(draft.name.clone().into());
             window.set_asset_snippet_modal_script(draft.script.clone().into());
             window.set_asset_snippet_modal_package(draft.package.clone().into());
+            let mut package_options = vec!["No Package".to_string()];
+            package_options.extend(state.snippet_package_option_labels());
+            sync_snippet_package_options(window, package_options);
+            window.set_asset_snippet_modal_package_selected_label(
+                if draft.package.trim().is_empty() {
+                    "No Package"
+                } else {
+                    draft.package.as_str()
+                }
+                .into(),
+            );
             window.set_asset_snippet_package_modal_name("".into());
             window.set_asset_rename_modal_open(false);
             window.set_asset_rename_modal_name("".into());
@@ -721,6 +736,8 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_snippet_modal_name("".into());
             window.set_asset_snippet_modal_script("".into());
             window.set_asset_snippet_modal_package("".into());
+            sync_snippet_package_options(window, Vec::new());
+            window.set_asset_snippet_modal_package_selected_label("".into());
             window.set_asset_snippet_package_modal_name(draft_name.clone().into());
             window.set_asset_rename_modal_open(false);
             window.set_asset_rename_modal_name("".into());
@@ -925,6 +942,18 @@ fn sync_ssh_keychain_identity_options(window: &AppWindow, labels: Vec<String>) {
     );
 }
 
+fn sync_snippet_package_options(window: &AppWindow, labels: Vec<String>) {
+    let rows = labels
+        .into_iter()
+        .map(SharedString::from)
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        window.get_asset_snippet_modal_package_options(),
+        rows,
+        |model| window.set_asset_snippet_modal_package_options(model),
+    );
+}
+
 fn sync_ssh_host_key_modal_state(window: &AppWindow, state: &ShellViewModel) {
     match &state.ssh_host_key_prompt_state {
         Some(prompt) => {
@@ -1007,7 +1036,12 @@ fn apply_pending_snippet_activation(
             forward_workspace_session_paste(state, bridge, session_id, &script);
         }
         SnippetActivation::Run => {
-            forward_active_workspace_text_input(state, bridge, &script);
+            let runnable_script = if script.ends_with('\n') {
+                script
+            } else {
+                format!("{script}\n")
+            };
+            forward_active_workspace_text_input(state, bridge, &runnable_script);
         }
     }
 
@@ -1057,8 +1091,8 @@ pub fn build_shared_app_credential_store_for_paths(
     encrypted_root: PathBuf,
     recovery_root: PathBuf,
 ) -> Arc<dyn CredentialStore> {
-    let primary_store =
-        preferred_system_store.unwrap_or_else(|| Arc::new(SystemCredentialStore) as Arc<dyn CredentialStore>);
+    let primary_store = preferred_system_store
+        .unwrap_or_else(|| Arc::new(SystemCredentialStore) as Arc<dyn CredentialStore>);
     let encrypted_store =
         Arc::new(EncryptedFileCredentialStore::new(encrypted_root)) as Arc<dyn CredentialStore>;
     let recovery_store =
@@ -1067,8 +1101,8 @@ pub fn build_shared_app_credential_store_for_paths(
         encrypted_store,
         recovery_store,
     )) as Arc<dyn CredentialStore>;
-    let backing =
-        Arc::new(FallbackCredentialStore::new(primary_store, encrypted_chain)) as Arc<dyn CredentialStore>;
+    let backing = Arc::new(MirroredCredentialStore::new(primary_store, encrypted_chain))
+        as Arc<dyn CredentialStore>;
 
     Arc::new(CachedCredentialStore::new(backing))
 }
@@ -1150,7 +1184,12 @@ fn profile_for_modal_action(
         _ => ("__modal_draft__".into(), None),
     };
     let spec = saved_spec_for_modal_draft(asset_id.as_str(), draft, existing_spec);
-    resolve_saved_ssh_profile(asset_id.as_str(), &draft.name, &spec, state.keychain_catalog())
+    resolve_saved_ssh_profile(
+        asset_id.as_str(),
+        &draft.name,
+        &spec,
+        state.keychain_catalog(),
+    )
 }
 
 fn runtime_profile_for_modal_action(
@@ -1605,7 +1644,8 @@ fn generate_key_pair_into_keychain_modal(state: &mut ShellViewModel) -> Result<(
 }
 
 fn copy_public_key_from_keychain_modal(state: &ShellViewModel) -> Result<()> {
-    let Some(AssetModalState::NewKeychainSshKey { draft, .. }) = state.asset_modal_state.as_ref() else {
+    let Some(AssetModalState::NewKeychainSshKey { draft, .. }) = state.asset_modal_state.as_ref()
+    else {
         return Ok(());
     };
     if draft.public_key.trim().is_empty() {
@@ -1620,7 +1660,8 @@ fn persist_keychain_ssh_key_secret(
     draft: &KeychainSshKeyDraft,
 ) -> Result<()> {
     let bundle = StoredKeychainKeySecretBundle {
-        private_key_content: (!draft.private_key.trim().is_empty()).then(|| draft.private_key.clone()),
+        private_key_content: (!draft.private_key.trim().is_empty())
+            .then(|| draft.private_key.clone()),
         passphrase: None,
     };
     let credential_ref = format!("keychain/key/{key_id}");
@@ -3110,7 +3151,10 @@ fn update_vault_panel_for_local_state(state: &mut ShellViewModel, vault: &VaultS
     }
 }
 
-fn sync_preferences_for_bundle(bundle: &BootstrapBundle, last_sync_result: Option<String>) -> SnapshotSyncPreferences {
+fn sync_preferences_for_bundle(
+    bundle: &BootstrapBundle,
+    last_sync_result: Option<String>,
+) -> SnapshotSyncPreferences {
     SnapshotSyncPreferences {
         auto_sync_enabled: bundle.auto_sync_enabled,
         selected_primary_remote_id: bundle
@@ -3218,8 +3262,9 @@ fn unlock_local_vault_into_shell(
     let wrapped: WrappedVaultKey = serde_json::from_str(&local_state.wrapped_vault_key)
         .context("failed to decode wrapped vault key")?;
     let vault_key = unwrap_vault_key(password, &wrapped)?;
-    let encrypted_snapshot = load_encrypted_cache(vault.cache_root().as_path(), &local_state.bundle.vault_id)?
-        .ok_or_else(|| anyhow!("encrypted cache is unavailable"))?;
+    let encrypted_snapshot =
+        load_encrypted_cache(vault.cache_root().as_path(), &local_state.bundle.vault_id)?
+            .ok_or_else(|| anyhow!("encrypted cache is unavailable"))?;
     let snapshot = decrypt_snapshot(&encrypted_snapshot, &vault_key)?;
     apply_vault_snapshot_to_shell(
         state,
@@ -3685,7 +3730,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let prefs = load_ui_preferences(&store);
     let mut initial_view_model = ShellViewModel::default();
     if let Some(repo) = asset_repo.as_ref() {
-        let (console_tree, snippet_tree) = catalog_to_asset_trees(&load_asset_catalog(repo.as_ref()));
+        let (console_tree, snippet_tree) =
+            catalog_to_asset_trees(&load_asset_catalog(repo.as_ref()));
         initial_view_model.replace_console_asset_tree(console_tree);
         initial_view_model.replace_snippet_asset_tree(snippet_tree);
     }
@@ -4523,9 +4569,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let result = match action.as_str() {
-            "import-private-key" => {
-                import_private_key_into_keychain_modal(&mut state, private_key_importer_ref.as_ref())
-            }
+            "import-private-key" => import_private_key_into_keychain_modal(
+                &mut state,
+                private_key_importer_ref.as_ref(),
+            ),
             "import-public-key" => {
                 import_public_key_into_keychain_modal(&mut state, private_key_importer_ref.as_ref())
             }
@@ -4911,7 +4958,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &pending_host_key_approval_ref,
                     item_id.as_str(),
                 );
-                apply_pending_snippet_activation(&window, &mut state, session_bridge_ref.as_deref());
+                apply_pending_snippet_activation(
+                    &window,
+                    &mut state,
+                    session_bridge_ref.as_deref(),
+                );
             }
         }
         sync_assets_toolbar_state(&window, &state);

@@ -261,8 +261,7 @@ fn invoking_paste_snippet_from_context_menu_forwards_script_to_active_session() 
     app.invoke_asset_activated(ssh_id.into());
     flush_runtime_projection();
 
-    let snippet_id =
-        create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+    let snippet_id = create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
 
     app.invoke_asset_context_menu_requested(snippet_id.into(), "snippet".into(), 96.0, 160.0);
     app.invoke_assets_context_menu_action_invoked("paste-snippet".into());
@@ -277,7 +276,7 @@ fn invoking_paste_snippet_from_context_menu_forwards_script_to_active_session() 
 }
 
 #[test]
-fn invoking_run_snippet_from_context_menu_forwards_script_as_text_input() {
+fn invoking_run_snippet_from_context_menu_forwards_script_with_trailing_enter() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -293,8 +292,7 @@ fn invoking_run_snippet_from_context_menu_forwards_script_as_text_input() {
     app.invoke_asset_activated(ssh_id.into());
     flush_runtime_projection();
 
-    let snippet_id =
-        create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+    let snippet_id = create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
 
     app.invoke_asset_context_menu_requested(snippet_id.into(), "snippet".into(), 96.0, 160.0);
     app.invoke_assets_context_menu_action_invoked("run-snippet".into());
@@ -304,7 +302,7 @@ fn invoking_run_snippet_from_context_menu_forwards_script_as_text_input() {
     assert_eq!(visible_lines.row_count(), 2);
     assert_eq!(
         visible_lines.row_data(1).unwrap().as_str(),
-        "text kubectl rollout restart deploy/api"
+        "text kubectl rollout restart deploy/api\n"
     );
 }
 

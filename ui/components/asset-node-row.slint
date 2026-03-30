@@ -30,13 +30,20 @@ export component AssetNodeRow inherits Rectangle {
     private property <image> chevron-down-icon: @image-url("../../assets/icons/fluent/chevron-down-20-regular.svg");
     private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
     private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
+    private property <image> snippet-package-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
+    private property <image> snippet-package-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
+    private property <image> snippet-icon: @image-url("../../assets/icons/fluent/document-code-16-regular.svg");
     private property <image> ssh-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
     private property <image> disclosure-icon: root.disclosure-state == "expanded"
         ? root.chevron-down-icon
         : root.chevron-right-icon;
     private property <image> kind-icon: root.item-kind == "folder"
         ? (root.expanded ? root.folder-open-icon : root.folder-icon)
-        : root.ssh-icon;
+        : root.item-kind == "snippet-package"
+            ? (root.expanded ? root.snippet-package-open-icon : root.snippet-package-icon)
+            : root.item-kind == "snippet"
+                ? root.snippet-icon
+                : root.ssh-icon;
 
     height: root.row-height;
     border-radius: 0px;

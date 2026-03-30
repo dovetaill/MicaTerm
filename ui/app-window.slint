@@ -51,6 +51,8 @@ export component AppWindow inherits Window {
     in-out property <string> asset-snippet-modal-name: "";
     in-out property <string> asset-snippet-modal-script: "";
     in-out property <string> asset-snippet-modal-package: "";
+    in-out property <[string]> asset-snippet-modal-package-options: [];
+    in-out property <string> asset-snippet-modal-package-selected-label: "";
     in-out property <string> asset-snippet-package-modal-name: "";
     in-out property <bool> asset-rename-modal-open: false;
     in-out property <string> asset-rename-modal-name: "";
@@ -857,6 +859,8 @@ export component AppWindow inherits Window {
             name: root.asset-snippet-modal-name;
             script: root.asset-snippet-modal-script;
             package: root.asset-snippet-modal-package;
+            package-options: root.asset-snippet-modal-package-options;
+            package-selected-label: root.asset-snippet-modal-package-selected-label;
             validation-message: root.asset-modal-validation-message;
             can-confirm: root.asset-modal-can-confirm;
             focus-sequence: root.asset-modal-focus-sequence;

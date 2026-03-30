@@ -19,15 +19,12 @@ use mica_term::app::assets_catalog::{
     catalog_to_asset_tree,
 };
 use mica_term::app::bootstrap::{
-    ImportedPrivateKey, PrivateKeyImporter, app_title,
-    build_shared_app_credential_store_for_paths,
-    bind_top_status_bar_with_store,
-    bind_top_status_bar_with_injected_services_and_vault_runtime,
+    ImportedPrivateKey, PrivateKeyImporter, VaultProviderFactory, VaultRuntimeOptions, app_title,
+    bind_top_status_bar_with_injected_services_and_vault_runtime, bind_top_status_bar_with_store,
     bind_top_status_bar_with_store_and_effects_and_asset_repo,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer,
-    default_window_size,
-    VaultProviderFactory, VaultRuntimeOptions,
+    build_shared_app_credential_store_for_paths, default_window_size,
 };
 use mica_term::app::keychain::KeychainCatalog;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
@@ -52,17 +49,17 @@ use mica_term::app::vault::bootstrap::{
 use mica_term::app::vault::cache::store_encrypted_cache;
 use mica_term::app::vault::crypto::{encrypt_snapshot, generate_vault_key, wrap_vault_key};
 use mica_term::app::vault::model::{
-    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, KdfConfig,
-    ProviderAuthKind, ProviderKind, RemoteRole, SnapshotSyncPreferences,
+    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, KdfConfig, ProviderAuthKind,
+    ProviderKind, RemoteRole, SnapshotSyncPreferences,
 };
 use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
 use mica_term::app::vault::snapshot::export_vault_snapshot;
 use mica_term::app::window_effects::default_platform_window_effects;
-use mica_term::shell::metrics::ShellMetrics;
 use mica_term::shell::assets::{
     AssetNodePayload, AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, ConsoleAssetKind,
 };
+use mica_term::shell::metrics::ShellMetrics;
 use russh::keys::{HashAlg, PublicKey};
 use secrecy::SecretString;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
@@ -900,10 +897,14 @@ fn snippet_edit_and_delete_actions_route_through_bootstrap_callbacks() {
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
-    let snippet_id =
-        create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+    let snippet_id = create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
 
-    app.invoke_asset_context_menu_requested(snippet_id.clone().into(), "snippet".into(), 96.0, 160.0);
+    app.invoke_asset_context_menu_requested(
+        snippet_id.clone().into(),
+        "snippet".into(),
+        96.0,
+        160.0,
+    );
     app.invoke_assets_context_menu_action_invoked("edit-snippet".into());
 
     assert!(app.get_asset_modal_open());
@@ -949,8 +950,7 @@ fn snippet_double_click_activation_defaults_to_paste() {
     app.invoke_asset_activated(ssh_id.into());
     flush_runtime_projection();
 
-    let snippet_id =
-        create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+    let snippet_id = create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
 
     app.invoke_asset_selected(snippet_id.clone().into());
     app.invoke_asset_selected(snippet_id.into());
@@ -1266,13 +1266,23 @@ fn unlocking_existing_vault_restores_cached_snapshot_without_loading_while_locke
     );
 
     assert_eq!(app.get_console_asset_items().row_count(), 0);
-    assert!(credential_store.get_secret(&credential_ref).unwrap().is_none());
+    assert!(
+        credential_store
+            .get_secret(&credential_ref)
+            .unwrap()
+            .is_none()
+    );
 
     app.invoke_vault_unlock_requested("vault-pass".into());
 
     assert_eq!(app.get_vault_lock_state_label().as_str(), "Unlocked");
     assert_eq!(app.get_console_asset_items().row_count(), 1);
-    assert!(credential_store.get_secret(&credential_ref).unwrap().is_some());
+    assert!(
+        credential_store
+            .get_secret(&credential_ref)
+            .unwrap()
+            .is_some()
+    );
 }
 
 #[test]
@@ -1386,13 +1396,23 @@ fn locking_vault_clears_decrypted_assets_and_secrets_from_memory() {
     app.invoke_vault_create_requested("vault-pass".into());
 
     assert_eq!(app.get_console_asset_items().row_count(), 1);
-    assert!(credential_store.get_secret(&credential_ref).unwrap().is_some());
+    assert!(
+        credential_store
+            .get_secret(&credential_ref)
+            .unwrap()
+            .is_some()
+    );
 
     app.invoke_vault_lock_requested();
 
     assert_eq!(app.get_vault_lock_state_label().as_str(), "Locked");
     assert_eq!(app.get_console_asset_items().row_count(), 0);
-    assert!(credential_store.get_secret(&credential_ref).unwrap().is_none());
+    assert!(
+        credential_store
+            .get_secret(&credential_ref)
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -1923,6 +1943,49 @@ fn bootstrap_shared_credential_store_prefers_encrypted_cache_when_preferred_stor
             .join("asset-prod.json")
             .exists(),
         "plain recovery store should not be used when encrypted fallback succeeds"
+    );
+
+    let _ = fs::remove_dir_all(encrypted_root);
+    let _ = fs::remove_dir_all(recovery_root);
+}
+
+#[test]
+fn bootstrap_shared_credential_store_reloads_saved_secret_when_system_store_is_empty_after_restart()
+{
+    let encrypted_root = sample_credential_root("secure-restart");
+    let recovery_root = sample_credential_root("recovery-restart");
+    let credential_ref = ssh_credential_ref("asset-prod", SshCredentialKind::SavedSecrets);
+    let first_primary = Arc::new(MemoryCredentialStore::default()) as Arc<dyn CredentialStore>;
+    let first_store = build_shared_app_credential_store_for_paths(
+        Some(first_primary),
+        encrypted_root.clone(),
+        recovery_root.clone(),
+    );
+
+    persist_secret_bundle(
+        first_store.as_ref(),
+        credential_ref.as_str(),
+        &StoredSshSecretBundle {
+            password: Some("super-secret".into()),
+            private_key_content: None,
+            passphrase: None,
+            proxy_socks5_password: None,
+        },
+    )
+    .expect("persist bundle through initial shared bootstrap store");
+
+    let second_store = build_shared_app_credential_store_for_paths(
+        Some(Arc::new(MemoryCredentialStore::default()) as Arc<dyn CredentialStore>),
+        encrypted_root.clone(),
+        recovery_root.clone(),
+    );
+
+    assert_eq!(
+        load_secret_bundle(second_store.as_ref(), credential_ref.as_str())
+            .expect("reload shared credential bundle after restart")
+            .password
+            .as_deref(),
+        Some("super-secret")
     );
 
     let _ = fs::remove_dir_all(encrypted_root);
@@ -2796,7 +2859,10 @@ fn manual_ssh_modal_private_key_import_still_populates_inline_content() {
         app.get_asset_ssh_modal_private_key_content().as_str(),
         "-----BEGIN OPENSSH PRIVATE KEY-----\nimported\n-----END OPENSSH PRIVATE KEY-----\n"
     );
-    assert_eq!(app.get_asset_ssh_modal_auth_method().as_str(), "private-key");
+    assert_eq!(
+        app.get_asset_ssh_modal_auth_method().as_str(),
+        "private-key"
+    );
     assert_eq!(
         app.get_asset_ssh_modal_private_key_source().as_str(),
         "content"
