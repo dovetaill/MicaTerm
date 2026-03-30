@@ -69,6 +69,8 @@ export component TerminalSessionHost inherits Rectangle {
     in property <int> session-viewport-offset-lines: 0;
     in property <int> session-viewport-max-offset-lines: 0;
     in property <bool> session-viewport-at-bottom: true;
+    in property <bool> session-follow-paused: false;
+    in property <int> session-pending-output-lines: 0;
     in-out property <bool> selection-active: false;
     in-out property <int> selection-start-row: -1;
     in-out property <int> selection-start-col: -1;
@@ -84,6 +86,7 @@ export component TerminalSessionHost inherits Rectangle {
     callback scroll-requested(int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
+    callback jump-to-latest-requested();
     callback mouse-input(string, string, int, int, bool, bool, bool);
 
     private property <length> terminal-font-size: 16px;
@@ -97,6 +100,7 @@ export component TerminalSessionHost inherits Rectangle {
     private property <length> scrollbar-reserved-width: 12px;
     private property <length> scrollbar-track-width: 7px;
     private property <length> scrollbar-thumb-min-height: 28px;
+    private property <length> jump-to-latest-height: 32px;
     private property <float> wheel-delta-remainder: 0;
     private property <float> wheel-delta-threshold: 120;
     private property <int> wheel-lines-per-notch: 6;
@@ -176,6 +180,26 @@ export component TerminalSessionHost inherits Rectangle {
                 1.0 - ((pointer-y - root.scrollbar-track-y())
                     / max(1px, root.scrollbar-track-height() - root.scrollbar-thumb-height())),
             ),
+        );
+    }
+
+    function jump-to-latest-width() -> length {
+        return root.session-pending-output-lines > 0 ? 212px : 144px;
+    }
+
+    function jump-to-latest-x() -> length {
+        return max(
+            root.terminal-padding-left,
+            root.width - root.terminal-padding-right
+                - (root.scrollbar-visible() ? root.scrollbar-reserved-width : 0px)
+                - root.jump-to-latest-width(),
+        );
+    }
+
+    function jump-to-latest-y() -> length {
+        return root.terminal-padding-top + max(
+            0px,
+            root.terminal-grid-height() - root.jump-to-latest-height - 12px,
         );
     }
 
@@ -848,6 +872,47 @@ export component TerminalSessionHost inherits Rectangle {
                                 root.scrollbar-thumb-drag-active = false;
                             }
                         }
+                    }
+                }
+            }
+
+            if root.session-follow-paused : jump-to-latest-pill := Rectangle {
+                x: root.jump-to-latest-x();
+                y: root.jump-to-latest-y();
+                width: root.jump-to-latest-width();
+                height: root.jump-to-latest-height;
+                border-radius: self.height / 2;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-strong;
+                background: jump-to-latest-touch.pressed
+                    ? ThemeTokens.control-active-surface
+                    : jump-to-latest-touch.has-hover
+                        ? ThemeTokens.control-hover-surface
+                        : ThemeTokens.inspector-surface;
+
+                Text {
+                    x: 14px;
+                    y: 0px;
+                    width: parent.width - 28px;
+                    height: parent.height;
+                    text: root.session-pending-output-lines > 0
+                        ? "Jump to latest (" + root.session-pending-output-lines + " new)"
+                        : "Jump to latest";
+                    color: ThemeTokens.text-primary;
+                    font-size: 12px;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                jump-to-latest-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        terminal-input.focus();
+                        root.close-context-menu();
+                        root.jump-to-latest-requested();
                     }
                 }
             }

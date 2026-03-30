@@ -33,6 +33,8 @@ export component WorkspacePane inherits Rectangle {
     in property <int> workspace-session-viewport-offset-lines: 0;
     in property <int> workspace-session-viewport-max-offset-lines: 0;
     in property <bool> workspace-session-viewport-at-bottom: true;
+    in property <bool> workspace-session-follow-paused: false;
+    in property <int> workspace-session-pending-output-lines: 0;
     in-out property <bool> workspace-session-selection-active: false;
     in-out property <int> workspace-session-selection-start-row: -1;
     in-out property <int> workspace-session-selection-start-col: -1;
@@ -50,6 +52,7 @@ export component WorkspacePane inherits Rectangle {
     callback scroll-requested(int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
+    callback jump-to-latest-requested();
     callback mouse-input(string, string, int, int, bool, bool, bool);
 
     horizontal-stretch: 1;
@@ -111,6 +114,8 @@ export component WorkspacePane inherits Rectangle {
                 session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
                 session-viewport-max-offset-lines: root.workspace-session-viewport-max-offset-lines;
                 session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
+                session-follow-paused: root.workspace-session-follow-paused;
+                session-pending-output-lines: root.workspace-session-pending-output-lines;
                 selection-active <=> root.workspace-session-selection-active;
                 selection-start-row <=> root.workspace-session-selection-start-row;
                 selection-start-col <=> root.workspace-session-selection-start-col;
@@ -155,6 +160,10 @@ export component WorkspacePane inherits Rectangle {
 
                 scroll-jump-requested(ratio) => {
                     root.scroll-jump-requested(ratio);
+                }
+
+                jump-to-latest-requested() => {
+                    root.jump-to-latest-requested();
                 }
 
                 mouse-input(kind, button, row, col, shift, ctrl, alt) => {

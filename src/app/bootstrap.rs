@@ -1,7 +1,7 @@
 //! Wires the Slint window to runtime state, persisted preferences, and native window hooks during startup.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
@@ -1021,6 +1021,7 @@ fn apply_pending_snippet_activation(
     window: &AppWindow,
     state: &mut ShellViewModel,
     bridge: Option<&ShellSessionBridge>,
+    follow_tracker: &mut WorkspaceFollowTracker,
 ) {
     let Some((snippet_id, mode)) = state.take_pending_snippet_activation() else {
         return;
@@ -1046,7 +1047,7 @@ fn apply_pending_snippet_activation(
         }
     }
 
-    refresh_active_workspace_projection(window, state, bridge);
+    refresh_active_workspace_projection(window, state, bridge, follow_tracker);
 }
 
 fn parse_context_target_kind(
@@ -1698,6 +1699,55 @@ impl WorkspaceProjectionDelta {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct WorkspaceFollowIndicator {
+    paused: bool,
+    pending_output_lines: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct WorkspaceFollowSessionState {
+    last_surface_seqno: usize,
+    last_viewport_offset_lines: u32,
+    pending_output_lines: u32,
+}
+
+#[derive(Debug, Default)]
+struct WorkspaceFollowTracker {
+    by_session: HashMap<Uuid, WorkspaceFollowSessionState>,
+}
+
+impl WorkspaceFollowTracker {
+    fn indicator_for_surface(
+        &mut self,
+        surface: Option<&TerminalSurfaceState>,
+    ) -> WorkspaceFollowIndicator {
+        let Some(surface) = surface else {
+            return WorkspaceFollowIndicator::default();
+        };
+
+        let session = self.by_session.entry(surface.session_id).or_default();
+        if surface.viewport_at_bottom {
+            session.pending_output_lines = 0;
+        } else if session.last_surface_seqno != 0 && surface.seqno != session.last_surface_seqno {
+            let appended_lines = surface
+                .viewport_offset_lines
+                .saturating_sub(session.last_viewport_offset_lines);
+            session.pending_output_lines = session
+                .pending_output_lines
+                .saturating_add(appended_lines);
+        }
+
+        session.last_surface_seqno = surface.seqno;
+        session.last_viewport_offset_lines = surface.viewport_offset_lines;
+
+        WorkspaceFollowIndicator {
+            paused: !surface.viewport_at_bottom,
+            pending_output_lines: session.pending_output_lines,
+        }
+    }
+}
+
 fn projected_active_workspace_session_id(
     state: &ShellViewModel,
     next_tabs: &[WorkspaceTab],
@@ -1817,6 +1867,7 @@ fn refresh_active_workspace_projection(
     window: &AppWindow,
     state: &mut ShellViewModel,
     bridge: Option<&ShellSessionBridge>,
+    follow_tracker: &mut WorkspaceFollowTracker,
 ) {
     let Some(bridge) = bridge else {
         return;
@@ -1824,7 +1875,7 @@ fn refresh_active_workspace_projection(
 
     let projection = sync_workspace_projection_from_manager(state, &bridge.manager);
     if projection.any_changed() {
-        sync_workspace_tabs(window, state);
+        sync_workspace_tabs(window, state, follow_tracker);
     }
 }
 
@@ -2136,6 +2187,8 @@ fn forward_active_workspace_mouse_input(
     let Some(session_id) = active_workspace_session_uuid(state) else {
         return;
     };
+
+    snap_active_workspace_viewport_to_bottom_if_needed(state, Some(bridge));
 
     if let Err(err) = bridge.manager.send_session_mouse_input(session_id, event) {
         tracing::error!(
@@ -2947,7 +3000,11 @@ where
     }
 }
 
-fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
+fn sync_workspace_session_state(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    follow_tracker: &mut WorkspaceFollowTracker,
+) {
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
     window.set_workspace_session_host_mode(state.workspace_session_host_mode().into());
@@ -2967,6 +3024,8 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         window.set_workspace_session_cell_width(metrics.cell_width as f32);
         window.set_workspace_session_cell_height(metrics.cell_height as f32);
     });
+
+    let follow_indicator = follow_tracker.indicator_for_surface(state.active_workspace_terminal_surface());
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
         let selection = active_workspace_terminal_selection(window);
@@ -3020,6 +3079,10 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
             i32::try_from(surface.viewport_max_offset_lines).unwrap_or(i32::MAX),
         );
         window.set_workspace_session_viewport_at_bottom(surface.viewport_at_bottom);
+        window.set_workspace_session_follow_paused(follow_indicator.paused);
+        window.set_workspace_session_pending_output_lines(
+            i32::try_from(follow_indicator.pending_output_lines).unwrap_or(i32::MAX),
+        );
     } else {
         let preset = preset_for_theme_mode(state.theme_mode);
         window.set_workspace_session_rows(24);
@@ -3044,6 +3107,8 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
         window.set_workspace_session_viewport_offset_lines(0);
         window.set_workspace_session_viewport_max_offset_lines(0);
         window.set_workspace_session_viewport_at_bottom(true);
+        window.set_workspace_session_follow_paused(false);
+        window.set_workspace_session_pending_output_lines(0);
     }
 
     if let Some(active_tab) = state.active_workspace_tab() {
@@ -3065,20 +3130,25 @@ fn sync_workspace_session_state(window: &AppWindow, state: &ShellViewModel) {
     }
 }
 
-fn sync_workspace_tabs(window: &AppWindow, state: &ShellViewModel) {
+fn sync_workspace_tabs(
+    window: &AppWindow,
+    state: &ShellViewModel,
+    follow_tracker: &mut WorkspaceFollowTracker,
+) {
     sync_workspace_tab_items(window, state);
-    sync_workspace_session_state(window, state);
+    sync_workspace_session_state(window, state, follow_tracker);
 }
 
 fn sync_shell_state(
     window: &AppWindow,
     state: &ShellViewModel,
     effects: &dyn PlatformWindowEffects,
+    follow_tracker: &mut WorkspaceFollowTracker,
 ) {
     sync_top_status_bar_state(window, state, effects);
     sync_right_panel_state(window, state);
     sync_sidebar_state(window, state);
-    sync_workspace_tabs(window, state);
+    sync_workspace_tabs(window, state, follow_tracker);
     sync_assets_context_menu_state(window, state);
     sync_asset_modal_state(window, state);
     sync_ssh_host_key_modal_state(window, state);
@@ -3796,6 +3866,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     );
     update_vault_panel_for_local_state(&mut initial_view_model, &initial_vault_session);
     let view_model = Rc::new(RefCell::new(initial_view_model));
+    let workspace_follow_tracker = Rc::new(RefCell::new(WorkspaceFollowTracker::default()));
     let vault_session = Rc::new(RefCell::new(initial_vault_session));
     if let Some(session_bridge_ref) = session_bridge.as_ref()
         && let Err(err) = session_bridge_ref
@@ -3824,7 +3895,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         session_bridge.clone(),
         Rc::clone(&pending_workspace_paste_warning),
     );
-    sync_shell_state(window, &view_model.borrow(), effects.as_ref());
+    sync_shell_state(
+        window,
+        &view_model.borrow(),
+        effects.as_ref(),
+        &mut workspace_follow_tracker.borrow_mut(),
+    );
     sync_workspace_paste_warning_modal_state(window, None);
     {
         let mut state = view_model.borrow_mut();
@@ -3842,6 +3918,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let handle = window.as_weak();
         let manager = session_bridge_ref.manager.clone();
         let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
+        let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
         session_projection_timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
             let Some(window) = handle.upgrade() else {
                 return;
@@ -3863,7 +3940,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 sync_assets_context_menu_state(&window, &state);
             }
             if projection_delta.any_changed() {
-                sync_workspace_session_state(&window, &state);
+                sync_workspace_session_state(
+                    &window,
+                    &state,
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                );
             }
         });
     }
@@ -3872,6 +3953,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let session_projection_timer_ref = Rc::clone(&session_projection_timer);
     let effects_ref = Rc::clone(&effects);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_toggle_right_panel_requested(move || {
         let _keep_session_projection_timer_alive = &session_projection_timer_ref;
         let window = handle.unwrap();
@@ -3881,6 +3963,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_right_panel_state(&window, &state);
         sync_shell_layout(&window, &mut state, width, height);
+        sync_workspace_session_state(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
     });
 
     let state = Rc::clone(&view_model);
@@ -3919,6 +4006,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let effects_ref = Rc::clone(&effects);
     let vault_session_ref = Rc::clone(&vault_session);
     let credential_store_ref = Arc::clone(&credential_store);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_vault_create_requested(move |password| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -3935,7 +4023,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             state.vault_panel_state_mut().primary_status_label =
                 format!("Vault create failed: {err}");
         }
-        sync_shell_state(&window, &state, effects_ref.as_ref());
+        sync_shell_state(
+            &window,
+            &state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
     });
@@ -3946,6 +4039,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let effects_ref = Rc::clone(&effects);
     let vault_session_ref = Rc::clone(&vault_session);
     let credential_store_ref = Arc::clone(&credential_store);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_vault_unlock_requested(move |password| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -3962,7 +4056,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             state.vault_panel_state_mut().primary_status_label =
                 format!("Vault decrypt error: {err}");
         }
-        sync_shell_state(&window, &state, effects_ref.as_ref());
+        sync_shell_state(
+            &window,
+            &state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
     });
@@ -3973,6 +4072,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let effects_ref = Rc::clone(&effects);
     let vault_session_ref = Rc::clone(&vault_session);
     let credential_store_ref = Arc::clone(&credential_store);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_vault_sync_now_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -3981,7 +4081,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         if let Err(err) = sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()) {
             tracing::error!(target: "app.vault", error = %err, "failed to sync local vault");
         }
-        sync_shell_state(&window, &state, effects_ref.as_ref());
+        sync_shell_state(
+            &window,
+            &state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
     });
@@ -3992,6 +4097,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let effects_ref = Rc::clone(&effects);
     let vault_session_ref = Rc::clone(&vault_session);
     let credential_store_ref = Arc::clone(&credential_store);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_vault_lock_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -4002,7 +4108,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             state.vault_panel_state_mut().primary_status_label =
                 format!("Vault lock failed: {err}");
         }
-        sync_shell_state(&window, &state, effects_ref.as_ref());
+        sync_shell_state(
+            &window,
+            &state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
     });
@@ -4030,6 +4141,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let store_ref = store.clone();
     let effects_ref = Rc::clone(&effects);
     let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_toggle_theme_mode_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -4046,7 +4158,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             let projection =
                 sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
             if projection.tabs_changed || projection.surface_changed {
-                sync_workspace_tabs(&window, &state);
+                sync_workspace_tabs(
+                    &window,
+                    &state,
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                );
             }
         }
         sync_theme_and_window_effects(&window, &state, effects_ref.as_ref());
@@ -4366,6 +4482,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let credential_store_ref = Arc::clone(&credential_store);
     let private_key_importer_ref = Arc::clone(&private_key_importer);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_asset_ssh_modal_action_requested(move |action| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -4568,7 +4685,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
-        sync_workspace_tabs(&window, &state);
+        sync_workspace_tabs(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
         sync_assets_context_menu_state(&window, &state);
         sync_asset_modal_state(&window, &state);
         sync_ssh_host_key_modal_state(&window, &state);
@@ -4579,6 +4700,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let modal_drag_state_ref = Rc::clone(&modal_drag_state);
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_ssh_host_key_modal_accept_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -4592,7 +4714,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
         window.set_blocking_modal_offset_x(0.0);
         window.set_blocking_modal_offset_y(0.0);
-        sync_workspace_tabs(&window, &state);
+        sync_workspace_tabs(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
         sync_ssh_host_key_modal_state(&window, &state);
         sync_asset_modal_state(&window, &state);
     });
@@ -4638,6 +4764,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let modal_drag_state_ref = Rc::clone(&modal_drag_state);
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_ssh_host_key_modal_reject_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -4646,7 +4773,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         resolve_pending_host_key(&mut state, None, &pending_host_key_approval_ref, false);
         window.set_blocking_modal_offset_x(0.0);
         window.set_blocking_modal_offset_y(0.0);
-        sync_workspace_tabs(&window, &state);
+        sync_workspace_tabs(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
         sync_ssh_host_key_modal_state(&window, &state);
         sync_asset_modal_state(&window, &state);
     });
@@ -4697,6 +4828,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_paste_warning_confirm_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -4721,12 +4853,18 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             pending.session_id,
             &text,
         );
-        refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+        refresh_active_workspace_projection(
+            &window,
+            &mut state,
+            session_bridge_ref.as_deref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
     });
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_tab_selected(move |session_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -4739,7 +4877,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     .unwrap_or((24, 80));
                 forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
             }
-            sync_workspace_tabs(&window, &state);
+            sync_workspace_tabs(
+                &window,
+                &state,
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+            );
             sync_assets_context_menu_state(&window, &state);
         }
     });
@@ -4748,6 +4890,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let session_runtime_guard_ref = session_runtime_guard.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_tab_close_requested(move |session_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -4765,7 +4908,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     .unwrap_or((24, 80));
                 forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
             }
-            sync_workspace_tabs(&window, &state);
+            sync_workspace_tabs(
+                &window,
+                &state,
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+            );
             sync_assets_context_menu_state(&window, &state);
         }
     });
@@ -4774,6 +4921,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_local_action_requested(move |action_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -4792,7 +4940,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &pending_host_key_approval_ref,
                     asset_id.as_str(),
                 );
-                sync_workspace_tabs(&window, &state);
+                sync_workspace_tabs(
+                    &window,
+                    &state,
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                );
                 sync_assets_context_menu_state(&window, &state);
                 sync_ssh_host_key_modal_state(&window, &state);
             }
@@ -4817,7 +4969,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                             .unwrap_or((24, 80));
                         forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
                     }
-                    sync_workspace_tabs(&window, &state);
+                    sync_workspace_tabs(
+                        &window,
+                        &state,
+                        &mut workspace_follow_tracker_ref.borrow_mut(),
+                    );
                     sync_assets_context_menu_state(&window, &state);
                 }
             }
@@ -4838,17 +4994,24 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_text_input(move |text| {
         let mut state = state.borrow_mut();
         forward_active_workspace_text_input(&state, session_bridge_ref.as_deref(), text.as_str());
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+            refresh_active_workspace_projection(
+                &window,
+                &mut state,
+                session_bridge_ref.as_deref(),
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+            );
         }
     });
 
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_key_input(move |key, alt, ctrl, shift| {
         let mut state = state.borrow_mut();
         forward_active_workspace_key_input(
@@ -4860,7 +5023,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             shift,
         );
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+            refresh_active_workspace_projection(
+                &window,
+                &mut state,
+                session_bridge_ref.as_deref(),
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+            );
         }
     });
 
@@ -4873,12 +5041,17 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let window_handle = window.as_weak();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_selection_changed(move || {
         let Some(window) = window_handle.upgrade() else {
             return;
         };
         let state = state.borrow();
-        sync_workspace_session_state(&window, &state);
+        sync_workspace_session_state(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
     });
 
     let state = Rc::clone(&view_model);
@@ -4893,6 +5066,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
     let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_paste_requested(move || {
         let mut state = state.borrow_mut();
         let outcome = forward_active_workspace_paste(
@@ -4908,6 +5082,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &window,
                     &mut state,
                     session_bridge_ref.as_deref(),
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
                 );
             }
         }
@@ -4915,8 +5090,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
+    let window_handle = window.as_weak();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_mouse_input(move |kind, button, row, col, shift, ctrl, alt| {
-        let state = state.borrow();
+        let mut state = state.borrow_mut();
         let Some(kind) = parse_terminal_mouse_kind(kind.as_str()) else {
             tracing::warn!(
                 target: "app.ssh",
@@ -4946,11 +5123,20 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 alt,
             },
         );
+        if let Some(window) = window_handle.upgrade() {
+            refresh_active_workspace_projection(
+                &window,
+                &mut state,
+                session_bridge_ref.as_deref(),
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+            );
+        }
     });
 
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_scroll_requested(move |delta_lines, row, col, shift, ctrl, alt| {
         let mut state = state.borrow_mut();
         forward_active_workspace_scroll(
@@ -4967,29 +5153,63 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
 
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+            refresh_active_workspace_projection(
+                &window,
+                &mut state,
+                session_bridge_ref.as_deref(),
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+            );
         }
     });
 
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_scroll_thumb_drag_requested(move |ratio| {
         let mut state = state.borrow_mut();
         forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), ratio);
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+            refresh_active_workspace_projection(
+                &window,
+                &mut state,
+                session_bridge_ref.as_deref(),
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+            );
         }
     });
 
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_scroll_jump_requested(move |ratio| {
         let mut state = state.borrow_mut();
         forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), ratio);
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(&window, &mut state, session_bridge_ref.as_deref());
+            refresh_active_workspace_projection(
+                &window,
+                &mut state,
+                session_bridge_ref.as_deref(),
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+            );
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let session_bridge_ref = session_bridge.clone();
+    let window_handle = window.as_weak();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_workspace_session_jump_to_latest_requested(move || {
+        let mut state = state.borrow_mut();
+        forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), 0.0);
+        if let Some(window) = window_handle.upgrade() {
+            refresh_active_workspace_projection(
+                &window,
+                &mut state,
+                session_bridge_ref.as_deref(),
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+            );
         }
     });
 
@@ -5000,6 +5220,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let asset_click_tracker_ref = Rc::clone(&asset_click_tracker);
     let pending_double_click_activation_ref = Rc::clone(&pending_double_click_activation);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_asset_selected(move |item_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -5026,13 +5247,18 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &window,
                     &mut state,
                     session_bridge_ref.as_deref(),
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
                 );
             }
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
         sync_keychain_assets(&window, &state);
-        sync_workspace_tabs(&window, &state);
+        sync_workspace_tabs(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
         sync_assets_context_menu_state(&window, &state);
         sync_ssh_host_key_modal_state(&window, &state);
     });
@@ -5044,6 +5270,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let asset_click_tracker_ref = Rc::clone(&asset_click_tracker);
     let pending_double_click_activation_ref = Rc::clone(&pending_double_click_activation);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_asset_activated(move |item_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -5072,13 +5299,18 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &window,
                     &mut state,
                     session_bridge_ref.as_deref(),
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
                 );
             }
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
         sync_keychain_assets(&window, &state);
-        sync_workspace_tabs(&window, &state);
+        sync_workspace_tabs(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
         sync_assets_context_menu_state(&window, &state);
         sync_ssh_host_key_modal_state(&window, &state);
     });
@@ -5138,6 +5370,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_runtime_guard_ref = session_runtime_guard.clone();
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let credential_store_ref = Arc::clone(&credential_store);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_assets_context_menu_action_invoked(move |action_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -5168,11 +5401,20 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             }
         }
 
-        apply_pending_snippet_activation(&window, &mut state, session_bridge_ref.as_deref());
+        apply_pending_snippet_activation(
+            &window,
+            &mut state,
+            session_bridge_ref.as_deref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
         hydrate_edit_ssh_modal_secret_from_store(&mut state, credential_store_ref.as_ref());
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
-        sync_workspace_tabs(&window, &state);
+        sync_workspace_tabs(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
         sync_asset_modal_state(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
@@ -5614,8 +5856,9 @@ mod tests {
             bg_rgba: 0xff0d_1117,
         }];
         state.set_active_workspace_terminal_surface(Some(initial_surface));
+        let mut follow_tracker = WorkspaceFollowTracker::default();
 
-        sync_workspace_session_state(&window, &state);
+        sync_workspace_session_state(&window, &state, &mut follow_tracker);
         let initial_lines_model = window.get_workspace_session_visible_lines();
         let initial_image = window.get_workspace_session_surface_image();
 
@@ -5636,7 +5879,7 @@ mod tests {
         }];
         state.set_active_workspace_terminal_surface(Some(updated_surface));
 
-        sync_workspace_session_state(&window, &state);
+        sync_workspace_session_state(&window, &state, &mut follow_tracker);
 
         assert_eq!(
             window.get_workspace_session_visible_lines(),
@@ -5685,8 +5928,9 @@ mod tests {
             bg_rgba: 0xff0d_1117,
         }];
         state.set_active_workspace_terminal_surface(Some(initial_surface));
+        let mut follow_tracker = WorkspaceFollowTracker::default();
 
-        sync_workspace_session_state(&window, &state);
+        sync_workspace_session_state(&window, &state, &mut follow_tracker);
         let initial_lines_model = window.get_workspace_session_visible_lines();
         assert_ne!(
             window.get_workspace_session_surface_image(),
@@ -5695,7 +5939,7 @@ mod tests {
         );
 
         state.set_active_workspace_terminal_surface(None);
-        sync_workspace_session_state(&window, &state);
+        sync_workspace_session_state(&window, &state, &mut follow_tracker);
 
         assert_eq!(
             window.get_workspace_session_visible_lines(),

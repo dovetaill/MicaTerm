@@ -139,6 +139,11 @@ struct PasteWarningProjectionLauncher {
 struct ScrollProjectionLauncher;
 
 #[derive(Clone)]
+struct FollowProjectionLauncher {
+    state: FollowProjectionState,
+}
+
+#[derive(Clone)]
 struct FailingProbeLauncher {
     message: &'static str,
 }
@@ -258,8 +263,76 @@ struct ScrollProjectionState {
     surface: Arc<Mutex<Option<TerminalSurfaceState>>>,
 }
 
+#[derive(Clone, Default)]
+struct FollowProjectionState {
+    surface: Arc<Mutex<Option<TerminalSurfaceState>>>,
+    event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<SessionRuntimeEvent>>>>,
+}
+
+impl FollowProjectionState {
+    fn emit_remote_output(&self, appended_lines: u32) {
+        let mut surface_guard = self.surface.lock().expect("lock follow projection surface");
+        let current = surface_guard
+            .clone()
+            .expect("current follow projection surface");
+        let next_offset = if current.viewport_at_bottom {
+            0
+        } else {
+            current.viewport_offset_lines.saturating_add(appended_lines)
+        };
+        let next_surface = bootstrap_surface_with_viewport(
+            current.session_id,
+            current.seqno.saturating_add(1),
+            next_offset,
+            current
+                .viewport_max_offset_lines
+                .saturating_add(appended_lines),
+        );
+        *surface_guard = Some(next_surface.clone());
+        drop(surface_guard);
+
+        if let Some(event_tx) = self
+            .event_tx
+            .lock()
+            .expect("lock follow projection event tx")
+            .as_ref()
+        {
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(next_surface));
+        }
+    }
+
+    fn emit_live_surface(&self, label: &str) {
+        let mut surface_guard = self.surface.lock().expect("lock follow projection surface");
+        let current = surface_guard
+            .clone()
+            .expect("current follow projection surface");
+        let mut next_surface = bootstrap_surface_with_viewport(
+            current.session_id,
+            current.seqno.saturating_add(1),
+            0,
+            current.viewport_max_offset_lines,
+        );
+        next_surface.visible_lines = vec!["live".into(), label.into()];
+        *surface_guard = Some(next_surface.clone());
+        drop(surface_guard);
+
+        if let Some(event_tx) = self
+            .event_tx
+            .lock()
+            .expect("lock follow projection event tx")
+            .as_ref()
+        {
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(next_surface));
+        }
+    }
+}
+
 struct ScrollProjectionRuntimeControl {
     state: ScrollProjectionState,
+}
+
+struct FollowProjectionRuntimeControl {
+    state: FollowProjectionState,
 }
 
 struct KeyboardMatrixRuntimeControl {
@@ -562,6 +635,39 @@ impl SessionRuntimeLauncher for ScrollProjectionLauncher {
     }
 }
 
+impl SessionRuntimeLauncher for FollowProjectionLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        Box::pin(async move {
+            let surface = bootstrap_surface_with_viewport(session_id, 1, 0, 8);
+            *state
+                .surface
+                .lock()
+                .expect("lock follow projection surface") = Some(surface.clone());
+            *state
+                .event_tx
+                .lock()
+                .expect("lock follow projection event tx") = Some(event_tx.clone());
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+            Ok(Box::new(FollowProjectionRuntimeControl { state }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeLauncher for FailingProbeLauncher {
     fn launch(
         &self,
@@ -784,6 +890,65 @@ impl SessionRuntimeControl for ScrollProjectionRuntimeControl {
             .surface
             .lock()
             .expect("lock scroll projection surface") = Some(surface.clone());
+        Ok(surface)
+    }
+}
+
+impl SessionRuntimeControl for FollowProjectionRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, text: String) -> Result<()> {
+        self.state.emit_live_surface(&format!("text {text}"));
+        Ok(())
+    }
+
+    fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()> {
+        let rendered = match event.key {
+            TerminalKeyKind::Named(name) => name.to_string(),
+            TerminalKeyKind::Function(number) => format!("f{number}"),
+            TerminalKeyKind::Char(ch) => ch.to_string(),
+        };
+        self.state.emit_live_surface(&format!("key {rendered}"));
+        Ok(())
+    }
+
+    fn send_paste(&self, text: String) -> Result<()> {
+        self.state.emit_live_surface(&format!("paste {text}"));
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        self.state.emit_live_surface("mouse");
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn scroll_viewport_lines(&self, delta: i32) -> Result<TerminalSurfaceState> {
+        let mut surface = self
+            .state
+            .surface
+            .lock()
+            .expect("lock follow projection surface")
+            .clone()
+            .expect("current follow projection surface");
+        let next_offset = (surface.viewport_offset_lines as i32 + delta)
+            .clamp(0, surface.viewport_max_offset_lines as i32) as u32;
+        surface = bootstrap_surface_with_viewport(
+            surface.session_id,
+            surface.seqno,
+            next_offset,
+            surface.viewport_max_offset_lines,
+        );
+        *self
+            .state
+            .surface
+            .lock()
+            .expect("lock follow projection surface") = Some(surface.clone());
         Ok(surface)
     }
 }
@@ -5145,6 +5310,76 @@ fn workspace_terminal_pointer_wheel_accumulates_before_multi_line_scrollback() {
         8,
         "one accumulated wheel notch should request six local lines, capped by the current viewport max offset"
     );
+}
+
+#[test]
+fn workspace_terminal_paused_follow_tracks_pending_output_until_jump_to_latest() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let follow_state = FollowProjectionState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(FollowProjectionLauncher {
+            state: follow_state.clone(),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    app.invoke_workspace_session_scroll_jump_requested(1.0);
+    assert!(app.get_workspace_session_follow_paused());
+    assert_eq!(app.get_workspace_session_pending_output_lines(), 0);
+
+    follow_state.emit_remote_output(3);
+    settle_terminal_projection();
+
+    assert!(app.get_workspace_session_follow_paused());
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 11);
+    assert_eq!(app.get_workspace_session_pending_output_lines(), 3);
+
+    app.invoke_workspace_session_jump_to_latest_requested();
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
+    assert!(app.get_workspace_session_viewport_at_bottom());
+    assert!(!app.get_workspace_session_follow_paused());
+    assert_eq!(app.get_workspace_session_pending_output_lines(), 0);
+}
+
+#[test]
+fn workspace_terminal_live_input_resumes_follow_and_clears_pending_output() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let follow_state = FollowProjectionState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(FollowProjectionLauncher {
+            state: follow_state.clone(),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    app.invoke_workspace_session_scroll_jump_requested(1.0);
+    follow_state.emit_remote_output(2);
+    settle_terminal_projection();
+
+    assert!(app.get_workspace_session_follow_paused());
+    assert_eq!(app.get_workspace_session_pending_output_lines(), 2);
+
+    app.invoke_workspace_session_text_input("a".into());
+    settle_terminal_projection();
+
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
+    assert!(app.get_workspace_session_viewport_at_bottom());
+    assert!(!app.get_workspace_session_follow_paused());
+    assert_eq!(app.get_workspace_session_pending_output_lines(), 0);
 }
 
 #[test]

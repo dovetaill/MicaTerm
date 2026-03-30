@@ -151,6 +151,8 @@ export component AppWindow inherits Window {
     in-out property <int> workspace-session-viewport-offset-lines: 0;
     in-out property <int> workspace-session-viewport-max-offset-lines: 0;
     in-out property <bool> workspace-session-viewport-at-bottom: true;
+    in-out property <bool> workspace-session-follow-paused: false;
+    in-out property <int> workspace-session-pending-output-lines: 0;
     in-out property <bool> workspace-session-selection-active: false;
     in-out property <int> workspace-session-selection-start-row: -1;
     in-out property <int> workspace-session-selection-start-col: -1;
@@ -274,6 +276,7 @@ export component AppWindow inherits Window {
     callback workspace-session-scroll-requested(int, int, int, bool, bool, bool);
     callback workspace-session-scroll-thumb-drag-requested(float);
     callback workspace-session-scroll-jump-requested(float);
+    callback workspace-session-jump-to-latest-requested();
     callback workspace-session-mouse-input(string, string, int, int, bool, bool, bool);
     callback asset-selected(string);
     callback asset-activated(string);
@@ -573,6 +576,8 @@ export component AppWindow inherits Window {
                         workspace-session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
                         workspace-session-viewport-max-offset-lines: root.workspace-session-viewport-max-offset-lines;
                         workspace-session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
+                        workspace-session-follow-paused: root.workspace-session-follow-paused;
+                        workspace-session-pending-output-lines: root.workspace-session-pending-output-lines;
                         workspace-session-selection-active <=> root.workspace-session-selection-active;
                         workspace-session-selection-start-row <=> root.workspace-session-selection-start-row;
                         workspace-session-selection-start-col <=> root.workspace-session-selection-start-col;
@@ -625,6 +630,10 @@ export component AppWindow inherits Window {
 
                         scroll-jump-requested(ratio) => {
                             root.workspace-session-scroll-jump-requested(ratio);
+                        }
+
+                        jump-to-latest-requested() => {
+                            root.workspace-session-jump-to-latest-requested();
                         }
 
                         mouse-input(kind, button, row, col, shift, ctrl, alt) => {

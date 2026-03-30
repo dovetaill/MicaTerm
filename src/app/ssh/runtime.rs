@@ -1631,8 +1631,15 @@ impl TerminalSession {
         self.keyboard_modes.observe(filtered.as_slice());
         self.mouse_modes.observe(filtered.as_slice());
         if !filtered.is_empty() {
-            self.snap_viewport_to_bottom();
+            let was_at_bottom = self.viewport_offset_lines == 0;
+            let previous_total_rows = self.terminal.screen().scrollback_rows();
             self.terminal.advance_bytes(filtered.as_slice());
+            if !was_at_bottom {
+                let next_total_rows = self.terminal.screen().scrollback_rows();
+                let appended_rows = next_total_rows.saturating_sub(previous_total_rows);
+                self.viewport_offset_lines =
+                    self.viewport_offset_lines.saturating_add(appended_rows);
+            }
         }
         self.clamp_viewport_offset();
     }

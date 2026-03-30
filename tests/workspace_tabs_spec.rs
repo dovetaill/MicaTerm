@@ -540,6 +540,14 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose whether the terminal viewport is already at bottom"
     );
     assert!(
+        app_window.contains("in-out property <bool> workspace-session-follow-paused: false;"),
+        "AppWindow should expose whether the active terminal session has paused auto-follow"
+    );
+    assert!(
+        app_window.contains("in-out property <int> workspace-session-pending-output-lines: 0;"),
+        "AppWindow should expose the unread output count accumulated while auto-follow is paused"
+    );
+    assert!(
         app_window.contains("in-out property <bool> workspace-session-selection-active: false;"),
         "AppWindow should expose terminal selection state for native clipboard shortcut fallbacks"
     );
@@ -597,6 +605,14 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "WorkspacePane should forward the viewport bottom-state projection into TerminalSessionHost"
     );
     assert!(
+        workspace_pane.contains("workspace-session-follow-paused"),
+        "WorkspacePane should forward the paused-follow projection into TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-pending-output-lines"),
+        "WorkspacePane should forward the pending-output count into TerminalSessionHost"
+    );
+    assert!(
         workspace_pane.contains("selection-active <=> root.workspace-session-selection-active;"),
         "WorkspacePane should forward terminal selection state into TerminalSessionHost"
     );
@@ -619,6 +635,18 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         terminal_host.contains("callback scroll-jump-requested(float);"),
         "TerminalSessionHost should emit track jump requests for local scrollback"
+    );
+    assert!(
+        terminal_host.contains("callback jump-to-latest-requested();"),
+        "TerminalSessionHost should emit a jump-to-latest callback while auto-follow is paused"
+    );
+    assert!(
+        terminal_host.contains("in property <bool> session-follow-paused: false;"),
+        "TerminalSessionHost should accept a paused-follow projection"
+    );
+    assert!(
+        terminal_host.contains("in property <int> session-pending-output-lines: 0;"),
+        "TerminalSessionHost should accept an unread output count projection"
     );
     assert!(
         terminal_host.contains("private property <length> terminal-font-size"),
@@ -747,6 +775,10 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         terminal_host.contains("scrollbar-thumb := Rectangle {"),
         "TerminalSessionHost should render a dedicated scrollbar thumb"
+    );
+    assert!(
+        terminal_host.contains("Jump to latest"),
+        "TerminalSessionHost should render a jump-to-latest affordance when auto-follow is paused"
     );
     assert!(
         !terminal_host.contains("terminal-lines := ListView {"),
