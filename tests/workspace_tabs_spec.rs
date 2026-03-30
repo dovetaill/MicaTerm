@@ -735,6 +735,10 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should not intercept plain Ctrl+V for local paste"
     );
     assert!(
+        !terminal_host.contains("event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == \"a\""),
+        "TerminalSessionHost should not hijack plain Ctrl+A for local select-all because screen/tmux use it as a terminal prefix key"
+    );
+    assert!(
         terminal_host.contains("cursor-blink-timer := Timer {"),
         "terminal host should manage a visible cursor blink timer instead of rendering a cursorless text dump"
     );

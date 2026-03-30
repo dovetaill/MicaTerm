@@ -4144,6 +4144,48 @@ fn workspace_terminal_ctrl_shift_c_copies_selected_text_when_backend_emits_etx()
 }
 
 #[test]
+fn workspace_terminal_plain_ctrl_a_forwards_prefix_key_without_selecting_all() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    assert!(
+        !app.get_workspace_session_selection_active(),
+        "terminal selection should start inactive before testing Ctrl+A forwarding"
+    );
+
+    app.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Control.into(),
+    });
+    app.window()
+        .dispatch_event(WindowEvent::KeyPressed { text: "a".into() });
+    app.window()
+        .dispatch_event(WindowEvent::KeyReleased { text: "a".into() });
+    app.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Control.into(),
+    });
+    settle_terminal_projection();
+
+    let visible_lines = app.get_workspace_session_visible_lines();
+    assert_eq!(
+        visible_lines.row_data(1).expect("forwarded Ctrl+A line").as_str(),
+        "$ a",
+        "plain Ctrl+A should stay in the terminal input stream so screen/tmux prefix chords still work"
+    );
+    assert!(
+        !app.get_workspace_session_selection_active(),
+        "plain Ctrl+A should not trigger a local select-all gesture inside the terminal host"
+    );
+}
+
+#[test]
 fn workspace_terminal_mouse_input_callback_updates_active_session_surface() {
     i_slint_backend_testing::init_no_event_loop();
 

@@ -606,13 +606,6 @@ export component TerminalSessionHost inherits Rectangle {
                 } else if (event.text == Key.F24) {
                     root.key-input("f24", event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
-                } else if (event.modifiers.control && !event.modifiers.alt && !event.modifiers.shift && event.text == "a") {
-                    root.selection-anchor-row = 0;
-                    root.selection-anchor-col = 0;
-                    root.selection-focus-row = max(0, root.session-rows - 1);
-                    root.selection-focus-col = max(0, root.session-cols - 1);
-                    root.sync-selection-state();
-                    accept
                 } else if ((event.modifiers.control || event.modifiers.alt) && !event.modifiers.shift && event.text != "") {
                     root.key-input(event.text, event.modifiers.alt, event.modifiers.control, event.modifiers.shift);
                     accept
