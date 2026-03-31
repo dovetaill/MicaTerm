@@ -787,14 +787,20 @@ fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
     );
     assert!(
         modal_chrome.contains("horizontal-scrollbar-policy: always-off;")
-            && modal_chrome.contains("scroll-body := VerticalLayout {")
-            && modal_chrome.contains("alignment: start;"),
-        "shared modal scroll body should use a layout-driven viewport with horizontal overflow disabled"
+            && modal_chrome.contains("scroll-body := Rectangle {")
+            && modal_chrome.contains(
+                "body-panel := Rectangle {\n                x: root.resolved-frame-padding;"
+            )
+            && modal_chrome.contains(
+                "width: max(0px, parent.width - (root.resolved-frame-padding * 2));"
+            ),
+        "shared modal scroll host should use an explicit clipped viewport shell so padded body panels cannot visually bleed into the workspace"
     );
     assert!(
         modal_chrome.contains("private property <length> resolved-content-padding-bottom:")
+            && modal_chrome.contains("body-content-host := Rectangle {")
             && modal_chrome.contains("background: root.viewport-surface;"),
-        "shared modal scroll body should keep an explicit viewport surface and bottom breathing room for long forms"
+        "shared modal scroll body should keep an explicit viewport surface, content host, and bottom breathing room for long forms"
     );
     assert!(
         sync.contains("footer := ModalFooterBar {\n            x: 0px;\n            y: parent.height - root.footer-height;"),

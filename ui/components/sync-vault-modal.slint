@@ -54,6 +54,9 @@ component SyncModalTextField inherits Rectangle {
     in property <bool> password-mode: false;
     callback value-changed(string);
 
+    min-width: 0px;
+    preferred-width: 0px;
+    horizontal-stretch: 1;
     height: 64px;
     background: transparent;
 
@@ -102,6 +105,9 @@ component SyncModalToggleRow inherits Rectangle {
     in property <bool> value: false;
     callback toggled(bool);
 
+    min-width: 0px;
+    preferred-width: 0px;
+    horizontal-stretch: 1;
     height: 54px;
     border-radius: 0px;
     border-width: 1px;

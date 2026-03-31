@@ -29,6 +29,28 @@ export component BlockingModalShell inherits Rectangle {
         && root.available-height - root.modal-height <= 40px
         ? root.available-height
         : min(root.modal-height, root.available-height);
+    private property <length> resolved-modal-x: max(
+        root.viewport-margin,
+        min(
+            root.width - root.viewport-margin - root.resolved-modal-width,
+            (root.width - root.resolved-modal-width) / 2 + root.offset-x
+        )
+    );
+    private property <length> resolved-modal-y: max(
+        root.host-titlebar-height + root.viewport-margin,
+        min(
+            root.height - root.viewport-margin - root.resolved-modal-height,
+            root.host-titlebar-height
+                + (root.height - root.host-titlebar-height - root.resolved-modal-height) / 2
+                + root.offset-y
+        )
+    );
+
+    backdrop-scrim := Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: ThemeTokens.dark-mode ? #040812c8 : #0f172a24;
+    }
 
     backdrop := TouchArea {
         width: parent.width;
@@ -39,30 +61,25 @@ export component BlockingModalShell inherits Rectangle {
         }
     }
 
+    modal-shadow := Rectangle {
+        x: root.resolved-modal-x + 6px;
+        y: root.resolved-modal-y + 12px;
+        width: root.resolved-modal-width;
+        height: root.resolved-modal-height;
+        border-radius: 0px;
+        background: ThemeTokens.dark-mode ? #00000036 : #0f172a14;
+    }
+
     modal-frame := Rectangle {
-        x: max(
-            root.viewport-margin,
-            min(
-                root.width - root.viewport-margin - root.resolved-modal-width,
-                (root.width - root.resolved-modal-width) / 2 + root.offset-x
-            )
-        );
-        y: max(
-            root.host-titlebar-height + root.viewport-margin,
-            min(
-                root.height - root.viewport-margin - root.resolved-modal-height,
-                root.host-titlebar-height
-                    + (root.height - root.host-titlebar-height - root.resolved-modal-height) / 2
-                    + root.offset-y
-            )
-        );
+        x: root.resolved-modal-x;
+        y: root.resolved-modal-y;
         width: root.resolved-modal-width;
         height: root.resolved-modal-height;
         clip: true;
         border-radius: 0px;
         border-width: 1px;
-        border-color: ThemeTokens.divider-strong;
-        background: ThemeTokens.assets-surface;
+        border-color: ThemeTokens.dark-mode ? #ffffff30 : #0f172a38;
+        background: ThemeTokens.dark-mode ? #1b2230 : #fbfdff;
 
         content-host := Rectangle {
             x: 0px;

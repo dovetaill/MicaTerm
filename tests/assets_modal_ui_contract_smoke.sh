@@ -141,7 +141,11 @@ grep -F 'callback toggle-changed(string, bool);' "$SYNC_MODAL" >/dev/null
 grep -F 'body := ModalBodyScrollArea {' "$SYNC_MODAL" >/dev/null
 grep -F 'mouse-drag-pan-enabled: true;' "$MODAL_CHROME" >/dev/null
 grep -F 'horizontal-scrollbar-policy: always-off;' "$MODAL_CHROME" >/dev/null
-grep -F 'scroll-body := VerticalLayout {' "$MODAL_CHROME" >/dev/null
+grep -F 'scroll-body := Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'body-panel := Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'x: root.resolved-frame-padding;' "$MODAL_CHROME" >/dev/null
+grep -F 'width: max(0px, parent.width - (root.resolved-frame-padding * 2));' "$MODAL_CHROME" >/dev/null
+grep -F 'body-content-host := Rectangle {' "$MODAL_CHROME" >/dev/null
 grep -F 'private property <length> resolved-content-padding-bottom:' "$MODAL_CHROME" >/dev/null
 grep -F 'footer := ModalFooterBar {' "$SYNC_MODAL" >/dev/null
 grep -F 'y: parent.height - root.footer-height;' "$SYNC_MODAL" >/dev/null

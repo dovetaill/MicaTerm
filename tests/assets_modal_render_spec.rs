@@ -404,6 +404,42 @@ fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
 }
 
 #[test]
+fn blocking_modal_tints_workspace_behind_the_dialog() {
+    let short_height = 640;
+    let modal_height = 528;
+    let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, modal_height);
+    let sample_x = modal.x + modal.width + 64;
+    let sample_y = modal.y + 180;
+    let workspace_surface = Rgb8Pixel {
+        r: 255,
+        g: 255,
+        b: 255,
+    };
+
+    let modal_buffer = render_app_with_size(WINDOW_WIDTH, short_height, |app| {
+        app.set_sync_modal_open(true);
+        app.set_sync_modal_mode("locked".into());
+        app.set_sync_modal_title("Unlock sync".into());
+        app.set_sync_modal_headline("Unlock sync".into());
+        app.set_sync_modal_status_text(
+            "Run sync automatically after local changes when the vault is unlocked.".into(),
+        );
+        app.set_sync_modal_provider_label("Gitee".into());
+        app.set_sync_modal_target_label("1 target configured".into());
+        app.set_sync_modal_primary_gist_id("yemd6wft9jgpv5bhlux3o60".into());
+        app.set_sync_modal_primary_pat("token-value".into());
+        app.set_sync_modal_primary_action_label("Unlock".into());
+        app.set_sync_modal_secondary_action_label("Close".into());
+    });
+    let tinted_pixel = pixel_at(&modal_buffer, sample_x, sample_y);
+
+    assert!(
+        color_distance(workspace_surface, tinted_pixel) >= 24,
+        "blocking modal should tint the workspace behind the dialog; expected the workspace pixel to differ from pure white, got {tinted_pixel:?}"
+    );
+}
+
+#[test]
 fn ssh_modal_footer_stays_visible_in_short_viewport() {
     let short_height = 640;
     let modal_height = 528;
