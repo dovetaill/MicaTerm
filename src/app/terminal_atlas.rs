@@ -1,20 +1,21 @@
 //! Renders the active terminal grid into a single image surface using a Sarasa-backed sprite atlas.
 
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use ab_glyph::{Font, FontArc, GlyphId, PxScale, ScaleFont, point};
-use anyhow::{Result, anyhow};
+use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
+use anyhow::{anyhow, Result};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
+use swash::scale::image::Content as SwashContent;
+use swash::scale::{Render, ScaleContext, Scaler, Source};
+use swash::zeno::{Format as SwashFormat, Vector as SwashVector};
+use swash::FontRef as SwashFontRef;
 
 use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
 use crate::app::terminal_emoji::{
-    ClusterRenderKind as EmojiClusterRenderKind, EmojiRenderOutcome, TerminalEmojiRenderer,
-    classify_cluster_render_kind,
-};
-use crate::app::terminal_font::backend::{
-    apply_synthetic_embolden, map_glyph_coverage_to_alpha,
+    classify_cluster_render_kind, ClusterRenderKind as EmojiClusterRenderKind, EmojiRenderOutcome,
+    TerminalEmojiRenderer,
 };
 
 const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-Regular.ttf");
@@ -25,6 +26,8 @@ const CELL_HORIZONTAL_PADDING_PX: u32 = 0;
 const CELL_VERTICAL_PADDING_PX: u32 = 0;
 const ASCII_LEFT_INSET_PX: f32 = 0.0;
 const MIXED_LEFT_INSET_PX: f32 = 0.0;
+const REGULAR_MONO_EMBOLDEN_STRENGTH: f32 = 0.0;
+const BOLD_MONO_EMBOLDEN_STRENGTH: f32 = 0.52;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalAtlasMetrics {
@@ -108,8 +111,12 @@ pub struct RenderedCluster {
 
 pub struct TerminalAtlasRenderer {
     font: FontArc,
+    swash_font: SwashFontRef<'static>,
+    mono_scale_context: ScaleContext,
     emoji_renderer: TerminalEmojiRenderer,
-    metrics: TerminalAtlasMetrics,
+    logical_metrics: TerminalAtlasMetrics,
+    raster_metrics: TerminalAtlasMetrics,
+    raster_scale: f32,
     sprite_cache: HashMap<ClusterKey, CachedClusterSprite>,
     row_hashes: Vec<u64>,
     pixels: Vec<Rgba8Pixel>,
@@ -121,6 +128,7 @@ pub struct TerminalAtlasRenderer {
 struct ClusterKey {
     text: String,
     span: u32,
+    bold: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -156,6 +164,25 @@ enum CachedClusterSprite {
     },
 }
 
+struct RenderedMonoGlyph {
+    left: i32,
+    top: i32,
+    width: u32,
+    height: u32,
+    alpha: Vec<u8>,
+}
+
+struct MonoRasterRequest<'a> {
+    font: &'a FontArc,
+    swash_font: SwashFontRef<'a>,
+    scale_context: &'a mut ScaleContext,
+    metrics: TerminalAtlasMetrics,
+    px_size: f32,
+    text: &'a str,
+    span: u32,
+    bold: bool,
+}
+
 impl CachedClusterSprite {
     fn kind(&self) -> ClusterSpriteKind {
         match self {
@@ -177,11 +204,17 @@ impl TerminalAtlasRenderer {
     fn with_emoji_renderer(emoji_renderer: TerminalEmojiRenderer) -> Result<Self> {
         let font = FontArc::try_from_slice(SARASA_FONT_BYTES)
             .map_err(|error| anyhow!("failed to load bundled Sarasa terminal font: {error}"))?;
-        let metrics = compute_terminal_metrics(&font);
+        let swash_font = SwashFontRef::from_index(SARASA_FONT_BYTES, 0)
+            .ok_or_else(|| anyhow!("failed to load bundled Sarasa terminal font into swash"))?;
+        let logical_metrics = compute_terminal_metrics(&font, TERMINAL_FONT_SIZE_PX);
         Ok(Self {
             font,
+            swash_font,
+            mono_scale_context: ScaleContext::new(),
             emoji_renderer,
-            metrics,
+            logical_metrics,
+            raster_metrics: logical_metrics,
+            raster_scale: 1.0,
             sprite_cache: HashMap::new(),
             row_hashes: Vec::new(),
             pixels: Vec::new(),
@@ -191,7 +224,22 @@ impl TerminalAtlasRenderer {
     }
 
     pub fn metrics(&self) -> TerminalAtlasMetrics {
-        self.metrics
+        self.logical_metrics
+    }
+
+    pub fn set_raster_scale(&mut self, scale: f32) {
+        let next_scale = sanitize_raster_scale(scale);
+        if (next_scale - self.raster_scale).abs() < 0.01 {
+            return;
+        }
+
+        self.raster_scale = next_scale;
+        self.raster_metrics = scale_terminal_metrics(self.logical_metrics, next_scale);
+        self.sprite_cache.clear();
+        self.row_hashes.clear();
+        self.pixels.clear();
+        self.surface_width_px = 0;
+        self.surface_height_px = 0;
     }
 
     pub fn render(&mut self, surface: &TerminalSurfaceState) -> Result<TerminalSurfaceFrame> {
@@ -204,8 +252,8 @@ impl TerminalAtlasRenderer {
         selection: Option<TerminalAtlasSelection>,
         selection_overlay_rgba: u32,
     ) -> Result<TerminalSurfaceFrame> {
-        let width_px = surface.cols.max(1) * self.metrics.cell_width;
-        let height_px = surface.rows.max(1) * self.metrics.cell_height;
+        let width_px = surface.cols.max(1) * self.raster_metrics.cell_width;
+        let height_px = surface.rows.max(1) * self.raster_metrics.cell_height;
         let mut rerendered_rows = Vec::new();
         let mut rendered_clusters = Vec::new();
         let resized = self.surface_width_px != width_px || self.surface_height_px != height_px;
@@ -274,7 +322,7 @@ impl TerminalAtlasRenderer {
 
         Ok(TerminalSurfaceFrame {
             image: Image::from_rgba8(buffer),
-            metrics: self.metrics,
+            metrics: self.logical_metrics,
             cache_entries: self.sprite_cache.len(),
             rerendered_rows,
             rendered_clusters,
@@ -288,7 +336,7 @@ impl TerminalAtlasRenderer {
         cells: &[&TerminalCellState],
         rendered_clusters: &mut Vec<RenderedCluster>,
     ) {
-        let row_y = request.row * self.metrics.cell_height;
+        let row_y = request.row * self.raster_metrics.cell_height;
         let row_bg = rgba8(request.row_bg_rgba);
         let default_fg = rgba8(request.default_fg_rgba);
         fill_rect(
@@ -298,8 +346,8 @@ impl TerminalAtlasRenderer {
             PixelRect {
                 start_x: 0,
                 start_y: row_y,
-                width: request.cols * self.metrics.cell_width,
-                height: self.metrics.cell_height,
+                width: request.cols * self.raster_metrics.cell_width,
+                height: self.raster_metrics.cell_height,
             },
             row_bg,
         );
@@ -310,19 +358,19 @@ impl TerminalAtlasRenderer {
                 self.surface_width_px,
                 self.surface_height_px,
                 PixelRect {
-                    start_x: start_col * self.metrics.cell_width,
+                    start_x: start_col * self.raster_metrics.cell_width,
                     start_y: row_y,
-                    width: (end_col - start_col + 1) * self.metrics.cell_width,
-                    height: self.metrics.cell_height,
+                    width: (end_col - start_col + 1) * self.raster_metrics.cell_width,
+                    height: self.raster_metrics.cell_height,
                 },
                 composite_color(row_bg, rgba8(request.selection_overlay_rgba)),
             );
         }
 
         for cell in cells {
-            let cell_x = cell.col * self.metrics.cell_width;
+            let cell_x = cell.col * self.raster_metrics.cell_width;
             let span = cell.width.max(1);
-            let span_width_px = span * self.metrics.cell_width;
+            let span_width_px = span * self.raster_metrics.cell_width;
             let selected = request
                 .row_selection
                 .is_some_and(|value| selection_overlaps_cell(value, cell.col, span));
@@ -346,7 +394,7 @@ impl TerminalAtlasRenderer {
                     start_x: cell_x,
                     start_y: row_y,
                     width: span_width_px,
-                    height: self.metrics.cell_height,
+                    height: self.raster_metrics.cell_height,
                 },
                 background,
             );
@@ -356,6 +404,7 @@ impl TerminalAtlasRenderer {
             } else {
                 rgba8(cell.fg_rgba)
             };
+            let underline_height = self.underline_thickness_px();
             if cell.underline {
                 fill_rect(
                     &mut self.pixels,
@@ -363,9 +412,13 @@ impl TerminalAtlasRenderer {
                     self.surface_height_px,
                     PixelRect {
                         start_x: cell_x,
-                        start_y: row_y + self.metrics.cell_height.saturating_sub(2),
+                        start_y: row_y
+                            + self
+                                .raster_metrics
+                                .cell_height
+                                .saturating_sub(underline_height + 1),
                         width: span_width_px,
-                        height: 1,
+                        height: underline_height,
                     },
                     foreground,
                 );
@@ -375,7 +428,7 @@ impl TerminalAtlasRenderer {
                 continue;
             }
 
-            let key = self.ensure_cluster_sprite(&cell.text, span);
+            let key = self.ensure_cluster_sprite(&cell.text, span, cell.bold);
             let sprite = self
                 .sprite_cache
                 .get(&key)
@@ -386,29 +439,6 @@ impl TerminalAtlasRenderer {
                 text: cell.text.clone(),
                 sprite_kind: sprite.kind(),
             });
-            if cell.bold
-                && let CachedClusterSprite::MonoAlpha {
-                    width,
-                    height,
-                    alpha,
-                } = sprite
-            {
-                let mut bold_alpha = alpha.clone();
-                apply_synthetic_embolden(&mut bold_alpha, *width, *height);
-                blit_mono_alpha(
-                    &mut self.pixels,
-                    self.surface_width_px,
-                    self.surface_height_px,
-                    cell_x,
-                    row_y,
-                    *width,
-                    *height,
-                    &bold_alpha,
-                    foreground,
-                );
-                continue;
-            }
-
             blit_cached_sprite(
                 &mut self.pixels,
                 self.surface_width_px,
@@ -421,27 +451,33 @@ impl TerminalAtlasRenderer {
         }
     }
 
-    fn ensure_cluster_sprite(&mut self, text: &str, span: u32) -> ClusterKey {
+    fn ensure_cluster_sprite(&mut self, text: &str, span: u32, bold: bool) -> ClusterKey {
         let key = ClusterKey {
             text: text.to_string(),
             span,
+            bold,
         };
 
         if !self.sprite_cache.contains_key(&key) {
-            let sprite = self.rasterize_cluster_sprite(text, span);
+            let sprite = self.rasterize_cluster_sprite(text, span, bold);
             self.sprite_cache.insert(key.clone(), sprite);
         }
 
         key
     }
 
-    fn rasterize_cluster_sprite(&self, text: &str, span: u32) -> CachedClusterSprite {
+    fn rasterize_cluster_sprite(
+        &mut self,
+        text: &str,
+        span: u32,
+        bold: bool,
+    ) -> CachedClusterSprite {
         if classify_cluster_render_kind(text) == EmojiClusterRenderKind::Emoji {
             match self.emoji_renderer.rasterize_cluster(
                 text,
                 span,
-                self.metrics.cell_width,
-                self.metrics.cell_height,
+                self.raster_metrics.cell_width,
+                self.raster_metrics.cell_height,
             ) {
                 EmojiRenderOutcome::Sprite(sprite) => {
                     return CachedClusterSprite::ColorRgba {
@@ -459,17 +495,30 @@ impl TerminalAtlasRenderer {
                         text = %text,
                         "terminal emoji rasterization fell back to a visible mono replacement"
                     );
-                    return rasterize_mono_cluster_sprite(
-                        &self.font,
-                        self.metrics,
-                        &replacement_text,
+                    return rasterize_mono_cluster_sprite(MonoRasterRequest {
+                        font: &self.font,
+                        swash_font: self.swash_font,
+                        scale_context: &mut self.mono_scale_context,
+                        metrics: self.raster_metrics,
+                        px_size: TERMINAL_FONT_SIZE_PX * self.raster_scale,
+                        text: &replacement_text,
                         span,
-                    );
+                        bold,
+                    });
                 }
             }
         }
 
-        rasterize_mono_cluster_sprite(&self.font, self.metrics, text, span)
+        rasterize_mono_cluster_sprite(MonoRasterRequest {
+            font: &self.font,
+            swash_font: self.swash_font,
+            scale_context: &mut self.mono_scale_context,
+            metrics: self.raster_metrics,
+            px_size: TERMINAL_FONT_SIZE_PX * self.raster_scale,
+            text,
+            span,
+            bold,
+        })
     }
 
     fn record_rendered_clusters_from_cache(
@@ -482,7 +531,7 @@ impl TerminalAtlasRenderer {
                 continue;
             }
 
-            let key = self.ensure_cluster_sprite(&cell.text, cell.width.max(1));
+            let key = self.ensure_cluster_sprite(&cell.text, cell.width.max(1), cell.bold);
             let sprite_kind = self
                 .sprite_cache
                 .get(&key)
@@ -496,6 +545,10 @@ impl TerminalAtlasRenderer {
             });
         }
     }
+
+    fn underline_thickness_px(&self) -> u32 {
+        self.raster_scale.round().max(1.0) as u32
+    }
 }
 
 fn row_background_rgba(surface: &TerminalSurfaceState, row: u32) -> u32 {
@@ -506,8 +559,8 @@ fn row_background_rgba(surface: &TerminalSurfaceState, row: u32) -> u32 {
     }
 }
 
-fn compute_terminal_metrics(font: &FontArc) -> TerminalAtlasMetrics {
-    let scaled = font.as_scaled(PxScale::from(TERMINAL_FONT_SIZE_PX));
+fn compute_terminal_metrics(font: &FontArc, px_size: f32) -> TerminalAtlasMetrics {
+    let scaled = font.as_scaled(PxScale::from(px_size));
     let mono_advance = scaled
         .h_advance(scaled.glyph_id('M'))
         .max(scaled.h_advance(scaled.glyph_id('0')))
@@ -526,20 +579,30 @@ fn compute_terminal_metrics(font: &FontArc) -> TerminalAtlasMetrics {
     }
 }
 
-fn rasterize_mono_cluster_sprite(
-    font: &FontArc,
-    metrics: TerminalAtlasMetrics,
-    text: &str,
-    span: u32,
-) -> CachedClusterSprite {
+fn rasterize_mono_cluster_sprite(request: MonoRasterRequest<'_>) -> CachedClusterSprite {
+    let MonoRasterRequest {
+        font,
+        swash_font,
+        scale_context,
+        metrics,
+        px_size,
+        text,
+        span,
+        bold,
+    } = request;
     let width = (span.max(1) * metrics.cell_width) as usize;
     let height = metrics.cell_height as usize;
     let mut alpha = vec![0u8; width * height];
-    let scaled = font.as_scaled(PxScale::from(TERMINAL_FONT_SIZE_PX));
+    let scaled = font.as_scaled(PxScale::from(px_size));
     let baseline = metrics.baseline_px as f32;
     let mut pen_x = 0.0f32;
-    let mut previous_id = None::<GlyphId>;
-    let mut outlined_glyphs = Vec::new();
+    let mut scaler = scale_context
+        .builder(swash_font)
+        .size(px_size)
+        .hint(true)
+        .build();
+    let embolden = mono_embolden_strength(bold);
+    let mut rendered_glyphs = Vec::new();
     let mut min_x = f32::MAX;
 
     for ch in text.chars() {
@@ -548,23 +611,24 @@ fn rasterize_mono_cluster_sprite(
         }
 
         let glyph_id = scaled.glyph_id(ch);
-        if let Some(prev) = previous_id {
-            pen_x += scaled.kern(prev, glyph_id);
-        }
 
-        let glyph = glyph_id
-            .with_scale_and_position(PxScale::from(TERMINAL_FONT_SIZE_PX), point(pen_x, baseline));
-        if let Some(outlined) = font.outline_glyph(glyph) {
-            let bounds = outlined.px_bounds();
-            min_x = min_x.min(bounds.min.x);
-            outlined_glyphs.push(outlined);
+        let (origin_x, offset_x) = split_fractional_offset(pen_x);
+        if let Some(image) = render_hinted_mono_glyph(&mut scaler, glyph_id.0, embolden, offset_x) {
+            let left = origin_x + image.left;
+            min_x = min_x.min(left as f32);
+            rendered_glyphs.push(RenderedMonoGlyph {
+                left,
+                top: baseline.round() as i32 - image.top,
+                width: image.width,
+                height: image.height,
+                alpha: image.alpha,
+            });
         }
 
         pen_x += scaled.h_advance(glyph_id);
-        previous_id = Some(glyph_id);
     }
 
-    if outlined_glyphs.is_empty() {
+    if rendered_glyphs.is_empty() {
         return CachedClusterSprite::MonoAlpha {
             width: width as u32,
             height: height as u32,
@@ -582,26 +646,116 @@ fn rasterize_mono_cluster_sprite(
     };
     let offset_x = left_padding + (-min_x).max(0.0);
 
-    for outlined in outlined_glyphs {
-        let bounds = outlined.px_bounds();
-        let glyph_origin_x = (offset_x + bounds.min.x).round() as i32;
-        let glyph_origin_y = bounds.min.y.round() as i32;
-        outlined.draw(|x, y, coverage| {
-            let target_x = glyph_origin_x + x as i32;
-            let target_y = glyph_origin_y + y as i32;
-            if !(0..width as i32).contains(&target_x) || !(0..height as i32).contains(&target_y) {
-                return;
-            }
-
-            let mask_index = target_y as usize * width + target_x as usize;
-            let next_alpha = map_glyph_coverage_to_alpha(coverage);
-            alpha[mask_index] = alpha[mask_index].max(next_alpha);
-        });
+    for glyph in rendered_glyphs {
+        blit_alpha_mask(
+            &mut alpha,
+            width as u32,
+            height as u32,
+            glyph.left + offset_x.round() as i32,
+            glyph.top,
+            glyph.width,
+            glyph.height,
+            &glyph.alpha,
+        );
     }
+
     CachedClusterSprite::MonoAlpha {
         width: width as u32,
         height: height as u32,
         alpha,
+    }
+}
+
+fn mono_embolden_strength(bold: bool) -> f32 {
+    if bold {
+        BOLD_MONO_EMBOLDEN_STRENGTH
+    } else {
+        REGULAR_MONO_EMBOLDEN_STRENGTH
+    }
+}
+
+fn render_hinted_mono_glyph(
+    scaler: &mut Scaler<'_>,
+    glyph_id: u16,
+    embolden: f32,
+    offset_x: f32,
+) -> Option<RenderedMonoGlyph> {
+    let mut renderer = Render::new(&[Source::Outline]);
+    renderer
+        .format(SwashFormat::Alpha)
+        .offset(SwashVector::new(offset_x, 0.0))
+        .embolden(embolden);
+    let image = renderer.render(scaler, glyph_id)?;
+    if image.placement.width == 0 || image.placement.height == 0 {
+        return None;
+    }
+
+    let alpha = match image.content {
+        SwashContent::Mask => image.data,
+        SwashContent::SubpixelMask => rgba_pixels_from_bytes(&image.data)
+            .into_iter()
+            .map(|pixel| pixel.g.max(pixel.r).max(pixel.b))
+            .collect(),
+        _ => return None,
+    };
+
+    Some(RenderedMonoGlyph {
+        left: image.placement.left,
+        top: image.placement.top,
+        width: image.placement.width,
+        height: image.placement.height,
+        alpha,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn blit_alpha_mask(
+    dst: &mut [u8],
+    dst_width: u32,
+    dst_height: u32,
+    dest_x: i32,
+    dest_y: i32,
+    src_width: u32,
+    src_height: u32,
+    src_alpha: &[u8],
+) {
+    let start_x = dest_x.max(0) as u32;
+    let start_y = dest_y.max(0) as u32;
+    let end_x = (dest_x + src_width as i32).min(dst_width as i32).max(0) as u32;
+    let end_y = (dest_y + src_height as i32).min(dst_height as i32).max(0) as u32;
+
+    for y in start_y..end_y {
+        let src_y = (y as i32 - dest_y) as usize;
+        for x in start_x..end_x {
+            let src_x = (x as i32 - dest_x) as usize;
+            let src_index = src_y * src_width as usize + src_x;
+            let dst_index = y as usize * dst_width as usize + x as usize;
+            if let (Some(source), Some(target)) = (src_alpha.get(src_index), dst.get_mut(dst_index))
+            {
+                *target = (*target).max(*source);
+            }
+        }
+    }
+}
+
+fn split_fractional_offset(position: f32) -> (i32, f32) {
+    let base = position.floor();
+    (base as i32, position - base)
+}
+
+fn sanitize_raster_scale(scale: f32) -> f32 {
+    if scale.is_finite() {
+        scale.max(1.0)
+    } else {
+        1.0
+    }
+}
+
+fn scale_terminal_metrics(metrics: TerminalAtlasMetrics, scale: f32) -> TerminalAtlasMetrics {
+    TerminalAtlasMetrics {
+        cell_width: ((metrics.cell_width as f32) * scale).round().max(1.0) as u32,
+        cell_height: ((metrics.cell_height as f32) * scale).round().max(1.0) as u32,
+        baseline_px: ((metrics.baseline_px as f32) * scale).round().max(1.0) as u32,
     }
 }
 

@@ -33,7 +33,8 @@ fn pixel_at(image: &slint::Image, x: u32, y: u32) -> Rgba8Pixel {
 }
 
 fn count_non_background_pixels(image: &slint::Image, background: Rgba8Pixel) -> usize {
-    image.to_rgba8()
+    image
+        .to_rgba8()
         .expect("rgba image")
         .as_slice()
         .iter()
@@ -112,6 +113,33 @@ fn atlas_renderer_loads_sarasa_metrics_and_emits_a_surface_image() -> Result<()>
         .into()
     );
     assert_eq!(frame.metrics, metrics);
+
+    Ok(())
+}
+
+#[test]
+fn atlas_renderer_rasterizes_bitmap_surface_at_hidpi_scale_without_changing_logical_cell_metrics(
+) -> Result<()> {
+    let surface = render_surface(4, 12, "hidpi\r\n");
+    let mut renderer = TerminalAtlasRenderer::new()?;
+    let logical_metrics = renderer.metrics();
+
+    renderer.set_raster_scale(2.0);
+    let frame = renderer.render(&surface)?;
+
+    assert_eq!(
+        frame.metrics, logical_metrics,
+        "bitmap atlas should keep reporting the logical cell metrics used by layout even when it rasterizes a denser hidpi backing image"
+    );
+    assert_eq!(
+        frame.image.size(),
+        [
+            surface.cols * logical_metrics.cell_width * 2,
+            surface.rows * logical_metrics.cell_height * 2,
+        ]
+        .into(),
+        "hidpi bitmap atlas rendering should scale the backing image instead of leaving Slint to stretch a low-resolution terminal surface"
+    );
 
     Ok(())
 }
@@ -326,11 +354,19 @@ fn atlas_renderer_draws_underlined_cells_with_extra_baseline_ink() -> Result<()>
 
     assert_ne!(
         plain.image.to_rgba8().expect("plain rgba").as_slice(),
-        underlined.image.to_rgba8().expect("underlined rgba").as_slice(),
+        underlined
+            .image
+            .to_rgba8()
+            .expect("underlined rgba")
+            .as_slice(),
         "underlined terminal cells should paint additional pixels beyond the plain glyph sprite"
     );
     assert_ne!(
-        pixel_at(&underlined.image, underlined.metrics.cell_width / 2, baseline_y),
+        pixel_at(
+            &underlined.image,
+            underlined.metrics.cell_width / 2,
+            baseline_y
+        ),
         background,
         "underlined cells should paint a visible underline near the baseline"
     );
