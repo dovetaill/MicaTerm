@@ -1692,12 +1692,16 @@ fn focus_workspace_terminal(app: &AppWindow) {
 
 fn select_terminal_welcome_span(app: &AppWindow) {
     let selection_start = LogicalPosition::new(
-        app.get_layout_main_workspace_x() + 18.0,
-        app.get_layout_titlebar_height() + 56.0,
+        app.get_layout_workspace_session_native_surface_x() + (app.get_workspace_session_cell_width() * 0.5),
+        app.get_layout_titlebar_height()
+            + app.get_layout_workspace_session_native_surface_y()
+            + (app.get_workspace_session_cell_height() * 0.5),
     );
     let selection_end = LogicalPosition::new(
-        app.get_layout_main_workspace_x() + 92.0,
-        app.get_layout_titlebar_height() + 56.0,
+        app.get_layout_workspace_session_native_surface_x() + (app.get_workspace_session_cell_width() * 10.5),
+        app.get_layout_titlebar_height()
+            + app.get_layout_workspace_session_native_surface_y()
+            + (app.get_workspace_session_cell_height() * 0.5),
     );
 
     app.window().dispatch_event(WindowEvent::PointerMoved {
@@ -4814,29 +4818,7 @@ fn workspace_terminal_ctrl_shift_c_copies_selected_text_to_clipboard() {
     settle_terminal_projection();
     focus_workspace_terminal(&app);
 
-    let selection_start = LogicalPosition::new(
-        app.get_layout_main_workspace_x() + 18.0,
-        app.get_layout_titlebar_height() + 56.0,
-    );
-    let selection_end = LogicalPosition::new(
-        app.get_layout_main_workspace_x() + 92.0,
-        app.get_layout_titlebar_height() + 56.0,
-    );
-
-    app.window().dispatch_event(WindowEvent::PointerMoved {
-        position: selection_start,
-    });
-    app.window().dispatch_event(WindowEvent::PointerPressed {
-        position: selection_start,
-        button: PointerEventButton::Left,
-    });
-    app.window().dispatch_event(WindowEvent::PointerMoved {
-        position: selection_end,
-    });
-    app.window().dispatch_event(WindowEvent::PointerReleased {
-        position: selection_end,
-        button: PointerEventButton::Left,
-    });
+    select_terminal_welcome_span(&app);
 
     i_slint_backend_selector::with_platform(|platform| {
         platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);
@@ -4892,29 +4874,7 @@ fn workspace_terminal_selection_updates_surface_image() {
         .to_rgba8()
         .expect("rgba image before selection");
 
-    let selection_start = LogicalPosition::new(
-        app.get_layout_main_workspace_x() + 18.0,
-        app.get_layout_titlebar_height() + 56.0,
-    );
-    let selection_end = LogicalPosition::new(
-        app.get_layout_main_workspace_x() + 92.0,
-        app.get_layout_titlebar_height() + 56.0,
-    );
-
-    app.window().dispatch_event(WindowEvent::PointerMoved {
-        position: selection_start,
-    });
-    app.window().dispatch_event(WindowEvent::PointerPressed {
-        position: selection_start,
-        button: PointerEventButton::Left,
-    });
-    app.window().dispatch_event(WindowEvent::PointerMoved {
-        position: selection_end,
-    });
-    app.window().dispatch_event(WindowEvent::PointerReleased {
-        position: selection_end,
-        button: PointerEventButton::Left,
-    });
+    select_terminal_welcome_span(&app);
     settle_terminal_projection();
 
     let after = app
@@ -4963,29 +4923,7 @@ fn workspace_terminal_ctrl_shift_c_copies_selected_text_when_backend_emits_etx()
     settle_terminal_projection();
     focus_workspace_terminal(&app);
 
-    let selection_start = LogicalPosition::new(
-        app.get_layout_main_workspace_x() + 18.0,
-        app.get_layout_titlebar_height() + 56.0,
-    );
-    let selection_end = LogicalPosition::new(
-        app.get_layout_main_workspace_x() + 92.0,
-        app.get_layout_titlebar_height() + 56.0,
-    );
-
-    app.window().dispatch_event(WindowEvent::PointerMoved {
-        position: selection_start,
-    });
-    app.window().dispatch_event(WindowEvent::PointerPressed {
-        position: selection_start,
-        button: PointerEventButton::Left,
-    });
-    app.window().dispatch_event(WindowEvent::PointerMoved {
-        position: selection_end,
-    });
-    app.window().dispatch_event(WindowEvent::PointerReleased {
-        position: selection_end,
-        button: PointerEventButton::Left,
-    });
+    select_terminal_welcome_span(&app);
 
     i_slint_backend_selector::with_platform(|platform| {
         platform.set_clipboard_text("", slint::platform::Clipboard::DefaultClipboard);

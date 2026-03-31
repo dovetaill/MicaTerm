@@ -159,8 +159,13 @@ fn shell_body_fills_to_window_bottom_in_software_renderer() {
         renderer.render(buffer.make_mut_slice(), stride);
     }));
 
-    let upper_body = pixel_at(&buffer, 720, 120);
-    let lower_body = pixel_at(&buffer, 720, 850);
+    let body_sample_x = (app.get_layout_main_workspace_x() + 12.0) as u32;
+    let upper_body = pixel_at(
+        &buffer,
+        body_sample_x,
+        (app.get_layout_titlebar_height() + 12.0) as u32,
+    );
+    let lower_body = pixel_at(&buffer, body_sample_x, 850);
 
     eprintln!(
         "upper body=({}, {}, {}), lower body=({}, {}, {})",
