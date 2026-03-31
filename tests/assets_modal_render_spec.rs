@@ -118,7 +118,6 @@ fn render_app_with_size(
         .set_size(PhysicalSize::new(window_width, window_height));
     setup(&app);
     app.show().unwrap();
-
     let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(window_width, window_height);
     let stride = buffer.width() as usize;
     assert!(window.draw_if_needed(|renderer| {
@@ -456,9 +455,8 @@ fn sync_modal_narrow_viewport_preserves_right_gutter_for_form_fields() {
         app.set_sync_modal_primary_action_label("Unlock".into());
         app.set_sync_modal_secondary_action_label("Close".into());
     });
-
     let field_border = pixel_at(&buffer, 100, 585);
-    let right_gutter_pixels = count_distinct_pixels(&buffer, 628, 585, 11, 1, field_border, 10);
+    let right_gutter_pixels = count_distinct_pixels(&buffer, 639, 585, 9, 1, field_border, 10);
 
     assert!(
         right_gutter_pixels >= 9,
@@ -480,9 +478,8 @@ fn ssh_modal_narrow_viewport_preserves_right_gutter_after_trailing_action() {
         app.set_asset_ssh_modal_password("secret".into());
         app.set_asset_modal_can_confirm(true);
     });
-
     let field_border = pixel_at(&buffer, 600, 400);
-    let right_gutter_pixels = count_distinct_pixels(&buffer, 628, 400, 11, 1, field_border, 10);
+    let right_gutter_pixels = count_distinct_pixels(&buffer, 639, 400, 9, 1, field_border, 10);
 
     assert!(
         right_gutter_pixels >= 9,

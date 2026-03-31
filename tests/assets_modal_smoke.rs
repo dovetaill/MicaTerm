@@ -851,6 +851,20 @@ fn complex_modal_bodies_wrap_content_in_an_explicit_shared_content_column() {
 }
 
 #[test]
+fn shared_modal_scroll_body_binds_explicit_viewport_dimensions() {
+    let modal_chrome =
+        fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome");
+
+    assert!(
+        modal_chrome.contains("viewport-width: scroll-body.width;")
+            && modal_chrome.contains("viewport-height: scroll-body.height;")
+            && modal_chrome.contains("height: max(")
+            && modal_chrome.contains("body-scroll.visible-height,"),
+        "shared modal scroll body should follow the explicit ScrollView viewport sizing pattern so short viewports stay scrollable"
+    );
+}
+
+#[test]
 fn sync_modal_shell_uses_viewport_constrained_height_instead_of_a_fixed_620px_frame() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
     let blocking_shell =

@@ -132,7 +132,7 @@ export component ModalBodyScrollArea inherits Rectangle {
     private property <length> resolved-content-spacing: root.compact-layout ? max(8px, root.content-spacing - 4px) : root.content-spacing;
     private property <length> resolved-panel-width: max(
         0px,
-        root.width - (root.resolved-frame-padding * 2)
+        body-scroll.visible-width - (root.resolved-frame-padding * 2)
     );
     out property <length> content-column-width: max(
         0px,
@@ -146,12 +146,17 @@ export component ModalBodyScrollArea inherits Rectangle {
         y: 0px;
         width: parent.width;
         height: parent.height;
+        viewport-width: scroll-body.width;
+        viewport-height: scroll-body.height;
         mouse-drag-pan-enabled: true;
         horizontal-scrollbar-policy: always-off;
 
         scroll-body := Rectangle {
-            width: root.width;
-            height: body-panel.y + body-panel.height + root.resolved-frame-padding;
+            width: body-scroll.visible-width;
+            height: max(
+                body-scroll.visible-height,
+                body-panel.y + body-panel.height + root.resolved-frame-padding
+            );
             background: root.viewport-surface;
 
             body-panel := Rectangle {

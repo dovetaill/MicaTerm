@@ -150,6 +150,10 @@ grep -F 'width: root.content-column-width;' "$MODAL_CHROME" >/dev/null
 grep -F 'body-content-host := Rectangle {' "$MODAL_CHROME" >/dev/null
 grep -F 'body-content := VerticalLayout {' "$MODAL_CHROME" >/dev/null
 grep -F 'private property <length> resolved-content-padding-bottom:' "$MODAL_CHROME" >/dev/null
+grep -F 'viewport-width: scroll-body.width;' "$MODAL_CHROME" >/dev/null
+grep -F 'viewport-height: scroll-body.height;' "$MODAL_CHROME" >/dev/null
+grep -F 'height: max(' "$MODAL_CHROME" >/dev/null
+grep -F 'body-scroll.visible-height,' "$MODAL_CHROME" >/dev/null
 grep -F 'footer := ModalFooterBar {' "$SYNC_MODAL" >/dev/null
 grep -F 'y: parent.height - root.footer-height;' "$SYNC_MODAL" >/dev/null
 grep -F 'divider-color: ThemeTokens.divider-strong;' "$SYNC_MODAL" >/dev/null
