@@ -54,7 +54,11 @@ pub fn build_remote_upload_path(target_dir: &str, relative_path: &Path) -> Strin
     if prefix == "/" {
         format!("/{}", suffix.trim_start_matches('/'))
     } else {
-        format!("{}/{}", prefix.trim_end_matches('/'), suffix.trim_start_matches('/'))
+        format!(
+            "{}/{}",
+            prefix.trim_end_matches('/'),
+            suffix.trim_start_matches('/')
+        )
     }
 }
 
@@ -67,13 +71,20 @@ pub fn build_local_download_path(local_root: &Path, remote_path: &str) -> PathBu
     local_root.join(name)
 }
 
-fn scan_directory(root: &Path, current: &Path, entries: &mut Vec<LocalTransferEntry>) -> Result<()> {
+fn scan_directory(
+    root: &Path,
+    current: &Path,
+    entries: &mut Vec<LocalTransferEntry>,
+) -> Result<()> {
     let directory = fs::read_dir(current)
         .with_context(|| format!("failed to read local directory `{}`", current.display()))?;
 
     for child in directory {
         let child = child.with_context(|| {
-            format!("failed to read local directory entry in `{}`", current.display())
+            format!(
+                "failed to read local directory entry in `{}`",
+                current.display()
+            )
         })?;
         let path = child.path();
         let metadata = child

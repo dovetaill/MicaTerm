@@ -1,12 +1,8 @@
 use anyhow::{Context, bail};
 use russh::keys::{HashAlg, PrivateKey, PublicKey};
 
-use crate::app::keychain::model::{
-    KeychainCatalog, KeychainIdentityAuthKind, KeychainNodePayload,
-};
-use crate::app::ssh::credentials::{
-    keychain_identity_credential_ref, keychain_key_credential_ref,
-};
+use crate::app::keychain::model::{KeychainCatalog, KeychainIdentityAuthKind, KeychainNodePayload};
+use crate::app::ssh::credentials::{keychain_identity_credential_ref, keychain_key_credential_ref};
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::shell::assets::{
     AssetSshConnectionSpec, SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY, SSH_AUTH_SOURCE_MANUAL,
@@ -47,7 +43,9 @@ fn resolve_identity_backed_spec(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("SSH asset `{title}` is missing keychain identity reference"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("SSH asset `{title}` is missing keychain identity reference")
+        })?;
     let identity_node = keychain_catalog.nodes.get(identity_id).ok_or_else(|| {
         anyhow::anyhow!(
             "keychain identity `{identity_id}` referenced by SSH asset `{title}` was not found"
@@ -147,9 +145,11 @@ pub fn derive_public_key_material_from_public_key(
     public_key: &str,
 ) -> anyhow::Result<DerivedSshKeyMaterial> {
     let trimmed = public_key.trim();
-    let public_key =
-        PublicKey::from_openssh(trimmed).context("failed to parse SSH public key")?;
-    Ok(derived_ssh_key_material_from_public_key(&public_key, trimmed))
+    let public_key = PublicKey::from_openssh(trimmed).context("failed to parse SSH public key")?;
+    Ok(derived_ssh_key_material_from_public_key(
+        &public_key,
+        trimmed,
+    ))
 }
 
 fn derived_ssh_key_material_from_public_key(

@@ -173,7 +173,12 @@ fn sample_profile(asset_id: &str) -> ConnectionProfile {
     }
 }
 
-fn running_step(step_id: &str, step_kind: &str, hop_label: &str, detail: &str) -> ConnectionStepStateItem {
+fn running_step(
+    step_id: &str,
+    step_kind: &str,
+    hop_label: &str,
+    detail: &str,
+) -> ConnectionStepStateItem {
     ConnectionStepStateItem {
         step_id: step_id.into(),
         step_kind: step_kind.into(),
@@ -184,14 +189,24 @@ fn running_step(step_id: &str, step_kind: &str, hop_label: &str, detail: &str) -
     }
 }
 
-fn done_step(step_id: &str, step_kind: &str, hop_label: &str, detail: &str) -> ConnectionStepStateItem {
+fn done_step(
+    step_id: &str,
+    step_kind: &str,
+    hop_label: &str,
+    detail: &str,
+) -> ConnectionStepStateItem {
     ConnectionStepStateItem {
         state: ConnectionStepState::Done,
         ..running_step(step_id, step_kind, hop_label, detail)
     }
 }
 
-fn failed_step(step_id: &str, step_kind: &str, hop_label: &str, detail: &str) -> ConnectionStepStateItem {
+fn failed_step(
+    step_id: &str,
+    step_kind: &str,
+    hop_label: &str,
+    detail: &str,
+) -> ConnectionStepStateItem {
     ConnectionStepStateItem {
         state: ConnectionStepState::Failed,
         ..running_step(step_id, step_kind, hop_label, detail)
@@ -215,12 +230,32 @@ fn multi_hop_connection_session_manager_aggregates_attempt_steps_and_ignores_sta
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let launcher = ScriptedProgressLauncher::new(
         vec![
-            ScriptedEvent::Step(running_step("00-resolve-profile", "resolve-profile", "Target", "Resolving profile")),
-            ScriptedEvent::Step(done_step("00-resolve-profile", "resolve-profile", "Target", "Resolved profile")),
+            ScriptedEvent::Step(running_step(
+                "00-resolve-profile",
+                "resolve-profile",
+                "Target",
+                "Resolving profile",
+            )),
+            ScriptedEvent::Step(done_step(
+                "00-resolve-profile",
+                "resolve-profile",
+                "Target",
+                "Resolved profile",
+            )),
             ScriptedEvent::StaleStep(done_step("99-stale", "stale-step", "Stale", "stale detail")),
             ScriptedEvent::Diagnostic("Resolved profile".into()),
-            ScriptedEvent::Step(running_step("01-connect-jump-host", "connect-jump-host", "Jump Host 1", "Opening SSH transport")),
-            ScriptedEvent::Step(done_step("01-connect-jump-host", "connect-jump-host", "Jump Host 1", "Connected to jump host")),
+            ScriptedEvent::Step(running_step(
+                "01-connect-jump-host",
+                "connect-jump-host",
+                "Jump Host 1",
+                "Opening SSH transport",
+            )),
+            ScriptedEvent::Step(done_step(
+                "01-connect-jump-host",
+                "connect-jump-host",
+                "Jump Host 1",
+                "Connected to jump host",
+            )),
             ScriptedEvent::Headline(ConnectionHeadlineState::Connected),
             ScriptedEvent::Connected,
         ],
@@ -247,7 +282,12 @@ fn multi_hop_connection_session_manager_aggregates_attempt_steps_and_ignores_sta
         attempt
             .steps
             .iter()
-            .map(|step| (step.step_id.clone(), step.step_kind.clone(), step.hop_label.clone(), step.state))
+            .map(|step| (
+                step.step_id.clone(),
+                step.step_kind.clone(),
+                step.hop_label.clone(),
+                step.state
+            ))
             .collect::<Vec<_>>(),
         vec![
             (
@@ -292,7 +332,9 @@ fn multi_hop_connection_session_manager_preserves_failing_hop_label_and_message(
                 "Jump Host 1",
                 "SSH upstream 'Proxy A' rejected direct-tcpip forwarding",
             )),
-            ScriptedEvent::Diagnostic("SSH upstream 'Proxy A' rejected direct-tcpip forwarding".into()),
+            ScriptedEvent::Diagnostic(
+                "SSH upstream 'Proxy A' rejected direct-tcpip forwarding".into(),
+            ),
         ],
         LaunchOutcome::Fail("SSH upstream 'Proxy A' rejected direct-tcpip forwarding"),
     );
@@ -324,7 +366,10 @@ fn multi_hop_connection_session_manager_preserves_failing_hop_label_and_message(
         failed_step.detail,
         "SSH upstream 'Proxy A' rejected direct-tcpip forwarding"
     );
-    assert_eq!(session.state, SessionState::Error("SSH upstream 'Proxy A' rejected direct-tcpip forwarding".into()));
+    assert_eq!(
+        session.state,
+        SessionState::Error("SSH upstream 'Proxy A' rejected direct-tcpip forwarding".into())
+    );
     assert!(session.can_reconnect);
 }
 

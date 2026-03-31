@@ -27,11 +27,46 @@ fn unique_clusters(row: &mica_term::app::terminal_layout::ShapedRow) -> Vec<u32>
 fn harfbuzz_layout_keeps_ascii_prompt_in_one_run_when_style_is_consistent() -> anyhow::Result<()> {
     let row = build_row(
         vec![
-            TerminalModelCell { row: 0, col: 0, width: 1, text: "$".into(), fg_rgba: 0xffd8_dfe8, bg_rgba: 0xff0c_1014 },
-            TerminalModelCell { row: 0, col: 1, width: 1, text: " ".into(), fg_rgba: 0xffd8_dfe8, bg_rgba: 0xff0c_1014 },
-            TerminalModelCell { row: 0, col: 2, width: 1, text: "p".into(), fg_rgba: 0xffd8_dfe8, bg_rgba: 0xff0c_1014 },
-            TerminalModelCell { row: 0, col: 3, width: 1, text: "w".into(), fg_rgba: 0xffd8_dfe8, bg_rgba: 0xff0c_1014 },
-            TerminalModelCell { row: 0, col: 4, width: 1, text: "d".into(), fg_rgba: 0xffd8_dfe8, bg_rgba: 0xff0c_1014 },
+            TerminalModelCell {
+                row: 0,
+                col: 0,
+                width: 1,
+                text: "$".into(),
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 1,
+                width: 1,
+                text: " ".into(),
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 2,
+                width: 1,
+                text: "p".into(),
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 3,
+                width: 1,
+                text: "w".into(),
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 4,
+                width: 1,
+                text: "d".into(),
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
         ],
         "$ pwd",
     );
@@ -49,8 +84,22 @@ fn harfbuzz_layout_keeps_ascii_prompt_in_one_run_when_style_is_consistent() -> a
 fn harfbuzz_layout_keeps_wide_cjk_and_emoji_cluster_boundaries_stable() -> anyhow::Result<()> {
     let row = build_row(
         vec![
-            TerminalModelCell { row: 0, col: 0, width: 2, text: "界".into(), fg_rgba: 0xffd8_dfe8, bg_rgba: 0xff0c_1014 },
-            TerminalModelCell { row: 0, col: 2, width: 2, text: "🙂".into(), fg_rgba: 0xffd8_dfe8, bg_rgba: 0xff0c_1014 },
+            TerminalModelCell {
+                row: 0,
+                col: 0,
+                width: 2,
+                text: "界".into(),
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 2,
+                width: 2,
+                text: "🙂".into(),
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
         ],
         "界🙂",
     );
@@ -68,10 +117,38 @@ fn harfbuzz_layout_keeps_wide_cjk_and_emoji_cluster_boundaries_stable() -> anyho
 fn harfbuzz_layout_splits_on_foreground_change_but_not_background_change() -> anyhow::Result<()> {
     let row = build_row(
         vec![
-            TerminalModelCell { row: 0, col: 0, width: 1, text: "a".into(), fg_rgba: 0xffd8_dfe8, bg_rgba: 0xff0c_1014 },
-            TerminalModelCell { row: 0, col: 1, width: 1, text: "b".into(), fg_rgba: 0xffd8_dfe8, bg_rgba: 0xff101820 },
-            TerminalModelCell { row: 0, col: 2, width: 1, text: "c".into(), fg_rgba: 0xffd8_dfe8, bg_rgba: 0xff0c_1014 },
-            TerminalModelCell { row: 0, col: 3, width: 1, text: "d".into(), fg_rgba: 0xff7aa2f7, bg_rgba: 0xff0c_1014 },
+            TerminalModelCell {
+                row: 0,
+                col: 0,
+                width: 1,
+                text: "a".into(),
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 1,
+                width: 1,
+                text: "b".into(),
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff101820,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 2,
+                width: 1,
+                text: "c".into(),
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 3,
+                width: 1,
+                text: "d".into(),
+                fg_rgba: 0xff7aa2f7,
+                bg_rgba: 0xff0c_1014,
+            },
         ],
         "abcd",
     );
@@ -85,11 +162,17 @@ fn harfbuzz_layout_splits_on_foreground_change_but_not_background_change() -> an
 }
 
 #[test]
-fn harfbuzz_layout_clusters_combining_sequences_instead_of_iterating_raw_chars() -> anyhow::Result<()> {
+fn harfbuzz_layout_clusters_combining_sequences_instead_of_iterating_raw_chars()
+-> anyhow::Result<()> {
     let row = build_row(
-        vec![
-            TerminalModelCell { row: 0, col: 0, width: 1, text: "A\u{0301}".into(), fg_rgba: 0xffd8_dfe8, bg_rgba: 0xff0c_1014 },
-        ],
+        vec![TerminalModelCell {
+            row: 0,
+            col: 0,
+            width: 1,
+            text: "A\u{0301}".into(),
+            fg_rgba: 0xffd8_dfe8,
+            bg_rgba: 0xff0c_1014,
+        }],
         "A\u{0301}",
     );
 

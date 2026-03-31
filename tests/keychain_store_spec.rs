@@ -4,12 +4,12 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mica_term::app::app_paths::{AppRootPathInputs, AppRootSource, resolve_app_root_paths};
+use mica_term::app::keychain::redb_store::RedbKeychainCatalogStore;
+use mica_term::app::keychain::repository::KeychainCatalogRepository;
 use mica_term::app::keychain::{
     KeychainCatalog, KeychainIdentityAuthKind, KeychainIdentitySpec, KeychainNode,
     KeychainNodeKind, KeychainNodePayload, KeychainSshKeySpec,
 };
-use mica_term::app::keychain::redb_store::RedbKeychainCatalogStore;
-use mica_term::app::keychain::repository::KeychainCatalogRepository;
 
 fn temp_data_dir(name: &str) -> PathBuf {
     let unique = SystemTime::now()
@@ -93,7 +93,10 @@ fn app_root_exposes_keychain_catalog_database_path_under_data_dir() {
     assert_eq!(paths.root_source, AppRootSource::EnvOverride);
     assert_eq!(
         paths.keychain_catalog_database_path(),
-        temp_root.join("override-root").join("data").join("keychain.redb")
+        temp_root
+            .join("override-root")
+            .join("data")
+            .join("keychain.redb")
     );
 }
 

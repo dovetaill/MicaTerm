@@ -45,11 +45,9 @@ fn ready_selection(selected_ids: Vec<&str>) -> SelectionContext {
 
 #[test]
 fn sftp_targets_resolve_expected_action_sets() {
-    let blank_actions = resolve_action_tree(ContextTargetKind::SftpBlankArea, &ready_selection(vec![]));
-    let blank_ids: Vec<_> = blank_actions
-        .iter()
-        .map(|node| node.id)
-        .collect();
+    let blank_actions =
+        resolve_action_tree(ContextTargetKind::SftpBlankArea, &ready_selection(vec![]));
+    let blank_ids: Vec<_> = blank_actions.iter().map(|node| node.id).collect();
     assert_eq!(
         blank_actions
             .iter()

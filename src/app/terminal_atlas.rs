@@ -789,7 +789,8 @@ fn blit_cached_sprite(
 }
 
 fn rgba_pixels_from_bytes(bytes: &[u8]) -> Vec<Rgba8Pixel> {
-    bytes.chunks_exact(4)
+    bytes
+        .chunks_exact(4)
         .map(|chunk| Rgba8Pixel {
             r: chunk[0],
             g: chunk[1],

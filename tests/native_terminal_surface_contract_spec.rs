@@ -25,11 +25,11 @@ fn terminal_session_host_source_exposes_native_render_contract() {
 fn workspace_and_window_sources_thread_native_render_contract() {
     let workspace_source =
         fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
-    let app_window_source =
-        fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let app_window_source = fs::read_to_string("ui/app-window.slint").expect("read app window");
 
     assert!(
-        workspace_source.contains("in property <string> workspace-session-render-mode: \"bitmap\";"),
+        workspace_source
+            .contains("in property <string> workspace-session-render-mode: \"bitmap\";"),
         "workspace pane should accept the workspace session render mode contract"
     );
     assert!(
@@ -41,7 +41,8 @@ fn workspace_and_window_sources_thread_native_render_contract() {
         "workspace pane should forward the render mode to the terminal session host"
     );
     assert!(
-        workspace_source.contains("session-native-frame-token: root.workspace-session-native-frame-token;"),
+        workspace_source
+            .contains("session-native-frame-token: root.workspace-session-native-frame-token;"),
         "workspace pane should forward the native frame token to the terminal session host"
     );
     assert!(
@@ -50,7 +51,8 @@ fn workspace_and_window_sources_thread_native_render_contract() {
         "app window should store the workspace terminal render mode"
     );
     assert!(
-        app_window_source.contains("in-out property <int> workspace-session-native-frame-token: 0;"),
+        app_window_source
+            .contains("in-out property <int> workspace-session-native-frame-token: 0;"),
         "app window should store the workspace terminal native frame token"
     );
 }

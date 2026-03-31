@@ -25,10 +25,9 @@ fn sample_gitlab_remote(auth_kind: ProviderAuthKind) -> BootstrapRemoteConfig {
 
 #[test]
 fn gitlab_bootstrap_auth_can_downgrade_from_device_flow_to_pkce_or_pat() {
-    let device_config = GitLabSnippetProviderConfig::try_from(
-        &sample_gitlab_remote(ProviderAuthKind::DeviceFlow),
-    )
-    .expect("parse gitlab device-flow config");
+    let device_config =
+        GitLabSnippetProviderConfig::try_from(&sample_gitlab_remote(ProviderAuthKind::DeviceFlow))
+            .expect("parse gitlab device-flow config");
     let pkce_config =
         GitLabSnippetProviderConfig::try_from(&sample_gitlab_remote(ProviderAuthKind::Pkce))
             .expect("parse gitlab pkce config");
@@ -69,7 +68,10 @@ fn gitlab_provider_capabilities_report_bundled_transport_without_strict_cas() {
 
     let capabilities = provider.capabilities();
 
-    assert_eq!(capabilities.preferred_pack_strategy, PackLayout::BundledFiles);
+    assert_eq!(
+        capabilities.preferred_pack_strategy,
+        PackLayout::BundledFiles
+    );
     assert!(!capabilities.supports_conditional_head_write);
     assert_eq!(capabilities.max_pack_count, 8);
 }

@@ -6,12 +6,12 @@ use mica_term::app::keychain::model::{
 };
 use mica_term::app::ssh::credentials::StoredSshSecretBundle;
 use mica_term::app::vault::model::{
-    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind,
-    CompressionKind, KdfConfig, PackLayout, PackRef, ProviderAuthKind, ProviderKind,
-    RemoteHealth, RemoteHealthStatus, RemoteRole, SnapshotSyncPreferences,
-    SnapshotUiPreferences, VaultAssetCatalog, VaultAssetKind, VaultAssetNode,
-    VaultAssetPayload, VaultHead, VaultKnownHostEntry, VaultManifest, VaultSnapshot,
-    VaultSocks5ProxySpec, VaultSshConnectionSpec, VaultSshProxySpec,
+    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind,
+    KdfConfig, PackLayout, PackRef, ProviderAuthKind, ProviderKind, RemoteHealth,
+    RemoteHealthStatus, RemoteRole, SnapshotSyncPreferences, SnapshotUiPreferences,
+    VaultAssetCatalog, VaultAssetKind, VaultAssetNode, VaultAssetPayload, VaultHead,
+    VaultKnownHostEntry, VaultManifest, VaultSnapshot, VaultSocks5ProxySpec,
+    VaultSshConnectionSpec, VaultSshProxySpec,
 };
 use serde_json::json;
 
@@ -134,7 +134,10 @@ fn vault_manifest_roundtrip_preserves_multiple_pack_refs_and_defaults() {
 
     assert_eq!(decoded.packs.len(), 2);
     assert_eq!(decoded.packs[0].pack_id, "pack-0001");
-    assert_eq!(decoded.feature_flags, vec!["ssh-proxy-chain", "known-hosts"]);
+    assert_eq!(
+        decoded.feature_flags,
+        vec!["ssh-proxy-chain", "known-hosts"]
+    );
     assert_eq!(
         decoded.provider_capability_fallbacks["github-gist"],
         "bundled-files"
@@ -171,27 +174,27 @@ fn vault_snapshot_roundtrip_preserves_assets_secrets_hosts_and_preferences() {
                         title: "Jump Host".into(),
                         kind: VaultAssetKind::SshConnection,
                         child_ids: Vec::new(),
-                        payload: VaultAssetPayload::SshConnection(Box::new(VaultSshConnectionSpec {
-                            host: "jump.example.com".into(),
-                            user: "ops".into(),
-                            port: "22".into(),
-                            auth_method: "private-key".into(),
-                            auth_source: "manual".into(),
-                            keychain_identity_id: None,
-                            private_key_source: "content".into(),
-                            private_key_path: String::new(),
-                            environment: "prod".into(),
-                            proxy: VaultSshProxySpec::Socks5(VaultSocks5ProxySpec {
-                                host: "proxy.internal".into(),
-                                port: "1080".into(),
-                                username: "relay".into(),
-                                password_credential_ref: Some(
-                                    "ssh/proxy-secrets/jump".into(),
-                                ),
-                            }),
-                            remark: "shared bastion".into(),
-                            credential_ref: Some("ssh/saved-secrets/ssh-jump".into()),
-                        })),
+                        payload: VaultAssetPayload::SshConnection(Box::new(
+                            VaultSshConnectionSpec {
+                                host: "jump.example.com".into(),
+                                user: "ops".into(),
+                                port: "22".into(),
+                                auth_method: "private-key".into(),
+                                auth_source: "manual".into(),
+                                keychain_identity_id: None,
+                                private_key_source: "content".into(),
+                                private_key_path: String::new(),
+                                environment: "prod".into(),
+                                proxy: VaultSshProxySpec::Socks5(VaultSocks5ProxySpec {
+                                    host: "proxy.internal".into(),
+                                    port: "1080".into(),
+                                    username: "relay".into(),
+                                    password_credential_ref: Some("ssh/proxy-secrets/jump".into()),
+                                }),
+                                remark: "shared bastion".into(),
+                                credential_ref: Some("ssh/saved-secrets/ssh-jump".into()),
+                            },
+                        )),
                     },
                 ),
             ]),
@@ -265,7 +268,10 @@ fn vault_snapshot_roundtrip_preserves_assets_secrets_hosts_and_preferences() {
     assert_eq!(decoded.known_hosts[0].host_pattern, "[jump.example.com]:22");
     assert!(decoded.sync_preferences.auto_sync_enabled);
     assert_eq!(
-        decoded.sync_preferences.selected_primary_remote_id.as_deref(),
+        decoded
+            .sync_preferences
+            .selected_primary_remote_id
+            .as_deref(),
         Some("remote-s3")
     );
     assert_eq!(decoded.ui_preferences.theme_mode.as_deref(), Some("dark"));

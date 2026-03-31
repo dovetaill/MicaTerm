@@ -50,6 +50,7 @@ export component Titlebar inherits Rectangle {
     callback drag-requested;
     callback drag-double-clicked;
     callback toggle-theme-mode-requested;
+    callback sync-now-requested;
     callback open-sync-modal-requested;
     callback toggle-right-panel-requested;
     callback open-settings-panel-requested;
@@ -219,12 +220,12 @@ export component Titlebar inherits Rectangle {
                 x: 40px;
                 y: 0px;
                 icon-source: root.sync-icon;
-                active: root.sync-modal-open;
-                tooltip-text: "Open sync";
+                active: false;
+                tooltip-text: "Sync now";
                 tooltip-source-id: "sync-button";
 
                 clicked => {
-                    root.open-sync-modal-requested();
+                    root.sync-now-requested();
                 }
 
                 tooltip-open-requested(source-id, text, anchor-x, anchor-y) => {
@@ -396,8 +397,8 @@ export component Titlebar inherits Rectangle {
             root.open-settings-panel-requested();
         }
 
-        appearance-selected => {
-            root.open-appearance-panel-requested();
+        sync-settings-selected => {
+            root.open-sync-modal-requested();
         }
     }
 

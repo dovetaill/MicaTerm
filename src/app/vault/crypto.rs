@@ -70,11 +70,14 @@ pub fn unwrap_vault_key(
         .map_err(|_| anyhow!("wrapped vault key length mismatch"))
 }
 
-pub fn encrypt_snapshot(snapshot: &VaultSnapshot, vault_key: &[u8; KEY_LEN]) -> Result<EncryptedSnapshot> {
+pub fn encrypt_snapshot(
+    snapshot: &VaultSnapshot,
+    vault_key: &[u8; KEY_LEN],
+) -> Result<EncryptedSnapshot> {
     let serialized = serde_json::to_vec(snapshot).context("failed to serialize vault snapshot")?;
     let plaintext_len = serialized.len();
-    let compressed =
-        zstd::stream::encode_all(serialized.as_slice(), ZSTD_LEVEL).context("failed to compress vault snapshot")?;
+    let compressed = zstd::stream::encode_all(serialized.as_slice(), ZSTD_LEVEL)
+        .context("failed to compress vault snapshot")?;
     let compressed_len = compressed.len();
     let payload_sha256 = sha256_hex(compressed.as_slice());
     let (nonce, ciphertext) = encrypt_bytes(compressed.as_slice(), vault_key)?;
@@ -96,8 +99,8 @@ pub fn decrypt_snapshot(
 ) -> Result<VaultSnapshot> {
     let compressed = decrypt_bytes(&encrypted.nonce, &encrypted.ciphertext, vault_key)
         .context("failed to decrypt vault snapshot")?;
-    let serialized =
-        zstd::stream::decode_all(compressed.as_slice()).context("failed to decompress vault snapshot")?;
+    let serialized = zstd::stream::decode_all(compressed.as_slice())
+        .context("failed to decompress vault snapshot")?;
     serde_json::from_slice(serialized.as_slice()).context("failed to decode vault snapshot")
 }
 
@@ -115,14 +118,19 @@ fn derive_kek(password: &SecretString, kdf: &KdfConfig) -> Result<Zeroizing<[u8;
     let mut derived = Zeroizing::new([0u8; KEY_LEN]);
 
     argon2
-        .hash_password_into(password.expose_secret().as_bytes(), salt_b64.as_bytes(), &mut *derived)
+        .hash_password_into(
+            password.expose_secret().as_bytes(),
+            salt_b64.as_bytes(),
+            &mut *derived,
+        )
         .map_err(|err| anyhow!("failed to derive vault KEK: {err}"))?;
 
     Ok(derived)
 }
 
 fn encrypt_bytes(plaintext: &[u8], key: &[u8; KEY_LEN]) -> Result<(Vec<u8>, Vec<u8>)> {
-    let cipher = XChaCha20Poly1305::new_from_slice(key).context("invalid XChaCha20-Poly1305 key")?;
+    let cipher =
+        XChaCha20Poly1305::new_from_slice(key).context("invalid XChaCha20-Poly1305 key")?;
     let mut nonce = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce);
     let nonce_ref = XNonce::from_slice(&nonce);
@@ -144,7 +152,8 @@ fn decrypt_bytes(nonce: &[u8], ciphertext: &[u8], key: &[u8; KEY_LEN]) -> Result
         return Err(anyhow!("invalid XChaCha20-Poly1305 nonce length"));
     }
 
-    let cipher = XChaCha20Poly1305::new_from_slice(key).context("invalid XChaCha20-Poly1305 key")?;
+    let cipher =
+        XChaCha20Poly1305::new_from_slice(key).context("invalid XChaCha20-Poly1305 key")?;
     let nonce_ref = XNonce::from_slice(nonce);
 
     cipher

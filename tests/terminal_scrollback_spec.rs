@@ -1,8 +1,8 @@
 use mica_term::app::ssh::runtime::{
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
 };
-use uuid::Uuid;
 use std::fs;
+use uuid::Uuid;
 
 #[test]
 fn wheel_without_mouse_grab_scrolls_local_viewport() {
@@ -59,7 +59,10 @@ fn remote_output_preserves_scrollback_view_when_user_is_not_at_bottom() {
     assert!(!before.viewport_at_bottom);
     assert!(!after.viewport_at_bottom);
     assert_eq!(after.visible_lines, before.visible_lines);
-    assert_eq!(after.viewport_offset_lines, before.viewport_offset_lines + 1);
+    assert_eq!(
+        after.viewport_offset_lines,
+        before.viewport_offset_lines + 1
+    );
     assert!(!after.visible_lines.iter().any(|line| line == "7"));
 }
 

@@ -23,11 +23,9 @@ use wezterm_surface::{CursorShape, CursorVisibility};
 use wezterm_term::color::{ColorAttribute, ColorPalette, SrgbaTuple};
 use wezterm_term::{Line, Terminal, TerminalConfiguration, TerminalSize};
 
+use crate::app::sftp::{SftpBackend, SftpDirectoryEntry, SftpOperationFuture, SftpRuntimeHandle};
 use crate::app::ssh::connection_progress::{
     ConnectionHeadlineState, ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
-};
-use crate::app::sftp::{
-    SftpBackend, SftpDirectoryEntry, SftpOperationFuture, SftpRuntimeHandle,
 };
 use crate::app::ssh::credentials::{
     CredentialStore, StoredSecretLookupError, StoredSshSecretBundle, SystemCredentialStore,
@@ -171,135 +169,133 @@ async fn connect_target_handle_for_profile(
 ) -> Result<(TransportChainGuard, client::Handle<RuntimeClientHandler>)> {
     let mut chain_guard = TransportChainGuard::default();
 
-    let mut current_stream: BoxedTransportStream = match profile.resolved_proxy_hops.first() {
-        Some(ResolvedProxyHop::Socks5 {
-            host,
-            port,
-            username,
-            password,
-        }) => {
-            let connect_step = progress.start_step(
-                "connect-proxy",
-                "Connect Proxy",
-                format!("Connecting to SOCKS5 proxy {host}:{port}"),
-                "Proxy",
-            );
-            let (next_host, next_port) = next_chain_target(profile, 0)?;
-            let mut stream = match connect_proxy_tcp_stream(
+    let mut current_stream: BoxedTransportStream =
+        match profile.resolved_proxy_hops.first() {
+            Some(ResolvedProxyHop::Socks5 {
                 host,
-                *port,
-                config.as_ref().nodelay,
-                "SOCKS5",
-            )
-            .await
-            {
-                Ok(stream) => {
-                    connect_step.finish(format!("Connected to SOCKS5 proxy {host}:{port}"));
-                    stream
-                }
-                Err(err) => {
-                    connect_step.fail(err.to_string());
-                    return Err(err);
-                }
-            };
-            let negotiate_step = progress.start_step(
-                "proxy-negotiate",
-                "Negotiate Proxy Tunnel",
-                format!("Negotiating SOCKS5 tunnel to {next_host}:{next_port}"),
-                "Proxy",
-            );
-            match negotiate_socks5_proxy_tunnel(
-                &mut stream,
-                username.as_deref(),
-                password.as_deref(),
-                next_host,
-                next_port,
-            )
-            .await
-            .with_context(|| format!("failed to negotiate SOCKS5 proxy `{}:{}`", host, port))
-            {
-                Ok(()) => {
-                    negotiate_step
-                        .finish(format!("Established SOCKS5 tunnel to {next_host}:{next_port}"));
-                    Box::new(stream)
-                }
-                Err(err) => {
-                    negotiate_step.fail(err.to_string());
-                    return Err(err);
+                port,
+                username,
+                password,
+            }) => {
+                let connect_step = progress.start_step(
+                    "connect-proxy",
+                    "Connect Proxy",
+                    format!("Connecting to SOCKS5 proxy {host}:{port}"),
+                    "Proxy",
+                );
+                let (next_host, next_port) = next_chain_target(profile, 0)?;
+                let mut stream =
+                    match connect_proxy_tcp_stream(host, *port, config.as_ref().nodelay, "SOCKS5")
+                        .await
+                    {
+                        Ok(stream) => {
+                            connect_step.finish(format!("Connected to SOCKS5 proxy {host}:{port}"));
+                            stream
+                        }
+                        Err(err) => {
+                            connect_step.fail(err.to_string());
+                            return Err(err);
+                        }
+                    };
+                let negotiate_step = progress.start_step(
+                    "proxy-negotiate",
+                    "Negotiate Proxy Tunnel",
+                    format!("Negotiating SOCKS5 tunnel to {next_host}:{next_port}"),
+                    "Proxy",
+                );
+                match negotiate_socks5_proxy_tunnel(
+                    &mut stream,
+                    username.as_deref(),
+                    password.as_deref(),
+                    next_host,
+                    next_port,
+                )
+                .await
+                .with_context(|| format!("failed to negotiate SOCKS5 proxy `{}:{}`", host, port))
+                {
+                    Ok(()) => {
+                        negotiate_step.finish(format!(
+                            "Established SOCKS5 tunnel to {next_host}:{next_port}"
+                        ));
+                        Box::new(stream)
+                    }
+                    Err(err) => {
+                        negotiate_step.fail(err.to_string());
+                        return Err(err);
+                    }
                 }
             }
-        }
-        Some(ResolvedProxyHop::Http {
-            host,
-            port,
-            username,
-            password,
-        }) => {
-            let connect_step = progress.start_step(
-                "connect-proxy",
-                "Connect Proxy",
-                format!("Connecting to HTTP proxy {host}:{port}"),
-                "Proxy",
-            );
-            let (next_host, next_port) = next_chain_target(profile, 0)?;
-            let mut stream = match connect_proxy_tcp_stream(
+            Some(ResolvedProxyHop::Http {
                 host,
-                *port,
-                config.as_ref().nodelay,
-                "HTTP",
-            )
-            .await
-            {
-                Ok(stream) => {
-                    connect_step.finish(format!("Connected to HTTP proxy {host}:{port}"));
-                    stream
-                }
-                Err(err) => {
-                    connect_step.fail(err.to_string());
-                    return Err(err);
-                }
-            };
-            let negotiate_step = progress.start_step(
-                "proxy-negotiate",
-                "Negotiate Proxy Tunnel",
-                format!("Negotiating HTTP CONNECT tunnel to {next_host}:{next_port}"),
-                "Proxy",
-            );
-            match negotiate_http_connect_tunnel(
-                &mut stream,
-                username.as_deref(),
-                password.as_deref(),
-                next_host,
-                next_port,
-            )
-            .await
-            .with_context(|| format!("failed to negotiate HTTP proxy `{}:{}`", host, port))
-            {
-                Ok(()) => {
-                    negotiate_step.finish(format!(
-                        "Established HTTP CONNECT tunnel to {next_host}:{next_port}"
-                    ));
-                    Box::new(stream)
-                }
-                Err(err) => {
-                    negotiate_step.fail(err.to_string());
-                    return Err(err);
+                port,
+                username,
+                password,
+            }) => {
+                let connect_step = progress.start_step(
+                    "connect-proxy",
+                    "Connect Proxy",
+                    format!("Connecting to HTTP proxy {host}:{port}"),
+                    "Proxy",
+                );
+                let (next_host, next_port) = next_chain_target(profile, 0)?;
+                let mut stream =
+                    match connect_proxy_tcp_stream(host, *port, config.as_ref().nodelay, "HTTP")
+                        .await
+                    {
+                        Ok(stream) => {
+                            connect_step.finish(format!("Connected to HTTP proxy {host}:{port}"));
+                            stream
+                        }
+                        Err(err) => {
+                            connect_step.fail(err.to_string());
+                            return Err(err);
+                        }
+                    };
+                let negotiate_step = progress.start_step(
+                    "proxy-negotiate",
+                    "Negotiate Proxy Tunnel",
+                    format!("Negotiating HTTP CONNECT tunnel to {next_host}:{next_port}"),
+                    "Proxy",
+                );
+                match negotiate_http_connect_tunnel(
+                    &mut stream,
+                    username.as_deref(),
+                    password.as_deref(),
+                    next_host,
+                    next_port,
+                )
+                .await
+                .with_context(|| format!("failed to negotiate HTTP proxy `{}:{}`", host, port))
+                {
+                    Ok(()) => {
+                        negotiate_step.finish(format!(
+                            "Established HTTP CONNECT tunnel to {next_host}:{next_port}"
+                        ));
+                        Box::new(stream)
+                    }
+                    Err(err) => {
+                        negotiate_step.fail(err.to_string());
+                        return Err(err);
+                    }
                 }
             }
-        }
-        Some(ResolvedProxyHop::Ssh(upstream)) => Box::new(
-            connect_direct_tcp_stream(
-                upstream.host.as_str(),
-                upstream.port,
-                config.as_ref().nodelay,
-            )
-            .await?,
-        ),
-        None => Box::new(
-            connect_direct_tcp_stream(profile.host.as_str(), profile.port, config.as_ref().nodelay)
+            Some(ResolvedProxyHop::Ssh(upstream)) => Box::new(
+                connect_direct_tcp_stream(
+                    upstream.host.as_str(),
+                    upstream.port,
+                    config.as_ref().nodelay,
+                )
                 .await?,
-        ),
-    };
+            ),
+            None => Box::new(
+                connect_direct_tcp_stream(
+                    profile.host.as_str(),
+                    profile.port,
+                    config.as_ref().nodelay,
+                )
+                .await?,
+            ),
+        };
 
     let mut jump_host_index = 0usize;
     for (hop_index, hop) in profile.resolved_proxy_hops.iter().enumerate() {
@@ -353,7 +349,7 @@ async fn connect_target_handle_for_profile(
                                 unknown.host, unknown.port, unknown.fingerprint
                             ));
                         } else {
-                        connect_step.fail(err.to_string());
+                            connect_step.fail(err.to_string());
                         }
                         return Err(err);
                     }
@@ -459,7 +455,10 @@ async fn connect_target_handle_for_profile(
         format!("Verifying host key for {}", profile.host),
         "Target",
     );
-    verify_step.finish(format!("Verified host key for {}:{}", profile.host, profile.port));
+    verify_step.finish(format!(
+        "Verified host key for {}:{}",
+        profile.host, profile.port
+    ));
     let auth_step = progress.start_step(
         "authenticate-target",
         "Authenticate Target",
@@ -1191,14 +1190,12 @@ impl ConnectionProgressReporter {
             state: ConnectionStepState::Running,
         };
         self.next_step_index = self.next_step_index.saturating_add(1);
-        let _ = self
-            .event_tx
-            .send(SessionRuntimeEvent::ConnectionProgress(
-                ConnectionProgressEvent::StepUpdated {
-                    attempt_id: self.attempt_id,
-                    step: step.clone(),
-                },
-            ));
+        let _ = self.event_tx.send(SessionRuntimeEvent::ConnectionProgress(
+            ConnectionProgressEvent::StepUpdated {
+                attempt_id: self.attempt_id,
+                step: step.clone(),
+            },
+        ));
         ConnectionProgressStep {
             attempt_id: self.attempt_id,
             event_tx: self.event_tx.clone(),
@@ -1210,97 +1207,83 @@ impl ConnectionProgressReporter {
     }
 
     fn set_headline(&self, headline: ConnectionHeadlineState) {
-        let _ = self
-            .event_tx
-            .send(SessionRuntimeEvent::ConnectionProgress(
-                ConnectionProgressEvent::HeadlineChanged {
-                    attempt_id: self.attempt_id,
-                    headline,
-                },
-            ));
+        let _ = self.event_tx.send(SessionRuntimeEvent::ConnectionProgress(
+            ConnectionProgressEvent::HeadlineChanged {
+                attempt_id: self.attempt_id,
+                headline,
+            },
+        ));
     }
 }
 
 impl ConnectionProgressStep {
     fn finish(self, detail: impl Into<String>) {
         let detail = detail.into();
-        let _ = self
-            .event_tx
-            .send(SessionRuntimeEvent::ConnectionProgress(
-                ConnectionProgressEvent::StepUpdated {
-                    attempt_id: self.attempt_id,
-                    step: ConnectionStepStateItem {
-                        step_id: self.step_id.clone(),
-                        step_kind: self.step_kind.clone(),
-                        title: self.title.clone(),
-                        detail: detail.clone(),
-                        hop_label: self.hop_label.clone(),
-                        state: ConnectionStepState::Done,
-                    },
+        let _ = self.event_tx.send(SessionRuntimeEvent::ConnectionProgress(
+            ConnectionProgressEvent::StepUpdated {
+                attempt_id: self.attempt_id,
+                step: ConnectionStepStateItem {
+                    step_id: self.step_id.clone(),
+                    step_kind: self.step_kind.clone(),
+                    title: self.title.clone(),
+                    detail: detail.clone(),
+                    hop_label: self.hop_label.clone(),
+                    state: ConnectionStepState::Done,
                 },
-            ));
-        let _ = self
-            .event_tx
-            .send(SessionRuntimeEvent::ConnectionProgress(
-                ConnectionProgressEvent::DiagnosticAppended {
-                    attempt_id: self.attempt_id,
-                    message: detail,
-                },
-            ));
+            },
+        ));
+        let _ = self.event_tx.send(SessionRuntimeEvent::ConnectionProgress(
+            ConnectionProgressEvent::DiagnosticAppended {
+                attempt_id: self.attempt_id,
+                message: detail,
+            },
+        ));
     }
 
     fn fail(self, detail: impl Into<String>) {
         let detail = detail.into();
-        let _ = self
-            .event_tx
-            .send(SessionRuntimeEvent::ConnectionProgress(
-                ConnectionProgressEvent::StepUpdated {
-                    attempt_id: self.attempt_id,
-                    step: ConnectionStepStateItem {
-                        step_id: self.step_id.clone(),
-                        step_kind: self.step_kind.clone(),
-                        title: self.title.clone(),
-                        detail: detail.clone(),
-                        hop_label: self.hop_label.clone(),
-                        state: ConnectionStepState::Failed,
-                    },
+        let _ = self.event_tx.send(SessionRuntimeEvent::ConnectionProgress(
+            ConnectionProgressEvent::StepUpdated {
+                attempt_id: self.attempt_id,
+                step: ConnectionStepStateItem {
+                    step_id: self.step_id.clone(),
+                    step_kind: self.step_kind.clone(),
+                    title: self.title.clone(),
+                    detail: detail.clone(),
+                    hop_label: self.hop_label.clone(),
+                    state: ConnectionStepState::Failed,
                 },
-            ));
-        let _ = self
-            .event_tx
-            .send(SessionRuntimeEvent::ConnectionProgress(
-                ConnectionProgressEvent::DiagnosticAppended {
-                    attempt_id: self.attempt_id,
-                    message: detail,
-                },
-            ));
+            },
+        ));
+        let _ = self.event_tx.send(SessionRuntimeEvent::ConnectionProgress(
+            ConnectionProgressEvent::DiagnosticAppended {
+                attempt_id: self.attempt_id,
+                message: detail,
+            },
+        ));
     }
 
     fn block(self, detail: impl Into<String>) {
         let detail = detail.into();
-        let _ = self
-            .event_tx
-            .send(SessionRuntimeEvent::ConnectionProgress(
-                ConnectionProgressEvent::StepUpdated {
-                    attempt_id: self.attempt_id,
-                    step: ConnectionStepStateItem {
-                        step_id: self.step_id.clone(),
-                        step_kind: self.step_kind.clone(),
-                        title: self.title.clone(),
-                        detail: detail.clone(),
-                        hop_label: self.hop_label.clone(),
-                        state: ConnectionStepState::Blocked,
-                    },
+        let _ = self.event_tx.send(SessionRuntimeEvent::ConnectionProgress(
+            ConnectionProgressEvent::StepUpdated {
+                attempt_id: self.attempt_id,
+                step: ConnectionStepStateItem {
+                    step_id: self.step_id.clone(),
+                    step_kind: self.step_kind.clone(),
+                    title: self.title.clone(),
+                    detail: detail.clone(),
+                    hop_label: self.hop_label.clone(),
+                    state: ConnectionStepState::Blocked,
                 },
-            ));
-        let _ = self
-            .event_tx
-            .send(SessionRuntimeEvent::ConnectionProgress(
-                ConnectionProgressEvent::DiagnosticAppended {
-                    attempt_id: self.attempt_id,
-                    message: detail,
-                },
-            ));
+            },
+        ));
+        let _ = self.event_tx.send(SessionRuntimeEvent::ConnectionProgress(
+            ConnectionProgressEvent::DiagnosticAppended {
+                attempt_id: self.attempt_id,
+                message: detail,
+            },
+        ));
     }
 }
 

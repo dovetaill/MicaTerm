@@ -39,10 +39,7 @@ impl SftpBackend for RecordingBackend {
         })
     }
 
-    fn mkdir<'a>(
-        &'a self,
-        path: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    fn mkdir<'a>(&'a self, path: &'a str) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
             self.mkdir_requests
                 .lock()
@@ -243,7 +240,10 @@ async fn runtime_forwards_mutating_operations_to_backend() {
             .lock()
             .expect("lock rename requests")
             .as_slice(),
-        &[("/srv/app/current".to_string(), "/srv/app/previous".to_string())]
+        &[(
+            "/srv/app/current".to_string(),
+            "/srv/app/previous".to_string()
+        )]
     );
 }
 
@@ -264,14 +264,18 @@ async fn runtime_supports_transfer_and_delete_operations() {
     let backend = Arc::new(RecordingBackend::default());
     let runtime = SftpRuntimeHandle::new(backend.clone());
 
-    assert!(!runtime
-        .path_exists("/srv/app/config")
-        .await
-        .expect("query path existence"));
-    assert!(runtime
-        .path_exists("/srv/app/existing")
-        .await
-        .expect("query existing path"));
+    assert!(
+        !runtime
+            .path_exists("/srv/app/config")
+            .await
+            .expect("query path existence")
+    );
+    assert!(
+        runtime
+            .path_exists("/srv/app/existing")
+            .await
+            .expect("query existing path")
+    );
 
     let uploaded = runtime
         .upload_file("/srv/app/config.yml", b"port=22".to_vec())

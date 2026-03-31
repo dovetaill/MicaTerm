@@ -4,7 +4,6 @@ use anyhow::Result;
 use slint::Image;
 
 use crate::app::ssh::runtime::TerminalSurfaceState;
-use crate::app::terminal_model::TerminalModelFrame;
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_font::{
@@ -12,6 +11,7 @@ use crate::app::terminal_font::{
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_layout::{HarfBuzzTextShaper, TextShaper};
+use crate::app::terminal_model::TerminalModelFrame;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 
@@ -191,14 +191,16 @@ fn model_frame_to_surface(model: &TerminalModelFrame) -> TerminalSurfaceState {
             .rows
             .iter()
             .flat_map(|row| {
-                row.cells.iter().map(|cell| crate::app::ssh::runtime::TerminalCellState {
-                    row: cell.row,
-                    col: cell.col,
-                    width: cell.width,
-                    text: cell.text.clone(),
-                    fg_rgba: cell.fg_rgba,
-                    bg_rgba: cell.bg_rgba,
-                })
+                row.cells
+                    .iter()
+                    .map(|cell| crate::app::ssh::runtime::TerminalCellState {
+                        row: cell.row,
+                        col: cell.col,
+                        width: cell.width,
+                        text: cell.text.clone(),
+                        fg_rgba: cell.fg_rgba,
+                        bg_rgba: cell.bg_rgba,
+                    })
             })
             .collect(),
         cursor: crate::app::ssh::runtime::TerminalCursorState {

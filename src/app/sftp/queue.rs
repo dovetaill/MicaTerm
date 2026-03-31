@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 
 use uuid::Uuid;
 
-use crate::app::sftp::local_ops::{LocalTransferEntry, build_local_download_path, build_remote_upload_path};
+use crate::app::sftp::local_ops::{
+    LocalTransferEntry, build_local_download_path, build_remote_upload_path,
+};
 use crate::app::sftp::model::{SftpDirectoryEntry, SftpDirectoryEntryKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,7 +85,8 @@ impl TransferQueueSummary {
             .count();
         let current_session_count = current_session_id
             .map(|session_id| {
-                tasks.iter()
+                tasks
+                    .iter()
                     .filter(|task| task.session_id == session_id)
                     .count()
             })
@@ -217,7 +220,10 @@ impl TransferQueue {
                     id: Uuid::new_v4().to_string(),
                     session_id: session_id.into(),
                     source_path: source.local_path.to_string_lossy().to_string(),
-                    target_path: build_remote_upload_path(target_dir, source.relative_path.as_path()),
+                    target_path: build_remote_upload_path(
+                        target_dir,
+                        source.relative_path.as_path(),
+                    ),
                     direction: TransferDirection::Upload,
                     action: TransferTaskAction::Upload {
                         local_path: source.local_path.clone(),
@@ -301,7 +307,8 @@ impl TransferQueue {
         entry: &SftpDirectoryEntry,
         target_dir: &str,
     ) -> String {
-        let target_path = build_remote_upload_path(target_dir, PathBuf::from(&entry.name).as_path());
+        let target_path =
+            build_remote_upload_path(target_dir, PathBuf::from(&entry.name).as_path());
         let task = TransferTask {
             id: Uuid::new_v4().to_string(),
             session_id: session_id.into(),

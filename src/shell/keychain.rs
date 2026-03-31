@@ -98,10 +98,16 @@ impl std::fmt::Display for KeychainDeleteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::FolderNotEmpty { child_count } => {
-                write!(f, "keychain folder is not empty ({child_count} child items)")
+                write!(
+                    f,
+                    "keychain folder is not empty ({child_count} child items)"
+                )
             }
             Self::ReferencedByHosts { reference_count } => {
-                write!(f, "keychain identity is still referenced by {reference_count} SSH hosts")
+                write!(
+                    f,
+                    "keychain identity is still referenced by {reference_count} SSH hosts"
+                )
             }
             Self::ReferencedByIdentities { reference_count } => write!(
                 f,
@@ -125,7 +131,9 @@ pub fn create_keychain_node(
     let next_id = next_keychain_id(catalog, kind);
     let payload = match kind {
         KeychainItemKind::Folder => KeychainNodePayload::Folder,
-        KeychainItemKind::Identity => KeychainNodePayload::Identity(KeychainIdentitySpec::default()),
+        KeychainItemKind::Identity => {
+            KeychainNodePayload::Identity(KeychainIdentitySpec::default())
+        }
         KeychainItemKind::SshKey => KeychainNodePayload::SshKey(KeychainSshKeySpec::default()),
     };
 
@@ -159,7 +167,8 @@ pub fn rename_keychain_node(
         anyhow::bail!("keychain node `{node_id}` was not found");
     };
     let kind = runtime_kind(node.kind);
-    let sibling_titles = sibling_titles_for_parent(catalog, node.parent_id.as_deref(), Some(node_id));
+    let sibling_titles =
+        sibling_titles_for_parent(catalog, node.parent_id.as_deref(), Some(node_id));
     let next_title = resolve_committed_name(kind, title, &sibling_titles);
     let Some(current) = catalog.nodes.get_mut(node_id) else {
         anyhow::bail!("keychain node `{node_id}` was not found");
@@ -289,12 +298,22 @@ fn collect_search_rows(
         };
 
         let mut child_rows = Vec::new();
-        let descendant_match =
-            collect_search_rows(catalog, &node.child_ids, depth + 1, query, expanded_ids, &mut child_rows);
+        let descendant_match = collect_search_rows(
+            catalog,
+            &node.child_ids,
+            depth + 1,
+            query,
+            expanded_ids,
+            &mut child_rows,
+        );
         let node_match = node_matches_search(node, query);
 
         if node_match || descendant_match {
-            rows.push(row_from_node(node, depth, descendant_match || expanded_ids.contains(node_id)));
+            rows.push(row_from_node(
+                node,
+                depth,
+                descendant_match || expanded_ids.contains(node_id),
+            ));
             rows.extend(child_rows);
             found_match = true;
         }
@@ -335,7 +354,9 @@ fn node_matches_search(node: &KeychainNode, query: &str) -> bool {
 
     match &node.payload {
         KeychainNodePayload::Folder => false,
-        KeychainNodePayload::Identity(identity) => identity.username.to_ascii_lowercase().contains(query),
+        KeychainNodePayload::Identity(identity) => {
+            identity.username.to_ascii_lowercase().contains(query)
+        }
         KeychainNodePayload::SshKey(ssh_key) => {
             ssh_key.fingerprint.to_ascii_lowercase().contains(query)
                 || ssh_key.comment.to_ascii_lowercase().contains(query)
@@ -469,7 +490,11 @@ fn next_default_name(kind: KeychainItemKind, sibling_titles: &[String]) -> Strin
     next_default_name_from_base(&base, sibling_titles)
 }
 
-fn resolve_committed_name(kind: KeychainItemKind, draft: &str, sibling_titles: &[String]) -> String {
+fn resolve_committed_name(
+    kind: KeychainItemKind,
+    draft: &str,
+    sibling_titles: &[String],
+) -> String {
     let trimmed = draft.trim();
     if trimmed.is_empty() {
         return next_default_name(kind, sibling_titles);

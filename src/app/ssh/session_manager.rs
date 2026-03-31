@@ -16,8 +16,7 @@ use crate::app::sftp::{
 };
 use crate::app::ssh::connection_progress::{
     ConnectionAttemptState, ConnectionDiagnosticLine, ConnectionHeadlineState,
-    ConnectionHostKeyPrompt, ConnectionProgressEvent, ConnectionStepState,
-    ConnectionStepStateItem,
+    ConnectionHostKeyPrompt, ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
 };
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::app::ssh::runtime::{
@@ -144,7 +143,9 @@ impl SessionManager {
             let mut registry = self.registry.lock().expect("lock session registry");
             registry.asset_sessions.insert(asset_id, session_id);
             registry.sessions.insert(session_id, handle.clone());
-            registry.session_profiles.insert(session_id, profile.clone());
+            registry
+                .session_profiles
+                .insert(session_id, profile.clone());
             registry.connection_attempts.insert(
                 session_id,
                 ConnectionAttemptState::with_attempt_id(
@@ -635,12 +636,9 @@ impl SessionManager {
                             SessionRuntimeEvent::SurfaceDirty,
                         );
                     }
-                    other => apply_runtime_event(
-                        &registry_for_events,
-                        session_id,
-                        attempt_id,
-                        other,
-                    ),
+                    other => {
+                        apply_runtime_event(&registry_for_events, session_id, attempt_id, other)
+                    }
                 }
             }
         });
@@ -648,7 +646,10 @@ impl SessionManager {
         let launcher = Arc::clone(&self.launcher);
         let registry_for_launch = Arc::clone(&self.registry);
         self.runtime_handle.spawn(async move {
-            match launcher.launch(profile, session_id, attempt_id, event_tx).await {
+            match launcher
+                .launch(profile, session_id, attempt_id, event_tx)
+                .await
+            {
                 Ok(runtime_control) => {
                     attach_runtime_control(
                         &registry_for_launch,
@@ -768,7 +769,11 @@ fn apply_runtime_event(
                 "session manager received runtime error event"
             );
             clear_runtime_control(registry, session_id);
-            update_connection_attempt_headline(registry, session_id, ConnectionHeadlineState::Error);
+            update_connection_attempt_headline(
+                registry,
+                session_id,
+                ConnectionHeadlineState::Error,
+            );
             update_session(registry, session_id, SessionState::Error(message), true);
         }
         SessionRuntimeEvent::ConnectionProgress(progress_event) => {
@@ -882,9 +887,10 @@ fn apply_connection_progress_event(
 fn upsert_connection_step(steps: &mut Vec<ConnectionStepStateItem>, step: ConnectionStepStateItem) {
     if let Some(existing) = steps.iter_mut().find(|item| item.step_id == step.step_id) {
         *existing = step;
-    } else if let Some(existing) = steps.iter_mut().find(|item| {
-        item.step_id == "verify-host-key" && step.step_kind == "verify-host-key"
-    }) {
+    } else if let Some(existing) = steps
+        .iter_mut()
+        .find(|item| item.step_id == "verify-host-key" && step.step_kind == "verify-host-key")
+    {
         *existing = step;
     } else {
         steps.push(step);
@@ -1185,13 +1191,13 @@ fn apply_unknown_host_key_prompt(
             state: ConnectionStepState::Blocked,
         });
     }
-    let should_append_diagnostic = attempt
-        .diagnostics
-        .last()
-        .map(|line| line.message.as_str())
-        != Some(message.as_str());
+    let should_append_diagnostic =
+        attempt.diagnostics.last().map(|line| line.message.as_str()) != Some(message.as_str());
     if should_append_diagnostic {
-        attempt.diagnostics.push(ConnectionDiagnosticLine { attempt_id, message });
+        attempt.diagnostics.push(ConnectionDiagnosticLine {
+            attempt_id,
+            message,
+        });
     }
 
     if let Some(session) = registry.sessions.get_mut(&session_id) {

@@ -34,12 +34,10 @@ fn pixel_at(image: &slint::Image, x: u32, y: u32) -> Rgba8Pixel {
 
 fn renderer_with_fake_color_emoji() -> Result<TerminalAtlasRenderer> {
     TerminalAtlasRenderer::with_emoji_renderer_for_tests(TerminalEmojiRenderer::with_backend(
-        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(
-            ResolvedEmojiFont {
-                face_id: fontdb::ID::dummy(),
-                family_name: "Noto Color Emoji".to_string(),
-            },
-        )),
+        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(ResolvedEmojiFont {
+            face_id: fontdb::ID::dummy(),
+            family_name: "Noto Color Emoji".to_string(),
+        })),
         Box::new(FakeAtlasEmojiBackend),
     ))
 }
@@ -280,7 +278,8 @@ fn atlas_renderer_composites_color_emoji_sprites_and_preserves_them_under_select
         before
             .rendered_clusters
             .iter()
-            .any(|cluster| cluster.text == "🦀" && cluster.sprite_kind == ClusterSpriteKind::ColorRgba),
+            .any(|cluster| cluster.text == "🦀"
+                && cluster.sprite_kind == ClusterSpriteKind::ColorRgba),
         "emoji clusters should be composited through the RGBA sprite path"
     );
     assert_eq!(selected.rerendered_rows, vec![0]);

@@ -117,6 +117,13 @@ pub struct SyncModalViewState {
     pub target_label: String,
     pub primary_action_label: String,
     pub secondary_action_label: String,
+    pub auto_sync_enabled: bool,
+    pub primary_gist_id: String,
+    pub primary_pat: String,
+    pub mirror_enabled: bool,
+    pub mirror_gist_id: String,
+    pub mirror_pat: String,
+    pub master_password: String,
 }
 
 impl Default for SyncModalViewState {
@@ -124,14 +131,21 @@ impl Default for SyncModalViewState {
         Self {
             open: false,
             mode: SyncModalMode::NotConfigured,
-            title: "Sync".into(),
-            headline: "Set up sync".into(),
-            status_text: "Configure a Gitee remote to enable sync.".into(),
+            title: "Sync Settings".into(),
+            headline: "Configure sync".into(),
+            status_text: "Configure at least one Gitee target to enable sync.".into(),
             error_text: String::new(),
             provider_label: "Gitee".into(),
             target_label: String::new(),
-            primary_action_label: "Set up sync".into(),
-            secondary_action_label: String::new(),
+            primary_action_label: "Save and enable".into(),
+            secondary_action_label: "Close".into(),
+            auto_sync_enabled: false,
+            primary_gist_id: String::new(),
+            primary_pat: String::new(),
+            mirror_enabled: false,
+            mirror_gist_id: String::new(),
+            mirror_pat: String::new(),
+            master_password: String::new(),
         }
     }
 }
@@ -699,6 +713,29 @@ impl ShellViewModel {
     pub fn close_sync_modal(&mut self) {
         self.sync_modal_state.open = false;
         self.show_global_menu = false;
+    }
+
+    pub fn update_sync_modal_field(&mut self, field: &str, value: String) {
+        let modal = self.sync_modal_state_mut();
+        match field {
+            "primary-gist-id" => modal.primary_gist_id = value,
+            "primary-pat" => modal.primary_pat = value,
+            "mirror-gist-id" => modal.mirror_gist_id = value,
+            "mirror-pat" => modal.mirror_pat = value,
+            "master-password" => modal.master_password = value,
+            _ => return,
+        }
+        modal.error_text.clear();
+    }
+
+    pub fn update_sync_modal_toggle(&mut self, field: &str, value: bool) {
+        let modal = self.sync_modal_state_mut();
+        match field {
+            "auto-sync" => modal.auto_sync_enabled = value,
+            "mirror-enabled" => modal.mirror_enabled = value,
+            _ => return,
+        }
+        modal.error_text.clear();
     }
 
     pub fn open_appearance_panel(&mut self) {

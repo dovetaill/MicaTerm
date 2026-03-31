@@ -181,8 +181,9 @@ fn missing_identity_reference_reports_explicit_diagnostics() {
     .expect_err("missing identity should fail");
 
     assert!(
-        err.to_string()
-            .contains("keychain identity `identity-missing` referenced by SSH asset `Prod Bastion`")
+        err.to_string().contains(
+            "keychain identity `identity-missing` referenced by SSH asset `Prod Bastion`"
+        )
     );
 }
 

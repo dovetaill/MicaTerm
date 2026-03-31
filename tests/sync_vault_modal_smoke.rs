@@ -17,9 +17,10 @@ use mica_term::app::ssh::credentials::{CredentialStore, MemoryCredentialStore};
 use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
+use mica_term::app::vault::bootstrap::load_local_vault_bootstrap_state;
 use mica_term::app::vault::model::{
-    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, ProviderAuthKind,
-    ProviderKind, RemoteRole,
+    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, ProviderAuthKind, ProviderKind,
+    RemoteRole,
 };
 use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
@@ -114,10 +115,7 @@ impl PrivateKeyImporter for CancelledPrivateKeyImporter {
 }
 
 fn sample_vault_runtime_root(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "mica-term-sync-modal-{label}-{}",
-        Uuid::new_v4()
-    ))
+    std::env::temp_dir().join(format!("mica-term-sync-modal-{label}-{}", Uuid::new_v4()))
 }
 
 fn sample_bootstrap_bundle_with_primary_and_mirror() -> BootstrapBundle {
@@ -185,7 +183,7 @@ fn sync_modal_defaults_to_not_configured_state() {
     assert_eq!(app.get_sync_modal_mode().as_str(), "not-configured");
     assert_eq!(
         app.get_sync_modal_primary_action_label().as_str(),
-        "Set up sync"
+        "Save and enable"
     );
 }
 
@@ -230,6 +228,98 @@ fn first_enable_flow_requires_a_remote_before_local_vault_is_created() {
             .contains("Configure a Gitee remote first")
     );
     assert!(!temp_root.join("vault-bootstrap-state.json").exists());
+}
+
+#[test]
+fn sync_settings_primary_action_persists_primary_target_and_creates_local_vault() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("settings-primary");
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            bootstrap_template: None,
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_draft_changed("primary-gist-id".into(), "gist-primary-123".into());
+    app.invoke_sync_modal_draft_changed("primary-pat".into(), "pat-primary-secret".into());
+    app.invoke_sync_modal_draft_changed("master-password".into(), "vault-pass".into());
+    app.invoke_sync_modal_toggle_changed("auto-sync".into(), true);
+
+    app.invoke_sync_modal_primary_action_requested();
+
+    let saved =
+        load_local_vault_bootstrap_state(temp_root.join("vault-bootstrap-state.json").as_path())
+            .expect("load local bootstrap state")
+            .expect("expected persisted local bootstrap state");
+    let primary = saved.bundle.primary_remote().expect("primary remote");
+    assert_eq!(saved.bundle.auto_sync_enabled, true);
+    assert_eq!(primary.provider, ProviderKind::GiteeGist);
+    assert_eq!(primary.auth_kind, ProviderAuthKind::Pat);
+    match &primary.locator {
+        BootstrapRemoteLocator::GiteeGist { gist_id } => {
+            assert_eq!(gist_id, "gist-primary-123");
+        }
+        other => panic!("unexpected primary locator: {other:?}"),
+    }
+}
+
+#[test]
+fn sync_settings_supports_one_optional_mirror_target() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("settings-mirror");
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            bootstrap_template: None,
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_draft_changed("primary-gist-id".into(), "gist-primary-123".into());
+    app.invoke_sync_modal_draft_changed("primary-pat".into(), "pat-primary-secret".into());
+    app.invoke_sync_modal_toggle_changed("mirror-enabled".into(), true);
+    app.invoke_sync_modal_draft_changed("mirror-gist-id".into(), "gist-mirror-456".into());
+    app.invoke_sync_modal_draft_changed("mirror-pat".into(), "pat-mirror-secret".into());
+    app.invoke_sync_modal_draft_changed("master-password".into(), "vault-pass".into());
+
+    app.invoke_sync_modal_primary_action_requested();
+
+    let saved =
+        load_local_vault_bootstrap_state(temp_root.join("vault-bootstrap-state.json").as_path())
+            .expect("load local bootstrap state")
+            .expect("expected persisted local bootstrap state");
+    assert_eq!(saved.bundle.remotes.len(), 2);
+    assert!(
+        saved
+            .bundle
+            .remotes
+            .iter()
+            .any(|remote| remote.role == RemoteRole::Mirror)
+    );
+    let mirror = saved
+        .bundle
+        .remotes
+        .iter()
+        .find(|remote| remote.role == RemoteRole::Mirror)
+        .expect("mirror remote");
+    match &mirror.locator {
+        BootstrapRemoteLocator::GiteeGist { gist_id } => {
+            assert_eq!(gist_id, "gist-mirror-456");
+        }
+        other => panic!("unexpected mirror locator: {other:?}"),
+    }
 }
 
 #[test]
@@ -296,11 +386,60 @@ fn sync_modal_primary_and_secondary_actions_route_to_sync_and_lock() {
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
 
+    app.invoke_sync_modal_draft_changed("primary-gist-id".into(), "gist-primary-123".into());
+    app.invoke_sync_modal_draft_changed("primary-pat".into(), "pat-primary-secret".into());
+    app.invoke_sync_modal_toggle_changed("mirror-enabled".into(), true);
+    app.invoke_sync_modal_draft_changed("mirror-gist-id".into(), "gist-mirror-456".into());
+    app.invoke_sync_modal_draft_changed("mirror-pat".into(), "pat-mirror-secret".into());
     app.invoke_sync_modal_primary_action_requested();
     assert_eq!(primary.recorded_writes().len(), 1);
 
     app.invoke_sync_modal_secondary_action_requested();
     assert_eq!(app.get_sync_modal_mode().as_str(), "locked");
+}
+
+#[test]
+fn titlebar_sync_failure_updates_error_state_without_reopening_modal() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("titlebar-sync-failure");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    primary.set_read_error(Some("token expired"));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary);
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_sync_modal_close_requested();
+    assert!(!app.get_sync_modal_open());
+
+    app.invoke_sync_now_requested();
+
+    assert!(!app.get_sync_modal_open());
+    assert!(
+        app.get_sync_modal_error_text()
+            .as_str()
+            .contains("token expired")
+    );
 }
 
 #[test]

@@ -1,12 +1,11 @@
 use mica_term::app::assets_catalog::{
-    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetDomain, PersistedAssetKind,
-    PersistedAssetPayload, PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec,
-    PersistedSnippetSpec, PersistedSshConnectionSpec, asset_tree_to_catalog,
-    catalog_to_asset_tree,
+    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetDomain, PersistedAssetKind, PersistedAssetPayload,
+    PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec, PersistedSnippetSpec,
+    PersistedSshConnectionSpec, asset_tree_to_catalog, catalog_to_asset_tree,
 };
 use mica_term::shell::assets::{
-    AssetDomain, AssetNodePayload, AssetSnippetSpec, AssetSocks5ProxySpec,
-    AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, ConsoleAssetKind,
+    AssetDomain, AssetNodePayload, AssetSnippetSpec, AssetSocks5ProxySpec, AssetSshConnectionSpec,
+    AssetSshProxySpec, AssetTree, ConsoleAssetKind,
 };
 
 #[test]
@@ -397,7 +396,10 @@ fn snippets_round_trip_through_catalog_and_preserve_domain() {
     );
 
     let catalog = asset_tree_to_catalog(&tree);
-    let package_node = catalog.nodes.get(&package_id).expect("snippet package node");
+    let package_node = catalog
+        .nodes
+        .get(&package_id)
+        .expect("snippet package node");
     let root_snippet = catalog
         .nodes
         .get(&root_snippet_id)

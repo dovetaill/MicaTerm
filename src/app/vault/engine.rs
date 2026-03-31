@@ -6,9 +6,7 @@ use crate::app::vault::model::{
     CipherKind, KdfConfig, PackLayout, PackRef, ProviderKind, VaultHead, VaultManifest,
     VaultSnapshot,
 };
-use crate::app::vault::provider::{
-    ProviderCapabilities, ProviderWriteRequest, VaultProvider,
-};
+use crate::app::vault::provider::{ProviderCapabilities, ProviderWriteRequest, VaultProvider};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncRequest {
@@ -126,11 +124,12 @@ impl SyncEngine {
             });
         }
 
-        let encrypted_snapshot = encrypt_snapshot(&request.snapshot, &request.vault_key).map_err(
-            |err| SyncError::PayloadAssemblyFailed {
-                message: err.to_string(),
-            },
-        )?;
+        let encrypted_snapshot =
+            encrypt_snapshot(&request.snapshot, &request.vault_key).map_err(|err| {
+                SyncError::PayloadAssemblyFailed {
+                    message: err.to_string(),
+                }
+            })?;
         let primary_request = build_provider_write_request(
             &request,
             &encrypted_snapshot,

@@ -105,7 +105,10 @@ fn deletion_cancels_conflicting_transfer_tasks() {
     let task_id = task_ids.first().expect("upload task id").clone();
 
     assert!(queue.mark_running(&task_id));
-    assert_eq!(queue.cancel_conflicting_paths("session-a", &["/srv/app/release.tar.gz".into()]), 1);
+    assert_eq!(
+        queue.cancel_conflicting_paths("session-a", &["/srv/app/release.tar.gz".into()]),
+        1
+    );
     assert_eq!(
         queue.task(&task_id).expect("cancelled task").state,
         TransferTaskState::Cancelled
@@ -128,5 +131,8 @@ fn conflict_task_can_resume_with_selected_policy() {
 
     let task = queue.task(&task_id).expect("resumed task");
     assert_eq!(task.state, TransferTaskState::Queued);
-    assert_eq!(task.conflict_policy, Some(TransferConflictPolicy::Overwrite));
+    assert_eq!(
+        task.conflict_policy,
+        Some(TransferConflictPolicy::Overwrite)
+    );
 }

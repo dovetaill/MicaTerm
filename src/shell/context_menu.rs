@@ -650,7 +650,9 @@ fn resolve_sftp_file_actions(selection: &SelectionContext) -> Vec<ContextMenuAct
     ]
 }
 
-fn resolve_sftp_multi_selection_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
+fn resolve_sftp_multi_selection_actions(
+    selection: &SelectionContext,
+) -> Vec<ContextMenuActionNode> {
     vec![
         action_with_state(
             "download-selected",

@@ -163,7 +163,7 @@ fn titlebar_exposes_sync_as_a_first_class_action() {
     bind_top_status_bar_with_store(&app, None);
 
     assert!(!app.get_sync_modal_open());
-    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_now_requested();
     assert!(app.get_sync_modal_open());
 }
 

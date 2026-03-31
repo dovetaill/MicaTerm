@@ -2,14 +2,16 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use mica_term::app::ssh::credentials::StoredSshSecretBundle;
-use mica_term::app::vault::cache::{cache_path_for_vault, load_encrypted_cache, store_encrypted_cache};
+use mica_term::app::vault::cache::{
+    cache_path_for_vault, load_encrypted_cache, store_encrypted_cache,
+};
 use mica_term::app::vault::crypto::{
     decrypt_snapshot, encrypt_snapshot, generate_vault_key, unwrap_vault_key, wrap_vault_key,
 };
 use mica_term::app::vault::model::{
     KdfConfig, SnapshotSyncPreferences, SnapshotUiPreferences, VaultAssetCatalog, VaultAssetKind,
-    VaultAssetNode, VaultAssetPayload, VaultKnownHostEntry, VaultSshConnectionSpec,
-    VaultSnapshot, VaultSshProxySpec,
+    VaultAssetNode, VaultAssetPayload, VaultKnownHostEntry, VaultSnapshot, VaultSshConnectionSpec,
+    VaultSshProxySpec,
 };
 use secrecy::SecretString;
 use uuid::Uuid;
@@ -74,7 +76,9 @@ fn sample_snapshot() -> VaultSnapshot {
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack.windows(needle.len()).any(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 #[test]

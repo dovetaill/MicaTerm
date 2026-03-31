@@ -2,19 +2,22 @@ use std::fs;
 
 #[test]
 fn keychain_panel_contract_replaces_placeholder_copy_with_tree_projection() {
-    let sidebar =
-        fs::read_to_string("ui/shell/assets-sidebar.slint").expect("read assets sidebar");
+    let sidebar = fs::read_to_string("ui/shell/assets-sidebar.slint").expect("read assets sidebar");
 
     assert!(
         sidebar.contains("in property <[ConsoleAssetItem]> keychain-asset-items: [];"),
         "keychain panel should expose a dedicated projected row model"
     );
     assert!(
-        sidebar.contains("if root.active-panel == \"keychain\" && root.keychain-asset-items.length == 0"),
+        sidebar.contains(
+            "if root.active-panel == \"keychain\" && root.keychain-asset-items.length == 0"
+        ),
         "keychain panel should keep an explicit empty state once explorer rows are wired"
     );
     assert!(
-        sidebar.contains("if root.active-panel == \"keychain\" && root.keychain-asset-items.length > 0"),
+        sidebar.contains(
+            "if root.active-panel == \"keychain\" && root.keychain-asset-items.length > 0"
+        ),
         "keychain panel should render a keychain list host when rows exist"
     );
     assert!(

@@ -4,9 +4,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use crate::app::ssh::runtime::{
-    TerminalCellState, TerminalCursorShape, TerminalSurfaceState,
-};
+use crate::app::ssh::runtime::{TerminalCellState, TerminalCursorShape, TerminalSurfaceState};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

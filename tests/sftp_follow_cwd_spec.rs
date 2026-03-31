@@ -11,9 +11,7 @@ use mica_term::app::bootstrap::bind_top_status_bar_with_store_and_effects_and_as
 use mica_term::app::sftp::{SftpBackend, SftpRuntimeHandle};
 use mica_term::app::ssh::credentials::{CredentialStore, MemoryCredentialStore};
 use mica_term::app::ssh::profile::ConnectionProfile;
-use mica_term::app::ssh::runtime::{
-    SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput,
-};
+use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::window_effects::default_platform_window_effects;
 use slint::Model;
@@ -27,7 +25,9 @@ impl SftpBackend for NoopSftpBackend {
     fn read_dir<'a>(
         &'a self,
         _path: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<mica_term::app::sftp::SftpDirectoryEntry>>> + Send + 'a>> {
+    ) -> Pin<
+        Box<dyn Future<Output = Result<Vec<mica_term::app::sftp::SftpDirectoryEntry>>> + Send + 'a>,
+    > {
         Box::pin(async move { Ok(Vec::new()) })
     }
 
@@ -132,7 +132,8 @@ impl SessionRuntimeLauncher for FollowCwdLauncher {
         _session_id: Uuid,
         _attempt_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         let state = self.state.clone();
         Box::pin(async move {
             *state.event_tx.lock().expect("lock event tx") = Some(event_tx.clone());

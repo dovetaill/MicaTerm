@@ -20,14 +20,21 @@ SIDEBAR="$ROOT_DIR/ui/shell/sidebar.slint"
 grep -F 'in-out property <bool> asset-modal-open: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> sync-modal-open: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-mode: "not-configured";' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <string> sync-modal-title: "Sync";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-title: "Sync Settings";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-headline: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-status-text: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-error-text: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-provider-label: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-target-label: "";' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <string> sync-modal-primary-action-label: "Set up sync";' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <string> sync-modal-secondary-action-label: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-primary-action-label: "Save and enable";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-secondary-action-label: "Close";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <bool> sync-modal-auto-sync-enabled: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-primary-gist-id: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-primary-pat: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <bool> sync-modal-mirror-enabled: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-mirror-gist-id: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-mirror-pat: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-master-password: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-modal-kind: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <int> asset-modal-focus-sequence: 0;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-snippet-modal-name: "";' "$APP_WINDOW" >/dev/null
@@ -67,6 +74,8 @@ grep -F 'callback close-asset-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback sync-modal-close-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback sync-modal-primary-action-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback sync-modal-secondary-action-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback sync-modal-draft-changed(string, string);' "$APP_WINDOW" >/dev/null
+grep -F 'callback sync-modal-toggle-changed(string, bool);' "$APP_WINDOW" >/dev/null
 grep -F 'callback confirm-asset-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback asset-snippet-modal-draft-changed(string, string);' "$APP_WINDOW" >/dev/null
 grep -F 'callback asset-snippet-package-modal-name-changed(string);' "$APP_WINDOW" >/dev/null
@@ -81,7 +90,7 @@ grep -F -A5 'sync-vault-modal-overlay := SyncVaultModal {' "$APP_WINDOW" | grep 
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 520px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
-grep -F 'modal-height: 560px;' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: 620px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 268px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 332px;' "$APP_WINDOW" >/dev/null
 grep -F 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" >/dev/null
@@ -110,12 +119,20 @@ grep -F 'y: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'export component AssetsSnippetModal inherits Rectangle {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'export component SyncVaultModal inherits Rectangle {' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> mode: "not-configured";' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <string> title: "Sync Settings";' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <bool> auto-sync-enabled: false;' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <string> primary-gist-id: "";' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <bool> mirror-enabled: false;' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <string> master-password: "";' "$SYNC_MODAL" >/dev/null
 grep -F 'callback close-requested();' "$SYNC_MODAL" >/dev/null
 grep -F 'callback primary-action-requested();' "$SYNC_MODAL" >/dev/null
 grep -F 'callback secondary-action-requested();' "$SYNC_MODAL" >/dev/null
-grep -F 'if root.mode == "not-configured"' "$SYNC_MODAL" >/dev/null
-grep -F 'if root.mode == "locked"' "$SYNC_MODAL" >/dev/null
-grep -F 'if root.mode == "ready"' "$SYNC_MODAL" >/dev/null
+grep -F 'callback draft-changed(string, string);' "$SYNC_MODAL" >/dev/null
+grep -F 'callback toggle-changed(string, bool);' "$SYNC_MODAL" >/dev/null
+grep -F 'error-banner := Rectangle {' "$SYNC_MODAL" >/dev/null
+grep -F 'SyncModalToggleRow {' "$SYNC_MODAL" >/dev/null
+grep -F 'SyncModalTextField {' "$SYNC_MODAL" >/dev/null
+grep -F 'if root.mode == "not-configured" || root.mode == "locked"' "$SYNC_MODAL" >/dev/null
 grep -F 'export component AssetsSnippetPackageModal inherits Rectangle {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'export component AssetsFolderCreateModal inherits Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsSshConnectionModal inherits Rectangle {' "$SSH_MODAL" >/dev/null

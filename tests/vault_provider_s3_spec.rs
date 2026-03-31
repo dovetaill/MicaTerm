@@ -67,7 +67,10 @@ fn s3_provider_generates_stable_deterministic_object_names_for_head_manifest_and
     let keys = S3ObjectKeySet::for_revision("users/demo", "rev-0002", 3);
 
     assert_eq!(keys.head_key, "users/demo/head.json");
-    assert_eq!(keys.manifest_key, "users/demo/revisions/rev-0002/manifest.bin");
+    assert_eq!(
+        keys.manifest_key,
+        "users/demo/revisions/rev-0002/manifest.bin"
+    );
     assert_eq!(
         keys.pack_keys,
         vec![

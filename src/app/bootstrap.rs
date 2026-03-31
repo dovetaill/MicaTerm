@@ -77,7 +77,8 @@ use crate::app::terminal_renderer::{NativeTerminalSurface, NativeTerminalSurface
 use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
-    LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
+    LocalVaultBootstrapState, bootstrap_provider_credential_ref, load_local_vault_bootstrap_state,
+    load_provider_credential, persist_provider_credential, save_local_vault_bootstrap_state,
 };
 use crate::app::vault::cache::{load_encrypted_cache, store_encrypted_cache};
 use crate::app::vault::crypto::{
@@ -86,8 +87,8 @@ use crate::app::vault::crypto::{
 };
 use crate::app::vault::engine::{SyncEngine, SyncError, SyncRequest};
 use crate::app::vault::model::{
-    BootstrapBundle, BootstrapRemoteConfig, GiteeRemoteDraft, KdfConfig, ProviderKind, RemoteRole,
-    SnapshotSyncPreferences, VaultAssetPayload, VaultSnapshot,
+    BootstrapBundle, BootstrapRemoteConfig, GiteeRemoteDraft, KdfConfig, ProviderAuthKind,
+    ProviderKind, RemoteRole, SnapshotSyncPreferences, VaultAssetPayload, VaultSnapshot,
 };
 use crate::app::vault::provider::gitee_gist::{GiteeGistProvider, GiteeGistProviderConfig};
 use crate::app::vault::provider::github_gist::{GitHubGistProvider, GitHubGistProviderConfig};
@@ -598,6 +599,13 @@ fn sync_sync_modal_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_sync_modal_target_label(modal.target_label.clone().into());
     window.set_sync_modal_primary_action_label(modal.primary_action_label.clone().into());
     window.set_sync_modal_secondary_action_label(modal.secondary_action_label.clone().into());
+    window.set_sync_modal_auto_sync_enabled(modal.auto_sync_enabled);
+    window.set_sync_modal_primary_gist_id(modal.primary_gist_id.clone().into());
+    window.set_sync_modal_primary_pat(modal.primary_pat.clone().into());
+    window.set_sync_modal_mirror_enabled(modal.mirror_enabled);
+    window.set_sync_modal_mirror_gist_id(modal.mirror_gist_id.clone().into());
+    window.set_sync_modal_mirror_pat(modal.mirror_pat.clone().into());
+    window.set_sync_modal_master_password(modal.master_password.clone().into());
 }
 
 fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) {
@@ -3968,20 +3976,195 @@ fn update_vault_panel_for_local_state(state: &mut ShellViewModel, vault: &VaultS
     }
 }
 
+fn sync_settings_remote_id(role: RemoteRole) -> &'static str {
+    match role {
+        RemoteRole::Primary => "remote-primary",
+        RemoteRole::Mirror => "remote-mirror",
+    }
+}
+
+fn configured_sync_bundle(vault: &VaultSessionState) -> Option<&BootstrapBundle> {
+    vault
+        .local_state
+        .as_ref()
+        .map(|local_state| &local_state.bundle)
+        .or(vault.bootstrap_template.as_ref())
+}
+
+fn hydrate_sync_modal_draft(
+    state: &mut ShellViewModel,
+    vault: &VaultSessionState,
+    credential_store: &dyn CredentialStore,
+) {
+    let modal = state.sync_modal_state_mut();
+    let bundle = configured_sync_bundle(vault);
+    let primary = bundle.and_then(BootstrapBundle::primary_remote);
+    let mirror = bundle.and_then(|bundle| {
+        bundle
+            .remotes
+            .iter()
+            .find(|remote| remote.role == RemoteRole::Mirror)
+    });
+
+    modal.auto_sync_enabled = bundle.is_some_and(|bundle| bundle.auto_sync_enabled);
+    modal.primary_gist_id = match primary.map(|remote| &remote.locator) {
+        Some(crate::app::vault::model::BootstrapRemoteLocator::GiteeGist { gist_id }) => {
+            gist_id.clone()
+        }
+        _ => String::new(),
+    };
+    modal.primary_pat = primary
+        .and_then(|remote| {
+            load_provider_credential(credential_store, remote.credential_ref.as_deref()).ok()
+        })
+        .flatten()
+        .unwrap_or_default();
+    modal.mirror_enabled = mirror.is_some();
+    modal.mirror_gist_id = match mirror.map(|remote| &remote.locator) {
+        Some(crate::app::vault::model::BootstrapRemoteLocator::GiteeGist { gist_id }) => {
+            gist_id.clone()
+        }
+        _ => String::new(),
+    };
+    modal.mirror_pat = mirror
+        .and_then(|remote| {
+            load_provider_credential(credential_store, remote.credential_ref.as_deref()).ok()
+        })
+        .flatten()
+        .unwrap_or_default();
+    modal.master_password.clear();
+}
+
+fn build_sync_bundle_from_modal(
+    state: &ShellViewModel,
+    existing_bundle: Option<&BootstrapBundle>,
+) -> Result<BootstrapBundle> {
+    let modal = state.sync_modal_state();
+    let primary_gist_id = modal.primary_gist_id.trim();
+    let primary_pat = modal.primary_pat.trim();
+
+    if primary_gist_id.is_empty() {
+        return Err(anyhow!("Enter a primary Gist ID before enabling sync"));
+    }
+    if primary_pat.is_empty() {
+        return Err(anyhow!(
+            "Enter a primary Personal Access Token before enabling sync"
+        ));
+    }
+    if modal.mirror_enabled {
+        if modal.mirror_gist_id.trim().is_empty() {
+            return Err(anyhow!(
+                "Enter a mirror Gist ID or disable the mirror target"
+            ));
+        }
+        if modal.mirror_pat.trim().is_empty() {
+            return Err(anyhow!(
+                "Enter a mirror Personal Access Token or disable the mirror target"
+            ));
+        }
+    }
+
+    let mut bundle = existing_bundle.cloned().unwrap_or_default();
+    bundle.auto_sync_enabled = modal.auto_sync_enabled;
+    bundle.remotes.clear();
+    bundle.remotes.push(BootstrapRemoteConfig {
+        remote_id: sync_settings_remote_id(RemoteRole::Primary).into(),
+        role: RemoteRole::Primary,
+        provider: first_release_formal_provider_kind(),
+        locator: crate::app::vault::model::BootstrapRemoteLocator::GiteeGist {
+            gist_id: primary_gist_id.into(),
+        },
+        credential_ref: Some(bootstrap_provider_credential_ref(sync_settings_remote_id(
+            RemoteRole::Primary,
+        ))),
+        auth_kind: ProviderAuthKind::Pat,
+        last_health: None,
+    });
+
+    if modal.mirror_enabled {
+        bundle.remotes.push(BootstrapRemoteConfig {
+            remote_id: sync_settings_remote_id(RemoteRole::Mirror).into(),
+            role: RemoteRole::Mirror,
+            provider: first_release_formal_provider_kind(),
+            locator: crate::app::vault::model::BootstrapRemoteLocator::GiteeGist {
+                gist_id: modal.mirror_gist_id.trim().into(),
+            },
+            credential_ref: Some(bootstrap_provider_credential_ref(sync_settings_remote_id(
+                RemoteRole::Mirror,
+            ))),
+            auth_kind: ProviderAuthKind::Pat,
+            last_health: None,
+        });
+    }
+
+    Ok(bundle)
+}
+
+fn persist_sync_modal_settings(
+    state: &mut ShellViewModel,
+    vault: &mut VaultSessionState,
+    credential_store: &dyn CredentialStore,
+) -> Result<()> {
+    let existing_bundle = configured_sync_bundle(vault);
+    let bundle = build_sync_bundle_from_modal(state, existing_bundle)?;
+    let modal = state.sync_modal_state();
+
+    persist_provider_credential(
+        credential_store,
+        bootstrap_provider_credential_ref(sync_settings_remote_id(RemoteRole::Primary)).as_str(),
+        Some(modal.primary_pat.as_str()),
+    )?;
+    persist_provider_credential(
+        credential_store,
+        bootstrap_provider_credential_ref(sync_settings_remote_id(RemoteRole::Mirror)).as_str(),
+        if modal.mirror_enabled {
+            Some(modal.mirror_pat.as_str())
+        } else {
+            None
+        },
+    )?;
+
+    let bootstrap_state_path = vault.bootstrap_state_path();
+    if let Some(local_state) = vault.local_state.as_mut() {
+        local_state.bundle = bundle;
+        save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
+    } else {
+        vault.bootstrap_template = Some(bundle);
+    }
+
+    update_sync_modal_for_local_state(state, vault);
+    Ok(())
+}
+
 fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vault: &VaultSessionState) {
     let has_primary_remote = vault_primary_remote(vault).is_some();
     let gitee_setup = GiteeRemoteDraft::default();
+    let mirror_count = configured_sync_bundle(vault)
+        .map(|bundle| {
+            bundle
+                .remotes
+                .iter()
+                .filter(|remote| remote.role == RemoteRole::Mirror)
+                .count()
+        })
+        .unwrap_or(0);
     let modal = state.sync_modal_state_mut();
 
-    modal.title = "Sync".into();
+    modal.title = "Sync Settings".into();
     debug_assert_eq!(
         first_release_formal_provider_kind(),
         ProviderKind::GiteeGist
     );
     modal.provider_label = first_release_formal_provider_label().into();
-    modal.target_label = vault_primary_remote(vault)
-        .map(|remote| remote.remote_id.clone())
-        .unwrap_or_default();
+    modal.target_label = if has_primary_remote {
+        if mirror_count == 0 {
+            "1 target configured".into()
+        } else {
+            format!("1 primary + {mirror_count} mirror")
+        }
+    } else {
+        String::new()
+    };
     modal.error_text.clear();
 
     match (
@@ -3991,44 +4174,50 @@ fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vault: &VaultSe
     ) {
         (None, false, false) => {
             modal.mode = SyncModalMode::NotConfigured;
-            modal.headline = "Set up sync".into();
+            modal.headline = "Configure sync".into();
             modal.status_text = gitee_setup.setup_summary();
-            modal.primary_action_label = "Set up sync".into();
+            modal.primary_action_label = "Save and enable".into();
             modal.secondary_action_label = "Close".into();
         }
         (None, false, true) => {
             modal.mode = SyncModalMode::NotConfigured;
-            modal.headline = "Set up sync".into();
+            modal.headline = "Enable sync".into();
             modal.status_text = format!(
-                "Submit a master password to finish {} {} setup for the configured Gist target.",
+                "The target is configured. Enter a master password to finish {} {} setup.",
                 first_release_formal_provider_label(),
                 first_release_formal_auth_label()
             );
-            modal.primary_action_label = "Set up sync".into();
+            modal.primary_action_label = "Save and enable".into();
             modal.secondary_action_label = "Close".into();
         }
         (Some(_), false, false) | (Some(_), false, true) => {
             modal.mode = SyncModalMode::Locked;
             modal.headline = "Unlock sync".into();
-            modal.status_text = "Unlock the local vault to inspect and manage sync.".into();
+            modal.status_text = "Sync is configured. Enter your master password to unlock local secrets and resume sync.".into();
             modal.primary_action_label = "Unlock".into();
             modal.secondary_action_label = "Close".into();
         }
         (Some(_), true, false) => {
             modal.mode = SyncModalMode::UnlockedButRemoteIncomplete;
-            modal.headline = "Finish sync setup".into();
+            modal.headline = "Finish sync settings".into();
             modal.status_text = format!(
                 "Add a {} target authenticated with {} before sync can run.",
                 first_release_formal_provider_label(),
                 first_release_formal_auth_label()
             );
-            modal.primary_action_label = "Set up sync".into();
+            modal.primary_action_label = "Save settings".into();
             modal.secondary_action_label = "Lock".into();
         }
         (Some(_), true, true) => {
             modal.mode = SyncModalMode::Ready;
             modal.headline = "Sync is ready".into();
-            modal.status_text = "Primary remote is configured and ready to use.".into();
+            modal.status_text =
+                if configured_sync_bundle(vault).is_some_and(|bundle| bundle.auto_sync_enabled) {
+                    "Auto sync is enabled. Titlebar Sync runs an immediate foreground sync.".into()
+                } else {
+                    "Auto sync is disabled. Use the titlebar Sync button when you want to sync now."
+                        .into()
+                };
             modal.primary_action_label = "Sync now".into();
             modal.secondary_action_label = "Lock".into();
         }
@@ -4065,14 +4254,13 @@ fn set_sync_modal_error(
     state.set_sync_modal_error(error);
 }
 
-fn sync_modal_password_prompt(vault: &VaultSessionState) -> &'static str {
-    if vault.local_state.is_some() {
-        "Submit a master password to unlock sync."
-    } else if vault_primary_remote(vault).is_some() {
-        "Submit a master password to finish sync setup."
-    } else {
-        "Configure a Gitee remote first"
-    }
+fn set_sync_modal_error_without_opening(
+    state: &mut ShellViewModel,
+    vault: &VaultSessionState,
+    error: impl Into<String>,
+) {
+    update_sync_modal_for_local_state(state, vault);
+    state.sync_modal_state_mut().error_text = error.into();
 }
 
 fn submit_sync_modal_master_password(
@@ -4082,7 +4270,9 @@ fn submit_sync_modal_master_password(
     password: &secrecy::SecretString,
 ) -> Result<()> {
     if vault.local_state.is_some() {
-        unlock_local_vault_into_shell(state, vault, credential_store, password)
+        unlock_local_vault_into_shell(state, vault, credential_store, password)?;
+        sync_local_vault_if_auto_enabled(state, vault, credential_store, "unlocking local vault");
+        Ok(())
     } else {
         create_local_vault_from_shell_state(state, vault, credential_store, password)
     }
@@ -4246,6 +4436,27 @@ fn lock_local_vault(
     Ok(())
 }
 
+fn resolve_remote_for_sync(
+    remote: &BootstrapRemoteConfig,
+    credential_store: &dyn CredentialStore,
+) -> Result<BootstrapRemoteConfig> {
+    let mut resolved = remote.clone();
+
+    if remote.provider == ProviderKind::GiteeGist && remote.auth_kind == ProviderAuthKind::Pat {
+        let inline_secret =
+            load_provider_credential(credential_store, remote.credential_ref.as_deref())?;
+        let inline_secret = inline_secret.ok_or_else(|| {
+            anyhow!(
+                "missing saved provider credential for remote `{}`",
+                remote.remote_id
+            )
+        })?;
+        resolved.credential_ref = Some(inline_secret);
+    }
+
+    Ok(resolved)
+}
+
 fn sync_local_vault(
     state: &mut ShellViewModel,
     vault: &mut VaultSessionState,
@@ -4265,13 +4476,17 @@ fn sync_local_vault(
         .primary_remote()
         .cloned()
         .ok_or_else(|| anyhow!("primary remote is not configured"))?;
+    let primary_remote = resolve_remote_for_sync(&primary_remote, credential_store)?;
     let primary_provider = vault.provider_factory.build_provider(&primary_remote)?;
     let mirror_providers = local_state
         .bundle
         .remotes
         .iter()
         .filter(|remote| remote.role == RemoteRole::Mirror)
-        .map(|remote| vault.provider_factory.build_provider(remote))
+        .map(|remote| {
+            let resolved = resolve_remote_for_sync(remote, credential_store)?;
+            vault.provider_factory.build_provider(&resolved)
+        })
         .collect::<Result<Vec<_>>>()?;
     let snapshot = export_vault_snapshot(
         &combined_asset_tree(state),
@@ -4340,9 +4555,33 @@ fn sync_local_vault(
                     format!("Vault decrypt error: {message}")
                 }
             };
-            state.set_sync_modal_error(err.to_string());
+            state.sync_modal_state_mut().error_text = err.to_string();
             Err(anyhow!(err.to_string()))
         }
+    }
+}
+
+fn sync_local_vault_if_auto_enabled(
+    state: &mut ShellViewModel,
+    vault: &mut VaultSessionState,
+    credential_store: &dyn CredentialStore,
+    context: &'static str,
+) {
+    let should_auto_sync = vault.local_state.is_some()
+        && vault.unlocked_vault_key.is_some()
+        && configured_sync_bundle(vault).is_some_and(|bundle| bundle.auto_sync_enabled);
+    if !should_auto_sync {
+        return;
+    }
+
+    if let Err(err) = sync_local_vault(state, vault, credential_store) {
+        tracing::error!(
+            target: "app.vault",
+            error = %err,
+            auto_sync_context = context,
+            "failed to auto sync local vault"
+        );
+        set_sync_modal_error_without_opening(state, vault, err.to_string());
     }
 }
 
@@ -4938,13 +5177,74 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(&effects);
+    let vault_session_ref = Rc::clone(&vault_session);
+    let credential_store_ref = Arc::clone(&credential_store);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_sync_now_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let mut vault = vault_session_ref.borrow_mut();
+        let (width, height) = current_window_size(&window);
+
+        update_sync_modal_for_local_state(&mut state, &vault);
+        if matches!(state.sync_modal_state().mode, SyncModalMode::Ready) {
+            if let Err(err) = sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref())
+            {
+                tracing::error!(target: "app.vault", error = %err, "failed to sync local vault from titlebar sync action");
+            }
+        } else {
+            hydrate_sync_modal_draft(&mut state, &vault, credential_store_ref.as_ref());
+            state.open_sync_modal();
+        }
+
+        sync_shell_state(
+            &window,
+            &state,
+            effects_ref.as_ref(),
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+        );
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    let vault_session_ref = Rc::clone(&vault_session);
+    let credential_store_ref = Arc::clone(&credential_store);
     window.on_open_sync_modal_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let vault = vault_session_ref.borrow();
+        hydrate_sync_modal_draft(&mut state, &vault, credential_store_ref.as_ref());
+        update_sync_modal_for_local_state(&mut state, &vault);
         state.open_sync_modal();
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_sync_modal_state(&window, &state);
         save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(&effects);
+    window.on_sync_modal_draft_changed(move |field, value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.update_sync_modal_field(field.as_str(), value.to_string());
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_sync_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(&effects);
+    window.on_sync_modal_toggle_changed(move |field, value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.update_sync_modal_toggle(field.as_str(), value);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_sync_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -5054,15 +5354,57 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let mut state = state.borrow_mut();
         let mut vault = vault_session_ref.borrow_mut();
         let (width, height) = current_window_size(&window);
+        let master_password = state.sync_modal_state().master_password.clone();
         match state.sync_modal_state().mode {
-            SyncModalMode::NotConfigured | SyncModalMode::Locked => {
-                state.set_sync_modal_error(sync_modal_password_prompt(&vault));
+            SyncModalMode::NotConfigured => {
+                if let Err(err) =
+                    persist_sync_modal_settings(&mut state, &mut vault, credential_store_ref.as_ref())
+                {
+                    set_sync_modal_error(&mut state, &vault, err.to_string());
+                } else if master_password.trim().is_empty() {
+                    state.set_sync_modal_error("Enter a master password to enable sync.");
+                } else {
+                    let secret = secrecy::SecretString::new(master_password.into());
+                    if let Err(err) = create_local_vault_from_shell_state(
+                        &mut state,
+                        &mut vault,
+                        credential_store_ref.as_ref(),
+                        &secret,
+                    ) {
+                        tracing::error!(target: "app.vault", error = %err, "failed to enable sync from sync settings");
+                        set_sync_modal_error(&mut state, &vault, err.to_string());
+                    }
+                }
+            }
+            SyncModalMode::Locked => {
+                if master_password.trim().is_empty() {
+                    state.set_sync_modal_error("Enter a master password to unlock sync.");
+                } else {
+                    let secret = secrecy::SecretString::new(master_password.into());
+                    if let Err(err) = unlock_local_vault_into_shell(
+                        &mut state,
+                        &mut vault,
+                        credential_store_ref.as_ref(),
+                        &secret,
+                    ) {
+                        tracing::error!(target: "app.vault", error = %err, "failed to unlock sync from sync settings");
+                        set_sync_modal_error(&mut state, &vault, err.to_string());
+                    }
+                }
             }
             SyncModalMode::UnlockedButRemoteIncomplete => {
-                set_sync_modal_error(&mut state, &vault, "Configure a Gitee remote first");
+                if let Err(err) =
+                    persist_sync_modal_settings(&mut state, &mut vault, credential_store_ref.as_ref())
+                {
+                    set_sync_modal_error(&mut state, &vault, err.to_string());
+                }
             }
             SyncModalMode::Ready => {
                 if let Err(err) =
+                    persist_sync_modal_settings(&mut state, &mut vault, credential_store_ref.as_ref())
+                {
+                    set_sync_modal_error(&mut state, &vault, err.to_string());
+                } else if let Err(err) =
                     sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref())
                 {
                     tracing::error!(target: "app.vault", error = %err, "failed to sync local vault from primary sync modal action");
@@ -5751,6 +6093,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let asset_repo_ref = asset_repo.clone();
     let credential_store_ref = Arc::clone(&credential_store);
+    let vault_session_ref = Rc::clone(&vault_session);
     window.on_confirm_asset_modal_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -5776,6 +6119,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 );
             }
             save_asset_catalog_if_available(&asset_repo_ref, &state);
+            let mut vault = vault_session_ref.borrow_mut();
+            sync_local_vault_if_auto_enabled(
+                &mut state,
+                &mut vault,
+                credential_store_ref.as_ref(),
+                "confirming asset modal changes",
+            );
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
@@ -5795,12 +6145,21 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let asset_repo_ref = asset_repo.clone();
+    let credential_store_ref = Arc::clone(&credential_store);
+    let vault_session_ref = Rc::clone(&vault_session);
     window.on_confirm_asset_rename_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let did_mutate = state.confirm_asset_modal();
         if did_mutate {
             save_asset_catalog_if_available(&asset_repo_ref, &state);
+            let mut vault = vault_session_ref.borrow_mut();
+            sync_local_vault_if_auto_enabled(
+                &mut state,
+                &mut vault,
+                credential_store_ref.as_ref(),
+                "renaming asset",
+            );
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
@@ -5810,12 +6169,21 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let asset_repo_ref = asset_repo.clone();
+    let credential_store_ref = Arc::clone(&credential_store);
+    let vault_session_ref = Rc::clone(&vault_session);
     window.on_confirm_delete_asset_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let did_mutate = state.confirm_delete_asset();
         if did_mutate {
             save_asset_catalog_if_available(&asset_repo_ref, &state);
+            let mut vault = vault_session_ref.borrow_mut();
+            sync_local_vault_if_auto_enabled(
+                &mut state,
+                &mut vault,
+                credential_store_ref.as_ref(),
+                "deleting asset",
+            );
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
@@ -5875,6 +6243,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let credential_store_ref = Arc::clone(&credential_store);
     let private_key_importer_ref = Arc::clone(&private_key_importer);
+    let vault_session_ref = Rc::clone(&vault_session);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_asset_ssh_modal_action_requested(move |action| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
@@ -6075,6 +6444,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
         if did_mutate && !catalog_persisted_in_action {
             save_asset_catalog_if_available(&asset_repo_ref, &state);
+        }
+        if did_mutate {
+            let mut vault = vault_session_ref.borrow_mut();
+            sync_local_vault_if_auto_enabled(
+                &mut state,
+                &mut vault,
+                credential_store_ref.as_ref(),
+                "saving SSH asset changes",
+            );
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
@@ -7137,6 +7515,7 @@ pub fn run_with_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::ssh::credentials::MemoryCredentialStore;
     use crate::app::ssh::profile::SshAuthMethod;
     use crate::app::ssh::runtime::{TerminalCellState, TerminalKeyEvent, TerminalSurfaceState};
     use std::future::Future;
@@ -7260,6 +7639,55 @@ mod tests {
             resolved_proxy_hops: Vec::new(),
             remark: String::new(),
         }
+    }
+
+    fn sample_gitee_sync_remote() -> BootstrapRemoteConfig {
+        BootstrapRemoteConfig {
+            remote_id: "remote-gitee-primary".into(),
+            role: RemoteRole::Primary,
+            provider: ProviderKind::GiteeGist,
+            locator: crate::app::vault::model::BootstrapRemoteLocator::GiteeGist {
+                gist_id: "gitee-gist-456".into(),
+            },
+            credential_ref: Some("vault/bootstrap/remote-gitee-primary".into()),
+            auth_kind: ProviderAuthKind::Pat,
+            last_health: None,
+        }
+    }
+
+    #[test]
+    fn sync_remote_resolution_inlines_saved_gitee_pat_before_provider_build() {
+        let remote = sample_gitee_sync_remote();
+        let store = MemoryCredentialStore::default();
+        persist_provider_credential(
+            &store,
+            remote.credential_ref.as_deref().expect("credential ref"),
+            Some("gitee-pat"),
+        )
+        .expect("persist provider credential");
+
+        let resolved = resolve_remote_for_sync(&remote, &store).expect("resolve sync remote");
+
+        assert_eq!(resolved.credential_ref.as_deref(), Some("gitee-pat"));
+        assert_eq!(
+            remote.credential_ref.as_deref(),
+            Some("vault/bootstrap/remote-gitee-primary"),
+            "runtime resolution should not mutate the persisted bootstrap remote"
+        );
+    }
+
+    #[test]
+    fn sync_remote_resolution_rejects_missing_saved_gitee_pat() {
+        let remote = sample_gitee_sync_remote();
+        let store = MemoryCredentialStore::default();
+
+        let err = resolve_remote_for_sync(&remote, &store).expect_err("missing PAT should fail");
+
+        assert!(
+            err.to_string()
+                .contains("missing saved provider credential for remote `remote-gitee-primary`"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

@@ -431,7 +431,9 @@ impl From<&PersistedAssetNode> for StoredPersistedAssetNode {
                         credential_ref: spec.credential_ref.clone(),
                     })
                 }
-                PersistedAssetPayload::SnippetPackage => StoredPersistedAssetPayload::SnippetPackage,
+                PersistedAssetPayload::SnippetPackage => {
+                    StoredPersistedAssetPayload::SnippetPackage
+                }
                 PersistedAssetPayload::Snippet(spec) => {
                     StoredPersistedAssetPayload::Snippet(StoredPersistedSnippetSpec {
                         script: spec.script.clone(),
@@ -496,7 +498,9 @@ impl From<CompatStoredPersistedAssetNodeV4> for PersistedAssetNode {
             title: node.title,
             kind: match node.kind {
                 CompatStoredPersistedAssetKindV4::Folder => PersistedAssetKind::Folder,
-                CompatStoredPersistedAssetKindV4::SshConnection => PersistedAssetKind::SshConnection,
+                CompatStoredPersistedAssetKindV4::SshConnection => {
+                    PersistedAssetKind::SshConnection
+                }
             },
             child_ids: node.child_ids,
             payload: match node.payload {

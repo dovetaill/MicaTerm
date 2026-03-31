@@ -36,7 +36,7 @@ grep -F 'root.tooltip-source-id-value == source-id && root.tooltip-text-value ==
 grep -F 'tooltip-text: "Open menu"' "$TITLEBAR" >/dev/null
 grep -F '"Switch to dark mode"' "$TITLEBAR" >/dev/null
 grep -F '"Switch to light mode"' "$TITLEBAR" >/dev/null
-grep -F 'tooltip-text: "Open sync"' "$TITLEBAR" >/dev/null
+grep -F 'tooltip-text: "Sync now"' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-text: "Toggle right panel"' "$TITLEBAR" >/dev/null
 grep -F '"Pin window on top"' "$TITLEBAR" >/dev/null
 grep -F '"Unpin window from top"' "$TITLEBAR" >/dev/null
@@ -50,10 +50,11 @@ grep -F 'nav-button.absolute-position.y' "$TITLEBAR" >/dev/null
 grep -F 'chrome-host := Rectangle' "$APP_WINDOW" >/dev/null
 grep -F 'titlebar := Titlebar {' "$APP_WINDOW" >/dev/null
 grep -F 'show-right-panel: root.effective-show-right-panel;' "$APP_WINDOW" >/dev/null
+grep -F 'callback sync-now-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback open-sync-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> sync-modal-open: false;' "$APP_WINDOW" >/dev/null
-grep -F 'open-sync-modal-requested => {' "$APP_WINDOW" >/dev/null
-grep -F 'root.open-sync-modal-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'sync-now-requested => {' "$APP_WINDOW" >/dev/null
+grep -F 'root.sync-now-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'tooltip-overlay := TitlebarTooltip {' "$APP_WINDOW" >/dev/null
 grep -F 'text: titlebar.tooltip-text;' "$APP_WINDOW" >/dev/null
 grep -F 'anchor-x: titlebar.tooltip-anchor-x;' "$APP_WINDOW" >/dev/null
@@ -122,4 +123,7 @@ grep -F 'ThemeTokens.control-active-surface' "$ROOT_DIR/ui/components/window-con
 grep -F 'background: ThemeTokens.inspector-surface;' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
 grep -F 'background: ThemeTokens.inspector-surface;' "$ROOT_DIR/ui/components/titlebar-tooltip.slint" >/dev/null
 grep -F 'border-color: ThemeTokens.divider-strong;' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
+grep -F 'callback sync-settings-selected;' "$TITLEBAR" >/dev/null || true
+grep -F 'callback sync-settings-selected;' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
+grep -F 'label: "Sync Settings";' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
 ! grep -F 'label: "Appearance";' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null

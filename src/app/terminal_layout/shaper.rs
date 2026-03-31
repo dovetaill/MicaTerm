@@ -64,16 +64,14 @@ impl TextShaper for HarfBuzzTextShaper {
 }
 
 impl HarfBuzzTextShaper {
-    fn shape_segment(
-        &mut self,
-        run: SegmentedRun,
-        fonts: &mut dyn FontSystem,
-    ) -> Result<GlyphRun> {
+    fn shape_segment(&mut self, run: SegmentedRun, fonts: &mut dyn FontSystem) -> Result<GlyphRun> {
         let face_key = fonts.resolve_face(&self.request)?;
         let _metrics = fonts.metrics(face_key, self.request.px_size)?;
         let face = Face::from_bytes(fonts.face_bytes(face_key)?, fonts.face_index(face_key));
         let font = Font::new(face);
-        let buffer = UnicodeBuffer::new().add_str(run.text.as_str()).guess_segment_properties();
+        let buffer = UnicodeBuffer::new()
+            .add_str(run.text.as_str())
+            .guess_segment_properties();
         let glyph_buffer = shape(&font, buffer, &[]);
 
         Ok(GlyphRun {

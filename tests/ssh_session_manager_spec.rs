@@ -297,7 +297,8 @@ impl SessionRuntimeLauncher for RuntimeBackedLauncher {
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
         Box::pin(async move {
-            let runtime = SshSessionRuntime::connect(profile, session_id, attempt_id, event_tx).await?;
+            let runtime =
+                SshSessionRuntime::connect(profile, session_id, attempt_id, event_tx).await?;
             Ok(Box::new(runtime) as Box<dyn SessionRuntimeControl>)
         })
     }
@@ -308,13 +309,9 @@ impl SessionRuntimeLauncher for RuntimeBackedLauncher {
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
         Box::pin(async move {
             let (event_tx, _event_rx) = mpsc::unbounded_channel();
-            let runtime = SshSessionRuntime::connect(
-                profile,
-                Uuid::new_v4(),
-                Uuid::new_v4(),
-                event_tx,
-            )
-            .await?;
+            let runtime =
+                SshSessionRuntime::connect(profile, Uuid::new_v4(), Uuid::new_v4(), event_tx)
+                    .await?;
             runtime.disconnect()?;
             Ok(())
         })
@@ -1587,7 +1584,10 @@ fn session_manager_exposes_sftp_binding_for_runtime_ready_session() {
         .expect("sftp binding should exist for runtime-ready session");
 
     assert_eq!(binding.session_id(), handle.session_id);
-    assert_eq!(binding.mode(), mica_term::app::sftp::SftpPanelMode::Connecting);
+    assert_eq!(
+        binding.mode(),
+        mica_term::app::sftp::SftpPanelMode::Connecting
+    );
     assert!(binding.runtime().is_some());
 }
 

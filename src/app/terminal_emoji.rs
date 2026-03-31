@@ -362,7 +362,11 @@ struct RenderedGlyphImage {
 
 fn shape_emoji_glyphs(font: FontRef<'_>, text: &str, size: f32) -> Vec<PositionedGlyph> {
     let mut context = ShapeContext::new();
-    let mut shaper = context.builder(font).script(Script::Common).size(size).build();
+    let mut shaper = context
+        .builder(font)
+        .script(Script::Common)
+        .size(size)
+        .build();
     let mut glyphs = Vec::new();
     let mut pen_x = 0.0f32;
 
@@ -448,8 +452,7 @@ fn blit_rgba_glyph(request: BlitRgbaGlyphRequest<'_>) {
             }
 
             let src_index = ((y as u32 * request.glyph_width + x as u32) * 4) as usize;
-            let dst_index =
-                ((target_y as u32 * request.dst_width + target_x as u32) * 4) as usize;
+            let dst_index = ((target_y as u32 * request.dst_width + target_x as u32) * 4) as usize;
             composite_rgba_pixel(
                 &mut request.dst[dst_index..dst_index + 4],
                 &request.src[src_index..src_index + 4],
