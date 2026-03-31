@@ -144,8 +144,11 @@ grep -F 'horizontal-scrollbar-policy: always-off;' "$MODAL_CHROME" >/dev/null
 grep -F 'scroll-body := Rectangle {' "$MODAL_CHROME" >/dev/null
 grep -F 'body-panel := Rectangle {' "$MODAL_CHROME" >/dev/null
 grep -F 'x: root.resolved-frame-padding;' "$MODAL_CHROME" >/dev/null
-grep -F 'width: max(0px, parent.width - (root.resolved-frame-padding * 2));' "$MODAL_CHROME" >/dev/null
+grep -F 'out property <length> content-column-width:' "$MODAL_CHROME" >/dev/null
+grep -F 'width: root.resolved-panel-width;' "$MODAL_CHROME" >/dev/null
+grep -F 'width: root.content-column-width;' "$MODAL_CHROME" >/dev/null
 grep -F 'body-content-host := Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'body-content := VerticalLayout {' "$MODAL_CHROME" >/dev/null
 grep -F 'private property <length> resolved-content-padding-bottom:' "$MODAL_CHROME" >/dev/null
 grep -F 'footer := ModalFooterBar {' "$SYNC_MODAL" >/dev/null
 grep -F 'y: parent.height - root.footer-height;' "$SYNC_MODAL" >/dev/null
@@ -156,6 +159,7 @@ grep -F 'prominent: true;' "$SYNC_MODAL" >/dev/null
 grep -F 'panel-surface: ThemeTokens.window-surface;' "$SYNC_MODAL" >/dev/null
 grep -F 'surface: ThemeTokens.activity-surface;' "$SYNC_MODAL" >/dev/null
 grep -F 'SyncModalTextField {' "$SYNC_MODAL" >/dev/null
+grep -F 'content-column := Rectangle {' "$SYNC_MODAL" >/dev/null
 grep -F 'if root.mode == "not-configured" || root.mode == "locked"' "$SYNC_MODAL" >/dev/null
 grep -F 'export component AssetsSnippetPackageModal inherits Rectangle {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'export component AssetsFolderCreateModal inherits Rectangle {' "$FOLDER_MODAL" >/dev/null
@@ -171,6 +175,7 @@ grep -F 'text: "Script";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'text: "Package";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'text: "Package name";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'body := ModalBodyScrollArea {' "$SNIPPET_MODAL" >/dev/null
+grep -F 'content-column := Rectangle {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'ComboBox {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'model: root.package-options;' "$SNIPPET_MODAL" >/dev/null
 grep -F 'current-value: root.package-selected-label;' "$SNIPPET_MODAL" >/dev/null
@@ -229,6 +234,7 @@ if grep -F 'text: "Connection Options";' "$SSH_MODAL" >/dev/null; then
 fi
 grep -F 'text: "Notes";' "$SSH_MODAL" >/dev/null
 grep -F 'body-scroll := ModalBodyScrollArea {' "$SSH_MODAL" >/dev/null
+grep -F 'content-column := Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'footer := ModalFooterBar {' "$SSH_MODAL" >/dev/null
 if grep -F 'footer-panel := Rectangle {' "$SSH_MODAL" >/dev/null; then
   echo "ssh modal footer must not use an inner footer-panel wrapper" >&2

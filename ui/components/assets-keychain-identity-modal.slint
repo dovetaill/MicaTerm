@@ -219,122 +219,133 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
             panel-surface: ThemeTokens.window-surface;
             panel-border-color: ThemeTokens.divider-strong;
 
-            name-field := TextField {
-                width: parent.width;
-                label: "Name";
-                required: true;
-                value: root.name;
+            content-column := Rectangle {
+                width: body-scroll.content-column-width;
+                height: content-layout.preferred-height;
+                background: transparent;
 
-                value-changed(value) => {
-                    root.draft-changed("name", value);
-                }
-            }
-
-            TextField {
-                width: parent.width;
-                label: "Username";
-                required: true;
-                value: root.username;
-
-                value-changed(value) => {
-                    root.draft-changed("username", value);
-                }
-            }
-
-            Text {
-                width: parent.width;
-                text: "Authentication";
-                color: ThemeTokens.text-primary;
-                font-weight: 600;
-            }
-
-            HorizontalLayout {
-                width: parent.width;
-                spacing: 8px;
-
-                AuthModeButton {
-                    label: "Password";
-                    active: root.auth-kind == "password";
-
-                    clicked => {
-                        root.draft-changed("auth_kind", "password");
-                    }
-                }
-
-                AuthModeButton {
-                    label: "SSH Key";
-                    active: root.auth-kind == "ssh-key";
-
-                    clicked => {
-                        root.draft-changed("auth_kind", "ssh-key");
-                    }
-                }
-            }
-
-            if root.auth-kind == "password" : TextField {
-                width: parent.width;
-                label: "Password";
-                required: true;
-                value: root.password;
-                password-mode: true;
-
-                value-changed(value) => {
-                    root.draft-changed("password", value);
-                }
-            }
-
-            if root.auth-kind == "ssh-key" : VerticalLayout {
-                width: parent.width;
-                spacing: 8px;
-
-                Text {
+                content-layout := VerticalLayout {
                     width: parent.width;
-                    text: "SSH Key";
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.8;
-                }
+                    spacing: body-scroll.content-spacing;
 
-                Rectangle {
-                    width: parent.width;
-                    height: 40px;
-                    border-radius: 0px;
-                    border-width: 1px;
-                    border-color: ThemeTokens.divider-subtle;
-                    background: ThemeTokens.inspector-surface;
+                    name-field := TextField {
+                        width: parent.width;
+                        label: "Name";
+                        required: true;
+                        value: root.name;
 
-                    Text {
-                        x: 12px;
-                        y: 0px;
-                        width: parent.width - 168px;
-                        height: parent.height;
-                        text: root.ssh-key-label == "" ? "No SSH Key selected." : root.ssh-key-label;
-                        color: ThemeTokens.text-primary;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-
-                    DialogButton {
-                        x: parent.width - 144px;
-                        y: 3px;
-                        width: 132px;
-                        height: 34px;
-                        label: "Use Existing SSH Key";
-
-                        clicked => {
-                            root.action-requested("use-existing-ssh-key");
+                        value-changed(value) => {
+                            root.draft-changed("name", value);
                         }
                     }
-                }
-            }
 
-            TextField {
-                width: parent.width;
-                label: "Remark";
-                value: root.remark;
-                multiline: true;
+                    TextField {
+                        width: parent.width;
+                        label: "Username";
+                        required: true;
+                        value: root.username;
 
-                value-changed(value) => {
-                    root.draft-changed("remark", value);
+                        value-changed(value) => {
+                            root.draft-changed("username", value);
+                        }
+                    }
+
+                    Text {
+                        width: parent.width;
+                        text: "Authentication";
+                        color: ThemeTokens.text-primary;
+                        font-weight: 600;
+                    }
+
+                    HorizontalLayout {
+                        width: parent.width;
+                        spacing: 8px;
+
+                        AuthModeButton {
+                            label: "Password";
+                            active: root.auth-kind == "password";
+
+                            clicked => {
+                                root.draft-changed("auth_kind", "password");
+                            }
+                        }
+
+                        AuthModeButton {
+                            label: "SSH Key";
+                            active: root.auth-kind == "ssh-key";
+
+                            clicked => {
+                                root.draft-changed("auth_kind", "ssh-key");
+                            }
+                        }
+                    }
+
+                    if root.auth-kind == "password" : TextField {
+                        width: parent.width;
+                        label: "Password";
+                        required: true;
+                        value: root.password;
+                        password-mode: true;
+
+                        value-changed(value) => {
+                            root.draft-changed("password", value);
+                        }
+                    }
+
+                    if root.auth-kind == "ssh-key" : VerticalLayout {
+                        width: parent.width;
+                        spacing: 8px;
+
+                        Text {
+                            width: parent.width;
+                            text: "SSH Key";
+                            color: ThemeTokens.text-primary;
+                            opacity: 0.8;
+                        }
+
+                        Rectangle {
+                            width: parent.width;
+                            height: 40px;
+                            border-radius: 0px;
+                            border-width: 1px;
+                            border-color: ThemeTokens.divider-subtle;
+                            background: ThemeTokens.inspector-surface;
+
+                            Text {
+                                x: 12px;
+                                y: 0px;
+                                width: parent.width - 168px;
+                                height: parent.height;
+                                text: root.ssh-key-label == "" ? "No SSH Key selected." : root.ssh-key-label;
+                                color: ThemeTokens.text-primary;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            DialogButton {
+                                x: parent.width - 144px;
+                                y: 3px;
+                                width: 132px;
+                                height: 34px;
+                                label: "Use Existing SSH Key";
+
+                                clicked => {
+                                    root.action-requested("use-existing-ssh-key");
+                                }
+                            }
+                        }
+                    }
+
+                    TextField {
+                        width: parent.width;
+                        label: "Remark";
+                        value: root.remark;
+                        multiline: true;
+
+                        value-changed(value) => {
+                            root.draft-changed("remark", value);
+                        }
+                    }
                 }
             }
         }

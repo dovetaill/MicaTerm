@@ -180,123 +180,134 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
             panel-surface: ThemeTokens.window-surface;
             panel-border-color: ThemeTokens.divider-strong;
 
-            name-field := TextField {
-                width: parent.width;
-                label: "Name";
-                value: root.name;
+            content-column := Rectangle {
+                width: body-scroll.content-column-width;
+                height: content-layout.preferred-height;
+                background: transparent;
 
-                value-changed(value) => {
-                    root.draft-changed("name", value);
-                }
-            }
+                content-layout := VerticalLayout {
+                    width: parent.width;
+                    spacing: body-scroll.content-spacing;
 
-            Text {
-                width: parent.width;
-                text: "Private Key";
-                color: ThemeTokens.text-primary;
-                font-weight: 600;
-            }
+                    name-field := TextField {
+                        width: parent.width;
+                        label: "Name";
+                        value: root.name;
 
-            HorizontalLayout {
-                width: parent.width;
-                spacing: 8px;
-
-                DialogButton {
-                    horizontal-stretch: 1;
-                    label: "Import Private Key";
-
-                    clicked => {
-                        root.action-requested("import-private-key");
+                        value-changed(value) => {
+                            root.draft-changed("name", value);
+                        }
                     }
-                }
 
-                DialogButton {
-                    horizontal-stretch: 1;
-                    label: "Paste Private Key";
-
-                    clicked => {
-                        root.action-requested("paste-private-key");
+                    Text {
+                        width: parent.width;
+                        text: "Private Key";
+                        color: ThemeTokens.text-primary;
+                        font-weight: 600;
                     }
-                }
-            }
 
-            TextField {
-                width: parent.width;
-                label: "Private Key";
-                value: root.private-key;
-                multiline: true;
+                    HorizontalLayout {
+                        width: parent.width;
+                        spacing: 8px;
 
-                value-changed(value) => {
-                    root.draft-changed("private_key", value);
-                }
-            }
+                        DialogButton {
+                            horizontal-stretch: 1;
+                            label: "Import Private Key";
 
-            Text {
-                width: parent.width;
-                text: "Public Key";
-                color: ThemeTokens.text-primary;
-                font-weight: 600;
-            }
+                            clicked => {
+                                root.action-requested("import-private-key");
+                            }
+                        }
 
-            HorizontalLayout {
-                width: parent.width;
-                spacing: 8px;
+                        DialogButton {
+                            horizontal-stretch: 1;
+                            label: "Paste Private Key";
 
-                DialogButton {
-                    horizontal-stretch: 1;
-                    label: "Import Public Key";
-
-                    clicked => {
-                        root.action-requested("import-public-key");
+                            clicked => {
+                                root.action-requested("paste-private-key");
+                            }
+                        }
                     }
-                }
 
-                DialogButton {
-                    horizontal-stretch: 1;
-                    label: "Paste Public Key";
+                    TextField {
+                        width: parent.width;
+                        label: "Private Key";
+                        value: root.private-key;
+                        multiline: true;
 
-                    clicked => {
-                        root.action-requested("paste-public-key");
+                        value-changed(value) => {
+                            root.draft-changed("private_key", value);
+                        }
                     }
-                }
 
-                DialogButton {
-                    horizontal-stretch: 1;
-                    label: "Generate Key Pair";
-
-                    clicked => {
-                        root.action-requested("generate-key-pair");
+                    Text {
+                        width: parent.width;
+                        text: "Public Key";
+                        color: ThemeTokens.text-primary;
+                        font-weight: 600;
                     }
-                }
 
-                DialogButton {
-                    horizontal-stretch: 1;
-                    label: "Copy Public Key";
+                    HorizontalLayout {
+                        width: parent.width;
+                        spacing: 8px;
 
-                    clicked => {
-                        root.action-requested("copy-public-key");
+                        DialogButton {
+                            horizontal-stretch: 1;
+                            label: "Import Public Key";
+
+                            clicked => {
+                                root.action-requested("import-public-key");
+                            }
+                        }
+
+                        DialogButton {
+                            horizontal-stretch: 1;
+                            label: "Paste Public Key";
+
+                            clicked => {
+                                root.action-requested("paste-public-key");
+                            }
+                        }
+
+                        DialogButton {
+                            horizontal-stretch: 1;
+                            label: "Generate Key Pair";
+
+                            clicked => {
+                                root.action-requested("generate-key-pair");
+                            }
+                        }
+
+                        DialogButton {
+                            horizontal-stretch: 1;
+                            label: "Copy Public Key";
+
+                            clicked => {
+                                root.action-requested("copy-public-key");
+                            }
+                        }
                     }
-                }
-            }
 
-            TextField {
-                width: parent.width;
-                label: "Public Key";
-                value: root.public-key;
-                multiline: true;
+                    TextField {
+                        width: parent.width;
+                        label: "Public Key";
+                        value: root.public-key;
+                        multiline: true;
 
-                value-changed(value) => {
-                    root.draft-changed("public_key", value);
-                }
-            }
+                        value-changed(value) => {
+                            root.draft-changed("public_key", value);
+                        }
+                    }
 
-            TextField {
-                width: parent.width;
-                label: "Fingerprint";
-                value: root.fingerprint;
+                    TextField {
+                        width: parent.width;
+                        label: "Fingerprint";
+                        value: root.fingerprint;
 
-                value-changed(value) => {
-                    root.draft-changed("fingerprint", value);
+                        value-changed(value) => {
+                            root.draft-changed("fingerprint", value);
+                        }
+                    }
                 }
             }
         }

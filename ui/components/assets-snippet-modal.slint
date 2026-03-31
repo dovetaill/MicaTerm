@@ -125,114 +125,125 @@ export component AssetsSnippetModal inherits Rectangle {
             panel-surface: ThemeTokens.window-surface;
             panel-border-color: ThemeTokens.divider-strong;
 
-            Rectangle {
-                width: parent.width;
-                height: 72px;
+            content-column := Rectangle {
+                width: body.content-column-width;
+                height: content-layout.preferred-height;
                 background: transparent;
 
-                Text {
-                    text: "Name";
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.78;
-                }
-
-                Rectangle {
-                    y: 28px;
+                content-layout := VerticalLayout {
                     width: parent.width;
-                    height: 40px;
-                    border-radius: 0px;
-                    border-width: 1px;
-                    border-color: ThemeTokens.divider-subtle;
-                    background: ThemeTokens.inspector-surface;
+                    spacing: body.content-spacing;
 
-                    name-input := TextInput {
-                        x: 12px;
-                        y: 9px;
-                        width: parent.width - 24px;
-                        height: 22px;
-                        text: root.name;
-                        color: ThemeTokens.text-primary;
-                        selection-background-color: ThemeTokens.accent;
-                        selection-foreground-color: ThemeTokens.text-primary;
-
-                        edited => {
-                            root.draft-changed("name", self.text);
-                        }
-                    }
-                }
-            }
-
-            Rectangle {
-                width: parent.width;
-                height: 178px;
-                background: transparent;
-
-                Text {
-                    text: "Script";
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.78;
-                }
-
-                Rectangle {
-                    y: 28px;
-                    width: parent.width;
-                    height: 146px;
-                    border-radius: 0px;
-                    border-width: 1px;
-                    border-color: ThemeTokens.divider-subtle;
-                    background: ThemeTokens.inspector-surface;
-
-                    script-input := TextInput {
-                        x: 12px;
-                        y: 8px;
-                        width: parent.width - 24px;
-                        height: parent.height - 16px;
-                        text: root.script;
-                        color: ThemeTokens.text-primary;
-                        single-line: false;
-                        selection-background-color: ThemeTokens.accent;
-                        selection-foreground-color: ThemeTokens.text-primary;
-
-                        edited => {
-                            root.draft-changed("script", self.text);
-                        }
-                    }
-                }
-            }
-
-            Rectangle {
-                width: parent.width;
-                height: 102px;
-                background: transparent;
-
-                VerticalLayout {
-                    width: parent.width;
-                    height: parent.height;
-                    spacing: 8px;
-
-                    Text {
-                        text: "Package";
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.78;
-                    }
-
-                    ComboBox {
+                    Rectangle {
                         width: parent.width;
-                        height: 34px;
-                        model: root.package-options;
-                        current-value: root.package-selected-label;
+                        height: 72px;
+                        background: transparent;
 
-                        selected(value) => {
-                            root.draft-changed("package", value == "No Package" ? "" : value);
+                        Text {
+                            text: "Name";
+                            color: ThemeTokens.text-primary;
+                            opacity: 0.78;
+                        }
+
+                        Rectangle {
+                            y: 28px;
+                            width: parent.width;
+                            height: 40px;
+                            border-radius: 0px;
+                            border-width: 1px;
+                            border-color: ThemeTokens.divider-subtle;
+                            background: ThemeTokens.inspector-surface;
+
+                            name-input := TextInput {
+                                x: 12px;
+                                y: 9px;
+                                width: parent.width - 24px;
+                                height: 22px;
+                                text: root.name;
+                                color: ThemeTokens.text-primary;
+                                selection-background-color: ThemeTokens.accent;
+                                selection-foreground-color: ThemeTokens.text-primary;
+
+                                edited => {
+                                    root.draft-changed("name", self.text);
+                                }
+                            }
                         }
                     }
 
-                    Text {
+                    Rectangle {
                         width: parent.width;
-                        text: "Optional. Choose a package or keep the snippet at the root level.";
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.62;
-                        wrap: word-wrap;
+                        height: 178px;
+                        background: transparent;
+
+                        Text {
+                            text: "Script";
+                            color: ThemeTokens.text-primary;
+                            opacity: 0.78;
+                        }
+
+                        Rectangle {
+                            y: 28px;
+                            width: parent.width;
+                            height: 146px;
+                            border-radius: 0px;
+                            border-width: 1px;
+                            border-color: ThemeTokens.divider-subtle;
+                            background: ThemeTokens.inspector-surface;
+
+                            script-input := TextInput {
+                                x: 12px;
+                                y: 8px;
+                                width: parent.width - 24px;
+                                height: parent.height - 16px;
+                                text: root.script;
+                                color: ThemeTokens.text-primary;
+                                single-line: false;
+                                selection-background-color: ThemeTokens.accent;
+                                selection-foreground-color: ThemeTokens.text-primary;
+
+                                edited => {
+                                    root.draft-changed("script", self.text);
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: parent.width;
+                        height: 102px;
+                        background: transparent;
+
+                        VerticalLayout {
+                            width: parent.width;
+                            height: parent.height;
+                            spacing: 8px;
+
+                            Text {
+                                text: "Package";
+                                color: ThemeTokens.text-primary;
+                                opacity: 0.78;
+                            }
+
+                            ComboBox {
+                                width: parent.width;
+                                height: 34px;
+                                model: root.package-options;
+                                current-value: root.package-selected-label;
+
+                                selected(value) => {
+                                    root.draft-changed("package", value == "No Package" ? "" : value);
+                                }
+                            }
+
+                            Text {
+                                width: parent.width;
+                                text: "Optional. Choose a package or keep the snippet at the root level.";
+                                color: ThemeTokens.text-primary;
+                                opacity: 0.62;
+                                wrap: word-wrap;
+                            }
+                        }
                     }
                 }
             }

@@ -778,7 +778,9 @@ fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
         "sync modal should delegate its header chrome to the shared modal header"
     );
     assert!(
-        sync.contains("body := ModalBodyScrollArea {\n            x: 0px;\n            y: header.height;"),
+        sync.contains(
+            "body := ModalBodyScrollArea {\n            x: 0px;\n            y: header.height;"
+        ),
         "sync modal body must scroll from directly below the title bar"
     );
     assert!(
@@ -791,10 +793,9 @@ fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
             && modal_chrome.contains(
                 "body-panel := Rectangle {\n                x: root.resolved-frame-padding;"
             )
-            && modal_chrome.contains(
-                "width: max(0px, parent.width - (root.resolved-frame-padding * 2));"
-            ),
-        "shared modal scroll host should use an explicit clipped viewport shell so padded body panels cannot visually bleed into the workspace"
+            && modal_chrome.contains("width: root.resolved-panel-width;")
+            && modal_chrome.contains("width: root.content-column-width;"),
+        "shared modal scroll host should derive panel and content widths from explicit shared measurements so padded body panels cannot visually bleed into the workspace"
     );
     assert!(
         modal_chrome.contains("private property <length> resolved-content-padding-bottom:")
@@ -806,6 +807,47 @@ fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
         sync.contains("footer := ModalFooterBar {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
         "sync modal footer must stay pinned to the bottom edge"
     );
+}
+
+#[test]
+fn complex_modal_bodies_wrap_content_in_an_explicit_shared_content_column() {
+    let modal_chrome =
+        fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome");
+
+    assert!(
+        modal_chrome.contains("out property <length> content-column-width:")
+            && modal_chrome.contains("body-content := VerticalLayout {"),
+        "shared modal chrome must expose an explicit content-column-width and keep a dedicated body content layout"
+    );
+
+    for (path, marker) in [
+        (
+            "ui/components/sync-vault-modal.slint",
+            "content-column := Rectangle {\n                width: body.content-column-width;",
+        ),
+        (
+            "ui/components/assets-ssh-connection-modal.slint",
+            "content-column := Rectangle {\n                width: body-scroll.content-column-width;",
+        ),
+        (
+            "ui/components/assets-keychain-identity-modal.slint",
+            "content-column := Rectangle {\n                width: body-scroll.content-column-width;",
+        ),
+        (
+            "ui/components/assets-keychain-ssh-key-modal.slint",
+            "content-column := Rectangle {\n                width: body-scroll.content-column-width;",
+        ),
+        (
+            "ui/components/assets-snippet-modal.slint",
+            "content-column := Rectangle {\n                width: body.content-column-width;",
+        ),
+    ] {
+        let source = fs::read_to_string(path).unwrap_or_else(|_| panic!("read {path}"));
+        assert!(
+            source.contains(marker),
+            "{path} must wrap modal body controls in an explicit content-column container"
+        );
+    }
 }
 
 #[test]
@@ -860,10 +902,11 @@ fn long_form_modals_share_common_modal_chrome_primitives() {
     let sync = fs::read_to_string("ui/components/sync-vault-modal.slint").expect("read sync");
     let snippet =
         fs::read_to_string("ui/components/assets-snippet-modal.slint").expect("read snippet");
-    let ssh = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
-        .expect("read ssh");
-    let keychain_identity = fs::read_to_string("ui/components/assets-keychain-identity-modal.slint")
-        .expect("read keychain identity");
+    let ssh =
+        fs::read_to_string("ui/components/assets-ssh-connection-modal.slint").expect("read ssh");
+    let keychain_identity =
+        fs::read_to_string("ui/components/assets-keychain-identity-modal.slint")
+            .expect("read keychain identity");
     let keychain_ssh_key = fs::read_to_string("ui/components/assets-keychain-ssh-key-modal.slint")
         .expect("read keychain ssh key");
     let open_saved =

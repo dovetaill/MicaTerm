@@ -333,8 +333,7 @@ fn sync_modal_footer_stays_visible_in_short_viewport() {
         app.set_sync_modal_title("Sync".into());
         app.set_sync_modal_headline("Unlock sync".into());
         app.set_sync_modal_status_text(
-            "Configure a Gitee remote and unlock the vault before automatic sync can run."
-                .into(),
+            "Configure a Gitee remote and unlock the vault before automatic sync can run.".into(),
         );
         app.set_sync_modal_error_text(
             "Primary remote must contain a valid vault-head.json before unlock can continue."
@@ -436,6 +435,58 @@ fn blocking_modal_tints_workspace_behind_the_dialog() {
     assert!(
         color_distance(workspace_surface, tinted_pixel) >= 24,
         "blocking modal should tint the workspace behind the dialog; expected the workspace pixel to differ from pure white, got {tinted_pixel:?}"
+    );
+}
+
+#[test]
+fn sync_modal_narrow_viewport_preserves_right_gutter_for_form_fields() {
+    let buffer = render_app_with_size(663, 744, |app| {
+        app.set_sync_modal_open(true);
+        app.set_sync_modal_mode("locked".into());
+        app.set_sync_modal_title("Unlock sync".into());
+        app.set_sync_modal_headline("Unlock sync".into());
+        app.set_sync_modal_status_text(
+            "Sync is configured. Enter your master password to unlock local secrets and resume sync."
+                .into(),
+        );
+        app.set_sync_modal_provider_label("Gitee".into());
+        app.set_sync_modal_target_label("1 target configured".into());
+        app.set_sync_modal_primary_gist_id("yemd6wft9jgpv5bhlux3o60".into());
+        app.set_sync_modal_primary_pat("token-value".into());
+        app.set_sync_modal_primary_action_label("Unlock".into());
+        app.set_sync_modal_secondary_action_label("Close".into());
+    });
+
+    let field_border = pixel_at(&buffer, 100, 585);
+    let right_gutter_pixels = count_distinct_pixels(&buffer, 628, 585, 11, 1, field_border, 10);
+
+    assert!(
+        right_gutter_pixels >= 9,
+        "sync modal should preserve a visible right gutter inside the body panel in narrow viewports, only found {right_gutter_pixels} distinct pixels"
+    );
+}
+
+#[test]
+fn ssh_modal_narrow_viewport_preserves_right_gutter_after_trailing_action() {
+    let buffer = render_app_with_size(663, 744, |app| {
+        app.set_asset_modal_open(true);
+        app.set_asset_modal_kind("new-ssh-connection".into());
+        app.set_asset_ssh_modal_name("Sharon".into());
+        app.set_asset_ssh_modal_host("157.254.53.77".into());
+        app.set_asset_ssh_modal_user("root".into());
+        app.set_asset_ssh_modal_port("57722".into());
+        app.set_asset_ssh_modal_auth_source("manual".into());
+        app.set_asset_ssh_modal_auth_method("password".into());
+        app.set_asset_ssh_modal_password("secret".into());
+        app.set_asset_modal_can_confirm(true);
+    });
+
+    let field_border = pixel_at(&buffer, 600, 400);
+    let right_gutter_pixels = count_distinct_pixels(&buffer, 628, 400, 11, 1, field_border, 10);
+
+    assert!(
+        right_gutter_pixels >= 9,
+        "ssh modal should preserve a visible right gutter after the trailing action in narrow viewports, only found {right_gutter_pixels} distinct pixels"
     );
 }
 

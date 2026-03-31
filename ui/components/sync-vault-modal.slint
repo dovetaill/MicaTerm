@@ -259,125 +259,136 @@ export component SyncVaultModal inherits Rectangle {
             panel-surface: ThemeTokens.window-surface;
             panel-border-color: ThemeTokens.divider-strong;
 
-            Text {
-                width: parent.width;
-                text: root.status-text;
-                color: ThemeTokens.text-primary;
-                opacity: 0.84;
-                wrap: word-wrap;
-            }
+            content-column := Rectangle {
+                width: body.content-column-width;
+                height: content-layout.preferred-height;
+                background: transparent;
 
-            if root.error-text != "" : error-banner := Rectangle {
-                width: parent.width;
-                height: max(40px, error-copy.preferred-height + 16px);
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-strong;
-                background: ThemeTokens.status-error-surface;
+                content-layout := VerticalLayout {
+                    width: parent.width;
+                    spacing: body.content-spacing;
 
-                error-copy := Text {
-                    x: 10px;
-                    y: 8px;
-                    width: parent.width - 20px;
-                    text: root.error-text;
-                    color: ThemeTokens.text-primary;
-                    wrap: word-wrap;
-                }
-            }
+                    Text {
+                        width: parent.width;
+                        text: root.status-text;
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.84;
+                        wrap: word-wrap;
+                    }
 
-            if root.provider-label != "" || root.target-label != "" : summary-card := Rectangle {
-                width: parent.width;
-                height: 44px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-strong;
-                background: ThemeTokens.workspace-surface;
+                    if root.error-text != "" : error-banner := Rectangle {
+                        width: parent.width;
+                        height: max(40px, error-copy.preferred-height + 16px);
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-strong;
+                        background: ThemeTokens.status-error-surface;
 
-                Text {
-                    x: 12px;
-                    y: 0px;
-                    width: parent.width - 24px;
-                    height: parent.height;
-                    text: (root.provider-label != "" ? "Provider: " + root.provider-label : "")
-                        + (root.target-label != "" ? "  •  " + root.target-label : "");
-                    color: ThemeTokens.text-primary;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-            }
+                        error-copy := Text {
+                            x: 10px;
+                            y: 8px;
+                            width: parent.width - 20px;
+                            text: root.error-text;
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+                    }
 
-            SyncModalToggleRow {
-                width: parent.width;
-                label: "Auto sync";
-                description: "Run sync automatically after local changes when the vault is unlocked.";
-                value: root.auto-sync-enabled;
+                    if root.provider-label != "" || root.target-label != "" : summary-card := Rectangle {
+                        width: parent.width;
+                        height: 44px;
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-strong;
+                        background: ThemeTokens.workspace-surface;
 
-                toggled(value) => {
-                    root.toggle-changed("auto-sync", value);
-                }
-            }
+                        Text {
+                            x: 12px;
+                            y: 0px;
+                            width: parent.width - 24px;
+                            height: parent.height;
+                            text: (root.provider-label != "" ? "Provider: " + root.provider-label : "")
+                                + (root.target-label != "" ? "  •  " + root.target-label : "");
+                            color: ThemeTokens.text-primary;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
 
-            SyncModalTextField {
-                width: parent.width;
-                label: "Primary Gist ID";
-                value: root.primary-gist-id;
+                    SyncModalToggleRow {
+                        width: parent.width;
+                        label: "Auto sync";
+                        description: "Run sync automatically after local changes when the vault is unlocked.";
+                        value: root.auto-sync-enabled;
 
-                value-changed(value) => {
-                    root.draft-changed("primary-gist-id", value);
-                }
-            }
+                        toggled(value) => {
+                            root.toggle-changed("auto-sync", value);
+                        }
+                    }
 
-            SyncModalTextField {
-                width: parent.width;
-                label: "Primary Personal Access Token";
-                value: root.primary-pat;
-                password-mode: true;
+                    SyncModalTextField {
+                        width: parent.width;
+                        label: "Primary Gist ID";
+                        value: root.primary-gist-id;
 
-                value-changed(value) => {
-                    root.draft-changed("primary-pat", value);
-                }
-            }
+                        value-changed(value) => {
+                            root.draft-changed("primary-gist-id", value);
+                        }
+                    }
 
-            SyncModalToggleRow {
-                width: parent.width;
-                label: "Mirror target";
-                description: "Keep a second Gitee gist updated as a backup target.";
-                value: root.mirror-enabled;
+                    SyncModalTextField {
+                        width: parent.width;
+                        label: "Primary Personal Access Token";
+                        value: root.primary-pat;
+                        password-mode: true;
 
-                toggled(value) => {
-                    root.toggle-changed("mirror-enabled", value);
-                }
-            }
+                        value-changed(value) => {
+                            root.draft-changed("primary-pat", value);
+                        }
+                    }
 
-            if root.mirror-enabled : mirror-gist-field := SyncModalTextField {
-                width: parent.width;
-                label: "Mirror Gist ID";
-                value: root.mirror-gist-id;
+                    SyncModalToggleRow {
+                        width: parent.width;
+                        label: "Mirror target";
+                        description: "Keep a second Gitee gist updated as a backup target.";
+                        value: root.mirror-enabled;
 
-                value-changed(value) => {
-                    root.draft-changed("mirror-gist-id", value);
-                }
-            }
+                        toggled(value) => {
+                            root.toggle-changed("mirror-enabled", value);
+                        }
+                    }
 
-            if root.mirror-enabled : mirror-pat-field := SyncModalTextField {
-                width: parent.width;
-                label: "Mirror Personal Access Token";
-                value: root.mirror-pat;
-                password-mode: true;
+                    if root.mirror-enabled : mirror-gist-field := SyncModalTextField {
+                        width: parent.width;
+                        label: "Mirror Gist ID";
+                        value: root.mirror-gist-id;
 
-                value-changed(value) => {
-                    root.draft-changed("mirror-pat", value);
-                }
-            }
+                        value-changed(value) => {
+                            root.draft-changed("mirror-gist-id", value);
+                        }
+                    }
 
-            if root.mode == "not-configured" || root.mode == "locked" : password-field := SyncModalTextField {
-                width: parent.width;
-                label: "Master Password";
-                value: root.master-password;
-                password-mode: true;
+                    if root.mirror-enabled : mirror-pat-field := SyncModalTextField {
+                        width: parent.width;
+                        label: "Mirror Personal Access Token";
+                        value: root.mirror-pat;
+                        password-mode: true;
 
-                value-changed(value) => {
-                    root.draft-changed("master-password", value);
+                        value-changed(value) => {
+                            root.draft-changed("mirror-pat", value);
+                        }
+                    }
+
+                    if root.mode == "not-configured" || root.mode == "locked" : password-field := SyncModalTextField {
+                        width: parent.width;
+                        label: "Master Password";
+                        value: root.master-password;
+                        password-mode: true;
+
+                        value-changed(value) => {
+                            root.draft-changed("master-password", value);
+                        }
+                    }
                 }
             }
         }

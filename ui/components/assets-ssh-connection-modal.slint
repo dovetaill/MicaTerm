@@ -303,15 +303,24 @@ export component AssetsSshConnectionModal inherits Rectangle {
             panel-surface: ThemeTokens.window-surface;
             panel-border-color: ThemeTokens.divider-strong;
 
+            content-column := Rectangle {
+                width: body-scroll.content-column-width;
+                height: content-layout.preferred-height;
+                background: transparent;
+
+                content-layout := VerticalLayout {
+                    width: parent.width;
+                    spacing: body-scroll.content-spacing;
+
                     Text {
-                        width: parent.width;
+                        width: body-scroll.content-column-width;
                         text: "Basic";
                         color: ThemeTokens.text-primary;
                         font-weight: 600;
                     }
 
                     VerticalLayout {
-                        width: parent.width;
+                        width: body-scroll.content-column-width;
                         spacing: 16px;
 
                         if root.compact-layout : VerticalLayout {
@@ -435,14 +444,14 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     }
 
                     Text {
-                        width: parent.width;
+                        width: body-scroll.content-column-width;
                         text: "Authentication";
                         color: ThemeTokens.text-primary;
                         font-weight: 600;
                     }
 
                     VerticalLayout {
-                        width: parent.width;
+                        width: body-scroll.content-column-width;
                         spacing: 16px;
 
                         Rectangle {
@@ -633,14 +642,14 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     }
 
                     Text {
-                        width: parent.width;
+                        width: body-scroll.content-column-width;
                         text: "Proxy";
                         color: ThemeTokens.text-primary;
                         font-weight: 600;
                     }
 
                     VerticalLayout {
-                        width: parent.width;
+                        width: body-scroll.content-column-width;
                         spacing: 16px;
 
                         VerticalLayout {
@@ -886,14 +895,14 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     }
 
                     Text {
-                        width: parent.width;
+                        width: body-scroll.content-column-width;
                         text: "Notes";
                         color: ThemeTokens.text-primary;
                         font-weight: 600;
                     }
 
                     VerticalLayout {
-                        width: parent.width;
+                        width: body-scroll.content-column-width;
                         spacing: 12px;
 
                         FormField {
@@ -907,6 +916,8 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
                     }
+                }
+            }
         }
 
         footer := ModalFooterBar {

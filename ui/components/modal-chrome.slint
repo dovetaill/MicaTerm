@@ -124,13 +124,20 @@ export component ModalBodyScrollArea inherits Rectangle {
     in property <color> viewport-surface: ThemeTokens.inspector-surface;
     in property <color> panel-surface: ThemeTokens.window-surface;
     in property <color> panel-border-color: ThemeTokens.divider-strong;
-
     private property <bool> compact-layout: root.height < 400px;
     private property <length> resolved-frame-padding: root.compact-layout ? max(8px, root.frame-padding - 4px) : root.frame-padding;
     private property <length> resolved-content-padding-horizontal: root.compact-layout ? max(12px, root.content-padding-horizontal - 4px) : root.content-padding-horizontal;
     private property <length> resolved-content-padding-vertical: root.compact-layout ? max(8px, root.content-padding-vertical - 4px) : root.content-padding-vertical;
     private property <length> resolved-content-padding-bottom: root.compact-layout ? max(10px, root.content-padding-bottom - 6px) : root.content-padding-bottom;
     private property <length> resolved-content-spacing: root.compact-layout ? max(8px, root.content-spacing - 4px) : root.content-spacing;
+    private property <length> resolved-panel-width: max(
+        0px,
+        root.width - (root.resolved-frame-padding * 2)
+    );
+    out property <length> content-column-width: max(
+        0px,
+        root.resolved-panel-width - (root.resolved-content-padding-horizontal * 2)
+    );
 
     background: root.viewport-surface;
 
@@ -143,14 +150,14 @@ export component ModalBodyScrollArea inherits Rectangle {
         horizontal-scrollbar-policy: always-off;
 
         scroll-body := Rectangle {
-            width: body-scroll.visible-width;
+            width: root.width;
             height: body-panel.y + body-panel.height + root.resolved-frame-padding;
             background: root.viewport-surface;
 
             body-panel := Rectangle {
                 x: root.resolved-frame-padding;
                 y: root.resolved-frame-padding;
-                width: max(0px, parent.width - (root.resolved-frame-padding * 2));
+                width: root.resolved-panel-width;
                 height: body-content-host.height
                     + root.resolved-content-padding-vertical
                     + root.resolved-content-padding-bottom;
@@ -162,12 +169,12 @@ export component ModalBodyScrollArea inherits Rectangle {
                 body-content-host := Rectangle {
                     x: root.resolved-content-padding-horizontal;
                     y: root.resolved-content-padding-vertical;
-                    width: max(0px, parent.width - (root.resolved-content-padding-horizontal * 2));
+                    width: root.content-column-width;
                     height: body-content.preferred-height;
                     background: transparent;
 
                     body-content := VerticalLayout {
-                        width: parent.width;
+                        width: root.content-column-width;
                         alignment: start;
                         padding-bottom: root.resolved-content-padding-bottom;
                         spacing: root.resolved-content-spacing;
