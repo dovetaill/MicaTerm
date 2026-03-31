@@ -52,6 +52,7 @@ pub struct SftpDirectoryEntry {
     pub name: String,
     pub path: String,
     pub kind: SftpDirectoryEntryKind,
+    pub modified_unix_seconds: Option<u64>,
     pub size_bytes: Option<u64>,
 }
 

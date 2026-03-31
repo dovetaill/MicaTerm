@@ -89,6 +89,36 @@ impl SftpBrowserController {
         Some(request)
     }
 
+    pub fn navigate_back(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
+        let request_id = self.next_request_id();
+        let path = self.sessions.get_mut(&session_id)?.navigate_back(request_id)?;
+        Some(SftpBrowserLoadRequest {
+            session_id,
+            path,
+            request_id,
+        })
+    }
+
+    pub fn navigate_forward(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
+        let request_id = self.next_request_id();
+        let path = self.sessions.get_mut(&session_id)?.navigate_forward(request_id)?;
+        Some(SftpBrowserLoadRequest {
+            session_id,
+            path,
+            request_id,
+        })
+    }
+
+    pub fn navigate_up(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
+        let request_id = self.next_request_id();
+        let path = self.sessions.get_mut(&session_id)?.navigate_up(request_id)?;
+        Some(SftpBrowserLoadRequest {
+            session_id,
+            path,
+            request_id,
+        })
+    }
+
     pub fn pending_request(&self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
         let state = self.sessions.get(&session_id)?;
         let request_id = state.active_request_id?;
@@ -148,11 +178,16 @@ impl SftpBrowserController {
     }
 
     fn new_request(&mut self, session_id: Uuid, path: &str) -> SftpBrowserLoadRequest {
-        self.next_request_id += 1;
+        let request_id = self.next_request_id();
         SftpBrowserLoadRequest {
             session_id,
             path: path.to_string(),
-            request_id: self.next_request_id,
+            request_id,
         }
+    }
+
+    fn next_request_id(&mut self) -> u64 {
+        self.next_request_id += 1;
+        self.next_request_id
     }
 }

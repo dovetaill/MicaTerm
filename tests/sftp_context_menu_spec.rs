@@ -174,6 +174,7 @@ fn opening_sftp_context_menu_tracks_remote_selection_without_touching_asset_sele
         name: "app".into(),
         path: "/srv/app".into(),
         kind: SftpDirectoryEntryKind::Directory,
+        modified_unix_seconds: None,
         size_bytes: None,
     }]);
 
@@ -203,6 +204,7 @@ fn sftp_create_rename_and_delete_flows_mutate_projected_state_only_after_confirm
             name: "app".into(),
             path: "/srv/app".into(),
             kind: SftpDirectoryEntryKind::Directory,
+            modified_unix_seconds: None,
             size_bytes: None,
         },
         SftpDirectoryEntry {
@@ -210,6 +212,7 @@ fn sftp_create_rename_and_delete_flows_mutate_projected_state_only_after_confirm
             name: "release.tar.gz".into(),
             path: "/srv/app/release.tar.gz".into(),
             kind: SftpDirectoryEntryKind::File,
+            modified_unix_seconds: None,
             size_bytes: Some(14 * 1024),
         },
     ]);

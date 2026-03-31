@@ -12,6 +12,7 @@ import { AssetsSnippetPackageModal } from "components/assets-snippet-package-mod
 import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal.slint";
 import { BlockingModalShell } from "components/blocking-modal-shell.slint";
 import { OpenSavedSshModal } from "components/open-saved-ssh-modal.slint";
+import { SftpRemoteFileModal } from "components/sftp-remote-file-modal.slint";
 import { SyncVaultModal } from "components/sync-vault-modal.slint";
 import { SshHostKeyConfirmModal } from "components/ssh-host-key-confirm-modal.slint";
 import { StatusPill } from "components/status-pill.slint";
@@ -110,6 +111,14 @@ export component AppWindow inherits Window {
     in-out property <bool> workspace-paste-warning-editor-mode: false;
     in-out property <string> workspace-paste-warning-text: "";
     in-out property <int> workspace-paste-warning-focus-sequence: 0;
+    in-out property <bool> sftp-remote-file-modal-open: false;
+    in-out property <string> sftp-remote-file-modal-title: "";
+    in-out property <string> sftp-remote-file-modal-path: "";
+    in-out property <string> sftp-remote-file-modal-content: "";
+    in-out property <string> sftp-remote-file-modal-status-text: "";
+    in-out property <string> sftp-remote-file-modal-error-text: "";
+    in-out property <bool> sftp-remote-file-modal-can-save: false;
+    in-out property <int> sftp-remote-file-modal-focus-sequence: 0;
     in-out property <string> asset-ssh-modal-name: "";
     in-out property <string> asset-ssh-modal-host: "";
     in-out property <string> asset-ssh-modal-user: "";
@@ -308,12 +317,17 @@ export component AppWindow inherits Window {
     callback sftp-panel-refresh-requested();
     callback sftp-panel-up-requested();
     callback sftp-panel-path-submitted(string);
+    callback sftp-panel-item-selected(string);
+    callback sftp-panel-item-activated(string, string);
     callback sftp-panel-context-menu-requested(string, string, length, length);
     callback sftp-panel-upload-requested();
     callback sftp-panel-new-folder-requested();
     callback sftp-panel-open-queue-requested();
     callback sftp-panel-retry-requested();
     callback sftp-panel-reenable-follow-requested();
+    callback sftp-remote-file-modal-close-requested();
+    callback sftp-remote-file-modal-save-requested();
+    callback sftp-remote-file-modal-content-changed(string);
     callback toggle-global-menu-requested();
     callback close-global-menu-requested();
     callback toggle-theme-mode-requested();
@@ -853,6 +867,14 @@ export component AppWindow inherits Window {
 
                         sftp-panel-path-submitted(path) => {
                             root.sftp-panel-path-submitted(path);
+                        }
+
+                        sftp-panel-item-selected(item-id) => {
+                            root.sftp-panel-item-selected(item-id);
+                        }
+
+                        sftp-panel-item-activated(item-id, item-kind) => {
+                            root.sftp-panel-item-activated(item-id, item-kind);
                         }
 
                         sftp-panel-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
@@ -1736,6 +1758,63 @@ export component AppWindow inherits Window {
 
             cancel-requested => {
                 root.workspace-paste-warning-cancel-requested();
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
+    }
+
+    if root.sftp-remote-file-modal-open : sftp-remote-file-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 860px;
+        modal-height: 620px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        sftp-remote-file-modal-overlay := SftpRemoteFileModal {
+            x: 0px;
+            y: 0px;
+            width: sftp-remote-file-modal-shell.content-width;
+            height: sftp-remote-file-modal-shell.content-height;
+            dialog-title: root.sftp-remote-file-modal-title;
+            remote-path: root.sftp-remote-file-modal-path;
+            content <=> root.sftp-remote-file-modal-content;
+            status-text: root.sftp-remote-file-modal-status-text;
+            error-text: root.sftp-remote-file-modal-error-text;
+            can-save: root.sftp-remote-file-modal-can-save;
+            focus-sequence: root.sftp-remote-file-modal-focus-sequence;
+
+            close-requested => {
+                root.sftp-remote-file-modal-close-requested();
+            }
+
+            save-requested => {
+                root.sftp-remote-file-modal-save-requested();
+            }
+
+            content-changed(value) => {
+                root.sftp-remote-file-modal-content-changed(value);
             }
 
             drag-requested(pointer-x, pointer-y) => {

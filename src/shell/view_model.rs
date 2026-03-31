@@ -195,6 +195,18 @@ pub struct SftpConflictModalState {
     pub apply_to_all: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SftpRemoteFileEditorState {
+    pub open: bool,
+    pub session_id: Option<String>,
+    pub remote_path: String,
+    pub title: String,
+    pub content: String,
+    pub saved_content: String,
+    pub status_text: String,
+    pub error_text: String,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetModalState {
@@ -441,6 +453,7 @@ pub struct ShellViewModel {
     pub context_menu_open_path: Vec<usize>,
     pub context_menu_feedback_text: String,
     sftp_conflict_modal_state: SftpConflictModalState,
+    sftp_remote_file_editor_state: SftpRemoteFileEditorState,
     sync_modal_state: SyncModalViewState,
     sync_feedback_state: SyncFeedbackViewState,
     vault_panel_state: VaultPanelViewState,
@@ -506,6 +519,7 @@ impl Default for ShellViewModel {
             context_menu_open_path: Vec::new(),
             context_menu_feedback_text: String::new(),
             sftp_conflict_modal_state: SftpConflictModalState::default(),
+            sftp_remote_file_editor_state: SftpRemoteFileEditorState::default(),
             sync_modal_state: SyncModalViewState::default(),
             sync_feedback_state: SyncFeedbackViewState::default(),
             vault_panel_state: VaultPanelViewState::default(),
@@ -797,6 +811,27 @@ impl ShellViewModel {
         Some(self.sftp_sessions.entry(session_id).or_default())
     }
 
+    pub fn select_sftp_panel_entry(&mut self, entry_id: &str) -> bool {
+        {
+            let Some(state) = self.active_sftp_session_state_mut() else {
+                return false;
+            };
+            if state.selected_entry_ids.len() == 1 && state.selected_entry_ids[0] == entry_id {
+                return false;
+            }
+            state.selected_entry_ids = vec![entry_id.to_string()];
+        }
+        self.context_target_asset_id = Some(entry_id.to_string());
+        true
+    }
+
+    pub fn active_sftp_entry(&self, entry_id: &str) -> Option<&SftpDirectoryEntry> {
+        self.active_sftp_session_state()?
+            .entries
+            .iter()
+            .find(|entry| entry.id == entry_id)
+    }
+
     pub fn sftp_panel_mode_id(&self) -> &'static str {
         if self.active_workspace_session_id.is_none() {
             return SftpPanelMode::Empty.id();
@@ -925,6 +960,83 @@ impl ShellViewModel {
         };
         state.reenable_follow(path);
         true
+    }
+
+    pub fn sftp_remote_file_editor_state(&self) -> &SftpRemoteFileEditorState {
+        &self.sftp_remote_file_editor_state
+    }
+
+    pub fn open_sftp_remote_file_editor(
+        &mut self,
+        session_id: impl Into<String>,
+        remote_path: impl Into<String>,
+        title: impl Into<String>,
+        content: impl Into<String>,
+        status_text: impl Into<String>,
+        error_text: impl Into<String>,
+    ) {
+        let content = content.into();
+        self.sftp_remote_file_editor_state = SftpRemoteFileEditorState {
+            open: true,
+            session_id: Some(session_id.into()),
+            remote_path: remote_path.into(),
+            title: title.into(),
+            saved_content: content.clone(),
+            content,
+            status_text: status_text.into(),
+            error_text: error_text.into(),
+        };
+    }
+
+    pub fn close_sftp_remote_file_editor(&mut self) {
+        self.sftp_remote_file_editor_state = SftpRemoteFileEditorState::default();
+    }
+
+    pub fn update_sftp_remote_file_editor_content(&mut self, value: String) {
+        if !self.sftp_remote_file_editor_state.open {
+            return;
+        }
+        self.sftp_remote_file_editor_state.content = value;
+        self.sftp_remote_file_editor_state.error_text.clear();
+    }
+
+    pub fn sftp_remote_file_editor_can_save(&self) -> bool {
+        let editor = &self.sftp_remote_file_editor_state;
+        editor.open
+            && editor.error_text.is_empty()
+            && editor.content != editor.saved_content
+            && editor.session_id.is_some()
+            && !editor.remote_path.is_empty()
+    }
+
+    pub fn sftp_remote_file_editor_save_payload(&self) -> Option<(String, String, String)> {
+        let editor = &self.sftp_remote_file_editor_state;
+        if !self.sftp_remote_file_editor_can_save() {
+            return None;
+        }
+
+        Some((
+            editor.session_id.clone()?,
+            editor.remote_path.clone(),
+            editor.content.clone(),
+        ))
+    }
+
+    pub fn mark_sftp_remote_file_editor_saved(&mut self) {
+        if !self.sftp_remote_file_editor_state.open {
+            return;
+        }
+        self.sftp_remote_file_editor_state.saved_content =
+            self.sftp_remote_file_editor_state.content.clone();
+        self.sftp_remote_file_editor_state.status_text = "Changes saved to the remote file.".into();
+        self.sftp_remote_file_editor_state.error_text.clear();
+    }
+
+    pub fn set_sftp_remote_file_editor_error(&mut self, message: impl Into<String>) {
+        if !self.sftp_remote_file_editor_state.open {
+            return;
+        }
+        self.sftp_remote_file_editor_state.error_text = message.into();
     }
 
     pub fn sftp_queue_drawer_open(&self) -> bool {
@@ -2182,6 +2294,7 @@ impl ShellViewModel {
                     name: draft_name.trim().to_string(),
                     path,
                     kind: crate::app::sftp::SftpDirectoryEntryKind::Directory,
+                    modified_unix_seconds: None,
                     size_bytes: None,
                 };
 

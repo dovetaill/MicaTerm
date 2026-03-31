@@ -57,6 +57,24 @@ impl SftpBrowserSessionState {
         self.active_request_id = Some(request_id);
     }
 
+    pub fn navigate_back(&mut self, request_id: u64) -> Option<String> {
+        let path = self.history.back()?.to_string();
+        self.begin_manual_navigation(path.clone(), request_id, false);
+        Some(path)
+    }
+
+    pub fn navigate_forward(&mut self, request_id: u64) -> Option<String> {
+        let path = self.history.forward()?.to_string();
+        self.begin_manual_navigation(path.clone(), request_id, false);
+        Some(path)
+    }
+
+    pub fn navigate_up(&mut self, request_id: u64) -> Option<String> {
+        let path = remote_parent_path(self.current_path.as_str())?;
+        self.begin_manual_navigation(path.clone(), request_id, true);
+        Some(path)
+    }
+
     pub fn set_ready(&mut self, path: &str, entries: Vec<SftpDirectoryEntry>) {
         self.mode = SftpPanelMode::Ready;
         self.current_path = path.to_string();
@@ -85,5 +103,30 @@ impl SftpBrowserSessionState {
 
     pub fn accepts_request(&self, request_id: u64) -> bool {
         self.active_request_id == Some(request_id)
+    }
+
+    fn begin_manual_navigation(&mut self, path: String, request_id: u64, push_history: bool) {
+        self.follow_mode = SftpFollowMode::ManualBrowse;
+        self.current_path = path.clone();
+        if push_history {
+            self.history.push(path);
+        }
+        self.mode = SftpPanelMode::Loading;
+        self.last_error = None;
+        self.active_request_id = Some(request_id);
+    }
+}
+
+fn remote_parent_path(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "/" {
+        return None;
+    }
+
+    let normalized = trimmed.trim_end_matches('/');
+    match normalized.rsplit_once('/') {
+        Some(("", _)) => Some("/".into()),
+        Some((parent, _)) if !parent.is_empty() => Some(parent.into()),
+        _ => None,
     }
 }

@@ -15,6 +15,7 @@ fn entry(
         name: name.into(),
         path: path.into(),
         kind,
+        modified_unix_seconds: None,
         size_bytes: None,
     }
 }
@@ -164,5 +165,53 @@ fn retry_moves_disconnected_session_back_to_connecting() {
         .expect("session state should be available");
     assert_eq!(retry.path, "/srv/app");
     assert_eq!(state.mode, SftpPanelMode::Connecting);
+    assert_eq!(state.current_path, "/srv/app");
+}
+
+#[test]
+fn back_forward_and_up_navigation_issue_real_load_requests() {
+    let session_id = Uuid::new_v4();
+    let mut controller = SftpBrowserController::default();
+
+    let open = controller.open(session_id, "/srv/app");
+    controller.apply_loaded_directory(session_id, open.request_id, "/srv/app", Vec::new());
+
+    let navigate = controller.navigate(session_id, "/srv/app/releases");
+    controller.apply_loaded_directory(
+        session_id,
+        navigate.request_id,
+        "/srv/app/releases",
+        Vec::new(),
+    );
+
+    let back = controller
+        .navigate_back(session_id)
+        .expect("history back should produce a load request");
+    assert_eq!(back.path, "/srv/app");
+
+    controller.apply_loaded_directory(session_id, back.request_id, "/srv/app", Vec::new());
+
+    let forward = controller
+        .navigate_forward(session_id)
+        .expect("history forward should produce a load request");
+    assert_eq!(forward.path, "/srv/app/releases");
+
+    controller.apply_loaded_directory(
+        session_id,
+        forward.request_id,
+        "/srv/app/releases",
+        Vec::new(),
+    );
+
+    let up = controller
+        .navigate_up(session_id)
+        .expect("navigate up should produce a load request");
+    assert_eq!(up.path, "/srv/app");
+
+    let state = controller
+        .session_state(session_id)
+        .expect("session state should be available");
+    assert_eq!(state.mode, SftpPanelMode::Loading);
+    assert_eq!(state.follow_mode, SftpFollowMode::ManualBrowse);
     assert_eq!(state.current_path, "/srv/app");
 }
