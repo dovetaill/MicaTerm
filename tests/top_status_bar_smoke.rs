@@ -168,6 +168,36 @@ fn titlebar_exposes_sync_as_a_first_class_action() {
 }
 
 #[test]
+fn titlebar_exposes_transfer_icon_with_queue_badge() {
+    let content = std::fs::read_to_string("ui/shell/titlebar.slint").unwrap();
+
+    assert!(
+        content.contains("transfer-button"),
+        "titlebar should expose a dedicated transfer action button"
+    );
+    assert!(
+        content.contains("transfer-badge"),
+        "titlebar should surface a queue badge on the transfer action"
+    );
+}
+
+#[test]
+fn clicking_transfer_icon_opens_transfer_center_surface() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    assert!(!app.get_transfer_center_open());
+
+    app.invoke_open_transfer_center_requested();
+    assert!(app.get_transfer_center_open());
+
+    app.invoke_open_transfer_center_requested();
+    assert!(!app.get_transfer_center_open());
+}
+
+#[test]
 fn settings_no_longer_routes_into_vault_flow() {
     i_slint_backend_testing::init_no_event_loop();
 

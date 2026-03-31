@@ -26,6 +26,9 @@ use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer,
     build_shared_app_credential_store_for_paths, default_window_size,
 };
+use mica_term::app::sftp::{
+    SftpBackend, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpRuntimeHandle,
+};
 use mica_term::app::keychain::KeychainCatalog;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
@@ -125,6 +128,24 @@ fn bootstrap_source_uses_windows_native_terminal_presenter_for_native_frames() {
     assert!(
         !bootstrap_source.contains("frame_token: u64::try_from(surface.seqno)"),
         "bootstrap should stop synthesizing native frame tokens directly from surface seqno once the native renderer owns frame preparation"
+    );
+}
+
+#[test]
+fn path_errors_render_as_lightweight_status_rows_instead_of_full_height_empty_cards() {
+    let panel_source = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
+
+    assert!(
+        panel_source.contains("status-row"),
+        "right panel should expose a lightweight status row for loading, error, and disconnected feedback"
+    );
+    assert!(
+        !panel_source.contains("root.sftp-panel-mode == \"empty\" || root.sftp-panel-mode == \"disconnected\" || root.sftp-panel-mode == \"error\" : empty-state"),
+        "error and disconnected states should no longer be rendered through the full-height empty state shell"
+    );
+    assert!(
+        !panel_source.contains("copy-card :="),
+        "right panel should remove the legacy full-height copy card for path errors"
     );
 }
 
@@ -253,6 +274,31 @@ struct NoopRuntimeControl;
 
 struct PendingConnectionRuntimeControl {
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+}
+
+#[derive(Clone, Default)]
+struct RecordingSftpState {
+    read_dir_calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl RecordingSftpState {
+    fn take_read_dir_calls(&self) -> Vec<String> {
+        std::mem::take(&mut *self.read_dir_calls.lock().expect("lock sftp read_dir calls"))
+    }
+}
+
+#[derive(Clone)]
+struct RecordingSftpLauncher {
+    state: RecordingSftpState,
+}
+
+struct RecordingSftpRuntimeControl {
+    runtime: SftpRuntimeHandle,
+}
+
+struct RecordingSftpBackend {
+    responses: BTreeMap<String, Vec<SftpDirectoryEntry>>,
+    state: RecordingSftpState,
 }
 
 #[derive(Clone, Default)]
@@ -433,6 +479,173 @@ impl SessionRuntimeControl for NoopRuntimeControl {
 
     fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
         Ok(())
+    }
+}
+
+impl SftpBackend for RecordingSftpBackend {
+    fn read_dir<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<SftpDirectoryEntry>>> + Send + 'a>> {
+        let state = self.state.clone();
+        let response = self.responses.get(path).cloned().unwrap_or_default();
+        let path = path.to_string();
+        Box::pin(async move {
+            state
+                .read_dir_calls
+                .lock()
+                .expect("lock sftp read_dir calls")
+                .push(path);
+            Ok(response)
+        })
+    }
+
+    fn mkdir<'a>(&'a self, _path: &'a str) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn rename<'a>(
+        &'a self,
+        _from: &'a str,
+        _to: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn path_exists<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
+        Box::pin(async move { Ok(true) })
+    }
+
+    fn upload_file<'a>(
+        &'a self,
+        _remote_path: &'a str,
+        data: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<u64>> + Send + 'a>> {
+        Box::pin(async move { Ok(data.len() as u64) })
+    }
+
+    fn download_file<'a>(
+        &'a self,
+        _remote_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>>> + Send + 'a>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+
+    fn remove_file<'a>(
+        &'a self,
+        _remote_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn remove_dir<'a>(
+        &'a self,
+        _remote_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeControl for RecordingSftpRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn sftp_runtime(&self) -> Option<SftpRuntimeHandle> {
+        Some(self.runtime.clone())
+    }
+}
+
+impl SessionRuntimeLauncher for RecordingSftpLauncher {
+    fn launch(
+        &self,
+        profile: ConnectionProfile,
+        _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        Box::pin(async move {
+            let responses = match profile.host.as_str() {
+                "10.0.0.12" => BTreeMap::from([
+                    (
+                        "/srv/app".to_string(),
+                        vec![SftpDirectoryEntry {
+                            id: "entry-logs".into(),
+                            name: "logs".into(),
+                            path: "/srv/app/logs".into(),
+                            kind: SftpDirectoryEntryKind::Directory,
+                            size_bytes: None,
+                        }],
+                    ),
+                    (
+                        "/srv/app/releases".to_string(),
+                        vec![SftpDirectoryEntry {
+                            id: "entry-release".into(),
+                            name: "release.tar.gz".into(),
+                            path: "/srv/app/releases/release.tar.gz".into(),
+                            kind: SftpDirectoryEntryKind::File,
+                            size_bytes: Some(14 * 1024),
+                        }],
+                    ),
+                ]),
+                _ => BTreeMap::from([(
+                    "/srv/db".to_string(),
+                    vec![SftpDirectoryEntry {
+                        id: "entry-backup".into(),
+                        name: "backup.sql".into(),
+                        path: "/srv/db/backup.sql".into(),
+                        kind: SftpDirectoryEntryKind::File,
+                        size_bytes: Some(7 * 1024),
+                    }],
+                )]),
+            };
+
+            let cwd = if profile.host == "10.0.0.24" {
+                "/srv/db"
+            } else {
+                "/srv/app"
+            };
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd.into()));
+            Ok(Box::new(RecordingSftpRuntimeControl {
+                runtime: SftpRuntimeHandle::new(Arc::new(RecordingSftpBackend {
+                    responses,
+                    state,
+                })),
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
     }
 }
 
@@ -5988,4 +6201,87 @@ fn sftp_navigation_callbacks_update_projected_path_state() {
 
     app.invoke_sftp_panel_up_requested();
     assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app");
+}
+
+#[test]
+fn opening_sftp_reads_the_active_session_directory_instead_of_staying_connecting() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app");
+    assert_eq!(app.get_sftp_panel_items().row_count(), 1);
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(0)
+            .expect("sftp row")
+            .name
+            .as_str(),
+        "logs"
+    );
+    assert_eq!(sftp_state.take_read_dir_calls(), vec!["/srv/app".to_string()]);
+}
+
+#[test]
+fn refresh_and_path_submit_trigger_real_directory_reads() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    flush_runtime_projection();
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app/releases");
+    assert_eq!(app.get_sftp_panel_items().row_count(), 1);
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(0)
+            .expect("sftp row")
+            .name
+            .as_str(),
+        "release.tar.gz"
+    );
+
+    app.invoke_sftp_panel_refresh_requested();
+    flush_runtime_projection();
+
+    assert_eq!(
+        sftp_state.take_read_dir_calls(),
+        vec![
+            "/srv/app".to_string(),
+            "/srv/app/releases".to_string(),
+            "/srv/app/releases".to_string(),
+        ]
+    );
 }

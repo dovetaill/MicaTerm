@@ -1,0 +1,249 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component TransferCenter inherits Rectangle {
+    in property <bool> open: false;
+    in property <int> queue-total: 0;
+
+    visible: root.open;
+    border-radius: 18px;
+    border-width: 1px;
+    border-color: ThemeTokens.divider-subtle;
+    background: ThemeTokens.window-surface;
+    clip: true;
+
+    header-strip := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 72px;
+        background: ThemeTokens.control-hover-surface;
+
+        Text {
+            x: 20px;
+            y: 16px;
+            text: "Transfers";
+            color: ThemeTokens.text-primary;
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        Text {
+            x: 20px;
+            y: 42px;
+            text: root.queue-total > 0
+                ? "" + root.queue-total + " transfers tracked across sessions"
+                : "Global transfer activity appears here once uploads, downloads, and deletes are queued.";
+            color: ThemeTokens.text-primary;
+            opacity: 0.68;
+            font-size: 12px;
+        }
+    }
+
+    tab-strip := Rectangle {
+        x: 20px;
+        y: header-strip.y + header-strip.height + 16px;
+        width: parent.width - 40px;
+        height: 28px;
+        background: transparent;
+
+        running-tab := Rectangle {
+            x: 0px;
+            width: 88px;
+            height: parent.height;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.control-active-surface;
+
+            Text {
+                x: 14px;
+                y: 0px;
+                width: parent.width - 28px;
+                height: parent.height;
+                text: "Running";
+                color: ThemeTokens.text-primary;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                font-size: 12px;
+                font-weight: 700;
+            }
+        }
+
+        queued-tab := Rectangle {
+            x: running-tab.x + running-tab.width + 8px;
+            width: 82px;
+            height: parent.height;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.control-hover-surface;
+
+            Text {
+                x: 14px;
+                y: 0px;
+                width: parent.width - 28px;
+                height: parent.height;
+                text: "Queued";
+                color: ThemeTokens.text-primary;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                font-size: 12px;
+                font-weight: 600;
+            }
+        }
+
+        paused-tab := Rectangle {
+            x: queued-tab.x + queued-tab.width + 8px;
+            width: 82px;
+            height: parent.height;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.control-hover-surface;
+
+            Text {
+                x: 14px;
+                y: 0px;
+                width: parent.width - 28px;
+                height: parent.height;
+                text: "Paused";
+                color: ThemeTokens.text-primary;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                font-size: 12px;
+                font-weight: 600;
+            }
+        }
+
+        failed-tab := Rectangle {
+            x: paused-tab.x + paused-tab.width + 8px;
+            width: 76px;
+            height: parent.height;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.control-hover-surface;
+
+            Text {
+                x: 14px;
+                y: 0px;
+                width: parent.width - 28px;
+                height: parent.height;
+                text: "Failed";
+                color: ThemeTokens.text-primary;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                font-size: 12px;
+                font-weight: 600;
+            }
+        }
+
+        completed-tab := Rectangle {
+            x: failed-tab.x + failed-tab.width + 8px;
+            width: 108px;
+            height: parent.height;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.control-hover-surface;
+
+            Text {
+                x: 14px;
+                y: 0px;
+                width: parent.width - 28px;
+                height: parent.height;
+                text: "Completed";
+                color: ThemeTokens.text-primary;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+                font-size: 12px;
+                font-weight: 600;
+            }
+        }
+    }
+
+    table-card := Rectangle {
+        x: 20px;
+        y: tab-strip.y + tab-strip.height + 16px;
+        width: parent.width - 40px;
+        height: max(0px, parent.height - self.y - 20px);
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: ThemeTokens.divider-subtle;
+        background: ThemeTokens.workspace-surface;
+
+        table-header := Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 36px;
+            background: ThemeTokens.control-hover-surface;
+
+            Text {
+                x: 16px;
+                y: 9px;
+                text: "Transfer";
+                color: ThemeTokens.text-primary;
+                font-size: 12px;
+                font-weight: 700;
+            }
+
+            Text {
+                x: parent.width - 180px;
+                y: 9px;
+                width: 72px;
+                text: "Status";
+                color: ThemeTokens.text-primary;
+                font-size: 12px;
+                font-weight: 700;
+            }
+
+            Text {
+                x: parent.width - 92px;
+                y: 9px;
+                width: 76px;
+                text: "Progress";
+                color: ThemeTokens.text-primary;
+                horizontal-alignment: right;
+                font-size: 12px;
+                font-weight: 700;
+            }
+        }
+
+        empty-state := Rectangle {
+            x: 0px;
+            y: table-header.height;
+            width: parent.width;
+            height: parent.height - table-header.height;
+            background: transparent;
+
+            Rectangle {
+                x: 20px;
+                y: 20px;
+                width: 56px;
+                height: 4px;
+                border-radius: 2px;
+                background: ThemeTokens.accent;
+            }
+
+            Text {
+                x: 20px;
+                y: 38px;
+                text: "No transfers yet";
+                color: ThemeTokens.text-primary;
+                font-size: 20px;
+                font-weight: 700;
+            }
+
+            Text {
+                x: 20px;
+                y: 72px;
+                width: parent.width - 40px;
+                text: "Queue a file operation from the SFTP browser and it will move into this shared transfer center.";
+                color: ThemeTokens.text-primary;
+                opacity: 0.7;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
