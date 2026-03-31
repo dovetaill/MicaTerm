@@ -154,6 +154,7 @@ impl Default for SyncModalViewState {
 pub struct SyncFeedbackViewState {
     pub text: String,
     pub sequence: i32,
+    pub running: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -698,9 +699,20 @@ impl ShellViewModel {
         &self.sync_feedback_state
     }
 
+    pub fn start_sync_feedback(&mut self, text: impl Into<String>) {
+        self.sync_feedback_state.text = text.into();
+        self.sync_feedback_state.running = true;
+        self.sync_feedback_state.sequence = self.sync_feedback_state.sequence.saturating_add(1);
+    }
+
     pub fn show_sync_feedback(&mut self, text: impl Into<String>) {
         self.sync_feedback_state.text = text.into();
+        self.sync_feedback_state.running = false;
         self.sync_feedback_state.sequence = self.sync_feedback_state.sequence.saturating_add(1);
+    }
+
+    pub fn clear_sync_feedback(&mut self) {
+        self.sync_feedback_state.running = false;
     }
 
     pub fn right_panel_view_id(&self) -> &'static str {

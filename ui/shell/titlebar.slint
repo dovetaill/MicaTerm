@@ -10,6 +10,7 @@ export component Titlebar inherits Rectangle {
     in property <bool> sync-modal-open: false;
     in property <string> sync-feedback-text: "";
     in property <int> sync-feedback-sequence: 0;
+    in property <bool> sync-feedback-running: false;
     in property <bool> show-right-panel: false;
     in property <bool> transfer-center-open: false;
     in property <int> transfer-queue-total: 0;
@@ -92,9 +93,20 @@ export component Titlebar inherits Rectangle {
     changed sync-feedback-sequence => {
         sync-feedback-hide.stop();
         root.sync-feedback-visible-value = false;
-        if root.sync-feedback-text != "" {
+        if root.sync-feedback-running {
+            root.sync-feedback-visible-value = true;
+        } else if root.sync-feedback-text != "" {
             root.sync-feedback-visible-value = true;
             sync-feedback-hide.start();
+        }
+    }
+
+    changed sync-feedback-running => {
+        sync-feedback-hide.stop();
+        if root.sync-feedback-running {
+            root.sync-feedback-visible-value = true;
+        } else if root.sync-feedback-text == "" {
+            root.sync-feedback-visible-value = false;
         }
     }
 
@@ -239,7 +251,7 @@ export component Titlebar inherits Rectangle {
                 x: 40px;
                 y: 0px;
                 icon-source: root.sync-icon;
-                active: root.sync-feedback-visible;
+                active: root.sync-feedback-visible || root.sync-feedback-running;
                 tooltip-text: "Sync now";
                 tooltip-source-id: "sync-button";
 

@@ -28,6 +28,8 @@ grep -F 'out property <length> tooltip-anchor-y <=> root.tooltip-anchor-y-value;
 grep -F 'tooltip-source-id-value' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-delay := Timer' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-close-delay := Timer' "$TITLEBAR" >/dev/null
+grep -F 'in property <bool> sync-feedback-running: false;' "$TITLEBAR" >/dev/null
+grep -F 'changed sync-feedback-running => {' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-delay.start();' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-close-delay.start();' "$TITLEBAR" >/dev/null
 grep -F 'tooltip-close-source-id-value' "$TITLEBAR" >/dev/null
@@ -53,8 +55,10 @@ grep -F 'show-right-panel: root.effective-show-right-panel;' "$APP_WINDOW" >/dev
 grep -F 'callback sync-now-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback open-sync-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> sync-modal-open: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <bool> sync-feedback-running: false;' "$APP_WINDOW" >/dev/null
 grep -F 'sync-now-requested => {' "$APP_WINDOW" >/dev/null
 grep -F 'root.sync-now-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'sync-feedback-running: root.sync-feedback-running;' "$APP_WINDOW" >/dev/null
 grep -F 'tooltip-overlay := TitlebarTooltip {' "$APP_WINDOW" >/dev/null
 grep -F 'text: titlebar.tooltip-text;' "$APP_WINDOW" >/dev/null
 grep -F 'anchor-x: titlebar.tooltip-anchor-x;' "$APP_WINDOW" >/dev/null

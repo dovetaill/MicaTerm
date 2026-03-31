@@ -570,10 +570,10 @@ fn titlebar_sync_failure_updates_error_state_without_reopening_modal() {
     app.invoke_sync_now_requested();
 
     assert!(!app.get_sync_modal_open());
+    let error = app.get_sync_modal_error_text().to_string();
     assert!(
-        app.get_sync_modal_error_text()
-            .as_str()
-            .contains("token expired")
+        error.contains("token expired"),
+        "unexpected error: {error}"
     );
 }
 

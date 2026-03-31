@@ -1897,6 +1897,12 @@ fn settle_terminal_projection() {
     slint::platform::update_timers_and_animations();
 }
 
+fn settle_sync_scheduler(delay: Duration) {
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(delay);
+    slint::platform::update_timers_and_animations();
+}
+
 fn terminal_interaction_position(app: &AppWindow) -> LogicalPosition {
     LogicalPosition::new(
         app.get_layout_main_workspace_x() + 96.0,
@@ -2440,6 +2446,8 @@ fn unlocked_vault_with_auto_sync_enabled_syncs_after_asset_mutations() {
     app.invoke_assets_create_action_selected("new-folder".into());
     app.invoke_asset_folder_modal_name_changed("Prod".into());
     app.invoke_confirm_asset_modal_requested();
+    assert_eq!(primary.recorded_writes().len(), 0);
+    settle_sync_scheduler(Duration::from_millis(1300));
     assert_eq!(primary.recorded_writes().len(), 1);
 
     let folder_id = app
@@ -2453,12 +2461,112 @@ fn unlocked_vault_with_auto_sync_enabled_syncs_after_asset_mutations() {
     app.invoke_assets_context_menu_action_invoked("rename-asset".into());
     app.invoke_asset_rename_modal_name_changed("Infra".into());
     app.invoke_confirm_asset_rename_requested();
+    assert_eq!(primary.recorded_writes().len(), 1);
+    settle_sync_scheduler(Duration::from_millis(1300));
     assert_eq!(primary.recorded_writes().len(), 2);
 
     app.invoke_asset_context_menu_requested(folder_id.into(), "folder".into(), 96.0, 160.0);
     app.invoke_assets_context_menu_action_invoked("delete-asset".into());
     app.invoke_confirm_delete_asset_requested();
+    assert_eq!(primary.recorded_writes().len(), 2);
+    settle_sync_scheduler(Duration::from_millis(1300));
     assert_eq!(primary.recorded_writes().len(), 3);
+}
+
+#[test]
+fn back_to_back_mutations_share_one_debounced_auto_sync_upload() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("debounced-auto-sync");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle.auto_sync_enabled = true;
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_sync_modal_close_requested();
+
+    create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+    create_root_snippet(&app, "Restart api", "kubectl rollout restart deploy/web");
+
+    assert_eq!(primary.recorded_writes().len(), 0);
+    settle_sync_scheduler(Duration::from_millis(1300));
+
+    assert_eq!(
+        primary.recorded_writes().len(),
+        1,
+        "two quick local mutations should collapse into one debounced upload"
+    );
+}
+
+#[test]
+fn periodic_auto_sync_retries_failed_dirty_changes() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("periodic-auto-sync-retry");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    primary.set_write_error(Some("temporary outage"));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle.auto_sync_enabled = true;
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_sync_modal_close_requested();
+
+    create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+    settle_sync_scheduler(Duration::from_millis(1300));
+    assert_eq!(primary.recorded_writes().len(), 0);
+
+    primary.set_write_error(None);
+    settle_sync_scheduler(Duration::from_secs(121));
+
+    assert_eq!(
+        primary.recorded_writes().len(),
+        1,
+        "periodic sync should retry a dirty local change after the provider becomes writable again"
+    );
 }
 
 #[test]

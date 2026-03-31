@@ -50,6 +50,7 @@ export component AppWindow inherits Window {
     in-out property <string> sync-modal-master-password: "";
     in-out property <string> sync-feedback-text: "";
     in-out property <int> sync-feedback-sequence: 0;
+    in-out property <bool> sync-feedback-running: false;
     in-out property <bool> show-right-panel: false;
     in-out property <bool> transfer-center-open: false;
     in-out property <int> transfer-queue-total: 0;
@@ -495,6 +496,7 @@ export component AppWindow inherits Window {
                 sync-modal-open: root.sync-modal-open;
                 sync-feedback-text: root.sync-feedback-text;
                 sync-feedback-sequence: root.sync-feedback-sequence;
+                sync-feedback-running: root.sync-feedback-running;
                 show-right-panel: root.effective-show-right-panel;
                 transfer-center-open: root.transfer-center-open;
                 transfer-queue-total: root.transfer-queue-total;

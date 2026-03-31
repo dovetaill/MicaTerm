@@ -168,6 +168,18 @@ fn titlebar_exposes_sync_as_a_first_class_action() {
 }
 
 #[test]
+fn titlebar_sync_feedback_contract_supports_a_persistent_inflight_state() {
+    let titlebar = std::fs::read_to_string("ui/shell/titlebar.slint").unwrap();
+    let app_window = std::fs::read_to_string("ui/app-window.slint").unwrap();
+
+    assert!(titlebar.contains("in property <bool> sync-feedback-running: false;"));
+    assert!(titlebar.contains("changed sync-feedback-running => {"));
+    assert!(titlebar.contains("active: root.sync-feedback-visible || root.sync-feedback-running;"));
+    assert!(app_window.contains("in-out property <bool> sync-feedback-running: false;"));
+    assert!(app_window.contains("sync-feedback-running: root.sync-feedback-running;"));
+}
+
+#[test]
 fn titlebar_exposes_transfer_icon_with_queue_badge() {
     let content = std::fs::read_to_string("ui/shell/titlebar.slint").unwrap();
 
