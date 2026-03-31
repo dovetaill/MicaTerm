@@ -53,7 +53,8 @@ use mica_term::app::ssh::session_manager::{
 };
 use mica_term::app::terminal_theme::preset_for_theme_mode;
 use mica_term::app::vault::bootstrap::{
-    LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
+    LocalVaultBootstrapState, load_local_vault_bootstrap_state, load_runtime_vault_key,
+    save_local_vault_bootstrap_state,
 };
 use mica_term::app::vault::cache::{load_encrypted_cache, store_encrypted_cache};
 use mica_term::app::vault::crypto::{encrypt_snapshot, generate_vault_key, wrap_vault_key};
@@ -2367,6 +2368,99 @@ fn unlocking_existing_vault_restores_cached_snapshot_without_loading_while_locke
 }
 
 #[test]
+fn enabling_sync_persists_runtime_vault_key_material() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("runtime-key-persist");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+        },
+    );
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+
+    let local_state = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+        .unwrap()
+        .expect("persisted local bootstrap state");
+    let runtime_key = load_runtime_vault_key(credential_store.as_ref(), &local_state.bundle.vault_id)
+        .expect("load persisted runtime vault key");
+
+    assert!(runtime_key.is_some());
+    assert_ne!(runtime_key.expect("runtime key"), [0u8; 32]);
+}
+
+#[test]
+fn restart_recovers_vault_session_without_prompting_for_unlock() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("restart-runtime-key");
+    let initial_provider_factory = RecordingVaultProviderFactory::default();
+    initial_provider_factory.insert(Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    )));
+
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(initial_provider_factory),
+            bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+        },
+    );
+
+    let asset_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    let credential_ref = ssh_credential_ref(&asset_id, SshCredentialKind::SavedSecrets);
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    assert_eq!(app.get_console_asset_items().row_count(), 1);
+
+    let restarted = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &restarted,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            bootstrap_template: None,
+        },
+    );
+
+    assert_eq!(restarted.get_console_asset_items().row_count(), 1);
+    assert!(
+        credential_store
+            .get_secret(&credential_ref)
+            .unwrap()
+            .is_some()
+    );
+
+    restarted.invoke_open_sync_modal_requested();
+    assert_eq!(restarted.get_sync_modal_mode().as_str(), "ready");
+}
+
+#[test]
 fn unlocking_existing_vault_with_auto_sync_enabled_waits_for_a_real_mutation() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -2401,8 +2495,8 @@ fn unlocking_existing_vault_with_auto_sync_enabled_waits_for_a_real_mutation() {
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     assert_eq!(primary.recorded_writes().len(), 0);
 
-    app.invoke_sync_modal_lock_requested();
-    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_sync_modal_close_requested();
+    app.invoke_open_sync_modal_requested();
 
     assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
     assert_eq!(primary.recorded_writes().len(), 0);
@@ -2696,15 +2790,15 @@ fn locking_vault_clears_decrypted_assets_and_secrets_from_memory() {
             .is_some()
     );
 
-    app.invoke_sync_modal_lock_requested();
+    app.invoke_sync_modal_close_requested();
 
-    assert_eq!(app.get_sync_modal_mode().as_str(), "locked");
-    assert_eq!(app.get_console_asset_items().row_count(), 0);
+    assert!(!app.get_sync_modal_open());
+    assert_eq!(app.get_console_asset_items().row_count(), 1);
     assert!(
         credential_store
             .get_secret(&credential_ref)
             .unwrap()
-            .is_none()
+            .is_some()
     );
 }
 
@@ -2741,11 +2835,11 @@ fn locking_and_unlocking_vault_round_trips_snippet_assets() {
 
     assert_eq!(app.get_snippet_asset_items().row_count(), 1);
 
-    app.invoke_sync_modal_lock_requested();
-    assert_eq!(app.get_sync_modal_mode().as_str(), "locked");
-    assert_eq!(app.get_snippet_asset_items().row_count(), 0);
+    app.invoke_sync_modal_close_requested();
+    assert!(!app.get_sync_modal_open());
+    assert_eq!(app.get_snippet_asset_items().row_count(), 1);
 
-    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_open_sync_modal_requested();
     assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
     assert_eq!(app.get_snippet_asset_items().row_count(), 1);
     assert_eq!(

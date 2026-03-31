@@ -22,8 +22,9 @@ use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, Termin
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::vault::bootstrap::{
     LocalVaultBootstrapState, bootstrap_provider_credential_ref, export_bootstrap_bundle,
-    import_bootstrap_bundle, load_provider_credential, persist_provider_credential,
-    restore_provider_credentials, save_local_vault_bootstrap_state, validate_bootstrap_bundle,
+    import_bootstrap_bundle, load_provider_credential, load_runtime_vault_key,
+    persist_provider_credential, persist_runtime_vault_key, restore_provider_credentials,
+    save_local_vault_bootstrap_state, validate_bootstrap_bundle, vault_runtime_key_credential_ref,
 };
 use mica_term::app::vault::cache::store_encrypted_cache;
 use mica_term::app::vault::crypto::{encrypt_snapshot, generate_vault_key, wrap_vault_key};
@@ -375,6 +376,35 @@ fn bootstrap_provider_credentials_round_trip_through_credential_store_refs() {
 }
 
 #[test]
+fn runtime_vault_key_round_trips_through_credential_store() {
+    let store = MemoryCredentialStore::default();
+    let vault_id = "vault-main";
+    let key = [
+        0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87, 0x98, 0xa9, 0xba, 0xcb, 0xdc, 0xed,
+        0xfe, 0x0f, 0x1f, 0x2e, 0x3d, 0x4c, 0x5b, 0x6a, 0x79, 0x88, 0x97, 0xa6, 0xb5, 0xc4,
+        0xd3, 0xe2, 0xf1, 0x00,
+    ];
+
+    assert_eq!(
+        load_runtime_vault_key(&store, vault_id).expect("load missing runtime key"),
+        None
+    );
+
+    persist_runtime_vault_key(&store, vault_id, &key).expect("persist runtime vault key");
+
+    assert_eq!(
+        load_runtime_vault_key(&store, vault_id).expect("reload runtime vault key"),
+        Some(key)
+    );
+    assert!(
+        store
+            .get_secret(&vault_runtime_key_credential_ref(vault_id))
+            .expect("raw runtime key secret")
+            .is_some()
+    );
+}
+
+#[test]
 fn bootstrap_export_round_trips_bundle_and_provider_credentials() {
     let path = temp_bootstrap_export_path();
     let password = SecretString::new("bootstrap-passphrase".into());
@@ -576,7 +606,7 @@ fn unlock_restores_console_snippet_and_keychain_projection() {
 }
 
 #[test]
-fn lock_clears_decrypted_keychain_and_asset_state() {
+fn closing_sync_modal_keeps_decrypted_keychain_and_asset_state_available() {
     init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("lock-clear");
@@ -594,20 +624,22 @@ fn lock_clears_decrypted_keychain_and_asset_state() {
     assert_eq!(app.get_snippet_asset_items().row_count(), 2);
     assert_eq!(app.get_keychain_asset_items().row_count(), 3);
 
-    app.invoke_sync_modal_lock_requested();
+    app.invoke_sync_modal_close_requested();
 
-    assert_eq!(app.get_console_asset_items().row_count(), 0);
-    assert_eq!(app.get_snippet_asset_items().row_count(), 0);
-    assert_eq!(app.get_keychain_asset_items().row_count(), 0);
-    assert_eq!(credential_store.get_secret(&credential_ref).unwrap(), None);
-    assert_eq!(
+    assert_eq!(app.get_console_asset_items().row_count(), 1);
+    assert_eq!(app.get_snippet_asset_items().row_count(), 2);
+    assert_eq!(app.get_keychain_asset_items().row_count(), 3);
+    assert!(credential_store.get_secret(&credential_ref).unwrap().is_some());
+    assert!(
         credential_store
             .get_secret(&identity_credential_ref)
-            .unwrap(),
-        None
+            .unwrap()
+            .is_some()
     );
-    assert_eq!(
-        credential_store.get_secret(&key_credential_ref).unwrap(),
-        None
+    assert!(
+        credential_store
+            .get_secret(&key_credential_ref)
+            .unwrap()
+            .is_some()
     );
 }

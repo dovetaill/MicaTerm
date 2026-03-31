@@ -81,7 +81,9 @@ use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, bootstrap_provider_credential_ref, load_local_vault_bootstrap_state,
-    load_provider_credential, persist_provider_credential, save_local_vault_bootstrap_state,
+    load_provider_credential, load_runtime_vault_key, persist_provider_credential,
+    persist_runtime_vault_key, save_local_vault_bootstrap_state,
+    vault_runtime_key_credential_ref,
 };
 use crate::app::vault::cache::{load_encrypted_cache, store_encrypted_cache};
 use crate::app::vault::crypto::{
@@ -4435,6 +4437,73 @@ fn submit_sync_modal_master_password(
     }
 }
 
+fn silently_restore_vault_session_from_runtime_key(
+    state: &mut ShellViewModel,
+    vault: &mut VaultSessionState,
+    credential_store: &dyn CredentialStore,
+) -> Option<String> {
+    let vault_id = vault
+        .local_state
+        .as_ref()
+        .map(|local_state| local_state.bundle.vault_id.clone())?;
+
+    let runtime_vault_key = match load_runtime_vault_key(credential_store, &vault_id) {
+        Ok(Some(key)) => key,
+        Ok(None) => return None,
+        Err(err) => {
+            let credential_ref = vault_runtime_key_credential_ref(&vault_id);
+            if let Err(delete_err) = credential_store.delete_secret(credential_ref.as_str()) {
+                tracing::error!(
+                    target: "app.vault",
+                    vault_id,
+                    credential_ref,
+                    error = %delete_err,
+                    "failed to clear unreadable runtime vault key material"
+                );
+            }
+            return Some(format!(
+                "Automatic vault recovery is unavailable until you re-enter the master password: {err}"
+            ));
+        }
+    };
+
+    let recovery_attempt = (|| -> Result<VaultSnapshot> {
+        let encrypted_snapshot = load_encrypted_cache(vault.cache_root().as_path(), &vault_id)?
+            .ok_or_else(|| anyhow!("encrypted cache is unavailable"))?;
+        let snapshot = decrypt_snapshot(&encrypted_snapshot, &runtime_vault_key)?;
+        apply_vault_snapshot_to_shell(
+            state,
+            &snapshot,
+            credential_store,
+            vault.known_hosts_path().as_path(),
+        )?;
+        Ok(snapshot)
+    })();
+
+    match recovery_attempt {
+        Ok(snapshot) => {
+            vault.unlocked_vault_key = Some(runtime_vault_key);
+            vault.decrypted_snapshot = Some(snapshot);
+            None
+        }
+        Err(err) => {
+            let credential_ref = vault_runtime_key_credential_ref(&vault_id);
+            if let Err(delete_err) = credential_store.delete_secret(credential_ref.as_str()) {
+                tracing::error!(
+                    target: "app.vault",
+                    vault_id,
+                    credential_ref,
+                    error = %delete_err,
+                    "failed to clear invalid runtime vault key material"
+                );
+            }
+            Some(format!(
+                "Automatic vault recovery failed. Re-enter the master password to restore sync: {err}"
+            ))
+        }
+    }
+}
+
 fn sync_preferences_for_bundle(
     bundle: &BootstrapBundle,
     last_sync_result: Option<String>,
@@ -4542,6 +4611,7 @@ fn create_local_vault_from_shell_state(
         current_revision: None,
     };
     save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
+    persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
     vault.local_state = Some(local_state);
     vault.unlocked_vault_key = Some(vault_key);
     vault.decrypted_snapshot = Some(snapshot);
@@ -4601,6 +4671,7 @@ fn recover_local_vault_from_primary_remote(
         current_revision: Some(remote_head.vault_revision.clone()),
     };
     save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
+    persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
     apply_vault_snapshot_to_shell(
         state,
         &snapshot,
@@ -4677,6 +4748,7 @@ fn unlock_local_vault_into_shell(
         credential_store,
         vault.known_hosts_path().as_path(),
     )?;
+    persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
     vault.unlocked_vault_key = Some(vault_key);
     vault.decrypted_snapshot = Some(snapshot);
     update_vault_panel_for_local_state(state, vault);
@@ -5413,14 +5485,22 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
         None
     });
-    let initial_vault_session = VaultSessionState::new(
+    let mut initial_vault_session = VaultSessionState::new(
         vault_root_dir,
         Arc::clone(&vault_runtime.provider_factory),
         vault_runtime.bootstrap_template.clone(),
         initial_local_vault_state,
     );
+    let initial_runtime_recovery_error = silently_restore_vault_session_from_runtime_key(
+        &mut initial_view_model,
+        &mut initial_vault_session,
+        credential_store.as_ref(),
+    );
     update_vault_panel_for_local_state(&mut initial_view_model, &initial_vault_session);
     update_sync_modal_for_local_state(&mut initial_view_model, &initial_vault_session);
+    if let Some(error) = initial_runtime_recovery_error {
+        set_sync_modal_error_without_opening(&mut initial_view_model, &initial_vault_session, error);
+    }
     let view_model = Rc::new(RefCell::new(initial_view_model));
     let workspace_follow_tracker = Rc::new(RefCell::new(WorkspaceFollowTracker::default()));
     let sftp_browser_controller = Rc::new(RefCell::new(SftpBrowserController::default()));
