@@ -165,7 +165,7 @@ fn dark_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let default_fg_rgba = extract_debug_u32_field(&debug, "default_fg_rgba");
     let default_bg_rgba = extract_debug_u32_field(&debug, "default_bg_rgba");
 
-    assert_eq!(default_fg_rgba, 0xffd8_dfe8);
+    assert_eq!(default_fg_rgba, 0xffe6_edf5);
     assert_eq!(default_bg_rgba, 0xff0c_1014);
 }
 
@@ -180,7 +180,7 @@ fn light_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let default_fg_rgba = extract_debug_u32_field(&debug, "default_fg_rgba");
     let default_bg_rgba = extract_debug_u32_field(&debug, "default_bg_rgba");
 
-    assert_eq!(default_fg_rgba, 0xff24_292f);
+    assert_eq!(default_fg_rgba, 0xff17_1c23);
     assert_eq!(default_bg_rgba, 0xfffc_fdff);
 }
 
@@ -193,7 +193,7 @@ fn dark_theme_surface_projection_exposes_mica_code_dark_cursor_palette() {
     let snapshot = session.surface_state(Uuid::new_v4());
 
     assert_eq!(snapshot.cursor.fg_rgba, 0xff0c_1014);
-    assert_eq!(snapshot.cursor.bg_rgba, 0xffd8_dfe8);
+    assert_eq!(snapshot.cursor.bg_rgba, 0xffe6_edf5);
 }
 
 #[test]
@@ -323,6 +323,28 @@ fn dark_theme_palette_uses_bright_default_foreground() {
         .expect("prompt cell");
 
     assert_ne!(prompt.fg_rgba, 0xff00_0000);
+}
+
+#[test]
+fn dark_theme_ansi_prompt_colors_use_higher_contrast_accents() {
+    let mut session = TerminalSession::new(24, 80);
+
+    session.apply_remote_bytes(b"\x1b[32mok\x1b[34mgo\x1b[0m");
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    let green = snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 0)
+        .expect("green prompt cell");
+    let blue = snapshot
+        .cells
+        .iter()
+        .find(|cell| cell.col == 2)
+        .expect("blue prompt cell");
+
+    assert_eq!(green.fg_rgba, 0xffa8_dc8a);
+    assert_eq!(blue.fg_rgba, 0xff7c_c5ff);
 }
 
 #[test]

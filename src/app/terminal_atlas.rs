@@ -13,6 +13,9 @@ use crate::app::terminal_emoji::{
     ClusterRenderKind as EmojiClusterRenderKind, EmojiRenderOutcome, TerminalEmojiRenderer,
     classify_cluster_render_kind,
 };
+use crate::app::terminal_font::backend::{
+    apply_synthetic_embolden, map_glyph_coverage_to_alpha,
+};
 
 const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-Regular.ttf");
 const TERMINAL_FONT_SIZE_PX: f32 = 18.0;
@@ -20,8 +23,6 @@ const MIN_CELL_WIDTH_PX: u32 = 8;
 const MIN_CELL_HEIGHT_PX: u32 = 20;
 const CELL_HORIZONTAL_PADDING_PX: u32 = 0;
 const CELL_VERTICAL_PADDING_PX: u32 = 0;
-const GLYPH_COVERAGE_GAMMA: f32 = 0.92;
-const GLYPH_ALPHA_GAIN: f32 = 1.14;
 const ASCII_LEFT_INSET_PX: f32 = 0.0;
 const MIXED_LEFT_INSET_PX: f32 = 0.0;
 
@@ -555,10 +556,11 @@ fn rasterize_mono_cluster_sprite(
             }
 
             let mask_index = target_y as usize * width + target_x as usize;
-            let next_alpha = map_coverage_to_alpha(coverage);
+            let next_alpha = map_glyph_coverage_to_alpha(coverage);
             alpha[mask_index] = alpha[mask_index].max(next_alpha);
         });
     }
+    apply_synthetic_embolden(&mut alpha, width as u32, height as u32);
 
     CachedClusterSprite::MonoAlpha {
         width: width as u32,
@@ -705,11 +707,6 @@ fn relative_luminance(color: Rgba8Pixel) -> f32 {
     };
 
     0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
-}
-
-fn map_coverage_to_alpha(coverage: f32) -> u8 {
-    let adjusted = coverage.clamp(0.0, 1.0).powf(GLYPH_COVERAGE_GAMMA) * GLYPH_ALPHA_GAIN;
-    (adjusted.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

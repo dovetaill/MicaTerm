@@ -3,7 +3,10 @@
 use ab_glyph::{Font, FontArc, Glyph, GlyphId, PxScale, ScaleFont, point};
 use anyhow::{Result, anyhow};
 
-use crate::app::terminal_font::backend::{FontFaceKey, FontMetrics, FontRequest, FontSystem};
+use crate::app::terminal_font::backend::{
+    FontFaceKey, FontMetrics, FontRequest, FontSystem, apply_synthetic_embolden,
+    map_glyph_coverage_to_alpha,
+};
 
 const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../../ui/fonts/SarasaTermSCNerd-Regular.ttf");
 const DEFAULT_FACE_KEY: FontFaceKey = FontFaceKey(1);
@@ -76,9 +79,10 @@ impl DirectWriteFontSystem {
                 .saturating_mul(width_px as usize)
                 .saturating_add(x as usize);
             if let Some(pixel) = coverage.get_mut(index) {
-                *pixel = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+                *pixel = map_glyph_coverage_to_alpha(value);
             }
         });
+        apply_synthetic_embolden(&mut coverage, width_px, height_px);
 
         Ok(RasterizedGlyph {
             width_px,

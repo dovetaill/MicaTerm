@@ -60,6 +60,8 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");
     let font_backend_source =
         fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let dwrite_source =
+        fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite font backend");
 
     assert!(
         atlas_source.contains("const TERMINAL_FONT_SIZE_PX: f32 = 18.0;"),
@@ -70,13 +72,38 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         "atlas renderer should stop forcing a 9px minimum cell width for a 7px bundled mono advance"
     );
     assert!(
-        atlas_source.contains("const GLYPH_ALPHA_GAIN: f32 = 1.14;"),
-        "atlas renderer should increase glyph alpha gain to strengthen regular-weight strokes"
+        font_backend_source.contains("pub(crate) fn map_glyph_coverage_to_alpha"),
+        "font backend should expose a shared glyph coverage mapping helper so bitmap and native renderers do not drift"
     );
     assert!(
-        font_backend_source.contains("px_size: 18.0,"),
-        "shared font request defaults should move to the tighter 18px contract so native and software paths stay aligned"
+        font_backend_source.contains("pub(crate) fn apply_synthetic_embolden"),
+        "font backend should expose a shared synthetic embolden helper for regular-weight terminal glyphs"
     );
+    assert!(
+        atlas_source.contains("map_glyph_coverage_to_alpha"),
+        "atlas renderer should route glyph coverage through the shared coverage mapping helper"
+    );
+    assert!(
+        atlas_source.contains("apply_synthetic_embolden(&mut alpha"),
+        "atlas renderer should apply the shared embolden pass to its mono alpha mask"
+    );
+    assert!(
+        dwrite_source.contains("map_glyph_coverage_to_alpha"),
+        "native font rasterization should route glyph coverage through the shared coverage mapping helper"
+    );
+    assert!(
+        dwrite_source.contains("apply_synthetic_embolden(&mut coverage"),
+        "native font rasterization should apply the same embolden pass as the bitmap atlas path"
+    );
+    assert!(
+        font_backend_source.contains("const GLYPH_ALPHA_GAIN: f32 = 1.26;"),
+        "shared glyph coverage gain should be stronger than the previous lighter-weight default"
+    );
+    assert!(
+        font_backend_source.contains("const SYNTHETIC_EMBOLDEN_STRENGTH: f32 = 0.46;"),
+        "shared glyph raster settings should include a light synthetic embolden pass to thicken regular-weight strokes"
+    );
+    assert!(font_backend_source.contains("px_size: 18.0,"));
 }
 
 #[test]
