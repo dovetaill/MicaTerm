@@ -132,7 +132,7 @@ fn bootstrap_binds_top_status_bar_callbacks_to_window_state() {
 
     app.invoke_toggle_right_panel_requested();
     assert!(app.get_show_right_panel());
-    assert_eq!(app.get_right_panel_view().as_str(), "appearance");
+    assert_eq!(app.get_right_panel_view().as_str(), "sftp");
 
     app.invoke_toggle_global_menu_requested();
     assert!(app.get_show_global_menu());

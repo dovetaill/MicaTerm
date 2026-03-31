@@ -28,7 +28,7 @@ ensure_absent() {
 grep -F 'callback open-settings-panel-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback open-sync-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> sync-modal-open: false;' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <string> right-panel-view: "appearance";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> right-panel-view: "sftp";' "$APP_WINDOW" >/dev/null
 grep -F 'open-settings-panel-requested => {' "$APP_WINDOW" >/dev/null
 grep -F 'root.open-settings-panel-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'open-sync-modal-requested => {' "$APP_WINDOW" >/dev/null

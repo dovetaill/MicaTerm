@@ -64,7 +64,7 @@ impl RightPanelView {
     pub fn from_id(value: &str) -> Self {
         match value {
             "sftp" => Self::Sftp,
-            _ => Self::Appearance,
+            _ => Self::Sftp,
         }
     }
 }
@@ -415,7 +415,7 @@ impl Default for ShellViewModel {
         Self {
             show_welcome: true,
             show_right_panel: false,
-            right_panel_view: RightPanelView::Appearance,
+            right_panel_view: RightPanelView::Sftp,
             show_global_menu: false,
             show_assets_sidebar: true,
             active_sidebar_destination: SidebarDestination::Console,
@@ -659,9 +659,7 @@ impl ShellViewModel {
     }
 
     pub fn open_settings_panel(&mut self) {
-        self.right_panel_view = RightPanelView::Appearance;
-        self.show_right_panel = true;
-        self.show_global_menu = false;
+        self.open_sftp_panel();
     }
 
     pub fn open_sync_modal(&mut self) {
@@ -684,9 +682,7 @@ impl ShellViewModel {
     }
 
     pub fn open_appearance_panel(&mut self) {
-        self.right_panel_view = RightPanelView::Appearance;
-        self.show_right_panel = true;
-        self.show_global_menu = false;
+        self.open_sftp_panel();
     }
 
     pub fn open_sftp_panel(&mut self) {
@@ -1204,6 +1200,7 @@ impl ShellViewModel {
 
     pub fn toggle_right_panel(&mut self) {
         self.show_right_panel = !self.show_right_panel;
+        self.right_panel_view = RightPanelView::Sftp;
     }
 
     pub fn toggle_global_menu(&mut self) {

@@ -193,10 +193,21 @@ fn shell_view_model_tracks_top_status_bar_state() {
 fn right_panel_view_supports_sftp_projection() {
     let mut view_model = ShellViewModel::default();
 
-    assert_eq!(view_model.right_panel_view_id(), "appearance");
+    assert_eq!(view_model.right_panel_view_id(), "sftp");
 
     view_model.set_right_panel_view(RightPanelView::from_id("sftp"));
 
+    assert_eq!(view_model.right_panel_view_id(), "sftp");
+}
+
+#[test]
+fn toggling_right_panel_reopens_the_sftp_browser() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.set_right_panel_view(RightPanelView::Appearance);
+    view_model.toggle_right_panel();
+
+    assert!(view_model.show_right_panel);
     assert_eq!(view_model.right_panel_view_id(), "sftp");
 }
 

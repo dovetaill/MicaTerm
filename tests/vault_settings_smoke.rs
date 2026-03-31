@@ -13,7 +13,7 @@ fn settings_action_no_longer_routes_right_panel_to_sync_and_vault() {
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
 
-    assert_eq!(app.get_right_panel_view().as_str(), "appearance");
+    assert_eq!(app.get_right_panel_view().as_str(), "sftp");
 
     app.invoke_open_settings_panel_requested();
 

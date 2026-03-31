@@ -10,7 +10,7 @@ fn ui_preferences_default_to_dark_and_not_pinned() {
 
     assert_eq!(prefs.theme_mode, ThemeMode::Dark);
     assert!(!prefs.always_on_top);
-    assert_eq!(prefs.right_panel_view, "appearance");
+    assert_eq!(prefs.right_panel_view, "sftp");
 }
 
 #[test]
@@ -43,4 +43,9 @@ fn ui_preferences_accept_sftp_right_panel_view() {
 
     assert_eq!(prefs.right_panel_view, "sftp");
     assert_eq!(RightPanelView::from_id(&prefs.right_panel_view).id(), "sftp");
+}
+
+#[test]
+fn legacy_appearance_preference_migrates_to_sftp() {
+    assert_eq!(RightPanelView::from_id("appearance").id(), "sftp");
 }

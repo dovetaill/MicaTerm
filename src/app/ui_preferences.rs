@@ -26,7 +26,7 @@ fn default_theme_mode() -> ThemeMode {
 }
 
 fn default_right_panel_view() -> String {
-    RightPanelView::Appearance.id().into()
+    RightPanelView::Sftp.id().into()
 }
 
 impl Default for UiPreferences {

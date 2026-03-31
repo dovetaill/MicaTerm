@@ -76,7 +76,7 @@ component SftpQueueChip inherits Rectangle {
 
 export component RightPanel inherits Rectangle {
     in property <bool> expanded: false;
-    in property <string> view: "appearance";
+    in property <string> view: "sftp";
     in property <string> sftp-panel-mode: "empty";
     in property <string> sftp-panel-host-label: "";
     in property <string> sftp-panel-path: "";
@@ -183,41 +183,11 @@ export component RightPanel inherits Rectangle {
         background: ThemeTokens.divider-strong;
     }
 
-    appearance-panel := Rectangle {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
-        visible: root.view == "appearance";
-        background: transparent;
-
-        Text {
-            x: 16px;
-            y: 16px;
-            width: parent.width - 32px;
-            text: "Appearance";
-            color: ThemeTokens.text-primary;
-            font-size: 24px;
-            font-weight: 700;
-        }
-
-        Text {
-            x: 16px;
-            y: 52px;
-            width: parent.width - 32px;
-            text: "Use the titlebar controls to open settings and adjust the desktop appearance.";
-            color: ThemeTokens.text-primary;
-            opacity: 0.72;
-            wrap: word-wrap;
-        }
-    }
-
     sftp-panel := Rectangle {
         x: 0px;
         y: 0px;
         width: parent.width;
         height: parent.height;
-        visible: root.view == "sftp";
         background: transparent;
 
         session-strip := Rectangle {
