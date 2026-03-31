@@ -1103,7 +1103,7 @@ export component AppWindow inherits Window {
     if root.sync-modal-open : sync-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 640px;
-        modal-height: 620px;
+        modal-height: max(420px, min(560px, root.height - titlebar.height - 64px));
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
 

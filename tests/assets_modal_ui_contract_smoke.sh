@@ -90,7 +90,7 @@ grep -F -A5 'sync-vault-modal-overlay := SyncVaultModal {' "$APP_WINDOW" | grep 
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 520px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
-grep -F 'modal-height: 620px;' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: max(420px, min(560px, root.height - titlebar.height - 64px));' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 268px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 332px;' "$APP_WINDOW" >/dev/null
 grep -F 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" >/dev/null
@@ -133,11 +133,15 @@ grep -F 'callback toggle-changed(string, bool);' "$SYNC_MODAL" >/dev/null
 grep -F 'body-scroll := ScrollView {' "$SYNC_MODAL" >/dev/null
 grep -F 'viewport-width: scroll-body.width;' "$SYNC_MODAL" >/dev/null
 grep -F 'viewport-height: scroll-body.height;' "$SYNC_MODAL" >/dev/null
-grep -F 'height: max(body-scroll.visible-height, body-column.preferred-height + 24px);' "$SYNC_MODAL" >/dev/null
+grep -F 'height: max(body-scroll.visible-height, body-panel.height + 12px);' "$SYNC_MODAL" >/dev/null
+grep -F 'body-panel := Rectangle {' "$SYNC_MODAL" >/dev/null
 grep -F 'footer := Rectangle {' "$SYNC_MODAL" >/dev/null
 grep -F 'y: parent.height - root.footer-height;' "$SYNC_MODAL" >/dev/null
+grep -F 'footer-divider := Rectangle {' "$SYNC_MODAL" >/dev/null
 grep -F 'error-banner := Rectangle {' "$SYNC_MODAL" >/dev/null
 grep -F 'SyncModalToggleRow {' "$SYNC_MODAL" >/dev/null
+grep -F 'background: ThemeTokens.titlebar-surface;' "$SYNC_MODAL" >/dev/null
+grep -F 'background: ThemeTokens.window-surface;' "$SYNC_MODAL" >/dev/null
 grep -F 'SyncModalTextField {' "$SYNC_MODAL" >/dev/null
 grep -F 'if root.mode == "not-configured" || root.mode == "locked"' "$SYNC_MODAL" >/dev/null
 grep -F 'export component AssetsSnippetPackageModal inherits Rectangle {' "$SNIPPET_PACKAGE_MODAL" >/dev/null

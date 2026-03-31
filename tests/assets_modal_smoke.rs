@@ -791,13 +791,56 @@ fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
     );
     assert!(
         sync.contains(
-            "height: max(body-scroll.visible-height, body-column.preferred-height + 24px);"
+            "height: max(body-scroll.visible-height, body-panel.height + 12px);"
         ),
         "sync modal scroll body must expand with long error and password content"
     );
     assert!(
         sync.contains("footer := Rectangle {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
         "sync modal footer must stay pinned to the bottom edge"
+    );
+}
+
+#[test]
+fn sync_modal_shell_uses_viewport_constrained_height_instead_of_a_fixed_620px_frame() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let sync_shell = app_window
+        .split("if root.sync-modal-open : sync-modal-shell := BlockingModalShell {")
+        .nth(1)
+        .and_then(|section| section.split("if root.asset-modal-open").next())
+        .expect("extract sync modal shell block");
+
+    assert!(
+        !sync_shell.contains("modal-height: 620px;"),
+        "sync modal shell should stop hardcoding a 620px height because it clips footer reachability on shorter windows"
+    );
+    assert!(
+        sync_shell.contains(
+            "modal-height: max(420px, min(560px, root.height - titlebar.height - 64px));"
+        ),
+        "sync modal shell should derive its target height from the viewport instead of a single fixed frame size"
+    );
+}
+
+#[test]
+fn sync_modal_uses_distinct_header_body_and_footer_surfaces() {
+    let sync = fs::read_to_string("ui/components/sync-vault-modal.slint").expect("read sync modal");
+
+    assert!(
+        sync.contains("background: ThemeTokens.titlebar-surface;"),
+        "sync modal header should use a stronger chrome surface so it stops blending into the body"
+    );
+    assert!(
+        sync.contains("body-panel := Rectangle {"),
+        "sync modal should render the body content inside a dedicated panel surface"
+    );
+    assert!(
+        sync.contains("background: ThemeTokens.window-surface;"),
+        "sync modal should introduce a clearer body or footer surface instead of reusing the same light panel everywhere"
+    );
+    assert!(
+        sync.contains("footer-divider := Rectangle {"),
+        "sync modal footer should expose an explicit divider so actions stay visually separated from error and form content"
     );
 }
 
