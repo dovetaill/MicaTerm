@@ -421,12 +421,12 @@ async fn ensure_success(response: reqwest::Response, operation: &str) -> Result<
     let status = response.status();
     let body = response.text().await.unwrap_or_else(|_| String::new());
 
-    if let Ok(error) = serde_json::from_str::<GiteeApiErrorDocument>(&body) {
-        if let Some(message) = error.message.or(error.error) {
-            return Err(anyhow!(
-                "Gitee gist {operation} failed with {status}: {message}"
-            ));
-        }
+    if let Ok(error) = serde_json::from_str::<GiteeApiErrorDocument>(&body)
+        && let Some(message) = error.message.or(error.error)
+    {
+        return Err(anyhow!(
+            "Gitee gist {operation} failed with {status}: {message}"
+        ));
     }
 
     if !body.trim().is_empty() {
@@ -487,7 +487,7 @@ fn encode_hex(bytes: &[u8]) -> String {
 }
 
 fn decode_hex(value: &str) -> Result<Vec<u8>> {
-    if value.len() % 2 != 0 {
+    if !value.len().is_multiple_of(2) {
         return Err(anyhow!(
             "hex payload must contain an even number of characters"
         ));

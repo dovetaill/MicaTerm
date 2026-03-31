@@ -4736,15 +4736,14 @@ fn sync_local_vault(
         sync_preferences_for_bundle(&local_bundle, None),
         &UiPreferences::from(&*state),
     )?;
-    if current_revision.is_some()
-        && vault
+    if let Some(stable_revision) = current_revision.as_ref().filter(|_| {
+        vault
             .decrypted_snapshot
             .as_ref()
             .is_some_and(|existing| existing == &snapshot)
-    {
+    }) {
         update_vault_panel_for_local_state(state, vault);
         update_sync_modal_for_local_state(state, vault);
-        let stable_revision = current_revision.expect("checked current revision above");
         state.vault_panel_state_mut().primary_status_label =
             format!("Already synced {stable_revision}");
         state.sync_modal_state_mut().status_text =
