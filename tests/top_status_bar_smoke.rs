@@ -317,7 +317,7 @@ fn titlebar_exposes_sync_as_a_first_class_action() {
 }
 
 #[test]
-fn titlebar_sync_keeps_immediate_action_semantics_after_configuration() {
+fn titlebar_sync_forces_foreground_check_when_scheduler_is_idle() {
     i_slint_backend_testing::init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("immediate-action");

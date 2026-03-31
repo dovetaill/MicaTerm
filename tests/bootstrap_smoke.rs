@@ -2678,7 +2678,7 @@ fn unlocking_existing_vault_with_auto_sync_enabled_waits_for_a_real_mutation() {
 }
 
 #[test]
-fn unlocked_vault_with_auto_sync_enabled_syncs_after_asset_mutations() {
+fn asset_mutation_syncs_without_auto_sync_toggle() {
     i_slint_backend_testing::init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("asset-auto-sync");
@@ -2690,7 +2690,6 @@ fn unlocked_vault_with_auto_sync_enabled_syncs_after_asset_mutations() {
     provider_factory.insert(primary.clone());
 
     let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
-    bundle.auto_sync_enabled = true;
     bundle
         .remotes
         .retain(|remote| remote.role == RemoteRole::Primary);
@@ -2743,6 +2742,89 @@ fn unlocked_vault_with_auto_sync_enabled_syncs_after_asset_mutations() {
 }
 
 #[test]
+fn periodic_sync_pulls_remote_changes_even_without_local_dirty_state() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("periodic-pull-clean-local");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store.clone(),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_sync_modal_sync_now_requested();
+    app.invoke_sync_modal_close_requested();
+
+    assert_eq!(primary.recorded_writes().len(), 1);
+    assert_eq!(app.get_console_asset_items().row_count(), 0);
+
+    let remote_store = Arc::new(MemoryCredentialStore::default());
+    let (remote_tree, remote_credential_ref) = sample_vault_asset_tree("10.0.0.99");
+    persist_secret_bundle(
+        remote_store.as_ref(),
+        &remote_credential_ref,
+        &StoredSshSecretBundle {
+            password: Some("hunter2".into()),
+            ..StoredSshSecretBundle::default()
+        },
+    )
+    .unwrap();
+    let local_state = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+        .unwrap()
+        .expect("local bootstrap state after initial sync");
+    let runtime_vault_key = load_runtime_vault_key(credential_store.as_ref(), "vault-main")
+        .unwrap()
+        .expect("runtime vault key after enabling sync");
+    let mut remote_revision = sample_remote_revision_for_existing_vault_key(
+        &remote_tree,
+        remote_store.as_ref(),
+        "rev-0002",
+        &runtime_vault_key,
+        &local_state.wrapped_vault_key,
+        &local_state.kdf,
+    );
+    remote_revision.head.parent_revision = Some("rev-0001".into());
+    remote_revision.head.committed_at = "99999999999999999999".into();
+    primary.set_remote_head(Some(remote_revision.head.clone()));
+    primary.set_remote_revision(Some(remote_revision));
+
+    settle_sync_scheduler(Duration::from_secs(121));
+
+    assert_eq!(
+        primary.recorded_writes().len(),
+        1,
+        "periodic sync should pull clean remote changes instead of pushing a new head"
+    );
+    assert_eq!(app.get_console_asset_items().row_count(), 1);
+    assert!(
+        credential_store
+            .get_secret(&remote_credential_ref)
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[test]
 fn back_to_back_mutations_share_one_debounced_auto_sync_upload() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -2755,7 +2837,6 @@ fn back_to_back_mutations_share_one_debounced_auto_sync_upload() {
     provider_factory.insert(primary.clone());
 
     let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
-    bundle.auto_sync_enabled = true;
     bundle
         .remotes
         .retain(|remote| remote.role == RemoteRole::Primary);
@@ -2803,7 +2884,6 @@ fn periodic_auto_sync_retries_failed_dirty_changes() {
     provider_factory.insert(primary.clone());
 
     let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
-    bundle.auto_sync_enabled = true;
     bundle
         .remotes
         .retain(|remote| remote.role == RemoteRole::Primary);

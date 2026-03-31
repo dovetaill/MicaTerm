@@ -4584,7 +4584,7 @@ fn sync_preferences_for_bundle(
     last_sync_result: Option<String>,
 ) -> SnapshotSyncPreferences {
     SnapshotSyncPreferences {
-        auto_sync_enabled: bundle.auto_sync_enabled,
+        auto_sync_enabled: bundle.primary_remote().is_some(),
         selected_primary_remote_id: bundle
             .primary_remote()
             .map(|remote| remote.remote_id.clone()),
@@ -5219,17 +5219,15 @@ fn refresh_local_vault_from_primary_remote_if_changed(
     Ok(true)
 }
 
-fn vault_auto_sync_ready(vault: &VaultSessionState) -> bool {
-    vault.local_state.is_some()
-        && vault.unlocked_vault_key.is_some()
-        && configured_sync_bundle(vault).is_some_and(|bundle| bundle.auto_sync_enabled)
+fn vault_background_sync_ready(vault: &VaultSessionState) -> bool {
+    vault.local_state.is_some() && vault.unlocked_vault_key.is_some()
 }
 
-fn mark_local_vault_dirty_and_arm_auto_sync(
+fn mark_local_vault_dirty_and_arm_sync(
     state: &mut ShellViewModel,
     vault: &mut VaultSessionState,
     scheduler: &Rc<RefCell<VaultSyncSchedulerState>>,
-    auto_sync_timer: &Rc<Timer>,
+    sync_debounce_timer: &Rc<Timer>,
     run_sync: Rc<dyn Fn(VaultSyncTrigger)>,
 ) {
     scheduler.borrow_mut().dirty = true;
@@ -5245,10 +5243,10 @@ fn mark_local_vault_dirty_and_arm_auto_sync(
         }
     }
     state.sync_modal_state_mut().status_text =
-        "Local changes queued for sync when the vault is ready.".into();
+        "Local changes queued for background sync.".into();
 
-    if vault_auto_sync_ready(vault) {
-        auto_sync_timer.start(
+    if vault_background_sync_ready(vault) {
+        sync_debounce_timer.start(
             TimerMode::SingleShot,
             Duration::from_millis(VAULT_AUTO_SYNC_DEBOUNCE_MS),
             move || {
@@ -5874,7 +5872,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 let should_attempt_refresh = !should_attempt_push
                     && matches!(trigger, VaultSyncTrigger::Manual | VaultSyncTrigger::Periodic);
                 if matches!(trigger, VaultSyncTrigger::DebouncedAuto | VaultSyncTrigger::Periodic)
-                    && !vault_auto_sync_ready(&vault)
+                    && !vault_background_sync_ready(&vault)
                 {
                     return;
                 }
@@ -7031,7 +7029,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             }
             save_asset_catalog_if_available(&asset_repo_ref, &state);
             let mut vault = vault_session_ref.borrow_mut();
-            mark_local_vault_dirty_and_arm_auto_sync(
+            mark_local_vault_dirty_and_arm_sync(
                 &mut state,
                 &mut vault,
                 &vault_sync_scheduler_ref,
@@ -7068,7 +7066,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         if did_mutate {
             save_asset_catalog_if_available(&asset_repo_ref, &state);
             let mut vault = vault_session_ref.borrow_mut();
-            mark_local_vault_dirty_and_arm_auto_sync(
+            mark_local_vault_dirty_and_arm_sync(
                 &mut state,
                 &mut vault,
                 &vault_sync_scheduler_ref,
@@ -7095,7 +7093,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         if did_mutate {
             save_asset_catalog_if_available(&asset_repo_ref, &state);
             let mut vault = vault_session_ref.borrow_mut();
-            mark_local_vault_dirty_and_arm_auto_sync(
+            mark_local_vault_dirty_and_arm_sync(
                 &mut state,
                 &mut vault,
                 &vault_sync_scheduler_ref,
@@ -7368,7 +7366,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
         if did_mutate {
             let mut vault = vault_session_ref.borrow_mut();
-            mark_local_vault_dirty_and_arm_auto_sync(
+            mark_local_vault_dirty_and_arm_sync(
                 &mut state,
                 &mut vault,
                 &vault_sync_scheduler_ref,
