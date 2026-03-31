@@ -8,6 +8,8 @@
 
 **Tech Stack:** Rust 2024, Slint 1.15.1, `russh`, `russh-sftp`, `tokio`, current shell view-model/bootstrap pipeline, `cargo test`, `cargo check`
 
+**Status (2026-03-31):** Implemented in worktree `/.worktree/sftp-right-panel-20260330` and verified by focused tests, smoke tests, `cargo check --workspace`, and `cargo clippy --workspace -- -D warnings`.
+
 ---
 
 **Execution Rules:**
@@ -16,6 +18,16 @@
 - 如果任务涉及回调顺序、右键菜单命中、焦点丢失、拖拽事件或会话状态竞态，立即切换 `@superpowers:systematic-debugging`，不要猜。
 - 完成所有任务后必须执行 `@superpowers:verification-before-completion`，收集新鲜测试输出后再声称完成。
 - 推荐在独立 worktree 中执行；如果当前会话继续实现，先用 `@superpowers:using-git-worktrees`。
+
+### Final Execution Notes (2026-03-31)
+
+- Follow CWD 最终没有新建独立 watcher，而是复用了既有投影链路：
+  `SSH runtime event -> SessionManager snapshot -> bootstrap::sync_active_sftp_projection_from_manager(...) -> ShellViewModel -> Slint`
+- `SessionRuntimeEvent::CurrentDirectoryChanged(String)` 与 `SessionManager.current_working_directories` 成为 active SFTP path projection 的权威来源。
+- retry 按钮最终调用 `SessionManager::retry_session(...)`，而不是由 `ShellViewModel` 自行重建 runtime；disconnect 会保留 path/history snapshot，仅切 panel mode。
+- 顶部工具栏最终落地为 `Back / Next / Up / Sync / Re-follow / Path Bar`；`Upload / New Folder` 继续通过 SFTP context menu 进入。
+- `TransferQueue` 已具备 `Overwrite / Skip` conflict policy，但 `SftpConflictModal` 组件尚未挂载到 `AppWindow`；后续 TDD 需要覆盖该 UI 缺口。
+- TDD 交接文档已写入 `docs/plans/2026-03-31-sftp-right-panel-tdd-spec.md`。
 
 ### Task 1: Freeze the right-panel contract for SFTP mode
 
@@ -559,12 +571,22 @@ Expected: PASS
 Run:
 
 ```bash
-cargo check
+cargo check --workspace
 ```
 
 Expected: PASS
 
-**Step 4: Update docs if execution drifted from the plan**
+**Step 4: Run lint verification**
+
+Run:
+
+```bash
+cargo clippy --workspace -- -D warnings
+```
+
+Expected: PASS
+
+**Step 5: Update docs if execution drifted from the plan**
 
 If any task required a different file path, callback name, or reducer split than planned, update:
 
@@ -573,7 +595,22 @@ If any task required a different file path, callback name, or reducer split than
 
 Keep the docs aligned with shipped behavior.
 
-**Step 5: Commit**
+**Step 6: Generate TDD handoff**
+
+Write a TDD handoff spec covering:
+
+- core structs / traits
+- Slint callbacks and properties
+- concurrency and retry edge cases
+- known UI gaps to cover next
+
+Target path:
+
+```bash
+docs/plans/2026-03-31-sftp-right-panel-tdd-spec.md
+```
+
+**Step 7: Commit (optional, only if requested)**
 
 ```bash
 git add docs/plans/2026-03-30-sftp-right-panel-design.md docs/plans/2026-03-30-sftp-right-panel-implementation-plan.md

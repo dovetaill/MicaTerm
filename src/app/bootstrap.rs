@@ -26,6 +26,7 @@ use crate::ConsoleAssetItem;
 use crate::QuickLaunchCardRow;
 use crate::QuickLaunchDetailRow;
 use crate::QuickLaunchGroupRow;
+use crate::SftpPanelItem;
 use crate::WorkspaceTabItem;
 use crate::app::app_paths::{AppRootPathInputs, AppRootPaths, resolve_app_root_paths};
 use crate::app::assets_catalog::{
@@ -39,6 +40,7 @@ use crate::app::keychain::{
     derive_public_key_material_from_public_key, resolve_saved_ssh_profile,
 };
 use crate::app::runtime_profile::{AppRuntimeProfile, TerminalRenderMode};
+use crate::app::sftp::{SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode};
 use crate::app::ssh::connection_progress::{
     ConnectionAttemptState, ConnectionHeadlineState, ConnectionStepState, ConnectionStepStateItem,
 };
@@ -598,8 +600,95 @@ fn sync_sync_modal_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_sync_modal_secondary_action_label(modal.secondary_action_label.clone().into());
 }
 
+fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) {
+    window.set_sftp_panel_mode(state.sftp_panel_mode_id().into());
+    window.set_sftp_panel_host_label(state.sftp_panel_host_label().into());
+    window.set_sftp_panel_path(state.sftp_panel_path().into());
+    window.set_sftp_panel_follow_mode(state.sftp_panel_follow_mode_id().into());
+    window.set_sftp_panel_can_go_back(state.sftp_panel_can_go_back());
+    window.set_sftp_panel_can_go_forward(state.sftp_panel_can_go_forward());
+    window.set_sftp_panel_can_go_up(state.sftp_panel_can_go_up());
+    window.set_sftp_panel_actions_enabled(state.sftp_panel_actions_enabled());
+    window.set_sftp_queue_drawer_open(state.sftp_queue_drawer_open());
+
+    let items = state
+        .sftp_panel_entries()
+        .iter()
+        .map(|entry| SftpPanelItem {
+            id: entry.id.clone().into(),
+            name: entry.name.clone().into(),
+            detail: sftp_panel_entry_detail(entry).into(),
+            kind: sftp_panel_entry_kind(entry.kind).into(),
+            selected: state
+                .sftp_panel_selected_entry_ids()
+                .iter()
+                .any(|selected_id| selected_id == &entry.id),
+        })
+        .collect::<Vec<_>>();
+    sync_vec_model(window.get_sftp_panel_items(), items, |model| {
+        window.set_sftp_panel_items(model)
+    });
+
+    let selected_ids = state
+        .sftp_panel_selected_entry_ids()
+        .iter()
+        .map(|entry_id| SharedString::from(entry_id.as_str()))
+        .collect::<Vec<_>>();
+    sync_vec_model(
+        window.get_sftp_panel_selected_entry_ids(),
+        selected_ids,
+        |model| window.set_sftp_panel_selected_entry_ids(model),
+    );
+
+    let queue = &state.sftp_queue_summary;
+    window.set_sftp_panel_queue_active(i32::try_from(queue.active_count).unwrap_or(i32::MAX));
+    window.set_sftp_panel_queue_failed(i32::try_from(queue.failed_count).unwrap_or(i32::MAX));
+    window.set_sftp_panel_queue_current_session(
+        i32::try_from(queue.current_session_count).unwrap_or(i32::MAX),
+    );
+}
+
 fn sync_right_panel_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_right_panel_view(state.right_panel_view_id().into());
+    sync_sftp_panel_state(window, state);
+}
+
+fn sftp_panel_entry_detail(entry: &crate::app::sftp::SftpDirectoryEntry) -> String {
+    match entry.kind {
+        SftpDirectoryEntryKind::Directory => "Directory".into(),
+        SftpDirectoryEntryKind::Symlink => "Symlink".into(),
+        SftpDirectoryEntryKind::Unknown => "Unknown".into(),
+        SftpDirectoryEntryKind::File => entry
+            .size_bytes
+            .map(format_binary_size)
+            .unwrap_or_else(|| "File".into()),
+    }
+}
+
+fn sftp_panel_entry_kind(kind: SftpDirectoryEntryKind) -> &'static str {
+    match kind {
+        SftpDirectoryEntryKind::Directory => "directory",
+        SftpDirectoryEntryKind::File => "file",
+        SftpDirectoryEntryKind::Symlink => "symlink",
+        SftpDirectoryEntryKind::Unknown => "unknown",
+    }
+}
+
+fn format_binary_size(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+
+    let bytes = bytes as f64;
+    if bytes >= GIB {
+        format!("{:.1} GB", bytes / GIB)
+    } else if bytes >= MIB {
+        format!("{:.1} MB", bytes / MIB)
+    } else if bytes >= KIB {
+        format!("{:.0} KB", bytes / KIB)
+    } else {
+        format!("{bytes:.0} B")
+    }
 }
 
 fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
@@ -698,6 +787,28 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
     sync_keychain_modal_defaults(window);
     match &state.asset_modal_state {
         Some(AssetModalState::NewFolder { draft_name, .. }) => {
+            window.set_asset_modal_open(true);
+            window.set_asset_modal_kind("new-folder".into());
+            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
+            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
+            window.set_asset_modal_validation_message(
+                state.asset_create_modal_validation_message().into(),
+            );
+            window.set_asset_ssh_modal_connect_family_enabled(false);
+            window.set_asset_ssh_modal_feedback_state("idle".into());
+            window.set_asset_ssh_modal_feedback_message("".into());
+            window.set_asset_folder_modal_name(draft_name.clone().into());
+            clear_asset_snippet_modal_fields(window);
+            window.set_asset_rename_modal_open(false);
+            window.set_asset_rename_modal_name("".into());
+            window.set_asset_rename_modal_validation_message("".into());
+            window.set_asset_rename_modal_can_confirm(false);
+            window.set_asset_delete_confirm_modal_open(false);
+            window.set_asset_delete_confirm_target_label("".into());
+            window.set_asset_delete_confirm_descendant_count(0);
+            clear_asset_ssh_modal_fields(window);
+        }
+        Some(AssetModalState::SftpNewFolder { draft_name }) => {
             window.set_asset_modal_open(true);
             window.set_asset_modal_kind("new-folder".into());
             window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
@@ -905,7 +1016,53 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_delete_confirm_descendant_count(0);
             clear_asset_ssh_modal_fields(window);
         }
+        Some(AssetModalState::SftpRenameEntry { draft_name, .. }) => {
+            window.set_asset_modal_open(false);
+            window.set_asset_modal_kind("".into());
+            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
+            window.set_asset_modal_can_confirm(false);
+            window.set_asset_modal_validation_message("".into());
+            window.set_asset_ssh_modal_connect_family_enabled(false);
+            window.set_asset_ssh_modal_feedback_state("idle".into());
+            window.set_asset_ssh_modal_feedback_message("".into());
+            window.set_asset_folder_modal_name("".into());
+            clear_asset_snippet_modal_fields(window);
+            window.set_asset_rename_modal_open(true);
+            window.set_asset_rename_modal_name(draft_name.clone().into());
+            window.set_asset_rename_modal_validation_message(
+                state.asset_rename_modal_validation_message().into(),
+            );
+            window.set_asset_rename_modal_can_confirm(state.can_confirm_asset_modal());
+            window.set_asset_delete_confirm_modal_open(false);
+            window.set_asset_delete_confirm_target_label("".into());
+            window.set_asset_delete_confirm_descendant_count(0);
+            clear_asset_ssh_modal_fields(window);
+        }
         Some(AssetModalState::DeleteAssetConfirm {
+            label,
+            descendant_count,
+            ..
+        }) => {
+            window.set_asset_modal_open(false);
+            window.set_asset_modal_kind("".into());
+            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
+            window.set_asset_modal_can_confirm(false);
+            window.set_asset_modal_validation_message("".into());
+            window.set_asset_ssh_modal_connect_family_enabled(false);
+            window.set_asset_ssh_modal_feedback_state("idle".into());
+            window.set_asset_ssh_modal_feedback_message("".into());
+            window.set_asset_folder_modal_name("".into());
+            clear_asset_snippet_modal_fields(window);
+            window.set_asset_rename_modal_open(false);
+            window.set_asset_rename_modal_name("".into());
+            window.set_asset_rename_modal_validation_message("".into());
+            window.set_asset_rename_modal_can_confirm(false);
+            window.set_asset_delete_confirm_modal_open(true);
+            window.set_asset_delete_confirm_target_label(label.clone().into());
+            window.set_asset_delete_confirm_descendant_count(*descendant_count as i32);
+            clear_asset_ssh_modal_fields(window);
+        }
+        Some(AssetModalState::SftpDeleteEntriesConfirm {
             label,
             descendant_count,
             ..
@@ -1088,6 +1245,10 @@ fn parse_context_target_kind(
     active_sidebar_destination: SidebarDestination,
 ) -> ContextTargetKind {
     match value {
+        "sftp-blank" => ContextTargetKind::SftpBlankArea,
+        "sftp-directory" => ContextTargetKind::SftpDirectory,
+        "sftp-file" => ContextTargetKind::SftpFile,
+        "sftp-selection" => ContextTargetKind::SftpMultiSelection,
         "ssh" => ContextTargetKind::SshConnection,
         "folder" => ContextTargetKind::Folder,
         "snippet-package" => ContextTargetKind::SnippetPackage,
@@ -1724,11 +1885,12 @@ fn merge_session_handle_into_tabs(state: &mut ShellViewModel, handle: &SessionHa
 struct WorkspaceProjectionDelta {
     tabs_changed: bool,
     surface_changed: bool,
+    sftp_changed: bool,
 }
 
 impl WorkspaceProjectionDelta {
     fn any_changed(self) -> bool {
-        self.tabs_changed || self.surface_changed
+        self.tabs_changed || self.surface_changed || self.sftp_changed
     }
 }
 
@@ -1857,10 +2019,53 @@ fn sync_workspace_projection_from_manager(
         state.set_active_workspace_terminal_surface(next_surface);
     }
 
+    let sftp_changed = sync_active_sftp_projection_from_manager(state, manager);
+
     WorkspaceProjectionDelta {
         tabs_changed,
         surface_changed,
+        sftp_changed,
     }
+}
+
+fn sync_active_sftp_projection_from_manager(
+    state: &mut ShellViewModel,
+    manager: &SessionManager,
+) -> bool {
+    let Some(session_id_text) = state.active_workspace_session_id().map(str::to_string) else {
+        return false;
+    };
+    let Some(session_id) = Uuid::parse_str(&session_id_text).ok() else {
+        return false;
+    };
+
+    let binding = manager.sftp_binding(session_id);
+    let cwd = manager.current_working_directory(session_id);
+    let Some(binding) = binding else {
+        return false;
+    };
+
+    let session_state = state.sftp_sessions.entry(session_id_text).or_default();
+    let before = session_state.clone();
+
+    match binding.mode() {
+        SftpPanelMode::Disconnected => session_state.mark_disconnected(),
+        _ if matches!(
+            session_state.mode,
+            SftpPanelMode::Empty | SftpPanelMode::Disconnected
+        ) => session_state.mark_connecting(),
+        _ => {}
+    }
+
+    if let Some(cwd) = cwd {
+        if session_state.current_path.is_empty() {
+            session_state.reenable_follow(cwd);
+        } else if session_state.follow_mode == SftpFollowMode::FollowCwd {
+            session_state.follow_terminal_path(cwd);
+        }
+    }
+
+    before != *session_state
 }
 
 fn active_workspace_session_uuid(state: &ShellViewModel) -> Option<Uuid> {
@@ -1909,6 +2114,9 @@ fn refresh_active_workspace_projection(
     let projection = sync_workspace_projection_from_manager(state, &bridge.manager);
     if projection.any_changed() {
         sync_workspace_tabs_with_manager(window, state, follow_tracker, Some(&bridge.manager));
+        if projection.sftp_changed {
+            sync_right_panel_state(window, state);
+        }
     }
 }
 
@@ -4643,6 +4851,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&manager),
                 );
+                if projection_delta.sftp_changed {
+                    sync_right_panel_state(&window, &state);
+                }
             }
         });
     }
@@ -4880,6 +5091,136 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sync_right_panel_state(&window, &state);
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(&effects);
+    window.on_open_sftp_panel_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let (width, height) = current_window_size(&window);
+        state.open_sftp_panel();
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sync_right_panel_state(&window, &state);
+        sync_shell_layout(&window, &mut state, width, height);
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_context_menu_requested(move |target_id, target_kind, anchor_x, anchor_y| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.open_context_menu_for_target(
+            parse_context_target_kind(target_kind.as_str(), SidebarDestination::Console),
+            if target_id.is_empty() {
+                None
+            } else {
+                Some(target_id.to_string())
+            },
+            anchor_x,
+            anchor_y,
+        );
+        update_context_menu_placement(&window, &mut state);
+        sync_assets_context_menu_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_open_queue_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_sftp_queue_drawer();
+        sync_right_panel_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_path_submitted(move |path| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.submit_sftp_panel_path(path.to_string()) {
+            sync_right_panel_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_back_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.navigate_sftp_panel_back() {
+            sync_right_panel_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_forward_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.navigate_sftp_panel_forward() {
+            sync_right_panel_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_up_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.navigate_sftp_panel_up() {
+            sync_right_panel_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_refresh_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.refresh_sftp_panel() {
+            sync_right_panel_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    window.on_sftp_panel_retry_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let mut retried = state.retry_sftp_panel();
+        if let Some(session_id) = active_workspace_session_uuid(&state)
+            && let Some(session_bridge) = session_bridge_ref.as_ref()
+        {
+            if let Err(err) = session_bridge.manager.retry_session(session_id) {
+                tracing::error!(
+                    target: "app.ssh",
+                    session_id = session_id.to_string(),
+                    error = %err,
+                    "failed to retry active SSH session from SFTP panel"
+                );
+            } else {
+                let projection = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                retried = retried || projection.sftp_changed || projection.tabs_changed || projection.surface_changed;
+            }
+        }
+        if retried {
+            sync_right_panel_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_reenable_follow_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.reenable_sftp_follow() {
+            sync_right_panel_state(&window, &state);
+        }
     });
 
     let state = Rc::clone(&view_model);

@@ -12,6 +12,7 @@ use russh::Disconnect;
 use russh::client;
 use russh::client::AuthResult;
 use russh::keys::{self, PrivateKeyWithHashAlg};
+use russh_sftp::client::SftpSession;
 use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers as KeyModifiers};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -24,6 +25,9 @@ use wezterm_term::{Line, Terminal, TerminalConfiguration, TerminalSize};
 
 use crate::app::ssh::connection_progress::{
     ConnectionHeadlineState, ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
+};
+use crate::app::sftp::{
+    SftpBackend, SftpDirectoryEntry, SftpOperationFuture, SftpRuntimeHandle,
 };
 use crate::app::ssh::credentials::{
     CredentialStore, StoredSecretLookupError, StoredSshSecretBundle, SystemCredentialStore,
@@ -940,6 +944,7 @@ impl TerminalKeyEvent {
 pub enum SessionRuntimeEvent {
     Connected,
     ConnectionProgress(ConnectionProgressEvent),
+    CurrentDirectoryChanged(String),
     SurfaceChanged(TerminalSurfaceState),
     SurfaceDirty,
     Disconnected,
@@ -952,6 +957,149 @@ pub struct SshSessionRuntime {
     profile: ConnectionProfile,
     terminal: Arc<Mutex<TerminalSession>>,
     command_tx: mpsc::UnboundedSender<RuntimeCommand>,
+    sftp_runtime: SftpRuntimeHandle,
+}
+
+struct RusshSftpBackend {
+    handle: Arc<client::Handle<RuntimeClientHandler>>,
+}
+
+impl RusshSftpBackend {
+    async fn open_sftp_session(&self) -> Result<SftpSession> {
+        let channel = self
+            .handle
+            .channel_open_session()
+            .await
+            .context("failed to open SSH session channel for SFTP subsystem")?;
+        channel
+            .request_subsystem(true, "sftp")
+            .await
+            .context("failed to request SFTP subsystem")?;
+        SftpSession::new(channel.into_stream())
+            .await
+            .context("failed to initialize SFTP client session")
+    }
+}
+
+impl SftpBackend for RusshSftpBackend {
+    fn read_dir<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, Vec<SftpDirectoryEntry>> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            let mut read_dir = sftp
+                .read_dir(path)
+                .await
+                .with_context(|| format!("failed to read remote directory `{path}`"))?;
+            let mut entries = Vec::new();
+
+            for entry in &mut read_dir {
+                let name = entry.file_name();
+                let child_path = remote_child_path(path, &name);
+                let metadata = entry.metadata();
+                let kind = if metadata.is_dir() {
+                    crate::app::sftp::SftpDirectoryEntryKind::Directory
+                } else if metadata.is_symlink() {
+                    crate::app::sftp::SftpDirectoryEntryKind::Symlink
+                } else if metadata.is_regular() {
+                    crate::app::sftp::SftpDirectoryEntryKind::File
+                } else {
+                    crate::app::sftp::SftpDirectoryEntryKind::Unknown
+                };
+                entries.push(SftpDirectoryEntry {
+                    id: child_path.clone(),
+                    name,
+                    path: child_path,
+                    kind,
+                    size_bytes: metadata.size,
+                });
+            }
+
+            Ok(entries)
+        })
+    }
+
+    fn mkdir<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, ()> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            sftp.create_dir(path)
+                .await
+                .with_context(|| format!("failed to create remote directory `{path}`"))?;
+            Ok(())
+        })
+    }
+
+    fn rename<'a>(&'a self, from: &'a str, to: &'a str) -> SftpOperationFuture<'a, ()> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            sftp.rename(from, to)
+                .await
+                .with_context(|| format!("failed to rename remote path `{from}` -> `{to}`"))?;
+            Ok(())
+        })
+    }
+
+    fn path_exists<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, bool> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            sftp.try_exists(path)
+                .await
+                .with_context(|| format!("failed to check remote path `{path}`"))
+        })
+    }
+
+    fn upload_file<'a>(
+        &'a self,
+        remote_path: &'a str,
+        data: Vec<u8>,
+    ) -> SftpOperationFuture<'a, u64> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            let mut file = sftp
+                .create(remote_path)
+                .await
+                .with_context(|| format!("failed to create remote file `{remote_path}`"))?;
+            file.write_all(&data)
+                .await
+                .with_context(|| format!("failed to write remote file `{remote_path}`"))?;
+            Ok(data.len() as u64)
+        })
+    }
+
+    fn download_file<'a>(&'a self, remote_path: &'a str) -> SftpOperationFuture<'a, Vec<u8>> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            sftp.read(remote_path)
+                .await
+                .with_context(|| format!("failed to read remote file `{remote_path}`"))
+        })
+    }
+
+    fn remove_file<'a>(&'a self, remote_path: &'a str) -> SftpOperationFuture<'a, ()> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            sftp.remove_file(remote_path)
+                .await
+                .with_context(|| format!("failed to remove remote file `{remote_path}`"))?;
+            Ok(())
+        })
+    }
+
+    fn remove_dir<'a>(&'a self, remote_path: &'a str) -> SftpOperationFuture<'a, ()> {
+        Box::pin(async move {
+            let sftp = self.open_sftp_session().await?;
+            sftp.remove_dir(remote_path)
+                .await
+                .with_context(|| format!("failed to remove remote directory `{remote_path}`"))?;
+            Ok(())
+        })
+    }
+}
+
+fn remote_child_path(parent: &str, name: &str) -> String {
+    if parent == "/" {
+        format!("/{}", name.trim_start_matches('/'))
+    } else {
+        format!("{}/{}", parent.trim_end_matches('/'), name)
+    }
 }
 
 struct ConnectionProgressReporter {
@@ -1292,11 +1440,17 @@ impl SshSessionRuntime {
             apply_remote_output(&terminal, &pending_output);
         }
 
+        let handle = Arc::new(handle);
+        let sftp_runtime = SftpRuntimeHandle::new(Arc::new(RusshSftpBackend {
+            handle: Arc::clone(&handle),
+        }));
+
         let runtime = Self {
             session_id,
             profile: profile.clone(),
             terminal: Arc::clone(&terminal),
             command_tx,
+            sftp_runtime,
         };
 
         tokio::spawn(run_channel_pump(
@@ -1418,6 +1572,10 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
     fn scroll_viewport_lines(&self, delta: i32) -> Result<TerminalSurfaceState> {
         SshSessionRuntime::scroll_viewport_lines(self, delta)
+    }
+
+    fn sftp_runtime(&self) -> Option<SftpRuntimeHandle> {
+        Some(self.sftp_runtime.clone())
     }
 }
 
@@ -1720,7 +1878,7 @@ async fn negotiate_terminal_environment(
 
 async fn run_channel_pump(
     session_id: Uuid,
-    handle: client::Handle<RuntimeClientHandler>,
+    handle: Arc<client::Handle<RuntimeClientHandler>>,
     mut channel: Channel<client::Msg>,
     terminal: Arc<Mutex<TerminalSession>>,
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
@@ -1871,6 +2029,9 @@ async fn run_channel_pump(
             maybe_message = channel.wait() => {
                 match maybe_message {
                     Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => {
+                        if let Some(cwd) = extract_current_working_directory_from_osc7(data.as_ref()) {
+                            let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd));
+                        }
                         apply_remote_output(&terminal, data.as_ref());
                         working_set_trim_scheduler.record_output(data.len());
                         working_set_trim_timer =
@@ -1972,6 +2133,65 @@ impl WorkingSetTrimScheduler {
 fn apply_remote_output(terminal: &Arc<Mutex<TerminalSession>>, bytes: &[u8]) {
     if let Ok(mut terminal) = terminal.lock() {
         terminal.apply_remote_bytes(bytes);
+    }
+}
+
+pub fn extract_current_working_directory_from_osc7(bytes: &[u8]) -> Option<String> {
+    const PREFIX: &[u8] = b"\x1b]7;file://";
+
+    let start = bytes
+        .windows(PREFIX.len())
+        .position(|window| window == PREFIX)?;
+    let payload_start = start + PREFIX.len();
+    let payload_end = bytes[payload_start..]
+        .iter()
+        .position(|byte| *byte == 0x07)
+        .map(|offset| payload_start + offset)
+        .or_else(|| {
+            bytes[payload_start..]
+                .windows(2)
+                .position(|window| window == b"\x1b\\")
+                .map(|offset| payload_start + offset)
+        })?;
+
+    let payload = std::str::from_utf8(&bytes[payload_start..payload_end]).ok()?;
+    let path_start = payload.find('/')?;
+    let decoded = percent_decode_path(&payload[path_start..])?;
+
+    if decoded.starts_with('/') {
+        Some(decoded)
+    } else {
+        None
+    }
+}
+
+fn percent_decode_path(path: &str) -> Option<String> {
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = *bytes.get(index + 1)?;
+            let low = *bytes.get(index + 2)?;
+            let value = (hex_value(high)? << 4) | hex_value(low)?;
+            decoded.push(value);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 

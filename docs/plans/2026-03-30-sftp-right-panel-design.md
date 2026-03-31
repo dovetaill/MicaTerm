@@ -2,7 +2,7 @@
 
 日期: 2026-03-30
 执行者: Codex
-状态: 方案已确认，待进入 implementation plan
+状态: 已实现并完成 Task 8 验证（2026-03-31）
 
 ## 背景
 
@@ -484,15 +484,32 @@ SFTP 采用：
 
 ## 数据流
 
-1. active SSH tab 变化
-2. `bootstrap` 切换或创建对应 `SftpSessionBinding`
-3. binding 决定当前路径：
-   - Follow CWD 路径
-   - 或该 session 上次浏览路径
-4. `SftpRuntime` 拉取目录并回写 view state
-5. UI 操作通过 callback 回到 Rust
-6. Rust 调度 runtime / queue
-7. queue 与 panel state 重新投影到 Slint
+1. active SSH tab 变化，或 SSH runtime 发出 `Connected / Disconnected / CurrentDirectoryChanged / SurfaceChanged` 事件
+2. `SessionManager` 维护每个 session 的 `SftpSessionBinding` 与 `current_working_directories`
+3. `bootstrap::sync_active_sftp_projection_from_manager(...)` 将 active session snapshot 投影到 `ShellViewModel`
+4. `ShellViewModel` 根据当前 session reducer 决定路径：
+   - `follow-cwd` 时跟随 `current_working_directories`
+   - `manual-browse` 时保留该 session 的 `current_path/history`
+5. UI 操作通过 `AppWindow` / `RightPanel` callback 回到 Rust
+6. Rust 通过 `SessionManager` 与 `app/sftp/*` 调度 runtime / queue
+7. `ShellViewModel` 与 queue 摘要重新投影回 Slint
+
+## 已落地补充（2026-03-31）
+
+### 实际架构补充
+
+- `app/sftp/` 承担 reducer、queue、local ops 和 session binding helper；
+- `src/app/ssh/runtime.rs` 仍保留 `RusshSftpBackend` 与 OSC7 cwd 提取逻辑，因为 SFTP 子通道复用 SSH runtime；
+- `src/app/ssh/session_manager.rs` 作为 session 级 authority，统一保存 live SFTP binding、cwd snapshot 与 retry/disconnect 语义；
+- `follow-cwd` 仅在当前 session 仍处于 follow 模式时推进路径；一旦用户通过 path submit / back / forward / up 进入 `manual-browse`，后续 cwd 推送不会覆盖用户路径；
+- 断线时面板仅切换到 `disconnected`，保留最后的 `current_path/history/selection`；重试通过 `SessionManager::retry_session(...)` 重新绑定 live runtime。
+
+### 实际 UI 合同补充
+
+- 已落地工具栏为 `Back / Next / Up / Sync / Re-follow / Path Bar`；
+- 设计稿中的 `Upload / New Folder` 顶部按钮本轮未落地，相关动作仍主要从 SFTP blank-area / row context menu 进入；
+- `TransferQueue` 已支持 `Overwrite / Skip` conflict policy；
+- `SftpConflictModalState` 与 `ui/components/sftp-conflict-modal.slint` 已存在，但当前尚未挂载到 `AppWindow`，后续 TDD 需要补齐端到端冲突弹窗覆盖。
 
 ## 首版验证要求
 
@@ -529,7 +546,8 @@ SFTP 采用：
 处理：
 
 - SFTP 子系统独立到 `app/sftp/`
-- 不把全部逻辑堆到 `app/ssh/runtime.rs`
+- SSH runtime / SessionManager 只保留会话桥接、cwd 事件发布与 live binding 生命周期
+- 不再额外引入第二套 session watcher 或独立连接管理层
 
 ### 风险 3：系统拖拽集成过深
 

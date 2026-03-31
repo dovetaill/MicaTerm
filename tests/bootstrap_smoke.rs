@@ -5899,3 +5899,34 @@ fn async_launch_failure_projects_error_tab_after_projection_timer_ticks() {
         "missing SSH password secret for `SSH Connection 1`"
     );
 }
+
+#[test]
+fn sftp_navigation_callbacks_update_projected_path_state() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app, None);
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    app.invoke_open_sftp_panel_requested();
+    assert_eq!(app.get_right_panel_view().as_str(), "sftp");
+
+    app.invoke_sftp_panel_path_submitted("/srv/app".into());
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app");
+    assert_eq!(app.get_sftp_panel_follow_mode().as_str(), "manual-browse");
+
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app/releases");
+
+    app.invoke_sftp_panel_back_requested();
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app");
+
+    app.invoke_sftp_panel_forward_requested();
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app/releases");
+
+    app.invoke_sftp_panel_up_requested();
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app");
+}

@@ -1,9 +1,29 @@
 use std::fs;
 
-use mica_term::app::ssh::runtime::{TerminalKeyEvent, TerminalSession};
+use mica_term::app::ssh::runtime::{
+    TerminalKeyEvent, TerminalSession, extract_current_working_directory_from_osc7,
+};
 use mica_term::app::terminal_theme::preset_for_theme_mode;
 use mica_term::theme::ThemeMode;
 use uuid::Uuid;
+
+#[test]
+fn osc7_sequence_updates_current_working_directory_snapshot() {
+    let bytes = b"\x1b]7;file://prod-host/srv/app/releases\x07";
+
+    let cwd = extract_current_working_directory_from_osc7(bytes)
+        .expect("cwd should be extracted from osc7 payload");
+
+    assert_eq!(cwd, "/srv/app/releases");
+}
+
+#[test]
+fn malformed_osc7_sequence_is_ignored() {
+    assert_eq!(
+        extract_current_working_directory_from_osc7(b"\x1b]7;not-a-file-url\x07"),
+        None
+    );
+}
 
 #[test]
 fn function_keys_and_application_cursor_keys_are_encoded_from_live_terminal_state() {

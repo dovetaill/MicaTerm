@@ -8,6 +8,10 @@ pub enum ContextTargetKind {
     Folder,
     SnippetPackage,
     Snippet,
+    SftpBlankArea,
+    SftpDirectory,
+    SftpFile,
+    SftpMultiSelection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,6 +106,10 @@ pub fn resolve_action_tree(
         ContextTargetKind::Folder => resolve_folder_actions(selection),
         ContextTargetKind::SnippetPackage => resolve_snippet_package_actions(selection),
         ContextTargetKind::Snippet => resolve_snippet_actions(selection),
+        ContextTargetKind::SftpBlankArea => resolve_sftp_blank_area_actions(selection),
+        ContextTargetKind::SftpDirectory => resolve_sftp_directory_actions(selection),
+        ContextTargetKind::SftpFile => resolve_sftp_file_actions(selection),
+        ContextTargetKind::SftpMultiSelection => resolve_sftp_multi_selection_actions(selection),
     }
 }
 
@@ -457,6 +465,235 @@ fn resolve_snippet_package_actions(selection: &SelectionContext) -> Vec<ContextM
     actions
 }
 
+fn resolve_sftp_blank_area_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
+    vec![
+        action_with_state(
+            "upload-files",
+            "Upload Files...",
+            "arrow-upload",
+            if selection.target_mutable {
+                ContextMenuActionState::Enabled
+            } else {
+                ContextMenuActionState::Disabled
+            },
+            false,
+        ),
+        action_with_state(
+            "upload-folder",
+            "Upload Folder...",
+            "folder-arrow-up",
+            if selection.target_mutable {
+                ContextMenuActionState::Enabled
+            } else {
+                ContextMenuActionState::Disabled
+            },
+            false,
+        ),
+        action_with_state(
+            "new-folder",
+            "New Folder",
+            "folder",
+            if selection.target_mutable {
+                ContextMenuActionState::Enabled
+            } else {
+                ContextMenuActionState::Disabled
+            },
+            true,
+        ),
+        action_with_state(
+            "paste-sftp",
+            "Paste",
+            "clipboard",
+            planned_mutable_state(selection),
+            false,
+        ),
+        action_with_state(
+            "refresh-sftp",
+            "Refresh",
+            "arrow-clockwise",
+            if selection.target_mutable {
+                ContextMenuActionState::Enabled
+            } else {
+                ContextMenuActionState::Disabled
+            },
+            true,
+        ),
+        action_with_state(
+            "copy-current-path",
+            "Copy Current Path",
+            "copy",
+            planned_mutable_state(selection),
+            false,
+        ),
+    ]
+}
+
+fn resolve_sftp_directory_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
+    vec![
+        action_with_state(
+            "open-remote",
+            "Open",
+            "folder-open",
+            planned_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "open-terminal-here",
+            "Open in Terminal Here",
+            "window-console",
+            planned_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "download",
+            "Download",
+            "arrow-download",
+            selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "upload-here",
+            "Upload Here",
+            "arrow-upload",
+            mutable_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "rename-sftp-entry",
+            "Rename",
+            "edit",
+            mutable_selection_state(selection),
+            true,
+        ),
+        action_with_state(
+            "delete-sftp-entry",
+            "Delete",
+            "delete",
+            mutable_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "copy-path",
+            "Copy Path",
+            "copy",
+            planned_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "properties",
+            "Properties",
+            "info",
+            planned_selection_state(selection),
+            false,
+        ),
+    ]
+}
+
+fn resolve_sftp_file_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
+    vec![
+        action_with_state(
+            "open-remote",
+            "Open",
+            "document",
+            planned_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "download",
+            "Download",
+            "arrow-download",
+            selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "edit-remote",
+            "Edit",
+            "edit",
+            planned_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "rename-sftp-entry",
+            "Rename",
+            "edit",
+            mutable_selection_state(selection),
+            true,
+        ),
+        action_with_state(
+            "delete-sftp-entry",
+            "Delete",
+            "delete",
+            mutable_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "copy-path",
+            "Copy Path",
+            "copy",
+            planned_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "copy-sftp-url",
+            "Copy SFTP URL",
+            "link",
+            planned_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "properties",
+            "Properties",
+            "info",
+            planned_selection_state(selection),
+            false,
+        ),
+    ]
+}
+
+fn resolve_sftp_multi_selection_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
+    vec![
+        action_with_state(
+            "download-selected",
+            "Download Selected",
+            "arrow-download",
+            selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "delete-selected",
+            "Delete Selected",
+            "delete",
+            mutable_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "copy-paths",
+            "Copy Paths",
+            "copy",
+            planned_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "cancel-transfers",
+            "Cancel Transfers",
+            "dismiss",
+            planned_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "refresh-sftp",
+            "Refresh",
+            "arrow-clockwise",
+            if selection.target_mutable {
+                ContextMenuActionState::Enabled
+            } else {
+                ContextMenuActionState::Disabled
+            },
+            true,
+        ),
+    ]
+}
+
 fn create_actions(divider_before: bool) -> Vec<ContextMenuActionNode> {
     vec![
         action_with_state(
@@ -506,6 +743,22 @@ fn selection_state(selection: &SelectionContext) -> ContextMenuActionState {
 fn mutable_selection_state(selection: &SelectionContext) -> ContextMenuActionState {
     if selection.has_selection() && selection.target_mutable {
         ContextMenuActionState::Enabled
+    } else {
+        ContextMenuActionState::Disabled
+    }
+}
+
+fn planned_selection_state(selection: &SelectionContext) -> ContextMenuActionState {
+    if selection.has_selection() && selection.target_mutable {
+        ContextMenuActionState::Planned
+    } else {
+        ContextMenuActionState::Disabled
+    }
+}
+
+fn planned_mutable_state(selection: &SelectionContext) -> ContextMenuActionState {
+    if selection.target_mutable {
+        ContextMenuActionState::Planned
     } else {
         ContextMenuActionState::Disabled
     }

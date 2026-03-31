@@ -9,6 +9,7 @@ pub mod logging;
 pub mod memory;
 pub mod quick_launch_preferences;
 pub mod runtime_profile;
+pub mod sftp;
 pub mod ssh;
 pub mod terminal_atlas;
 pub mod terminal_emoji;

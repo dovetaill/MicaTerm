@@ -1,6 +1,7 @@
 //! Persistence coverage for saved UI preferences.
 
 use mica_term::app::ui_preferences::{UiPreferences, UiPreferencesStore};
+use mica_term::shell::view_model::RightPanelView;
 use mica_term::theme::ThemeMode;
 
 #[test]
@@ -31,4 +32,15 @@ fn ui_preferences_roundtrip_theme_and_pin_state() {
 
     assert_eq!(loaded, prefs);
     let _ = std::fs::remove_file(temp_path);
+}
+
+#[test]
+fn ui_preferences_accept_sftp_right_panel_view() {
+    let prefs = UiPreferences {
+        right_panel_view: "sftp".into(),
+        ..UiPreferences::default()
+    };
+
+    assert_eq!(prefs.right_panel_view, "sftp");
+    assert_eq!(RightPanelView::from_id(&prefs.right_panel_view).id(), "sftp");
 }

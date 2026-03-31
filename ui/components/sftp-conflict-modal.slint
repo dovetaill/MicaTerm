@@ -1,0 +1,172 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+
+component ConflictActionButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: 88px;
+    height: 30px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: ThemeTokens.divider-subtle;
+    background: !root.enabled ? ThemeTokens.control-disabled-surface
+        : touch.pressed ? ThemeTokens.control-pressed-surface
+        : touch.has-hover ? ThemeTokens.control-hover-surface
+        : ThemeTokens.control-active-surface;
+    opacity: root.enabled ? 1.0 : 0.48;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+export component SftpConflictModal inherits Rectangle {
+    in property <string> source-path: "";
+    in property <string> target-path: "";
+    in property <bool> can-resume: false;
+    in property <bool> apply-to-all: false;
+    callback close-requested();
+    callback replace-requested();
+    callback skip-requested();
+    callback keep-both-requested();
+    callback resume-requested();
+    callback apply-to-all-toggled(bool);
+    callback drag-requested(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended();
+    callback focus-restore-requested();
+
+    background: ThemeTokens.workspace-surface;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: ThemeTokens.divider-subtle;
+
+    Text {
+        x: 20px;
+        y: 18px;
+        text: "Resolve File Conflict";
+        color: ThemeTokens.text-primary;
+        font-size: 22px;
+        font-weight: 700;
+    }
+
+    Text {
+        x: 20px;
+        y: 56px;
+        width: parent.width - 40px;
+        text: "The transfer queue will use this shell in the next task when upload or download targets collide.";
+        color: ThemeTokens.text-primary;
+        opacity: 0.72;
+        wrap: word-wrap;
+    }
+
+    Text {
+        x: 20px;
+        y: 104px;
+        width: parent.width - 40px;
+        text: "Source: " + root.source-path;
+        color: ThemeTokens.text-primary;
+        wrap: word-wrap;
+    }
+
+    Text {
+        x: 20px;
+        y: 132px;
+        width: parent.width - 40px;
+        text: "Target: " + root.target-path;
+        color: ThemeTokens.text-primary;
+        wrap: word-wrap;
+    }
+
+    apply-toggle := TouchArea {
+        x: 20px;
+        y: parent.height - 78px;
+        width: 148px;
+        height: 24px;
+
+        clicked => {
+            root.apply-to-all-toggled(!root.apply-to-all);
+        }
+    }
+
+    Rectangle {
+        x: 20px;
+        y: parent.height - 74px;
+        width: 16px;
+        height: 16px;
+        border-radius: 0px;
+        border-width: 1px;
+        border-color: ThemeTokens.divider-subtle;
+        background: root.apply-to-all ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+    }
+
+    Text {
+        x: 44px;
+        y: parent.height - 76px;
+        text: "Apply to all";
+        color: ThemeTokens.text-primary;
+        font-size: 12px;
+    }
+
+    replace-button := ConflictActionButton {
+        x: parent.width - 388px;
+        y: parent.height - 48px;
+        label: "Replace";
+
+        clicked => {
+            root.replace-requested();
+        }
+    }
+
+    skip-button := ConflictActionButton {
+        x: replace-button.x + replace-button.width + 8px;
+        y: parent.height - 48px;
+        label: "Skip";
+
+        clicked => {
+            root.skip-requested();
+        }
+    }
+
+    keep-both-button := ConflictActionButton {
+        x: skip-button.x + skip-button.width + 8px;
+        y: parent.height - 48px;
+        width: 98px;
+        label: "Keep Both";
+
+        clicked => {
+            root.keep-both-requested();
+        }
+    }
+
+    resume-button := ConflictActionButton {
+        x: keep-both-button.x + keep-both-button.width + 8px;
+        y: parent.height - 48px;
+        label: "Resume";
+        enabled: root.can-resume;
+
+        clicked => {
+            root.resume-requested();
+        }
+    }
+}
