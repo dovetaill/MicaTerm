@@ -12,7 +12,6 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-session-title: "";
     in property <string> workspace-session-subtitle: "";
     in property <string> workspace-session-state: "";
-    in property <string> workspace-session-enhanced-state: "";
     in property <string> workspace-session-error-detail: "";
     in property <bool> workspace-session-can-reconnect: false;
     in property <string> workspace-session-render-mode: "bitmap";
@@ -138,7 +137,6 @@ export component WorkspacePane inherits Rectangle {
                 session-title: root.workspace-session-title;
                 session-subtitle: root.workspace-session-subtitle;
                 session-state: root.workspace-session-state;
-                workspace-session-enhanced-state: root.workspace-session-enhanced-state;
                 session-error-detail: root.workspace-session-error-detail;
                 can-reconnect: root.workspace-session-can-reconnect;
                 session-render-mode: root.workspace-session-render-mode;

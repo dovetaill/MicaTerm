@@ -17,7 +17,7 @@ use termwiz::input::{KeyCode, KeyCodeEncodeModes, KeyboardEncoding, Modifiers as
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tokio::time::{Sleep, sleep, timeout};
+use tokio::time::{Sleep, sleep};
 use uuid::Uuid;
 use wezterm_surface::{CursorShape, CursorVisibility};
 use wezterm_term::color::{ColorAttribute, ColorPalette, SrgbaTuple};
@@ -33,11 +33,7 @@ use crate::app::ssh::credentials::{
 };
 use crate::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, ResolvedProxyHop, SshAuthMethod};
-use crate::app::ssh::shell_integration::{
-    BOOTSTRAP_ACK_ACCEPTED, BOOTSTRAP_ACK_REJECTED, BootstrapOptions, ShellKind,
-    build_shell_bootstrap, parse_detected_shell, runtime_shell_events, shell_probe_command,
-    shell_supports_integration,
-};
+use crate::app::ssh::shell_integration::runtime_shell_events;
 use crate::app::ssh::session_manager::{EnhancedSessionState, SessionRuntimeControl};
 use crate::app::terminal_theme::{palette_for_theme_mode, preset_for_theme_mode};
 use crate::theme::ThemeMode;
@@ -50,8 +46,6 @@ const SSH_KEEPALIVE_MAX_MISSES: usize = 3;
 const SURFACE_DIRTY_NOTIFICATION_INTERVAL: Duration = Duration::from_millis(40);
 const WORKING_SET_TRIM_IDLE_INTERVAL: Duration = Duration::from_secs(2);
 const WORKING_SET_TRIM_MIN_OUTPUT_BYTES: usize = 1024 * 1024;
-const SHELL_PROBE_TIMEOUT: Duration = Duration::from_millis(120);
-const SHELL_BOOTSTRAP_TIMEOUT: Duration = Duration::from_millis(120);
 const FILTERED_EXACT_BANNER: &str =
     "Activate the web console with: systemctl enable --now cockpit.socket";
 
@@ -1425,20 +1419,6 @@ impl SshSessionRuntime {
         await_channel_success(&mut channel, "shell", &mut pending_output).await?;
         shell_step.finish("Interactive shell request accepted");
 
-        let detected_shell = detect_remote_shell(&handle).await;
-        if shell_supports_integration(&detected_shell) {
-            let enhanced_state = attempt_shell_bootstrap(
-                &handle,
-                &mut channel,
-                &mut pending_output,
-                detected_shell,
-            )
-            .await;
-            let _ = event_tx.send(SessionRuntimeEvent::EnhancedSessionStateChanged(
-                enhanced_state,
-            ));
-        }
-
         progress.set_headline(ConnectionHeadlineState::Connected);
         let _ = event_tx.send(SessionRuntimeEvent::Connected);
         if !pending_output.is_empty() {
@@ -1877,84 +1857,6 @@ async fn negotiate_terminal_environment(
                 error = %err,
                 "SSH server rejected negotiated terminal environment request",
             );
-        }
-    }
-}
-
-async fn detect_remote_shell(handle: &client::Handle<RuntimeClientHandler>) -> ShellKind {
-    let mut probe_channel = match handle.channel_open_session().await {
-        Ok(channel) => channel,
-        Err(error) => {
-            tracing::debug!("shell probe skipped because probe channel could not open: {error}");
-            return ShellKind::Unsupported("probe-channel-open-failed".into());
-        }
-    };
-
-    if let Err(error) = probe_channel.exec(true, shell_probe_command()).await {
-        tracing::debug!("shell probe skipped because exec request failed: {error}");
-        let _ = probe_channel.close().await;
-        return ShellKind::Unsupported("probe-exec-failed".into());
-    }
-
-    let mut output = Vec::new();
-    if let Err(error) = await_channel_success(&mut probe_channel, "shell-probe", &mut output).await
-    {
-        tracing::debug!("shell probe skipped because server rejected probe request: {error}");
-        let _ = probe_channel.close().await;
-        return ShellKind::Unsupported("probe-request-rejected".into());
-    }
-
-    loop {
-        match timeout(SHELL_PROBE_TIMEOUT, probe_channel.wait()).await {
-            Ok(Some(ChannelMsg::Data { data }))
-            | Ok(Some(ChannelMsg::ExtendedData { data, .. })) => {
-                output.extend_from_slice(data.as_ref());
-            }
-            Ok(Some(ChannelMsg::Close | ChannelMsg::Eof)) | Ok(None) | Err(_) => break,
-            Ok(Some(_)) => {}
-        }
-    }
-
-    let _ = probe_channel.close().await;
-    parse_detected_shell(&output)
-}
-
-async fn attempt_shell_bootstrap(
-    handle: &client::Handle<RuntimeClientHandler>,
-    channel: &mut Channel<client::Msg>,
-    pending_output: &mut Vec<u8>,
-    shell: ShellKind,
-) -> EnhancedSessionState {
-    let bootstrap = build_shell_bootstrap(shell, BootstrapOptions::default());
-    if bootstrap.trim().is_empty() {
-        return EnhancedSessionState::Plain;
-    }
-
-    if handle
-        .data(channel.id(), format!("{bootstrap}\n"))
-        .await
-        .is_err()
-    {
-        return EnhancedSessionState::Fallback;
-    }
-
-    loop {
-        match timeout(SHELL_BOOTSTRAP_TIMEOUT, channel.wait()).await {
-            Ok(Some(ChannelMsg::Data { data }))
-            | Ok(Some(ChannelMsg::ExtendedData { data, .. })) => {
-                let text = String::from_utf8_lossy(data.as_ref());
-                if text.contains(BOOTSTRAP_ACK_ACCEPTED) {
-                    return EnhancedSessionState::Enhanced;
-                }
-                if text.contains(BOOTSTRAP_ACK_REJECTED) {
-                    return EnhancedSessionState::Fallback;
-                }
-                pending_output.extend_from_slice(data.as_ref());
-            }
-            Ok(Some(ChannelMsg::Close | ChannelMsg::Eof)) | Ok(None) | Err(_) => {
-                return EnhancedSessionState::Fallback;
-            }
-            Ok(Some(_)) => {}
         }
     }
 }

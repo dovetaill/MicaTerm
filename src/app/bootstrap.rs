@@ -3994,9 +3994,6 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_title(active_tab.title.clone().into());
         window.set_workspace_session_subtitle(active_tab.subtitle.clone().into());
         window.set_workspace_session_state(active_tab.state.clone().into());
-        window.set_workspace_session_enhanced_state(
-            state.active_workspace_session_enhanced_state().into(),
-        );
         window.set_workspace_session_error_detail(active_tab.error_detail.clone().into());
         window.set_workspace_session_can_reconnect(active_tab.can_reconnect());
         window.set_workspace_session_surface_seqno(
@@ -4006,7 +4003,6 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_title("".into());
         window.set_workspace_session_subtitle("".into());
         window.set_workspace_session_state("".into());
-        window.set_workspace_session_enhanced_state("".into());
         window.set_workspace_session_error_detail("".into());
         window.set_workspace_session_can_reconnect(false);
         window.set_workspace_session_surface_seqno(0);
@@ -7557,58 +7553,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     return;
                 };
                 let _ = session_bridge.manager.reject_host_key_prompt(session_id);
-                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
-                sync_workspace_tabs_with_manager(
-                    &window,
-                    &state,
-                    &mut workspace_follow_tracker_ref.borrow_mut(),
-                    Some(&session_bridge.manager),
-                );
-            }
-            "disable-enhanced-session" => {
-                let Some(session_bridge) = session_bridge_ref.as_ref() else {
-                    return;
-                };
-                let Some(session_id) = active_workspace_session_uuid(&state) else {
-                    return;
-                };
-                if let Err(err) = session_bridge.manager.disable_enhancement_for_session(session_id)
-                {
-                    tracing::error!(
-                        target: "app.ssh",
-                        session_id = session_id.to_string(),
-                        error = %err,
-                        "failed to disable enhanced session for current workspace tab"
-                    );
-                    return;
-                }
-                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
-                sync_workspace_tabs_with_manager(
-                    &window,
-                    &state,
-                    &mut workspace_follow_tracker_ref.borrow_mut(),
-                    Some(&session_bridge.manager),
-                );
-            }
-            "disable-enhanced-session-host" => {
-                let Some(session_bridge) = session_bridge_ref.as_ref() else {
-                    return;
-                };
-                let Some(session_id) = active_workspace_session_uuid(&state) else {
-                    return;
-                };
-                if let Err(err) = session_bridge
-                    .manager
-                    .disable_enhancement_for_host(session_id, "")
-                {
-                    tracing::error!(
-                        target: "app.ssh",
-                        session_id = session_id.to_string(),
-                        error = %err,
-                        "failed to cache enhanced-session opt-out for workspace host"
-                    );
-                    return;
-                }
                 let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
                 sync_workspace_tabs_with_manager(
                     &window,

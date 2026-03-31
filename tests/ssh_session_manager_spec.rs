@@ -1142,7 +1142,7 @@ fn collect_enhancement_states(
     event_rx: &mut mpsc::UnboundedReceiver<SessionRuntimeEvent>,
 ) -> Vec<EnhancedSessionState> {
     runtime.block_on(async {
-        tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::time::timeout(Duration::from_millis(150), async {
             let mut states = Vec::new();
             while let Some(event) = event_rx.recv().await {
                 if let SessionRuntimeEvent::EnhancedSessionStateChanged(state) = event {
@@ -1153,7 +1153,7 @@ fn collect_enhancement_states(
             states
         })
         .await
-        .expect("wait for enhancement state event")
+        .unwrap_or_default()
     })
 }
 
@@ -2094,7 +2094,7 @@ fn ssh_runtime_negotiates_truecolor_environment_before_requesting_shell() {
 }
 
 #[test]
-fn ssh_runtime_attempts_supported_shell_bootstrap_once() {
+fn ssh_runtime_does_not_auto_bootstrap_supported_shells() {
     let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let (server_task, addr, private_key_path, server_public_key, server_state) =
@@ -2138,8 +2138,11 @@ fn ssh_runtime_attempts_supported_shell_bootstrap_once() {
 
     let states = collect_enhancement_states(&runtime, &mut event_rx);
 
-    assert_eq!(states, vec![EnhancedSessionState::Enhanced]);
-    assert_eq!(server_state.bootstrap_attempts(), 1);
+    assert!(
+        states.is_empty(),
+        "runtime should not emit enhancement state changes when auto bootstrap is disabled"
+    );
+    assert_eq!(server_state.bootstrap_attempts(), 0);
 
     runtime_handle.disconnect().expect("disconnect runtime");
     runtime.block_on(async {
@@ -2154,7 +2157,7 @@ fn ssh_runtime_attempts_supported_shell_bootstrap_once() {
 }
 
 #[test]
-fn ssh_runtime_marks_session_fallback_after_failed_bootstrap_without_retry() {
+fn ssh_runtime_does_not_attempt_bootstrap_even_when_server_would_reject_it() {
     let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let (server_task, addr, private_key_path, server_public_key, server_state) =
@@ -2198,8 +2201,11 @@ fn ssh_runtime_marks_session_fallback_after_failed_bootstrap_without_retry() {
 
     let states = collect_enhancement_states(&runtime, &mut event_rx);
 
-    assert_eq!(states, vec![EnhancedSessionState::Fallback]);
-    assert_eq!(server_state.bootstrap_attempts(), 1);
+    assert!(
+        states.is_empty(),
+        "runtime should not emit fallback enhancement state when no bootstrap is attempted"
+    );
+    assert_eq!(server_state.bootstrap_attempts(), 0);
 
     runtime_handle.disconnect().expect("disconnect runtime");
     runtime.block_on(async {

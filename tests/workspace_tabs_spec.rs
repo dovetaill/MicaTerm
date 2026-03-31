@@ -542,17 +542,17 @@ fn workspace_tab_projects_enhanced_session_state_badge() {
 }
 
 #[test]
-fn workspace_session_host_projects_enhanced_state_and_disable_action() {
+fn workspace_session_host_hides_enhancement_state_and_disable_action() {
     let terminal_host =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        terminal_host.contains("workspace-session-enhanced-state"),
-        "terminal host should expose the active enhanced-session state contract"
+        !terminal_host.contains("workspace-session-enhanced-state"),
+        "terminal host should not expose enhanced-session state in the visible UI contract"
     );
     assert!(
-        terminal_host.contains("disable-enhanced-session"),
-        "terminal host should expose a local action for disabling enhanced sessions"
+        !terminal_host.contains("disable-enhanced-session"),
+        "terminal host should not expose local enhanced-session disable actions"
     );
 }
 
