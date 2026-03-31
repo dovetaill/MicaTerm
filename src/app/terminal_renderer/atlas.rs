@@ -9,6 +9,7 @@ pub struct GlyphAtlasKey {
     pub face: FontFaceKey,
     pub glyph_id: u32,
     pub px_size_bits: u32,
+    pub bold: bool,
 }
 
 impl From<GlyphRasterRequest> for GlyphAtlasKey {
@@ -17,6 +18,7 @@ impl From<GlyphRasterRequest> for GlyphAtlasKey {
             face: request.face,
             glyph_id: request.glyph_id,
             px_size_bits: request.px_size.to_bits(),
+            bold: request.bold,
         }
     }
 }

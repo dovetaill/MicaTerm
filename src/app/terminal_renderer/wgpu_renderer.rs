@@ -56,6 +56,7 @@ impl WgpuTerminalRenderer {
                         face: frame.face,
                         glyph_id: glyph.glyph_id,
                         px_size: frame.px_size,
+                        bold: run.style.bold,
                     };
                     let rasterized = fonts.rasterize(request)?;
                     self.atlas.upsert(request, &rasterized);
@@ -95,6 +96,8 @@ fn hash_shaped_frame(frame: &ShapedTerminalFrame) -> u64 {
             run.cell_range.end.hash(&mut hasher);
             run.text.hash(&mut hasher);
             run.style.fg_rgba.hash(&mut hasher);
+            run.style.bold.hash(&mut hasher);
+            run.style.underline.hash(&mut hasher);
             for glyph in &run.glyphs {
                 glyph.glyph_id.hash(&mut hasher);
                 glyph.cluster.hash(&mut hasher);

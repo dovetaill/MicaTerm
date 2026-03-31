@@ -47,6 +47,8 @@ fn terminal_model_preserves_visible_row_text_and_color_spans() {
                 col: 0,
                 width: 1,
                 text: "a".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xff11_2233,
                 bg_rgba: 0xff00_0000,
             },
@@ -55,6 +57,8 @@ fn terminal_model_preserves_visible_row_text_and_color_spans() {
                 col: 1,
                 width: 2,
                 text: "界".into(),
+                bold: true,
+                underline: false,
                 fg_rgba: 0xff44_5566,
                 bg_rgba: 0xff00_0000,
             },
@@ -63,6 +67,8 @@ fn terminal_model_preserves_visible_row_text_and_color_spans() {
                 col: 3,
                 width: 2,
                 text: "🙂".into(),
+                bold: false,
+                underline: true,
                 fg_rgba: 0xff77_8899,
                 bg_rgba: 0xff00_1111,
             },
@@ -79,7 +85,9 @@ fn terminal_model_preserves_visible_row_text_and_color_spans() {
     assert_eq!(frame.rows[0].cells.len(), 3);
     assert_eq!(frame.rows[0].cells[1].text, "界");
     assert_eq!(frame.rows[0].cells[1].width, 2);
+    assert!(frame.rows[0].cells[1].bold);
     assert_eq!(frame.rows[0].cells[1].fg_rgba, 0xff44_5566);
+    assert!(frame.rows[0].cells[2].underline);
     assert_eq!(frame.rows[0].cells[2].bg_rgba, 0xff00_1111);
 }
 
@@ -95,6 +103,8 @@ fn terminal_model_preserves_cursor_and_current_selection_contract() {
             col: 0,
             width: 1,
             text: "c".into(),
+            bold: false,
+            underline: false,
             fg_rgba: 0xffde_adbe,
             bg_rgba: 0xff10_1010,
         }],
@@ -158,6 +168,8 @@ fn terminal_model_marks_only_changed_rows_dirty() {
             col: 0,
             width: 1,
             text: "r".into(),
+            bold: false,
+            underline: false,
             fg_rgba: 0xffaa_aaaa,
             bg_rgba: 0xff00_0000,
         },
@@ -166,6 +178,8 @@ fn terminal_model_marks_only_changed_rows_dirty() {
             col: 0,
             width: 1,
             text: "r".into(),
+            bold: false,
+            underline: false,
             fg_rgba: 0xffbb_bbbb,
             bg_rgba: 0xff00_0000,
         },

@@ -32,6 +32,17 @@ fn pixel_at(image: &slint::Image, x: u32, y: u32) -> Rgba8Pixel {
     buffer.as_slice()[(y * width + x) as usize]
 }
 
+fn count_non_background_pixels(image: &slint::Image, background: Rgba8Pixel) -> usize {
+    image.to_rgba8()
+        .expect("rgba image")
+        .as_slice()
+        .iter()
+        .filter(|pixel| {
+            pixel.r != background.r || pixel.g != background.g || pixel.b != background.b
+        })
+        .count()
+}
+
 fn renderer_with_fake_color_emoji() -> Result<TerminalAtlasRenderer> {
     TerminalAtlasRenderer::with_emoji_renderer_for_tests(TerminalEmojiRenderer::with_backend(
         TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(ResolvedEmojiFont {
@@ -297,6 +308,50 @@ fn atlas_renderer_composites_color_emoji_sprites_and_preserves_them_under_select
             b: 0,
         },
         "selection repainting must not erase previously composited emoji pixels"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn atlas_renderer_draws_underlined_cells_with_extra_baseline_ink() -> Result<()> {
+    let plain_surface = render_surface(4, 12, "A\r\n");
+    let underlined_surface = render_surface(4, 12, "\x1b[4mA\x1b[0m\r\n");
+    let mut renderer = TerminalAtlasRenderer::new()?;
+
+    let plain = renderer.render(&plain_surface)?;
+    let underlined = renderer.render(&underlined_surface)?;
+    let baseline_y = underlined.metrics.cell_height.saturating_sub(2);
+    let background = unpack_rgba(underlined_surface.default_bg_rgba);
+
+    assert_ne!(
+        plain.image.to_rgba8().expect("plain rgba").as_slice(),
+        underlined.image.to_rgba8().expect("underlined rgba").as_slice(),
+        "underlined terminal cells should paint additional pixels beyond the plain glyph sprite"
+    );
+    assert_ne!(
+        pixel_at(&underlined.image, underlined.metrics.cell_width / 2, baseline_y),
+        background,
+        "underlined cells should paint a visible underline near the baseline"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn atlas_renderer_draws_bold_cells_with_more_ink_than_plain_cells() -> Result<()> {
+    let plain_surface = render_surface(4, 12, "A\r\n");
+    let bold_surface = render_surface(4, 12, "\x1b[1mA\x1b[0m\r\n");
+    let mut renderer = TerminalAtlasRenderer::new()?;
+
+    let plain = renderer.render(&plain_surface)?;
+    let bold = renderer.render(&bold_surface)?;
+    let background = unpack_rgba(bold_surface.default_bg_rgba);
+
+    assert!(
+        count_non_background_pixels(&bold.image, background)
+            > count_non_background_pixels(&plain.image, background),
+        "bold terminal cells should occupy more lit pixels than the plain regular-weight glyph"
     );
 
     Ok(())

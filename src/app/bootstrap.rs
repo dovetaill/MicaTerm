@@ -8484,6 +8484,8 @@ mod tests {
             col: 0,
             width: 1,
             text: "w".into(),
+            bold: false,
+            underline: false,
             fg_rgba: 0xffff_ffff,
             bg_rgba: 0xff0d_1117,
         }];
@@ -8506,6 +8508,8 @@ mod tests {
             col: 0,
             width: 1,
             text: "$".into(),
+            bold: false,
+            underline: false,
             fg_rgba: 0xffff_ffff,
             bg_rgba: 0xff0d_1117,
         }];
@@ -8557,6 +8561,8 @@ mod tests {
             col: 0,
             width: 1,
             text: "w".into(),
+            bold: false,
+            underline: false,
             fg_rgba: 0xffff_ffff,
             bg_rgba: 0xff0d_1117,
         }];

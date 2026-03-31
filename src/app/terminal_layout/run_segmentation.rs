@@ -9,6 +9,8 @@ use crate::app::terminal_model::{TerminalModelCell, TerminalModelRow};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TextStyleKey {
     pub fg_rgba: u32,
+    pub bold: bool,
+    pub underline: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,10 +41,14 @@ pub fn segment_row(row: &TerminalModelRow) -> Vec<SegmentedRun> {
     let mut current_cells = Vec::<TerminalModelCell>::new();
     let mut current_style = TextStyleKey {
         fg_rgba: ordered_cells[0].fg_rgba,
+        bold: ordered_cells[0].bold,
+        underline: ordered_cells[0].underline,
     };
     for cell in ordered_cells {
         let next_style = TextStyleKey {
             fg_rgba: cell.fg_rgba,
+            bold: cell.bold,
+            underline: cell.underline,
         };
         let style_changed = next_style != current_style;
         if style_changed && !current_cells.is_empty() {

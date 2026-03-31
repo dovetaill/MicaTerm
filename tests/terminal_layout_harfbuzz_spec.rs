@@ -32,6 +32,8 @@ fn harfbuzz_layout_keeps_ascii_prompt_in_one_run_when_style_is_consistent() -> a
                 col: 0,
                 width: 1,
                 text: "$".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xffd8_dfe8,
                 bg_rgba: 0xff0c_1014,
             },
@@ -40,6 +42,8 @@ fn harfbuzz_layout_keeps_ascii_prompt_in_one_run_when_style_is_consistent() -> a
                 col: 1,
                 width: 1,
                 text: " ".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xffd8_dfe8,
                 bg_rgba: 0xff0c_1014,
             },
@@ -48,6 +52,8 @@ fn harfbuzz_layout_keeps_ascii_prompt_in_one_run_when_style_is_consistent() -> a
                 col: 2,
                 width: 1,
                 text: "p".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xffd8_dfe8,
                 bg_rgba: 0xff0c_1014,
             },
@@ -56,6 +62,8 @@ fn harfbuzz_layout_keeps_ascii_prompt_in_one_run_when_style_is_consistent() -> a
                 col: 3,
                 width: 1,
                 text: "w".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xffd8_dfe8,
                 bg_rgba: 0xff0c_1014,
             },
@@ -64,6 +72,8 @@ fn harfbuzz_layout_keeps_ascii_prompt_in_one_run_when_style_is_consistent() -> a
                 col: 4,
                 width: 1,
                 text: "d".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xffd8_dfe8,
                 bg_rgba: 0xff0c_1014,
             },
@@ -89,6 +99,8 @@ fn harfbuzz_layout_keeps_wide_cjk_and_emoji_cluster_boundaries_stable() -> anyho
                 col: 0,
                 width: 2,
                 text: "界".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xffd8_dfe8,
                 bg_rgba: 0xff0c_1014,
             },
@@ -97,6 +109,8 @@ fn harfbuzz_layout_keeps_wide_cjk_and_emoji_cluster_boundaries_stable() -> anyho
                 col: 2,
                 width: 2,
                 text: "🙂".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xffd8_dfe8,
                 bg_rgba: 0xff0c_1014,
             },
@@ -122,6 +136,8 @@ fn harfbuzz_layout_splits_on_foreground_change_but_not_background_change() -> an
                 col: 0,
                 width: 1,
                 text: "a".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xffd8_dfe8,
                 bg_rgba: 0xff0c_1014,
             },
@@ -130,6 +146,8 @@ fn harfbuzz_layout_splits_on_foreground_change_but_not_background_change() -> an
                 col: 1,
                 width: 1,
                 text: "b".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xffd8_dfe8,
                 bg_rgba: 0xff101820,
             },
@@ -138,6 +156,8 @@ fn harfbuzz_layout_splits_on_foreground_change_but_not_background_change() -> an
                 col: 2,
                 width: 1,
                 text: "c".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xffd8_dfe8,
                 bg_rgba: 0xff0c_1014,
             },
@@ -146,6 +166,8 @@ fn harfbuzz_layout_splits_on_foreground_change_but_not_background_change() -> an
                 col: 3,
                 width: 1,
                 text: "d".into(),
+                bold: false,
+                underline: false,
                 fg_rgba: 0xff7aa2f7,
                 bg_rgba: 0xff0c_1014,
             },
@@ -170,6 +192,8 @@ fn harfbuzz_layout_clusters_combining_sequences_instead_of_iterating_raw_chars()
             col: 0,
             width: 1,
             text: "A\u{0301}".into(),
+            bold: false,
+            underline: false,
             fg_rgba: 0xffd8_dfe8,
             bg_rgba: 0xff0c_1014,
         }],
@@ -182,5 +206,54 @@ fn harfbuzz_layout_clusters_combining_sequences_instead_of_iterating_raw_chars()
     assert_eq!(shaped.runs.len(), 1);
     assert_eq!(row.text.chars().count(), 2);
     assert_eq!(clusters.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn harfbuzz_layout_splits_runs_when_bold_or_underline_changes() -> anyhow::Result<()> {
+    let row = build_row(
+        vec![
+            TerminalModelCell {
+                row: 0,
+                col: 0,
+                width: 1,
+                text: "a".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 1,
+                width: 1,
+                text: "b".into(),
+                bold: true,
+                underline: false,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+            TerminalModelCell {
+                row: 0,
+                col: 2,
+                width: 1,
+                text: "c".into(),
+                bold: true,
+                underline: true,
+                fg_rgba: 0xffd8_dfe8,
+                bg_rgba: 0xff0c_1014,
+            },
+        ],
+        "abc",
+    );
+
+    let shaped = shape_row(&row, &mut mock_font_system())?;
+
+    assert_eq!(shaped.runs.len(), 3);
+    assert!(!shaped.runs[0].style.bold);
+    assert!(shaped.runs[1].style.bold);
+    assert!(!shaped.runs[1].style.underline);
+    assert!(shaped.runs[2].style.bold);
+    assert!(shaped.runs[2].style.underline);
     Ok(())
 }

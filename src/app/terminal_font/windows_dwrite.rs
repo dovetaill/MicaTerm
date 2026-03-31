@@ -16,6 +16,7 @@ pub struct GlyphRasterRequest {
     pub face: FontFaceKey,
     pub glyph_id: u32,
     pub px_size: f32,
+    pub bold: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,6 +84,9 @@ impl DirectWriteFontSystem {
             }
         });
         apply_synthetic_embolden(&mut coverage, width_px, height_px);
+        if request.bold {
+            apply_synthetic_embolden(&mut coverage, width_px, height_px);
+        }
 
         Ok(RasterizedGlyph {
             width_px,

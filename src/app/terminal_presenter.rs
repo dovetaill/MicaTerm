@@ -198,6 +198,8 @@ fn model_frame_to_surface(model: &TerminalModelFrame) -> TerminalSurfaceState {
                         col: cell.col,
                         width: cell.width,
                         text: cell.text.clone(),
+                        bold: cell.bold,
+                        underline: cell.underline,
                         fg_rgba: cell.fg_rgba,
                         bg_rgba: cell.bg_rgba,
                     })

@@ -40,6 +40,8 @@ pub struct TerminalModelCell {
     pub col: u32,
     pub width: u32,
     pub text: String,
+    pub bold: bool,
+    pub underline: bool,
     pub fg_rgba: u32,
     pub bg_rgba: u32,
 }
@@ -168,6 +170,8 @@ impl TerminalModelCell {
             col: cell.col,
             width: cell.width,
             text: cell.text.clone(),
+            bold: cell.bold,
+            underline: cell.underline,
             fg_rgba: cell.fg_rgba,
             bg_rgba: cell.bg_rgba,
         }
@@ -194,6 +198,8 @@ fn hash_row(
         cell.col.hash(&mut hasher);
         cell.width.hash(&mut hasher);
         cell.text.hash(&mut hasher);
+        cell.bold.hash(&mut hasher);
+        cell.underline.hash(&mut hasher);
         cell.fg_rgba.hash(&mut hasher);
         cell.bg_rgba.hash(&mut hasher);
     }

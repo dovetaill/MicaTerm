@@ -128,3 +128,55 @@ fn terminal_presenter_source_wires_windows_native_renderer() {
         "Windows native presenter should publish native terminal frames"
     );
 }
+
+#[test]
+fn terminal_style_contract_threads_bold_and_underline_across_runtime_model_and_layout() {
+    let runtime_source = fs::read_to_string("src/app/ssh/runtime.rs").expect("read runtime");
+    let model_source =
+        fs::read_to_string("src/app/terminal_model.rs").expect("read terminal model");
+    let segmentation_source = fs::read_to_string("src/app/terminal_layout/run_segmentation.rs")
+        .expect("read run segmentation");
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read native renderer");
+
+    assert!(
+        runtime_source.contains("pub bold: bool"),
+        "runtime terminal cells should expose the bold SGR state"
+    );
+    assert!(
+        runtime_source.contains("pub underline: bool"),
+        "runtime terminal cells should expose the underline SGR state"
+    );
+    assert!(
+        runtime_source.contains("attrs.intensity()"),
+        "surface projection should derive bold state from wezterm cell intensity"
+    );
+    assert!(
+        runtime_source.contains("attrs.underline()"),
+        "surface projection should derive underline state from wezterm cell underline metadata"
+    );
+    assert!(
+        model_source.contains("pub bold: bool"),
+        "terminal model cells should preserve bold state from runtime snapshots"
+    );
+    assert!(
+        model_source.contains("pub underline: bool"),
+        "terminal model cells should preserve underline state from runtime snapshots"
+    );
+    assert!(
+        segmentation_source.contains("pub bold: bool"),
+        "text style keys should include bold state so shaped runs can split correctly"
+    );
+    assert!(
+        segmentation_source.contains("pub underline: bool"),
+        "text style keys should include underline state so renderer prep does not drop decorations"
+    );
+    assert!(
+        renderer_source.contains("run.style.bold.hash(&mut hasher);"),
+        "native frame fingerprints should include bold state so style-only changes trigger redraws"
+    );
+    assert!(
+        renderer_source.contains("run.style.underline.hash(&mut hasher);"),
+        "native frame fingerprints should include underline state so decoration changes trigger redraws"
+    );
+}

@@ -21,7 +21,7 @@ use tokio::time::{Sleep, sleep};
 use uuid::Uuid;
 use wezterm_surface::{CursorShape, CursorVisibility};
 use wezterm_term::color::{ColorAttribute, ColorPalette, SrgbaTuple};
-use wezterm_term::{Line, Terminal, TerminalConfiguration, TerminalSize};
+use wezterm_term::{Intensity, Line, Terminal, TerminalConfiguration, TerminalSize, Underline};
 
 use crate::app::sftp::{SftpBackend, SftpDirectoryEntry, SftpOperationFuture, SftpRuntimeHandle};
 use crate::app::ssh::connection_progress::{
@@ -845,6 +845,8 @@ pub struct TerminalCellState {
     pub col: u32,
     pub width: u32,
     pub text: String,
+    pub bold: bool,
+    pub underline: bool,
     pub fg_rgba: u32,
     pub bg_rgba: u32,
 }
@@ -2477,12 +2479,15 @@ impl TerminalSession {
                     continue;
                 }
 
-                let (fg_rgba, bg_rgba) = resolve_cell_colors(palette, cell.attrs());
+                let attrs = cell.attrs();
+                let (fg_rgba, bg_rgba) = resolve_cell_colors(palette, attrs);
                 cells.push(TerminalCellState {
                     row,
                     col: cell.cell_index() as u32,
                     width: cell.width() as u32,
                     text: cell.str().to_string(),
+                    bold: matches!(attrs.intensity(), Intensity::Bold),
+                    underline: attrs.underline() != Underline::None,
                     fg_rgba,
                     bg_rgba,
                 });

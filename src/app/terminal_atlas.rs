@@ -351,6 +351,26 @@ impl TerminalAtlasRenderer {
                 background,
             );
 
+            let foreground = if selected {
+                resolve_selected_foreground(rgba8(cell.fg_rgba), cell_bg, default_fg, background)
+            } else {
+                rgba8(cell.fg_rgba)
+            };
+            if cell.underline {
+                fill_rect(
+                    &mut self.pixels,
+                    self.surface_width_px,
+                    self.surface_height_px,
+                    PixelRect {
+                        start_x: cell_x,
+                        start_y: row_y + self.metrics.cell_height.saturating_sub(2),
+                        width: span_width_px,
+                        height: 1,
+                    },
+                    foreground,
+                );
+            }
+
             if cell.text.chars().all(char::is_whitespace) {
                 continue;
             }
@@ -366,11 +386,29 @@ impl TerminalAtlasRenderer {
                 text: cell.text.clone(),
                 sprite_kind: sprite.kind(),
             });
-            let foreground = if selected {
-                resolve_selected_foreground(rgba8(cell.fg_rgba), cell_bg, default_fg, background)
-            } else {
-                rgba8(cell.fg_rgba)
-            };
+            if cell.bold
+                && let CachedClusterSprite::MonoAlpha {
+                    width,
+                    height,
+                    alpha,
+                } = sprite
+            {
+                let mut bold_alpha = alpha.clone();
+                apply_synthetic_embolden(&mut bold_alpha, *width, *height);
+                blit_mono_alpha(
+                    &mut self.pixels,
+                    self.surface_width_px,
+                    self.surface_height_px,
+                    cell_x,
+                    row_y,
+                    *width,
+                    *height,
+                    &bold_alpha,
+                    foreground,
+                );
+                continue;
+            }
+
             blit_cached_sprite(
                 &mut self.pixels,
                 self.surface_width_px,
@@ -589,6 +627,8 @@ fn hash_row(
         cell.col.hash(&mut hasher);
         cell.width.hash(&mut hasher);
         cell.text.hash(&mut hasher);
+        cell.bold.hash(&mut hasher);
+        cell.underline.hash(&mut hasher);
         cell.fg_rgba.hash(&mut hasher);
         cell.bg_rgba.hash(&mut hasher);
     }
@@ -740,25 +780,17 @@ fn blit_cached_sprite(
             width,
             height,
             alpha,
-        } => {
-            let start_x = cell_x.min(surface_width_px);
-            let start_y = row_y.min(surface_height_px);
-            let end_x = (start_x + *width).min(surface_width_px);
-            let end_y = (start_y + *height).min(surface_height_px);
-
-            for y in start_y..end_y {
-                let sprite_y = (y - start_y) as usize;
-                for x in start_x..end_x {
-                    let sprite_x = (x - start_x) as usize;
-                    let alpha = alpha[sprite_y * *width as usize + sprite_x];
-                    if alpha == 0 {
-                        continue;
-                    }
-                    let pixel = &mut pixels[(y * surface_width_px + x) as usize];
-                    blend(pixel, fg, alpha);
-                }
-            }
-        }
+        } => blit_mono_alpha(
+            pixels,
+            surface_width_px,
+            surface_height_px,
+            cell_x,
+            row_y,
+            *width,
+            *height,
+            alpha,
+            fg,
+        ),
         CachedClusterSprite::ColorRgba {
             width,
             height,
@@ -781,6 +813,37 @@ fn blit_cached_sprite(
                     blend(pixel, source, source.a);
                 }
             }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn blit_mono_alpha(
+    pixels: &mut [Rgba8Pixel],
+    surface_width_px: u32,
+    surface_height_px: u32,
+    cell_x: u32,
+    row_y: u32,
+    width: u32,
+    height: u32,
+    alpha: &[u8],
+    fg: Rgba8Pixel,
+) {
+    let start_x = cell_x.min(surface_width_px);
+    let start_y = row_y.min(surface_height_px);
+    let end_x = (start_x + width).min(surface_width_px);
+    let end_y = (start_y + height).min(surface_height_px);
+
+    for y in start_y..end_y {
+        let sprite_y = (y - start_y) as usize;
+        for x in start_x..end_x {
+            let sprite_x = (x - start_x) as usize;
+            let alpha = alpha[sprite_y * width as usize + sprite_x];
+            if alpha == 0 {
+                continue;
+            }
+            let pixel = &mut pixels[(y * surface_width_px + x) as usize];
+            blend(pixel, fg, alpha);
         }
     }
 }
