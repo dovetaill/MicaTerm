@@ -87,8 +87,6 @@ impl RightPanelView {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncModalMode {
     NotConfigured,
-    Locked,
-    UnlockedButRemoteIncomplete,
     Ready,
     SyncError,
 }
@@ -97,8 +95,6 @@ impl SyncModalMode {
     pub fn id(self) -> &'static str {
         match self {
             Self::NotConfigured => "not-configured",
-            Self::Locked => "locked",
-            Self::UnlockedButRemoteIncomplete => "unlocked-but-remote-incomplete",
             Self::Ready => "ready",
             Self::SyncError => "sync-error",
         }
@@ -117,7 +113,6 @@ pub struct SyncModalViewState {
     pub target_label: String,
     pub primary_action_label: String,
     pub secondary_action_label: String,
-    pub auto_sync_enabled: bool,
     pub primary_gist_id: String,
     pub primary_pat: String,
     pub mirror_enabled: bool,
@@ -139,7 +134,6 @@ impl Default for SyncModalViewState {
             target_label: String::new(),
             primary_action_label: "Save and enable".into(),
             secondary_action_label: "Close".into(),
-            auto_sync_enabled: false,
             primary_gist_id: String::new(),
             primary_pat: String::new(),
             mirror_enabled: false,
@@ -762,7 +756,6 @@ impl ShellViewModel {
     pub fn update_sync_modal_toggle(&mut self, field: &str, value: bool) {
         let modal = self.sync_modal_state_mut();
         match field {
-            "auto-sync" => modal.auto_sync_enabled = value,
             "mirror-enabled" => modal.mirror_enabled = value,
             _ => return,
         }

@@ -278,7 +278,6 @@ fn sync_settings_primary_action_persists_primary_target_and_creates_local_vault(
     app.invoke_sync_modal_draft_changed("primary-gist-id".into(), "gist-primary-123".into());
     app.invoke_sync_modal_draft_changed("primary-pat".into(), "pat-primary-secret".into());
     app.invoke_sync_modal_draft_changed("master-password".into(), "vault-pass".into());
-    app.invoke_sync_modal_toggle_changed("auto-sync".into(), true);
 
     app.invoke_sync_modal_primary_action_requested();
 
@@ -287,7 +286,6 @@ fn sync_settings_primary_action_persists_primary_target_and_creates_local_vault(
             .expect("load local bootstrap state")
             .expect("expected persisted local bootstrap state");
     let primary = saved.bundle.primary_remote().expect("primary remote");
-    assert_eq!(saved.bundle.auto_sync_enabled, true);
     assert_eq!(primary.provider, ProviderKind::GiteeGist);
     assert_eq!(primary.auth_kind, ProviderAuthKind::Pat);
     match &primary.locator {
@@ -360,10 +358,10 @@ fn sync_settings_supports_one_optional_mirror_target() {
 }
 
 #[test]
-fn sync_modal_submit_lock_unlock_and_close_actions_update_modal_state() {
+fn sync_modal_never_enters_locked_mode_after_sync_is_enabled() {
     i_slint_backend_testing::init_no_event_loop();
 
-    let temp_root = sample_vault_runtime_root("lock-unlock");
+    let temp_root = sample_vault_runtime_root("no-locked-mode");
     let primary = Arc::new(MockVaultProvider::new(
         "remote-primary",
         ProviderCapabilities::bundled_files_like(),
@@ -392,14 +390,12 @@ fn sync_modal_submit_lock_unlock_and_close_actions_update_modal_state() {
     assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
     assert!(temp_root.join("vault-bootstrap-state.json").exists());
 
-    app.invoke_sync_modal_lock_requested();
-    assert_eq!(app.get_sync_modal_mode().as_str(), "locked");
+    app.invoke_sync_modal_secondary_action_requested();
+    app.invoke_open_sync_modal_requested();
 
-    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    assert_ne!(app.get_sync_modal_mode().as_str(), "locked");
     assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
-
-    app.invoke_sync_modal_close_requested();
-    assert!(!app.get_sync_modal_open());
+    assert_ne!(app.get_sync_modal_secondary_action_label().as_str(), "Lock");
 }
 
 #[test]
@@ -446,10 +442,11 @@ fn sync_modal_refuses_to_reinitialize_an_empty_local_state_over_an_existing_remo
 }
 
 #[test]
-fn unlocking_does_not_auto_sync_without_a_user_mutation() {
+fn restart_with_saved_sync_configuration_does_not_require_unlock() {
     i_slint_backend_testing::init_no_event_loop();
 
-    let temp_root = sample_vault_runtime_root("unlock-no-auto-sync");
+    let temp_root = sample_vault_runtime_root("restart-no-unlock");
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
     let primary = Arc::new(MockVaultProvider::new(
         "remote-primary",
         ProviderCapabilities::bundled_files_like(),
@@ -459,37 +456,63 @@ fn unlocking_does_not_auto_sync_without_a_user_mutation() {
         ProviderCapabilities::bundled_files_like(),
     ));
     let provider_factory = RecordingVaultProviderFactory::default();
-    provider_factory.insert(primary.clone());
+    provider_factory.insert(primary);
     provider_factory.insert(mirror);
-
-    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
-    bundle.auto_sync_enabled = true;
 
     let app = AppWindow::new().unwrap();
     bind_with_vault_runtime(
         &app,
-        Arc::new(MemoryCredentialStore::default()),
+        Arc::clone(&credential_store),
         VaultRuntimeOptions {
-            root_dir: Some(temp_root),
+            root_dir: Some(temp_root.clone()),
             provider_factory: Arc::new(provider_factory),
-            bootstrap_template: Some(bundle),
+            bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
         },
     );
 
     app.invoke_open_sync_modal_requested();
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
-    app.invoke_sync_modal_lock_requested();
-    app.invoke_sync_modal_submit_master_password("vault-pass".into());
 
-    assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
+    let restarted_provider_factory = RecordingVaultProviderFactory::default();
+    restarted_provider_factory.insert(Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    )));
+    restarted_provider_factory.insert(Arc::new(MockVaultProvider::new(
+        "remote-mirror",
+        ProviderCapabilities::bundled_files_like(),
+    )));
+
+    let restarted = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &restarted,
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(restarted_provider_factory),
+            bootstrap_template: None,
+        },
+    );
+
+    restarted.invoke_open_sync_modal_requested();
+
+    assert_ne!(restarted.get_sync_modal_mode().as_str(), "locked");
     assert!(
-        primary.recorded_writes().is_empty(),
-        "unlocking alone must not push a new remote revision"
+        !restarted
+            .get_sync_modal_headline()
+            .as_str()
+            .contains("Unlock")
+    );
+    assert!(
+        !restarted
+            .get_sync_modal_primary_action_label()
+            .as_str()
+            .contains("Unlock")
     );
 }
 
 #[test]
-fn sync_modal_primary_and_secondary_actions_route_to_sync_and_lock() {
+fn sync_modal_primary_action_routes_to_sync_and_secondary_action_closes() {
     i_slint_backend_testing::init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("actions");
@@ -529,7 +552,7 @@ fn sync_modal_primary_and_secondary_actions_route_to_sync_and_lock() {
     assert_eq!(primary.recorded_writes().len(), 1);
 
     app.invoke_sync_modal_secondary_action_requested();
-    assert_eq!(app.get_sync_modal_mode().as_str(), "locked");
+    assert!(!app.get_sync_modal_open());
 }
 
 #[test]
@@ -587,12 +610,11 @@ fn sync_modal_does_not_reuse_right_panel_vault_copy() {
 }
 
 #[test]
-fn sync_modal_window_contract_exposes_task_three_callbacks() {
+fn sync_modal_window_contract_removes_lock_and_auto_sync_callbacks() {
     let source = fs::read_to_string("ui/app-window.slint").unwrap();
 
-    assert!(source.contains("callback sync-modal-submit-master-password(string);"));
-    assert!(source.contains("callback sync-modal-sync-now-requested();"));
-    assert!(source.contains("callback sync-modal-lock-requested();"));
+    assert!(!source.contains("callback sync-modal-lock-requested();"));
+    assert!(!source.contains("in-out property <bool> sync-modal-auto-sync-enabled: false;"));
 }
 
 #[test]

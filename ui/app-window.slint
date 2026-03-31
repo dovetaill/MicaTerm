@@ -41,7 +41,6 @@ export component AppWindow inherits Window {
     in-out property <string> sync-modal-target-label: "";
     in-out property <string> sync-modal-primary-action-label: "Save and enable";
     in-out property <string> sync-modal-secondary-action-label: "Close";
-    in-out property <bool> sync-modal-auto-sync-enabled: false;
     in-out property <string> sync-modal-primary-gist-id: "";
     in-out property <string> sync-modal-primary-pat: "";
     in-out property <bool> sync-modal-mirror-enabled: false;
@@ -294,7 +293,6 @@ export component AppWindow inherits Window {
     callback sync-modal-close-requested();
     callback sync-modal-submit-master-password(string);
     callback sync-modal-sync-now-requested();
-    callback sync-modal-lock-requested();
     callback sync-modal-primary-action-requested();
     callback sync-modal-secondary-action-requested();
     callback sync-modal-draft-changed(string, string);
@@ -1128,7 +1126,6 @@ export component AppWindow inherits Window {
             target-label: root.sync-modal-target-label;
             primary-action-label: root.sync-modal-primary-action-label;
             secondary-action-label: root.sync-modal-secondary-action-label;
-            auto-sync-enabled: root.sync-modal-auto-sync-enabled;
             primary-gist-id: root.sync-modal-primary-gist-id;
             primary-pat: root.sync-modal-primary-pat;
             mirror-enabled: root.sync-modal-mirror-enabled;

@@ -625,7 +625,6 @@ fn sync_sync_modal_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_sync_modal_target_label(modal.target_label.clone().into());
     window.set_sync_modal_primary_action_label(modal.primary_action_label.clone().into());
     window.set_sync_modal_secondary_action_label(modal.secondary_action_label.clone().into());
-    window.set_sync_modal_auto_sync_enabled(modal.auto_sync_enabled);
     window.set_sync_modal_primary_gist_id(modal.primary_gist_id.clone().into());
     window.set_sync_modal_primary_pat(modal.primary_pat.clone().into());
     window.set_sync_modal_mirror_enabled(modal.mirror_enabled);
@@ -4178,7 +4177,6 @@ fn hydrate_sync_modal_draft(
             .find(|remote| remote.role == RemoteRole::Mirror)
     });
 
-    modal.auto_sync_enabled = bundle.is_some_and(|bundle| bundle.auto_sync_enabled);
     modal.primary_gist_id = match primary.map(|remote| &remote.locator) {
         Some(crate::app::vault::model::BootstrapRemoteLocator::GiteeGist { gist_id }) => {
             gist_id.clone()
@@ -4237,7 +4235,6 @@ fn build_sync_bundle_from_modal(
     }
 
     let mut bundle = existing_bundle.cloned().unwrap_or_default();
-    bundle.auto_sync_enabled = modal.auto_sync_enabled;
     bundle.remotes.clear();
     bundle.remotes.push(BootstrapRemoteConfig {
         remote_id: sync_settings_remote_id(RemoteRole::Primary).into(),
@@ -4339,34 +4336,33 @@ fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vault: &VaultSe
     };
     modal.error_text.clear();
 
-    match (
-        &vault.local_state,
-        vault.unlocked_vault_key.is_some(),
-        has_primary_remote,
-    ) {
-        (None, false, false) => {
+    if vault.local_state.is_none() && vault.unlocked_vault_key.is_some() {
+        modal.mode = SyncModalMode::SyncError;
+        modal.headline = "Sync state is inconsistent".into();
+        modal.status_text = "The local vault state could not be resolved.".into();
+        modal.error_text = "Missing local bootstrap state".into();
+        modal.primary_action_label = "Close".into();
+        modal.secondary_action_label.clear();
+        return;
+    }
+
+    match (&vault.local_state, has_primary_remote) {
+        (None, false) => {
             modal.mode = SyncModalMode::NotConfigured;
             modal.headline = "Configure sync".into();
             modal.status_text = gitee_setup.setup_summary();
             modal.primary_action_label = "Save and enable".into();
             modal.secondary_action_label = "Close".into();
         }
-        (None, false, true) => {
+        (None, true) => {
             modal.mode = SyncModalMode::NotConfigured;
             modal.headline = "Enable or recover sync".into();
             modal.status_text = "The target is configured. Enter a master password to recover from the remote if it already has data, or create a new local vault if it is still empty.".into();
             modal.primary_action_label = "Save and enable".into();
             modal.secondary_action_label = "Close".into();
         }
-        (Some(_), false, false) | (Some(_), false, true) => {
-            modal.mode = SyncModalMode::Locked;
-            modal.headline = "Unlock sync".into();
-            modal.status_text = "Sync is configured. Enter your master password to unlock local secrets and resume sync.".into();
-            modal.primary_action_label = "Unlock".into();
-            modal.secondary_action_label = "Close".into();
-        }
-        (Some(_), true, false) => {
-            modal.mode = SyncModalMode::UnlockedButRemoteIncomplete;
+        (Some(_), false) => {
+            modal.mode = SyncModalMode::NotConfigured;
             modal.headline = "Finish sync settings".into();
             modal.status_text = format!(
                 "Add a {} target authenticated with {} before sync can run.",
@@ -4374,28 +4370,20 @@ fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vault: &VaultSe
                 first_release_formal_auth_label()
             );
             modal.primary_action_label = "Save settings".into();
-            modal.secondary_action_label = "Lock".into();
+            modal.secondary_action_label = "Close".into();
         }
-        (Some(_), true, true) => {
+        (Some(_), true) => {
             modal.mode = SyncModalMode::Ready;
-            modal.headline = "Sync is ready".into();
-            modal.status_text =
-                if configured_sync_bundle(vault).is_some_and(|bundle| bundle.auto_sync_enabled) {
-                    "Auto sync is enabled. Titlebar Sync runs an immediate foreground sync.".into()
-                } else {
-                    "Auto sync is disabled. Use the titlebar Sync button when you want to sync now."
-                        .into()
-                };
+            modal.headline = "Sync ready".into();
+            modal.status_text = if vault.unlocked_vault_key.is_some() {
+                "Sync is configured. Use the titlebar Sync button to run an immediate check."
+                    .into()
+            } else {
+                "Sync is configured. Use the titlebar Sync button to run an immediate check. Diagnostics appear here if sync needs attention."
+                    .into()
+            };
             modal.primary_action_label = "Sync now".into();
-            modal.secondary_action_label = "Lock".into();
-        }
-        (None, true, _) => {
-            modal.mode = SyncModalMode::SyncError;
-            modal.headline = "Sync state is inconsistent".into();
-            modal.status_text = "The local vault state could not be resolved.".into();
-            modal.error_text = "Missing local bootstrap state".into();
-            modal.primary_action_label = "Close".into();
-            modal.secondary_action_label.clear();
+            modal.secondary_action_label = "Close".into();
         }
     }
 }
@@ -4691,19 +4679,6 @@ fn unlock_local_vault_into_shell(
     )?;
     vault.unlocked_vault_key = Some(vault_key);
     vault.decrypted_snapshot = Some(snapshot);
-    update_vault_panel_for_local_state(state, vault);
-    update_sync_modal_for_local_state(state, vault);
-    Ok(())
-}
-
-fn lock_local_vault(
-    state: &mut ShellViewModel,
-    vault: &mut VaultSessionState,
-    credential_store: &dyn CredentialStore,
-) -> Result<()> {
-    clear_vault_decrypted_state(state, vault.decrypted_snapshot.as_ref(), credential_store)?;
-    vault.unlocked_vault_key = None;
-    vault.decrypted_snapshot = None;
     update_vault_panel_for_local_state(state, vault);
     update_sync_modal_for_local_state(state, vault);
     Ok(())
@@ -5733,18 +5708,22 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let mut state = state.borrow_mut();
         let vault = vault_session_ref.borrow();
         let (width, height) = current_window_size(&window);
+        let sync_is_configured = vault
+            .local_state
+            .as_ref()
+            .and_then(|local_state| local_state.bundle.primary_remote())
+            .is_some();
 
-        update_sync_modal_for_local_state(&mut state, &vault);
-        if matches!(state.sync_modal_state().mode, SyncModalMode::Ready) {
+        if sync_is_configured {
             drop(vault);
             drop(state);
             vault_auto_sync_timer_ref.stop();
             run_vault_sync_ref(VaultSyncTrigger::Manual);
             return;
-        } else {
-            hydrate_sync_modal_draft(&mut state, &vault, credential_store_ref.as_ref());
-            state.open_sync_modal();
         }
+        update_sync_modal_for_local_state(&mut state, &vault);
+        hydrate_sync_modal_draft(&mut state, &vault, credential_store_ref.as_ref());
+        state.open_sync_modal();
 
         sync_shell_state(
             &window,
@@ -5876,32 +5855,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let vault_session_ref = Rc::clone(&vault_session);
     let credential_store_ref = Arc::clone(&credential_store);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    window.on_sync_modal_lock_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let mut vault = vault_session_ref.borrow_mut();
-        let (width, height) = current_window_size(&window);
-        if let Err(err) = lock_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()) {
-            tracing::error!(target: "app.vault", error = %err, "failed to lock local vault from sync modal");
-            set_sync_modal_error(&mut state, &vault, format!("Vault lock failed: {err}"));
-        }
-        sync_shell_state(
-            &window,
-            &state,
-            effects_ref.as_ref(),
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-        );
-        sync_shell_layout(&window, &mut state, width, height);
-        save_ui_preferences(&store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let store_ref = store.clone();
-    let effects_ref = Rc::clone(&effects);
-    let vault_session_ref = Rc::clone(&vault_session);
-    let credential_store_ref = Arc::clone(&credential_store);
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_sync_modal_primary_action_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -5927,29 +5880,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         tracing::error!(target: "app.vault", error = %err, "failed to enable sync from sync settings");
                         set_sync_modal_error(&mut state, &vault, err.to_string());
                     }
-                }
-            }
-            SyncModalMode::Locked => {
-                if master_password.trim().is_empty() {
-                    state.set_sync_modal_error("Enter a master password to unlock sync.");
-                } else {
-                    let secret = secrecy::SecretString::new(master_password.into());
-                    if let Err(err) = submit_sync_modal_master_password(
-                        &mut state,
-                        &mut vault,
-                        credential_store_ref.as_ref(),
-                        &secret,
-                    ) {
-                        tracing::error!(target: "app.vault", error = %err, "failed to unlock sync from sync settings");
-                        set_sync_modal_error(&mut state, &vault, err.to_string());
-                    }
-                }
-            }
-            SyncModalMode::UnlockedButRemoteIncomplete => {
-                if let Err(err) =
-                    persist_sync_modal_settings(&mut state, &mut vault, credential_store_ref.as_ref())
-                {
-                    set_sync_modal_error(&mut state, &vault, err.to_string());
                 }
             }
             SyncModalMode::Ready => {
@@ -5984,27 +5914,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(&effects);
-    let vault_session_ref = Rc::clone(&vault_session);
-    let credential_store_ref = Arc::clone(&credential_store);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_sync_modal_secondary_action_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let mut vault = vault_session_ref.borrow_mut();
         let (width, height) = current_window_size(&window);
-        match state.sync_modal_state().mode {
-            SyncModalMode::UnlockedButRemoteIncomplete | SyncModalMode::Ready => {
-                if let Err(err) =
-                    lock_local_vault(&mut state, &mut vault, credential_store_ref.as_ref())
-                {
-                    tracing::error!(target: "app.vault", error = %err, "failed to lock local vault from secondary sync modal action");
-                    set_sync_modal_error(&mut state, &vault, format!("Vault lock failed: {err}"));
-                }
-            }
-            SyncModalMode::NotConfigured | SyncModalMode::Locked | SyncModalMode::SyncError => {
-                state.close_sync_modal();
-            }
-        }
+        state.close_sync_modal();
         sync_shell_state(
             &window,
             &state,

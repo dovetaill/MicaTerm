@@ -177,7 +177,6 @@ export component SyncVaultModal inherits Rectangle {
     in property <string> target-label: "";
     in property <string> primary-action-label: "Set up sync";
     in property <string> secondary-action-label: "";
-    in property <bool> auto-sync-enabled: false;
     in property <string> primary-gist-id: "";
     in property <string> primary-pat: "";
     in property <bool> mirror-enabled: false;
@@ -315,17 +314,6 @@ export component SyncVaultModal inherits Rectangle {
                         }
                     }
 
-                    SyncModalToggleRow {
-                        width: parent.width;
-                        label: "Auto sync";
-                        description: "Run sync automatically after local changes when the vault is unlocked.";
-                        value: root.auto-sync-enabled;
-
-                        toggled(value) => {
-                            root.toggle-changed("auto-sync", value);
-                        }
-                    }
-
                     SyncModalTextField {
                         width: parent.width;
                         label: "Primary Gist ID";
@@ -379,7 +367,7 @@ export component SyncVaultModal inherits Rectangle {
                         }
                     }
 
-                    if root.mode == "not-configured" || root.mode == "locked" : password-field := SyncModalTextField {
+                    if root.mode == "not-configured" : password-field := SyncModalTextField {
                         width: parent.width;
                         label: "Master Password";
                         value: root.master-password;

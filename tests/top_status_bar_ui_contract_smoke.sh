@@ -7,6 +7,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TITLEBAR="$ROOT_DIR/ui/shell/titlebar.slint"
 TOOLTIP="$ROOT_DIR/ui/components/titlebar-tooltip.slint"
 APP_WINDOW="$ROOT_DIR/ui/app-window.slint"
+SYNC_MODAL="$ROOT_DIR/ui/components/sync-vault-modal.slint"
+VIEW_MODEL="$ROOT_DIR/src/shell/view_model.rs"
 
 [[ -f "$TOOLTIP" ]] || {
   echo "missing ui/components/titlebar-tooltip.slint" >&2
@@ -131,3 +133,13 @@ grep -F 'callback sync-settings-selected;' "$TITLEBAR" >/dev/null || true
 grep -F 'callback sync-settings-selected;' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
 grep -F 'label: "Sync Settings";' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
 ! grep -F 'label: "Appearance";' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
+! grep -F 'callback sync-modal-lock-requested();' "$APP_WINDOW" >/dev/null
+! grep -F 'in-out property <bool> sync-modal-auto-sync-enabled: false;' "$APP_WINDOW" >/dev/null
+! grep -F 'auto-sync-enabled: root.sync-modal-auto-sync-enabled;' "$APP_WINDOW" >/dev/null
+! grep -F 'label: "Auto sync"' "$SYNC_MODAL" >/dev/null
+! grep -F 'root.mode == "locked"' "$SYNC_MODAL" >/dev/null
+! grep -F 'root.mode == "unlocked-but-remote-incomplete"' "$SYNC_MODAL" >/dev/null
+! grep -F 'Unlock' "$SYNC_MODAL" >/dev/null
+! grep -F 'Lock' "$SYNC_MODAL" >/dev/null
+! grep -F 'Locked,' "$VIEW_MODEL" >/dev/null
+! grep -F 'UnlockedButRemoteIncomplete,' "$VIEW_MODEL" >/dev/null

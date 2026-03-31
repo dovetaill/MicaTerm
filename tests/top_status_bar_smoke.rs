@@ -1,12 +1,19 @@
 //! Smoke coverage for titlebar bindings, theme sync, and auxiliary actions.
 
+use std::collections::BTreeMap;
 use std::cell::RefCell;
 use std::fs;
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use anyhow::{Result, anyhow};
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::{
+    PrivateKeyImporter, VaultProviderFactory, VaultRuntimeOptions,
+    bind_top_status_bar_with_injected_services_and_vault_runtime,
     bind_top_status_bar_with_store, bind_top_status_bar_with_store_and_effects,
     runtime_window_title,
 };
@@ -14,14 +21,156 @@ use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::build_test_logging_runtime;
 use mica_term::app::runtime_profile::AppRuntimeProfile;
+use mica_term::app::ssh::credentials::{CredentialStore, MemoryCredentialStore};
+use mica_term::app::ssh::profile::ConnectionProfile;
+use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput};
+use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::ui_preferences::UiPreferencesStore;
+use mica_term::app::vault::model::{
+    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, ProviderAuthKind,
+    ProviderKind, RemoteRole,
+};
+use mica_term::app::vault::provider::mock::MockVaultProvider;
+use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
 use mica_term::app::window_effects::{
     BackdropApplyStatus, NativeWindowAppearanceRequest, NativeWindowCornerPreference,
     NativeWindowTheme, PlatformWindowEffects, WindowAppearanceSyncReport,
+    default_platform_window_effects,
 };
 use mica_term::shell::metrics::ShellMetrics;
 use slint::platform::{PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, PhysicalSize};
+use tokio::sync::mpsc;
+use uuid::Uuid;
+
+struct FakeLauncher;
+
+struct NoopRuntimeControl;
+
+#[derive(Clone, Default)]
+struct CancelledPrivateKeyImporter;
+
+#[derive(Clone, Default)]
+struct RecordingVaultProviderFactory {
+    providers: Arc<Mutex<BTreeMap<String, Arc<MockVaultProvider>>>>,
+}
+
+impl RecordingVaultProviderFactory {
+    fn insert(&self, provider: Arc<MockVaultProvider>) {
+        self.providers
+            .lock()
+            .expect("lock vault provider factory")
+            .insert(provider.remote_id().to_string(), provider);
+    }
+}
+
+impl VaultProviderFactory for RecordingVaultProviderFactory {
+    fn build_provider(&self, remote: &BootstrapRemoteConfig) -> Result<Arc<dyn VaultProvider>> {
+        let provider = self
+            .providers
+            .lock()
+            .expect("lock vault provider factory")
+            .get(&remote.remote_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("missing mock vault provider `{}`", remote.remote_id))?;
+        Ok(provider as Arc<dyn VaultProvider>)
+    }
+}
+
+impl SessionRuntimeControl for NoopRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl SessionRuntimeLauncher for FakeLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: Uuid,
+        _attempt_id: Uuid,
+        _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        Box::pin(async move { Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>) })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl PrivateKeyImporter for CancelledPrivateKeyImporter {
+    fn import_private_key(&self) -> Result<Option<mica_term::app::bootstrap::ImportedPrivateKey>> {
+        Ok(None)
+    }
+}
+
+fn sample_vault_runtime_root(label: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("mica-term-titlebar-sync-{label}-{}", Uuid::new_v4()))
+}
+
+fn sample_bootstrap_bundle_with_primary() -> BootstrapBundle {
+    BootstrapBundle {
+        vault_id: "vault-main".into(),
+        remotes: vec![BootstrapRemoteConfig {
+            remote_id: "remote-primary".into(),
+            role: RemoteRole::Primary,
+            provider: ProviderKind::S3Compatible,
+            locator: BootstrapRemoteLocator::S3 {
+                bucket: "vault-bucket".into(),
+                prefix: "mica".into(),
+                endpoint: None,
+                region: Some("us-east-1".into()),
+                force_path_style: false,
+            },
+            credential_ref: Some("vault/bootstrap/remote-primary".into()),
+            auth_kind: ProviderAuthKind::AwsStandardChain,
+            last_health: None,
+        }],
+        ..BootstrapBundle::default()
+    }
+}
+
+fn bind_with_vault_runtime(
+    app: &AppWindow,
+    credential_store: Arc<dyn CredentialStore>,
+    vault_runtime: VaultRuntimeOptions,
+) {
+    bind_top_status_bar_with_injected_services_and_vault_runtime(
+        app,
+        None,
+        default_platform_window_effects(),
+        None,
+        Arc::new(FakeLauncher),
+        credential_store,
+        Arc::new(CancelledPrivateKeyImporter),
+        vault_runtime,
+    );
+}
 
 #[derive(Clone)]
 struct RecordingWindowEffects {
@@ -165,6 +314,59 @@ fn titlebar_exposes_sync_as_a_first_class_action() {
     assert!(!app.get_sync_modal_open());
     app.invoke_sync_now_requested();
     assert!(app.get_sync_modal_open());
+}
+
+#[test]
+fn titlebar_sync_keeps_immediate_action_semantics_after_configuration() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("immediate-action");
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    )));
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::clone(&credential_store),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(sample_bootstrap_bundle_with_primary()),
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_sync_modal_close_requested();
+
+    let restarted_provider_factory = RecordingVaultProviderFactory::default();
+    restarted_provider_factory.insert(Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    )));
+
+    let restarted = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &restarted,
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(restarted_provider_factory),
+            bootstrap_template: None,
+        },
+    );
+
+    restarted.invoke_sync_now_requested();
+
+    assert!(
+        !restarted.get_sync_modal_open(),
+        "configured sync should keep the titlebar action on immediate sync/check semantics"
+    );
 }
 
 #[test]
