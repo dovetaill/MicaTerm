@@ -14,7 +14,7 @@ use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::runtime::{
     SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceState,
 };
-use mica_term::app::ssh::session_manager::{SessionHandle, SessionState};
+use mica_term::app::ssh::session_manager::{EnhancedSessionState, SessionHandle, SessionState};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::window_effects::default_platform_window_effects;
 use mica_term::shell::tabs::WorkspaceTab;
@@ -92,6 +92,7 @@ fn sample_handle(title: &str, subtitle: &str, state: SessionState) -> SessionHan
         subtitle: subtitle.into(),
         state,
         can_reconnect: false,
+        enhanced_session_state: EnhancedSessionState::Plain,
     }
 }
 
@@ -520,6 +521,38 @@ fn connected_session_projects_terminal_surface_state_without_placeholder_copy() 
     assert!(
         !terminal_host.contains("if root.session-subtitle != \"\""),
         "terminal host should not render session subtitles above the terminal surface"
+    );
+}
+
+#[test]
+fn workspace_tab_projects_enhanced_session_state_badge() {
+    let handle = SessionHandle {
+        session_id: Uuid::new_v4(),
+        asset_id: "asset-prod".into(),
+        title: "Prod".into(),
+        subtitle: "ops@10.0.0.12:22".into(),
+        state: SessionState::Connected,
+        can_reconnect: false,
+        enhanced_session_state: EnhancedSessionState::Fallback,
+    };
+
+    let tab = WorkspaceTab::from_session(&handle);
+
+    assert_eq!(tab.enhanced_session_state, "fallback");
+}
+
+#[test]
+fn workspace_session_host_projects_enhanced_state_and_disable_action() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        terminal_host.contains("workspace-session-enhanced-state"),
+        "terminal host should expose the active enhanced-session state contract"
+    );
+    assert!(
+        terminal_host.contains("disable-enhanced-session"),
+        "terminal host should expose a local action for disabling enhanced sessions"
     );
 }
 

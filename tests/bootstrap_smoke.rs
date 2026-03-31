@@ -43,12 +43,14 @@ use mica_term::app::ssh::credentials::{
 use mica_term::app::ssh::known_hosts::{
     KnownHostCheck, KnownHostsService, default_known_hosts_path,
 };
-use mica_term::app::ssh::profile::ConnectionProfile;
+use mica_term::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, SshAuthMethod};
 use mica_term::app::ssh::runtime::{
     SessionRuntimeEvent, TerminalKeyEvent, TerminalKeyKind, TerminalMouseInput, TerminalSession,
     TerminalSurfaceState, UnknownHostKeyError,
 };
-use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
+use mica_term::app::ssh::session_manager::{
+    EnhancementPolicy, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
+};
 use mica_term::app::terminal_theme::preset_for_theme_mode;
 use mica_term::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
@@ -130,6 +132,35 @@ fn bootstrap_source_uses_windows_native_terminal_presenter_for_native_frames() {
         !bootstrap_source.contains("frame_token: u64::try_from(surface.seqno)"),
         "bootstrap should stop synthesizing native frame tokens directly from surface seqno once the native renderer owns frame preparation"
     );
+}
+
+#[test]
+fn session_manager_skips_auto_bootstrap_for_cached_fallback_host() {
+    let runtime = mica_term::app::async_runtime::AppAsyncRuntime::new()
+        .expect("create app async runtime");
+    let manager = SessionManager::new_with_launcher(runtime.handle(), Arc::new(FakeLauncher));
+    let profile = ConnectionProfile {
+        asset_id: Some("asset-prod".into()),
+        name: "Prod Bastion".into(),
+        host: "10.0.0.12".into(),
+        user: "ops".into(),
+        port: 22,
+        auth_method: SshAuthMethod::Password,
+        credential_ref: Some("draft://ssh-password/ops@10.0.0.12:22".into()),
+        private_key_path: None,
+        password: Some("secret".into()),
+        private_key_content: None,
+        passphrase: None,
+        proxy: ConnectionProxyProfile::None,
+        resolved_proxy_hops: Vec::new(),
+        remark: String::new(),
+    };
+
+    manager.remember_enhancement_fallback(&profile, "bash");
+
+    let policy = manager.enhancement_policy_for(&profile);
+
+    assert_eq!(policy, EnhancementPolicy::SkipAutoBootstrap);
 }
 
 #[test]

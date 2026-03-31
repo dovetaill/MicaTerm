@@ -6,4 +6,5 @@ pub mod known_hosts;
 pub mod profile;
 pub mod proxy;
 pub mod runtime;
+pub mod shell_integration;
 pub mod session_manager;

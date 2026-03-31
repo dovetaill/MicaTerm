@@ -3,7 +3,7 @@ use mica_term::app::bootstrap::bind_top_status_bar_with_store;
 use mica_term::app::sftp::{
     SftpDirectoryEntry, SftpDirectoryEntryKind, SftpPanelMode, SftpSessionBindingState,
 };
-use mica_term::app::ssh::session_manager::{SessionHandle, SessionState};
+use mica_term::app::ssh::session_manager::{EnhancedSessionState, SessionHandle, SessionState};
 use mica_term::shell::context_menu::{
     ContextMenuActionState, ContextTargetKind, SelectionContext, resolve_action_tree,
 };
@@ -20,6 +20,7 @@ fn active_sftp_view_model(entries: Vec<SftpDirectoryEntry>) -> ShellViewModel {
         subtitle: "ops@10.0.0.12:22".into(),
         state: SessionState::Connected,
         can_reconnect: false,
+        enhanced_session_state: EnhancedSessionState::Plain,
     };
     let mut tab = WorkspaceTab::from_session(&handle);
     tab.active = true;
