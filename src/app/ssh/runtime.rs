@@ -33,8 +33,8 @@ use crate::app::ssh::credentials::{
 };
 use crate::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, ResolvedProxyHop, SshAuthMethod};
-use crate::app::ssh::shell_integration::runtime_shell_events;
 use crate::app::ssh::session_manager::{EnhancedSessionState, SessionRuntimeControl};
+use crate::app::ssh::shell_integration::runtime_shell_events;
 use crate::app::terminal_theme::{palette_for_theme_mode, preset_for_theme_mode};
 use crate::theme::ThemeMode;
 

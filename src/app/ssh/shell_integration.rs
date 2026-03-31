@@ -61,12 +61,7 @@ pub fn shell_probe_command() -> &'static str {
 
 pub fn parse_detected_shell(bytes: &[u8]) -> ShellKind {
     let output = String::from_utf8_lossy(bytes);
-    let shell_name = output
-        .trim()
-        .rsplit('/')
-        .next()
-        .unwrap_or_default()
-        .trim();
+    let shell_name = output.trim().rsplit('/').next().unwrap_or_default().trim();
 
     match shell_name {
         "bash" => ShellKind::Bash,
@@ -193,10 +188,7 @@ fn parse_osc_payload(payload: &str) -> Option<ShellIntegrationEvent> {
         return Some(ShellIntegrationEvent::CurrentDirectory(cwd));
     }
 
-    if let Some(event) = payload
-        .strip_prefix("133;")
-        .and_then(parse_osc133_event)
-    {
+    if let Some(event) = payload.strip_prefix("133;").and_then(parse_osc133_event) {
         return Some(event);
     }
 

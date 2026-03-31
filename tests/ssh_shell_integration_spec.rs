@@ -1,6 +1,6 @@
 use mica_term::app::ssh::shell_integration::{
-    BootstrapOptions, MicaPrivateAction, ShellIntegrationEvent, ShellKind,
-    build_shell_bootstrap, parse_shell_integration_events, runtime_shell_events,
+    BootstrapOptions, MicaPrivateAction, ShellIntegrationEvent, ShellKind, build_shell_bootstrap,
+    parse_shell_integration_events, runtime_shell_events,
 };
 
 #[test]
@@ -17,7 +17,9 @@ fn parser_extracts_standard_and_private_shell_integration_events() {
 
     let events = parse_shell_integration_events(input.as_bytes());
 
-    assert!(events.contains(&ShellIntegrationEvent::CurrentDirectory("/tmp/project".into())));
+    assert!(events.contains(&ShellIntegrationEvent::CurrentDirectory(
+        "/tmp/project".into()
+    )));
     assert!(events.contains(&ShellIntegrationEvent::PromptStart));
     assert!(events.contains(&ShellIntegrationEvent::PromptEnd));
     assert!(events.contains(&ShellIntegrationEvent::CommandStart));

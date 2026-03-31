@@ -32,7 +32,10 @@ impl SftpBrowserController {
         }
 
         let request = self.new_request(session_id, path.as_str());
-        let state = self.sessions.get_mut(&session_id).expect("state must exist");
+        let state = self
+            .sessions
+            .get_mut(&session_id)
+            .expect("state must exist");
         state.set_loading_follow(request.path.as_str(), request.request_id);
         Some(request)
     }
@@ -68,7 +71,10 @@ impl SftpBrowserController {
         }
 
         let request = self.new_request(session_id, path.as_str());
-        let state = self.sessions.get_mut(&session_id).expect("state must exist");
+        let state = self
+            .sessions
+            .get_mut(&session_id)
+            .expect("state must exist");
         if state.follow_mode == crate::app::sftp::SftpFollowMode::FollowCwd {
             state.set_loading_follow(request.path.as_str(), request.request_id);
         } else {
@@ -84,7 +90,10 @@ impl SftpBrowserController {
         }
 
         let request = self.new_request(session_id, path.as_str());
-        let state = self.sessions.get_mut(&session_id).expect("state must exist");
+        let state = self
+            .sessions
+            .get_mut(&session_id)
+            .expect("state must exist");
         state.set_retrying(request.path.as_str(), request.request_id);
         Some(request)
     }

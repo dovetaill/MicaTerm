@@ -207,8 +207,7 @@ fn ready_sftp_panel_renders_compact_toolbar_and_file_table() {
         count_distinct_pixels(&buffer, PANEL_X + 12, 12, 360, 56, panel_surface, 14);
     let path_bar_pixels =
         count_distinct_pixels(&buffer, PANEL_X + 84, 12, 276, 56, panel_surface, 14);
-    let list_pixels =
-        count_distinct_pixels(&buffer, PANEL_X + 12, 88, 360, 260, panel_surface, 14);
+    let list_pixels = count_distinct_pixels(&buffer, PANEL_X + 12, 88, 360, 260, panel_surface, 14);
 
     assert!(
         toolbar_pixels >= 1600,

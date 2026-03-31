@@ -20,11 +20,11 @@ use mica_term::app::ssh::runtime::{
     TerminalMouseEventKind, TerminalMouseInput, TerminalSession, TerminalSurfaceState,
     UnknownHostKeyError, negotiated_terminal_environment,
 };
-use mica_term::app::ssh::shell_integration::runtime_shell_events;
 use mica_term::app::ssh::session_manager::{
     EnhancedSessionState, OpenSessionMode, SessionManager, SessionRuntimeControl,
     SessionRuntimeLauncher, SessionState,
 };
+use mica_term::app::ssh::shell_integration::runtime_shell_events;
 use russh::keys::PrivateKey;
 use russh::keys::ssh_key::rand_core::OsRng;
 use russh::server::{Auth, Session};
@@ -1620,7 +1620,10 @@ fn session_manager_tracks_enhanced_remote_session_state_changes() {
         .session(handle.session_id)
         .expect("session should remain registered");
 
-    assert_eq!(session.enhanced_session_state, EnhancedSessionState::Enhanced);
+    assert_eq!(
+        session.enhanced_session_state,
+        EnhancedSessionState::Enhanced
+    );
 }
 
 #[test]

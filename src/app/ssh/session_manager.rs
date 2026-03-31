@@ -1346,9 +1346,9 @@ mod tests {
     use super::{
         ConnectionAttemptState, ConnectionHeadlineState, EnhancedSessionState, SessionHandle,
         SessionRegistry, SessionRuntimeControl, SessionRuntimeEvent, SessionState,
-        apply_runtime_event,
-        coalesce_surface_backlog, coalesce_surface_dirty_backlog, refresh_runtime_surface,
-        terminal_surface_signature_for_registry, terminal_surface_stale, update_terminal_surface,
+        apply_runtime_event, coalesce_surface_backlog, coalesce_surface_dirty_backlog,
+        refresh_runtime_surface, terminal_surface_signature_for_registry, terminal_surface_stale,
+        update_terminal_surface,
     };
     use crate::app::ssh::runtime::{TerminalKeyEvent, TerminalMouseInput, TerminalSurfaceState};
 

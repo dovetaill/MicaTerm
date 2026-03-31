@@ -4,12 +4,7 @@ use mica_term::app::sftp::{
 };
 use uuid::Uuid;
 
-fn entry(
-    id: &str,
-    name: &str,
-    path: &str,
-    kind: SftpDirectoryEntryKind,
-) -> SftpDirectoryEntry {
+fn entry(id: &str, name: &str, path: &str, kind: SftpDirectoryEntryKind) -> SftpDirectoryEntry {
     SftpDirectoryEntry {
         id: id.into(),
         name: name.into(),
@@ -135,7 +130,9 @@ fn follow_cwd_only_updates_when_follow_mode_is_enabled() {
     controller.apply_loaded_directory(session_id, manual.request_id, "/srv/manual", Vec::new());
 
     assert!(
-        controller.follow_cwd(session_id, "/srv/app/ignored").is_none(),
+        controller
+            .follow_cwd(session_id, "/srv/app/ignored")
+            .is_none(),
         "manual browse should ignore cwd updates"
     );
 

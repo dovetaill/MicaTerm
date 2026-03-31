@@ -26,13 +26,13 @@ use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer,
     build_shared_app_credential_store_for_paths, default_window_size,
 };
-use mica_term::app::sftp::{
-    SftpBackend, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpRuntimeHandle,
-};
 use mica_term::app::keychain::KeychainCatalog;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::build_test_logging_runtime;
+use mica_term::app::sftp::{
+    SftpBackend, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpRuntimeHandle,
+};
 use mica_term::app::ssh::connection_progress::{
     ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
 };
@@ -136,8 +136,8 @@ fn bootstrap_source_uses_windows_native_terminal_presenter_for_native_frames() {
 
 #[test]
 fn session_manager_skips_auto_bootstrap_for_cached_fallback_host() {
-    let runtime = mica_term::app::async_runtime::AppAsyncRuntime::new()
-        .expect("create app async runtime");
+    let runtime =
+        mica_term::app::async_runtime::AppAsyncRuntime::new().expect("create app async runtime");
     let manager = SessionManager::new_with_launcher(runtime.handle(), Arc::new(FakeLauncher));
     let profile = ConnectionProfile {
         asset_id: Some("asset-prod".into()),
@@ -315,7 +315,12 @@ struct RecordingSftpState {
 
 impl RecordingSftpState {
     fn take_read_dir_calls(&self) -> Vec<String> {
-        std::mem::take(&mut *self.read_dir_calls.lock().expect("lock sftp read_dir calls"))
+        std::mem::take(
+            &mut *self
+                .read_dir_calls
+                .lock()
+                .expect("lock sftp read_dir calls"),
+        )
     }
 }
 
@@ -532,7 +537,10 @@ impl SftpBackend for RecordingSftpBackend {
         })
     }
 
-    fn mkdir<'a>(&'a self, _path: &'a str) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    fn mkdir<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move { Ok(()) })
     }
 
@@ -6724,7 +6732,10 @@ fn opening_sftp_reads_the_active_session_directory_instead_of_staying_connecting
             .as_str(),
         "logs"
     );
-    assert_eq!(sftp_state.take_read_dir_calls(), vec!["/srv/app".to_string()]);
+    assert_eq!(
+        sftp_state.take_read_dir_calls(),
+        vec!["/srv/app".to_string()]
+    );
 }
 
 #[test]

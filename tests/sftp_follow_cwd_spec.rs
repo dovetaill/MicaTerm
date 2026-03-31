@@ -203,7 +203,8 @@ impl SessionRuntimeLauncher for SessionCwdLauncher {
         _session_id: Uuid,
         _attempt_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
         let cwd = self
             .cwd_by_host
             .iter()

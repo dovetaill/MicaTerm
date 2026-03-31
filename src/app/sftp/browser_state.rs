@@ -1,6 +1,4 @@
-use crate::app::sftp::{
-    SftpDirectoryEntry, SftpFollowMode, SftpPanelMode, SftpPathHistory,
-};
+use crate::app::sftp::{SftpDirectoryEntry, SftpFollowMode, SftpPanelMode, SftpPathHistory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SftpBrowserSessionState {
