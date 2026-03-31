@@ -154,28 +154,14 @@ pub struct SyncFeedbackViewState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultPanelViewState {
     pub title: String,
-    pub lock_state_label: String,
     pub primary_status_label: String,
-    pub primary_action_label: String,
-    pub secondary_action_label: String,
-    pub tertiary_action_label: String,
-    pub sync_now_label: String,
-    pub export_bootstrap_label: String,
-    pub import_bootstrap_label: String,
 }
 
 impl Default for VaultPanelViewState {
     fn default() -> Self {
         Self {
             title: "Sync & Vault".into(),
-            lock_state_label: "Locked".into(),
             primary_status_label: "Primary not configured".into(),
-            primary_action_label: "Set".into(),
-            secondary_action_label: "Change".into(),
-            tertiary_action_label: "Lock now".into(),
-            sync_now_label: "Sync now".into(),
-            export_bootstrap_label: "Export bootstrap".into(),
-            import_bootstrap_label: "Import bootstrap".into(),
         }
     }
 }

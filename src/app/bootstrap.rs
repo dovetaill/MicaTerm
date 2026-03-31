@@ -4180,48 +4180,23 @@ fn persist_remote_recovery_snapshot(
 
 fn update_vault_panel_for_local_state(state: &mut ShellViewModel, vault: &VaultSessionState) {
     let panel = state.vault_panel_state_mut();
-    match (&vault.local_state, vault.unlocked_vault_key.is_some()) {
-        (None, false) => {
-            panel.lock_state_label = "Locked".into();
-            panel.primary_status_label = "Primary not configured".into();
-            panel.primary_action_label = "Set".into();
-            panel.secondary_action_label = "Change".into();
-            panel.tertiary_action_label = "Lock now".into();
-        }
-        (Some(local_state), false) => {
-            panel.lock_state_label = "Locked".into();
-            panel.primary_status_label = if local_state
+    panel.primary_status_label = vault
+        .local_state
+        .as_ref()
+        .map(|local_state| {
+            if local_state
                 .bundle
                 .remotes
                 .iter()
                 .any(|remote| remote.role == RemoteRole::Primary)
             {
-                "Primary configured".into()
+                "Primary configured"
             } else {
-                "Primary not configured".into()
-            };
-            panel.primary_action_label = "Unlock".into();
-            panel.secondary_action_label = "Change".into();
-            panel.tertiary_action_label = "Lock now".into();
-        }
-        (Some(local_state), true) => {
-            panel.lock_state_label = "Unlocked".into();
-            panel.primary_status_label = if local_state
-                .bundle
-                .remotes
-                .iter()
-                .any(|remote| remote.role == RemoteRole::Primary)
-            {
-                "Primary configured".into()
-            } else {
-                "Primary not configured".into()
-            };
-            panel.primary_action_label = "Change".into();
-            panel.secondary_action_label = "Sync now".into();
-            panel.tertiary_action_label = "Lock now".into();
-        }
-        (None, true) => {}
-    }
+                "Primary not configured"
+            }
+        })
+        .unwrap_or("Primary not configured")
+        .into();
 }
 
 fn sync_settings_remote_id(role: RemoteRole) -> &'static str {
