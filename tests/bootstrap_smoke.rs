@@ -7080,3 +7080,40 @@ fn activating_sftp_rows_navigates_directories_and_opens_remote_text_files() {
     );
     assert_eq!(app.get_sftp_remote_file_modal_content().as_str(), "port=2022\n");
 }
+
+#[test]
+fn sftp_sort_and_column_width_callbacks_round_trip_runtime_window_state() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    assert_eq!(app.get_sftp_panel_sort_column().as_str(), "default");
+    assert_eq!(app.get_sftp_panel_sort_direction().as_str(), "none");
+    assert_eq!(app.get_sftp_panel_name_column_width(), 226.0);
+    assert_eq!(app.get_sftp_panel_type_column_width(), 78.0);
+    assert_eq!(app.get_sftp_panel_modified_column_width(), 150.0);
+    assert_eq!(app.get_sftp_panel_size_column_width(), 72.0);
+
+    app.invoke_sftp_panel_sort_requested("modified".into());
+    assert_eq!(app.get_sftp_panel_sort_column().as_str(), "modified");
+    assert_eq!(app.get_sftp_panel_sort_direction().as_str(), "asc");
+
+    app.invoke_sftp_panel_sort_requested("modified".into());
+    assert_eq!(app.get_sftp_panel_sort_column().as_str(), "modified");
+    assert_eq!(app.get_sftp_panel_sort_direction().as_str(), "desc");
+
+    app.invoke_sftp_panel_sort_requested("modified".into());
+    assert_eq!(app.get_sftp_panel_sort_column().as_str(), "default");
+    assert_eq!(app.get_sftp_panel_sort_direction().as_str(), "none");
+
+    app.invoke_sftp_panel_column_width_change_requested("name".into(), 320.0);
+    app.invoke_sftp_panel_column_width_change_requested("type".into(), 12.0);
+    app.invoke_sftp_panel_column_width_change_requested("modified".into(), 64.0);
+    app.invoke_sftp_panel_column_width_change_requested("size".into(), 20.0);
+
+    assert_eq!(app.get_sftp_panel_name_column_width(), 320.0);
+    assert_eq!(app.get_sftp_panel_type_column_width(), 72.0);
+    assert_eq!(app.get_sftp_panel_modified_column_width(), 132.0);
+    assert_eq!(app.get_sftp_panel_size_column_width(), 72.0);
+}

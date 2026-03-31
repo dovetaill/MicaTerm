@@ -6,6 +6,7 @@
 
 - `SftpBrowserController` 驱动的按 session 浏览状态管理
 - 紧凑化 `RightPanel` SFTP 浏览器
+- 右侧表格的 runtime sort state、header sort indicator、column resize
 - titlebar `Transfer` 入口与 `Transfer Center` 首轮 surface
 - follow/manual browse、error、disconnected、retry 的最终状态流转
 
@@ -33,6 +34,8 @@
   - 文件: `src/shell/view_model.rs`
   - 与本次功能直接相关的字段:
     - `sftp_sessions`
+    - `sftp_panel_sort_state`
+    - `sftp_panel_column_layout`
     - `sftp_queue_summary`
     - `transfer_center_open`
   - 与本次功能直接相关的方法:
@@ -40,6 +43,17 @@
     - `toggle_transfer_center()`
     - `retry_sftp_panel()`
     - `reenable_sftp_follow()`
+    - `cycle_sftp_panel_sort()`
+    - `set_sftp_panel_column_width()`
+    - `project_sftp_panel_entries()`
+
+- `SftpPanelSortState`
+  - 文件: `src/shell/view_model.rs`
+  - 责任: 保存当前 SFTP 右栏排序列与方向，支持 `default -> asc -> desc -> default` 循环中的运行时投影。
+
+- `SftpPanelColumnLayout`
+  - 文件: `src/shell/view_model.rs`
+  - 责任: 保存 `Name / Type / Modified / Size` 的窗口态列宽，并对 metadata 列执行最小宽度 clamp。
 
 - `TransferQueueSummary`
   - 文件: `src/app/sftp/queue.rs`
@@ -80,6 +94,12 @@
 - `sftp-panel-mode`
 - `sftp-panel-path`
 - `sftp-panel-follow-mode`
+- `sftp-panel-sort-column`
+- `sftp-panel-sort-direction`
+- `sftp-panel-name-column-width`
+- `sftp-panel-type-column-width`
+- `sftp-panel-modified-column-width`
+- `sftp-panel-size-column-width`
 - `sftp-panel-items`
 - `sftp-panel-selected-entry-ids`
 
@@ -97,6 +117,8 @@
   - `sftp-panel-refresh-requested()`
   - `sftp-panel-up-requested()`
   - `sftp-panel-path-submitted(string)`
+  - `sftp-panel-sort-requested(string)`
+  - `sftp-panel-column-width-change-requested(string, length)`
   - `sftp-panel-retry-requested()`
   - `sftp-panel-reenable-follow-requested()`
   - `sftp-panel-context-menu-requested(string, string, length, length)`
@@ -106,6 +128,7 @@
 - `AppWindow.titlebar.transfer-center-open` 绑定到 `root.transfer-center-open`
 - `AppWindow.titlebar.transfer-queue-total` 绑定到 `root.transfer-queue-total`
 - `AppWindow.right-panel.*` 绑定到 `ShellViewModel` 投影出的 SFTP 浏览状态
+- `AppWindow.right-panel.sftp-panel-sort-*` 与 `sftp-panel-*-column-width` 绑定到 `ShellViewModel` 的窗口态 SFTP 表格状态
 - `AppWindow.transfer-center.open` 与 `transfer-center-open` 直连
 
 ## Tokio Task / Channel / Actor 交互
@@ -153,6 +176,22 @@
 3. 后续 `CurrentDirectoryChanged` 事件不会覆盖当前浏览路径
 4. 只有 `sftp-panel-reenable-follow-requested()` 才恢复到 `FollowCwd`
 
+### Header Sort / Column Resize
+
+1. 用户点击 header
+2. `RightPanel.sftp-panel-sort-requested(column-id)`
+3. `AppWindow` 透传到 `bootstrap`
+4. `ShellViewModel.cycle_sftp_panel_sort()` 更新窗口态排序状态
+5. `sync_sftp_panel_state()` 重新投影排序后的 `SftpPanelItem`
+
+列宽拖拽流：
+
+1. 用户拖动 header resize handle
+2. `RightPanel.sftp-panel-column-width-change-requested(column-id, width)`
+3. `bootstrap` 调 `ShellViewModel.set_sftp_panel_column_width()`
+4. `ShellViewModel` 做最小宽度 clamp
+5. `RightPanel` 的 header/body 通过同一组 width property 保持对齐
+
 ### Disconnected / Retry
 
 1. runtime 发出 `Disconnected`
@@ -179,6 +218,10 @@
 - retry 恢复:
   - 即使 runtime 尚未重新连上，也先把 request 保存在 controller 中
   - 等待 projection timer 检测到新的 binding 后再执行真实读取
+
+- 列宽拖拽保护:
+  - metadata 列通过最小宽度 clamp 防止拖到不可读
+  - `Name` 列允许更大范围伸缩，但仍通过 shared width property 保持 header/body 同步
 
 ## Edge Cases
 
@@ -209,6 +252,14 @@
   - `sync_vec_model()` 负责把 `ShellViewModel` 中的 `entries/selected ids` 投影到 `AppWindow`
   - 若后续为 transfer center 增加独立 rows model，需要保持与 `TransferQueue` 数据源同步策略一致
 
+- 表头和内容列宽不同步
+  - 当前实现通过 `sftp-panel-*-column-width` 单一数据源驱动 header 与 row layout
+  - 若后续新增列或持久化配置，必须保证两边继续共用同一套 width state
+
+- 排序与选择态交叉
+  - 当前排序只重排投影视图，不修改底层 `entries`
+  - 这样可以保持双击、右键和 remote editor 的 `entry_id` 语义稳定，但需要继续防止后续直接对投影数组写回
+
 ## 后续测试建议
 
 - 单元测试
@@ -222,7 +273,7 @@
 - UI 交互测试
   - 为 `status-row` 增加 render spec，覆盖 `connecting/loading/error/disconnected`
   - 为 transfer center 增加 render spec，覆盖 tab strip、empty state、后续 rows table
-  - 为右侧表格新增真实 `Modified` 元数据后，补充多列对齐与截断测试
+  - 为右侧表格继续补充 sort indicator、column resize handle、横向滚动和多列对齐测试
 
 - 回归测试
   - 增加 tab 切换 + manual browse + disconnect + retry 的组合路径，验证不会意外回到 `FollowCwd`

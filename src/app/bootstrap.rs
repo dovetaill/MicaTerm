@@ -644,14 +644,20 @@ fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_sftp_panel_can_go_forward(state.sftp_panel_can_go_forward());
     window.set_sftp_panel_can_go_up(state.sftp_panel_can_go_up());
     window.set_sftp_panel_actions_enabled(state.sftp_panel_actions_enabled());
+    window.set_sftp_panel_sort_column(state.sftp_panel_sort_column_id().into());
+    window.set_sftp_panel_sort_direction(state.sftp_panel_sort_direction_id().into());
+    window.set_sftp_panel_name_column_width(state.sftp_panel_name_column_width_px());
+    window.set_sftp_panel_type_column_width(state.sftp_panel_type_column_width_px());
+    window.set_sftp_panel_modified_column_width(state.sftp_panel_modified_column_width_px());
+    window.set_sftp_panel_size_column_width(state.sftp_panel_size_column_width_px());
     window.set_sftp_queue_drawer_open(state.sftp_queue_drawer_open());
 
     let items = state
-        .sftp_panel_entries()
+        .project_sftp_panel_entries(state.sftp_panel_entries())
         .iter()
         .map(|entry| SftpPanelItem {
-            id: entry.id.clone().into(),
-            name: entry.name.clone().into(),
+            id: entry.id.as_str().into(),
+            name: entry.name.as_str().into(),
             type_label: sftp_panel_entry_type_label(entry.kind).into(),
             modified_label: sftp_panel_entry_modified_label(entry).into(),
             size_label: sftp_panel_entry_size_label(entry).into(),
@@ -6547,6 +6553,26 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             state.reenable_sftp_follow()
         };
         if changed {
+            sync_right_panel_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_sort_requested(move |column_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.cycle_sftp_panel_sort(column_id.as_str()) {
+            sync_right_panel_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_column_width_change_requested(move |column_id, width| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.set_sftp_panel_column_width(column_id.as_str(), width) {
             sync_right_panel_state(&window, &state);
         }
     });

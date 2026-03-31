@@ -133,24 +133,52 @@ fn right_panel_source_defines_dense_remote_file_headers() {
     let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
 
     assert!(
-        source.contains("text: \"Name\""),
+        source.contains("text: \"Name\"") || source.contains("label: \"Name\""),
         "right panel should expose the Name column header"
     );
     assert!(
-        source.contains("text: \"Type\""),
+        source.contains("text: \"Type\"") || source.contains("label: \"Type\""),
         "right panel should expose the Type column header"
     );
     assert!(
-        source.contains("text: \"Modified\""),
+        source.contains("text: \"Modified\"") || source.contains("label: \"Modified\""),
         "right panel should expose the Modified column header"
     );
     assert!(
-        source.contains("text: \"Size\""),
+        source.contains("text: \"Size\"") || source.contains("label: \"Size\""),
         "right panel should expose the Size column header"
     );
     assert!(
         !source.contains("text: \"Remote items\""),
         "right panel should drop the legacy single-column list header"
+    );
+}
+
+#[test]
+fn right_panel_source_exposes_sort_indicator_and_column_resize_contract() {
+    let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
+
+    assert!(
+        source.contains("in property <string> sftp-panel-sort-column")
+            && source.contains("in property <string> sftp-panel-sort-direction"),
+        "right panel should accept runtime sort state from the shell view model"
+    );
+    assert!(
+        source.contains("in property <length> sftp-panel-name-column-width")
+            && source.contains("in property <length> sftp-panel-type-column-width")
+            && source.contains("in property <length> sftp-panel-modified-column-width")
+            && source.contains("in property <length> sftp-panel-size-column-width"),
+        "right panel should bind runtime column widths instead of hard-coded file table widths"
+    );
+    assert!(
+        source.contains("callback sftp-panel-sort-requested(string);")
+            && source.contains("callback sftp-panel-column-width-change-requested(string, length);"),
+        "right panel should expose sort and column-resize callbacks"
+    );
+    assert!(
+        source.contains("sort-indicator")
+            && source.contains("resize-handle"),
+        "right panel should render an explicit header sort indicator and resize handles"
     );
 }
 
@@ -171,6 +199,31 @@ fn right_panel_source_uses_borderless_toolbar_buttons_and_horizontal_file_scroll
         source.contains("horizontal-scrollbar-policy")
             && source.contains("viewport-width: max(self.visible-width"),
         "dense file list should support horizontal scrolling when the metadata columns overflow the panel"
+    );
+}
+
+#[test]
+fn app_window_source_threads_sftp_table_state_into_right_panel() {
+    let source = std::fs::read_to_string("ui/app-window.slint").unwrap();
+
+    assert!(
+        source.contains("sftp-panel-sort-column: root.sftp-panel-sort-column;")
+            && source.contains("sftp-panel-sort-direction: root.sftp-panel-sort-direction;"),
+        "app window should forward sort state into the right panel"
+    );
+    assert!(
+        source.contains("sftp-panel-name-column-width: root.sftp-panel-name-column-width;")
+            && source.contains("sftp-panel-type-column-width: root.sftp-panel-type-column-width;")
+            && source.contains("sftp-panel-modified-column-width: root.sftp-panel-modified-column-width;")
+            && source.contains("sftp-panel-size-column-width: root.sftp-panel-size-column-width;"),
+        "app window should forward current column widths into the right panel"
+    );
+    assert!(
+        source.contains("sftp-panel-sort-requested(column-id) => {")
+            && source.contains("root.sftp-panel-sort-requested(column-id);")
+            && source.contains("sftp-panel-column-width-change-requested(column-id, width) => {")
+            && source.contains("root.sftp-panel-column-width-change-requested(column-id, width);"),
+        "app window should proxy header sort and column resize callbacks from the right panel"
     );
 }
 

@@ -2,7 +2,7 @@
 
 日期: 2026-03-31
 执行者: Codex
-状态: 方案已确认，待进入实现
+状态: 已实现并验证通过
 
 ## 背景
 
@@ -84,7 +84,7 @@
 本轮不包含：
 
 - 新增复杂的双栏本地/远程 commander 模式
-- 在首轮实现中加入列排序、拖拽列宽、收藏夹、预览面板
+- 收藏夹、预览面板，以及更重的本地/远程双栏 commander 交互
 - 一次性重做所有 `SFTP` 上下文菜单能力
 - 引入新的全局导航体系
 - 将传输中心做成独立窗口
@@ -407,5 +407,5 @@
 ## 实施残留说明
 
 - `Transfer Center` 首轮实现已经包含 titlebar 入口、全局 queue badge、tab strip 和空态容器，但当前仍未投影逐条 transfer rows，也没有按 `Running/Queued/Paused/Failed/Completed` 做真实过滤。
-- 右侧 SFTP 三列表格当前只完成了布局壳层；`Modified` 列仍使用条目类型占位，真实修改时间需要在后续为 `SftpDirectoryEntry` 补充远端元数据后再接入。
+- 右侧 SFTP 文件表格现在已经接入真实 `Modified` 元数据，并补齐了 header sort indicator 与列宽拖拽；当前列宽和排序状态只在当前窗口进程内生效，关闭应用后恢复默认。
 - `Retry` 已能在断线后保持 last path 和 manual/follow 上下文，但 pending reconnect request 仍由 `session_projection_timer` 轮询消费；当前行为正确，后续可收敛为更直接的事件驱动恢复。

@@ -50,6 +50,103 @@ component SftpToolbarButton inherits Rectangle {
     }
 }
 
+component SftpHeaderCell inherits Rectangle {
+    in property <string> label;
+    in property <string> column-id;
+    in property <string> active-sort-column: "default";
+    in property <string> active-sort-direction: "none";
+    in property <bool> right-aligned: false;
+    callback sort-requested(string);
+
+    background: header-touch.has-hover ? ThemeTokens.control-hover-surface : transparent;
+
+    label-text := Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width - (sort-indicator.visible ? 14px : 0px);
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        opacity: 0.68;
+        font-size: 11px;
+        font-weight: 600;
+        horizontal-alignment: root.right-aligned ? right : left;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    sort-indicator := Text {
+        x: parent.width - self.width;
+        y: 0px;
+        width: 12px;
+        height: parent.height;
+        visible: root.active-sort-column == root.column-id;
+        text: root.active-sort-direction == "desc" ? "↓" : "↑";
+        color: ThemeTokens.text-primary;
+        opacity: 0.82;
+        font-size: 10px;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    header-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.sort-requested(root.column-id);
+        }
+    }
+}
+
+component SftpColumnResizeHandle inherits Rectangle {
+    in property <string> column-id;
+    in property <length> column-origin-x: 0px;
+    in property <length> min-column-width: 0px;
+    callback width-change-requested(string, length);
+    private property <bool> drag-active: false;
+
+    width: 8px;
+    background: transparent;
+
+    if drag-active || resize-touch.has-hover : resize-handle := Rectangle {
+        x: parent.width / 2;
+        y: 6px;
+        width: 1px;
+        height: parent.height - 12px;
+        background: ThemeTokens.divider-strong;
+    }
+
+    resize-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                root.drag-active = true;
+                root.width-change-requested(
+                    root.column-id,
+                    max(
+                        root.min-column-width,
+                        self.absolute-position.x + self.mouse-x - root.column-origin-x,
+                    ),
+                );
+            } else if event.kind == PointerEventKind.move && root.drag-active {
+                root.width-change-requested(
+                    root.column-id,
+                    max(
+                        root.min-column-width,
+                        self.absolute-position.x + self.mouse-x - root.column-origin-x,
+                    ),
+                );
+            } else if event.kind == PointerEventKind.up {
+                root.drag-active = false;
+            }
+        }
+    }
+}
+
 export component RightPanel inherits Rectangle {
     in property <bool> expanded: false;
     in property <string> view: "sftp";
@@ -61,6 +158,12 @@ export component RightPanel inherits Rectangle {
     in property <bool> sftp-panel-can-go-forward: false;
     in property <bool> sftp-panel-can-go-up: false;
     in property <bool> sftp-panel-actions-enabled: false;
+    in property <string> sftp-panel-sort-column: "default";
+    in property <string> sftp-panel-sort-direction: "none";
+    in property <length> sftp-panel-name-column-width: 226px;
+    in property <length> sftp-panel-type-column-width: 78px;
+    in property <length> sftp-panel-modified-column-width: 150px;
+    in property <length> sftp-panel-size-column-width: 72px;
     in property <[SftpPanelItem]> sftp-panel-items: [];
     in property <[string]> sftp-panel-selected-entry-ids: [];
     in property <int> sftp-panel-queue-active: 0;
@@ -80,6 +183,8 @@ export component RightPanel inherits Rectangle {
     callback sftp-panel-refresh-requested();
     callback sftp-panel-up-requested();
     callback sftp-panel-path-submitted(string);
+    callback sftp-panel-sort-requested(string);
+    callback sftp-panel-column-width-change-requested(string, length);
     callback sftp-panel-item-selected(string);
     callback sftp-panel-item-activated(string, string);
     callback sftp-panel-context-menu-requested(string, string, length, length);
@@ -97,15 +202,11 @@ export component RightPanel inherits Rectangle {
             : 0px;
     private property <length> sftp-table-header-height: 28px;
     private property <length> sftp-table-row-height: 30px;
-    private property <length> sftp-table-content-width: 584px;
     private property <length> sftp-name-column-x: 14px;
-    private property <length> sftp-name-column-width: 226px;
-    private property <length> sftp-type-column-x: 252px;
-    private property <length> sftp-type-column-width: 78px;
-    private property <length> sftp-modified-column-x: 340px;
-    private property <length> sftp-modified-column-width: 150px;
-    private property <length> sftp-size-column-x: 500px;
-    private property <length> sftp-size-column-width: 72px;
+    private property <length> sftp-type-column-x: root.sftp-name-column-x + root.sftp-panel-name-column-width + 12px;
+    private property <length> sftp-modified-column-x: root.sftp-type-column-x + root.sftp-panel-type-column-width + 10px;
+    private property <length> sftp-size-column-x: root.sftp-modified-column-x + root.sftp-panel-modified-column-width + 10px;
+    private property <length> sftp-table-content-width: root.sftp-size-column-x + root.sftp-panel-size-column-width + 12px;
 
     function sftp-empty-headline() -> string {
         return "Open an SSH session";
@@ -299,61 +400,117 @@ export component RightPanel inherits Rectangle {
                         background: ThemeTokens.divider-subtle;
                     }
 
-                    Text {
+                    SftpHeaderCell {
                         x: root.sftp-name-column-x;
                         y: 0px;
-                        width: root.sftp-name-column-width;
+                        width: root.sftp-panel-name-column-width;
                         height: parent.height;
-                        text: "Name";
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.68;
-                        font-size: 11px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                        overflow: elide;
+                        label: "Name";
+                        column-id: "name";
+                        active-sort-column: root.sftp-panel-sort-column;
+                        active-sort-direction: root.sftp-panel-sort-direction;
+
+                        sort-requested(column-id) => {
+                            root.sftp-panel-sort-requested(column-id);
+                        }
                     }
 
-                    Text {
+                    SftpHeaderCell {
                         x: root.sftp-type-column-x;
                         y: 0px;
-                        width: root.sftp-type-column-width;
+                        width: root.sftp-panel-type-column-width;
                         height: parent.height;
-                        text: "Type";
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.68;
-                        font-size: 11px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                        overflow: elide;
+                        label: "Type";
+                        column-id: "type";
+                        active-sort-column: root.sftp-panel-sort-column;
+                        active-sort-direction: root.sftp-panel-sort-direction;
+
+                        sort-requested(column-id) => {
+                            root.sftp-panel-sort-requested(column-id);
+                        }
                     }
 
-                    Text {
+                    SftpHeaderCell {
                         x: root.sftp-modified-column-x;
                         y: 0px;
-                        width: root.sftp-modified-column-width;
+                        width: root.sftp-panel-modified-column-width;
                         height: parent.height;
-                        text: "Modified";
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.68;
-                        font-size: 11px;
-                        font-weight: 600;
-                        vertical-alignment: center;
-                        overflow: elide;
+                        label: "Modified";
+                        column-id: "modified";
+                        active-sort-column: root.sftp-panel-sort-column;
+                        active-sort-direction: root.sftp-panel-sort-direction;
+
+                        sort-requested(column-id) => {
+                            root.sftp-panel-sort-requested(column-id);
+                        }
                     }
 
-                    Text {
+                    SftpHeaderCell {
                         x: root.sftp-size-column-x;
                         y: 0px;
-                        width: root.sftp-size-column-width;
+                        width: root.sftp-panel-size-column-width;
                         height: parent.height;
-                        text: "Size";
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.68;
-                        font-size: 11px;
-                        font-weight: 600;
-                        horizontal-alignment: right;
-                        vertical-alignment: center;
-                        overflow: elide;
+                        label: "Size";
+                        column-id: "size";
+                        active-sort-column: root.sftp-panel-sort-column;
+                        active-sort-direction: root.sftp-panel-sort-direction;
+                        right-aligned: true;
+
+                        sort-requested(column-id) => {
+                            root.sftp-panel-sort-requested(column-id);
+                        }
+                    }
+
+                    SftpColumnResizeHandle {
+                        x: root.sftp-type-column-x - self.width / 2;
+                        y: 0px;
+                        height: parent.height;
+                        column-id: "name";
+                        column-origin-x: header-content.absolute-position.x + root.sftp-name-column-x;
+                        min-column-width: 120px;
+
+                        width-change-requested(column-id, width) => {
+                            root.sftp-panel-column-width-change-requested(column-id, width);
+                        }
+                    }
+
+                    SftpColumnResizeHandle {
+                        x: root.sftp-modified-column-x - self.width / 2;
+                        y: 0px;
+                        height: parent.height;
+                        column-id: "type";
+                        column-origin-x: header-content.absolute-position.x + root.sftp-type-column-x;
+                        min-column-width: 72px;
+
+                        width-change-requested(column-id, width) => {
+                            root.sftp-panel-column-width-change-requested(column-id, width);
+                        }
+                    }
+
+                    SftpColumnResizeHandle {
+                        x: root.sftp-size-column-x - self.width / 2;
+                        y: 0px;
+                        height: parent.height;
+                        column-id: "modified";
+                        column-origin-x: header-content.absolute-position.x + root.sftp-modified-column-x;
+                        min-column-width: 132px;
+
+                        width-change-requested(column-id, width) => {
+                            root.sftp-panel-column-width-change-requested(column-id, width);
+                        }
+                    }
+
+                    SftpColumnResizeHandle {
+                        x: root.sftp-size-column-x + root.sftp-panel-size-column-width - self.width / 2;
+                        y: 0px;
+                        height: parent.height;
+                        column-id: "size";
+                        column-origin-x: header-content.absolute-position.x + root.sftp-size-column-x;
+                        min-column-width: 72px;
+
+                        width-change-requested(column-id, width) => {
+                            root.sftp-panel-column-width-change-requested(column-id, width);
+                        }
                     }
                 }
             }
@@ -533,7 +690,7 @@ export component RightPanel inherits Rectangle {
                     Text {
                         x: root.sftp-name-column-x + 24px;
                         y: 0px;
-                        width: root.sftp-name-column-width - 28px;
+                        width: root.sftp-panel-name-column-width - 28px;
                         height: parent.height;
                         text: item.name;
                         color: ThemeTokens.text-primary;
@@ -546,7 +703,7 @@ export component RightPanel inherits Rectangle {
                     Text {
                         x: root.sftp-type-column-x;
                         y: 0px;
-                        width: root.sftp-type-column-width;
+                        width: root.sftp-panel-type-column-width;
                         height: parent.height;
                         text: item.type_label;
                         color: ThemeTokens.text-primary;
@@ -559,7 +716,7 @@ export component RightPanel inherits Rectangle {
                     Text {
                         x: root.sftp-modified-column-x;
                         y: 0px;
-                        width: root.sftp-modified-column-width;
+                        width: root.sftp-panel-modified-column-width;
                         height: parent.height;
                         text: item.modified_label;
                         color: ThemeTokens.text-primary;
@@ -572,7 +729,7 @@ export component RightPanel inherits Rectangle {
                     Text {
                         x: root.sftp-size-column-x;
                         y: 0px;
-                        width: root.sftp-size-column-width;
+                        width: root.sftp-panel-size-column-width;
                         height: parent.height;
                         text: item.size_label;
                         color: ThemeTokens.text-primary;
