@@ -178,7 +178,10 @@ impl VaultProvider for S3VaultProvider {
 
     fn read_head(&self) -> Result<ProviderReadResult> {
         let head_key = join_s3_key(&self.config.prefix, "head.json");
-        let Some(bytes) = self.object_store.get_object(&self.config.bucket, &head_key)? else {
+        let Some(bytes) = self
+            .object_store
+            .get_object(&self.config.bucket, &head_key)?
+        else {
             return Ok(ProviderReadResult::default());
         };
 

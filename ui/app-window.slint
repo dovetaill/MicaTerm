@@ -31,14 +31,21 @@ export component AppWindow inherits Window {
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
     in-out property <bool> sync-modal-open: false;
     in-out property <string> sync-modal-mode: "not-configured";
-    in-out property <string> sync-modal-title: "Sync";
+    in-out property <string> sync-modal-title: "Sync Settings";
     in-out property <string> sync-modal-headline: "";
     in-out property <string> sync-modal-status-text: "";
     in-out property <string> sync-modal-error-text: "";
     in-out property <string> sync-modal-provider-label: "";
     in-out property <string> sync-modal-target-label: "";
-    in-out property <string> sync-modal-primary-action-label: "Set up sync";
-    in-out property <string> sync-modal-secondary-action-label: "";
+    in-out property <string> sync-modal-primary-action-label: "Save and enable";
+    in-out property <string> sync-modal-secondary-action-label: "Close";
+    in-out property <bool> sync-modal-auto-sync-enabled: false;
+    in-out property <string> sync-modal-primary-gist-id: "";
+    in-out property <string> sync-modal-primary-pat: "";
+    in-out property <bool> sync-modal-mirror-enabled: false;
+    in-out property <string> sync-modal-mirror-gist-id: "";
+    in-out property <string> sync-modal-mirror-pat: "";
+    in-out property <string> sync-modal-master-password: "";
     in-out property <bool> show-right-panel: false;
     in-out property <string> right-panel-view: "sftp";
     in-out property <string> sftp-panel-mode: "empty";
@@ -271,6 +278,7 @@ export component AppWindow inherits Window {
     callback maximize-toggle-requested();
     callback close-requested();
     callback toggle-right-panel-requested();
+    callback sync-now-requested();
     callback open-sync-modal-requested();
     callback sync-modal-close-requested();
     callback sync-modal-submit-master-password(string);
@@ -278,6 +286,8 @@ export component AppWindow inherits Window {
     callback sync-modal-lock-requested();
     callback sync-modal-primary-action-requested();
     callback sync-modal-secondary-action-requested();
+    callback sync-modal-draft-changed(string, string);
+    callback sync-modal-toggle-changed(string, bool);
     callback open-settings-panel-requested();
     callback open-appearance-panel-requested();
     callback open-sftp-panel-requested();
@@ -493,6 +503,10 @@ export component AppWindow inherits Window {
 
                 toggle-right-panel-requested => {
                     root.toggle-right-panel-requested();
+                }
+
+                sync-now-requested => {
+                    root.sync-now-requested();
                 }
 
                 open-sync-modal-requested => {
@@ -974,8 +988,8 @@ export component AppWindow inherits Window {
 
     if root.sync-modal-open : sync-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
-        modal-width: 560px;
-        modal-height: 360px;
+        modal-width: 640px;
+        modal-height: 620px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
 
@@ -1000,6 +1014,13 @@ export component AppWindow inherits Window {
             target-label: root.sync-modal-target-label;
             primary-action-label: root.sync-modal-primary-action-label;
             secondary-action-label: root.sync-modal-secondary-action-label;
+            auto-sync-enabled: root.sync-modal-auto-sync-enabled;
+            primary-gist-id: root.sync-modal-primary-gist-id;
+            primary-pat: root.sync-modal-primary-pat;
+            mirror-enabled: root.sync-modal-mirror-enabled;
+            mirror-gist-id: root.sync-modal-mirror-gist-id;
+            mirror-pat: root.sync-modal-mirror-pat;
+            master-password: root.sync-modal-master-password;
 
             close-requested => {
                 root.sync-modal-close-requested();
@@ -1011,6 +1032,14 @@ export component AppWindow inherits Window {
 
             secondary-action-requested => {
                 root.sync-modal-secondary-action-requested();
+            }
+
+            draft-changed(field, value) => {
+                root.sync-modal-draft-changed(field, value);
+            }
+
+            toggle-changed(field, value) => {
+                root.sync-modal-toggle-changed(field, value);
             }
 
             drag-requested(pointer-x, pointer-y) => {

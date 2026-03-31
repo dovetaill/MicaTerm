@@ -186,8 +186,12 @@ async fn execute_transfer(
 
             queue.mark_running(task_id);
             ensure_remote_parent_dirs(runtime, &task.target_path).await?;
-            let bytes = fs::read(&local_path)
-                .with_context(|| format!("failed to read local upload source `{}`", local_path.display()))?;
+            let bytes = fs::read(&local_path).with_context(|| {
+                format!(
+                    "failed to read local upload source `{}`",
+                    local_path.display()
+                )
+            })?;
             let transferred = runtime
                 .upload_file(&task.target_path, bytes)
                 .await
@@ -217,11 +221,15 @@ async fn execute_transfer(
                 .with_context(|| format!("failed to download `{}`", task.source_path))?;
             if let Some(parent) = local_path.parent() {
                 fs::create_dir_all(parent).with_context(|| {
-                    format!("failed to create local download directory `{}`", parent.display())
+                    format!(
+                        "failed to create local download directory `{}`",
+                        parent.display()
+                    )
                 })?;
             }
-            fs::write(&local_path, &bytes)
-                .with_context(|| format!("failed to write local download `{}`", local_path.display()))?;
+            fs::write(&local_path, &bytes).with_context(|| {
+                format!("failed to write local download `{}`", local_path.display())
+            })?;
             queue.mark_completed(task_id, bytes.len() as u64);
         }
         TransferTaskAction::Delete { entry_kind } => {

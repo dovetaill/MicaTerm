@@ -12,12 +12,12 @@ use mica_term::app::ssh::credentials::{
 };
 use mica_term::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService};
 use mica_term::app::ui_preferences::UiPreferences;
-use mica_term::app::vault::snapshot::{apply_vault_snapshot, export_vault_snapshot};
 use mica_term::app::vault::model::{
     SnapshotSyncPreferences, SnapshotUiPreferences, VaultAssetCatalog, VaultAssetDomain,
     VaultAssetKind, VaultAssetNode, VaultAssetPayload, VaultKnownHostEntry, VaultSnapshot,
     VaultSnippetSpec,
 };
+use mica_term::app::vault::snapshot::{apply_vault_snapshot, export_vault_snapshot};
 use mica_term::shell::assets::{
     AssetDomain, AssetNodePayload, AssetSnippetSpec, AssetSshConnectionSpec, AssetSshProxySpec,
     AssetTree, ConsoleAssetKind,
@@ -63,15 +63,14 @@ fn sample_asset_tree(credential_ref: &str) -> AssetTree {
             credential_ref: Some(credential_ref.into()),
         }),
     );
-    tree.insert_child(
-        &folder_id,
-        ConsoleAssetKind::Folder,
-        "Nested Folder",
-    );
+    tree.insert_child(&folder_id, ConsoleAssetKind::Folder, "Nested Folder");
     tree
 }
 
-fn sample_keychain_catalog(identity_credential_ref: &str, key_credential_ref: &str) -> KeychainCatalog {
+fn sample_keychain_catalog(
+    identity_credential_ref: &str,
+    key_credential_ref: &str,
+) -> KeychainCatalog {
     KeychainCatalog {
         root_ids: vec!["folder-team".into(), "identity-ops".into()],
         nodes: BTreeMap::from([
@@ -236,7 +235,7 @@ fn export_vault_snapshot_excludes_ui_preferences_for_first_release() {
 
 #[test]
 fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_defaults_ui_preferences()
-{
+ {
     let credential_ref = "ssh/saved-secrets/gateway";
     let identity_credential_ref = "keychain/identity/identity-ops";
     let key_credential_ref = "keychain/key/key-prod";
@@ -332,13 +331,17 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_def
         },
     };
 
-    let applied = apply_vault_snapshot(&snapshot, &store, &known_hosts_path)
-        .expect("apply vault snapshot");
+    let applied =
+        apply_vault_snapshot(&snapshot, &store, &known_hosts_path).expect("apply vault snapshot");
 
     assert_eq!(applied.asset_tree.root_ids().len(), 2);
     assert_eq!(applied.keychain_catalog.root_ids.len(), 2);
     assert_eq!(
-        applied.asset_tree.node("asset-gateway").expect("gateway node").title,
+        applied
+            .asset_tree
+            .node("asset-gateway")
+            .expect("gateway node")
+            .title,
         "Gateway"
     );
     assert_eq!(
@@ -351,22 +354,31 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_def
         Some(credential_ref)
     );
     assert_eq!(
-        store.get_secret(credential_ref).expect("load secret").as_deref(),
-        Some("{\"password\":null,\"private_key_content\":\"-----BEGIN OPENSSH PRIVATE KEY-----\",\"passphrase\":\"hunter2\",\"proxy_socks5_password\":null}")
+        store
+            .get_secret(credential_ref)
+            .expect("load secret")
+            .as_deref(),
+        Some(
+            "{\"password\":null,\"private_key_content\":\"-----BEGIN OPENSSH PRIVATE KEY-----\",\"passphrase\":\"hunter2\",\"proxy_socks5_password\":null}"
+        )
     );
     assert_eq!(
         store
             .get_secret(identity_credential_ref)
             .expect("load identity secret")
             .as_deref(),
-        Some("{\"password\":\"ops-password\",\"private_key_content\":null,\"passphrase\":null,\"proxy_socks5_password\":null}")
+        Some(
+            "{\"password\":\"ops-password\",\"private_key_content\":null,\"passphrase\":null,\"proxy_socks5_password\":null}"
+        )
     );
     assert_eq!(
         store
             .get_secret(key_credential_ref)
             .expect("load key secret")
             .as_deref(),
-        Some("{\"password\":null,\"private_key_content\":\"-----BEGIN OPENSSH PRIVATE KEY-----\",\"passphrase\":\"key-passphrase\",\"proxy_socks5_password\":null}")
+        Some(
+            "{\"password\":null,\"private_key_content\":\"-----BEGIN OPENSSH PRIVATE KEY-----\",\"passphrase\":\"key-passphrase\",\"proxy_socks5_password\":null}"
+        )
     );
     assert_eq!(applied.sync_preferences, snapshot.sync_preferences);
     assert_eq!(applied.ui_preferences.theme_mode, ThemeMode::Dark);
@@ -377,7 +389,10 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_def
         .check("prod.example.com", 22, &public_key)
         .expect("check imported known_hosts entry");
     assert!(matches!(result, KnownHostCheck::Trusted));
-    assert_eq!(public_key.fingerprint(HashAlg::Sha256).to_string().len() > 0, true);
+    assert_eq!(
+        public_key.fingerprint(HashAlg::Sha256).to_string().len() > 0,
+        true
+    );
 
     let _ = fs::remove_file(known_hosts_path);
 }

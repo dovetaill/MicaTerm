@@ -129,10 +129,7 @@ fn snippet_modal_callback_contract_exposes_name_script_and_package_fields() {
         changes.borrow().as_slice(),
         [
             ("name".into(), "Deploy prod".into()),
-            (
-                "script".into(),
-                "kubectl rollout restart deploy/api".into()
-            ),
+            ("script".into(), "kubectl rollout restart deploy/api".into()),
             ("package".into(), "Operations".into()),
         ]
     );
@@ -489,7 +486,10 @@ fn keychain_ssh_key_modal_round_trips_fields_and_action_callbacks() {
         app.get_keychain_ssh_key_modal_name().as_str(),
         "Prod Bastion Key"
     );
-    assert_eq!(app.get_keychain_ssh_key_modal_private_key().as_str(), "PRIVATE");
+    assert_eq!(
+        app.get_keychain_ssh_key_modal_private_key().as_str(),
+        "PRIVATE"
+    );
     assert_eq!(
         app.get_keychain_ssh_key_modal_public_key().as_str(),
         "ssh-ed25519 AAAATEST"

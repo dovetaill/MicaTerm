@@ -8,7 +8,7 @@ component SyncModalActionButton inherits Rectangle {
     min-width: 0px;
     preferred-width: 0px;
     horizontal-stretch: 1;
-    height: 34px;
+    height: 36px;
     border-radius: 0px;
     border-width: 1px;
     border-color: root.primary ? ThemeTokens.accent : ThemeTokens.divider-subtle;
@@ -37,9 +37,122 @@ component SyncModalActionButton inherits Rectangle {
     }
 }
 
+component SyncModalTextField inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "";
+    in property <bool> password-mode: false;
+    callback value-changed(string);
+
+    height: 68px;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 18px;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        opacity: 0.78;
+    }
+
+    field-shell := Rectangle {
+        x: 0px;
+        y: 26px;
+        width: parent.width;
+        height: 40px;
+        border-radius: 0px;
+        border-width: 1px;
+        border-color: ThemeTokens.divider-subtle;
+        background: ThemeTokens.assets-surface;
+
+        field-input := TextInput {
+            x: 12px;
+            y: 9px;
+            width: parent.width - 24px;
+            height: parent.height - 18px;
+            text: root.value;
+            color: ThemeTokens.text-primary;
+            single-line: true;
+            input-type: root.password-mode ? InputType.password : InputType.text;
+            selection-background-color: ThemeTokens.accent;
+            selection-foreground-color: ThemeTokens.text-primary;
+
+            edited => {
+                root.value-changed(self.text);
+            }
+        }
+    }
+}
+
+component SyncModalToggleRow inherits Rectangle {
+    in property <string> label: "";
+    in property <string> description: "";
+    in property <bool> value: false;
+    callback toggled(bool);
+
+    height: 52px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: ThemeTokens.divider-subtle;
+    background: ThemeTokens.assets-surface;
+
+    Text {
+        x: 12px;
+        y: 8px;
+        width: parent.width - 78px;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        font-weight: 600;
+        overflow: elide;
+    }
+
+    Text {
+        x: 12px;
+        y: 28px;
+        width: parent.width - 78px;
+        text: root.description;
+        color: ThemeTokens.text-primary;
+        opacity: 0.72;
+        font-size: 11px;
+        overflow: elide;
+    }
+
+    toggle-shell := Rectangle {
+        x: parent.width - 44px;
+        y: 14px;
+        width: 20px;
+        height: 20px;
+        border-radius: 0px;
+        border-width: 1px;
+        border-color: root.value ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+        background: root.value ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+
+        if root.value : toggle-check := Text {
+            width: parent.width;
+            height: parent.height;
+            text: "✓";
+            color: ThemeTokens.text-primary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-size: 12px;
+            font-weight: 700;
+        }
+    }
+
+    toggle-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.toggled(!root.value);
+        }
+    }
+}
+
 export component SyncVaultModal inherits Rectangle {
     in property <string> mode: "not-configured";
-    in property <string> title: "Sync";
+    in property <string> title: "Sync Settings";
     in property <string> headline: "";
     in property <string> status-text: "";
     in property <string> error-text: "";
@@ -47,16 +160,25 @@ export component SyncVaultModal inherits Rectangle {
     in property <string> target-label: "";
     in property <string> primary-action-label: "Set up sync";
     in property <string> secondary-action-label: "";
+    in property <bool> auto-sync-enabled: false;
+    in property <string> primary-gist-id: "";
+    in property <string> primary-pat: "";
+    in property <bool> mirror-enabled: false;
+    in property <string> mirror-gist-id: "";
+    in property <string> mirror-pat: "";
+    in property <string> master-password: "";
     callback close-requested();
     callback primary-action-requested();
     callback secondary-action-requested();
+    callback draft-changed(string, string);
+    callback toggle-changed(string, bool);
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
 
-    private property <length> header-height: 56px;
-    private property <length> footer-height: root.secondary-action-label == "" ? 76px : 84px;
+    private property <length> header-height: 60px;
+    private property <length> footer-height: 86px;
     private property <length> body-height: max(0px, root.height - root.header-height - root.footer-height);
 
     background: transparent;
@@ -107,12 +229,23 @@ export component SyncVaultModal inherits Rectangle {
 
             Text {
                 x: 20px;
-                y: 18px;
+                y: 10px;
                 width: parent.width - 84px;
                 text: root.title;
                 color: ThemeTokens.text-primary;
                 font-size: 22px;
                 font-weight: 700;
+                overflow: elide;
+            }
+
+            Text {
+                x: 20px;
+                y: 34px;
+                width: parent.width - 84px;
+                text: root.headline;
+                color: ThemeTokens.text-primary;
+                opacity: 0.74;
+                font-size: 12px;
                 overflow: elide;
             }
 
@@ -131,7 +264,7 @@ export component SyncVaultModal inherits Rectangle {
                 Text {
                     width: parent.width;
                     height: parent.height;
-                    text: "x";
+                    text: "×";
                     color: ThemeTokens.text-primary;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -157,97 +290,127 @@ export component SyncVaultModal inherits Rectangle {
             border-width: 1px;
             border-color: ThemeTokens.divider-subtle;
             background: ThemeTokens.inspector-surface;
+            clip: true;
 
             content := VerticalLayout {
                 x: 20px;
-                y: 20px;
+                y: 18px;
                 width: parent.width - 40px;
-                spacing: 12px;
-
-                Text {
-                    text: root.headline;
-                    color: ThemeTokens.text-primary;
-                    font-size: 20px;
-                    font-weight: 700;
-                    wrap: word-wrap;
-                }
+                spacing: 10px;
 
                 Text {
                     text: root.status-text;
                     color: ThemeTokens.text-primary;
-                    opacity: 0.82;
+                    opacity: 0.84;
                     wrap: word-wrap;
                 }
 
-                if root.provider-label != "" : provider-row := Rectangle {
+                if root.error-text != "" : error-banner := Rectangle {
                     width: parent.width;
-                    height: 36px;
+                    height: 52px;
+                    border-radius: 0px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.divider-strong;
+                    background: ThemeTokens.status-error-surface;
+
+                    Text {
+                        x: 10px;
+                        y: 8px;
+                        width: parent.width - 20px;
+                        height: parent.height - 16px;
+                        text: root.error-text;
+                        color: ThemeTokens.text-primary;
+                        wrap: word-wrap;
+                    }
+                }
+
+                if root.provider-label != "" || root.target-label != "" : summary-card := Rectangle {
+                    width: parent.width;
+                    height: 44px;
                     border-radius: 0px;
                     border-width: 1px;
                     border-color: ThemeTokens.divider-subtle;
-                    background: ThemeTokens.control-active-surface;
+                    background: ThemeTokens.assets-surface;
 
                     Text {
                         x: 12px;
-                        y: 8px;
+                        y: 0px;
                         width: parent.width - 24px;
-                        text: "Provider: " + root.provider-label;
+                        height: parent.height;
+                        text: (root.provider-label != "" ? "Provider: " + root.provider-label : "")
+                            + (root.target-label != "" ? "  •  " + root.target-label : "");
                         color: ThemeTokens.text-primary;
+                        vertical-alignment: center;
                         overflow: elide;
                     }
                 }
 
-                if root.target-label != "" : target-row := Rectangle {
-                    width: parent.width;
-                    height: 36px;
-                    border-radius: 0px;
-                    border-width: 1px;
-                    border-color: ThemeTokens.divider-subtle;
-                    background: ThemeTokens.control-active-surface;
+                SyncModalToggleRow {
+                    label: "Auto sync";
+                    description: "Run sync automatically after local changes when the vault is unlocked.";
+                    value: root.auto-sync-enabled;
 
-                    Text {
-                        x: 12px;
-                        y: 8px;
-                        width: parent.width - 24px;
-                        text: "Target: " + root.target-label;
-                        color: ThemeTokens.text-primary;
-                        overflow: elide;
+                    toggled(value) => {
+                        root.toggle-changed("auto-sync", value);
                     }
                 }
 
-                if root.mode == "not-configured" : mode-copy-not-configured := Text {
-                    text: "Remote-first setup is required before sync can be enabled.";
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.72;
-                    wrap: word-wrap;
+                SyncModalTextField {
+                    label: "Primary Gist ID";
+                    value: root.primary-gist-id;
+
+                    value-changed(value) => {
+                        root.draft-changed("primary-gist-id", value);
+                    }
                 }
 
-                if root.mode == "locked" : mode-copy-locked := Text {
-                    text: "The vault is configured, but it must be unlocked before sync details are shown.";
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.72;
-                    wrap: word-wrap;
+                SyncModalTextField {
+                    label: "Primary Personal Access Token";
+                    value: root.primary-pat;
+                    password-mode: true;
+
+                    value-changed(value) => {
+                        root.draft-changed("primary-pat", value);
+                    }
                 }
 
-                if root.mode == "unlocked-but-remote-incomplete" : mode-copy-unlocked := Text {
-                    text: "The local vault is available, but the primary remote is still incomplete.";
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.72;
-                    wrap: word-wrap;
+                SyncModalToggleRow {
+                    label: "Mirror target";
+                    description: "Keep a second Gitee gist updated as a backup target.";
+                    value: root.mirror-enabled;
+
+                    toggled(value) => {
+                        root.toggle-changed("mirror-enabled", value);
+                    }
                 }
 
-                if root.mode == "ready" : mode-copy-ready := Text {
-                    text: "The current sync configuration is ready and can be managed from this modal.";
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.72;
-                    wrap: word-wrap;
+                if root.mirror-enabled : mirror-gist-field := SyncModalTextField {
+                    label: "Mirror Gist ID";
+                    value: root.mirror-gist-id;
+
+                    value-changed(value) => {
+                        root.draft-changed("mirror-gist-id", value);
+                    }
                 }
 
-                if root.mode == "sync-error" : mode-copy-error := Text {
-                    text: "Sync state could not be resolved. Close the modal and try again.";
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.72;
-                    wrap: word-wrap;
+                if root.mirror-enabled : mirror-pat-field := SyncModalTextField {
+                    label: "Mirror Personal Access Token";
+                    value: root.mirror-pat;
+                    password-mode: true;
+
+                    value-changed(value) => {
+                        root.draft-changed("mirror-pat", value);
+                    }
+                }
+
+                if root.mode == "not-configured" || root.mode == "locked" : password-field := SyncModalTextField {
+                    label: "Master Password";
+                    value: root.master-password;
+                    password-mode: true;
+
+                    value-changed(value) => {
+                        root.draft-changed("master-password", value);
+                    }
                 }
             }
         }
@@ -257,53 +420,31 @@ export component SyncVaultModal inherits Rectangle {
             width: parent.width;
             height: root.footer-height;
             border-radius: 0px;
-            border-width: 0px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-strong;
             background: ThemeTokens.assets-surface;
 
-            footer-content := VerticalLayout {
+            HorizontalLayout {
                 x: 20px;
-                y: 12px;
+                y: 24px;
                 width: parent.width - 40px;
-                spacing: 8px;
+                spacing: 10px;
 
-                if root.error-text != "" : error-banner := Rectangle {
-                    width: parent.width;
-                    height: 28px;
-                    border-radius: 0px;
-                    border-width: 1px;
-                    border-color: ThemeTokens.divider-strong;
-                    background: ThemeTokens.status-error-surface;
+                if root.secondary-action-label != "" : secondary-button := SyncModalActionButton {
+                    label: root.secondary-action-label;
+                    primary: false;
 
-                    Text {
-                        x: 10px;
-                        y: 5px;
-                        width: parent.width - 20px;
-                        text: root.error-text;
-                        color: ThemeTokens.text-primary;
-                        overflow: elide;
+                    clicked => {
+                        root.secondary-action-requested();
                     }
                 }
 
-                HorizontalLayout {
-                    width: parent.width;
-                    spacing: 8px;
+                primary-button := SyncModalActionButton {
+                    label: root.primary-action-label;
+                    primary: true;
 
-                    if root.secondary-action-label != "" : secondary-button := SyncModalActionButton {
-                        label: root.secondary-action-label;
-                        primary: false;
-
-                        clicked => {
-                            root.secondary-action-requested();
-                        }
-                    }
-
-                    primary-button := SyncModalActionButton {
-                        label: root.primary-action-label;
-                        primary: true;
-
-                        clicked => {
-                            root.primary-action-requested();
-                        }
+                    clicked => {
+                        root.primary-action-requested();
                     }
                 }
             }

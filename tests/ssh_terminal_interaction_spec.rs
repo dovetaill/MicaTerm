@@ -78,7 +78,9 @@ fn terminal_host_forwards_backtab_into_terminal_tab_input() {
         "TerminalSessionHost should recognize Slint's Backtab key token for Shift+Tab"
     );
     assert!(
-        terminal_host.contains("root.key-input(\"tab\", event.modifiers.alt, event.modifiers.control, true);"),
+        terminal_host.contains(
+            "root.key-input(\"tab\", event.modifiers.alt, event.modifiers.control, true);"
+        ),
         "TerminalSessionHost should forward Backtab as a shifted terminal Tab sequence instead of leaving Shift+Tab to local focus navigation"
     );
 }

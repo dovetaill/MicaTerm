@@ -31,12 +31,12 @@ component MenuActionItem inherits Rectangle {
 }
 
 export component TitlebarMenu inherits PopupWindow {
+    callback sync-settings-selected;
     callback settings-selected;
-    callback appearance-selected;
     callback close-requested;
 
     width: 196px;
-    height: 92px;
+    height: 132px;
     close-policy: PopupClosePolicy.close-on-click;
 
     background-layer := Rectangle {
@@ -50,6 +50,15 @@ export component TitlebarMenu inherits PopupWindow {
         VerticalLayout {
             padding: 8px;
             spacing: 4px;
+
+            MenuActionItem {
+                label: "Sync Settings";
+                invoked => {
+                    root.sync-settings-selected();
+                    root.close-requested();
+                    root.close();
+                }
+            }
 
             MenuActionItem {
                 label: "Settings";

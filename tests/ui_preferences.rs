@@ -42,7 +42,10 @@ fn ui_preferences_accept_sftp_right_panel_view() {
     };
 
     assert_eq!(prefs.right_panel_view, "sftp");
-    assert_eq!(RightPanelView::from_id(&prefs.right_panel_view).id(), "sftp");
+    assert_eq!(
+        RightPanelView::from_id(&prefs.right_panel_view).id(),
+        "sftp"
+    );
 }
 
 #[test]

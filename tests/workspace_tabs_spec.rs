@@ -206,7 +206,10 @@ fn opening_slow_connecting_workspace_session_uses_connection_progress_mode() {
     let mut view_model = ShellViewModel::default();
     view_model.set_workspace_tabs(vec![connecting]);
 
-    assert_eq!(view_model.workspace_session_host_mode(), "connection-progress");
+    assert_eq!(
+        view_model.workspace_session_host_mode(),
+        "connection-progress"
+    );
 }
 
 #[test]

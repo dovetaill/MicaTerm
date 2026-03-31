@@ -30,7 +30,9 @@ impl QuickLaunchPreferencesStore {
     pub fn for_app() -> Result<Self> {
         let dirs = ProjectDirs::from("dev", "MicaTerm", "MicaTerm")
             .context("project directories are unavailable")?;
-        Ok(Self::new(dirs.config_dir().join("quick-launch-preferences.json")))
+        Ok(Self::new(
+            dirs.config_dir().join("quick-launch-preferences.json"),
+        ))
     }
 
     pub fn load_or_default(&self) -> Result<QuickLaunchPreferences> {

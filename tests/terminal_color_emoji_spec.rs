@@ -2,8 +2,8 @@ use anyhow::Result;
 use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
 use mica_term::app::terminal_atlas::{ClusterSpriteKind, TerminalAtlasRenderer};
 use mica_term::app::terminal_emoji::{
-    ClusterRenderKind, EmojiFallbackReason, EmojiFontRasterizeRequest, EmojiRasterizerBackend,
-    EmojiRenderOutcome, EmojiSprite, EmojiFontResolution, ResolvedEmojiFont,
+    ClusterRenderKind, EmojiFallbackReason, EmojiFontRasterizeRequest, EmojiFontResolution,
+    EmojiRasterizerBackend, EmojiRenderOutcome, EmojiSprite, ResolvedEmojiFont,
     TerminalEmojiRenderer, TerminalEmojiResolver, classify_cluster_render_kind,
     recommended_emoji_font_size_px,
 };
@@ -27,12 +27,10 @@ fn unpack_rgba(color: u32) -> Rgba8Pixel {
 
 fn fake_color_emoji_renderer() -> TerminalEmojiRenderer {
     TerminalEmojiRenderer::with_backend(
-        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(
-            ResolvedEmojiFont {
-                face_id: fontdb::ID::dummy(),
-                family_name: "Noto Color Emoji".to_string(),
-            },
-        )),
+        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(ResolvedEmojiFont {
+            face_id: fontdb::ID::dummy(),
+            family_name: "Noto Color Emoji".to_string(),
+        })),
         Box::new(FakeAtlasEmojiBackend),
     )
 }
@@ -232,12 +230,10 @@ impl EmojiRasterizerBackend for FakeAtlasEmojiBackend {
 #[test]
 fn emoji_rasterizer_returns_rgba_sprite_data_from_backend() {
     let renderer = TerminalEmojiRenderer::with_backend(
-        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(
-            ResolvedEmojiFont {
-                face_id: fontdb::ID::dummy(),
-                family_name: "Noto Color Emoji".to_string(),
-            },
-        )),
+        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(ResolvedEmojiFont {
+            face_id: fontdb::ID::dummy(),
+            family_name: "Noto Color Emoji".to_string(),
+        })),
         Box::new(FakeEmojiRasterizerBackend {
             sprite: Some(EmojiSprite {
                 width: 2,
@@ -260,12 +256,10 @@ fn emoji_rasterizer_returns_rgba_sprite_data_from_backend() {
 #[test]
 fn emoji_rasterizer_returns_visible_fallback_on_backend_failure() {
     let renderer = TerminalEmojiRenderer::with_backend(
-        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(
-            ResolvedEmojiFont {
-                face_id: fontdb::ID::dummy(),
-                family_name: "Noto Color Emoji".to_string(),
-            },
-        )),
+        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(ResolvedEmojiFont {
+            face_id: fontdb::ID::dummy(),
+            family_name: "Noto Color Emoji".to_string(),
+        })),
         Box::new(FakeEmojiRasterizerBackend { sprite: None }),
     );
 

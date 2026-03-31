@@ -247,7 +247,8 @@ fn terminal_surface_projection_tracks_cursor_colors_and_filters_bracketed_paste_
 
 #[test]
 fn terminal_font_backend_owns_cell_metrics_contract_beyond_legacy_atlas_renderer() {
-    let atlas_source = fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");
+    let atlas_source =
+        fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");
     let font_backend =
         fs::read_to_string("src/app/terminal_font/backend.rs").expect("read terminal font backend");
 

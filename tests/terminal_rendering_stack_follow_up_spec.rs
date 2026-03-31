@@ -2,8 +2,9 @@ use std::fs;
 
 #[test]
 fn follow_up_doc_tracks_linux_macos_backends_and_libghostty_stop_loss() {
-    let follow_up = fs::read_to_string("docs/plans/2026-03-30-terminal-rendering-stack-follow-up.md")
-        .expect("read follow-up doc");
+    let follow_up =
+        fs::read_to_string("docs/plans/2026-03-30-terminal-rendering-stack-follow-up.md")
+            .expect("read follow-up doc");
 
     assert!(
         follow_up.contains("| Item | Trigger | Owner | Notes |"),

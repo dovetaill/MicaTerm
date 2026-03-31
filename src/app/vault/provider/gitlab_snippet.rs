@@ -112,9 +112,8 @@ impl GitLabSnippetFileLayout {
             "vault-head.json".into(),
             format!("vault-{revision}-manifest.bin"),
         ];
-        file_names.extend(
-            (0..pack_count).map(|index| format!("vault-{revision}-pack-{index:04}.bin")),
-        );
+        file_names
+            .extend((0..pack_count).map(|index| format!("vault-{revision}-pack-{index:04}.bin")));
 
         Ok(Self { file_names })
     }
@@ -166,8 +165,10 @@ impl VaultProvider for GitLabSnippetProvider {
     }
 
     fn write_revision(&self, request: &ProviderWriteRequest) -> Result<()> {
-        let _layout =
-            GitLabSnippetFileLayout::for_revision(&request.head.vault_revision, request.manifest.packs.len().max(1))?;
+        let _layout = GitLabSnippetFileLayout::for_revision(
+            &request.head.vault_revision,
+            request.manifest.packs.len().max(1),
+        )?;
         Err(anyhow!(
             "GitLab snippet provider write_revision is not wired yet for `{}`",
             self.config.remote_id

@@ -92,7 +92,10 @@ pub fn gitee_oauth_code_bootstrap() -> OAuthCodeBootstrap {
 }
 
 impl OAuthDeviceFlowBootstrap {
-    pub fn build_request_plan(&self, fallback_client_id: Option<&str>) -> Result<OAuthDeviceFlowRequestPlan> {
+    pub fn build_request_plan(
+        &self,
+        fallback_client_id: Option<&str>,
+    ) -> Result<OAuthDeviceFlowRequestPlan> {
         let client_id = self
             .client_id
             .clone()

@@ -10,10 +10,9 @@ pub use mapper::{
     catalog_to_asset_tree, catalog_to_asset_trees, vault_catalog_to_asset_tree,
 };
 pub use model::{
-    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetCatalog, PersistedAssetDomain,
-    PersistedAssetKind, PersistedAssetNode, PersistedAssetPayload,
-    PersistedAssetSocks5ProxySpec, PersistedAssetSshProxySpec, PersistedSnippetSpec,
-    PersistedSshConnectionSpec,
+    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetCatalog, PersistedAssetDomain, PersistedAssetKind,
+    PersistedAssetNode, PersistedAssetPayload, PersistedAssetSocks5ProxySpec,
+    PersistedAssetSshProxySpec, PersistedSnippetSpec, PersistedSshConnectionSpec,
 };
 pub use redb_store::{
     ASSET_RECORDS_TABLE, METADATA_ROOT_IDS_KEY, METADATA_SCHEMA_VERSION_KEY, METADATA_TABLE,

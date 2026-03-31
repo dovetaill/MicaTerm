@@ -2,18 +2,18 @@
 
 use std::fs;
 
-use mica_term::app::window_state::WindowPlacementKind;
 use mica_term::app::keychain::{
     KeychainCatalog, KeychainNode, KeychainNodeKind, KeychainNodePayload,
 };
+use mica_term::app::window_state::WindowPlacementKind;
 use mica_term::shell::assets::{
     AssetNameValidation, AssetNodePayload, AssetSnippetSpec, AssetSocks5ProxySpec,
     AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, AssetViewMode, ConsoleAssetKind,
 };
-use mica_term::shell::keychain::KeychainItemKind;
 use mica_term::shell::context_menu::{
     ContextTargetKind, SelectionContext, resolve_action_tree, visible_columns_for_path,
 };
+use mica_term::shell::keychain::KeychainItemKind;
 use mica_term::shell::sidebar::SidebarDestination;
 use mica_term::shell::view_model::{
     AssetModalState, RightPanelView, ShellViewModel, SnippetActivation, SnippetCreateAction,
@@ -44,13 +44,15 @@ fn sample_keychain_catalog_for_view_model() -> KeychainCatalog {
                     title: "Identity 1".into(),
                     kind: KeychainNodeKind::Identity,
                     child_ids: Vec::new(),
-                    payload: KeychainNodePayload::Identity(mica_term::app::keychain::KeychainIdentitySpec {
-                        username: "ops".into(),
-                        auth_kind: mica_term::app::keychain::KeychainIdentityAuthKind::Password,
-                        ssh_key_id: None,
-                        credential_ref: None,
-                        remark: String::new(),
-                    }),
+                    payload: KeychainNodePayload::Identity(
+                        mica_term::app::keychain::KeychainIdentitySpec {
+                            username: "ops".into(),
+                            auth_kind: mica_term::app::keychain::KeychainIdentityAuthKind::Password,
+                            ssh_key_id: None,
+                            credential_ref: None,
+                            remark: String::new(),
+                        },
+                    ),
                 },
             ),
             (
@@ -61,13 +63,15 @@ fn sample_keychain_catalog_for_view_model() -> KeychainCatalog {
                     title: "Ops Key".into(),
                     kind: KeychainNodeKind::Identity,
                     child_ids: Vec::new(),
-                    payload: KeychainNodePayload::Identity(mica_term::app::keychain::KeychainIdentitySpec {
-                        username: "deploy".into(),
-                        auth_kind: mica_term::app::keychain::KeychainIdentityAuthKind::SshKey,
-                        ssh_key_id: Some("key-prod".into()),
-                        credential_ref: None,
-                        remark: String::new(),
-                    }),
+                    payload: KeychainNodePayload::Identity(
+                        mica_term::app::keychain::KeychainIdentitySpec {
+                            username: "deploy".into(),
+                            auth_kind: mica_term::app::keychain::KeychainIdentityAuthKind::SshKey,
+                            ssh_key_id: Some("key-prod".into()),
+                            credential_ref: None,
+                            remark: String::new(),
+                        },
+                    ),
                 },
             ),
             (
@@ -78,14 +82,16 @@ fn sample_keychain_catalog_for_view_model() -> KeychainCatalog {
                     title: "Prod Key".into(),
                     kind: KeychainNodeKind::SshKey,
                     child_ids: Vec::new(),
-                    payload: KeychainNodePayload::SshKey(mica_term::app::keychain::KeychainSshKeySpec {
-                        algorithm: "ssh-ed25519".into(),
-                        fingerprint: "SHA256:key-prod".into(),
-                        public_key: "ssh-ed25519 AAAAC3NzaKeyProd".into(),
-                        comment: "prod@example.com".into(),
-                        credential_ref: None,
-                        remark: String::new(),
-                    }),
+                    payload: KeychainNodePayload::SshKey(
+                        mica_term::app::keychain::KeychainSshKeySpec {
+                            algorithm: "ssh-ed25519".into(),
+                            fingerprint: "SHA256:key-prod".into(),
+                            public_key: "ssh-ed25519 AAAAC3NzaKeyProd".into(),
+                            comment: "prod@example.com".into(),
+                            credential_ref: None,
+                            remark: String::new(),
+                        },
+                    ),
                 },
             ),
         ]),
@@ -1626,7 +1632,10 @@ fn keychain_selection_state_is_independent_from_console_asset_tree_state() {
 
     view_model.select_keychain_item("identity-prod");
 
-    assert_eq!(view_model.selected_asset_ids, vec![console_asset_id.clone()]);
+    assert_eq!(
+        view_model.selected_asset_ids,
+        vec![console_asset_id.clone()]
+    );
     assert_eq!(
         view_model.focused_asset_id.as_deref(),
         Some(console_asset_id.as_str())
@@ -1655,10 +1664,14 @@ fn keychain_default_create_names_are_scoped_within_parent_folder() {
     view_model.replace_keychain_catalog(sample_keychain_catalog_for_view_model());
 
     let second_folder_id = view_model.create_keychain_item(None, KeychainItemKind::Folder);
-    view_model.rename_keychain_item(&second_folder_id, "Other Team").unwrap();
+    view_model
+        .rename_keychain_item(&second_folder_id, "Other Team")
+        .unwrap();
 
-    let first_identity_id = view_model.create_keychain_item(Some("folder-team".into()), KeychainItemKind::Identity);
-    let second_identity_id = view_model.create_keychain_item(Some(second_folder_id.clone()), KeychainItemKind::Identity);
+    let first_identity_id =
+        view_model.create_keychain_item(Some("folder-team".into()), KeychainItemKind::Identity);
+    let second_identity_id =
+        view_model.create_keychain_item(Some(second_folder_id.clone()), KeychainItemKind::Identity);
 
     let rows = view_model.visible_keychain_rows();
     let first_label = rows

@@ -64,7 +64,10 @@ fn keychain_catalog_roundtrip_preserves_folder_identity_and_key_nodes() {
     let decoded: KeychainCatalog = serde_json::from_str(&encoded).unwrap();
 
     assert_eq!(decoded.root_ids.len(), 2);
-    assert_eq!(decoded.nodes["identity-ops"].kind, KeychainNodeKind::Identity);
+    assert_eq!(
+        decoded.nodes["identity-ops"].kind,
+        KeychainNodeKind::Identity
+    );
     match &decoded.nodes["identity-ops"].payload {
         KeychainNodePayload::Identity(identity) => {
             assert_eq!(identity.username, "ops");

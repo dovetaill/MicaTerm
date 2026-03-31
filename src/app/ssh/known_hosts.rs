@@ -88,9 +88,10 @@ impl KnownHostsService {
             .map(|entry| {
                 Ok(VaultKnownHostEntry {
                     host_pattern: entry.host_pattern,
-                    public_key: entry.public_key.to_openssh().with_context(|| {
-                        "failed to encode known_hosts entry for vault snapshot"
-                    })?,
+                    public_key: entry
+                        .public_key
+                        .to_openssh()
+                        .with_context(|| "failed to encode known_hosts entry for vault snapshot")?,
                 })
             })
             .collect()
@@ -100,14 +101,13 @@ impl KnownHostsService {
         let entries = entries
             .iter()
             .map(|entry| {
-                let public_key = PublicKey::from_openssh(entry.public_key.as_str()).with_context(
-                    || {
+                let public_key =
+                    PublicKey::from_openssh(entry.public_key.as_str()).with_context(|| {
                         format!(
                             "failed to parse known_hosts public key for `{}`",
                             entry.host_pattern
                         )
-                    },
-                )?;
+                    })?;
                 Ok(KnownHostEntry {
                     host_pattern: entry.host_pattern.clone(),
                     public_key,

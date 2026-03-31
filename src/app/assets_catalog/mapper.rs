@@ -3,17 +3,17 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::app::assets_catalog::model::{
-    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetCatalog, PersistedAssetDomain,
-    PersistedAssetKind, PersistedAssetNode, PersistedAssetPayload, PersistedAssetSocks5ProxySpec,
+    ASSET_CATALOG_SCHEMA_VERSION, PersistedAssetCatalog, PersistedAssetDomain, PersistedAssetKind,
+    PersistedAssetNode, PersistedAssetPayload, PersistedAssetSocks5ProxySpec,
     PersistedAssetSshProxySpec, PersistedSnippetSpec, PersistedSshConnectionSpec,
 };
 use crate::app::vault::model::{
-    VaultAssetCatalog, VaultAssetKind, VaultAssetNode, VaultAssetPayload, VaultSocks5ProxySpec,
-    VaultSnippetSpec, VaultSshConnectionSpec, VaultSshProxySpec,
+    VaultAssetCatalog, VaultAssetKind, VaultAssetNode, VaultAssetPayload, VaultSnippetSpec,
+    VaultSocks5ProxySpec, VaultSshConnectionSpec, VaultSshProxySpec,
 };
 use crate::shell::assets::{
-    AssetNode, AssetNodePayload, AssetSnippetSpec, AssetSocks5ProxySpec,
-    AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, ConsoleAssetKind,
+    AssetNode, AssetNodePayload, AssetSnippetSpec, AssetSocks5ProxySpec, AssetSshConnectionSpec,
+    AssetSshProxySpec, AssetTree, ConsoleAssetKind,
 };
 
 pub fn catalog_to_asset_tree(catalog: &PersistedAssetCatalog) -> AssetTree {
@@ -187,7 +187,9 @@ fn remap_snippet_catalog_ids(
                 remapped_id.clone(),
                 PersistedAssetNode {
                     id: remapped_id,
-                    parent_id: node.parent_id.map(|parent_id| remap_id(&parent_id, &id_map)),
+                    parent_id: node
+                        .parent_id
+                        .map(|parent_id| remap_id(&parent_id, &id_map)),
                     title: node.title,
                     kind: node.kind,
                     child_ids: node
@@ -267,7 +269,9 @@ fn remap_persisted_payload_ids(
 ) -> PersistedAssetPayload {
     match payload {
         PersistedAssetPayload::Snippet(mut spec) => {
-            spec.package_id = spec.package_id.map(|package_id| remap_id(&package_id, id_map));
+            spec.package_id = spec
+                .package_id
+                .map(|package_id| remap_id(&package_id, id_map));
             PersistedAssetPayload::Snippet(spec)
         }
         other => other,

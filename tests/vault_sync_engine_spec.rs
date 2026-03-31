@@ -3,8 +3,8 @@ use std::sync::Arc;
 use mica_term::app::vault::crypto::generate_vault_key;
 use mica_term::app::vault::engine::{SyncEngine, SyncError, SyncRequest};
 use mica_term::app::vault::model::{
-    CipherKind, CompressionKind, KdfConfig, PackLayout, ProviderKind, VaultAssetCatalog,
-    VaultHead, VaultSnapshot,
+    CipherKind, CompressionKind, KdfConfig, PackLayout, ProviderKind, VaultAssetCatalog, VaultHead,
+    VaultSnapshot,
 };
 use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
@@ -159,7 +159,10 @@ fn sync_engine_enables_conditional_head_write_for_s3_like_primary() {
     let writes = primary.recorded_writes();
     assert_eq!(writes.len(), 1);
     assert!(writes[0].conditional_head_write);
-    assert_eq!(writes[0].expected_parent_revision.as_deref(), Some("rev-0001"));
+    assert_eq!(
+        writes[0].expected_parent_revision.as_deref(),
+        Some("rev-0001")
+    );
     assert_eq!(writes[0].head.pack_layout, PackLayout::ObjectSet);
 }
 

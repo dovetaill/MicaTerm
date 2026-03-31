@@ -115,20 +115,12 @@ pub fn toolbar_descriptor_for(
         base_show_tree_controls,
     ) = match destination {
         SidebarDestination::Console => (true, None, "Create Asset", "Search Console Assets", true),
-        SidebarDestination::Snippets => (
-            true,
-            None,
-            "Create Snippet Asset",
-            "Search Snippets",
-            false,
-        ),
-        SidebarDestination::Keychain => (
-            true,
-            None,
-            "Create Keychain Item",
-            "Search Keychain",
-            false,
-        ),
+        SidebarDestination::Snippets => {
+            (true, None, "Create Snippet Asset", "Search Snippets", false)
+        }
+        SidebarDestination::Keychain => {
+            (true, None, "Create Keychain Item", "Search Keychain", false)
+        }
     };
 
     let view_mode_tooltip = match view_model.asset_view_mode {

@@ -285,7 +285,11 @@ fn seed_locked_vault_runtime(
     (credential_ref, identity_credential_ref, key_credential_ref)
 }
 
-fn bind_with_vault_runtime(app: &AppWindow, credential_store: Arc<dyn CredentialStore>, root: PathBuf) {
+fn bind_with_vault_runtime(
+    app: &AppWindow,
+    credential_store: Arc<dyn CredentialStore>,
+    root: PathBuf,
+) {
     bind_top_status_bar_with_injected_services_and_vault_runtime(
         app,
         None,
@@ -334,8 +338,9 @@ impl SessionRuntimeLauncher for FakeLauncher {
         _session_id: Uuid,
         _attempt_id: Uuid,
         _event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
-    {
+    ) -> Pin<
+        Box<dyn Future<Output = anyhow::Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>,
+    > {
         Box::pin(async move { Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>) })
     }
 
@@ -378,13 +383,19 @@ fn bootstrap_export_round_trips_bundle_and_provider_credentials() {
 
     persist_provider_credential(
         &source_store,
-        bundle.remotes[0].credential_ref.as_deref().expect("primary credential ref"),
+        bundle.remotes[0]
+            .credential_ref
+            .as_deref()
+            .expect("primary credential ref"),
         Some("aws-secret-token"),
     )
     .expect("persist primary provider credential");
     persist_provider_credential(
         &source_store,
-        bundle.remotes[1].credential_ref.as_deref().expect("mirror credential ref"),
+        bundle.remotes[1]
+            .credential_ref
+            .as_deref()
+            .expect("mirror credential ref"),
         Some("github-pat-token"),
     )
     .expect("persist mirror provider credential");
@@ -397,14 +408,24 @@ fn bootstrap_export_round_trips_bundle_and_provider_credentials() {
     assert_eq!(
         imported
             .provider_credentials
-            .get(bundle.remotes[0].credential_ref.as_ref().expect("primary ref"))
+            .get(
+                bundle.remotes[0]
+                    .credential_ref
+                    .as_ref()
+                    .expect("primary ref")
+            )
             .map(String::as_str),
         Some("aws-secret-token")
     );
     assert_eq!(
         imported
             .provider_credentials
-            .get(bundle.remotes[1].credential_ref.as_ref().expect("mirror ref"))
+            .get(
+                bundle.remotes[1]
+                    .credential_ref
+                    .as_ref()
+                    .expect("mirror ref")
+            )
             .map(String::as_str),
         Some("github-pat-token")
     );
@@ -412,12 +433,9 @@ fn bootstrap_export_round_trips_bundle_and_provider_credentials() {
     let restored_store = MemoryCredentialStore::default();
     restore_provider_credentials(&restored_store, &imported).expect("restore provider credentials");
     assert_eq!(
-        load_provider_credential(
-            &restored_store,
-            bundle.remotes[1].credential_ref.as_deref()
-        )
-        .expect("reload restored provider credential")
-        .as_deref(),
+        load_provider_credential(&restored_store, bundle.remotes[1].credential_ref.as_deref())
+            .expect("reload restored provider credential")
+            .as_deref(),
         Some("github-pat-token")
     );
 
@@ -433,7 +451,10 @@ fn bootstrap_export_file_is_not_plaintext_json() {
 
     persist_provider_credential(
         &store,
-        bundle.remotes[0].credential_ref.as_deref().expect("primary credential ref"),
+        bundle.remotes[0]
+            .credential_ref
+            .as_deref()
+            .expect("primary credential ref"),
         Some("aws-secret-token"),
     )
     .expect("persist provider credential");
@@ -453,7 +474,9 @@ fn bootstrap_export_file_is_not_plaintext_json() {
 #[test]
 fn bootstrap_bundle_validation_rejects_missing_primary_remote() {
     let mut bundle = sample_bootstrap_bundle();
-    bundle.remotes.retain(|remote| remote.role != RemoteRole::Primary);
+    bundle
+        .remotes
+        .retain(|remote| remote.role != RemoteRole::Primary);
 
     let err = validate_bootstrap_bundle(&bundle).expect_err("bundle without primary should fail");
 
@@ -517,21 +540,39 @@ fn unlock_restores_console_snippet_and_keychain_projection() {
     assert_eq!(app.get_snippet_asset_items().row_count(), 2);
     assert_eq!(app.get_keychain_asset_items().row_count(), 3);
     assert_eq!(
-        app.get_snippet_asset_items().row_data(0).unwrap().label.as_str(),
+        app.get_snippet_asset_items()
+            .row_data(0)
+            .unwrap()
+            .label
+            .as_str(),
         "Deploy"
     );
     assert_eq!(
-        app.get_keychain_asset_items().row_data(1).unwrap().label.as_str(),
+        app.get_keychain_asset_items()
+            .row_data(1)
+            .unwrap()
+            .label
+            .as_str(),
         "Prod Key"
     );
-    assert!(credential_store.get_secret(&credential_ref).unwrap().is_some());
+    assert!(
+        credential_store
+            .get_secret(&credential_ref)
+            .unwrap()
+            .is_some()
+    );
     assert!(
         credential_store
             .get_secret(&identity_credential_ref)
             .unwrap()
             .is_some()
     );
-    assert!(credential_store.get_secret(&key_credential_ref).unwrap().is_some());
+    assert!(
+        credential_store
+            .get_secret(&key_credential_ref)
+            .unwrap()
+            .is_some()
+    );
 }
 
 #[test]
@@ -560,8 +601,13 @@ fn lock_clears_decrypted_keychain_and_asset_state() {
     assert_eq!(app.get_keychain_asset_items().row_count(), 0);
     assert_eq!(credential_store.get_secret(&credential_ref).unwrap(), None);
     assert_eq!(
-        credential_store.get_secret(&identity_credential_ref).unwrap(),
+        credential_store
+            .get_secret(&identity_credential_ref)
+            .unwrap(),
         None
     );
-    assert_eq!(credential_store.get_secret(&key_credential_ref).unwrap(), None);
+    assert_eq!(
+        credential_store.get_secret(&key_credential_ref).unwrap(),
+        None
+    );
 }

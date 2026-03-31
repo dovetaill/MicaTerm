@@ -1,7 +1,6 @@
 use mica_term::app::ssh::credentials::{
     CredentialStore, MemoryCredentialStore, StoredKeychainIdentitySecretBundle,
-    StoredKeychainKeySecretBundle,
-    keychain_identity_credential_ref, keychain_key_credential_ref,
+    StoredKeychainKeySecretBundle, keychain_identity_credential_ref, keychain_key_credential_ref,
     load_keychain_identity_secret_bundle, load_keychain_key_secret_bundle,
     persist_keychain_identity_secret_bundle, persist_keychain_key_secret_bundle,
     restore_keychain_identity_secret_bundle, restore_keychain_key_secret_bundle,
@@ -39,7 +38,9 @@ fn identity_secret_bundle_round_trips_password_and_empties_cleanly() {
         snapshot_keychain_identity_secret_bundle(&store, Some(credential_ref.as_str()))
             .expect("snapshot bundle");
     assert_eq!(
-        snapshotted.as_ref().and_then(|bundle| bundle.password.as_deref()),
+        snapshotted
+            .as_ref()
+            .and_then(|bundle| bundle.password.as_deref()),
         Some("ops-password")
     );
 

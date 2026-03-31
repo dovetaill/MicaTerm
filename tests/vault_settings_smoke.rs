@@ -21,7 +21,7 @@ fn settings_action_no_longer_routes_right_panel_to_sync_and_vault() {
 }
 
 #[test]
-fn sync_modal_starts_closed_until_the_titlebar_sync_action_is_invoked() {
+fn sync_settings_starts_closed_until_explicitly_requested() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -30,6 +30,20 @@ fn sync_modal_starts_closed_until_the_titlebar_sync_action_is_invoked() {
     assert!(!app.get_sync_modal_open());
 
     app.invoke_open_sync_modal_requested();
+
+    assert!(app.get_sync_modal_open());
+}
+
+#[test]
+fn titlebar_sync_action_falls_back_to_sync_settings_when_not_configured() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    assert!(!app.get_sync_modal_open());
+
+    app.invoke_sync_now_requested();
 
     assert!(app.get_sync_modal_open());
 }

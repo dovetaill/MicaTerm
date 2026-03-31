@@ -8,7 +8,7 @@ use mica_term::shell::assets::{
     AssetNodePayload, AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, ConsoleAssetKind,
 };
 use mica_term::shell::keychain::{
-    delete_keychain_node, project_keychain_rows, KeychainDeleteError,
+    KeychainDeleteError, delete_keychain_node, project_keychain_rows,
 };
 
 fn sample_keychain_catalog() -> KeychainCatalog {

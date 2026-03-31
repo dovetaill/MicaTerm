@@ -2,13 +2,12 @@ use std::path::Path;
 
 use anyhow::Result;
 
+use crate::app::assets_catalog::{asset_tree_to_vault_catalog, vault_catalog_to_asset_tree};
 use crate::app::keychain::{
     KeychainCatalog, KeychainIdentitySpec, KeychainNodePayload, KeychainSshKeySpec,
 };
-use crate::app::assets_catalog::{asset_tree_to_vault_catalog, vault_catalog_to_asset_tree};
 use crate::app::ssh::credentials::{
-    CredentialStore, StoredSshSecretBundle, restore_snapshot_secret_bundle,
-    snapshot_secret_bundle,
+    CredentialStore, StoredSshSecretBundle, restore_snapshot_secret_bundle, snapshot_secret_bundle,
 };
 use crate::app::ssh::known_hosts::KnownHostsService;
 use crate::app::ui_preferences::UiPreferences;
@@ -139,8 +138,7 @@ fn insert_keychain_bundle<T>(
 where
     T: KeychainSecretHolder,
 {
-    if let Some(bundle) =
-        snapshot_secret_bundle(credential_store, secret_holder.credential_ref())?
+    if let Some(bundle) = snapshot_secret_bundle(credential_store, secret_holder.credential_ref())?
     {
         bundles.insert(node_id.to_string(), bundle);
     }

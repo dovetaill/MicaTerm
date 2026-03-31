@@ -30,12 +30,12 @@ use mica_term::app::keychain::KeychainCatalog;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::build_test_logging_runtime;
+use mica_term::app::ssh::connection_progress::{
+    ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
+};
 use mica_term::app::ssh::credentials::{
     CredentialStore, MemoryCredentialStore, SshCredentialKind, StoredSshSecretBundle,
     load_secret_bundle, persist_secret_bundle, ssh_credential_ref,
-};
-use mica_term::app::ssh::connection_progress::{
-    ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
 };
 use mica_term::app::ssh::known_hosts::{
     KnownHostCheck, KnownHostsService, default_known_hosts_path,
@@ -64,13 +64,13 @@ use mica_term::shell::assets::{
     AssetNodePayload, AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, ConsoleAssetKind,
 };
 use mica_term::shell::metrics::ShellMetrics;
+use mica_term::theme::ThemeMode;
 use russh::keys::{HashAlg, PublicKey};
 use secrecy::SecretString;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, Model};
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use mica_term::theme::ThemeMode;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -799,7 +799,8 @@ impl SessionRuntimeLauncher for FollowProjectionLauncher {
                 .expect("lock follow projection event tx") = Some(event_tx.clone());
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
-            Ok(Box::new(FollowProjectionRuntimeControl { state }) as Box<dyn SessionRuntimeControl>)
+            Ok(Box::new(FollowProjectionRuntimeControl { state })
+                as Box<dyn SessionRuntimeControl>)
         })
     }
 
@@ -1692,13 +1693,15 @@ fn focus_workspace_terminal(app: &AppWindow) {
 
 fn select_terminal_welcome_span(app: &AppWindow) {
     let selection_start = LogicalPosition::new(
-        app.get_layout_workspace_session_native_surface_x() + (app.get_workspace_session_cell_width() * 0.5),
+        app.get_layout_workspace_session_native_surface_x()
+            + (app.get_workspace_session_cell_width() * 0.5),
         app.get_layout_titlebar_height()
             + app.get_layout_workspace_session_native_surface_y()
             + (app.get_workspace_session_cell_height() * 0.5),
     );
     let selection_end = LogicalPosition::new(
-        app.get_layout_workspace_session_native_surface_x() + (app.get_workspace_session_cell_width() * 10.5),
+        app.get_layout_workspace_session_native_surface_x()
+            + (app.get_workspace_session_cell_width() * 10.5),
         app.get_layout_titlebar_height()
             + app.get_layout_workspace_session_native_surface_y()
             + (app.get_workspace_session_cell_height() * 0.5),
@@ -1880,6 +1883,107 @@ fn unlocking_existing_vault_restores_cached_snapshot_without_loading_while_locke
             .unwrap()
             .is_some()
     );
+}
+
+#[test]
+fn unlocking_existing_vault_with_auto_sync_enabled_syncs_immediately() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("unlock-auto-sync");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle.auto_sync_enabled = true;
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    assert_eq!(primary.recorded_writes().len(), 0);
+
+    app.invoke_sync_modal_lock_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+
+    assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
+    assert_eq!(primary.recorded_writes().len(), 1);
+}
+
+#[test]
+fn unlocked_vault_with_auto_sync_enabled_syncs_after_asset_mutations() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("asset-auto-sync");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle.auto_sync_enabled = true;
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_sync_modal_close_requested();
+    assert_eq!(primary.recorded_writes().len(), 0);
+
+    app.invoke_assets_create_action_selected("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("Prod".into());
+    app.invoke_confirm_asset_modal_requested();
+    assert_eq!(primary.recorded_writes().len(), 1);
+
+    let folder_id = app
+        .get_console_asset_items()
+        .row_data(0)
+        .expect("saved folder asset")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(folder_id.clone().into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("rename-asset".into());
+    app.invoke_asset_rename_modal_name_changed("Infra".into());
+    app.invoke_confirm_asset_rename_requested();
+    assert_eq!(primary.recorded_writes().len(), 2);
+
+    app.invoke_asset_context_menu_requested(folder_id.into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("delete-asset".into());
+    app.invoke_confirm_delete_asset_requested();
+    assert_eq!(primary.recorded_writes().len(), 3);
 }
 
 #[test]
@@ -3989,7 +4093,11 @@ fn quick_launch_toggle_favorite_and_search_refresh_dashboard_projection() {
     let favorites = app.get_welcome_quick_launch_favorite_items();
     assert_eq!(favorites.row_count(), 1);
     assert_eq!(
-        favorites.row_data(0).expect("favorite row 0").asset_id.as_str(),
+        favorites
+            .row_data(0)
+            .expect("favorite row 0")
+            .asset_id
+            .as_str(),
         prod_id.as_str()
     );
     assert!(favorites.row_data(0).expect("favorite row 0").favorite);
@@ -4361,7 +4469,10 @@ fn unknown_host_key_blocks_connection_in_workspace_timeline() {
         "workspace session host-key confirmation should stay inline instead of reusing the modal flow"
     );
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
     assert_eq!(
         app.get_workspace_session_connection_headline().as_str(),
         "waiting-user"
@@ -4406,7 +4517,10 @@ fn trusting_unknown_host_key_retries_connection_in_same_workspace_tab() {
     flush_runtime_projection();
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        session_id.as_str()
+    );
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
     assert_eq!(app.get_workspace_session_state().as_str(), "connected");
     assert_eq!(
@@ -4456,8 +4570,14 @@ fn rejecting_unknown_host_key_keeps_connection_timeline_in_same_tab() {
 
     let headline = app.get_workspace_session_connection_headline().to_string();
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        session_id.as_str()
+    );
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
     assert!(
         matches!(headline.as_str(), "cancelled" | "error"),
         "rejecting the host key should keep the timeline surface active with a terminal-free final state"
@@ -4497,7 +4617,10 @@ fn cancelling_running_connection_attempt_marks_timeline_cancelled() {
     flush_runtime_projection();
     let session_id = app.get_active_workspace_session_id().to_string();
 
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
     assert_eq!(
         app.get_workspace_session_connection_headline().as_str(),
         "connecting"
@@ -4507,8 +4630,14 @@ fn cancelling_running_connection_attempt_marks_timeline_cancelled() {
     flush_runtime_projection();
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        session_id.as_str()
+    );
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
     assert_eq!(
         app.get_workspace_session_connection_headline().as_str(),
         "cancelled"

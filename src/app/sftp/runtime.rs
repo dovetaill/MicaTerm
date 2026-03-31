@@ -16,7 +16,11 @@ pub trait SftpBackend: Send + Sync {
     fn mkdir<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, ()>;
     fn rename<'a>(&'a self, from: &'a str, to: &'a str) -> SftpOperationFuture<'a, ()>;
     fn path_exists<'a>(&'a self, path: &'a str) -> SftpOperationFuture<'a, bool>;
-    fn upload_file<'a>(&'a self, remote_path: &'a str, data: Vec<u8>) -> SftpOperationFuture<'a, u64>;
+    fn upload_file<'a>(
+        &'a self,
+        remote_path: &'a str,
+        data: Vec<u8>,
+    ) -> SftpOperationFuture<'a, u64>;
     fn download_file<'a>(&'a self, remote_path: &'a str) -> SftpOperationFuture<'a, Vec<u8>>;
     fn remove_file<'a>(&'a self, remote_path: &'a str) -> SftpOperationFuture<'a, ()>;
     fn remove_dir<'a>(&'a self, remote_path: &'a str) -> SftpOperationFuture<'a, ()>;

@@ -1,10 +1,9 @@
 use anyhow::{Result, anyhow};
 use mica_term::app::ssh::credentials::{
-    CachedCredentialStore, CredentialStore, EncryptedFileCredentialStore,
-    FallbackCredentialStore, FileCredentialStore, MemoryCredentialStore, SshCredentialKind,
-    StoredSecretLookupError, StoredSshSecretBundle, load_secret_bundle,
-    load_secret_bundle_with_diagnostics, merge_edit_bundle, persist_secret_bundle,
-    required_secret_bundle_field, ssh_credential_ref,
+    CachedCredentialStore, CredentialStore, EncryptedFileCredentialStore, FallbackCredentialStore,
+    FileCredentialStore, MemoryCredentialStore, SshCredentialKind, StoredSecretLookupError,
+    StoredSshSecretBundle, load_secret_bundle, load_secret_bundle_with_diagnostics,
+    merge_edit_bundle, persist_secret_bundle, required_secret_bundle_field, ssh_credential_ref,
 };
 use mica_term::shell::view_model::AssetSshConnectionDraft;
 use std::fs;

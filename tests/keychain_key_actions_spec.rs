@@ -11,13 +11,11 @@ use mica_term::app::bootstrap::{
 };
 use mica_term::app::ssh::credentials::{CredentialStore, MemoryCredentialStore};
 use mica_term::app::ssh::profile::ConnectionProfile;
-use mica_term::app::ssh::runtime::{
-    SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput,
-};
+use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::window_effects::default_platform_window_effects;
-use russh::keys::{Algorithm, HashAlg, PrivateKey, PublicKey};
 use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
+use russh::keys::{Algorithm, HashAlg, PrivateKey, PublicKey};
 use slint::Model;
 use tokio::sync::mpsc;
 
@@ -136,8 +134,8 @@ fn new_ssh_key_action_opens_modal_before_creating_keychain_item() {
 fn importing_private_key_into_keychain_modal_populates_private_public_and_fingerprint() {
     i_slint_backend_testing::init_no_event_loop();
 
-    let private_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
-        .expect("generate sample private key");
+    let private_key =
+        PrivateKey::random(&mut OsRng, Algorithm::Ed25519).expect("generate sample private key");
     let private_key_openssh = private_key
         .to_openssh(LineEnding::LF)
         .expect("encode private key");
@@ -177,8 +175,8 @@ fn importing_private_key_into_keychain_modal_populates_private_public_and_finger
 fn importing_public_key_into_keychain_modal_populates_public_key_and_fingerprint_only() {
     i_slint_backend_testing::init_no_event_loop();
 
-    let private_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
-        .expect("generate sample private key");
+    let private_key =
+        PrivateKey::random(&mut OsRng, Algorithm::Ed25519).expect("generate sample private key");
     let public_key_openssh = private_key
         .public_key()
         .to_openssh()

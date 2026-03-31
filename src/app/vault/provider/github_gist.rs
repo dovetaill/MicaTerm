@@ -248,9 +248,10 @@ impl VaultProvider for GitHubGistProvider {
             ),
         );
 
-        for (index, chunk) in split_bytes(request.encrypted_snapshot.ciphertext.as_slice(), pack_count)
-            .into_iter()
-            .enumerate()
+        for (index, chunk) in
+            split_bytes(request.encrypted_snapshot.ciphertext.as_slice(), pack_count)
+                .into_iter()
+                .enumerate()
         {
             files.insert(
                 bundled_pack_file_name(&request.head.vault_revision, index),

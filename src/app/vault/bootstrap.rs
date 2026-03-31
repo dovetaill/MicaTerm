@@ -90,7 +90,10 @@ pub fn restore_provider_credentials(
         persist_provider_credential(
             store,
             credential_ref,
-            imported.provider_credentials.get(credential_ref).map(String::as_str),
+            imported
+                .provider_credentials
+                .get(credential_ref)
+                .map(String::as_str),
         )?;
     }
 
@@ -156,8 +159,8 @@ pub fn import_bootstrap_bundle(
         bincode::deserialize(encoded.as_slice()).context("failed to decode bootstrap export")?;
     let key = derive_bootstrap_key(password, &export.kdf)?;
     let plaintext = decrypt_bootstrap_bytes(&export.nonce, &export.ciphertext, &key)?;
-    let payload: BootstrapExportPayload =
-        serde_json::from_slice(plaintext.as_slice()).context("failed to decode bootstrap payload")?;
+    let payload: BootstrapExportPayload = serde_json::from_slice(plaintext.as_slice())
+        .context("failed to decode bootstrap payload")?;
     validate_bootstrap_bundle(&payload.bundle)?;
 
     Ok(ImportedBootstrapBundle {

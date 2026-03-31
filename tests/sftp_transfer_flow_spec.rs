@@ -56,10 +56,7 @@ impl SftpBackend for MemoryBackend {
         Box::pin(async move { Ok(Vec::new()) })
     }
 
-    fn mkdir<'a>(
-        &'a self,
-        path: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+    fn mkdir<'a>(&'a self, path: &'a str) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
             self.mkdir_requests
                 .lock()
@@ -184,7 +181,11 @@ async fn upload_and_download_tasks_reach_completed_and_update_session_summary() 
     let upload_path = root.join("notes.txt");
     fs::write(&upload_path, b"hello from local").expect("write upload source");
 
-    let backend = Arc::new(MemoryBackend::with_directories(&["/srv", "/srv/app", "/srv/other"]));
+    let backend = Arc::new(MemoryBackend::with_directories(&[
+        "/srv",
+        "/srv/app",
+        "/srv/other",
+    ]));
     backend.insert_remote_file("/srv/app/config.yml", b"port=22");
     let runtime = SftpRuntimeHandle::new(backend.clone());
     let sources = scan_local_sources(&[upload_path]).expect("scan upload source");
@@ -192,7 +193,8 @@ async fn upload_and_download_tasks_reach_completed_and_update_session_summary() 
     let mut queue = TransferQueue::default();
     let upload_ids = queue.enqueue_upload("session-a", "/srv/app", &sources);
     assert_eq!(
-        queue.task(upload_ids.first().expect("upload task id"))
+        queue
+            .task(upload_ids.first().expect("upload task id"))
             .expect("queued upload task")
             .state,
         TransferTaskState::Queued
@@ -203,7 +205,8 @@ async fn upload_and_download_tasks_reach_completed_and_update_session_summary() 
         .expect("run queued upload");
 
     assert_eq!(
-        queue.task(upload_ids.first().expect("upload task id"))
+        queue
+            .task(upload_ids.first().expect("upload task id"))
             .expect("completed upload task")
             .state,
         TransferTaskState::Completed
@@ -227,14 +230,19 @@ async fn upload_and_download_tasks_reach_completed_and_update_session_summary() 
     let download_ids = queue.enqueue_download(
         "session-a",
         root.as_path(),
-        &[file_entry("remote-config", "config.yml", "/srv/app/config.yml")],
+        &[file_entry(
+            "remote-config",
+            "config.yml",
+            "/srv/app/config.yml",
+        )],
     );
     execute_queued_transfers(&runtime, &mut queue)
         .await
         .expect("run queued download");
 
     assert_eq!(
-        queue.task(download_ids.first().expect("download task id"))
+        queue
+            .task(download_ids.first().expect("download task id"))
             .expect("completed download task")
             .state,
         TransferTaskState::Completed
@@ -253,7 +261,11 @@ async fn upload_and_download_tasks_reach_completed_and_update_session_summary() 
 
 #[tokio::test(flavor = "current_thread")]
 async fn moving_remote_entry_into_directory_updates_listing_and_clears_stale_selection() {
-    let backend = Arc::new(MemoryBackend::with_directories(&["/srv", "/srv/app", "/srv/archive"]));
+    let backend = Arc::new(MemoryBackend::with_directories(&[
+        "/srv",
+        "/srv/app",
+        "/srv/archive",
+    ]));
     backend.insert_remote_file("/srv/app/release.tar.gz", b"release");
     let runtime = SftpRuntimeHandle::new(backend.clone());
 
@@ -266,9 +278,10 @@ async fn moving_remote_entry_into_directory_updates_listing_and_clears_stale_sel
     )];
     state.selected_entry_ids = vec!["release-id".into()];
 
-    let did_move = move_entry_between_directories(&runtime, &mut state, "release-id", "/srv/archive")
-        .await
-        .expect("move remote entry");
+    let did_move =
+        move_entry_between_directories(&runtime, &mut state, "release-id", "/srv/archive")
+            .await
+            .expect("move remote entry");
 
     assert!(did_move);
     assert!(state.entries.is_empty());

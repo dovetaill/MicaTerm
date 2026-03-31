@@ -1,12 +1,14 @@
 //! Pure SFTP domain state used by later runtime and UI integration tasks.
 
-pub mod model;
 pub mod local_ops;
+pub mod model;
 pub mod queue;
 pub mod runtime;
 pub mod session_binding;
 
-pub use local_ops::{LocalTransferEntry, build_local_download_path, build_remote_upload_path, scan_local_sources};
+pub use local_ops::{
+    LocalTransferEntry, build_local_download_path, build_remote_upload_path, scan_local_sources,
+};
 pub use model::{
     SftpDirectoryEntry, SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode, SftpPathHistory,
     SftpSessionBindingState,

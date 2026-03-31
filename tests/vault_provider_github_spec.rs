@@ -85,10 +85,9 @@ impl GitHubGistApi for RecordingGitHubGistApi {
 
 #[test]
 fn github_gist_bootstrap_config_can_represent_device_flow_or_pat() {
-    let device_config =
-        GitHubGistProviderConfig::try_from(&sample_device_flow_remote()).expect("parse device flow");
-    let pat_config =
-        GitHubGistProviderConfig::try_from(&sample_pat_remote()).expect("parse pat");
+    let device_config = GitHubGistProviderConfig::try_from(&sample_device_flow_remote())
+        .expect("parse device flow");
+    let pat_config = GitHubGistProviderConfig::try_from(&sample_pat_remote()).expect("parse pat");
 
     assert!(matches!(
         device_config.auth,
@@ -109,7 +108,10 @@ fn github_gist_provider_uses_bundled_files_layout_without_conditional_head_write
 
     let capabilities = provider.capabilities();
 
-    assert_eq!(capabilities.preferred_pack_strategy, PackLayout::BundledFiles);
+    assert_eq!(
+        capabilities.preferred_pack_strategy,
+        PackLayout::BundledFiles
+    );
     assert!(!capabilities.supports_conditional_head_write);
     assert!(capabilities.max_pack_count <= 8);
 }

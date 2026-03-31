@@ -40,7 +40,9 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
 fn cargo_manifest_exposes_software_and_skia_renderers() {
     let content = fs::read_to_string("Cargo.toml").expect("read cargo manifest");
 
-    assert!(content.contains("default = [\"slint-renderer-software\", \"terminal-native-renderer\"]"));
+    assert!(
+        content.contains("default = [\"slint-renderer-software\", \"terminal-native-renderer\"]")
+    );
     assert!(content.contains("slint-renderer-software ="));
     assert!(content.contains("slint-renderer-skia ="));
     assert!(content.contains("terminal-native-renderer = [\"dep:harfbuzz_rs\"]"));

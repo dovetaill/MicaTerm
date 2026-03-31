@@ -102,6 +102,13 @@ pub struct SyncModalViewState {
     pub target_label: String,
     pub primary_action_label: String,
     pub secondary_action_label: String,
+    pub auto_sync_enabled: bool,
+    pub primary_gist_id: String,
+    pub primary_pat: String,
+    pub mirror_enabled: bool,
+    pub mirror_gist_id: String,
+    pub mirror_pat: String,
+    pub master_password: String,
 }
 
 impl Default for SyncModalViewState {
@@ -109,14 +116,21 @@ impl Default for SyncModalViewState {
         Self {
             open: false,
             mode: SyncModalMode::NotConfigured,
-            title: "Sync".into(),
-            headline: "Set up sync".into(),
-            status_text: "Configure a Gitee remote to enable sync.".into(),
+            title: "Sync Settings".into(),
+            headline: "Configure sync".into(),
+            status_text: "Configure at least one Gitee target to enable sync.".into(),
             error_text: String::new(),
             provider_label: "Gitee".into(),
             target_label: String::new(),
-            primary_action_label: "Set up sync".into(),
-            secondary_action_label: String::new(),
+            primary_action_label: "Save and enable".into(),
+            secondary_action_label: "Close".into(),
+            auto_sync_enabled: false,
+            primary_gist_id: String::new(),
+            primary_pat: String::new(),
+            mirror_enabled: false,
+            mirror_gist_id: String::new(),
+            mirror_pat: String::new(),
+            master_password: String::new(),
         }
     }
 }
@@ -529,10 +543,9 @@ impl ShellViewModel {
                 entry_id,
                 draft_name,
                 ..
-            }) => asset_name_validation_message(self.sftp_name_validation(
-                draft_name,
-                Some(entry_id.as_str()),
-            )),
+            }) => asset_name_validation_message(
+                self.sftp_name_validation(draft_name, Some(entry_id.as_str())),
+            ),
             _ => String::new(),
         }
     }
@@ -681,6 +694,29 @@ impl ShellViewModel {
         self.show_global_menu = false;
     }
 
+    pub fn update_sync_modal_field(&mut self, field: &str, value: String) {
+        let modal = self.sync_modal_state_mut();
+        match field {
+            "primary-gist-id" => modal.primary_gist_id = value,
+            "primary-pat" => modal.primary_pat = value,
+            "mirror-gist-id" => modal.mirror_gist_id = value,
+            "mirror-pat" => modal.mirror_pat = value,
+            "master-password" => modal.master_password = value,
+            _ => return,
+        }
+        modal.error_text.clear();
+    }
+
+    pub fn update_sync_modal_toggle(&mut self, field: &str, value: bool) {
+        let modal = self.sync_modal_state_mut();
+        match field {
+            "auto-sync" => modal.auto_sync_enabled = value,
+            "mirror-enabled" => modal.mirror_enabled = value,
+            _ => return,
+        }
+        modal.error_text.clear();
+    }
+
     pub fn open_appearance_panel(&mut self) {
         self.open_sftp_panel();
     }
@@ -691,7 +727,11 @@ impl ShellViewModel {
         self.show_global_menu = false;
     }
 
-    pub fn set_sftp_session_state(&mut self, session_id: impl Into<String>, state: SftpSessionBindingState) {
+    pub fn set_sftp_session_state(
+        &mut self,
+        session_id: impl Into<String>,
+        state: SftpSessionBindingState,
+    ) {
         self.sftp_sessions.insert(session_id.into(), state);
     }
 
@@ -753,7 +793,12 @@ impl ShellViewModel {
 
     pub fn sftp_panel_actions_enabled(&self) -> bool {
         self.active_sftp_session_state()
-            .map(|state| matches!(state.mode, SftpPanelMode::Ready | SftpPanelMode::Loading | SftpPanelMode::Connecting))
+            .map(|state| {
+                matches!(
+                    state.mode,
+                    SftpPanelMode::Ready | SftpPanelMode::Loading | SftpPanelMode::Connecting
+                )
+            })
             .unwrap_or(false)
     }
 
@@ -1060,7 +1105,11 @@ impl ShellViewModel {
     }
 
     pub fn record_recent_saved_ssh_asset(&mut self, asset_id: &str) {
-        if self.console_asset_tree.ssh_connection_spec(asset_id).is_none() {
+        if self
+            .console_asset_tree
+            .ssh_connection_spec(asset_id)
+            .is_none()
+        {
             return;
         }
 
@@ -1076,7 +1125,11 @@ impl ShellViewModel {
     }
 
     pub fn toggle_quick_launch_favorite(&mut self, asset_id: &str) {
-        if self.console_asset_tree.ssh_connection_spec(asset_id).is_none() {
+        if self
+            .console_asset_tree
+            .ssh_connection_spec(asset_id)
+            .is_none()
+        {
             return;
         }
 
@@ -1086,7 +1139,9 @@ impl ShellViewModel {
             .iter()
             .position(|current| current == asset_id)
         {
-            self.quick_launch_preferences.favorite_asset_ids.remove(index);
+            self.quick_launch_preferences
+                .favorite_asset_ids
+                .remove(index);
         } else {
             self.quick_launch_preferences
                 .favorite_asset_ids
@@ -1097,7 +1152,11 @@ impl ShellViewModel {
     }
 
     pub fn select_quick_launch_asset(&mut self, asset_id: String) {
-        if self.console_asset_tree.ssh_connection_spec(&asset_id).is_none() {
+        if self
+            .console_asset_tree
+            .ssh_connection_spec(&asset_id)
+            .is_none()
+        {
             return;
         }
 
@@ -1182,11 +1241,15 @@ impl ShellViewModel {
     pub fn ensure_quick_launch_selection(&mut self) {
         let records = self.matching_quick_launch_records();
         let visible_asset_ids = self.visible_asset_ids_from_records(&records);
-        if self.quick_launch_selected_asset_id.as_deref().is_some_and(|asset_id| {
-            visible_asset_ids
-                .iter()
-                .any(|visible_asset_id| visible_asset_id == asset_id)
-        }) {
+        if self
+            .quick_launch_selected_asset_id
+            .as_deref()
+            .is_some_and(|asset_id| {
+                visible_asset_ids
+                    .iter()
+                    .any(|visible_asset_id| visible_asset_id == asset_id)
+            })
+        {
             self.sync_quick_launch_group_from_selected();
             return;
         }
@@ -1938,8 +2001,10 @@ impl ShellViewModel {
                 entry_id,
                 draft_name,
                 ..
-            }) => self.sftp_name_validation(draft_name, Some(entry_id.as_str()))
-                == AssetNameValidation::Valid,
+            }) => {
+                self.sftp_name_validation(draft_name, Some(entry_id.as_str()))
+                    == AssetNameValidation::Valid
+            }
             Some(AssetModalState::SftpDeleteEntriesConfirm { .. }) => true,
             Some(AssetModalState::DeleteAssetConfirm { .. }) => true,
             None => false,
@@ -1966,7 +2031,8 @@ impl ShellViewModel {
                     return false;
                 }
 
-                let Some(session_id) = self.active_workspace_session_id().map(str::to_string) else {
+                let Some(session_id) = self.active_workspace_session_id().map(str::to_string)
+                else {
                     return false;
                 };
                 let path = sftp_child_path(self.sftp_panel_path().as_str(), draft_name.trim());
@@ -2293,10 +2359,12 @@ impl ShellViewModel {
             };
 
             let before_len = state.entries.len();
-            state.entries.retain(|entry| !entry_ids.iter().any(|id| id == &entry.id));
-            state.selected_entry_ids.retain(|selected_id| {
-                !entry_ids.iter().any(|entry_id| entry_id == selected_id)
-            });
+            state
+                .entries
+                .retain(|entry| !entry_ids.iter().any(|id| id == &entry.id));
+            state
+                .selected_entry_ids
+                .retain(|selected_id| !entry_ids.iter().any(|entry_id| entry_id == selected_id));
             if state.entries.len() == before_len {
                 return false;
             }
@@ -2640,14 +2708,12 @@ impl ShellViewModel {
             match target_id.clone() {
                 Some(target_id)
                     if matches!(target_kind, ContextTargetKind::SftpMultiSelection)
-                        && self
-                            .active_sftp_session_state()
-                            .is_some_and(|state| {
-                                state
-                                    .selected_entry_ids
-                                    .iter()
-                                    .any(|selected_id| selected_id == &target_id)
-                            }) => {}
+                        && self.active_sftp_session_state().is_some_and(|state| {
+                            state
+                                .selected_entry_ids
+                                .iter()
+                                .any(|selected_id| selected_id == &target_id)
+                        }) => {}
                 Some(target_id) => {
                     if let Some(state) = self.active_sftp_session_state_mut() {
                         state.selected_entry_ids = vec![target_id.clone()];
@@ -3045,10 +3111,7 @@ impl ShellViewModel {
                     .iter()
                     .find(|record| record.asset_id == asset_id)
                     .map(|record| {
-                        project_card_item(
-                            record,
-                            self.is_quick_launch_favorite(asset_id.as_str()),
-                        )
+                        project_card_item(record, self.is_quick_launch_favorite(asset_id.as_str()))
                     })
             })
             .collect()
@@ -3135,7 +3198,12 @@ impl ShellViewModel {
             .into_iter()
             .next()
         })
-        .or_else(|| self.visible_group_records(records).into_iter().map(|record| record.asset_id).next())
+        .or_else(|| {
+            self.visible_group_records(records)
+                .into_iter()
+                .map(|record| record.asset_id)
+                .next()
+        })
     }
 
     fn is_quick_launch_favorite(&self, asset_id: &str) -> bool {

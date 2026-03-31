@@ -25,7 +25,10 @@ pub fn store_encrypted_cache(
     let path = cache_path_for_vault(root, vault_id);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
-            format!("failed to create vault cache directory `{}`", parent.display())
+            format!(
+                "failed to create vault cache directory `{}`",
+                parent.display()
+            )
         })?;
     }
 
@@ -48,8 +51,8 @@ pub fn load_encrypted_cache(root: &Path, vault_id: &str) -> Result<Option<Encryp
 
     let encoded = fs::read(&path)
         .with_context(|| format!("failed to read encrypted cache file `{}`", path.display()))?;
-    let record: EncryptedCacheRecord =
-        bincode::deserialize(encoded.as_slice()).context("failed to decode encrypted cache record")?;
+    let record: EncryptedCacheRecord = bincode::deserialize(encoded.as_slice())
+        .context("failed to decode encrypted cache record")?;
 
     if record.vault_id != vault_id {
         return Ok(None);
