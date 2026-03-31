@@ -1094,6 +1094,12 @@ impl ShellViewModel {
             .unwrap_or(false)
     }
 
+    pub fn active_workspace_session_enhanced_state(&self) -> &str {
+        self.active_workspace_tab()
+            .map(|tab| tab.enhanced_session_state.as_str())
+            .unwrap_or("")
+    }
+
     pub fn workspace_terminal_surface_ready(&self) -> bool {
         self.active_workspace_terminal_surface().is_some()
     }

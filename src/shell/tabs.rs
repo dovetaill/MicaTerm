@@ -1,6 +1,6 @@
 //! Workspace tab projections derived from SSH session handles.
 
-use crate::app::ssh::session_manager::{SessionHandle, SessionState};
+use crate::app::ssh::session_manager::{EnhancedSessionState, SessionHandle, SessionState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceTabKind {
@@ -15,6 +15,7 @@ pub struct WorkspaceTab {
     pub title: String,
     pub subtitle: String,
     pub state: String,
+    pub enhanced_session_state: String,
     pub error_detail: String,
     pub active: bool,
     pub kind: WorkspaceTabKind,
@@ -28,6 +29,7 @@ impl WorkspaceTab {
             title: resolve_title(&handle.title, &handle.subtitle),
             subtitle: String::new(),
             state: session_state_id(&handle.state).into(),
+            enhanced_session_state: enhanced_session_state_id(handle.enhanced_session_state).into(),
             error_detail: session_error_detail(&handle.state).into(),
             active: false,
             kind: WorkspaceTabKind::Session,
@@ -41,6 +43,7 @@ impl WorkspaceTab {
             title: "New Tab".into(),
             subtitle: String::new(),
             state: "launcher".into(),
+            enhanced_session_state: String::new(),
             error_detail: String::new(),
             active: false,
             kind: WorkspaceTabKind::Launcher,
@@ -84,6 +87,14 @@ fn session_state_id(state: &SessionState) -> &'static str {
         SessionState::Cancelled => "cancelled",
         SessionState::Disconnected => "disconnected",
         SessionState::Error(_) => "error",
+    }
+}
+
+fn enhanced_session_state_id(state: EnhancedSessionState) -> &'static str {
+    match state {
+        EnhancedSessionState::Plain => "plain",
+        EnhancedSessionState::Enhanced => "enhanced",
+        EnhancedSessionState::Fallback => "fallback",
     }
 }
 

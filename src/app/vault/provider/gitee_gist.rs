@@ -377,12 +377,12 @@ async fn ensure_success(response: reqwest::Response, operation: &str) -> Result<
     let status = response.status();
     let body = response.text().await.unwrap_or_else(|_| String::new());
 
-    if let Ok(error) = serde_json::from_str::<GiteeApiErrorDocument>(&body) {
-        if let Some(message) = error.message.or(error.error) {
-            return Err(anyhow!(
-                "Gitee gist {operation} failed with {status}: {message}"
-            ));
-        }
+    if let Ok(error) = serde_json::from_str::<GiteeApiErrorDocument>(&body)
+        && let Some(message) = error.message.or(error.error)
+    {
+        return Err(anyhow!(
+            "Gitee gist {operation} failed with {status}: {message}"
+        ));
     }
 
     if !body.trim().is_empty() {

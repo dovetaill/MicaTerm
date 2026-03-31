@@ -520,6 +520,7 @@ fn app_window_round_trips_workspace_tab_items_and_active_session() {
             title: "Prod Bastion".into(),
             subtitle: "ops@example.com:22".into(),
             state: "connected".into(),
+            enhanced_session_state: "enhanced".into(),
             active: false,
         },
         WorkspaceTabItem {
@@ -527,6 +528,7 @@ fn app_window_round_trips_workspace_tab_items_and_active_session() {
             title: "Staging Bastion".into(),
             subtitle: "ops@staging.example.com:22".into(),
             state: "error".into(),
+            enhanced_session_state: "fallback".into(),
             active: true,
         },
     ])));

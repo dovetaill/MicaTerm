@@ -100,6 +100,7 @@ export component TerminalSessionHost inherits Rectangle {
     in property <string> session-title: "";
     in property <string> session-subtitle: "";
     in property <string> session-state: "";
+    in property <string> workspace-session-enhanced-state: "plain";
     in property <string> session-error-detail: "";
     in property <bool> can-reconnect: false;
     in property <string> session-render-mode: "bitmap";
@@ -336,6 +337,20 @@ export component TerminalSessionHost inherits Rectangle {
             return "toggle-asset-search";
         }
         return "";
+    }
+
+    function show-enhancement-status() -> bool {
+        return root.session-id != "" && root.workspace-session-enhanced-state != "";
+    }
+
+    function enhancement-state-label() -> string {
+        if root.workspace-session-enhanced-state == "enhanced" {
+            return "Enhanced session active";
+        }
+        if root.workspace-session-enhanced-state == "fallback" {
+            return "Enhanced bootstrap skipped for this host";
+        }
+        return "Standard session";
     }
 
     function emit-surface-resize() {
@@ -1142,6 +1157,56 @@ export component TerminalSessionHost inherits Rectangle {
                     }
                 }
             }
+
+            if root.show-enhancement-status() : enhancement-status-card := Rectangle {
+                x: max(root.terminal-padding-left, root.width - 348px);
+                y: 12px;
+                width: 336px;
+                height: 74px;
+                border-radius: 10px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.titlebar-surface;
+
+                VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: 14px;
+                    padding-top: 10px;
+                    padding-right: 14px;
+                    padding-bottom: 10px;
+                    spacing: 8px;
+
+                    Text {
+                        text: root.enhancement-state-label();
+                        color: ThemeTokens.text-primary;
+                        font-size: 11px;
+                        font-weight: 700;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        ConnectionProgressActionButton {
+                            width: 138px;
+                            label: "Disable This Session";
+
+                            clicked => {
+                                root.local-action-requested("disable-enhanced-session");
+                            }
+                        }
+
+                        ConnectionProgressActionButton {
+                            width: 148px;
+                            label: "Disable For Host";
+
+                            clicked => {
+                                root.local-action-requested("disable-enhanced-session-host");
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1488,6 +1553,54 @@ export component TerminalSessionHost inherits Rectangle {
                 color: ThemeTokens.text-primary;
                 font-size: 12px;
                 wrap: word-wrap;
+            }
+
+            if root.show-enhancement-status() : Rectangle {
+                width: parent.width;
+                height: 70px;
+                border-radius: 10px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.titlebar-surface;
+
+                VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    padding-left: 14px;
+                    padding-top: 10px;
+                    padding-right: 14px;
+                    padding-bottom: 10px;
+                    spacing: 8px;
+
+                    Text {
+                        text: root.enhancement-state-label();
+                        color: ThemeTokens.text-primary;
+                        font-size: 11px;
+                        font-weight: 700;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        ConnectionProgressActionButton {
+                            width: 138px;
+                            label: "Disable This Session";
+
+                            clicked => {
+                                root.local-action-requested("disable-enhanced-session");
+                            }
+                        }
+
+                        ConnectionProgressActionButton {
+                            width: 148px;
+                            label: "Disable For Host";
+
+                            clicked => {
+                                root.local-action-requested("disable-enhanced-session-host");
+                            }
+                        }
+                    }
+                }
             }
         }
     }

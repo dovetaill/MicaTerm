@@ -41,6 +41,53 @@ pub enum SessionState {
     Error(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnhancedSessionState {
+    Plain,
+    Enhanced,
+    Fallback,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EnhancementCacheKey {
+    pub user: String,
+    pub host: String,
+    pub port: u16,
+    pub shell: String,
+}
+
+impl EnhancementCacheKey {
+    fn new(user: &str, host: &str, port: u16, shell: &str) -> Self {
+        Self {
+            user: user.trim().to_string(),
+            host: host.trim().to_ascii_lowercase(),
+            port,
+            shell: shell.trim().to_ascii_lowercase(),
+        }
+    }
+
+    fn from_profile(profile: &ConnectionProfile, shell: &str) -> Self {
+        Self::new(
+            profile.user.as_str(),
+            profile.host.as_str(),
+            profile.port,
+            shell,
+        )
+    }
+
+    fn matches_profile(&self, profile: &ConnectionProfile) -> bool {
+        self.user == profile.user
+            && self.host == profile.host.trim().to_ascii_lowercase()
+            && self.port == profile.port
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnhancementPolicy {
+    AutoTry,
+    SkipAutoBootstrap,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionHandle {
     pub session_id: Uuid,
@@ -49,6 +96,7 @@ pub struct SessionHandle {
     pub subtitle: String,
     pub state: SessionState,
     pub can_reconnect: bool,
+    pub enhanced_session_state: EnhancedSessionState,
 }
 
 pub trait SessionRuntimeControl: Send {
@@ -137,6 +185,7 @@ impl SessionManager {
             subtitle: format!("{}@{}:{}", profile.user, profile.host, profile.port),
             state: SessionState::Connecting,
             can_reconnect: false,
+            enhanced_session_state: EnhancedSessionState::Plain,
         };
 
         {
@@ -226,6 +275,60 @@ impl SessionManager {
             .current_working_directories
             .get(&session_id)
             .cloned()
+    }
+
+    pub fn remember_enhancement_fallback(&self, profile: &ConnectionProfile, shell: &str) {
+        let mut registry = self.registry.lock().expect("lock session registry");
+        registry
+            .enhancement_fallback_cache
+            .insert(EnhancementCacheKey::from_profile(profile, shell));
+    }
+
+    pub fn enhancement_policy_for(&self, profile: &ConnectionProfile) -> EnhancementPolicy {
+        let registry = self.registry.lock().expect("lock session registry");
+        if registry
+            .enhancement_fallback_cache
+            .iter()
+            .any(|key| key.matches_profile(profile))
+        {
+            EnhancementPolicy::SkipAutoBootstrap
+        } else {
+            EnhancementPolicy::AutoTry
+        }
+    }
+
+    pub fn disable_enhancement_for_session(&self, session_id: Uuid) -> Result<SessionHandle> {
+        let mut registry = self.registry.lock().expect("lock session registry");
+        registry.disabled_enhancement_sessions.insert(session_id);
+        let session = registry
+            .sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` does not exist"))?;
+        session.enhanced_session_state = EnhancedSessionState::Plain;
+        Ok(session.clone())
+    }
+
+    pub fn disable_enhancement_for_host(
+        &self,
+        session_id: Uuid,
+        shell: &str,
+    ) -> Result<SessionHandle> {
+        let mut registry = self.registry.lock().expect("lock session registry");
+        let profile = registry
+            .session_profiles
+            .get(&session_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("session profile is not available for `{session_id}`"))?;
+        registry
+            .enhancement_fallback_cache
+            .insert(EnhancementCacheKey::from_profile(&profile, shell));
+        registry.disabled_enhancement_sessions.insert(session_id);
+        let session = registry
+            .sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| anyhow!("session `{session_id}` does not exist"))?;
+        session.enhanced_session_state = EnhancedSessionState::Plain;
+        Ok(session.clone())
     }
 
     pub fn sftp_read_dir(&self, session_id: Uuid, path: &str) -> Result<Vec<SftpDirectoryEntry>> {
@@ -553,6 +656,7 @@ impl SessionManager {
             registry.terminal_surface_revisions.remove(&session_id);
             registry.pending_disconnects.remove(&session_id);
             registry.pending_resizes.remove(&session_id);
+            registry.disabled_enhancement_sessions.remove(&session_id);
             registry.sftp_bindings.remove(&session_id);
             let runtime_control = registry.runtime_controls.remove(&session_id);
             if registry.asset_sessions.get(&removed.asset_id) == Some(&session_id) {
@@ -702,12 +806,14 @@ struct SessionRegistry {
     asset_sessions: HashMap<String, Uuid>,
     open_order: Vec<Uuid>,
     session_profiles: HashMap<Uuid, ConnectionProfile>,
+    enhancement_fallback_cache: HashSet<EnhancementCacheKey>,
     connection_attempts: HashMap<Uuid, ConnectionAttemptState>,
     terminal_surfaces: HashMap<Uuid, TerminalSurfaceState>,
     current_working_directories: HashMap<Uuid, String>,
     terminal_surface_revisions: HashMap<Uuid, usize>,
     runtime_controls: HashMap<Uuid, Box<dyn SessionRuntimeControl>>,
     sftp_bindings: HashMap<Uuid, SftpSessionBinding>,
+    disabled_enhancement_sessions: HashSet<Uuid>,
     pending_disconnects: HashSet<Uuid>,
     pending_resizes: HashMap<Uuid, (u32, u32)>,
     theme_mode: ThemeMode,
@@ -720,12 +826,14 @@ impl Default for SessionRegistry {
             asset_sessions: HashMap::new(),
             open_order: Vec::new(),
             session_profiles: HashMap::new(),
+            enhancement_fallback_cache: HashSet::new(),
             connection_attempts: HashMap::new(),
             terminal_surfaces: HashMap::new(),
             current_working_directories: HashMap::new(),
             terminal_surface_revisions: HashMap::new(),
             runtime_controls: HashMap::new(),
             sftp_bindings: HashMap::new(),
+            disabled_enhancement_sessions: HashSet::new(),
             pending_disconnects: HashSet::new(),
             pending_resizes: HashMap::new(),
             theme_mode: ThemeMode::Dark,
@@ -779,6 +887,9 @@ fn apply_runtime_event(
         SessionRuntimeEvent::ConnectionProgress(progress_event) => {
             apply_connection_progress_event(registry, session_id, progress_event);
         }
+        SessionRuntimeEvent::EnhancedSessionStateChanged(state) => {
+            update_enhanced_session_state(registry, session_id, state);
+        }
         SessionRuntimeEvent::CurrentDirectoryChanged(path) => {
             registry
                 .lock()
@@ -824,6 +935,23 @@ fn update_connection_attempt_headline(
         .get_mut(&session_id)
     {
         attempt.headline = headline;
+    }
+}
+
+fn update_enhanced_session_state(
+    registry: &Arc<Mutex<SessionRegistry>>,
+    session_id: Uuid,
+    state: EnhancedSessionState,
+) {
+    let mut registry = registry.lock().expect("lock session registry");
+    if registry.disabled_enhancement_sessions.contains(&session_id) {
+        if let Some(session) = registry.sessions.get_mut(&session_id) {
+            session.enhanced_session_state = EnhancedSessionState::Plain;
+        }
+        return;
+    }
+    if let Some(session) = registry.sessions.get_mut(&session_id) {
+        session.enhanced_session_state = state;
     }
 }
 
@@ -1216,8 +1344,9 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        ConnectionAttemptState, ConnectionHeadlineState, SessionHandle, SessionRegistry,
-        SessionRuntimeControl, SessionRuntimeEvent, SessionState, apply_runtime_event,
+        ConnectionAttemptState, ConnectionHeadlineState, EnhancedSessionState, SessionHandle,
+        SessionRegistry, SessionRuntimeControl, SessionRuntimeEvent, SessionState,
+        apply_runtime_event,
         coalesce_surface_backlog, coalesce_surface_dirty_backlog, refresh_runtime_surface,
         terminal_surface_signature_for_registry, terminal_surface_stale, update_terminal_surface,
     };
@@ -1323,6 +1452,7 @@ mod tests {
                     subtitle: "ops@example.com:22".into(),
                     state: SessionState::Connected,
                     can_reconnect: false,
+                    enhanced_session_state: EnhancedSessionState::Plain,
                 },
             );
             registry_guard.connection_attempts.insert(
@@ -1374,6 +1504,7 @@ mod tests {
                     subtitle: "ops@example.com:22".into(),
                     state: SessionState::Connected,
                     can_reconnect: false,
+                    enhanced_session_state: EnhancedSessionState::Plain,
                 },
             );
             registry_guard.connection_attempts.insert(

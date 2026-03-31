@@ -20,8 +20,10 @@ use mica_term::app::ssh::runtime::{
     TerminalMouseEventKind, TerminalMouseInput, TerminalSession, TerminalSurfaceState,
     UnknownHostKeyError, negotiated_terminal_environment,
 };
+use mica_term::app::ssh::shell_integration::runtime_shell_events;
 use mica_term::app::ssh::session_manager::{
-    OpenSessionMode, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher, SessionState,
+    EnhancedSessionState, OpenSessionMode, SessionManager, SessionRuntimeControl,
+    SessionRuntimeLauncher, SessionState,
 };
 use russh::keys::PrivateKey;
 use russh::keys::ssh_key::rand_core::OsRng;
@@ -33,6 +35,8 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
+const BOOTSTRAP_ACK_ACCEPTED: &str = "__MICA_TERM_BOOTSTRAP_OK__";
+const BOOTSTRAP_ACK_REJECTED: &str = "__MICA_TERM_BOOTSTRAP_REJECT__";
 
 fn lock_known_hosts_env() -> std::sync::MutexGuard<'static, ()> {
     KNOWN_HOSTS_ENV_LOCK
@@ -94,6 +98,9 @@ struct DelayedInteractiveTrackingLauncher {
     state: InteractiveTrackingState,
     ready_delay: Duration,
 }
+
+#[derive(Clone, Default)]
+struct EnhancedStateLauncher;
 
 #[derive(Clone)]
 struct TrackingRuntimeControl {
@@ -242,6 +249,34 @@ impl DelayedTrackingLauncher {
 impl DelayedInteractiveTrackingLauncher {
     fn new(state: InteractiveTrackingState, ready_delay: Duration) -> Self {
         Self { state, ready_delay }
+    }
+}
+
+impl SessionRuntimeLauncher for EnhancedStateLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: Uuid,
+        _attempt_id: Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::EnhancedSessionStateChanged(
+                EnhancedSessionState::Enhanced,
+            ));
+            Ok(Box::new(TrackingRuntimeControl {
+                disconnects: Arc::new(AtomicUsize::new(0)),
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
     }
 }
 
@@ -754,7 +789,30 @@ struct InteractiveTestServer {
     auth_key: russh::keys::PublicKey,
     shell_ready_delay: Duration,
     direct_tcpip_behavior: DirectTcpipBehavior,
+    shell_integration_behavior: ShellIntegrationServerBehavior,
     state: InteractiveServerState,
+}
+
+#[derive(Clone)]
+struct ShellIntegrationServerBehavior {
+    shell_path: String,
+    bootstrap_reply: BootstrapReply,
+}
+
+impl Default for ShellIntegrationServerBehavior {
+    fn default() -> Self {
+        Self {
+            shell_path: "/bin/bash".into(),
+            bootstrap_reply: BootstrapReply::Accept,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+enum BootstrapReply {
+    #[default]
+    Accept,
+    Reject,
 }
 
 #[derive(Clone, Default)]
@@ -763,6 +821,15 @@ struct InteractiveServerState {
     environment_requests: Arc<Mutex<Vec<(String, String)>>>,
     request_order: Arc<Mutex<Vec<String>>>,
     direct_tcpip_requests: Arc<Mutex<Vec<(String, u16)>>>,
+    exec_requests: Arc<Mutex<Vec<String>>>,
+    shell_inputs: Arc<Mutex<Vec<String>>>,
+    bootstrap_attempts: Arc<AtomicUsize>,
+}
+
+impl InteractiveServerState {
+    fn bootstrap_attempts(&self) -> usize {
+        self.bootstrap_attempts.load(Ordering::SeqCst)
+    }
 }
 
 impl server::Server for InteractiveTestServer {
@@ -859,6 +926,52 @@ impl server::Handler for InteractiveTestServer {
         Ok(())
     }
 
+    async fn exec_request(
+        &mut self,
+        channel: ChannelId,
+        data: &[u8],
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.state
+            .exec_requests
+            .lock()
+            .expect("lock exec requests")
+            .push(String::from_utf8_lossy(data).into_owned());
+        let _ = session.channel_success(channel);
+        session.data(
+            channel,
+            format!("{}\n", self.shell_integration_behavior.shell_path).into_bytes(),
+        )?;
+        session.eof(channel)?;
+        session.close(channel)?;
+        Ok(())
+    }
+
+    async fn data(
+        &mut self,
+        channel: ChannelId,
+        data: &[u8],
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let text = String::from_utf8_lossy(data).into_owned();
+        self.state
+            .shell_inputs
+            .lock()
+            .expect("lock shell inputs")
+            .push(text.clone());
+
+        if text.contains("MICA_TERM_ENHANCED=1") {
+            self.state.bootstrap_attempts.fetch_add(1, Ordering::SeqCst);
+            let ack = match self.shell_integration_behavior.bootstrap_reply {
+                BootstrapReply::Accept => BOOTSTRAP_ACK_ACCEPTED,
+                BootstrapReply::Reject => BOOTSTRAP_ACK_REJECTED,
+            };
+            session.data(channel, format!("{ack}\n").into_bytes())?;
+        }
+
+        Ok(())
+    }
+
     async fn channel_open_direct_tcpip(
         &mut self,
         channel: Channel<server::Msg>,
@@ -940,6 +1053,7 @@ async fn spawn_publickey_server_with_auth_key(
     auth_key: russh::keys::PublicKey,
     shell_ready_delay: Duration,
     direct_tcpip_behavior: DirectTcpipBehavior,
+    shell_integration_behavior: ShellIntegrationServerBehavior,
 ) -> (
     tokio::task::JoinHandle<()>,
     std::net::SocketAddr,
@@ -964,6 +1078,7 @@ async fn spawn_publickey_server_with_auth_key(
         auth_key,
         shell_ready_delay,
         direct_tcpip_behavior,
+        shell_integration_behavior,
         state: state.clone(),
     };
 
@@ -991,9 +1106,63 @@ async fn spawn_publickey_shell_server(
         client_public,
         shell_ready_delay,
         DirectTcpipBehavior::default(),
+        ShellIntegrationServerBehavior::default(),
     )
     .await;
     (join, addr, private_key_path, server_public, state)
+}
+
+async fn spawn_publickey_shell_server_with_integration(
+    shell_ready_delay: Duration,
+    shell_path: &str,
+    bootstrap_reply: BootstrapReply,
+) -> (
+    tokio::task::JoinHandle<()>,
+    std::net::SocketAddr,
+    std::path::PathBuf,
+    russh::keys::PublicKey,
+    InteractiveServerState,
+) {
+    let (client_public, private_key_path) = create_publickey_auth_material("client");
+    let (join, addr, server_public, state) = spawn_publickey_server_with_auth_key(
+        client_public,
+        shell_ready_delay,
+        DirectTcpipBehavior::default(),
+        ShellIntegrationServerBehavior {
+            shell_path: shell_path.into(),
+            bootstrap_reply,
+        },
+    )
+    .await;
+    (join, addr, private_key_path, server_public, state)
+}
+
+fn collect_enhancement_states(
+    runtime: &AppAsyncRuntime,
+    event_rx: &mut mpsc::UnboundedReceiver<SessionRuntimeEvent>,
+) -> Vec<EnhancedSessionState> {
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            let mut states = Vec::new();
+            while let Some(event) = event_rx.recv().await {
+                if let SessionRuntimeEvent::EnhancedSessionStateChanged(state) = event {
+                    states.push(state);
+                    break;
+                }
+            }
+            states
+        })
+        .await
+        .expect("wait for enhancement state event")
+    })
+}
+
+fn apply_output_and_snapshot(bytes: &[u8]) -> TerminalSurfaceState {
+    let session_id = Uuid::new_v4();
+    let parsed = runtime_shell_events(bytes);
+    let mut terminal = TerminalSession::new(24, 80);
+    terminal.apply_remote_bytes(&parsed.sanitized_bytes);
+    terminal.surface_state(session_id)
 }
 
 async fn spawn_fake_socks5_server(
@@ -1417,6 +1586,41 @@ fn session_manager_creates_connecting_session_handle() {
     assert_eq!(handle.title, "Prod Bastion");
     assert_eq!(handle.subtitle, "ops@example.com:22");
     assert_eq!(handle.state, SessionState::Connecting);
+}
+
+#[test]
+fn runtime_does_not_leave_private_control_sequences_in_visible_terminal_rows() {
+    let surface = apply_output_and_snapshot(
+        "\u{1b}]9001;mterm;open;/tmp/readme.md\u{7}\r\nprompt$ ".as_bytes(),
+    );
+
+    assert!(
+        surface
+            .visible_lines
+            .iter()
+            .all(|line| !line.contains("9001;mterm"))
+    );
+}
+
+#[test]
+fn session_manager_tracks_enhanced_remote_session_state_changes() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let manager =
+        SessionManager::new_with_launcher(runtime.handle(), Arc::new(EnhancedStateLauncher));
+
+    let handle = manager
+        .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    let session = manager
+        .session(handle.session_id)
+        .expect("session should remain registered");
+
+    assert_eq!(session.enhanced_session_state, EnhancedSessionState::Enhanced);
 }
 
 #[test]
@@ -1890,6 +2094,126 @@ fn ssh_runtime_negotiates_truecolor_environment_before_requesting_shell() {
 }
 
 #[test]
+fn ssh_runtime_attempts_supported_shell_bootstrap_once() {
+    let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, addr, private_key_path, server_public_key, server_state) =
+        runtime.block_on(async {
+            spawn_publickey_shell_server_with_integration(
+                Duration::from_millis(10),
+                "/bin/bash",
+                BootstrapReply::Accept,
+            )
+            .await
+        });
+    let known_hosts_path = temp_known_hosts_path("enhanced-shell-bootstrap-once");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(
+            addr.ip().to_string().as_str(),
+            addr.port(),
+            &server_public_key,
+        )
+        .expect("trust test server host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let runtime_handle = runtime.block_on(async {
+        SshSessionRuntime::connect(
+            sample_publickey_profile(
+                "asset-prod",
+                addr.ip().to_string(),
+                addr.port(),
+                private_key_path.display().to_string(),
+            ),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            event_tx,
+        )
+        .await
+        .expect("connect runtime")
+    });
+
+    let states = collect_enhancement_states(&runtime, &mut event_rx);
+
+    assert_eq!(states, vec![EnhancedSessionState::Enhanced]);
+    assert_eq!(server_state.bootstrap_attempts(), 1);
+
+    runtime_handle.disconnect().expect("disconnect runtime");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        server_task.await.expect("join test ssh server");
+    });
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+}
+
+#[test]
+fn ssh_runtime_marks_session_fallback_after_failed_bootstrap_without_retry() {
+    let _env_lock = KNOWN_HOSTS_ENV_LOCK.lock().expect("lock known_hosts env");
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let (server_task, addr, private_key_path, server_public_key, server_state) =
+        runtime.block_on(async {
+            spawn_publickey_shell_server_with_integration(
+                Duration::from_millis(10),
+                "/bin/bash",
+                BootstrapReply::Reject,
+            )
+            .await
+        });
+    let known_hosts_path = temp_known_hosts_path("enhanced-shell-bootstrap-fallback");
+    let known_hosts = KnownHostsService::new(&known_hosts_path);
+    known_hosts
+        .accept_unknown(
+            addr.ip().to_string().as_str(),
+            addr.port(),
+            &server_public_key,
+        )
+        .expect("trust test server host key");
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let runtime_handle = runtime.block_on(async {
+        SshSessionRuntime::connect(
+            sample_publickey_profile(
+                "asset-prod",
+                addr.ip().to_string(),
+                addr.port(),
+                private_key_path.display().to_string(),
+            ),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            event_tx,
+        )
+        .await
+        .expect("connect runtime")
+    });
+
+    let states = collect_enhancement_states(&runtime, &mut event_rx);
+
+    assert_eq!(states, vec![EnhancedSessionState::Fallback]);
+    assert_eq!(server_state.bootstrap_attempts(), 1);
+
+    runtime_handle.disconnect().expect("disconnect runtime");
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        server_task.await.expect("join test ssh server");
+    });
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+    let _ = fs::remove_file(&private_key_path);
+    let _ = fs::remove_file(&known_hosts_path);
+}
+
+#[test]
 fn ssh_runtime_connects_through_unauthenticated_socks5_proxy() {
     let _env_lock = lock_known_hosts_env();
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
@@ -2315,6 +2639,7 @@ fn ssh_runtime_connects_through_single_direct_tcpip_upstream() {
             client_public.clone(),
             Duration::from_millis(10),
             DirectTcpipBehavior::default(),
+            ShellIntegrationServerBehavior::default(),
         )
         .await
     });
@@ -2332,6 +2657,7 @@ fn ssh_runtime_connects_through_single_direct_tcpip_upstream() {
                     }],
                     reject_requests: false,
                 },
+                ShellIntegrationServerBehavior::default(),
             )
             .await
         });
@@ -2426,6 +2752,7 @@ fn multi_hop_connection_emits_timeline_steps_in_order() {
             client_public.clone(),
             Duration::from_millis(10),
             DirectTcpipBehavior::default(),
+            ShellIntegrationServerBehavior::default(),
         )
         .await
     });
@@ -2446,6 +2773,7 @@ fn multi_hop_connection_emits_timeline_steps_in_order() {
                     }],
                     reject_requests: false,
                 },
+                ShellIntegrationServerBehavior::default(),
             )
             .await
         });
@@ -2462,6 +2790,7 @@ fn multi_hop_connection_emits_timeline_steps_in_order() {
                     }],
                     reject_requests: false,
                 },
+                ShellIntegrationServerBehavior::default(),
             )
             .await
         });
@@ -2629,6 +2958,7 @@ fn multi_hop_connection_failure_is_reported_on_the_failing_hop() {
             client_public.clone(),
             Duration::from_millis(10),
             DirectTcpipBehavior::default(),
+            ShellIntegrationServerBehavior::default(),
         )
         .await
     });
@@ -2642,6 +2972,7 @@ fn multi_hop_connection_failure_is_reported_on_the_failing_hop() {
                     routes: Vec::new(),
                     reject_requests: true,
                 },
+                ShellIntegrationServerBehavior::default(),
             )
             .await
         });
