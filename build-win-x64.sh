@@ -53,9 +53,10 @@ esac
 echo "==> Windows wrapper target: $TARGET"
 export TARGET
 export CARGO_NO_DEFAULT_FEATURES=1
-export CARGO_FEATURES="slint-renderer-skia,terminal-native-renderer"
+export CARGO_FEATURES="slint-renderer-skia"
 export MICA_TERM_BUILD_FLAVOR="windows-mainline"
 export MICA_TERM_PACKAGE_RENDERER="skia-software"
+export MICA_TERM_PACKAGE_TERMINAL_RENDERER="bitmap"
 export PACKAGE_FLAVOR_SUFFIX="-skia"
 
 exec "$ROOT_DIR/build-desktop.sh" "$@"

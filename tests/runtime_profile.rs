@@ -31,9 +31,13 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
     assert!(content.contains("pub fn packaged() -> Self"));
     assert!(content.contains("option_env!(\"MICA_TERM_BUILD_FLAVOR\")"));
     assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_RENDERER\")"));
+    assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_TERMINAL_RENDERER\")"));
     assert!(content.contains("WindowsSoftwareCompat"));
     assert!(content.contains("SkiaSoftware"));
     assert!(content.contains("Software"));
+    assert!(content.contains("Some(\"bitmap\")"));
+    assert!(content.contains("Self::mainline()"));
+    assert!(content.contains("Self::mainline_native()"));
 }
 
 #[test]

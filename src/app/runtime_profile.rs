@@ -72,9 +72,15 @@ impl AppRuntimeProfile {
         match (
             option_env!("MICA_TERM_BUILD_FLAVOR"),
             option_env!("MICA_TERM_PACKAGE_RENDERER"),
+            option_env!("MICA_TERM_PACKAGE_TERMINAL_RENDERER"),
         ) {
-            (Some("windows-mainline"), Some("skia-software")) => Self::mainline_native(),
-            (Some("windows-software-compat"), Some("software")) => Self::software_compat(),
+            (Some("windows-mainline"), Some("skia-software"), Some("native")) => {
+                Self::mainline_native()
+            }
+            (Some("windows-mainline"), Some("skia-software"), Some("bitmap") | None) => {
+                Self::mainline()
+            }
+            (Some("windows-software-compat"), Some("software"), _) => Self::software_compat(),
             _ => Self::development(),
         }
     }
