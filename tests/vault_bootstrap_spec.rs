@@ -277,6 +277,11 @@ fn seed_locked_vault_runtime(
             wrapped_vault_key,
             kdf: sample_vault_kdf(),
             current_revision: Some("rev-0001".into()),
+            local_snapshot_hash: Some(format!("sha256:{}", encrypted.payload_sha256)),
+            last_local_change_at: Some("2026-03-31T10:00:00Z".into()),
+            last_successful_push_at: None,
+            last_successful_pull_at: None,
+            last_sync_error: None,
         },
     )
     .expect("save local bootstrap state");

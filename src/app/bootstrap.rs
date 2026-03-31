@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use directories::ProjectDirs;
@@ -4103,6 +4103,17 @@ fn next_vault_revision(current_revision: Option<&str>) -> String {
     format!("rev-{next_number:04}")
 }
 
+fn current_sync_timestamp() -> String {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{:020}", elapsed.as_millis())
+}
+
+fn payload_hash_from_encrypted_snapshot_sha(payload_sha256: &str) -> String {
+    format!("sha256:{payload_sha256}")
+}
+
 fn update_vault_panel_for_local_state(state: &mut ShellViewModel, vault: &VaultSessionState) {
     let panel = state.vault_panel_state_mut();
     match (&vault.local_state, vault.unlocked_vault_key.is_some()) {
@@ -4599,6 +4610,7 @@ fn create_local_vault_from_shell_state(
         &UiPreferences::from(&*state),
     )?;
     let encrypted_snapshot = encrypt_snapshot(&snapshot, &vault_key)?;
+    let bootstrap_created_at = current_sync_timestamp();
     store_encrypted_cache(
         vault.cache_root().as_path(),
         &bundle.vault_id,
@@ -4609,6 +4621,13 @@ fn create_local_vault_from_shell_state(
         wrapped_vault_key,
         kdf: kdf.clone(),
         current_revision: None,
+        local_snapshot_hash: Some(payload_hash_from_encrypted_snapshot_sha(
+            &encrypted_snapshot.payload_sha256,
+        )),
+        last_local_change_at: Some(bootstrap_created_at),
+        last_successful_push_at: None,
+        last_successful_pull_at: None,
+        last_sync_error: None,
     };
     save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
     persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
@@ -4658,6 +4677,7 @@ fn recover_local_vault_from_primary_remote(
         .context("failed to decode wrapped vault key from remote head")?;
     let vault_key = unwrap_vault_key(password, &wrapped)?;
     let snapshot = decrypt_snapshot(&remote_revision.encrypted_snapshot, &vault_key)?;
+    let recovery_pulled_at = current_sync_timestamp();
     bundle.vault_id = remote_head.vault_id.clone();
     store_encrypted_cache(
         vault.cache_root().as_path(),
@@ -4669,6 +4689,11 @@ fn recover_local_vault_from_primary_remote(
         wrapped_vault_key: remote_head.wrapped_vault_key.clone(),
         kdf: remote_head.kdf.clone(),
         current_revision: Some(remote_head.vault_revision.clone()),
+        local_snapshot_hash: Some(remote_head.payload_hash.clone()),
+        last_local_change_at: None,
+        last_successful_push_at: None,
+        last_successful_pull_at: Some(recovery_pulled_at),
+        last_sync_error: None,
     };
     save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
     persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
@@ -4749,8 +4774,23 @@ fn unlock_local_vault_into_shell(
         vault.known_hosts_path().as_path(),
     )?;
     persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
+    let cached_snapshot_hash =
+        payload_hash_from_encrypted_snapshot_sha(&encrypted_snapshot.payload_sha256);
+    let bootstrap_state_path = vault.bootstrap_state_path();
     vault.unlocked_vault_key = Some(vault_key);
     vault.decrypted_snapshot = Some(snapshot);
+    if let Some(local_state) = vault.local_state.as_mut() {
+        let needs_save = local_state.local_snapshot_hash.as_deref()
+            != Some(cached_snapshot_hash.as_str())
+            || local_state.last_sync_error.is_some();
+        if needs_save {
+            local_state.local_snapshot_hash = Some(cached_snapshot_hash);
+        }
+        local_state.last_sync_error = None;
+        if needs_save {
+            save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
+        }
+    }
     update_vault_panel_for_local_state(state, vault);
     update_sync_modal_for_local_state(state, vault);
     Ok(())
@@ -4783,6 +4823,7 @@ fn sync_local_vault(
     credential_store: &dyn CredentialStore,
 ) -> Result<()> {
     let known_hosts_path = vault.known_hosts_path();
+    let bootstrap_state_path = vault.bootstrap_state_path();
     let cache_root = vault.cache_root();
     let local_state = vault
         .local_state
@@ -4839,7 +4880,8 @@ fn sync_local_vault(
         next_revision: next_vault_revision(current_revision.as_deref()),
         parent_revision: current_revision,
         device_id: "local-device".into(),
-        created_at: "2026-03-28T00:00:00Z".into(),
+        committed_at: current_sync_timestamp(),
+        committed_by_device: "local-device".into(),
         wrapped_vault_key,
         kdf,
         provider_kind: primary_remote.provider,
@@ -4859,6 +4901,10 @@ fn sync_local_vault(
                 &report.encrypted_snapshot,
             )?;
             local_state.current_revision = Some(report.primary_revision.clone());
+            local_state.local_snapshot_hash = Some(report.head.payload_hash.clone());
+            local_state.last_successful_push_at = Some(report.head.committed_at.clone());
+            local_state.last_sync_error = None;
+            save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
             vault.decrypted_snapshot = Some(snapshot);
             update_vault_panel_for_local_state(state, vault);
             update_sync_modal_for_local_state(state, vault);
@@ -4888,6 +4934,11 @@ fn sync_local_vault(
             Ok(())
         }
         Err(err) => {
+            let bootstrap_state_path = vault.bootstrap_state_path();
+            if let Some(local_state) = vault.local_state.as_mut() {
+                local_state.last_sync_error = Some(err.to_string());
+                save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
+            }
             update_vault_panel_for_local_state(state, vault);
             update_sync_modal_for_local_state(state, vault);
             state.vault_panel_state_mut().primary_status_label = match &err {
@@ -4966,6 +5017,7 @@ fn refresh_local_vault_from_primary_remote_if_changed(
 
     let bootstrap_state_path = vault.bootstrap_state_path();
     let cache_root = vault.cache_root();
+    let pulled_at = current_sync_timestamp();
     let local_state = vault
         .local_state
         .as_mut()
@@ -4973,6 +5025,9 @@ fn refresh_local_vault_from_primary_remote_if_changed(
     local_state.wrapped_vault_key = remote_head.wrapped_vault_key.clone();
     local_state.kdf = remote_head.kdf.clone();
     local_state.current_revision = Some(remote_head.vault_revision.clone());
+    local_state.local_snapshot_hash = Some(remote_head.payload_hash.clone());
+    local_state.last_successful_pull_at = Some(pulled_at);
+    local_state.last_sync_error = None;
     save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
     store_encrypted_cache(
         cache_root.as_path(),
@@ -5000,12 +5055,23 @@ fn vault_auto_sync_ready(vault: &VaultSessionState) -> bool {
 
 fn mark_local_vault_dirty_and_arm_auto_sync(
     state: &mut ShellViewModel,
-    vault: &VaultSessionState,
+    vault: &mut VaultSessionState,
     scheduler: &Rc<RefCell<VaultSyncSchedulerState>>,
     auto_sync_timer: &Rc<Timer>,
     run_sync: Rc<dyn Fn(VaultSyncTrigger)>,
 ) {
     scheduler.borrow_mut().dirty = true;
+    let bootstrap_state_path = vault.bootstrap_state_path();
+    if let Some(local_state) = vault.local_state.as_mut() {
+        local_state.last_local_change_at = Some(current_sync_timestamp());
+        if let Err(err) = save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state) {
+            tracing::error!(
+                target: "app.vault",
+                error = %err,
+                "failed to persist local vault sync metadata after local mutation"
+            );
+        }
+    }
     state.sync_modal_state_mut().status_text =
         "Local changes queued for sync when the vault is ready.".into();
 
@@ -6792,10 +6858,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 );
             }
             save_asset_catalog_if_available(&asset_repo_ref, &state);
-            let vault = vault_session_ref.borrow();
+            let mut vault = vault_session_ref.borrow_mut();
             mark_local_vault_dirty_and_arm_auto_sync(
                 &mut state,
-                &vault,
+                &mut vault,
                 &vault_sync_scheduler_ref,
                 &vault_auto_sync_timer_ref,
                 Rc::clone(&run_vault_sync_ref),
@@ -6829,10 +6895,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let did_mutate = state.confirm_asset_modal();
         if did_mutate {
             save_asset_catalog_if_available(&asset_repo_ref, &state);
-            let vault = vault_session_ref.borrow();
+            let mut vault = vault_session_ref.borrow_mut();
             mark_local_vault_dirty_and_arm_auto_sync(
                 &mut state,
-                &vault,
+                &mut vault,
                 &vault_sync_scheduler_ref,
                 &vault_auto_sync_timer_ref,
                 Rc::clone(&run_vault_sync_ref),
@@ -6856,10 +6922,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let did_mutate = state.confirm_delete_asset();
         if did_mutate {
             save_asset_catalog_if_available(&asset_repo_ref, &state);
-            let vault = vault_session_ref.borrow();
+            let mut vault = vault_session_ref.borrow_mut();
             mark_local_vault_dirty_and_arm_auto_sync(
                 &mut state,
-                &vault,
+                &mut vault,
                 &vault_sync_scheduler_ref,
                 &vault_auto_sync_timer_ref,
                 Rc::clone(&run_vault_sync_ref),
@@ -7129,10 +7195,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             save_asset_catalog_if_available(&asset_repo_ref, &state);
         }
         if did_mutate {
-            let vault = vault_session_ref.borrow();
+            let mut vault = vault_session_ref.borrow_mut();
             mark_local_vault_dirty_and_arm_auto_sync(
                 &mut state,
-                &vault,
+                &mut vault,
                 &vault_sync_scheduler_ref,
                 &vault_auto_sync_timer_ref,
                 Rc::clone(&run_vault_sync_ref),

@@ -1821,7 +1821,8 @@ fn sample_remote_revision_for_tree(
         vault_revision: revision.into(),
         parent_revision: Some("rev-0003".into()),
         device_id: "device-remote".into(),
-        created_at: "2026-03-31T10:00:00Z".into(),
+        committed_at: "2026-03-31T10:00:00Z".into(),
+        committed_by_device: "device-remote".into(),
         payload_hash: format!("sha256:{}", encrypted_snapshot.payload_sha256),
         manifest_ref: format!("bundle/{revision}/manifest.bin"),
         wrapped_vault_key: serde_json::to_string(
@@ -2328,6 +2329,11 @@ fn unlocking_existing_vault_restores_cached_snapshot_without_loading_while_locke
             wrapped_vault_key,
             kdf: sample_vault_kdf(),
             current_revision: Some("rev-0001".into()),
+            local_snapshot_hash: Some(format!("sha256:{}", encrypted.payload_sha256)),
+            last_local_change_at: Some("2026-03-31T10:00:00Z".into()),
+            last_successful_push_at: None,
+            last_successful_pull_at: None,
+            last_sync_error: None,
         },
     )
     .unwrap();

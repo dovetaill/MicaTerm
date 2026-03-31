@@ -33,7 +33,8 @@ fn sample_remote_head(revision: &str) -> VaultHead {
         vault_revision: revision.into(),
         parent_revision: Some("rev-0000".into()),
         device_id: "device-a".into(),
-        created_at: "2026-03-28T09:00:00Z".into(),
+        committed_at: "2026-03-28T09:00:00Z".into(),
+        committed_by_device: "device-a".into(),
         payload_hash: "sha256:payload-prev".into(),
         manifest_ref: format!("manifest/{revision}.bin"),
         wrapped_vault_key: "wrapped-key-prev".into(),
@@ -51,7 +52,8 @@ fn sample_request(next_revision: &str, parent_revision: Option<&str>) -> SyncReq
         next_revision: next_revision.into(),
         parent_revision: parent_revision.map(ToOwned::to_owned),
         device_id: "device-b".into(),
-        created_at: "2026-03-28T10:00:00Z".into(),
+        committed_at: "2026-03-28T10:00:00Z".into(),
+        committed_by_device: "device-b".into(),
         wrapped_vault_key: "wrapped-key-next".into(),
         kdf: sample_kdf(),
         provider_kind: ProviderKind::S3Compatible,
@@ -267,4 +269,22 @@ fn sync_engine_embeds_recovery_metadata_into_written_manifest() {
             .get("snapshot.payload_sha256"),
         Some(&result.encrypted_snapshot.payload_sha256)
     );
+}
+
+#[test]
+fn sync_engine_writes_committed_metadata_instead_of_legacy_created_at() {
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let engine = SyncEngine::new(primary.clone() as Arc<dyn VaultProvider>, Vec::new());
+
+    let result = engine
+        .sync(sample_request("rev-0001", None))
+        .expect("initial sync should succeed against an empty head");
+
+    assert_eq!(result.head.committed_at, "2026-03-28T10:00:00Z");
+    assert_eq!(result.head.committed_by_device, "device-b");
+    let encoded = serde_json::to_value(&result.head).expect("serialize written head");
+    assert!(encoded.get("created_at").is_none());
 }

@@ -53,7 +53,10 @@ pub struct VaultHead {
     pub vault_revision: String,
     pub parent_revision: Option<String>,
     pub device_id: String,
-    pub created_at: String,
+    #[serde(alias = "created_at")]
+    pub committed_at: String,
+    #[serde(default)]
+    pub committed_by_device: String,
     pub payload_hash: String,
     pub manifest_ref: String,
     pub wrapped_vault_key: String,

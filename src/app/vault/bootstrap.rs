@@ -36,6 +36,16 @@ pub struct LocalVaultBootstrapState {
     pub wrapped_vault_key: String,
     pub kdf: KdfConfig,
     pub current_revision: Option<String>,
+    #[serde(default)]
+    pub local_snapshot_hash: Option<String>,
+    #[serde(default)]
+    pub last_local_change_at: Option<String>,
+    #[serde(default)]
+    pub last_successful_push_at: Option<String>,
+    #[serde(default)]
+    pub last_successful_pull_at: Option<String>,
+    #[serde(default)]
+    pub last_sync_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
