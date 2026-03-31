@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 
-const GLYPH_COVERAGE_GAMMA: f32 = 0.82;
-const GLYPH_ALPHA_GAIN: f32 = 1.26;
+const GLYPH_COVERAGE_GAMMA: f32 = 1.0;
+const GLYPH_ALPHA_GAIN: f32 = 1.0;
 const SYNTHETIC_EMBOLDEN_STRENGTH: f32 = 0.46;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -74,15 +74,15 @@ mod tests {
     use super::{apply_synthetic_embolden, map_glyph_coverage_to_alpha};
 
     #[test]
-    fn glyph_coverage_mapping_lifts_mid_tone_alpha() {
+    fn glyph_coverage_mapping_keeps_regular_weight_edges_close_to_source_coverage() {
         assert_eq!(map_glyph_coverage_to_alpha(1.0), 255);
         assert!(
-            map_glyph_coverage_to_alpha(0.5) >= 180,
-            "regular-weight stems should get a visibly stronger alpha curve than the raw coverage value"
+            map_glyph_coverage_to_alpha(0.5) <= 140,
+            "regular-weight grayscale coverage should stay close to the source mask instead of inflating edge alpha and making glyphs look soft"
         );
         assert!(
-            map_glyph_coverage_to_alpha(0.2) > 70,
-            "low-coverage anti-aliased edge pixels should stay visible instead of fading out too aggressively"
+            map_glyph_coverage_to_alpha(0.2) <= 60,
+            "low-coverage anti-aliased edge pixels should not be boosted so much that thin stems start glowing"
         );
     }
 

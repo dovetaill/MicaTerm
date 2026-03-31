@@ -77,27 +77,27 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
     );
     assert!(
         font_backend_source.contains("pub(crate) fn apply_synthetic_embolden"),
-        "font backend should expose a shared synthetic embolden helper for regular-weight terminal glyphs"
+        "font backend should expose a shared synthetic embolden helper for explicit bold terminal glyphs"
     );
     assert!(
         atlas_source.contains("map_glyph_coverage_to_alpha"),
         "atlas renderer should route glyph coverage through the shared coverage mapping helper"
     );
     assert!(
-        atlas_source.contains("apply_synthetic_embolden(&mut alpha"),
-        "atlas renderer should apply the shared embolden pass to its mono alpha mask"
+        atlas_source.contains("apply_synthetic_embolden(&mut bold_alpha"),
+        "atlas renderer should reserve synthetic embolden for explicit bold glyph rendering instead of softening every regular cell"
     );
     assert!(
         dwrite_source.contains("map_glyph_coverage_to_alpha"),
         "native font rasterization should route glyph coverage through the shared coverage mapping helper"
     );
     assert!(
-        dwrite_source.contains("apply_synthetic_embolden(&mut coverage"),
-        "native font rasterization should apply the same embolden pass as the bitmap atlas path"
+        dwrite_source.contains("if request.bold"),
+        "native font rasterization should only apply synthetic embolden when the shaped run requests bold text"
     );
     assert!(
-        font_backend_source.contains("const GLYPH_ALPHA_GAIN: f32 = 1.26;"),
-        "shared glyph coverage gain should be stronger than the previous lighter-weight default"
+        font_backend_source.contains("const GLYPH_ALPHA_GAIN: f32 = 1.0;"),
+        "shared glyph coverage gain should stay neutral for regular text so grayscale edges remain crisp"
     );
     assert!(
         font_backend_source.contains("const SYNTHETIC_EMBOLDEN_STRENGTH: f32 = 0.46;"),

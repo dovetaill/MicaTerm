@@ -598,8 +598,6 @@ fn rasterize_mono_cluster_sprite(
             alpha[mask_index] = alpha[mask_index].max(next_alpha);
         });
     }
-    apply_synthetic_embolden(&mut alpha, width as u32, height as u32);
-
     CachedClusterSprite::MonoAlpha {
         width: width as u32,
         height: height as u32,

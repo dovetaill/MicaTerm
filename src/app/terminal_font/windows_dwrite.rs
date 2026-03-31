@@ -83,7 +83,6 @@ impl DirectWriteFontSystem {
                 *pixel = map_glyph_coverage_to_alpha(value);
             }
         });
-        apply_synthetic_embolden(&mut coverage, width_px, height_px);
         if request.bold {
             apply_synthetic_embolden(&mut coverage, width_px, height_px);
         }
