@@ -175,6 +175,7 @@ export component TerminalSessionHost inherits Rectangle {
     callback welcome-quick-launch-connect-in-new-tab-requested(string);
     callback welcome-quick-launch-toggle-favorite-requested(string);
     callback welcome-quick-launch-reveal-in-assets-requested(string);
+    callback welcome-open-saved-ssh-requested();
 
     private property <length> terminal-font-size: 16px;
     private property <length> terminal-cell-width: max(1px, root.session-cell-width);
@@ -589,6 +590,10 @@ export component TerminalSessionHost inherits Rectangle {
 
         reveal-in-assets-requested(asset-id) => {
             root.welcome-quick-launch-reveal-in-assets-requested(asset-id);
+        }
+
+        open-saved-ssh-requested => {
+            root.welcome-open-saved-ssh-requested();
         }
     }
 

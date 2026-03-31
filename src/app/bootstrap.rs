@@ -39,6 +39,9 @@ use crate::app::keychain::{
     KeychainNodePayload, derive_public_key_material_from_private_key,
     derive_public_key_material_from_public_key, resolve_saved_ssh_profile,
 };
+use crate::app::quick_launch_preferences::{
+    QuickLaunchPreferences, QuickLaunchPreferencesStore, retain_known_ssh_asset_ids,
+};
 use crate::app::runtime_profile::{AppRuntimeProfile, TerminalRenderMode};
 use crate::app::sftp::{SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode};
 use crate::app::ssh::connection_progress::{
@@ -64,17 +67,14 @@ use crate::app::ssh::session_manager::{
     SessionState,
 };
 use crate::app::terminal_atlas::TerminalAtlasSelection;
+#[cfg(all(target_os = "windows", feature = "terminal-native-renderer"))]
+use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_presenter::{
     BitmapAtlasPresenter, NativeTerminalFrame, PresentedTerminalFrame, TerminalPresentationOptions,
     TerminalPresenter,
 };
 use crate::app::terminal_renderer::{NativeTerminalSurface, NativeTerminalSurfaceRect};
-#[cfg(all(target_os = "windows", feature = "terminal-native-renderer"))]
-use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
-use crate::app::quick_launch_preferences::{
-    QuickLaunchPreferences, QuickLaunchPreferencesStore, retain_known_ssh_asset_ids,
-};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
@@ -89,16 +89,16 @@ use crate::app::vault::model::{
     BootstrapBundle, BootstrapRemoteConfig, GiteeRemoteDraft, KdfConfig, ProviderKind, RemoteRole,
     SnapshotSyncPreferences, VaultAssetPayload, VaultSnapshot,
 };
-use crate::app::vault::provider::{
-    VaultProvider, first_release_formal_auth_label, first_release_formal_provider_kind,
-    first_release_formal_provider_label,
-};
 use crate::app::vault::provider::gitee_gist::{GiteeGistProvider, GiteeGistProviderConfig};
 use crate::app::vault::provider::github_gist::{GitHubGistProvider, GitHubGistProviderConfig};
 use crate::app::vault::provider::gitlab_snippet::{
     GitLabSnippetProvider, GitLabSnippetProviderConfig,
 };
 use crate::app::vault::provider::s3::{S3VaultProvider, S3VaultProviderConfig};
+use crate::app::vault::provider::{
+    VaultProvider, first_release_formal_auth_label, first_release_formal_provider_kind,
+    first_release_formal_provider_label,
+};
 use crate::app::vault::snapshot::{apply_vault_snapshot, export_vault_snapshot};
 use crate::app::window_effects::{
     PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
@@ -1928,9 +1928,8 @@ impl WorkspaceFollowTracker {
             let appended_lines = surface
                 .viewport_offset_lines
                 .saturating_sub(session.last_viewport_offset_lines);
-            session.pending_output_lines = session
-                .pending_output_lines
-                .saturating_add(appended_lines);
+            session.pending_output_lines =
+                session.pending_output_lines.saturating_add(appended_lines);
         }
 
         session.last_surface_seqno = surface.seqno;
@@ -1993,7 +1992,14 @@ fn sync_workspace_projection_from_manager(
         })
         .cloned()
         .collect::<Vec<_>>();
+    let preserved_launcher_tabs = state
+        .workspace_tabs()
+        .iter()
+        .filter(|tab| tab.is_launcher())
+        .cloned()
+        .collect::<Vec<_>>();
     next_tabs.extend(preserved_error_tabs);
+    next_tabs.extend(preserved_launcher_tabs);
     let active_id = projected_active_workspace_session_id(state, &next_tabs);
     for tab in &mut next_tabs {
         tab.active = active_id.as_deref() == Some(tab.session_id.as_str());
@@ -2053,7 +2059,10 @@ fn sync_active_sftp_projection_from_manager(
         _ if matches!(
             session_state.mode,
             SftpPanelMode::Empty | SftpPanelMode::Disconnected
-        ) => session_state.mark_connecting(),
+        ) =>
+        {
+            session_state.mark_connecting()
+        }
         _ => {}
     }
 
@@ -3166,6 +3175,7 @@ fn sync_console_assets(window: &AppWindow, state: &ShellViewModel) {
         state.visible_snippet_rows(),
     ))));
     sync_welcome_quick_launch_state(window, state);
+    sync_saved_ssh_picker_state(window, state);
 }
 
 fn sync_keychain_assets(window: &AppWindow, state: &ShellViewModel) {
@@ -3230,29 +3240,26 @@ fn sync_workspace_tab_items(window: &AppWindow, state: &ShellViewModel) {
 fn sync_welcome_quick_launch_state(window: &AppWindow, state: &ShellViewModel) {
     let selected_asset_id = state.quick_launch_selected_asset_id();
     let active_group_id = state.quick_launch_active_group_id();
-    let project_card = |item: crate::shell::quick_launch::QuickLaunchCardItem| {
-        QuickLaunchCardRow {
-            asset_id: item.asset_id.clone().into(),
-            title: item.title.into(),
-            subtitle: item.subtitle.into(),
-            badge: item.badge.into(),
-            meta: item.meta.into(),
-            icon_kind: item.icon_kind.into(),
-            accent_kind: item.accent_kind.into(),
-            favorite: item.favorite,
-            selected: selected_asset_id == Some(item.asset_id.as_str()),
-        }
+    let project_card = |item: crate::shell::quick_launch::QuickLaunchCardItem| QuickLaunchCardRow {
+        asset_id: item.asset_id.clone().into(),
+        title: item.title.into(),
+        subtitle: item.subtitle.into(),
+        badge: item.badge.into(),
+        meta: item.meta.into(),
+        icon_kind: item.icon_kind.into(),
+        accent_kind: item.accent_kind.into(),
+        favorite: item.favorite,
+        selected: selected_asset_id == Some(item.asset_id.as_str()),
     };
-    let project_group = |item: crate::shell::quick_launch::QuickLaunchGroupItem| {
-        QuickLaunchGroupRow {
+    let project_group =
+        |item: crate::shell::quick_launch::QuickLaunchGroupItem| QuickLaunchGroupRow {
             group_id: item.group_id.clone().into(),
             label: item.label.into(),
             count: i32::try_from(item.count).unwrap_or(i32::MAX),
             selected: active_group_id == Some(item.group_id.as_str()),
-        }
-    };
-    let project_detail = |item: crate::shell::quick_launch::QuickLaunchDetailItem| {
-        QuickLaunchDetailRow {
+        };
+    let project_detail =
+        |item: crate::shell::quick_launch::QuickLaunchDetailItem| QuickLaunchDetailRow {
             asset_id: item.asset_id.into(),
             title: item.title.into(),
             subtitle: item.subtitle.into(),
@@ -3261,8 +3268,7 @@ fn sync_welcome_quick_launch_state(window: &AppWindow, state: &ShellViewModel) {
             proxy_summary: item.proxy_summary.into(),
             remark: item.remark.into(),
             recent_label: item.recent_label.into(),
-        }
-    };
+        };
     let empty_detail = || QuickLaunchDetailRow {
         asset_id: "".into(),
         title: "".into(),
@@ -3317,6 +3323,30 @@ fn sync_welcome_quick_launch_state(window: &AppWindow, state: &ShellViewModel) {
             .unwrap_or_else(empty_detail),
     );
     window.set_welcome_quick_launch_search_query(state.quick_launch_search_query().into());
+}
+
+fn sync_saved_ssh_picker_state(window: &AppWindow, state: &ShellViewModel) {
+    let items = state
+        .saved_ssh_picker_items()
+        .into_iter()
+        .map(|item| ConsoleAssetItem {
+            id: item.id.into(),
+            kind: item.kind.into(),
+            label: item.label.into(),
+            depth: item.depth as i32,
+            has_children: item.has_children,
+            expanded: item.expanded,
+            selected: item.selected,
+            focused: item.focused,
+            disclosure_state: item.disclosure_state.into(),
+            path_hint: item.path_hint.into(),
+            compact_flat_mode: item.compact_flat_mode,
+        })
+        .collect::<Vec<_>>();
+
+    window.set_open_saved_ssh_modal_open(state.saved_ssh_picker_open());
+    window.set_open_saved_ssh_modal_query(state.saved_ssh_picker_query().into());
+    window.set_open_saved_ssh_modal_items(ModelRc::new(VecModel::from(items)));
 }
 
 fn slint_color_from_rgba(rgba: u32) -> Color {
@@ -3388,9 +3418,13 @@ where
 fn build_workspace_terminal_presenter(
     profile: AppRuntimeProfile,
 ) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)> {
-    if cfg!(target_os = "windows") && matches!(profile.terminal_render_mode, TerminalRenderMode::Native)
+    if cfg!(target_os = "windows")
+        && matches!(profile.terminal_render_mode, TerminalRenderMode::Native)
     {
-        return Ok((build_native_terminal_presenter()?, TerminalRenderMode::Native));
+        return Ok((
+            build_native_terminal_presenter()?,
+            TerminalRenderMode::Native,
+        ));
     }
 
     Ok((
@@ -3628,9 +3662,11 @@ fn sync_workspace_connection_progress_state(
             .unwrap_or_default()
             .into(),
     );
-    sync_vec_model(window.get_workspace_session_connection_steps(), steps, |model| {
-        window.set_workspace_session_connection_steps(model)
-    });
+    sync_vec_model(
+        window.get_workspace_session_connection_steps(),
+        steps,
+        |model| window.set_workspace_session_connection_steps(model),
+    );
     sync_vec_model(
         window.get_workspace_session_connection_diagnostics(),
         diagnostics,
@@ -3664,7 +3700,8 @@ fn sync_workspace_session_state_with_manager(
     window.set_workspace_session_cell_height(default_cell_height_px as f32);
     sync_workspace_native_terminal_surface_geometry(window);
 
-    let follow_indicator = follow_tracker.indicator_for_surface(state.active_workspace_terminal_surface());
+    let follow_indicator =
+        follow_tracker.indicator_for_surface(state.active_workspace_terminal_surface());
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
         let selection = active_workspace_terminal_selection(window);
@@ -3679,14 +3716,18 @@ fn sync_workspace_session_state_with_manager(
                 },
             ) {
                 Ok(PresentedTerminalFrame::Bitmap(frame)) => {
-                    window.set_workspace_session_render_mode(TerminalRenderMode::Bitmap.as_str().into());
+                    window.set_workspace_session_render_mode(
+                        TerminalRenderMode::Bitmap.as_str().into(),
+                    );
                     window.set_workspace_session_surface_image(frame.image);
                     window.set_workspace_session_native_frame_token(0);
                     window.set_workspace_session_cell_width(frame.cell_width_px as f32);
                     window.set_workspace_session_cell_height(frame.cell_height_px as f32);
                 }
                 Ok(PresentedTerminalFrame::Native(frame)) => {
-                    window.set_workspace_session_render_mode(TerminalRenderMode::Native.as_str().into());
+                    window.set_workspace_session_render_mode(
+                        TerminalRenderMode::Native.as_str().into(),
+                    );
                     window.set_workspace_session_cell_width(frame.cell_width_px as f32);
                     window.set_workspace_session_cell_height(frame.cell_height_px as f32);
                     present_workspace_native_terminal_frame(window, frame);
@@ -3698,7 +3739,9 @@ fn sync_workspace_session_state_with_manager(
                         error = %err,
                         "failed to render workspace terminal atlas surface"
                     );
-                    window.set_workspace_session_render_mode(TerminalRenderMode::Bitmap.as_str().into());
+                    window.set_workspace_session_render_mode(
+                        TerminalRenderMode::Bitmap.as_str().into(),
+                    );
                     window.set_workspace_session_cell_width(default_cell_width_px as f32);
                     window.set_workspace_session_cell_height(default_cell_height_px as f32);
                     clear_workspace_native_terminal_frame(window);
@@ -3931,14 +3974,21 @@ fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vault: &VaultSe
     let modal = state.sync_modal_state_mut();
 
     modal.title = "Sync".into();
-    debug_assert_eq!(first_release_formal_provider_kind(), ProviderKind::GiteeGist);
+    debug_assert_eq!(
+        first_release_formal_provider_kind(),
+        ProviderKind::GiteeGist
+    );
     modal.provider_label = first_release_formal_provider_label().into();
     modal.target_label = vault_primary_remote(vault)
         .map(|remote| remote.remote_id.clone())
         .unwrap_or_default();
     modal.error_text.clear();
 
-    match (&vault.local_state, vault.unlocked_vault_key.is_some(), has_primary_remote) {
+    match (
+        &vault.local_state,
+        vault.unlocked_vault_key.is_some(),
+        has_primary_remote,
+    ) {
         (None, false, false) => {
             modal.mode = SyncModalMode::NotConfigured;
             modal.headline = "Set up sync".into();
@@ -4044,7 +4094,9 @@ fn sync_preferences_for_bundle(
 ) -> SnapshotSyncPreferences {
     SnapshotSyncPreferences {
         auto_sync_enabled: bundle.auto_sync_enabled,
-        selected_primary_remote_id: bundle.primary_remote().map(|remote| remote.remote_id.clone()),
+        selected_primary_remote_id: bundle
+            .primary_remote()
+            .map(|remote| remote.remote_id.clone()),
         selected_mirror_remote_ids: bundle
             .remotes
             .iter()
@@ -4263,7 +4315,8 @@ fn sync_local_vault(
                         .map(|failure| failure.message.as_str())
                         .unwrap_or("unknown mirror failure")
                 );
-                state.vault_panel_state_mut().primary_status_label = mirror_degraded_message.clone();
+                state.vault_panel_state_mut().primary_status_label =
+                    mirror_degraded_message.clone();
                 state.sync_modal_state_mut().status_text = format!(
                     "Primary synced {}. {}",
                     report.primary_revision, mirror_degraded_message
@@ -5110,22 +5163,24 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
-    window.on_sftp_panel_context_menu_requested(move |target_id, target_kind, anchor_x, anchor_y| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.open_context_menu_for_target(
-            parse_context_target_kind(target_kind.as_str(), SidebarDestination::Console),
-            if target_id.is_empty() {
-                None
-            } else {
-                Some(target_id.to_string())
-            },
-            anchor_x,
-            anchor_y,
-        );
-        update_context_menu_placement(&window, &mut state);
-        sync_assets_context_menu_state(&window, &state);
-    });
+    window.on_sftp_panel_context_menu_requested(
+        move |target_id, target_kind, anchor_x, anchor_y| {
+            let window = handle.unwrap();
+            let mut state = state.borrow_mut();
+            state.open_context_menu_for_target(
+                parse_context_target_kind(target_kind.as_str(), SidebarDestination::Console),
+                if target_id.is_empty() {
+                    None
+                } else {
+                    Some(target_id.to_string())
+                },
+                anchor_x,
+                anchor_y,
+            );
+            update_context_menu_placement(&window, &mut state);
+            sync_assets_context_menu_state(&window, &state);
+        },
+    );
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
@@ -5204,8 +5259,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     "failed to retry active SSH session from SFTP panel"
                 );
             } else {
-                let projection = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
-                retried = retried || projection.sftp_changed || projection.tabs_changed || projection.surface_changed;
+                let projection =
+                    sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                retried = retried
+                    || projection.sftp_changed
+                    || projection.tabs_changed
+                    || projection.surface_changed;
             }
         }
         if retried {
@@ -5335,6 +5394,23 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    window.on_workspace_new_tab_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.open_workspace_launcher_tab();
+        sync_workspace_tabs_with_manager(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+        sync_saved_ssh_picker_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
     let quick_launch_store_ref = quick_launch_store.clone();
     window.on_welcome_quick_launch_asset_selected(move |asset_id| {
         let window = handle.unwrap();
@@ -5377,12 +5453,18 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        if state
+            .active_workspace_tab()
+            .is_some_and(|tab| tab.is_launcher())
+        {
+            state.close_workspace_launcher_tab();
+        }
         open_saved_ssh_asset_from_quick_launch(
             &mut state,
             session_bridge_ref.as_deref(),
             &pending_host_key_approval_ref,
             asset_id.as_str(),
-            OpenSessionMode::ActivateExisting,
+            OpenSessionMode::ForceNewTab,
         );
         sync_welcome_quick_launch_state(&window, &state);
         sync_workspace_tabs_with_manager(
@@ -5391,6 +5473,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
+        sync_saved_ssh_picker_state(&window, &state);
         sync_ssh_host_key_modal_state(&window, &state);
         save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
     });
@@ -5406,6 +5489,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        if state
+            .active_workspace_tab()
+            .is_some_and(|tab| tab.is_launcher())
+        {
+            state.close_workspace_launcher_tab();
+        }
         open_saved_ssh_asset_from_quick_launch(
             &mut state,
             session_bridge_ref.as_deref(),
@@ -5420,6 +5509,98 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
+        sync_saved_ssh_picker_state(&window, &state);
+        sync_ssh_host_key_modal_state(&window, &state);
+        save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_welcome_open_saved_ssh_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.open_saved_ssh_picker();
+        sync_saved_ssh_picker_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_open_saved_ssh_modal_close_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_saved_ssh_picker();
+        sync_saved_ssh_picker_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_open_saved_ssh_modal_query_changed(move |query| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_saved_ssh_picker_query(query.to_string());
+        sync_saved_ssh_picker_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_open_saved_ssh_modal_asset_selected(move |asset_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.select_saved_ssh_picker_asset(asset_id.to_string());
+        sync_saved_ssh_picker_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_open_saved_ssh_modal_toggle_expanded_requested(move |asset_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.toggle_saved_ssh_picker_expanded(asset_id.as_str());
+        sync_saved_ssh_picker_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let session_runtime_guard_ref = session_runtime_guard.clone();
+    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let quick_launch_store_ref = quick_launch_store.clone();
+    window.on_open_saved_ssh_modal_asset_activated(move |asset_id| {
+        let _keep_runtime_alive = &session_runtime_guard_ref;
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        match state.console_asset_tree().kind(asset_id.as_str()) {
+            Some(ConsoleAssetKind::Folder) => {
+                state.toggle_saved_ssh_picker_expanded(asset_id.as_str());
+                sync_saved_ssh_picker_state(&window, &state);
+                return;
+            }
+            Some(ConsoleAssetKind::SshConnection) => {}
+            _ => return,
+        }
+        state.close_saved_ssh_picker();
+        if state
+            .active_workspace_tab()
+            .is_some_and(|tab| tab.is_launcher())
+        {
+            state.close_workspace_launcher_tab();
+        }
+        open_saved_ssh_asset_from_quick_launch(
+            &mut state,
+            session_bridge_ref.as_deref(),
+            &pending_host_key_approval_ref,
+            asset_id.as_str(),
+            OpenSessionMode::ForceNewTab,
+        );
+        sync_welcome_quick_launch_state(&window, &state);
+        sync_workspace_tabs_with_manager(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
+        sync_saved_ssh_picker_state(&window, &state);
         sync_ssh_host_key_modal_state(&window, &state);
         save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
     });
@@ -7268,7 +7449,10 @@ mod tests {
             "clearing the surface should keep reusing the visible line model"
         );
         assert!(
-            window.get_workspace_session_surface_image().to_rgba8().is_none(),
+            window
+                .get_workspace_session_surface_image()
+                .to_rgba8()
+                .is_none(),
             "clearing the surface should reset the atlas image to an empty handle"
         );
         assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);

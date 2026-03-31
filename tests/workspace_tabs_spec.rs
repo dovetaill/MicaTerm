@@ -143,6 +143,32 @@ fn workspace_tabs_hide_connection_details_from_visible_copy() {
 }
 
 #[test]
+fn workspace_launcher_tab_projects_welcome_mode_without_runtime_session() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_workspace_launcher_tab();
+
+    assert_eq!(view_model.workspace_tabs().len(), 1);
+    assert!(view_model.workspace_tabs()[0].is_launcher());
+    assert_eq!(view_model.workspace_session_host_mode(), "welcome");
+    assert_eq!(
+        view_model.active_workspace_session_id(),
+        Some("workspace-launcher")
+    );
+}
+
+#[test]
+fn workspace_launcher_tab_is_singleton_when_opened_repeatedly() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.open_workspace_launcher_tab();
+    view_model.open_workspace_launcher_tab();
+
+    assert_eq!(view_model.workspace_tabs().len(), 1);
+    assert!(view_model.workspace_tabs()[0].active);
+}
+
+#[test]
 fn tab_model_tracks_active_session_and_closeability() {
     let first = WorkspaceTab::from_session(&sample_handle(
         "Prod Bastion",
@@ -206,7 +232,10 @@ fn opening_slow_connecting_workspace_session_uses_connection_progress_mode() {
     let mut view_model = ShellViewModel::default();
     view_model.set_workspace_tabs(vec![connecting]);
 
-    assert_eq!(view_model.workspace_session_host_mode(), "connection-progress");
+    assert_eq!(
+        view_model.workspace_session_host_mode(),
+        "connection-progress"
+    );
 }
 
 #[test]

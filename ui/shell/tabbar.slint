@@ -15,7 +15,10 @@ export component TabBar inherits Rectangle {
     in property <[WorkspaceTabItem]> items: [];
     callback tab-selected(string);
     callback tab-close-requested(string);
+    callback new-tab-requested();
     // State contract forwarded from Rust projections: connecting / connected / disconnected / error.
+
+    private property <image> new-tab-icon: @image-url("../../assets/icons/fluent/add-20-regular.svg");
 
     width: 100%;
     min-width: 0px;
@@ -46,6 +49,37 @@ export component TabBar inherits Rectangle {
 
             close-requested => {
                 root.tab-close-requested(item.session_id);
+            }
+        }
+
+        new-tab-button := Rectangle {
+            width: 32px;
+            height: 30px;
+            y: 3px;
+            border-radius: 0px;
+            background: new-tab-touch.pressed
+                ? ThemeTokens.control-pressed-surface
+                : new-tab-touch.has-hover
+                    ? ThemeTokens.control-hover-surface
+                    : transparent;
+
+            Image {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 16px;
+                height: 16px;
+                source: root.new-tab-icon;
+                image-fit: contain;
+                colorize: ThemeTokens.text-primary;
+            }
+
+            new-tab-touch := TouchArea {
+                width: parent.width;
+                height: parent.height;
+
+                clicked => {
+                    root.new-tab-requested();
+                }
             }
         }
 

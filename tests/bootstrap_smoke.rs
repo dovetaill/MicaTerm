@@ -30,12 +30,12 @@ use mica_term::app::keychain::KeychainCatalog;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::build_test_logging_runtime;
+use mica_term::app::ssh::connection_progress::{
+    ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
+};
 use mica_term::app::ssh::credentials::{
     CredentialStore, MemoryCredentialStore, SshCredentialKind, StoredSshSecretBundle,
     load_secret_bundle, persist_secret_bundle, ssh_credential_ref,
-};
-use mica_term::app::ssh::connection_progress::{
-    ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
 };
 use mica_term::app::ssh::known_hosts::{
     KnownHostCheck, KnownHostsService, default_known_hosts_path,
@@ -64,13 +64,13 @@ use mica_term::shell::assets::{
     AssetNodePayload, AssetSshConnectionSpec, AssetSshProxySpec, AssetTree, ConsoleAssetKind,
 };
 use mica_term::shell::metrics::ShellMetrics;
+use mica_term::theme::ThemeMode;
 use russh::keys::{HashAlg, PublicKey};
 use secrecy::SecretString;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, Model};
 use tokio::sync::mpsc;
 use uuid::Uuid;
-use mica_term::theme::ThemeMode;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -799,7 +799,8 @@ impl SessionRuntimeLauncher for FollowProjectionLauncher {
                 .expect("lock follow projection event tx") = Some(event_tx.clone());
             let _ = event_tx.send(SessionRuntimeEvent::Connected);
             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
-            Ok(Box::new(FollowProjectionRuntimeControl { state }) as Box<dyn SessionRuntimeControl>)
+            Ok(Box::new(FollowProjectionRuntimeControl { state })
+                as Box<dyn SessionRuntimeControl>)
         })
     }
 
@@ -1692,13 +1693,15 @@ fn focus_workspace_terminal(app: &AppWindow) {
 
 fn select_terminal_welcome_span(app: &AppWindow) {
     let selection_start = LogicalPosition::new(
-        app.get_layout_workspace_session_native_surface_x() + (app.get_workspace_session_cell_width() * 0.5),
+        app.get_layout_workspace_session_native_surface_x()
+            + (app.get_workspace_session_cell_width() * 0.5),
         app.get_layout_titlebar_height()
             + app.get_layout_workspace_session_native_surface_y()
             + (app.get_workspace_session_cell_height() * 0.5),
     );
     let selection_end = LogicalPosition::new(
-        app.get_layout_workspace_session_native_surface_x() + (app.get_workspace_session_cell_width() * 10.5),
+        app.get_layout_workspace_session_native_surface_x()
+            + (app.get_workspace_session_cell_width() * 10.5),
         app.get_layout_titlebar_height()
             + app.get_layout_workspace_session_native_surface_y()
             + (app.get_workspace_session_cell_height() * 0.5),
@@ -3989,7 +3992,11 @@ fn quick_launch_toggle_favorite_and_search_refresh_dashboard_projection() {
     let favorites = app.get_welcome_quick_launch_favorite_items();
     assert_eq!(favorites.row_count(), 1);
     assert_eq!(
-        favorites.row_data(0).expect("favorite row 0").asset_id.as_str(),
+        favorites
+            .row_data(0)
+            .expect("favorite row 0")
+            .asset_id
+            .as_str(),
         prod_id.as_str()
     );
     assert!(favorites.row_data(0).expect("favorite row 0").favorite);
@@ -4013,6 +4020,99 @@ fn quick_launch_toggle_favorite_and_search_refresh_dashboard_projection() {
             .as_str(),
         db_id.as_str()
     );
+}
+
+#[test]
+fn workspace_new_tab_request_opens_single_launcher_tab() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app, None);
+
+    app.invoke_workspace_new_tab_requested();
+    app.invoke_workspace_new_tab_requested();
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        "workspace-launcher"
+    );
+}
+
+#[test]
+fn launcher_recent_connection_replaces_launcher_tab_with_real_session_tab() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app, None);
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_workspace_new_tab_requested();
+    app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    let item = app
+        .get_workspace_tab_items()
+        .row_data(0)
+        .expect("workspace tab after launcher connect");
+    assert_ne!(item.session_id.as_str(), "workspace-launcher");
+    assert_eq!(item.title.as_str(), "Prod Bastion");
+}
+
+#[test]
+fn launcher_picker_activation_replaces_launcher_tab_and_closes_modal() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app, None);
+
+    let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+
+    app.invoke_workspace_new_tab_requested();
+    app.invoke_welcome_open_saved_ssh_requested();
+    assert!(app.get_open_saved_ssh_modal_open());
+
+    app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
+
+    assert!(!app.get_open_saved_ssh_modal_open());
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    let item = app
+        .get_workspace_tab_items()
+        .row_data(0)
+        .expect("workspace tab after picker activation");
+    assert_ne!(item.session_id.as_str(), "workspace-launcher");
+    assert_eq!(item.title.as_str(), "DB Admin");
+}
+
+#[test]
+fn launcher_picker_folder_activation_does_not_attempt_to_open_session() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let repo_state = Rc::new(RefCell::new(AssetRepoState::default()));
+    let asset_repo: Rc<dyn AssetCatalogRepository> = Rc::new(RecordingAssetRepo::new(
+        loaded_catalog_for_bootstrap(),
+        Rc::clone(&repo_state),
+        None,
+    ));
+    bind_with_fake_sessions(&app, Some(asset_repo));
+
+    app.invoke_workspace_new_tab_requested();
+    app.invoke_welcome_open_saved_ssh_requested();
+    assert!(app.get_open_saved_ssh_modal_open());
+
+    app.invoke_open_saved_ssh_modal_asset_activated("folder-root".into());
+
+    assert!(app.get_open_saved_ssh_modal_open());
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    let item = app
+        .get_workspace_tab_items()
+        .row_data(0)
+        .expect("launcher tab after folder activation");
+    assert_eq!(item.session_id.as_str(), "workspace-launcher");
+    assert_eq!(item.title.as_str(), "New Tab");
 }
 
 #[test]
@@ -4361,7 +4461,10 @@ fn unknown_host_key_blocks_connection_in_workspace_timeline() {
         "workspace session host-key confirmation should stay inline instead of reusing the modal flow"
     );
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
     assert_eq!(
         app.get_workspace_session_connection_headline().as_str(),
         "waiting-user"
@@ -4406,7 +4509,10 @@ fn trusting_unknown_host_key_retries_connection_in_same_workspace_tab() {
     flush_runtime_projection();
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        session_id.as_str()
+    );
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
     assert_eq!(app.get_workspace_session_state().as_str(), "connected");
     assert_eq!(
@@ -4456,8 +4562,14 @@ fn rejecting_unknown_host_key_keeps_connection_timeline_in_same_tab() {
 
     let headline = app.get_workspace_session_connection_headline().to_string();
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        session_id.as_str()
+    );
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
     assert!(
         matches!(headline.as_str(), "cancelled" | "error"),
         "rejecting the host key should keep the timeline surface active with a terminal-free final state"
@@ -4497,7 +4609,10 @@ fn cancelling_running_connection_attempt_marks_timeline_cancelled() {
     flush_runtime_projection();
     let session_id = app.get_active_workspace_session_id().to_string();
 
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
     assert_eq!(
         app.get_workspace_session_connection_headline().as_str(),
         "connecting"
@@ -4507,8 +4622,14 @@ fn cancelling_running_connection_attempt_marks_timeline_cancelled() {
     flush_runtime_projection();
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
-    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        session_id.as_str()
+    );
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
     assert_eq!(
         app.get_workspace_session_connection_headline().as_str(),
         "cancelled"

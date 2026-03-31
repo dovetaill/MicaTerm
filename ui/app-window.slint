@@ -11,6 +11,7 @@ import { AssetsSnippetModal } from "components/assets-snippet-modal.slint";
 import { AssetsSnippetPackageModal } from "components/assets-snippet-package-modal.slint";
 import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal.slint";
 import { BlockingModalShell } from "components/blocking-modal-shell.slint";
+import { OpenSavedSshModal } from "components/open-saved-ssh-modal.slint";
 import { SyncVaultModal } from "components/sync-vault-modal.slint";
 import { SshHostKeyConfirmModal } from "components/ssh-host-key-confirm-modal.slint";
 import { StatusPill } from "components/status-pill.slint";
@@ -181,6 +182,9 @@ export component AppWindow inherits Window {
         recent_label: "",
     };
     in-out property <string> welcome-quick-launch-search-query: "";
+    in-out property <bool> open-saved-ssh-modal-open: false;
+    in-out property <string> open-saved-ssh-modal-query: "";
+    in-out property <[ConsoleAssetItem]> open-saved-ssh-modal-items: [];
     in-out property <image> workspace-session-surface-image;
     in-out property <int> workspace-session-native-frame-token: 0;
     in-out property <int> workspace-session-rows: 24;
@@ -331,6 +335,7 @@ export component AppWindow inherits Window {
     callback blocking-modal-focus-restore-requested();
     callback workspace-tab-selected(string);
     callback workspace-tab-close-requested(string);
+    callback workspace-new-tab-requested();
     callback workspace-session-text-input(string);
     callback workspace-session-key-input(string, bool, bool, bool);
     callback workspace-session-resize-requested(int, int);
@@ -349,6 +354,12 @@ export component AppWindow inherits Window {
     callback welcome-quick-launch-connect-in-new-tab-requested(string);
     callback welcome-quick-launch-toggle-favorite-requested(string);
     callback welcome-quick-launch-reveal-in-assets-requested(string);
+    callback welcome-open-saved-ssh-requested();
+    callback open-saved-ssh-modal-close-requested();
+    callback open-saved-ssh-modal-query-changed(string);
+    callback open-saved-ssh-modal-asset-selected(string);
+    callback open-saved-ssh-modal-asset-activated(string);
+    callback open-saved-ssh-modal-toggle-expanded-requested(string);
     callback asset-selected(string);
     callback asset-activated(string);
     callback toggle-expanded-requested(string);
@@ -690,6 +701,10 @@ export component AppWindow inherits Window {
                             root.workspace-tab-close-requested(session-id);
                         }
 
+                        workspace-new-tab-requested => {
+                            root.workspace-new-tab-requested();
+                        }
+
                         text-input(text) => {
                             root.workspace-session-text-input(text);
                         }
@@ -760,6 +775,10 @@ export component AppWindow inherits Window {
 
                         welcome-quick-launch-reveal-in-assets-requested(asset-id) => {
                             root.welcome-quick-launch-reveal-in-assets-requested(asset-id);
+                        }
+
+                        welcome-open-saved-ssh-requested => {
+                            root.welcome-open-saved-ssh-requested();
                         }
                     }
 
@@ -967,9 +986,69 @@ export component AppWindow inherits Window {
         y: titlebar.height;
         width: root.width;
         height: root.height - titlebar.height;
-        enabled: root.sync-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open;
+        enabled: root.sync-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open || root.open-saved-ssh-modal-open;
 
         clicked => { }
+    }
+
+    if root.open-saved-ssh-modal-open : open-saved-ssh-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 620px;
+        modal-height: 520px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        open-saved-ssh-modal-overlay := OpenSavedSshModal {
+            x: 0px;
+            y: 0px;
+            width: open-saved-ssh-modal-shell.content-width;
+            height: open-saved-ssh-modal-shell.content-height;
+            query: root.open-saved-ssh-modal-query;
+            items: root.open-saved-ssh-modal-items;
+
+            close-requested => {
+                root.open-saved-ssh-modal-close-requested();
+            }
+
+            query-changed(value) => {
+                root.open-saved-ssh-modal-query-changed(value);
+            }
+
+            asset-selected(item-id) => {
+                root.open-saved-ssh-modal-asset-selected(item-id);
+            }
+
+            asset-activated(item-id) => {
+                root.open-saved-ssh-modal-asset-activated(item-id);
+            }
+
+            toggle-expanded-requested(item-id) => {
+                root.open-saved-ssh-modal-toggle-expanded-requested(item-id);
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
     }
 
     if root.sync-modal-open : sync-modal-shell := BlockingModalShell {

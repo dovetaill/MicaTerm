@@ -16,11 +16,15 @@ grep -F 'in-out property <bool> ssh-host-key-modal-open: false;' "$APP_WINDOW" >
 grep -F 'in-out property <[WorkspaceTabItem]> workspace-tab-items: [];' "$APP_WINDOW" >/dev/null
 grep -F 'callback workspace-tab-selected(string);' "$APP_WINDOW" >/dev/null
 grep -F 'callback workspace-tab-close-requested(string);' "$APP_WINDOW" >/dev/null
+grep -F 'callback workspace-new-tab-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback workspace-session-text-input(string);' "$APP_WINDOW" >/dev/null
 grep -F 'callback workspace-session-key-input(string, bool, bool, bool);' "$APP_WINDOW" >/dev/null
 grep -F 'callback workspace-session-resize-requested(int, int);' "$APP_WINDOW" >/dev/null
 ! grep -F 'width: 216px;' "$TABBAR" >/dev/null
 grep -F 'for item in root.items : ActiveTab {' "$TABBAR" >/dev/null
+grep -F '@image-url("../../assets/icons/fluent/add-20-regular.svg")' "$TABBAR" >/dev/null
+grep -F 'callback new-tab-requested();' "$TABBAR" >/dev/null
+grep -F 'new-tab-requested => {' "$WORKSPACE_PANE" >/dev/null
 grep -F 'horizontal-stretch: 0;' "$TABBAR" >/dev/null
 grep -F 'trailing-spacer := Rectangle {' "$TABBAR" >/dev/null
 grep -F 'background: ThemeTokens.titlebar-surface;' "$TABBAR" >/dev/null
@@ -30,6 +34,7 @@ grep -F 'callback close-requested();' "$ACTIVE_TAB" >/dev/null
 grep -F 'overflow: elide;' "$ACTIVE_TAB" >/dev/null
 ! grep -F 'text: root.subtitle;' "$ACTIVE_TAB" >/dev/null
 grep -F '@image-url("../../assets/icons/fluent/dismiss-20-regular.svg")' "$ACTIVE_TAB" >/dev/null
+grep -F 'root.state == "launcher" ? ThemeTokens.divider-subtle' "$ACTIVE_TAB" >/dev/null
 ! grep -F 'text: "×";' "$ACTIVE_TAB" >/dev/null
 ! grep -F 'background: root.active ? ThemeTokens.accent : transparent;' "$ACTIVE_TAB" >/dev/null
 grep -F 'content-hit-target := TouchArea {' "$ACTIVE_TAB" >/dev/null

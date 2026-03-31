@@ -1,10 +1,42 @@
-// SSH-first quick launch dashboard shown while no workspace tab is active.
+// Minimal launcher surface shown by the workspace new-tab flow.
 
 import { ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "quick-launch-types.slint";
-import { QuickLaunchDetailPane } from "quick-launch-detail-pane.slint";
-import { QuickLaunchGroupSection, QuickLaunchSection } from "quick-launch-section.slint";
+import { QuickLaunchSection } from "quick-launch-section.slint";
+
+component LauncherPrimaryActionButton inherits Rectangle {
+    in property <string> label: "";
+    callback clicked();
+
+    height: 38px;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: ThemeTokens.accent;
+    background: button-touch.pressed
+        ? ThemeTokens.control-pressed-surface
+        : button-touch.has-hover
+            ? ThemeTokens.control-hover-surface
+            : ThemeTokens.accent;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    button-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
 
 export component WelcomeView inherits Rectangle {
     in property <[QuickLaunchCardRow]> recent-items: [];
@@ -28,9 +60,7 @@ export component WelcomeView inherits Rectangle {
     callback connect-in-new-tab-requested(string);
     callback toggle-favorite-requested(string);
     callback reveal-in-assets-requested(string);
-
-    private property <bool> compact-layout: root.width < 1040px;
-    private property <image> search-icon: @image-url("../../assets/icons/fluent/search-20-regular.svg");
+    callback open-saved-ssh-requested();
 
     background: transparent;
 
@@ -46,253 +76,74 @@ export component WelcomeView inherits Rectangle {
             background: transparent;
 
             body-column := VerticalLayout {
-                x: 24px;
+                x: 28px;
                 y: 28px;
-                width: parent.width - 48px;
-                spacing: 24px;
+                width: parent.width - 56px;
+                spacing: 18px;
 
-                header-row := Rectangle {
+                header-card := Rectangle {
                     width: parent.width;
-                    height: 104px;
+                    height: 132px;
                     border-radius: 0px;
                     border-width: 1px;
                     border-color: ThemeTokens.divider-subtle;
                     background: ThemeTokens.assets-surface;
 
+                    Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: 4px;
+                        height: parent.height;
+                        background: ThemeTokens.accent;
+                    }
+
                     Text {
-                        x: 20px;
+                        x: 24px;
                         y: 18px;
-                        text: "Quick Start";
+                        text: "New Tab";
                         color: ThemeTokens.text-primary;
                         font-size: 30px;
                         font-weight: 700;
                     }
 
                     Text {
-                        x: 20px;
-                        y: 56px;
-                        width: parent.width - search-shell.width - 60px;
-                        text: "Open saved SSH connections fast";
+                        x: 24px;
+                        y: 58px;
+                        width: parent.width - 48px;
+                        text: "Open a recent connection or browse saved SSH targets.";
                         color: ThemeTokens.text-primary;
-                        opacity: 0.70;
+                        opacity: 0.72;
                     }
 
-                    search-shell := Rectangle {
-                        x: parent.width - self.width - 20px;
-                        y: 20px;
-                        width: min(320px, parent.width - 40px);
-                        height: 42px;
-                        border-radius: 0px;
-                        border-width: 1px;
-                        border-color: ThemeTokens.divider-subtle;
-                        background: ThemeTokens.inspector-surface;
+                    open-saved-ssh-button := LauncherPrimaryActionButton {
+                        x: 24px;
+                        y: 84px;
+                        width: 240px;
+                        label: "Open Saved SSH Connections";
 
-                        Image {
-                            x: 12px;
-                            y: 11px;
-                            width: 20px;
-                            height: 20px;
-                            source: root.search-icon;
-                            image-fit: contain;
-                            colorize: ThemeTokens.text-primary;
-                            opacity: 0.68;
-                        }
-
-                        TextInput {
-                            x: 42px;
-                            y: 9px;
-                            width: parent.width - 54px;
-                            height: 24px;
-                            text: root.search-query;
-                            color: ThemeTokens.text-primary;
-                            selection-background-color: ThemeTokens.accent;
-                            selection-foreground-color: ThemeTokens.text-primary;
-
-                            edited => {
-                                root.search-changed(self.text);
-                            }
+                        clicked => {
+                            root.open-saved-ssh-requested();
                         }
                     }
                 }
 
-                if root.compact-layout : VerticalLayout {
+                QuickLaunchSection {
                     width: parent.width;
-                    spacing: 20px;
+                    title: "Recent Connections";
+                    subtitle: "Most recently launched saved SSH sessions";
+                    items: root.recent-items;
+                    empty_text: "No recent SSH connections yet. Use Open Saved SSH Connections to browse your saved hosts.";
 
-                    QuickLaunchSection {
-                        width: parent.width;
-                        title: "Recent Connections";
-                        subtitle: "Most recently launched saved SSH sessions";
-                        items: root.recent-items;
-                        empty_text: "Open a saved SSH connection to build recent history.";
-
-                        item-selected(asset-id) => {
-                            root.asset-selected(asset-id);
-                        }
-
-                        item-activated(asset-id) => {
-                            root.connect-requested(asset-id);
-                        }
-
-                        toggle-favorite-requested(asset-id) => {
-                            root.toggle-favorite-requested(asset-id);
-                        }
+                    item-selected(asset-id) => {
+                        root.asset-selected(asset-id);
                     }
 
-                    QuickLaunchSection {
-                        width: parent.width;
-                        title: "Favorites";
-                        subtitle: "Pinned saved SSH connections";
-                        items: root.favorite-items;
-                        empty_text: "Pin high-frequency SSH targets to keep them here.";
-
-                        item-selected(asset-id) => {
-                            root.asset-selected(asset-id);
-                        }
-
-                        item-activated(asset-id) => {
-                            root.connect-requested(asset-id);
-                        }
-
-                        toggle-favorite-requested(asset-id) => {
-                            root.toggle-favorite-requested(asset-id);
-                        }
+                    item-activated(asset-id) => {
+                        root.connect-requested(asset-id);
                     }
 
-                    QuickLaunchGroupSection {
-                        width: parent.width;
-                        items: root.group-items;
-                    }
-
-                    QuickLaunchSection {
-                        width: parent.width;
-                        title: "Group Focus";
-                        subtitle: "Saved SSH connections from the active folder context";
-                        items: root.visible-group-items;
-                        empty_text: "Select a saved SSH connection to focus its group.";
-
-                        item-selected(asset-id) => {
-                            root.asset-selected(asset-id);
-                        }
-
-                        item-activated(asset-id) => {
-                            root.connect-requested(asset-id);
-                        }
-
-                        toggle-favorite-requested(asset-id) => {
-                            root.toggle-favorite-requested(asset-id);
-                        }
-                    }
-
-                    QuickLaunchDetailPane {
-                        width: parent.width;
-                        height: 340px;
-                        detail: root.selected-detail;
-
-                        connect-requested(asset-id) => {
-                            root.connect-requested(asset-id);
-                        }
-
-                        connect-in-new-tab-requested(asset-id) => {
-                            root.connect-in-new-tab-requested(asset-id);
-                        }
-
-                        reveal-in-assets-requested(asset-id) => {
-                            root.reveal-in-assets-requested(asset-id);
-                        }
-                    }
-                }
-
-                if !root.compact-layout : HorizontalLayout {
-                    width: parent.width;
-                    spacing: 24px;
-
-                    left-column := VerticalLayout {
-                        spacing: 20px;
-                        width: max(0px, parent.width - 360px);
-
-                        QuickLaunchSection {
-                            width: parent.width;
-                            title: "Recent Connections";
-                            subtitle: "Most recently launched saved SSH sessions";
-                            items: root.recent-items;
-                            empty_text: "Open a saved SSH connection to build recent history.";
-
-                            item-selected(asset-id) => {
-                                root.asset-selected(asset-id);
-                            }
-
-                            item-activated(asset-id) => {
-                                root.connect-requested(asset-id);
-                            }
-
-                            toggle-favorite-requested(asset-id) => {
-                                root.toggle-favorite-requested(asset-id);
-                            }
-                        }
-
-                        QuickLaunchSection {
-                            width: parent.width;
-                            title: "Favorites";
-                            subtitle: "Pinned saved SSH connections";
-                            items: root.favorite-items;
-                            empty_text: "Pin high-frequency SSH targets to keep them here.";
-
-                            item-selected(asset-id) => {
-                                root.asset-selected(asset-id);
-                            }
-
-                            item-activated(asset-id) => {
-                                root.connect-requested(asset-id);
-                            }
-
-                            toggle-favorite-requested(asset-id) => {
-                                root.toggle-favorite-requested(asset-id);
-                            }
-                        }
-
-                        QuickLaunchGroupSection {
-                            width: parent.width;
-                            items: root.group-items;
-                        }
-
-                        QuickLaunchSection {
-                            width: parent.width;
-                            title: "Group Focus";
-                            subtitle: "Saved SSH connections from the active folder context";
-                            items: root.visible-group-items;
-                            empty_text: "Select a saved SSH connection to focus its group.";
-
-                            item-selected(asset-id) => {
-                                root.asset-selected(asset-id);
-                            }
-
-                            item-activated(asset-id) => {
-                                root.connect-requested(asset-id);
-                            }
-
-                            toggle-favorite-requested(asset-id) => {
-                                root.toggle-favorite-requested(asset-id);
-                            }
-                        }
-                    }
-
-                    QuickLaunchDetailPane {
-                        width: 336px;
-                        vertical-stretch: 1;
-                        detail: root.selected-detail;
-
-                        connect-requested(asset-id) => {
-                            root.connect-requested(asset-id);
-                        }
-
-                        connect-in-new-tab-requested(asset-id) => {
-                            root.connect-in-new-tab-requested(asset-id);
-                        }
-
-                        reveal-in-assets-requested(asset-id) => {
-                            root.reveal-in-assets-requested(asset-id);
-                        }
+                    toggle-favorite-requested(asset-id) => {
+                        root.toggle-favorite-requested(asset-id);
                     }
                 }
             }
