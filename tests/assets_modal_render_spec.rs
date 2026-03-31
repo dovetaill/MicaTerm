@@ -363,6 +363,47 @@ fn sync_modal_footer_stays_visible_in_short_viewport() {
 }
 
 #[test]
+fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
+    let short_height = 640;
+    let modal_height = 528;
+    let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, modal_height);
+    let footer_height = 82;
+    let footer_top = modal.y + modal.height - footer_height;
+    let buffer = render_app_with_size(WINDOW_WIDTH, short_height, |app| {
+        app.set_sync_modal_open(true);
+        app.set_sync_modal_mode("locked".into());
+        app.set_sync_modal_title("Unlock sync".into());
+        app.set_sync_modal_headline("Unlock sync".into());
+        app.set_sync_modal_status_text(
+            "Run sync automatically after local changes when the vault is unlocked.".into(),
+        );
+        app.set_sync_modal_provider_label("Gitee".into());
+        app.set_sync_modal_target_label("1 target configured".into());
+        app.set_sync_modal_primary_gist_id("yemd6wft9jgpv5bhlux3o60".into());
+        app.set_sync_modal_primary_pat("token-value".into());
+        app.set_sync_modal_primary_action_label("Unlock".into());
+        app.set_sync_modal_secondary_action_label("Close".into());
+    });
+    write_ppm(&buffer, "/tmp/sync-vault-short-modal.ppm");
+
+    let body_surface = pixel_at(&buffer, modal.x + 36, modal.y + 124);
+    let master_password_field_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 36,
+        footer_top - 42,
+        modal.width - 92,
+        28,
+        body_surface,
+        10,
+    );
+
+    assert!(
+        master_password_field_pixels >= 2600,
+        "sync modal should keep the master password field visibly above the sticky footer in short viewports, only found {master_password_field_pixels} distinct pixels"
+    );
+}
+
+#[test]
 fn ssh_modal_footer_stays_visible_in_short_viewport() {
     let short_height = 640;
     let modal_height = 528;
@@ -398,5 +439,43 @@ fn ssh_modal_footer_stays_visible_in_short_viewport() {
     assert!(
         footer_pixels >= 1300,
         "ssh modal footer should stay visible in short viewports, only found {footer_pixels} distinct pixels"
+    );
+}
+
+#[test]
+fn ssh_modal_short_viewport_keeps_primary_auth_field_actionable() {
+    let short_height = 640;
+    let modal_height = 528;
+    let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, modal_height);
+    let footer_height = 84;
+    let footer_top = modal.y + modal.height - footer_height;
+    let buffer = render_app_with_size(WINDOW_WIDTH, short_height, |app| {
+        app.set_asset_modal_open(true);
+        app.set_asset_modal_kind("new-ssh-connection".into());
+        app.set_asset_ssh_modal_name("Sharon".into());
+        app.set_asset_ssh_modal_host("157.254.53.77".into());
+        app.set_asset_ssh_modal_user("root".into());
+        app.set_asset_ssh_modal_port("57722".into());
+        app.set_asset_ssh_modal_auth_source("manual".into());
+        app.set_asset_ssh_modal_auth_method("password".into());
+        app.set_asset_ssh_modal_connect_family_enabled(true);
+        app.set_asset_modal_can_confirm(true);
+    });
+    write_ppm(&buffer, "/tmp/new-ssh-short-modal.ppm");
+
+    let body_surface = pixel_at(&buffer, modal.x + 36, modal.y + 140);
+    let password_field_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 36,
+        footer_top - 48,
+        modal.width - 92,
+        32,
+        body_surface,
+        10,
+    );
+
+    assert!(
+        password_field_pixels >= 2400,
+        "ssh modal should keep the first authentication field visibly above the sticky footer in short viewports, only found {password_field_pixels} distinct pixels"
     );
 }

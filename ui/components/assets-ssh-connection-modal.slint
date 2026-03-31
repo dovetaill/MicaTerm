@@ -238,8 +238,11 @@ export component AssetsSshConnectionModal inherits Rectangle {
     callback focus-restore-requested();
 
     private property <bool> compact-layout: root.width < 620px;
+    private property <bool> dense-layout: root.height < 576px;
     private property <length> header-height: 56px;
-    private property <length> footer-height: root.feedback-message != "" || root.validation-message != "" ? 112px : 84px;
+    private property <length> footer-height: root.feedback-message != "" || root.validation-message != ""
+        ? root.dense-layout ? 96px : 112px
+        : root.dense-layout ? 64px : 84px;
     private property <length> body-height: max(0px, root.height - root.header-height - root.footer-height);
 
     background: transparent;
@@ -291,10 +294,11 @@ export component AssetsSshConnectionModal inherits Rectangle {
             y: root.header-height;
             width: parent.width;
             height: root.body-height;
-            frame-padding: 12px;
-            content-padding-horizontal: 16px;
-            content-padding-vertical: 14px;
-            content-spacing: 18px;
+            frame-padding: root.dense-layout ? 10px : 12px;
+            content-padding-horizontal: root.dense-layout ? 14px : 16px;
+            content-padding-vertical: root.dense-layout ? 10px : 14px;
+            content-padding-bottom: root.dense-layout ? 12px : 18px;
+            content-spacing: root.dense-layout ? 14px : 18px;
             viewport-surface: ThemeTokens.inspector-surface;
             panel-surface: ThemeTokens.window-surface;
             panel-border-color: ThemeTokens.divider-strong;
@@ -912,8 +916,9 @@ export component AssetsSshConnectionModal inherits Rectangle {
             height: root.footer-height;
             surface: ThemeTokens.activity-surface;
             divider-color: ThemeTokens.divider-strong;
-            content-padding-top: 14px;
-            content-padding-bottom: 14px;
+            content-padding-top: root.dense-layout ? 6px : 14px;
+            content-padding-bottom: root.dense-layout ? 6px : 14px;
+            content-spacing: root.dense-layout ? 6px : 8px;
 
             if root.feedback-message != "" : FeedbackBanner {
                 width: parent.width;

@@ -774,10 +774,6 @@ fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
         fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome");
 
     assert!(
-        sync.contains("import { ScrollView } from \"std-widgets.slint\";"),
-        "sync modal should import ScrollView to keep long forms reachable"
-    );
-    assert!(
         sync.contains("header := ModalHeaderBar {\n            x: 0px;\n            y: 0px;"),
         "sync modal should delegate its header chrome to the shared modal header"
     );
@@ -790,10 +786,15 @@ fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
         "shared modal scroll host should allow direct drag scrolling when the content grows"
     );
     assert!(
-        modal_chrome.contains(
-            "height: max(body-scroll.visible-height, body-panel.height + (root.frame-padding * 2));"
-        ),
-        "shared modal scroll body must expand with long error and password content"
+        modal_chrome.contains("horizontal-scrollbar-policy: always-off;")
+            && modal_chrome.contains("scroll-body := VerticalLayout {")
+            && modal_chrome.contains("alignment: start;"),
+        "shared modal scroll body should use a layout-driven viewport with horizontal overflow disabled"
+    );
+    assert!(
+        modal_chrome.contains("private property <length> resolved-content-padding-bottom:")
+            && modal_chrome.contains("background: root.viewport-surface;"),
+        "shared modal scroll body should keep an explicit viewport surface and bottom breathing room for long forms"
     );
     assert!(
         sync.contains("footer := ModalFooterBar {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
@@ -804,6 +805,8 @@ fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
 #[test]
 fn sync_modal_shell_uses_viewport_constrained_height_instead_of_a_fixed_620px_frame() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let blocking_shell =
+        fs::read_to_string("ui/components/blocking-modal-shell.slint").expect("read modal shell");
     let sync_shell = app_window
         .split("if root.sync-modal-open : sync-modal-shell := BlockingModalShell {")
         .nth(1)
@@ -811,14 +814,14 @@ fn sync_modal_shell_uses_viewport_constrained_height_instead_of_a_fixed_620px_fr
         .expect("extract sync modal shell block");
 
     assert!(
-        !sync_shell.contains("modal-height: 620px;"),
-        "sync modal shell should stop hardcoding a 620px height because it clips footer reachability on shorter windows"
+        sync_shell.contains("modal-height: 680px;"),
+        "sync modal shell should request a taller preferred height so desktop-sized windows keep the primary form fields reachable"
     );
     assert!(
-        sync_shell.contains(
-            "modal-height: max(420px, min(560px, root.height - titlebar.height - 64px));"
-        ),
-        "sync modal shell should derive its target height from the viewport instead of a single fixed frame size"
+        blocking_shell.contains("root.available-height > root.modal-height")
+            && blocking_shell.contains("root.available-height - root.modal-height <= 40px")
+            && blocking_shell.contains("? root.available-height"),
+        "blocking modal shell should expand near-constrained forms to the full available viewport height"
     );
 }
 
@@ -927,28 +930,31 @@ fn keychain_identity_modal_scrolls_body_inside_the_shared_scaffold() {
 #[test]
 fn long_form_modal_shells_use_viewport_constrained_heights_instead_of_fixed_frames() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let blocking_shell =
+        fs::read_to_string("ui/components/blocking-modal-shell.slint").expect("read modal shell");
 
-    for fixed_height in [
-        "modal-height: 520px;",
-        "modal-height: 560px;",
-        "modal-height: 620px;",
+    for expected_height in [
+        "modal-height: 600px;",
+        "modal-height: 680px;",
+        "modal-height: 720px;",
     ] {
         assert!(
-            !app_window.contains(fixed_height),
-            "form modal shells should stop hardcoding `{fixed_height}` because short desktop windows clip footer reachability"
+            app_window.contains(expected_height),
+            "form modal shells should request taller preferred frames using `{expected_height}` so desktop windows surface the next form field before scrolling"
         );
     }
 
-    for expected_formula in [
-        "modal-height: max(360px, min(520px, root.height - titlebar.height - 64px));",
-        "modal-height: max(420px, min(560px, root.height - titlebar.height - 64px));",
-        "modal-height: max(420px, min(620px, root.height - titlebar.height - 64px));",
-    ] {
-        assert!(
-            app_window.contains(expected_formula),
-            "form modal shells should clamp their height to the viewport using `{expected_formula}`"
-        );
-    }
+    assert!(
+        blocking_shell.contains(
+            "viewport-margin: root.width < 960px || root.height - root.host-titlebar-height < 720px ? 8px : 24px;"
+        ),
+        "blocking modal shell should tighten outer margins on constrained viewports"
+    );
+    assert!(
+        blocking_shell.contains("root.available-height > root.modal-height")
+            && blocking_shell.contains("? root.available-height"),
+        "blocking modal shell should let near-full-height forms use the remaining viewport instead of preserving a too-small preferred height"
+    );
 }
 
 #[test]

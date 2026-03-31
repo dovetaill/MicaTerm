@@ -66,6 +66,8 @@ grep -F 'in-out property <string> asset-ssh-modal-keychain-identity-selected-lab
 grep -F 'in-out property <string> asset-ssh-modal-keychain-identity-username: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-ssh-modal-keychain-identity-auth-summary: "";' "$APP_WINDOW" >/dev/null
 grep -F 'callback drag-requested(length, length);' "$MODAL_SHELL" >/dev/null
+grep -F 'viewport-margin: root.width < 960px || root.height - root.host-titlebar-height < 720px ? 8px : 24px;' "$MODAL_SHELL" >/dev/null
+grep -F 'root.available-height > root.modal-height' "$MODAL_SHELL" >/dev/null
 ! grep -F 'in property <string> dialog-title: "";' "$MODAL_SHELL" >/dev/null
 ! grep -F 'callback close-requested();' "$MODAL_SHELL" >/dev/null
 ! grep -F 'header := Rectangle {' "$MODAL_SHELL" >/dev/null
@@ -89,10 +91,10 @@ grep -F 'sync-vault-modal-overlay := SyncVaultModal {' "$APP_WINDOW" >/dev/null
 grep -F -A4 'sync-vault-modal-overlay := SyncVaultModal {' "$APP_WINDOW" | grep -F 'width: sync-modal-shell.content-width;' >/dev/null
 grep -F -A5 'sync-vault-modal-overlay := SyncVaultModal {' "$APP_WINDOW" | grep -F 'height: sync-modal-shell.content-height;' >/dev/null
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
-grep -F 'modal-height: max(360px, min(520px, root.height - titlebar.height - 64px));' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: 600px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
-grep -F 'modal-height: max(420px, min(560px, root.height - titlebar.height - 64px));' "$APP_WINDOW" >/dev/null
-grep -F 'modal-height: max(420px, min(620px, root.height - titlebar.height - 64px));' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: 680px;' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: 720px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 268px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 332px;' "$APP_WINDOW" >/dev/null
 grep -F 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" >/dev/null
@@ -138,9 +140,9 @@ grep -F 'callback draft-changed(string, string);' "$SYNC_MODAL" >/dev/null
 grep -F 'callback toggle-changed(string, bool);' "$SYNC_MODAL" >/dev/null
 grep -F 'body := ModalBodyScrollArea {' "$SYNC_MODAL" >/dev/null
 grep -F 'mouse-drag-pan-enabled: true;' "$MODAL_CHROME" >/dev/null
-grep -F 'viewport-width: scroll-body.width;' "$MODAL_CHROME" >/dev/null
-grep -F 'viewport-height: scroll-body.height;' "$MODAL_CHROME" >/dev/null
-grep -F 'height: max(body-scroll.visible-height, body-panel.height + (root.frame-padding * 2));' "$MODAL_CHROME" >/dev/null
+grep -F 'horizontal-scrollbar-policy: always-off;' "$MODAL_CHROME" >/dev/null
+grep -F 'scroll-body := VerticalLayout {' "$MODAL_CHROME" >/dev/null
+grep -F 'private property <length> resolved-content-padding-bottom:' "$MODAL_CHROME" >/dev/null
 grep -F 'footer := ModalFooterBar {' "$SYNC_MODAL" >/dev/null
 grep -F 'y: parent.height - root.footer-height;' "$SYNC_MODAL" >/dev/null
 grep -F 'divider-color: ThemeTokens.divider-strong;' "$SYNC_MODAL" >/dev/null

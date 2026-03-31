@@ -1043,7 +1043,7 @@ export component AppWindow inherits Window {
     if root.open-saved-ssh-modal-open : open-saved-ssh-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 620px;
-        modal-height: max(360px, min(520px, root.height - titlebar.height - 64px));
+        modal-height: 600px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
 
@@ -1103,7 +1103,7 @@ export component AppWindow inherits Window {
     if root.sync-modal-open : sync-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 640px;
-        modal-height: max(420px, min(560px, root.height - titlebar.height - 64px));
+        modal-height: 680px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
 
@@ -1232,7 +1232,7 @@ export component AppWindow inherits Window {
     if root.asset-modal-open && root.asset-modal-kind == "new-snippet" : asset-snippet-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 560px;
-        modal-height: max(360px, min(520px, root.height - titlebar.height - 64px));
+        modal-height: 600px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
 
@@ -1346,7 +1346,7 @@ export component AppWindow inherits Window {
     if root.asset-modal-open && root.asset-modal-kind == "new-ssh-connection" : asset-ssh-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 640px;
-        modal-height: max(420px, min(560px, root.height - titlebar.height - 64px));
+        modal-height: 720px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
 
@@ -1431,7 +1431,7 @@ export component AppWindow inherits Window {
     if root.asset-modal-open && root.asset-modal-kind == "new-keychain-identity" : keychain-identity-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 520px;
-        modal-height: max(360px, min(520px, root.height - titlebar.height - 64px));
+        modal-height: 600px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
 
@@ -1494,7 +1494,7 @@ export component AppWindow inherits Window {
     if root.asset-modal-open && root.asset-modal-kind == "new-keychain-ssh-key" : keychain-ssh-key-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 720px;
-        modal-height: max(420px, min(620px, root.height - titlebar.height - 64px));
+        modal-height: 720px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
 

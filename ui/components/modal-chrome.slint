@@ -119,12 +119,20 @@ export component ModalBodyScrollArea inherits Rectangle {
     in property <length> frame-padding: 12px;
     in property <length> content-padding-horizontal: 16px;
     in property <length> content-padding-vertical: 12px;
+    in property <length> content-padding-bottom: root.content-padding-vertical;
     in property <length> content-spacing: 12px;
     in property <color> viewport-surface: ThemeTokens.inspector-surface;
     in property <color> panel-surface: ThemeTokens.window-surface;
     in property <color> panel-border-color: ThemeTokens.divider-strong;
 
-    background: transparent;
+    private property <bool> compact-layout: root.height < 400px;
+    private property <length> resolved-frame-padding: root.compact-layout ? max(8px, root.frame-padding - 4px) : root.frame-padding;
+    private property <length> resolved-content-padding-horizontal: root.compact-layout ? max(12px, root.content-padding-horizontal - 4px) : root.content-padding-horizontal;
+    private property <length> resolved-content-padding-vertical: root.compact-layout ? max(8px, root.content-padding-vertical - 4px) : root.content-padding-vertical;
+    private property <length> resolved-content-padding-bottom: root.compact-layout ? max(10px, root.content-padding-bottom - 6px) : root.content-padding-bottom;
+    private property <length> resolved-content-spacing: root.compact-layout ? max(8px, root.content-spacing - 4px) : root.content-spacing;
+
+    background: root.viewport-surface;
 
     body-scroll := ScrollView {
         x: 0px;
@@ -132,29 +140,32 @@ export component ModalBodyScrollArea inherits Rectangle {
         width: parent.width;
         height: parent.height;
         mouse-drag-pan-enabled: true;
-        viewport-width: scroll-body.width;
-        viewport-height: scroll-body.height;
+        horizontal-scrollbar-policy: always-off;
 
-        scroll-body := Rectangle {
+        scroll-body := VerticalLayout {
             width: body-scroll.visible-width;
-            height: max(body-scroll.visible-height, body-panel.height + (root.frame-padding * 2));
-            background: root.viewport-surface;
+            alignment: start;
+            padding-left: root.resolved-frame-padding;
+            padding-right: root.resolved-frame-padding;
+            padding-top: root.resolved-frame-padding;
+            padding-bottom: root.resolved-frame-padding;
 
             body-panel := Rectangle {
-                x: root.frame-padding;
-                y: root.frame-padding;
-                width: parent.width - (root.frame-padding * 2);
-                height: body-content.preferred-height + (root.content-padding-vertical * 2);
+                preferred-width: 100%;
+                min-width: 0px;
+                horizontal-stretch: 1;
                 border-radius: 0px;
                 border-width: 1px;
                 border-color: root.panel-border-color;
                 background: root.panel-surface;
 
                 body-content := VerticalLayout {
-                    x: root.content-padding-horizontal;
-                    y: root.content-padding-vertical;
-                    width: parent.width - (root.content-padding-horizontal * 2);
-                    spacing: root.content-spacing;
+                    alignment: start;
+                    padding-left: root.resolved-content-padding-horizontal;
+                    padding-right: root.resolved-content-padding-horizontal;
+                    padding-top: root.resolved-content-padding-vertical;
+                    padding-bottom: root.resolved-content-padding-bottom;
+                    spacing: root.resolved-content-spacing;
 
                     @children
                 }

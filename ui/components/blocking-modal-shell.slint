@@ -18,14 +18,17 @@ export component BlockingModalShell inherits Rectangle {
     height: 100%;
     background: transparent;
 
-    private property <length> viewport-margin: 24px;
+    private property <length> viewport-margin: root.width < 960px || root.height - root.host-titlebar-height < 720px ? 8px : 24px;
     private property <length> available-width: max(280px, root.width - (root.viewport-margin * 2));
     private property <length> available-height: max(
         220px,
         root.height - root.host-titlebar-height - (root.viewport-margin * 2)
     );
     private property <length> resolved-modal-width: min(root.modal-width, root.available-width);
-    private property <length> resolved-modal-height: min(root.modal-height, root.available-height);
+    private property <length> resolved-modal-height: root.available-height > root.modal-height
+        && root.available-height - root.modal-height <= 40px
+        ? root.available-height
+        : min(root.modal-height, root.available-height);
 
     backdrop := TouchArea {
         width: parent.width;

@@ -188,8 +188,9 @@ export component SyncVaultModal inherits Rectangle {
     callback drag-ended();
     callback focus-restore-requested();
 
+    private property <bool> compact-layout: root.height < 576px;
     private property <length> header-height: 60px;
-    private property <length> footer-height: 82px;
+    private property <length> footer-height: root.compact-layout ? 60px : 82px;
     private property <length> body-height: max(0px, root.height - root.header-height - root.footer-height);
 
     background: transparent;
@@ -243,10 +244,11 @@ export component SyncVaultModal inherits Rectangle {
             y: header.height;
             width: parent.width;
             height: parent.height - header.height - footer.height;
-            frame-padding: 12px;
-            content-padding-horizontal: 16px;
-            content-padding-vertical: 12px;
-            content-spacing: 10px;
+            frame-padding: root.compact-layout ? 10px : 12px;
+            content-padding-horizontal: root.compact-layout ? 14px : 16px;
+            content-padding-vertical: root.compact-layout ? 10px : 12px;
+            content-padding-bottom: root.compact-layout ? 12px : 16px;
+            content-spacing: root.compact-layout ? 8px : 10px;
             viewport-surface: ThemeTokens.inspector-surface;
             panel-surface: ThemeTokens.window-surface;
             panel-border-color: ThemeTokens.divider-strong;
@@ -381,7 +383,9 @@ export component SyncVaultModal inherits Rectangle {
             height: root.footer-height;
             surface: ThemeTokens.activity-surface;
             divider-color: ThemeTokens.divider-strong;
-            content-spacing: 6px;
+            content-padding-top: root.compact-layout ? 6px : 12px;
+            content-padding-bottom: root.compact-layout ? 6px : 12px;
+            content-spacing: root.compact-layout ? 4px : 6px;
 
             Rectangle {
                 height: 0px;
@@ -390,7 +394,7 @@ export component SyncVaultModal inherits Rectangle {
             }
 
             HorizontalLayout {
-                height: 36px;
+                height: root.compact-layout ? 34px : 36px;
                 spacing: 12px;
 
                 if root.secondary-action-label != "" : secondary-button := SyncModalActionButton {
