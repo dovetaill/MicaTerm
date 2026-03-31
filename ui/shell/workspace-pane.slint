@@ -75,6 +75,7 @@ export component WorkspacePane inherits Rectangle {
         session-host.native-surface-height;
     callback workspace-tab-selected(string);
     callback workspace-tab-close-requested(string);
+    callback workspace-new-tab-requested();
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
@@ -93,6 +94,7 @@ export component WorkspacePane inherits Rectangle {
     callback welcome-quick-launch-connect-in-new-tab-requested(string);
     callback welcome-quick-launch-toggle-favorite-requested(string);
     callback welcome-quick-launch-reveal-in-assets-requested(string);
+    callback welcome-open-saved-ssh-requested();
 
     horizontal-stretch: 1;
     min-width: 0px;
@@ -114,6 +116,10 @@ export component WorkspacePane inherits Rectangle {
 
             tab-close-requested(session-id) => {
                 root.workspace-tab-close-requested(session-id);
+            }
+
+            new-tab-requested => {
+                root.workspace-new-tab-requested();
             }
         }
 
@@ -246,6 +252,10 @@ export component WorkspacePane inherits Rectangle {
 
                 welcome-quick-launch-reveal-in-assets-requested(asset-id) => {
                     root.welcome-quick-launch-reveal-in-assets-requested(asset-id);
+                }
+
+                welcome-open-saved-ssh-requested => {
+                    root.welcome-open-saved-ssh-requested();
                 }
             }
         }

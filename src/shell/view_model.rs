@@ -47,6 +47,21 @@ pub enum WelcomeAction {
     Sftp,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedSshPickerItem {
+    pub id: String,
+    pub kind: String,
+    pub label: String,
+    pub depth: usize,
+    pub has_children: bool,
+    pub expanded: bool,
+    pub selected: bool,
+    pub focused: bool,
+    pub disclosure_state: String,
+    pub path_hint: String,
+    pub compact_flat_mode: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightPanelView {
     Appearance,
@@ -378,6 +393,9 @@ pub struct ShellViewModel {
     quick_launch_search_query: String,
     quick_launch_selected_asset_id: Option<String>,
     quick_launch_active_group_id: Option<String>,
+    saved_ssh_picker_open: bool,
+    saved_ssh_picker_query: String,
+    saved_ssh_picker_selected_asset_id: Option<String>,
     pub sftp_sessions: HashMap<String, SftpSessionBindingState>,
     pub sftp_queue_summary: TransferQueueSummary,
     pub sftp_queue_drawer_open: bool,
@@ -438,6 +456,9 @@ impl Default for ShellViewModel {
             quick_launch_search_query: String::new(),
             quick_launch_selected_asset_id: None,
             quick_launch_active_group_id: None,
+            saved_ssh_picker_open: false,
+            saved_ssh_picker_query: String::new(),
+            saved_ssh_picker_selected_asset_id: None,
             sftp_sessions: HashMap::new(),
             sftp_queue_summary: TransferQueueSummary::default(),
             sftp_queue_drawer_open: false,
@@ -529,10 +550,9 @@ impl ShellViewModel {
                 entry_id,
                 draft_name,
                 ..
-            }) => asset_name_validation_message(self.sftp_name_validation(
-                draft_name,
-                Some(entry_id.as_str()),
-            )),
+            }) => asset_name_validation_message(
+                self.sftp_name_validation(draft_name, Some(entry_id.as_str())),
+            ),
             _ => String::new(),
         }
     }
@@ -695,7 +715,11 @@ impl ShellViewModel {
         self.show_global_menu = false;
     }
 
-    pub fn set_sftp_session_state(&mut self, session_id: impl Into<String>, state: SftpSessionBindingState) {
+    pub fn set_sftp_session_state(
+        &mut self,
+        session_id: impl Into<String>,
+        state: SftpSessionBindingState,
+    ) {
         self.sftp_sessions.insert(session_id.into(), state);
     }
 
@@ -757,7 +781,12 @@ impl ShellViewModel {
 
     pub fn sftp_panel_actions_enabled(&self) -> bool {
         self.active_sftp_session_state()
-            .map(|state| matches!(state.mode, SftpPanelMode::Ready | SftpPanelMode::Loading | SftpPanelMode::Connecting))
+            .map(|state| {
+                matches!(
+                    state.mode,
+                    SftpPanelMode::Ready | SftpPanelMode::Loading | SftpPanelMode::Connecting
+                )
+            })
             .unwrap_or(false)
     }
 
@@ -977,6 +1006,23 @@ impl ShellViewModel {
         self.close_workspace_session_with_fallback(session_id)
     }
 
+    pub fn open_workspace_launcher_tab(&mut self) {
+        if self.workspace_tabs.iter().any(WorkspaceTab::is_launcher) {
+            let _ = self.activate_workspace_session("workspace-launcher");
+            return;
+        }
+
+        let mut launcher = WorkspaceTab::launcher();
+        launcher.active = true;
+        self.workspace_tabs.push(launcher);
+        self.active_workspace_session_id = Some("workspace-launcher".into());
+        self.normalize_workspace_tabs();
+    }
+
+    pub fn close_workspace_launcher_tab(&mut self) -> bool {
+        self.close_workspace_session_with_fallback("workspace-launcher")
+    }
+
     pub fn close_workspace_session_with_fallback(&mut self, session_id: &str) -> bool {
         let Some(removed_index) = self
             .workspace_tabs
@@ -1034,10 +1080,67 @@ impl ShellViewModel {
     pub fn workspace_session_host_mode(&self) -> &'static str {
         match self.active_workspace_tab() {
             None => "welcome",
+            Some(tab) if tab.is_launcher() => "welcome",
             Some(tab) if tab.uses_terminal_surface() => "terminal",
             Some(tab) if tab.uses_connection_progress_surface() => "connection-progress",
             Some(_) => "session-error",
         }
+    }
+
+    pub fn saved_ssh_picker_open(&self) -> bool {
+        self.saved_ssh_picker_open
+    }
+
+    pub fn saved_ssh_picker_query(&self) -> &str {
+        &self.saved_ssh_picker_query
+    }
+
+    pub fn open_saved_ssh_picker(&mut self) {
+        self.saved_ssh_picker_open = true;
+        self.saved_ssh_picker_query.clear();
+        self.saved_ssh_picker_selected_asset_id = self.first_saved_ssh_picker_asset_id();
+    }
+
+    pub fn close_saved_ssh_picker(&mut self) {
+        self.saved_ssh_picker_open = false;
+        self.saved_ssh_picker_query.clear();
+        self.saved_ssh_picker_selected_asset_id = None;
+    }
+
+    pub fn set_saved_ssh_picker_query(&mut self, query: String) {
+        self.saved_ssh_picker_query = query;
+        self.saved_ssh_picker_selected_asset_id = self.first_saved_ssh_picker_asset_id();
+    }
+
+    pub fn select_saved_ssh_picker_asset(&mut self, asset_id: String) {
+        if self
+            .saved_ssh_picker_items()
+            .iter()
+            .any(|item| item.id == asset_id)
+        {
+            self.saved_ssh_picker_selected_asset_id = Some(asset_id);
+        }
+    }
+
+    pub fn toggle_saved_ssh_picker_expanded(&mut self, asset_id: &str) {
+        if self.console_asset_tree.kind(asset_id) != Some(ConsoleAssetKind::Folder) {
+            return;
+        }
+
+        let next = !self
+            .console_asset_tree
+            .is_expanded(asset_id)
+            .unwrap_or(false);
+        self.console_asset_tree.set_expanded(asset_id, next);
+    }
+
+    pub fn saved_ssh_picker_items(&self) -> Vec<SavedSshPickerItem> {
+        let mut rows = Vec::new();
+        let query_active = !self.saved_ssh_picker_query.trim().is_empty();
+        for root_id in self.console_asset_tree.root_ids() {
+            self.collect_saved_ssh_picker_rows(root_id, 0, query_active, &mut rows);
+        }
+        rows
     }
 
     pub fn quick_launch_preferences(&self) -> &QuickLaunchPreferences {
@@ -1064,7 +1167,11 @@ impl ShellViewModel {
     }
 
     pub fn record_recent_saved_ssh_asset(&mut self, asset_id: &str) {
-        if self.console_asset_tree.ssh_connection_spec(asset_id).is_none() {
+        if self
+            .console_asset_tree
+            .ssh_connection_spec(asset_id)
+            .is_none()
+        {
             return;
         }
 
@@ -1080,7 +1187,11 @@ impl ShellViewModel {
     }
 
     pub fn toggle_quick_launch_favorite(&mut self, asset_id: &str) {
-        if self.console_asset_tree.ssh_connection_spec(asset_id).is_none() {
+        if self
+            .console_asset_tree
+            .ssh_connection_spec(asset_id)
+            .is_none()
+        {
             return;
         }
 
@@ -1090,7 +1201,9 @@ impl ShellViewModel {
             .iter()
             .position(|current| current == asset_id)
         {
-            self.quick_launch_preferences.favorite_asset_ids.remove(index);
+            self.quick_launch_preferences
+                .favorite_asset_ids
+                .remove(index);
         } else {
             self.quick_launch_preferences
                 .favorite_asset_ids
@@ -1101,7 +1214,11 @@ impl ShellViewModel {
     }
 
     pub fn select_quick_launch_asset(&mut self, asset_id: String) {
-        if self.console_asset_tree.ssh_connection_spec(&asset_id).is_none() {
+        if self
+            .console_asset_tree
+            .ssh_connection_spec(&asset_id)
+            .is_none()
+        {
             return;
         }
 
@@ -1186,11 +1303,15 @@ impl ShellViewModel {
     pub fn ensure_quick_launch_selection(&mut self) {
         let records = self.matching_quick_launch_records();
         let visible_asset_ids = self.visible_asset_ids_from_records(&records);
-        if self.quick_launch_selected_asset_id.as_deref().is_some_and(|asset_id| {
-            visible_asset_ids
-                .iter()
-                .any(|visible_asset_id| visible_asset_id == asset_id)
-        }) {
+        if self
+            .quick_launch_selected_asset_id
+            .as_deref()
+            .is_some_and(|asset_id| {
+                visible_asset_ids
+                    .iter()
+                    .any(|visible_asset_id| visible_asset_id == asset_id)
+            })
+        {
             self.sync_quick_launch_group_from_selected();
             return;
         }
@@ -1941,8 +2062,10 @@ impl ShellViewModel {
                 entry_id,
                 draft_name,
                 ..
-            }) => self.sftp_name_validation(draft_name, Some(entry_id.as_str()))
-                == AssetNameValidation::Valid,
+            }) => {
+                self.sftp_name_validation(draft_name, Some(entry_id.as_str()))
+                    == AssetNameValidation::Valid
+            }
             Some(AssetModalState::SftpDeleteEntriesConfirm { .. }) => true,
             Some(AssetModalState::DeleteAssetConfirm { .. }) => true,
             None => false,
@@ -1969,7 +2092,8 @@ impl ShellViewModel {
                     return false;
                 }
 
-                let Some(session_id) = self.active_workspace_session_id().map(str::to_string) else {
+                let Some(session_id) = self.active_workspace_session_id().map(str::to_string)
+                else {
                     return false;
                 };
                 let path = sftp_child_path(self.sftp_panel_path().as_str(), draft_name.trim());
@@ -2296,10 +2420,12 @@ impl ShellViewModel {
             };
 
             let before_len = state.entries.len();
-            state.entries.retain(|entry| !entry_ids.iter().any(|id| id == &entry.id));
-            state.selected_entry_ids.retain(|selected_id| {
-                !entry_ids.iter().any(|entry_id| entry_id == selected_id)
-            });
+            state
+                .entries
+                .retain(|entry| !entry_ids.iter().any(|id| id == &entry.id));
+            state
+                .selected_entry_ids
+                .retain(|selected_id| !entry_ids.iter().any(|entry_id| entry_id == selected_id));
             if state.entries.len() == before_len {
                 return false;
             }
@@ -2643,14 +2769,12 @@ impl ShellViewModel {
             match target_id.clone() {
                 Some(target_id)
                     if matches!(target_kind, ContextTargetKind::SftpMultiSelection)
-                        && self
-                            .active_sftp_session_state()
-                            .is_some_and(|state| {
-                                state
-                                    .selected_entry_ids
-                                    .iter()
-                                    .any(|selected_id| selected_id == &target_id)
-                            }) => {}
+                        && self.active_sftp_session_state().is_some_and(|state| {
+                            state
+                                .selected_entry_ids
+                                .iter()
+                                .any(|selected_id| selected_id == &target_id)
+                        }) => {}
                 Some(target_id) => {
                     if let Some(state) = self.active_sftp_session_state_mut() {
                         state.selected_entry_ids = vec![target_id.clone()];
@@ -2990,6 +3114,13 @@ impl ShellViewModel {
         {
             self.quick_launch_active_group_id = None;
         }
+        if self
+            .saved_ssh_picker_selected_asset_id
+            .as_deref()
+            .is_some_and(|asset_id| !self.console_asset_tree.contains(asset_id))
+        {
+            self.saved_ssh_picker_selected_asset_id = None;
+        }
         self.clear_active_asset_rename_session();
         self.context_target_asset_id = None;
         self.close_context_menu();
@@ -3048,10 +3179,7 @@ impl ShellViewModel {
                     .iter()
                     .find(|record| record.asset_id == asset_id)
                     .map(|record| {
-                        project_card_item(
-                            record,
-                            self.is_quick_launch_favorite(asset_id.as_str()),
-                        )
+                        project_card_item(record, self.is_quick_launch_favorite(asset_id.as_str()))
                     })
             })
             .collect()
@@ -3138,7 +3266,12 @@ impl ShellViewModel {
             .into_iter()
             .next()
         })
-        .or_else(|| self.visible_group_records(records).into_iter().map(|record| record.asset_id).next())
+        .or_else(|| {
+            self.visible_group_records(records)
+                .into_iter()
+                .map(|record| record.asset_id)
+                .next()
+        })
     }
 
     fn is_quick_launch_favorite(&self, asset_id: &str) -> bool {
@@ -3162,6 +3295,114 @@ impl ShellViewModel {
             .quick_launch_selected_asset_id
             .as_deref()
             .and_then(|asset_id| group_id_for_asset(&self.console_asset_tree, asset_id));
+    }
+
+    fn first_saved_ssh_picker_asset_id(&self) -> Option<String> {
+        self.saved_ssh_picker_items()
+            .into_iter()
+            .find(|item| item.kind == ConsoleAssetKind::SshConnection.id())
+            .map(|item| item.id)
+    }
+
+    fn collect_saved_ssh_picker_rows(
+        &self,
+        node_id: &str,
+        depth: usize,
+        query_active: bool,
+        rows: &mut Vec<SavedSshPickerItem>,
+    ) -> bool {
+        let Some(node) = self.console_asset_tree.node(node_id) else {
+            return false;
+        };
+
+        match node.kind {
+            ConsoleAssetKind::SshConnection => {
+                if !self.saved_ssh_picker_matches(node_id) {
+                    return false;
+                }
+
+                rows.push(SavedSshPickerItem {
+                    id: node.id.clone(),
+                    kind: node.kind.id().into(),
+                    label: node.title.clone(),
+                    depth,
+                    has_children: false,
+                    expanded: false,
+                    selected: self.saved_ssh_picker_selected_asset_id.as_deref()
+                        == Some(node.id.as_str()),
+                    focused: self.saved_ssh_picker_selected_asset_id.as_deref()
+                        == Some(node.id.as_str()),
+                    disclosure_state: "none".into(),
+                    path_hint: String::new(),
+                    compact_flat_mode: false,
+                });
+                true
+            }
+            ConsoleAssetKind::Folder => {
+                let mut child_rows = Vec::new();
+                let mut has_matching_descendants = false;
+                for child_id in &node.children {
+                    has_matching_descendants |= self.collect_saved_ssh_picker_rows(
+                        child_id,
+                        depth + 1,
+                        query_active,
+                        &mut child_rows,
+                    );
+                }
+
+                if !has_matching_descendants {
+                    return false;
+                }
+
+                rows.push(SavedSshPickerItem {
+                    id: node.id.clone(),
+                    kind: node.kind.id().into(),
+                    label: node.title.clone(),
+                    depth,
+                    has_children: true,
+                    expanded: query_active || node.expanded,
+                    selected: self.saved_ssh_picker_selected_asset_id.as_deref()
+                        == Some(node.id.as_str()),
+                    focused: self.saved_ssh_picker_selected_asset_id.as_deref()
+                        == Some(node.id.as_str()),
+                    disclosure_state: if query_active || node.expanded {
+                        "expanded".into()
+                    } else {
+                        "collapsed".into()
+                    },
+                    path_hint: String::new(),
+                    compact_flat_mode: false,
+                });
+
+                if query_active || node.expanded {
+                    rows.extend(child_rows);
+                }
+                true
+            }
+            ConsoleAssetKind::SnippetPackage | ConsoleAssetKind::Snippet => false,
+        }
+    }
+
+    fn saved_ssh_picker_matches(&self, node_id: &str) -> bool {
+        let Some(spec) = self.console_asset_tree.ssh_connection_spec(node_id) else {
+            return false;
+        };
+
+        let query = self.saved_ssh_picker_query.trim().to_ascii_lowercase();
+        if query.is_empty() {
+            return true;
+        }
+
+        let title = self.console_asset_tree.title(node_id).unwrap_or_default();
+        [
+            title,
+            spec.host.as_str(),
+            spec.user.as_str(),
+            spec.environment.as_str(),
+            spec.remark.as_str(),
+        ]
+        .into_iter()
+        .any(|value| value.to_ascii_lowercase().contains(&query))
     }
 
     pub fn replace_vault_projection(

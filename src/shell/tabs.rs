@@ -2,6 +2,12 @@
 
 use crate::app::ssh::session_manager::{SessionHandle, SessionState};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceTabKind {
+    Session,
+    Launcher,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceTab {
     pub session_id: String,
@@ -11,6 +17,7 @@ pub struct WorkspaceTab {
     pub state: String,
     pub error_detail: String,
     pub active: bool,
+    pub kind: WorkspaceTabKind,
 }
 
 impl WorkspaceTab {
@@ -23,22 +30,42 @@ impl WorkspaceTab {
             state: session_state_id(&handle.state).into(),
             error_detail: session_error_detail(&handle.state).into(),
             active: false,
+            kind: WorkspaceTabKind::Session,
         }
     }
 
+    pub fn launcher() -> Self {
+        Self {
+            session_id: "workspace-launcher".into(),
+            asset_id: String::new(),
+            title: "New Tab".into(),
+            subtitle: String::new(),
+            state: "launcher".into(),
+            error_detail: String::new(),
+            active: false,
+            kind: WorkspaceTabKind::Launcher,
+        }
+    }
+
+    pub fn is_launcher(&self) -> bool {
+        self.kind == WorkspaceTabKind::Launcher
+    }
+
     pub fn can_reconnect(&self) -> bool {
-        matches!(self.state.as_str(), "cancelled" | "disconnected" | "error")
+        self.kind == WorkspaceTabKind::Session
+            && matches!(self.state.as_str(), "cancelled" | "disconnected" | "error")
     }
 
     pub fn uses_terminal_surface(&self) -> bool {
-        matches!(self.state.as_str(), "connected")
+        self.kind == WorkspaceTabKind::Session && matches!(self.state.as_str(), "connected")
     }
 
     pub fn uses_connection_progress_surface(&self) -> bool {
-        matches!(
-            self.state.as_str(),
-            "connecting" | "waiting-user" | "cancelled"
-        )
+        self.kind == WorkspaceTabKind::Session
+            && matches!(
+                self.state.as_str(),
+                "connecting" | "waiting-user" | "cancelled"
+            )
     }
 }
 

@@ -122,3 +122,22 @@ fn quick_launch_selected_detail_reports_auth_and_proxy_summary() {
     assert!(detail.auth_summary.contains("Private key"));
     assert!(detail.proxy_summary.contains("SOCKS5"));
 }
+
+#[test]
+fn saved_ssh_picker_projection_filters_to_saved_ssh_assets_in_tree_order() {
+    let (mut view_model, ids) = seeded_view_model();
+
+    view_model.set_saved_ssh_picker_query("db".into());
+
+    let items = view_model.saved_ssh_picker_items();
+
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].kind, "folder");
+    assert_eq!(items[0].label, "Databases");
+    assert_eq!(items[1].id, ids.db);
+    assert_eq!(items[1].kind, "ssh");
+    assert!(
+        items.iter().all(|item| item.id != ids.snippet),
+        "saved ssh picker must not project snippet assets"
+    );
+}

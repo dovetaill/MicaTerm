@@ -49,7 +49,8 @@ export component ActiveTab inherits Rectangle {
         height: 14px;
         border-radius: 1px;
         background: root.state == "error" || root.state == "disconnected" ? #c94f4f :
-                    root.state == "connecting" ? ThemeTokens.accent : #4da36d;
+                    root.state == "connecting" ? ThemeTokens.accent :
+                    root.state == "launcher" ? ThemeTokens.divider-subtle : #4da36d;
     }
 
     bottom-divider := Rectangle {
