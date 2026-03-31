@@ -61,10 +61,11 @@ use mica_term::app::vault::crypto::{encrypt_snapshot, generate_vault_key, wrap_v
 use mica_term::app::vault::model::{
     BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind,
     KdfConfig, PackLayout, PackRef, ProviderAuthKind, ProviderKind, RemoteRole,
-    SnapshotSyncPreferences, VaultHead, VaultManifest,
+    SnapshotSyncPreferences, VaultAssetPayload, VaultHead, VaultManifest,
 };
 use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::{ProviderCapabilities, ProviderRevision, VaultProvider};
+use mica_term::app::vault::recovery::{RecoverySource, load_recovery_snapshots};
 use mica_term::app::vault::snapshot::export_vault_snapshot;
 use mica_term::app::window_effects::default_platform_window_effects;
 use mica_term::shell::assets::{
@@ -1843,6 +1844,75 @@ fn sample_remote_revision_for_tree(
     }
 }
 
+fn sample_remote_revision_for_existing_vault_key(
+    asset_tree: &AssetTree,
+    credential_store: &dyn CredentialStore,
+    revision: &str,
+    vault_key: &[u8; 32],
+    wrapped_vault_key: &str,
+    kdf: &KdfConfig,
+) -> ProviderRevision {
+    let snapshot = export_vault_snapshot(
+        asset_tree,
+        &KeychainCatalog::default(),
+        credential_store,
+        &sample_known_hosts_path("remote-revision"),
+        SnapshotSyncPreferences::default(),
+        &mica_term::app::ui_preferences::UiPreferences::default(),
+    )
+    .expect("export vault snapshot");
+    let encrypted_snapshot = encrypt_snapshot(&snapshot, vault_key).expect("encrypt snapshot");
+    let manifest = VaultManifest {
+        packs: vec![PackRef {
+            pack_id: format!("pack-{revision}"),
+            object_name: format!("bundle/{revision}/snapshot.bin"),
+            size_bytes: encrypted_snapshot.ciphertext.len() as u64,
+            digest: format!("sha256:{}", encrypted_snapshot.payload_sha256),
+        }],
+        provider_capability_fallbacks: BTreeMap::from([
+            (
+                "snapshot.nonce_hex".into(),
+                hex(encrypted_snapshot.nonce.as_slice()),
+            ),
+            (
+                "snapshot.plaintext_len".into(),
+                encrypted_snapshot.plaintext_len.to_string(),
+            ),
+            (
+                "snapshot.compressed_len".into(),
+                encrypted_snapshot.compressed_len.to_string(),
+            ),
+            (
+                "snapshot.payload_sha256".into(),
+                encrypted_snapshot.payload_sha256.clone(),
+            ),
+        ]),
+        ..VaultManifest::default()
+    };
+    let head = VaultHead {
+        format_version: 1,
+        vault_id: "vault-main".into(),
+        vault_revision: revision.into(),
+        parent_revision: Some("rev-0003".into()),
+        device_id: "device-remote".into(),
+        committed_at: "2026-03-31T10:00:00Z".into(),
+        committed_by_device: "device-remote".into(),
+        payload_hash: format!("sha256:{}", encrypted_snapshot.payload_sha256),
+        manifest_ref: format!("bundle/{revision}/manifest.bin"),
+        wrapped_vault_key: wrapped_vault_key.into(),
+        kdf: kdf.clone(),
+        cipher: CipherKind::XChaCha20Poly1305,
+        compression: CompressionKind::Zstd,
+        pack_layout: PackLayout::BundledFiles,
+    };
+
+    ProviderRevision {
+        head,
+        manifest,
+        encrypted_snapshot,
+    }
+}
+
 fn sample_credential_root(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
         "mica-term-bootstrap-credentials-{}-{}",
@@ -2464,6 +2534,105 @@ fn restart_recovers_vault_session_without_prompting_for_unlock() {
 
     restarted.invoke_open_sync_modal_requested();
     assert_eq!(restarted.get_sync_modal_mode().as_str(), "ready");
+}
+
+#[test]
+fn recovery_pull_persists_local_snapshot_before_remote_replacement() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("recovery-pull-before-replace");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_sync_modal_sync_now_requested();
+    assert_eq!(primary.recorded_writes().len(), 1);
+
+    create_root_ssh(&app, "DB Replica", "10.0.0.24");
+    let remote_store = Arc::new(MemoryCredentialStore::default());
+    let (remote_tree, remote_credential_ref) = sample_vault_asset_tree("10.0.0.99");
+    persist_secret_bundle(
+        remote_store.as_ref(),
+        &remote_credential_ref,
+        &StoredSshSecretBundle {
+            password: Some("hunter2".into()),
+            ..StoredSshSecretBundle::default()
+        },
+    )
+    .unwrap();
+    let local_state = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+        .unwrap()
+        .expect("local bootstrap state after first sync");
+    let runtime_vault_key = load_runtime_vault_key(credential_store.as_ref(), "vault-main")
+        .unwrap()
+        .expect("runtime vault key after enabling sync");
+    let mut remote_revision = sample_remote_revision_for_existing_vault_key(
+        &remote_tree,
+        remote_store.as_ref(),
+        "rev-0002",
+        &runtime_vault_key,
+        &local_state.wrapped_vault_key,
+        &local_state.kdf,
+    );
+    remote_revision.head.parent_revision = Some("rev-0001".into());
+    remote_revision.head.committed_at = "99999999999999999999".into();
+    primary.set_remote_head(Some(remote_revision.head.clone()));
+    primary.set_remote_revision(Some(remote_revision));
+
+    app.invoke_sync_modal_sync_now_requested();
+
+    assert_eq!(
+        primary.recorded_writes().len(),
+        1,
+        "newer remote data should pull instead of overwriting the primary head"
+    );
+    assert_eq!(app.get_console_asset_items().row_count(), 1);
+    assert!(
+        credential_store
+            .get_secret(&remote_credential_ref)
+            .unwrap()
+            .is_some()
+    );
+
+    let recovery_entries = load_recovery_snapshots(temp_root.join("recovery").as_path(), "vault-main")
+        .expect("load persisted recovery snapshots");
+    assert_eq!(recovery_entries.len(), 1);
+    assert_eq!(recovery_entries[0].source, RecoverySource::LocalBeforePull);
+    assert!(
+        recovery_entries[0]
+            .snapshot
+            .asset_catalog
+            .nodes
+            .values()
+            .any(|node| matches!(
+                &node.payload,
+                VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.24"
+            )),
+        "local recovery snapshot should preserve the pending local SSH asset before pull"
+    );
 }
 
 #[test]

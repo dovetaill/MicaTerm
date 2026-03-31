@@ -93,7 +93,8 @@ use crate::app::vault::crypto::{
 use crate::app::vault::engine::{SyncEngine, SyncError, SyncRequest};
 use crate::app::vault::model::{
     BootstrapBundle, BootstrapRemoteConfig, GiteeRemoteDraft, KdfConfig, ProviderAuthKind,
-    ProviderKind, RemoteRole, SnapshotSyncPreferences, VaultAssetPayload, VaultSnapshot,
+    ProviderKind, RemoteRole, SnapshotSyncPreferences, VaultAssetPayload, VaultHead,
+    VaultSnapshot,
 };
 use crate::app::vault::provider::gitee_gist::{GiteeGistProvider, GiteeGistProviderConfig};
 use crate::app::vault::provider::github_gist::{GitHubGistProvider, GitHubGistProviderConfig};
@@ -105,7 +106,13 @@ use crate::app::vault::provider::{
     VaultProvider, first_release_formal_auth_label, first_release_formal_provider_kind,
     first_release_formal_provider_label,
 };
+use crate::app::vault::recovery::{
+    RecoverySnapshotRecord, RecoverySource, persist_recovery_snapshot,
+};
 use crate::app::vault::snapshot::{apply_vault_snapshot, export_vault_snapshot};
+use crate::app::vault::sync_decision::{
+    LocalSyncState, SyncAction, decide_sync_action,
+};
 use crate::app::window_effects::{
     PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
 };
@@ -4114,6 +4121,63 @@ fn payload_hash_from_encrypted_snapshot_sha(payload_sha256: &str) -> String {
     format!("sha256:{payload_sha256}")
 }
 
+fn local_sync_state_for_snapshot(
+    local_state: &LocalVaultBootstrapState,
+    local_snapshot_hash: String,
+) -> LocalSyncState {
+    LocalSyncState {
+        base_revision: local_state.current_revision.clone(),
+        local_snapshot_hash: Some(local_snapshot_hash),
+        last_local_change_at: local_state.last_local_change_at.clone(),
+        last_successful_push_at: local_state.last_successful_push_at.clone(),
+        last_successful_pull_at: local_state.last_successful_pull_at.clone(),
+    }
+}
+
+fn persist_local_recovery_snapshot(
+    vault: &VaultSessionState,
+    snapshot: &VaultSnapshot,
+    local_snapshot_hash: String,
+) -> Result<()> {
+    let local_state = vault
+        .local_state
+        .as_ref()
+        .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
+    let recovery_record = RecoverySnapshotRecord::new(
+        local_state.bundle.vault_id.clone(),
+        RecoverySource::LocalBeforePull,
+        current_sync_timestamp(),
+        local_state.current_revision.clone(),
+        local_state.current_revision.clone(),
+        Some(local_snapshot_hash),
+        snapshot.clone(),
+    );
+    persist_recovery_snapshot(vault.root_dir.join("recovery").as_path(), &recovery_record)?;
+    Ok(())
+}
+
+fn persist_remote_recovery_snapshot(
+    vault: &VaultSessionState,
+    remote_head: &VaultHead,
+    snapshot: &VaultSnapshot,
+) -> Result<()> {
+    let local_state = vault
+        .local_state
+        .as_ref()
+        .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
+    let recovery_record = RecoverySnapshotRecord::new(
+        local_state.bundle.vault_id.clone(),
+        RecoverySource::RemoteBeforePush,
+        current_sync_timestamp(),
+        local_state.current_revision.clone(),
+        Some(remote_head.vault_revision.clone()),
+        Some(remote_head.payload_hash.clone()),
+        snapshot.clone(),
+    );
+    persist_recovery_snapshot(vault.root_dir.join("recovery").as_path(), &recovery_record)?;
+    Ok(())
+}
+
 fn update_vault_panel_for_local_state(state: &mut ShellViewModel, vault: &VaultSessionState) {
     let panel = state.vault_panel_state_mut();
     match (&vault.local_state, vault.unlocked_vault_key.is_some()) {
@@ -4844,20 +4908,10 @@ fn sync_local_vault(
         sync_preferences_for_bundle(&local_bundle, None),
         &UiPreferences::from(&*state),
     )?;
-    if let Some(stable_revision) = current_revision.as_ref().filter(|_| {
-        vault
-            .decrypted_snapshot
-            .as_ref()
-            .is_some_and(|existing| existing == &snapshot)
-    }) {
-        update_vault_panel_for_local_state(state, vault);
-        update_sync_modal_for_local_state(state, vault);
-        state.vault_panel_state_mut().primary_status_label =
-            format!("Already synced {stable_revision}");
-        state.sync_modal_state_mut().status_text =
-            format!("No local changes to upload. Primary stays at {stable_revision}.");
-        return Ok(());
-    }
+    let current_encrypted_snapshot = encrypt_snapshot(&snapshot, &vault_key)?;
+    let local_snapshot_hash =
+        payload_hash_from_encrypted_snapshot_sha(&current_encrypted_snapshot.payload_sha256);
+    let local_sync_state = local_sync_state_for_snapshot(local_state, local_snapshot_hash.clone());
 
     let primary_remote = local_bundle
         .primary_remote()
@@ -4865,6 +4919,101 @@ fn sync_local_vault(
         .ok_or_else(|| anyhow!("primary remote is not configured"))?;
     let primary_remote = resolve_remote_for_sync(&primary_remote, credential_store)?;
     let primary_provider = vault.provider_factory.build_provider(&primary_remote)?;
+    let primary_head = primary_provider
+        .read_head()
+        .map_err(|err| anyhow!("failed to inspect primary remote `{}`: {err}", primary_remote.remote_id))?
+        .head;
+    let decision = decide_sync_action(&local_sync_state, primary_head.as_ref());
+    match decision.action {
+        SyncAction::Noop => {
+            store_encrypted_cache(
+                cache_root.as_path(),
+                &local_bundle.vault_id,
+                &current_encrypted_snapshot,
+            )?;
+            if let Some(remote_head) = primary_head.as_ref() {
+                let local_state = vault
+                    .local_state
+                    .as_mut()
+                    .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
+                local_state.current_revision = Some(remote_head.vault_revision.clone());
+                local_state.local_snapshot_hash = Some(local_snapshot_hash);
+                if current_revision.as_deref() != Some(remote_head.vault_revision.as_str()) {
+                    local_state.last_successful_pull_at = Some(remote_head.committed_at.clone());
+                }
+                local_state.last_sync_error = None;
+                save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
+                vault.decrypted_snapshot = Some(snapshot);
+                update_vault_panel_for_local_state(state, vault);
+                update_sync_modal_for_local_state(state, vault);
+                state.vault_panel_state_mut().primary_status_label =
+                    format!("Already synced {}", remote_head.vault_revision);
+                state.sync_modal_state_mut().status_text = format!(
+                    "Local and remote snapshots already match at {}.",
+                    remote_head.vault_revision
+                );
+            } else {
+                update_vault_panel_for_local_state(state, vault);
+                update_sync_modal_for_local_state(state, vault);
+                state.vault_panel_state_mut().primary_status_label = "Primary empty".into();
+                state.sync_modal_state_mut().status_text =
+                    "No remote revision exists yet. Run sync after the next local change.".into();
+            }
+            return Ok(());
+        }
+        SyncAction::Pull => {
+            let remote_head = primary_head.ok_or_else(|| {
+                anyhow!("primary remote `{}` is missing a readable head", primary_remote.remote_id)
+            })?;
+            if decision.backup_local_snapshot {
+                persist_local_recovery_snapshot(vault, &snapshot, local_snapshot_hash.clone())?;
+            }
+            let remote_revision = primary_provider.read_revision(&remote_head).map_err(|err| {
+                anyhow!(
+                    "failed to read primary revision `{}` from remote `{}`: {err}",
+                    remote_head.vault_revision,
+                    primary_remote.remote_id
+                )
+            })?;
+            let remote_snapshot = decrypt_snapshot(&remote_revision.encrypted_snapshot, &vault_key)?;
+            clear_vault_decrypted_state(state, vault.decrypted_snapshot.as_ref(), credential_store)?;
+            apply_vault_snapshot_to_shell(
+                state,
+                &remote_snapshot,
+                credential_store,
+                vault.known_hosts_path().as_path(),
+            )?;
+            let pulled_at = current_sync_timestamp();
+            let local_state = vault
+                .local_state
+                .as_mut()
+                .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
+            local_state.wrapped_vault_key = remote_head.wrapped_vault_key.clone();
+            local_state.kdf = remote_head.kdf.clone();
+            local_state.current_revision = Some(remote_head.vault_revision.clone());
+            local_state.local_snapshot_hash = Some(remote_head.payload_hash.clone());
+            local_state.last_successful_pull_at = Some(pulled_at);
+            local_state.last_sync_error = None;
+            save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
+            store_encrypted_cache(
+                cache_root.as_path(),
+                &local_bundle.vault_id,
+                &remote_revision.encrypted_snapshot,
+            )?;
+            vault.decrypted_snapshot = Some(remote_snapshot);
+            update_vault_panel_for_local_state(state, vault);
+            update_sync_modal_for_local_state(state, vault);
+            state.vault_panel_state_mut().primary_status_label =
+                format!("Pulled primary {}", remote_head.vault_revision);
+            state.sync_modal_state_mut().status_text = format!(
+                "Pulled remote changes from primary {}.",
+                remote_head.vault_revision
+            );
+            return Ok(());
+        }
+        SyncAction::Push => {}
+    }
+
     let mirror_providers = local_bundle
         .remotes
         .iter()
@@ -4874,11 +5023,34 @@ fn sync_local_vault(
             vault.provider_factory.build_provider(&resolved)
         })
         .collect::<Result<Vec<_>>>()?;
+
+    if decision.backup_remote_snapshot {
+        let remote_head = primary_head.as_ref().ok_or_else(|| {
+            anyhow!(
+                "primary remote `{}` is missing a recoverable head for overwrite backup",
+                primary_remote.remote_id
+            )
+        })?;
+        let remote_revision = primary_provider.read_revision(remote_head).map_err(|err| {
+            anyhow!(
+                "failed to read primary revision `{}` from remote `{}` for recovery backup: {err}",
+                remote_head.vault_revision,
+                primary_remote.remote_id
+            )
+        })?;
+        let remote_snapshot = decrypt_snapshot(&remote_revision.encrypted_snapshot, &vault_key)?;
+        persist_remote_recovery_snapshot(vault, remote_head, &remote_snapshot)?;
+    }
+
+    let parent_revision = primary_head
+        .as_ref()
+        .map(|head| head.vault_revision.clone())
+        .or(current_revision);
     let request = SyncRequest {
         vault_id: local_bundle.vault_id.clone(),
         snapshot: snapshot.clone(),
-        next_revision: next_vault_revision(current_revision.as_deref()),
-        parent_revision: current_revision,
+        next_revision: next_vault_revision(parent_revision.as_deref()),
+        parent_revision,
         device_id: "local-device".into(),
         committed_at: current_sync_timestamp(),
         committed_by_device: "local-device".into(),
