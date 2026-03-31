@@ -12,7 +12,8 @@ use crate::app::vault::model::{
     VaultHead,
 };
 use crate::app::vault::provider::{
-    ProviderCapabilities, ProviderReadResult, ProviderWriteRequest, VaultProvider,
+    ProviderCapabilities, ProviderReadResult, ProviderRevision, ProviderWriteRequest,
+    VaultProvider, rebuild_snapshot_from_manifest,
 };
 
 const GIST_HEAD_FILE_NAME: &str = "vault-head.json";
@@ -231,6 +232,20 @@ impl VaultProvider for GitHubGistProvider {
         Ok(ProviderReadResult { head: Some(head) })
     }
 
+    fn read_revision(&self, head: &VaultHead) -> Result<ProviderRevision> {
+        let gist = self.api.get_gist(&self.config.gist_id, None)?;
+        let manifest = load_bundled_manifest_from_gist(&gist, head, self)?;
+        let ciphertext =
+            load_bundled_ciphertext_from_gist(&gist, head, manifest.packs.len().max(1), self)?;
+        let encrypted_snapshot = rebuild_snapshot_from_manifest(head, &manifest, ciphertext)?;
+
+        Ok(ProviderRevision {
+            head: head.clone(),
+            manifest,
+            encrypted_snapshot,
+        })
+    }
+
     fn write_revision(&self, request: &ProviderWriteRequest) -> Result<()> {
         let pack_count = request.manifest.packs.len().max(1);
         let mut files = BTreeMap::new();
@@ -296,4 +311,87 @@ fn encode_hex(bytes: &[u8]) -> String {
         let _ = write!(&mut output, "{byte:02x}");
     }
     output
+}
+
+fn decode_hex(value: &str) -> Result<Vec<u8>> {
+    if value.len() % 2 != 0 {
+        return Err(anyhow!(
+            "hex payload must contain an even number of characters"
+        ));
+    }
+
+    let mut output = Vec::with_capacity(value.len() / 2);
+    for pair in value.as_bytes().chunks_exact(2) {
+        let hex = std::str::from_utf8(pair).context("hex payload is not valid UTF-8")?;
+        let byte = u8::from_str_radix(hex, 16)
+            .with_context(|| format!("invalid hex payload byte `{hex}`"))?;
+        output.push(byte);
+    }
+
+    Ok(output)
+}
+
+fn load_bundled_manifest_from_gist(
+    gist: &GitHubGistDocument,
+    head: &VaultHead,
+    provider: &GitHubGistProvider,
+) -> Result<crate::app::vault::model::VaultManifest> {
+    let manifest_raw = load_gist_file_from_document(
+        gist,
+        bundled_manifest_file_name(&head.vault_revision).as_str(),
+        provider,
+    )?;
+    let manifest_bytes = decode_hex(manifest_raw.trim()).with_context(|| {
+        format!(
+            "failed to decode GitHub gist manifest payload for remote `{}` revision `{}`",
+            provider.config.remote_id, head.vault_revision
+        )
+    })?;
+
+    bincode::deserialize::<crate::app::vault::model::VaultManifest>(manifest_bytes.as_slice())
+        .with_context(|| {
+            format!(
+                "failed to decode GitHub gist manifest for remote `{}` revision `{}`",
+                provider.config.remote_id, head.vault_revision
+            )
+        })
+}
+
+fn load_bundled_ciphertext_from_gist(
+    gist: &GitHubGistDocument,
+    head: &VaultHead,
+    pack_count: usize,
+    provider: &GitHubGistProvider,
+) -> Result<Vec<u8>> {
+    let mut ciphertext = Vec::new();
+    for index in 0..pack_count {
+        let pack_raw = load_gist_file_from_document(
+            gist,
+            bundled_pack_file_name(&head.vault_revision, index).as_str(),
+            provider,
+        )?;
+        let mut pack_bytes = decode_hex(pack_raw.trim()).with_context(|| {
+            format!(
+                "failed to decode GitHub gist pack payload for remote `{}` revision `{}` index {}",
+                provider.config.remote_id, head.vault_revision, index
+            )
+        })?;
+        ciphertext.append(&mut pack_bytes);
+    }
+
+    Ok(ciphertext)
+}
+
+fn load_gist_file_from_document(
+    gist: &GitHubGistDocument,
+    file_name: &str,
+    provider: &GitHubGistProvider,
+) -> Result<String> {
+    let file = gist.files.get(file_name).with_context(|| {
+        format!(
+            "GitHub gist `{}` is missing file `{file_name}`",
+            provider.config.gist_id
+        )
+    })?;
+    provider.resolve_gist_file_text(file, None)
 }

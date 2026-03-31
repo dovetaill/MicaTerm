@@ -4,7 +4,8 @@ use anyhow::{Result, anyhow};
 
 use crate::app::vault::model::VaultHead;
 use crate::app::vault::provider::{
-    ProviderCapabilities, ProviderReadResult, ProviderWriteRequest, VaultProvider,
+    ProviderCapabilities, ProviderReadResult, ProviderRevision, ProviderWriteRequest,
+    VaultProvider, rebuild_snapshot_from_manifest,
 };
 
 #[derive(Debug)]
@@ -17,6 +18,7 @@ pub struct MockVaultProvider {
 #[derive(Debug, Default)]
 struct MockVaultProviderState {
     remote_head: Option<VaultHead>,
+    remote_revision: Option<ProviderRevision>,
     read_error: Option<String>,
     write_error: Option<String>,
     recorded_writes: Vec<ProviderWriteRequest>,
@@ -34,6 +36,12 @@ impl MockVaultProvider {
     pub fn set_remote_head(&self, head: Option<VaultHead>) {
         if let Ok(mut state) = self.state.lock() {
             state.remote_head = head;
+        }
+    }
+
+    pub fn set_remote_revision(&self, revision: Option<ProviderRevision>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.remote_revision = revision;
         }
     }
 
@@ -80,6 +88,35 @@ impl VaultProvider for MockVaultProvider {
         })
     }
 
+    fn read_revision(&self, head: &VaultHead) -> Result<ProviderRevision> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow!("mock provider state lock poisoned"))?;
+        if let Some(message) = state.read_error.as_deref() {
+            return Err(anyhow!(message.to_string()));
+        }
+
+        let revision = state
+            .remote_revision
+            .clone()
+            .ok_or_else(|| anyhow!("mock provider is missing remote revision payload"))?;
+        if revision.head.vault_revision != head.vault_revision {
+            return Err(anyhow!(
+                "mock provider revision mismatch: requested `{}`, stored `{}`",
+                head.vault_revision,
+                revision.head.vault_revision
+            ));
+        }
+        let _ = rebuild_snapshot_from_manifest(
+            &revision.head,
+            &revision.manifest,
+            revision.encrypted_snapshot.ciphertext.clone(),
+        )?;
+
+        Ok(revision)
+    }
+
     fn write_revision(&self, request: &ProviderWriteRequest) -> Result<()> {
         let mut state = self
             .state
@@ -104,6 +141,11 @@ impl VaultProvider for MockVaultProvider {
 
         state.recorded_writes.push(request.clone());
         state.remote_head = Some(request.head.clone());
+        state.remote_revision = Some(ProviderRevision {
+            head: request.head.clone(),
+            manifest: request.manifest.clone(),
+            encrypted_snapshot: request.encrypted_snapshot.clone(),
+        });
         Ok(())
     }
 }

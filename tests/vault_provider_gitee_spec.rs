@@ -225,6 +225,99 @@ fn gitee_provider_reads_head_from_gist_document_and_threads_pat_auth() {
 }
 
 #[test]
+fn gitee_provider_treats_missing_head_file_as_empty_remote_when_gist_has_no_sync_payloads() {
+    let api = Arc::new(RecordingGiteeGistApi::with_gist(GiteeGistDocument {
+        gist_id: "gitee-gist-456".into(),
+        truncated: false,
+        files: BTreeMap::from([(
+            "README.md".into(),
+            GiteeGistFile {
+                filename: "README.md".into(),
+                raw_url: None,
+                truncated: false,
+                content: Some("manual placeholder gist".into()),
+            },
+        )]),
+    }));
+    let config = GiteeGistProviderConfig::try_from(&sample_gitee_remote(ProviderAuthKind::Pat))
+        .expect("parse gitee provider config");
+    let provider = GiteeGistProvider::with_api(config, api).expect("build provider");
+
+    let read_result = provider
+        .read_head()
+        .expect("missing head file should behave like an empty remote");
+
+    assert_eq!(read_result.head, None);
+}
+
+#[test]
+fn gitee_provider_treats_invalid_placeholder_head_as_empty_remote_when_gist_has_no_sync_payloads() {
+    let api = Arc::new(RecordingGiteeGistApi::with_gist(GiteeGistDocument {
+        gist_id: "gitee-gist-456".into(),
+        truncated: false,
+        files: BTreeMap::from([(
+            "vault-head.json".into(),
+            GiteeGistFile {
+                filename: "vault-head.json".into(),
+                raw_url: None,
+                truncated: false,
+                content: Some("{\"draft\":true}".into()),
+            },
+        )]),
+    }));
+    let config = GiteeGistProviderConfig::try_from(&sample_gitee_remote(ProviderAuthKind::Pat))
+        .expect("parse gitee provider config");
+    let provider = GiteeGistProvider::with_api(config, api).expect("build provider");
+
+    let read_result = provider
+        .read_head()
+        .expect("placeholder head should behave like an empty remote");
+
+    assert_eq!(read_result.head, None);
+}
+
+#[test]
+fn gitee_provider_keeps_invalid_head_as_an_error_when_revision_payloads_exist() {
+    let api = Arc::new(RecordingGiteeGistApi::with_gist(GiteeGistDocument {
+        gist_id: "gitee-gist-456".into(),
+        truncated: false,
+        files: BTreeMap::from([
+            (
+                "vault-head.json".into(),
+                GiteeGistFile {
+                    filename: "vault-head.json".into(),
+                    raw_url: None,
+                    truncated: false,
+                    content: Some("{\"draft\":true}".into()),
+                },
+            ),
+            (
+                "vault-rev-0001-manifest.bin".into(),
+                GiteeGistFile {
+                    filename: "vault-rev-0001-manifest.bin".into(),
+                    raw_url: None,
+                    truncated: false,
+                    content: Some("deadbeef".into()),
+                },
+            ),
+        ]),
+    }));
+    let config = GiteeGistProviderConfig::try_from(&sample_gitee_remote(ProviderAuthKind::Pat))
+        .expect("parse gitee provider config");
+    let provider = GiteeGistProvider::with_api(config, api).expect("build provider");
+
+    let err = provider
+        .read_head()
+        .expect_err("synced payload files should keep invalid head errors visible");
+
+    assert!(
+        err.to_string()
+            .contains("failed to decode Gitee gist head for remote `remote-gitee-pat`"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn gitee_provider_reads_use_raw_url_when_file_is_truncated() {
     let api = Arc::new(RecordingGiteeGistApi::with_gist(GiteeGistDocument {
         gist_id: "gitee-gist-456".into(),
@@ -292,4 +385,74 @@ fn gitee_provider_writes_bundled_revision_files_back_to_the_gist() {
         update.files["vault-rev-0002-pack-0000.bin"],
         hex(request.encrypted_snapshot.ciphertext.as_slice())
     );
+}
+
+#[test]
+fn gitee_provider_reads_revision_payloads_back_from_manifest_metadata_and_pack_file() {
+    let request = sample_write_request("rev-0002");
+    let mut manifest = request.manifest.clone();
+    manifest.provider_capability_fallbacks.insert(
+        "snapshot.nonce_hex".into(),
+        hex(request.encrypted_snapshot.nonce.as_slice()),
+    );
+    manifest.provider_capability_fallbacks.insert(
+        "snapshot.plaintext_len".into(),
+        request.encrypted_snapshot.plaintext_len.to_string(),
+    );
+    manifest.provider_capability_fallbacks.insert(
+        "snapshot.compressed_len".into(),
+        request.encrypted_snapshot.compressed_len.to_string(),
+    );
+    manifest.provider_capability_fallbacks.insert(
+        "snapshot.payload_sha256".into(),
+        request.encrypted_snapshot.payload_sha256.clone(),
+    );
+    let api = Arc::new(RecordingGiteeGistApi::with_gist(GiteeGistDocument {
+        gist_id: "gitee-gist-456".into(),
+        truncated: false,
+        files: BTreeMap::from([
+            (
+                "vault-head.json".into(),
+                GiteeGistFile {
+                    filename: "vault-head.json".into(),
+                    raw_url: None,
+                    truncated: false,
+                    content: Some(
+                        serde_json::to_string(&request.head).expect("encode expected vault head"),
+                    ),
+                },
+            ),
+            (
+                "vault-rev-0002-manifest.bin".into(),
+                GiteeGistFile {
+                    filename: "vault-rev-0002-manifest.bin".into(),
+                    raw_url: None,
+                    truncated: false,
+                    content: Some(hex(bincode::serialize(&manifest)
+                        .expect("encode manifest")
+                        .as_slice())),
+                },
+            ),
+            (
+                "vault-rev-0002-pack-0000.bin".into(),
+                GiteeGistFile {
+                    filename: "vault-rev-0002-pack-0000.bin".into(),
+                    raw_url: None,
+                    truncated: false,
+                    content: Some(hex(request.encrypted_snapshot.ciphertext.as_slice())),
+                },
+            ),
+        ]),
+    }));
+    let config = GiteeGistProviderConfig::try_from(&sample_gitee_remote(ProviderAuthKind::Pat))
+        .expect("parse gitee provider config");
+    let provider = GiteeGistProvider::with_api(config, api).expect("build provider");
+
+    let revision = provider
+        .read_revision(&request.head)
+        .expect("read current gitee revision");
+
+    assert_eq!(revision.head, request.head);
+    assert_eq!(revision.manifest, manifest);
+    assert_eq!(revision.encrypted_snapshot, request.encrypted_snapshot);
 }

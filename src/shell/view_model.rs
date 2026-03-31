@@ -150,6 +150,12 @@ impl Default for SyncModalViewState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SyncFeedbackViewState {
+    pub text: String,
+    pub sequence: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultPanelViewState {
     pub title: String,
@@ -434,6 +440,7 @@ pub struct ShellViewModel {
     pub context_menu_feedback_text: String,
     sftp_conflict_modal_state: SftpConflictModalState,
     sync_modal_state: SyncModalViewState,
+    sync_feedback_state: SyncFeedbackViewState,
     vault_panel_state: VaultPanelViewState,
     console_asset_tree: AssetTree,
     snippet_asset_tree: AssetTree,
@@ -497,6 +504,7 @@ impl Default for ShellViewModel {
             context_menu_feedback_text: String::new(),
             sftp_conflict_modal_state: SftpConflictModalState::default(),
             sync_modal_state: SyncModalViewState::default(),
+            sync_feedback_state: SyncFeedbackViewState::default(),
             vault_panel_state: VaultPanelViewState::default(),
             console_asset_tree: AssetTree::new(),
             snippet_asset_tree: AssetTree::new(),
@@ -682,6 +690,15 @@ impl ShellViewModel {
 
     pub fn sync_modal_state_mut(&mut self) -> &mut SyncModalViewState {
         &mut self.sync_modal_state
+    }
+
+    pub fn sync_feedback_state(&self) -> &SyncFeedbackViewState {
+        &self.sync_feedback_state
+    }
+
+    pub fn show_sync_feedback(&mut self, text: impl Into<String>) {
+        self.sync_feedback_state.text = text.into();
+        self.sync_feedback_state.sequence = self.sync_feedback_state.sequence.saturating_add(1);
     }
 
     pub fn right_panel_view_id(&self) -> &'static str {

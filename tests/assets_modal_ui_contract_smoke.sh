@@ -118,6 +118,7 @@ grep -F 'x: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'y: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'export component AssetsSnippetModal inherits Rectangle {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'export component SyncVaultModal inherits Rectangle {' "$SYNC_MODAL" >/dev/null
+grep -F 'import { ScrollView } from "std-widgets.slint";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> mode: "not-configured";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> title: "Sync Settings";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <bool> auto-sync-enabled: false;' "$SYNC_MODAL" >/dev/null
@@ -129,6 +130,12 @@ grep -F 'callback primary-action-requested();' "$SYNC_MODAL" >/dev/null
 grep -F 'callback secondary-action-requested();' "$SYNC_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SYNC_MODAL" >/dev/null
 grep -F 'callback toggle-changed(string, bool);' "$SYNC_MODAL" >/dev/null
+grep -F 'body-scroll := ScrollView {' "$SYNC_MODAL" >/dev/null
+grep -F 'viewport-width: scroll-body.width;' "$SYNC_MODAL" >/dev/null
+grep -F 'viewport-height: scroll-body.height;' "$SYNC_MODAL" >/dev/null
+grep -F 'height: max(body-scroll.visible-height, body-column.preferred-height + 24px);' "$SYNC_MODAL" >/dev/null
+grep -F 'footer := Rectangle {' "$SYNC_MODAL" >/dev/null
+grep -F 'y: parent.height - root.footer-height;' "$SYNC_MODAL" >/dev/null
 grep -F 'error-banner := Rectangle {' "$SYNC_MODAL" >/dev/null
 grep -F 'SyncModalToggleRow {' "$SYNC_MODAL" >/dev/null
 grep -F 'SyncModalTextField {' "$SYNC_MODAL" >/dev/null

@@ -584,6 +584,8 @@ fn sync_top_status_bar_state(
     window.set_is_window_maximized(state.is_window_maximized());
     window.set_is_window_active(state.is_window_active);
     window.set_is_window_always_on_top(state.is_always_on_top);
+    window.set_sync_feedback_text(state.sync_feedback_state().text.clone().into());
+    window.set_sync_feedback_sequence(state.sync_feedback_state().sequence);
 }
 
 fn sync_sync_modal_state(window: &AppWindow, state: &ShellViewModel) {
@@ -4181,12 +4183,8 @@ fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vault: &VaultSe
         }
         (None, false, true) => {
             modal.mode = SyncModalMode::NotConfigured;
-            modal.headline = "Enable sync".into();
-            modal.status_text = format!(
-                "The target is configured. Enter a master password to finish {} {} setup.",
-                first_release_formal_provider_label(),
-                first_release_formal_auth_label()
-            );
+            modal.headline = "Enable or recover sync".into();
+            modal.status_text = "The target is configured. Enter a master password to recover from the remote if it already has data, or create a new local vault if it is still empty.".into();
             modal.primary_action_label = "Save and enable".into();
             modal.secondary_action_label = "Close".into();
         }
@@ -4270,10 +4268,11 @@ fn submit_sync_modal_master_password(
     password: &secrecy::SecretString,
 ) -> Result<()> {
     if vault.local_state.is_some() {
-        unlock_local_vault_into_shell(state, vault, credential_store, password)?;
-        sync_local_vault_if_auto_enabled(state, vault, credential_store, "unlocking local vault");
-        Ok(())
+        unlock_local_vault_into_shell(state, vault, credential_store, password)
     } else {
+        if recover_local_vault_from_primary_remote(state, vault, credential_store, password)? {
+            return Ok(());
+        }
         create_local_vault_from_shell_state(state, vault, credential_store, password)
     }
 }
@@ -4359,6 +4358,7 @@ fn create_local_vault_from_shell_state(
     if bundle.vault_id.trim().is_empty() {
         bundle.vault_id = format!("vault-{}", Uuid::new_v4().simple());
     }
+    ensure_primary_remote_is_empty_before_first_local_bootstrap(vault, &bundle, credential_store)?;
     let kdf = default_vault_kdf();
     let vault_key = generate_vault_key();
     let wrapped_vault_key = serde_json::to_string(&wrap_vault_key(password, &kdf, &vault_key)?)
@@ -4389,6 +4389,109 @@ fn create_local_vault_from_shell_state(
     vault.decrypted_snapshot = Some(snapshot);
     update_vault_panel_for_local_state(state, vault);
     update_sync_modal_for_local_state(state, vault);
+
+    Ok(())
+}
+
+fn recover_local_vault_from_primary_remote(
+    state: &mut ShellViewModel,
+    vault: &mut VaultSessionState,
+    credential_store: &dyn CredentialStore,
+    password: &secrecy::SecretString,
+) -> Result<bool> {
+    let Some(mut bundle) = vault.bootstrap_template.clone() else {
+        return Ok(false);
+    };
+    let Some(primary_remote) = bundle.primary_remote().cloned() else {
+        return Ok(false);
+    };
+    let primary_remote = resolve_remote_for_sync(&primary_remote, credential_store)?;
+    let provider = vault.provider_factory.build_provider(&primary_remote)?;
+    let Some(remote_head) = provider
+        .read_head()
+        .with_context(|| {
+            format!(
+                "failed to inspect primary remote `{}` before enabling sync",
+                primary_remote.remote_id
+            )
+        })?
+        .head
+    else {
+        return Ok(false);
+    };
+    let remote_revision = provider.read_revision(&remote_head).map_err(|err| {
+        anyhow!(
+            "failed to read recoverable revision `{}` from primary remote `{}`: {err}",
+            remote_head.vault_revision,
+            primary_remote.remote_id
+        )
+    })?;
+    let wrapped: WrappedVaultKey = serde_json::from_str(&remote_head.wrapped_vault_key)
+        .context("failed to decode wrapped vault key from remote head")?;
+    let vault_key = unwrap_vault_key(password, &wrapped)?;
+    let snapshot = decrypt_snapshot(&remote_revision.encrypted_snapshot, &vault_key)?;
+    bundle.vault_id = remote_head.vault_id.clone();
+    store_encrypted_cache(
+        vault.cache_root().as_path(),
+        &bundle.vault_id,
+        &remote_revision.encrypted_snapshot,
+    )?;
+    let local_state = LocalVaultBootstrapState {
+        bundle,
+        wrapped_vault_key: remote_head.wrapped_vault_key.clone(),
+        kdf: remote_head.kdf.clone(),
+        current_revision: Some(remote_head.vault_revision.clone()),
+    };
+    save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
+    apply_vault_snapshot_to_shell(
+        state,
+        &snapshot,
+        credential_store,
+        vault.known_hosts_path().as_path(),
+    )?;
+    vault.local_state = Some(local_state);
+    vault.unlocked_vault_key = Some(vault_key);
+    vault.decrypted_snapshot = Some(snapshot);
+    update_vault_panel_for_local_state(state, vault);
+    update_sync_modal_for_local_state(state, vault);
+    state.vault_panel_state_mut().primary_status_label =
+        format!("Recovered from primary {}", remote_head.vault_revision);
+    state.sync_modal_state_mut().status_text = format!(
+        "Recovered local vault from primary remote at {}.",
+        remote_head.vault_revision
+    );
+
+    Ok(true)
+}
+
+fn ensure_primary_remote_is_empty_before_first_local_bootstrap(
+    vault: &VaultSessionState,
+    bundle: &BootstrapBundle,
+    credential_store: &dyn CredentialStore,
+) -> Result<()> {
+    let primary_remote = bundle
+        .primary_remote()
+        .cloned()
+        .ok_or_else(|| anyhow!("primary remote is not configured"))?;
+    let resolved = resolve_remote_for_sync(&primary_remote, credential_store)?;
+    let provider = vault.provider_factory.build_provider(&resolved)?;
+    let remote_head = provider
+        .read_head()
+        .with_context(|| {
+            format!(
+                "failed to inspect primary remote `{}` before enabling sync",
+                primary_remote.remote_id
+            )
+        })?
+        .head;
+
+    if let Some(head) = remote_head {
+        return Err(anyhow!(
+            "primary remote `{}` already contains revision `{}`. Local recovery from remote is not implemented yet, so refusing to initialize a new empty local vault over existing remote data.",
+            primary_remote.remote_id,
+            head.vault_revision
+        ));
+    }
 
     Ok(())
 }
@@ -4466,20 +4569,46 @@ fn sync_local_vault(
     let cache_root = vault.cache_root();
     let local_state = vault
         .local_state
-        .as_mut()
+        .as_ref()
         .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
+    let local_bundle = local_state.bundle.clone();
+    let current_revision = local_state.current_revision.clone();
+    let wrapped_vault_key = local_state.wrapped_vault_key.clone();
+    let kdf = local_state.kdf.clone();
     let vault_key = vault
         .unlocked_vault_key
         .ok_or_else(|| anyhow!("vault is locked"))?;
-    let primary_remote = local_state
-        .bundle
+    let snapshot = export_vault_snapshot(
+        &combined_asset_tree(state),
+        state.keychain_catalog(),
+        credential_store,
+        known_hosts_path.as_path(),
+        sync_preferences_for_bundle(&local_bundle, None),
+        &UiPreferences::from(&*state),
+    )?;
+    if current_revision.is_some()
+        && vault
+            .decrypted_snapshot
+            .as_ref()
+            .is_some_and(|existing| existing == &snapshot)
+    {
+        update_vault_panel_for_local_state(state, vault);
+        update_sync_modal_for_local_state(state, vault);
+        let stable_revision = current_revision.expect("checked current revision above");
+        state.vault_panel_state_mut().primary_status_label =
+            format!("Already synced {stable_revision}");
+        state.sync_modal_state_mut().status_text =
+            format!("No local changes to upload. Primary stays at {stable_revision}.");
+        return Ok(());
+    }
+
+    let primary_remote = local_bundle
         .primary_remote()
         .cloned()
         .ok_or_else(|| anyhow!("primary remote is not configured"))?;
     let primary_remote = resolve_remote_for_sync(&primary_remote, credential_store)?;
     let primary_provider = vault.provider_factory.build_provider(&primary_remote)?;
-    let mirror_providers = local_state
-        .bundle
+    let mirror_providers = local_bundle
         .remotes
         .iter()
         .filter(|remote| remote.role == RemoteRole::Mirror)
@@ -4488,23 +4617,15 @@ fn sync_local_vault(
             vault.provider_factory.build_provider(&resolved)
         })
         .collect::<Result<Vec<_>>>()?;
-    let snapshot = export_vault_snapshot(
-        &combined_asset_tree(state),
-        state.keychain_catalog(),
-        credential_store,
-        known_hosts_path.as_path(),
-        sync_preferences_for_bundle(&local_state.bundle, None),
-        &UiPreferences::from(&*state),
-    )?;
     let request = SyncRequest {
-        vault_id: local_state.bundle.vault_id.clone(),
+        vault_id: local_bundle.vault_id.clone(),
         snapshot: snapshot.clone(),
-        next_revision: next_vault_revision(local_state.current_revision.as_deref()),
-        parent_revision: local_state.current_revision.clone(),
+        next_revision: next_vault_revision(current_revision.as_deref()),
+        parent_revision: current_revision,
         device_id: "local-device".into(),
         created_at: "2026-03-28T00:00:00Z".into(),
-        wrapped_vault_key: local_state.wrapped_vault_key.clone(),
-        kdf: local_state.kdf.clone(),
+        wrapped_vault_key,
+        kdf,
         provider_kind: primary_remote.provider,
         vault_key,
     };
@@ -4512,9 +4633,13 @@ fn sync_local_vault(
 
     match engine.sync(request) {
         Ok(report) => {
+            let local_state = vault
+                .local_state
+                .as_mut()
+                .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
             store_encrypted_cache(
                 cache_root.as_path(),
-                &local_state.bundle.vault_id,
+                &local_bundle.vault_id,
                 &report.encrypted_snapshot,
             )?;
             local_state.current_revision = Some(report.primary_revision.clone());
@@ -4539,6 +4664,10 @@ fn sync_local_vault(
             } else {
                 state.vault_panel_state_mut().primary_status_label =
                     format!("Primary synced {}", report.primary_revision);
+                state.sync_modal_state_mut().status_text = format!(
+                    "Sync completed. Primary is now at {}.",
+                    report.primary_revision
+                );
             }
             Ok(())
         }
@@ -5188,9 +5317,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
         update_sync_modal_for_local_state(&mut state, &vault);
         if matches!(state.sync_modal_state().mode, SyncModalMode::Ready) {
-            if let Err(err) = sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref())
-            {
+            if let Err(err) = sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()) {
                 tracing::error!(target: "app.vault", error = %err, "failed to sync local vault from titlebar sync action");
+                state.show_sync_feedback("Sync failed");
+            } else {
+                let feedback = state.vault_panel_state().primary_status_label.clone();
+                state.show_sync_feedback(feedback);
             }
         } else {
             hydrate_sync_modal_draft(&mut state, &vault, credential_store_ref.as_ref());
@@ -5305,6 +5437,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         if let Err(err) = sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()) {
             tracing::error!(target: "app.vault", error = %err, "failed to sync local vault from sync modal");
             set_sync_modal_error(&mut state, &vault, err.to_string());
+            state.show_sync_feedback("Sync failed");
+        } else {
+            let feedback = state.vault_panel_state().primary_status_label.clone();
+            state.show_sync_feedback(feedback);
         }
         sync_shell_state(
             &window,
@@ -5365,7 +5501,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     state.set_sync_modal_error("Enter a master password to enable sync.");
                 } else {
                     let secret = secrecy::SecretString::new(master_password.into());
-                    if let Err(err) = create_local_vault_from_shell_state(
+                    if let Err(err) = submit_sync_modal_master_password(
                         &mut state,
                         &mut vault,
                         credential_store_ref.as_ref(),
@@ -5381,7 +5517,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     state.set_sync_modal_error("Enter a master password to unlock sync.");
                 } else {
                     let secret = secrecy::SecretString::new(master_password.into());
-                    if let Err(err) = unlock_local_vault_into_shell(
+                    if let Err(err) = submit_sync_modal_master_password(
                         &mut state,
                         &mut vault,
                         credential_store_ref.as_ref(),
@@ -5409,6 +5545,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 {
                     tracing::error!(target: "app.vault", error = %err, "failed to sync local vault from primary sync modal action");
                     set_sync_modal_error(&mut state, &vault, err.to_string());
+                    state.show_sync_feedback("Sync failed");
+                } else {
+                    let feedback = state.vault_panel_state().primary_status_label.clone();
+                    state.show_sync_feedback(feedback);
                 }
             }
             SyncModalMode::SyncError => state.close_sync_modal(),

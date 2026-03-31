@@ -9,7 +9,8 @@ use crate::app::vault::model::{
     VaultHead,
 };
 use crate::app::vault::provider::{
-    ProviderCapabilities, ProviderReadResult, ProviderWriteRequest, VaultProvider,
+    ProviderCapabilities, ProviderReadResult, ProviderRevision, ProviderWriteRequest,
+    VaultProvider, rebuild_snapshot_from_manifest,
 };
 
 const GITEE_MAX_PACK_COUNT: usize = 4;
@@ -254,7 +255,7 @@ impl GiteeGistProvider {
         file_name: &str,
         access_token: Option<&str>,
     ) -> Result<String> {
-        let gist = self.api.get_gist(&self.config.gist_id, access_token)?;
+        let gist = self.load_gist_document(access_token)?;
         let file = gist.files.get(file_name).with_context(|| {
             format!(
                 "Gitee gist `{}` is missing file `{file_name}`",
@@ -263,6 +264,10 @@ impl GiteeGistProvider {
         })?;
 
         self.resolve_gist_file_text(file, access_token)
+    }
+
+    fn load_gist_document(&self, access_token: Option<&str>) -> Result<GiteeGistDocument> {
+        self.api.get_gist(&self.config.gist_id, access_token)
     }
 
     fn resolve_gist_file_text(
@@ -306,14 +311,53 @@ impl VaultProvider for GiteeGistProvider {
     }
 
     fn read_head(&self) -> Result<ProviderReadResult> {
-        let raw = self.load_gist_file_text(GIST_HEAD_FILE_NAME, self.config.access_token())?;
-        let head = serde_json::from_str::<VaultHead>(&raw).with_context(|| {
-            format!(
-                "failed to decode Gitee gist head for remote `{}`",
-                self.config.remote_id
-            )
-        })?;
-        Ok(ProviderReadResult { head: Some(head) })
+        let gist = self.load_gist_document(self.config.access_token())?;
+        let Some(file) = gist.files.get(GIST_HEAD_FILE_NAME) else {
+            if gist_has_revision_payloads(&gist) {
+                return Err(anyhow!(
+                    "Gitee gist `{}` is missing file `{}`",
+                    self.config.gist_id,
+                    GIST_HEAD_FILE_NAME
+                ));
+            }
+            return Ok(ProviderReadResult::default());
+        };
+
+        let raw = self.resolve_gist_file_text(file, self.config.access_token())?;
+        if raw.trim().is_empty() && !gist_has_revision_payloads(&gist) {
+            return Ok(ProviderReadResult::default());
+        }
+
+        match serde_json::from_str::<VaultHead>(&raw) {
+            Ok(head) => Ok(ProviderReadResult { head: Some(head) }),
+            Err(_) if !gist_has_revision_payloads(&gist) => Ok(ProviderReadResult::default()),
+            Err(err) => Err(err).with_context(|| {
+                format!(
+                    "failed to decode Gitee gist head for remote `{}`",
+                    self.config.remote_id
+                )
+            }),
+        }
+    }
+
+    fn read_revision(&self, head: &VaultHead) -> Result<ProviderRevision> {
+        let gist = self.load_gist_document(self.config.access_token())?;
+        let manifest =
+            load_bundled_manifest_from_gist(&gist, head, self.config.access_token(), self)?;
+        let ciphertext = load_bundled_ciphertext_from_gist(
+            &gist,
+            head,
+            manifest.packs.len().max(1),
+            self.config.access_token(),
+            self,
+        )?;
+        let encrypted_snapshot = rebuild_snapshot_from_manifest(head, &manifest, ciphertext)?;
+
+        Ok(ProviderRevision {
+            head: head.clone(),
+            manifest,
+            encrypted_snapshot,
+        })
     }
 
     fn write_revision(&self, request: &ProviderWriteRequest) -> Result<()> {
@@ -411,6 +455,17 @@ fn bundled_pack_file_name(revision: &str, index: usize) -> String {
     format!("vault-{revision}-pack-{index:04}.bin")
 }
 
+fn gist_has_revision_payloads(gist: &GiteeGistDocument) -> bool {
+    gist.files
+        .keys()
+        .any(|name| is_revision_payload_file(name.as_str()))
+}
+
+fn is_revision_payload_file(name: &str) -> bool {
+    name.starts_with("vault-")
+        && (name.ends_with("-manifest.bin") || (name.contains("-pack-") && name.ends_with(".bin")))
+}
+
 fn split_bytes(bytes: &[u8], chunk_count: usize) -> Vec<Vec<u8>> {
     let chunk_size = bytes.len().div_ceil(chunk_count);
     let mut chunks = Vec::with_capacity(chunk_count);
@@ -429,4 +484,92 @@ fn encode_hex(bytes: &[u8]) -> String {
         let _ = write!(&mut output, "{byte:02x}");
     }
     output
+}
+
+fn decode_hex(value: &str) -> Result<Vec<u8>> {
+    if value.len() % 2 != 0 {
+        return Err(anyhow!(
+            "hex payload must contain an even number of characters"
+        ));
+    }
+
+    let mut output = Vec::with_capacity(value.len() / 2);
+    for pair in value.as_bytes().chunks_exact(2) {
+        let hex = std::str::from_utf8(pair).context("hex payload is not valid UTF-8")?;
+        let byte = u8::from_str_radix(hex, 16)
+            .with_context(|| format!("invalid hex payload byte `{hex}`"))?;
+        output.push(byte);
+    }
+
+    Ok(output)
+}
+
+fn load_bundled_manifest_from_gist(
+    gist: &GiteeGistDocument,
+    head: &VaultHead,
+    access_token: Option<&str>,
+    provider: &GiteeGistProvider,
+) -> Result<crate::app::vault::model::VaultManifest> {
+    let manifest_raw = load_gist_file_from_document(
+        gist,
+        bundled_manifest_file_name(&head.vault_revision).as_str(),
+        access_token,
+        provider,
+    )?;
+    let manifest_bytes = decode_hex(manifest_raw.trim()).with_context(|| {
+        format!(
+            "failed to decode Gitee gist manifest payload for remote `{}` revision `{}`",
+            provider.config.remote_id, head.vault_revision
+        )
+    })?;
+
+    bincode::deserialize::<crate::app::vault::model::VaultManifest>(manifest_bytes.as_slice())
+        .with_context(|| {
+            format!(
+                "failed to decode Gitee gist manifest for remote `{}` revision `{}`",
+                provider.config.remote_id, head.vault_revision
+            )
+        })
+}
+
+fn load_bundled_ciphertext_from_gist(
+    gist: &GiteeGistDocument,
+    head: &VaultHead,
+    pack_count: usize,
+    access_token: Option<&str>,
+    provider: &GiteeGistProvider,
+) -> Result<Vec<u8>> {
+    let mut ciphertext = Vec::new();
+    for index in 0..pack_count {
+        let pack_raw = load_gist_file_from_document(
+            gist,
+            bundled_pack_file_name(&head.vault_revision, index).as_str(),
+            access_token,
+            provider,
+        )?;
+        let mut pack_bytes = decode_hex(pack_raw.trim()).with_context(|| {
+            format!(
+                "failed to decode Gitee gist pack payload for remote `{}` revision `{}` index {}",
+                provider.config.remote_id, head.vault_revision, index
+            )
+        })?;
+        ciphertext.append(&mut pack_bytes);
+    }
+
+    Ok(ciphertext)
+}
+
+fn load_gist_file_from_document(
+    gist: &GiteeGistDocument,
+    file_name: &str,
+    access_token: Option<&str>,
+    provider: &GiteeGistProvider,
+) -> Result<String> {
+    let file = gist.files.get(file_name).with_context(|| {
+        format!(
+            "Gitee gist `{}` is missing file `{file_name}`",
+            provider.config.gist_id
+        )
+    })?;
+    provider.resolve_gist_file_text(file, access_token)
 }

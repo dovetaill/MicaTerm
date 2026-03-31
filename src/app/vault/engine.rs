@@ -6,7 +6,9 @@ use crate::app::vault::model::{
     CipherKind, KdfConfig, PackLayout, PackRef, ProviderKind, VaultHead, VaultManifest,
     VaultSnapshot,
 };
-use crate::app::vault::provider::{ProviderCapabilities, ProviderWriteRequest, VaultProvider};
+use crate::app::vault::provider::{
+    ProviderCapabilities, ProviderWriteRequest, VaultProvider, attach_snapshot_recovery_metadata,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncRequest {
@@ -188,6 +190,8 @@ fn build_provider_write_request(
         packs: vec![pack_ref],
         ..VaultManifest::default()
     };
+    let mut manifest = manifest;
+    attach_snapshot_recovery_metadata(&mut manifest, encrypted_snapshot);
     let head = VaultHead {
         format_version: 1,
         vault_id: request.vault_id.clone(),

@@ -1,3 +1,4 @@
+import { ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 
 component SyncModalActionButton inherits Rectangle {
@@ -11,17 +12,17 @@ component SyncModalActionButton inherits Rectangle {
     height: 36px;
     border-radius: 0px;
     border-width: 1px;
-    border-color: root.primary ? ThemeTokens.accent : ThemeTokens.divider-subtle;
+    border-color: root.primary ? ThemeTokens.accent : ThemeTokens.divider-strong;
     background: action-touch.pressed ? ThemeTokens.control-pressed-surface
         : action-touch.has-hover ? ThemeTokens.control-hover-surface
-        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+        : root.primary ? ThemeTokens.accent : ThemeTokens.inspector-surface;
 
     Text {
         x: 8px;
         width: parent.width - 16px;
         height: parent.height;
         text: root.label;
-        color: ThemeTokens.text-primary;
+        color: root.primary ? ThemeTokens.text-primary : ThemeTokens.accent;
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;
@@ -177,8 +178,8 @@ export component SyncVaultModal inherits Rectangle {
     callback drag-ended();
     callback focus-restore-requested();
 
-    private property <length> header-height: 60px;
-    private property <length> footer-height: 86px;
+    private property <length> header-height: 56px;
+    private property <length> footer-height: 88px;
     private property <length> body-height: max(0px, root.height - root.header-height - root.footer-height);
 
     background: transparent;
@@ -198,6 +199,8 @@ export component SyncVaultModal inherits Rectangle {
         }
 
         header := Rectangle {
+            x: 0px;
+            y: 0px;
             width: parent.width;
             height: root.header-height;
             border-radius: 0px;
@@ -229,23 +232,25 @@ export component SyncVaultModal inherits Rectangle {
 
             Text {
                 x: 20px;
-                y: 10px;
+                y: root.headline != "" ? 8px : 0px;
                 width: parent.width - 84px;
+                height: root.headline != "" ? 20px : parent.height;
                 text: root.title;
                 color: ThemeTokens.text-primary;
-                font-size: 22px;
-                font-weight: 700;
+                font-size: 18px;
+                font-weight: 600;
+                vertical-alignment: center;
                 overflow: elide;
             }
 
-            Text {
+            if root.headline != "" : headline-copy := Text {
                 x: 20px;
-                y: 34px;
+                y: 30px;
                 width: parent.width - 84px;
                 text: root.headline;
                 color: ThemeTokens.text-primary;
                 opacity: 0.74;
-                font-size: 12px;
+                font-size: 11px;
                 overflow: elide;
             }
 
@@ -276,175 +281,210 @@ export component SyncVaultModal inherits Rectangle {
                     height: parent.height;
 
                     clicked => {
+                        root.focus-restore-requested();
                         root.close-requested();
                     }
                 }
             }
+
+            header-divider := Rectangle {
+                x: 0px;
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
+            }
         }
 
-        body := Rectangle {
+        body-scroll := ScrollView {
+            x: 0px;
             y: root.header-height;
             width: parent.width;
             height: root.body-height;
-            border-radius: 0px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.inspector-surface;
-            clip: true;
+            mouse-drag-pan-enabled: true;
+            viewport-width: scroll-body.width;
+            viewport-height: scroll-body.height;
 
-            content := VerticalLayout {
-                x: 20px;
-                y: 18px;
-                width: parent.width - 40px;
-                spacing: 10px;
+            scroll-body := Rectangle {
+                width: body-scroll.visible-width;
+                height: max(body-scroll.visible-height, body-column.preferred-height + 24px);
+                background: ThemeTokens.inspector-surface;
 
-                Text {
-                    text: root.status-text;
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.84;
-                    wrap: word-wrap;
-                }
-
-                if root.error-text != "" : error-banner := Rectangle {
-                    width: parent.width;
-                    height: 52px;
-                    border-radius: 0px;
-                    border-width: 1px;
-                    border-color: ThemeTokens.divider-strong;
-                    background: ThemeTokens.status-error-surface;
+                body-column := VerticalLayout {
+                    x: 20px;
+                    y: 16px;
+                    width: parent.width - 40px;
+                    spacing: 12px;
 
                     Text {
-                        x: 10px;
-                        y: 8px;
-                        width: parent.width - 20px;
-                        height: parent.height - 16px;
-                        text: root.error-text;
+                        width: parent.width;
+                        text: root.status-text;
                         color: ThemeTokens.text-primary;
+                        opacity: 0.84;
                         wrap: word-wrap;
                     }
-                }
 
-                if root.provider-label != "" || root.target-label != "" : summary-card := Rectangle {
-                    width: parent.width;
-                    height: 44px;
-                    border-radius: 0px;
-                    border-width: 1px;
-                    border-color: ThemeTokens.divider-subtle;
-                    background: ThemeTokens.assets-surface;
+                    if root.error-text != "" : error-banner := Rectangle {
+                        width: parent.width;
+                        height: max(40px, error-copy.preferred-height + 16px);
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-strong;
+                        background: ThemeTokens.status-error-surface;
 
-                    Text {
-                        x: 12px;
-                        y: 0px;
-                        width: parent.width - 24px;
-                        height: parent.height;
-                        text: (root.provider-label != "" ? "Provider: " + root.provider-label : "")
-                            + (root.target-label != "" ? "  •  " + root.target-label : "");
-                        color: ThemeTokens.text-primary;
-                        vertical-alignment: center;
-                        overflow: elide;
+                        error-copy := Text {
+                            x: 10px;
+                            y: 8px;
+                            width: parent.width - 20px;
+                            text: root.error-text;
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
                     }
-                }
 
-                SyncModalToggleRow {
-                    label: "Auto sync";
-                    description: "Run sync automatically after local changes when the vault is unlocked.";
-                    value: root.auto-sync-enabled;
+                    if root.provider-label != "" || root.target-label != "" : summary-card := Rectangle {
+                        width: parent.width;
+                        height: 44px;
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-subtle;
+                        background: ThemeTokens.assets-surface;
 
-                    toggled(value) => {
-                        root.toggle-changed("auto-sync", value);
+                        Text {
+                            x: 12px;
+                            y: 0px;
+                            width: parent.width - 24px;
+                            height: parent.height;
+                            text: (root.provider-label != "" ? "Provider: " + root.provider-label : "")
+                                + (root.target-label != "" ? "  •  " + root.target-label : "");
+                            color: ThemeTokens.text-primary;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
                     }
-                }
 
-                SyncModalTextField {
-                    label: "Primary Gist ID";
-                    value: root.primary-gist-id;
+                    SyncModalToggleRow {
+                        width: parent.width;
+                        label: "Auto sync";
+                        description: "Run sync automatically after local changes when the vault is unlocked.";
+                        value: root.auto-sync-enabled;
 
-                    value-changed(value) => {
-                        root.draft-changed("primary-gist-id", value);
+                        toggled(value) => {
+                            root.toggle-changed("auto-sync", value);
+                        }
                     }
-                }
 
-                SyncModalTextField {
-                    label: "Primary Personal Access Token";
-                    value: root.primary-pat;
-                    password-mode: true;
+                    SyncModalTextField {
+                        width: parent.width;
+                        label: "Primary Gist ID";
+                        value: root.primary-gist-id;
 
-                    value-changed(value) => {
-                        root.draft-changed("primary-pat", value);
+                        value-changed(value) => {
+                            root.draft-changed("primary-gist-id", value);
+                        }
                     }
-                }
 
-                SyncModalToggleRow {
-                    label: "Mirror target";
-                    description: "Keep a second Gitee gist updated as a backup target.";
-                    value: root.mirror-enabled;
+                    SyncModalTextField {
+                        width: parent.width;
+                        label: "Primary Personal Access Token";
+                        value: root.primary-pat;
+                        password-mode: true;
 
-                    toggled(value) => {
-                        root.toggle-changed("mirror-enabled", value);
+                        value-changed(value) => {
+                            root.draft-changed("primary-pat", value);
+                        }
                     }
-                }
 
-                if root.mirror-enabled : mirror-gist-field := SyncModalTextField {
-                    label: "Mirror Gist ID";
-                    value: root.mirror-gist-id;
+                    SyncModalToggleRow {
+                        width: parent.width;
+                        label: "Mirror target";
+                        description: "Keep a second Gitee gist updated as a backup target.";
+                        value: root.mirror-enabled;
 
-                    value-changed(value) => {
-                        root.draft-changed("mirror-gist-id", value);
+                        toggled(value) => {
+                            root.toggle-changed("mirror-enabled", value);
+                        }
                     }
-                }
 
-                if root.mirror-enabled : mirror-pat-field := SyncModalTextField {
-                    label: "Mirror Personal Access Token";
-                    value: root.mirror-pat;
-                    password-mode: true;
+                    if root.mirror-enabled : mirror-gist-field := SyncModalTextField {
+                        width: parent.width;
+                        label: "Mirror Gist ID";
+                        value: root.mirror-gist-id;
 
-                    value-changed(value) => {
-                        root.draft-changed("mirror-pat", value);
+                        value-changed(value) => {
+                            root.draft-changed("mirror-gist-id", value);
+                        }
                     }
-                }
 
-                if root.mode == "not-configured" || root.mode == "locked" : password-field := SyncModalTextField {
-                    label: "Master Password";
-                    value: root.master-password;
-                    password-mode: true;
+                    if root.mirror-enabled : mirror-pat-field := SyncModalTextField {
+                        width: parent.width;
+                        label: "Mirror Personal Access Token";
+                        value: root.mirror-pat;
+                        password-mode: true;
 
-                    value-changed(value) => {
-                        root.draft-changed("master-password", value);
+                        value-changed(value) => {
+                            root.draft-changed("mirror-pat", value);
+                        }
+                    }
+
+                    if root.mode == "not-configured" || root.mode == "locked" : password-field := SyncModalTextField {
+                        width: parent.width;
+                        label: "Master Password";
+                        value: root.master-password;
+                        password-mode: true;
+
+                        value-changed(value) => {
+                            root.draft-changed("master-password", value);
+                        }
                     }
                 }
             }
         }
 
         footer := Rectangle {
-            y: root.height - root.footer-height;
+            x: 0px;
+            y: parent.height - root.footer-height;
             width: parent.width;
             height: root.footer-height;
-            border-radius: 0px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-strong;
             background: ThemeTokens.assets-surface;
 
-            HorizontalLayout {
-                x: 20px;
-                y: 24px;
-                width: parent.width - 40px;
-                spacing: 10px;
+            footer-content := VerticalLayout {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 16px;
+                padding-bottom: 16px;
+                spacing: 8px;
 
-                if root.secondary-action-label != "" : secondary-button := SyncModalActionButton {
-                    label: root.secondary-action-label;
-                    primary: false;
-
-                    clicked => {
-                        root.secondary-action-requested();
-                    }
+                Rectangle {
+                    height: 0px;
+                    vertical-stretch: 1;
+                    background: transparent;
                 }
 
-                primary-button := SyncModalActionButton {
-                    label: root.primary-action-label;
-                    primary: true;
+                HorizontalLayout {
+                    height: 36px;
+                    spacing: 12px;
 
-                    clicked => {
-                        root.primary-action-requested();
+                    if root.secondary-action-label != "" : secondary-button := SyncModalActionButton {
+                        label: root.secondary-action-label;
+                        primary: false;
+
+                        clicked => {
+                            root.secondary-action-requested();
+                        }
+                    }
+
+                    primary-button := SyncModalActionButton {
+                        label: root.primary-action-label;
+                        primary: true;
+
+                        clicked => {
+                            root.primary-action-requested();
+                        }
                     }
                 }
             }

@@ -9,7 +9,7 @@ use crate::app::vault::model::{
     BootstrapRemoteConfig, BootstrapRemoteLocator, ProviderAuthKind, ProviderKind, VaultHead,
 };
 use crate::app::vault::provider::{
-    ProviderCapabilities, ProviderReadResult, ProviderWriteRequest, VaultProvider,
+    ProviderCapabilities, ProviderReadResult, ProviderRevision, ProviderWriteRequest, VaultProvider,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +193,75 @@ impl VaultProvider for S3VaultProvider {
         })?;
 
         Ok(ProviderReadResult { head: Some(head) })
+    }
+
+    fn read_revision(&self, head: &VaultHead) -> Result<ProviderRevision> {
+        let keys = self.object_keys_for_revision(head.vault_revision.as_str(), 1);
+        let manifest_bytes = self
+            .object_store
+            .get_object(&self.config.bucket, &keys.manifest_key)?
+            .ok_or_else(|| {
+                anyhow!(
+                    "S3 manifest object is missing for remote `{}` revision `{}`",
+                    self.config.remote_id,
+                    head.vault_revision
+                )
+            })?;
+        let manifest = bincode::deserialize::<crate::app::vault::model::VaultManifest>(
+            manifest_bytes.as_slice(),
+        )
+        .with_context(|| {
+            format!(
+                "failed to decode S3 manifest for remote `{}` revision `{}`",
+                self.config.remote_id, head.vault_revision
+            )
+        })?;
+
+        let keys = self
+            .object_keys_for_revision(head.vault_revision.as_str(), manifest.packs.len().max(1));
+        let mut stored_packs = Vec::with_capacity(keys.pack_keys.len());
+        for key in &keys.pack_keys {
+            let pack_bytes = self
+                .object_store
+                .get_object(&self.config.bucket, key)?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "S3 pack object `{key}` is missing for remote `{}` revision `{}`",
+                        self.config.remote_id,
+                        head.vault_revision
+                    )
+                })?;
+            stored_packs.push(
+                bincode::deserialize::<S3StoredPack>(pack_bytes.as_slice()).with_context(|| {
+                    format!(
+                        "failed to decode S3 pack `{key}` for remote `{}` revision `{}`",
+                        self.config.remote_id, head.vault_revision
+                    )
+                })?,
+            );
+        }
+
+        let mut encrypted_snapshot = stored_packs
+            .first()
+            .map(|pack| pack.encrypted_snapshot.clone())
+            .ok_or_else(|| {
+                anyhow!(
+                    "S3 revision `{}` for remote `{}` does not contain any stored packs",
+                    head.vault_revision,
+                    self.config.remote_id
+                )
+            })?;
+        stored_packs.sort_by_key(|pack| pack.pack_index);
+        encrypted_snapshot.ciphertext = stored_packs
+            .into_iter()
+            .flat_map(|pack| pack.chunk.into_iter())
+            .collect();
+
+        Ok(ProviderRevision {
+            head: head.clone(),
+            manifest,
+            encrypted_snapshot,
+        })
     }
 
     fn write_revision(&self, request: &ProviderWriteRequest) -> Result<()> {

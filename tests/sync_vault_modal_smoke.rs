@@ -19,8 +19,8 @@ use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, Termin
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::vault::bootstrap::load_local_vault_bootstrap_state;
 use mica_term::app::vault::model::{
-    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, ProviderAuthKind, ProviderKind,
-    RemoteRole,
+    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind,
+    KdfConfig, PackLayout, ProviderAuthKind, ProviderKind, RemoteRole, VaultHead,
 };
 use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
@@ -154,6 +154,29 @@ fn sample_bootstrap_bundle_with_primary_and_mirror() -> BootstrapBundle {
     }
 }
 
+fn sample_remote_head(revision: &str) -> VaultHead {
+    VaultHead {
+        format_version: 1,
+        vault_id: "vault-main".into(),
+        vault_revision: revision.into(),
+        parent_revision: Some("rev-0000".into()),
+        device_id: "device-a".into(),
+        created_at: "2026-03-31T08:00:00Z".into(),
+        payload_hash: "sha256:payload-prev".into(),
+        manifest_ref: format!("bundle/{revision}/manifest.bin"),
+        wrapped_vault_key: "wrapped-key-prev".into(),
+        kdf: KdfConfig::Argon2id {
+            memory_cost_kib: 19_456,
+            time_cost: 2,
+            parallelism: 1,
+            salt_b64: "sync-modal-remote-salt".into(),
+        },
+        cipher: CipherKind::XChaCha20Poly1305,
+        compression: CompressionKind::Zstd,
+        pack_layout: PackLayout::BundledFiles,
+    }
+}
+
 fn bind_with_vault_runtime(
     app: &AppWindow,
     credential_store: Arc<dyn CredentialStore>,
@@ -235,13 +258,18 @@ fn sync_settings_primary_action_persists_primary_target_and_creates_local_vault(
     i_slint_backend_testing::init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("settings-primary");
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    )));
     let app = AppWindow::new().unwrap();
     bind_with_vault_runtime(
         &app,
         Arc::new(MemoryCredentialStore::default()),
         VaultRuntimeOptions {
             root_dir: Some(temp_root.clone()),
-            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            provider_factory: Arc::new(provider_factory),
             bootstrap_template: None,
         },
     );
@@ -275,13 +303,22 @@ fn sync_settings_supports_one_optional_mirror_target() {
     i_slint_backend_testing::init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("settings-mirror");
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    )));
+    provider_factory.insert(Arc::new(MockVaultProvider::new(
+        "remote-mirror",
+        ProviderCapabilities::bundled_files_like(),
+    )));
     let app = AppWindow::new().unwrap();
     bind_with_vault_runtime(
         &app,
         Arc::new(MemoryCredentialStore::default()),
         VaultRuntimeOptions {
             root_dir: Some(temp_root.clone()),
-            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            provider_factory: Arc::new(provider_factory),
             bootstrap_template: None,
         },
     );
@@ -327,13 +364,24 @@ fn sync_modal_submit_lock_unlock_and_close_actions_update_modal_state() {
     i_slint_backend_testing::init_no_event_loop();
 
     let temp_root = sample_vault_runtime_root("lock-unlock");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let mirror = Arc::new(MockVaultProvider::new(
+        "remote-mirror",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary);
+    provider_factory.insert(mirror);
     let app = AppWindow::new().unwrap();
     bind_with_vault_runtime(
         &app,
         Arc::new(MemoryCredentialStore::default()),
         VaultRuntimeOptions {
             root_dir: Some(temp_root.clone()),
-            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            provider_factory: Arc::new(provider_factory),
             bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
         },
     );
@@ -352,6 +400,92 @@ fn sync_modal_submit_lock_unlock_and_close_actions_update_modal_state() {
 
     app.invoke_sync_modal_close_requested();
     assert!(!app.get_sync_modal_open());
+}
+
+#[test]
+fn sync_modal_refuses_to_reinitialize_an_empty_local_state_over_an_existing_remote_revision() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("existing-remote-guard");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    primary.set_remote_head(Some(sample_remote_head("rev-0004")));
+    let mirror = Arc::new(MockVaultProvider::new(
+        "remote-mirror",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary);
+    provider_factory.insert(mirror);
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(sample_bootstrap_bundle_with_primary_and_mirror()),
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+
+    assert_eq!(app.get_sync_modal_mode().as_str(), "not-configured");
+    assert!(
+        app.get_sync_modal_error_text()
+            .as_str()
+            .contains("rev-0004"),
+        "unexpected error: {}",
+        app.get_sync_modal_error_text()
+    );
+    assert!(!temp_root.join("vault-bootstrap-state.json").exists());
+}
+
+#[test]
+fn unlocking_does_not_auto_sync_without_a_user_mutation() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("unlock-no-auto-sync");
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let mirror = Arc::new(MockVaultProvider::new(
+        "remote-mirror",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let provider_factory = RecordingVaultProviderFactory::default();
+    provider_factory.insert(primary.clone());
+    provider_factory.insert(mirror);
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle.auto_sync_enabled = true;
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_sync_modal_lock_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+
+    assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
+    assert!(
+        primary.recorded_writes().is_empty(),
+        "unlocking alone must not push a new remote revision"
+    );
 }
 
 #[test]
@@ -407,9 +541,8 @@ fn titlebar_sync_failure_updates_error_state_without_reopening_modal() {
         "remote-primary",
         ProviderCapabilities::s3_like(),
     ));
-    primary.set_read_error(Some("token expired"));
     let provider_factory = RecordingVaultProviderFactory::default();
-    provider_factory.insert(primary);
+    provider_factory.insert(primary.clone());
 
     let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
     bundle
@@ -431,6 +564,8 @@ fn titlebar_sync_failure_updates_error_state_without_reopening_modal() {
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     app.invoke_sync_modal_close_requested();
     assert!(!app.get_sync_modal_open());
+
+    primary.set_read_error(Some("token expired"));
 
     app.invoke_sync_now_requested();
 

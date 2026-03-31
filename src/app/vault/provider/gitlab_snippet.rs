@@ -8,7 +8,7 @@ use crate::app::vault::model::{
     BootstrapRemoteConfig, BootstrapRemoteLocator, PackLayout, ProviderAuthKind, ProviderKind,
 };
 use crate::app::vault::provider::{
-    ProviderCapabilities, ProviderReadResult, ProviderWriteRequest, VaultProvider,
+    ProviderCapabilities, ProviderReadResult, ProviderRevision, ProviderWriteRequest, VaultProvider,
 };
 
 const DEFAULT_GITLAB_BASE_URL: &str = "https://gitlab.com";
@@ -160,6 +160,16 @@ impl VaultProvider for GitLabSnippetProvider {
     fn read_head(&self) -> Result<ProviderReadResult> {
         Err(anyhow!(
             "GitLab snippet provider read_head is not wired yet for `{}`",
+            self.config.remote_id
+        ))
+    }
+
+    fn read_revision(
+        &self,
+        _head: &crate::app::vault::model::VaultHead,
+    ) -> Result<ProviderRevision> {
+        Err(anyhow!(
+            "GitLab snippet provider read_revision is not wired yet for `{}`",
             self.config.remote_id
         ))
     }

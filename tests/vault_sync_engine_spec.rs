@@ -59,6 +59,15 @@ fn sample_request(next_revision: &str, parent_revision: Option<&str>) -> SyncReq
     }
 }
 
+fn hex(bytes: &[u8]) -> String {
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut output, "{byte:02x}");
+    }
+    output
+}
+
 #[test]
 fn sync_engine_writes_primary_then_fans_out_to_mirrors() {
     let primary = Arc::new(MockVaultProvider::new(
@@ -214,4 +223,48 @@ fn sync_engine_allows_the_first_commit_against_an_empty_primary_head() {
     assert_eq!(writes.len(), 1);
     assert!(writes[0].conditional_head_write);
     assert_eq!(writes[0].expected_parent_revision, None);
+}
+
+#[test]
+fn sync_engine_embeds_recovery_metadata_into_written_manifest() {
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let engine = SyncEngine::new(primary.clone() as Arc<dyn VaultProvider>, Vec::new());
+
+    let result = engine
+        .sync(sample_request("rev-0001", None))
+        .expect("initial sync should succeed against an empty head");
+
+    let writes = primary.recorded_writes();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(
+        writes[0]
+            .manifest
+            .provider_capability_fallbacks
+            .get("snapshot.nonce_hex"),
+        Some(&hex(result.encrypted_snapshot.nonce.as_slice()))
+    );
+    assert_eq!(
+        writes[0]
+            .manifest
+            .provider_capability_fallbacks
+            .get("snapshot.plaintext_len"),
+        Some(&result.encrypted_snapshot.plaintext_len.to_string())
+    );
+    assert_eq!(
+        writes[0]
+            .manifest
+            .provider_capability_fallbacks
+            .get("snapshot.compressed_len"),
+        Some(&result.encrypted_snapshot.compressed_len.to_string())
+    );
+    assert_eq!(
+        writes[0]
+            .manifest
+            .provider_capability_fallbacks
+            .get("snapshot.payload_sha256"),
+        Some(&result.encrypted_snapshot.payload_sha256)
+    );
 }

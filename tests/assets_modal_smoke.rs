@@ -703,6 +703,21 @@ fn blocking_modal_shell_exposes_a_full_frame_for_child_owned_chrome() {
 }
 
 #[test]
+fn blocking_modal_shell_clamps_dragged_frames_inside_the_viewport() {
+    let shell = fs::read_to_string("ui/components/blocking-modal-shell.slint")
+        .expect("read blocking modal shell");
+
+    assert!(
+        shell.contains("root.width - root.viewport-margin - root.resolved-modal-width"),
+        "blocking modal shell should cap drag offsets at the right edge"
+    );
+    assert!(
+        shell.contains("root.height - root.viewport-margin - root.resolved-modal-height"),
+        "blocking modal shell should cap drag offsets at the bottom edge"
+    );
+}
+
+#[test]
 fn simple_asset_modals_anchor_header_and_footer_to_the_frame_edges() {
     let folder = fs::read_to_string("ui/components/assets-folder-create-modal.slint")
         .expect("read folder modal");
@@ -747,6 +762,40 @@ fn ssh_modal_header_body_and_footer_are_explicitly_anchored() {
     assert!(
         ssh.contains("footer := Rectangle {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
         "ssh modal footer must be pinned to the bottom edge"
+    );
+}
+
+#[test]
+fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
+    let sync = fs::read_to_string("ui/components/sync-vault-modal.slint").expect("read sync modal");
+
+    assert!(
+        sync.contains("import { ScrollView } from \"std-widgets.slint\";"),
+        "sync modal should import ScrollView to keep long forms reachable"
+    );
+    assert!(
+        sync.contains("header := Rectangle {\n            x: 0px;\n            y: 0px;"),
+        "sync modal header must be pinned to the top-left corner"
+    );
+    assert!(
+        sync.contains(
+            "body-scroll := ScrollView {\n            x: 0px;\n            y: root.header-height;"
+        ),
+        "sync modal body must scroll from directly below the title bar"
+    );
+    assert!(
+        sync.contains("mouse-drag-pan-enabled: true;"),
+        "sync modal scroll host should allow direct drag scrolling when the content grows"
+    );
+    assert!(
+        sync.contains(
+            "height: max(body-scroll.visible-height, body-column.preferred-height + 24px);"
+        ),
+        "sync modal scroll body must expand with long error and password content"
+    );
+    assert!(
+        sync.contains("footer := Rectangle {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
+        "sync modal footer must stay pinned to the bottom edge"
     );
 }
 

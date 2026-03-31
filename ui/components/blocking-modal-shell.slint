@@ -37,12 +37,21 @@ export component BlockingModalShell inherits Rectangle {
     }
 
     modal-frame := Rectangle {
-        x: max(root.viewport-margin, (root.width - root.resolved-modal-width) / 2 + root.offset-x);
+        x: max(
+            root.viewport-margin,
+            min(
+                root.width - root.viewport-margin - root.resolved-modal-width,
+                (root.width - root.resolved-modal-width) / 2 + root.offset-x
+            )
+        );
         y: max(
             root.host-titlebar-height + root.viewport-margin,
-            root.host-titlebar-height
-                + (root.height - root.host-titlebar-height - root.resolved-modal-height) / 2
-                + root.offset-y
+            min(
+                root.height - root.viewport-margin - root.resolved-modal-height,
+                root.host-titlebar-height
+                    + (root.height - root.host-titlebar-height - root.resolved-modal-height) / 2
+                    + root.offset-y
+            )
         );
         width: root.resolved-modal-width;
         height: root.resolved-modal-height;

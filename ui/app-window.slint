@@ -47,6 +47,8 @@ export component AppWindow inherits Window {
     in-out property <string> sync-modal-mirror-gist-id: "";
     in-out property <string> sync-modal-mirror-pat: "";
     in-out property <string> sync-modal-master-password: "";
+    in-out property <string> sync-feedback-text: "";
+    in-out property <int> sync-feedback-sequence: 0;
     in-out property <bool> show-right-panel: false;
     in-out property <string> right-panel-view: "sftp";
     in-out property <string> sftp-panel-mode: "empty";
@@ -486,6 +488,8 @@ export component AppWindow inherits Window {
                 width: parent.width;
                 dark-mode: root.dark-mode;
                 sync-modal-open: root.sync-modal-open;
+                sync-feedback-text: root.sync-feedback-text;
+                sync-feedback-sequence: root.sync-feedback-sequence;
                 show-right-panel: root.effective-show-right-panel;
                 show-global-menu: root.show-global-menu;
                 is-window-maximized: root.is-window-maximized;
@@ -881,6 +885,16 @@ export component AppWindow inherits Window {
         anchor-y: titlebar.tooltip-anchor-y;
         tooltip-visible: titlebar.tooltip-visible;
         host-width: root.width;
+        host-height: root.height;
+    }
+
+    sync-feedback-overlay := TitlebarTooltip {
+        text: root.sync-feedback-text;
+        anchor-x: titlebar.sync-feedback-anchor-x;
+        anchor-y: titlebar.sync-feedback-anchor-y;
+        tooltip-visible: titlebar.sync-feedback-visible;
+        host-width: root.width;
+        host-height: root.height;
     }
 
     sidebar-tooltip-overlay := TitlebarTooltip {
