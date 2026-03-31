@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use mica_term::app::async_runtime::AppAsyncRuntime;
+use mica_term::app::sftp::{SftpBackend, SftpDirectoryEntry, SftpRuntimeHandle};
 use mica_term::app::ssh::connection_progress::{
     ConnectionHeadlineState, ConnectionProgressEvent, ConnectionStepState,
 };
@@ -112,6 +113,19 @@ struct ScrollTrackingRuntimeControl {
 #[derive(Clone)]
 struct SurfacePullRuntimeControl {
     surface: TerminalSurfaceState,
+}
+
+#[derive(Default)]
+struct NoopSftpBackend;
+
+#[derive(Clone)]
+struct SftpCapableLauncher {
+    backend: Arc<dyn SftpBackend>,
+}
+
+#[derive(Clone)]
+struct SftpCapableRuntimeControl {
+    runtime: SftpRuntimeHandle,
 }
 
 #[derive(Clone, Copy)]
@@ -613,6 +627,128 @@ impl SessionRuntimeControl for SurfacePullRuntimeControl {
 
     fn terminal_surface(&self) -> Result<TerminalSurfaceState> {
         Ok(self.surface.clone())
+    }
+}
+
+impl SftpBackend for NoopSftpBackend {
+    fn read_dir<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<SftpDirectoryEntry>>> + Send + 'a>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+
+    fn mkdir<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn rename<'a>(
+        &'a self,
+        _from: &'a str,
+        _to: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn path_exists<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
+        Box::pin(async move { Ok(true) })
+    }
+
+    fn upload_file<'a>(
+        &'a self,
+        _remote_path: &'a str,
+        data: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<u64>> + Send + 'a>> {
+        Box::pin(async move { Ok(data.len() as u64) })
+    }
+
+    fn download_file<'a>(
+        &'a self,
+        _remote_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>>> + Send + 'a>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+
+    fn remove_file<'a>(
+        &'a self,
+        _remote_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn remove_dir<'a>(
+        &'a self,
+        _remote_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SftpCapableLauncher {
+    fn new(backend: Arc<dyn SftpBackend>) -> Self {
+        Self { backend }
+    }
+}
+
+impl SessionRuntimeLauncher for SftpCapableLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        _session_id: Uuid,
+        _attempt_id: Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let backend = Arc::clone(&self.backend);
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            Ok(Box::new(SftpCapableRuntimeControl {
+                runtime: SftpRuntimeHandle::new(backend),
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeControl for SftpCapableRuntimeControl {
+    fn disconnect(&self) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_text_input(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_key_input(&self, _event: TerminalKeyEvent) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_mouse_input(&self, _event: TerminalMouseInput) -> Result<()> {
+        Ok(())
+    }
+
+    fn send_paste(&self, _text: String) -> Result<()> {
+        Ok(())
+    }
+
+    fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn sftp_runtime(&self) -> Option<SftpRuntimeHandle> {
+        Some(self.runtime.clone())
     }
 }
 
@@ -1425,6 +1561,85 @@ fn session_manager_can_force_new_tab_session_for_same_asset() {
         .expect("force second session");
 
     assert_ne!(first.session_id, second.session_id);
+}
+
+#[test]
+fn session_manager_exposes_sftp_binding_for_runtime_ready_session() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(SftpCapableLauncher::new(Arc::new(NoopSftpBackend))),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    let binding = manager
+        .sftp_binding(handle.session_id)
+        .expect("sftp binding should exist for runtime-ready session");
+
+    assert_eq!(binding.session_id(), handle.session_id);
+    assert_eq!(binding.mode(), mica_term::app::sftp::SftpPanelMode::Connecting);
+    assert!(binding.runtime().is_some());
+}
+
+#[test]
+fn retry_session_replaces_sftp_binding_and_disconnect_marks_it_recoverable() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(SftpCapableLauncher::new(Arc::new(NoopSftpBackend))),
+    );
+
+    let handle = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open session");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    let first_binding = manager
+        .sftp_binding(handle.session_id)
+        .expect("initial sftp binding");
+    let first_id = first_binding.binding_id();
+
+    manager
+        .retry_session(handle.session_id)
+        .expect("retry session should succeed");
+
+    runtime.block_on(async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    });
+
+    let second_binding = manager
+        .sftp_binding(handle.session_id)
+        .expect("replacement sftp binding");
+    assert_ne!(first_id, second_binding.binding_id());
+
+    manager
+        .disconnect_session(handle.session_id)
+        .expect("disconnect session");
+
+    let disconnected_binding = manager
+        .sftp_binding(handle.session_id)
+        .expect("disconnected binding snapshot");
+    assert_eq!(
+        disconnected_binding.mode(),
+        mica_term::app::sftp::SftpPanelMode::Disconnected
+    );
+    assert!(disconnected_binding.runtime().is_none());
 }
 
 #[test]

@@ -16,8 +16,8 @@ use mica_term::shell::context_menu::{
 };
 use mica_term::shell::sidebar::SidebarDestination;
 use mica_term::shell::view_model::{
-    AssetModalState, ShellViewModel, SnippetActivation, SnippetCreateAction, SshModalAction,
-    SshModalActionState, WelcomeAction, welcome_actions,
+    AssetModalState, RightPanelView, ShellViewModel, SnippetActivation, SnippetCreateAction,
+    SshModalAction, SshModalActionState, WelcomeAction, welcome_actions,
 };
 use mica_term::theme::ThemeMode;
 
@@ -141,6 +141,27 @@ fn shell_view_model_tracks_top_status_bar_state() {
 
     view_model.set_window_active(false);
     assert!(!view_model.is_window_active);
+}
+
+#[test]
+fn right_panel_view_supports_sftp_projection() {
+    let mut view_model = ShellViewModel::default();
+
+    assert_eq!(view_model.right_panel_view_id(), "appearance");
+
+    view_model.set_right_panel_view(RightPanelView::from_id("sftp"));
+
+    assert_eq!(view_model.right_panel_view_id(), "sftp");
+}
+
+#[test]
+fn right_panel_slint_declares_sftp_placeholder_branch() {
+    let right_panel = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
+
+    assert!(
+        right_panel.contains("SFTP") || right_panel.contains("sftp-panel"),
+        "right panel should declare an SFTP placeholder branch before runtime wiring lands"
+    );
 }
 
 #[test]

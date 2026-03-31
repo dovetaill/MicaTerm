@@ -19,7 +19,7 @@ import { ThemeTokens } from "theme/tokens.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
 import { WindowResizeGrips } from "components/window-resize-grips.slint";
 import { ConsoleAssetItem } from "shell/assets-sidebar.slint";
-import { RightPanel } from "shell/right-panel.slint";
+import { RightPanel, SftpPanelItem } from "shell/right-panel.slint";
 import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
 import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow } from "shell/terminal-session-host.slint";
 import { WorkspaceTabItem } from "shell/tabbar.slint";
@@ -40,6 +40,20 @@ export component AppWindow inherits Window {
     in-out property <string> sync-modal-secondary-action-label: "";
     in-out property <bool> show-right-panel: false;
     in-out property <string> right-panel-view: "appearance";
+    in-out property <string> sftp-panel-mode: "empty";
+    in-out property <string> sftp-panel-host-label: "";
+    in-out property <string> sftp-panel-path: "";
+    in-out property <string> sftp-panel-follow-mode: "follow-cwd";
+    in-out property <bool> sftp-panel-can-go-back: false;
+    in-out property <bool> sftp-panel-can-go-forward: false;
+    in-out property <bool> sftp-panel-can-go-up: false;
+    in-out property <bool> sftp-panel-actions-enabled: false;
+    in-out property <[SftpPanelItem]> sftp-panel-items: [];
+    in-out property <[string]> sftp-panel-selected-entry-ids: [];
+    in-out property <int> sftp-panel-queue-active: 0;
+    in-out property <int> sftp-panel-queue-failed: 0;
+    in-out property <int> sftp-panel-queue-current-session: 0;
+    in-out property <bool> sftp-queue-drawer-open: false;
     in-out property <bool> show-global-menu: false;
     in-out property <bool> is-window-maximized: false;
     in-out property <bool> is-window-active: true;
@@ -250,6 +264,18 @@ export component AppWindow inherits Window {
     callback sync-modal-secondary-action-requested();
     callback open-settings-panel-requested();
     callback open-appearance-panel-requested();
+    callback open-sftp-panel-requested();
+    callback sftp-panel-back-requested();
+    callback sftp-panel-forward-requested();
+    callback sftp-panel-refresh-requested();
+    callback sftp-panel-up-requested();
+    callback sftp-panel-path-submitted(string);
+    callback sftp-panel-context-menu-requested(string, string, length, length);
+    callback sftp-panel-upload-requested();
+    callback sftp-panel-new-folder-requested();
+    callback sftp-panel-open-queue-requested();
+    callback sftp-panel-retry-requested();
+    callback sftp-panel-reenable-follow-requested();
     callback toggle-global-menu-requested();
     callback close-global-menu-requested();
     callback toggle-theme-mode-requested();
@@ -690,6 +716,65 @@ export component AppWindow inherits Window {
                         y: 0px;
                         height: parent.height;
                         expanded: root.effective-show-right-panel;
+                        view: root.right-panel-view;
+                        sftp-panel-mode: root.sftp-panel-mode;
+                        sftp-panel-host-label: root.sftp-panel-host-label;
+                        sftp-panel-path: root.sftp-panel-path;
+                        sftp-panel-follow-mode: root.sftp-panel-follow-mode;
+                        sftp-panel-can-go-back: root.sftp-panel-can-go-back;
+                        sftp-panel-can-go-forward: root.sftp-panel-can-go-forward;
+                        sftp-panel-can-go-up: root.sftp-panel-can-go-up;
+                        sftp-panel-actions-enabled: root.sftp-panel-actions-enabled;
+                        sftp-panel-items: root.sftp-panel-items;
+                        sftp-panel-selected-entry-ids: root.sftp-panel-selected-entry-ids;
+                        sftp-panel-queue-active: root.sftp-panel-queue-active;
+                        sftp-panel-queue-failed: root.sftp-panel-queue-failed;
+                        sftp-panel-queue-current-session: root.sftp-panel-queue-current-session;
+                        sftp-queue-drawer-open: root.sftp-queue-drawer-open;
+
+                        sftp-panel-back-requested => {
+                            root.sftp-panel-back-requested();
+                        }
+
+                        sftp-panel-forward-requested => {
+                            root.sftp-panel-forward-requested();
+                        }
+
+                        sftp-panel-refresh-requested => {
+                            root.sftp-panel-refresh-requested();
+                        }
+
+                        sftp-panel-up-requested => {
+                            root.sftp-panel-up-requested();
+                        }
+
+                        sftp-panel-path-submitted(path) => {
+                            root.sftp-panel-path-submitted(path);
+                        }
+
+                        sftp-panel-context-menu-requested(item-id, item-kind, anchor-x, anchor-y) => {
+                            root.sftp-panel-context-menu-requested(item-id, item-kind, anchor-x, anchor-y);
+                        }
+
+                        sftp-panel-upload-requested => {
+                            root.sftp-panel-upload-requested();
+                        }
+
+                        sftp-panel-new-folder-requested => {
+                            root.sftp-panel-new-folder-requested();
+                        }
+
+                        sftp-panel-open-queue-requested => {
+                            root.sftp-panel-open-queue-requested();
+                        }
+
+                        sftp-panel-retry-requested => {
+                            root.sftp-panel-retry-requested();
+                        }
+
+                        sftp-panel-reenable-follow-requested => {
+                            root.sftp-panel-reenable-follow-requested();
+                        }
                     }
                 }
             }

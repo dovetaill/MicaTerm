@@ -5,6 +5,10 @@ use std::collections::{BTreeSet, HashMap};
 use crate::app::keychain::{
     KeychainCatalog, KeychainIdentityAuthKind, KeychainNodePayload, KeychainSshKeySpec,
 };
+use crate::app::sftp::{
+    SftpDirectoryEntry, SftpFollowMode, SftpPanelMode, SftpSessionBindingState,
+    TransferQueueSummary,
+};
 use crate::app::ssh::credentials::{
     SshCredentialKind, keychain_key_credential_ref, ssh_credential_ref,
 };
@@ -40,15 +44,22 @@ pub enum WelcomeAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RightPanelView {
     Appearance,
+    Sftp,
 }
 
 impl RightPanelView {
     pub fn id(self) -> &'static str {
-        "appearance"
+        match self {
+            Self::Appearance => "appearance",
+            Self::Sftp => "sftp",
+        }
     }
 
-    pub fn from_id(_value: &str) -> Self {
-        Self::Appearance
+    pub fn from_id(value: &str) -> Self {
+        match value {
+            "sftp" => Self::Sftp,
+            _ => Self::Appearance,
+        }
     }
 }
 
@@ -133,6 +144,15 @@ impl Default for VaultPanelViewState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SftpConflictModalState {
+    pub open: bool,
+    pub source_path: String,
+    pub target_path: String,
+    pub can_resume: bool,
+    pub apply_to_all: bool,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssetModalState {
@@ -157,6 +177,19 @@ pub enum AssetModalState {
         parent_id: Option<String>,
         editing_asset_id: Option<String>,
         draft: AssetSshConnectionDraft,
+    },
+    SftpNewFolder {
+        draft_name: String,
+    },
+    SftpRenameEntry {
+        entry_id: String,
+        original_name: String,
+        draft_name: String,
+    },
+    SftpDeleteEntriesConfirm {
+        entry_ids: Vec<String>,
+        label: String,
+        descendant_count: usize,
     },
     RenameAsset {
         asset_id: String,
@@ -335,6 +368,9 @@ pub struct ShellViewModel {
     pub focused_asset_id: Option<String>,
     pub selected_keychain_ids: Vec<String>,
     pub focused_keychain_id: Option<String>,
+    pub sftp_sessions: HashMap<String, SftpSessionBindingState>,
+    pub sftp_queue_summary: TransferQueueSummary,
+    pub sftp_queue_drawer_open: bool,
     workspace_tabs: Vec<WorkspaceTab>,
     active_workspace_session_id: Option<String>,
     active_workspace_terminal_surface: Option<TerminalSurfaceState>,
@@ -354,6 +390,7 @@ pub struct ShellViewModel {
     pub context_menu_child_flows_left: bool,
     pub context_menu_open_path: Vec<usize>,
     pub context_menu_feedback_text: String,
+    sftp_conflict_modal_state: SftpConflictModalState,
     sync_modal_state: SyncModalViewState,
     vault_panel_state: VaultPanelViewState,
     console_asset_tree: AssetTree,
@@ -387,6 +424,9 @@ impl Default for ShellViewModel {
             focused_asset_id: None,
             selected_keychain_ids: Vec::new(),
             focused_keychain_id: None,
+            sftp_sessions: HashMap::new(),
+            sftp_queue_summary: TransferQueueSummary::default(),
+            sftp_queue_drawer_open: false,
             workspace_tabs: Vec::new(),
             active_workspace_session_id: None,
             active_workspace_terminal_surface: None,
@@ -406,6 +446,7 @@ impl Default for ShellViewModel {
             context_menu_child_flows_left: false,
             context_menu_open_path: Vec::new(),
             context_menu_feedback_text: String::new(),
+            sftp_conflict_modal_state: SftpConflictModalState::default(),
             sync_modal_state: SyncModalViewState::default(),
             vault_panel_state: VaultPanelViewState::default(),
             console_asset_tree: AssetTree::new(),
@@ -437,6 +478,30 @@ impl ShellViewModel {
             .validate_name_in_parent(parent_id, draft_name, Some(asset_id))
     }
 
+    fn sftp_name_validation(
+        &self,
+        draft_name: &str,
+        editing_entry_id: Option<&str>,
+    ) -> AssetNameValidation {
+        let trimmed = draft_name.trim();
+        if trimmed.is_empty() {
+            return AssetNameValidation::Empty;
+        }
+
+        let duplicate = self
+            .active_sftp_session_state()
+            .into_iter()
+            .flat_map(|state| state.entries.iter())
+            .filter(|entry| Some(entry.id.as_str()) != editing_entry_id)
+            .any(|entry| entry.name.trim() == trimmed);
+
+        if duplicate {
+            AssetNameValidation::Duplicate
+        } else {
+            AssetNameValidation::Valid
+        }
+    }
+
     pub fn asset_rename_modal_validation_message(&self) -> String {
         match &self.asset_modal_state {
             Some(AssetModalState::RenameAsset {
@@ -446,6 +511,14 @@ impl ShellViewModel {
             }) => asset_name_validation_message(
                 self.rename_asset_modal_validation(asset_id, draft_name),
             ),
+            Some(AssetModalState::SftpRenameEntry {
+                entry_id,
+                draft_name,
+                ..
+            }) => asset_name_validation_message(self.sftp_name_validation(
+                draft_name,
+                Some(entry_id.as_str()),
+            )),
             _ => String::new(),
         }
     }
@@ -488,6 +561,9 @@ impl ShellViewModel {
                 editing_asset_id.as_deref(),
                 draft,
             ),
+            Some(AssetModalState::SftpNewFolder { draft_name }) => {
+                asset_name_validation_message(self.sftp_name_validation(draft_name, None))
+            }
             _ => String::new(),
         }
     }
@@ -532,6 +608,9 @@ impl ShellViewModel {
                 ..
             }) => {
                 self.ssh_modal_can_confirm(parent_id.as_deref(), editing_asset_id.as_deref(), draft)
+            }
+            Some(AssetModalState::SftpNewFolder { draft_name }) => {
+                self.sftp_name_validation(draft_name, None) == AssetNameValidation::Valid
             }
             _ => false,
         }
@@ -594,6 +673,163 @@ impl ShellViewModel {
         self.right_panel_view = RightPanelView::Appearance;
         self.show_right_panel = true;
         self.show_global_menu = false;
+    }
+
+    pub fn open_sftp_panel(&mut self) {
+        self.right_panel_view = RightPanelView::Sftp;
+        self.show_right_panel = true;
+        self.show_global_menu = false;
+    }
+
+    pub fn set_sftp_session_state(&mut self, session_id: impl Into<String>, state: SftpSessionBindingState) {
+        self.sftp_sessions.insert(session_id.into(), state);
+    }
+
+    pub fn active_sftp_session_state(&self) -> Option<&SftpSessionBindingState> {
+        let session_id = self.active_workspace_session_id.as_deref()?;
+        self.sftp_sessions.get(session_id)
+    }
+
+    fn active_sftp_session_state_mut(&mut self) -> Option<&mut SftpSessionBindingState> {
+        let session_id = self.active_workspace_session_id.clone()?;
+        Some(self.sftp_sessions.entry(session_id).or_default())
+    }
+
+    pub fn sftp_panel_mode_id(&self) -> &'static str {
+        if self.active_workspace_session_id.is_none() {
+            return SftpPanelMode::Empty.id();
+        }
+
+        self.active_sftp_session_state()
+            .map(|state| state.mode.id())
+            .unwrap_or(SftpPanelMode::Empty.id())
+    }
+
+    pub fn sftp_panel_host_label(&self) -> String {
+        self.active_workspace_tab()
+            .map(|tab| tab.title.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn sftp_panel_path(&self) -> String {
+        self.active_sftp_session_state()
+            .map(|state| state.current_path.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn sftp_panel_follow_mode_id(&self) -> &'static str {
+        self.active_sftp_session_state()
+            .map(|state| state.follow_mode.id())
+            .unwrap_or(SftpFollowMode::FollowCwd.id())
+    }
+
+    pub fn sftp_panel_can_go_back(&self) -> bool {
+        self.active_sftp_session_state()
+            .map(|state| state.history.can_back())
+            .unwrap_or(false)
+    }
+
+    pub fn sftp_panel_can_go_forward(&self) -> bool {
+        self.active_sftp_session_state()
+            .map(|state| state.history.can_forward())
+            .unwrap_or(false)
+    }
+
+    pub fn sftp_panel_can_go_up(&self) -> bool {
+        self.active_sftp_session_state()
+            .map(SftpSessionBindingState::can_navigate_up)
+            .unwrap_or(false)
+    }
+
+    pub fn sftp_panel_actions_enabled(&self) -> bool {
+        self.active_sftp_session_state()
+            .map(|state| matches!(state.mode, SftpPanelMode::Ready | SftpPanelMode::Loading | SftpPanelMode::Connecting))
+            .unwrap_or(false)
+    }
+
+    pub fn sftp_panel_entries(&self) -> &[SftpDirectoryEntry] {
+        self.active_sftp_session_state()
+            .map(|state| state.entries.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn sftp_panel_selected_entry_ids(&self) -> &[String] {
+        self.active_sftp_session_state()
+            .map(|state| state.selected_entry_ids.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn submit_sftp_panel_path(&mut self, path: impl Into<String>) -> bool {
+        let path = path.into();
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+
+        let Some(state) = self.active_sftp_session_state_mut() else {
+            return false;
+        };
+        state.navigate_manual(trimmed.to_string());
+        true
+    }
+
+    pub fn navigate_sftp_panel_back(&mut self) -> bool {
+        self.active_sftp_session_state_mut()
+            .map(SftpSessionBindingState::navigate_back)
+            .unwrap_or(false)
+    }
+
+    pub fn navigate_sftp_panel_forward(&mut self) -> bool {
+        self.active_sftp_session_state_mut()
+            .map(SftpSessionBindingState::navigate_forward)
+            .unwrap_or(false)
+    }
+
+    pub fn navigate_sftp_panel_up(&mut self) -> bool {
+        self.active_sftp_session_state_mut()
+            .map(SftpSessionBindingState::navigate_up)
+            .unwrap_or(false)
+    }
+
+    pub fn retry_sftp_panel(&mut self) -> bool {
+        let Some(state) = self.active_sftp_session_state_mut() else {
+            return false;
+        };
+        state.mark_connecting();
+        true
+    }
+
+    pub fn refresh_sftp_panel(&mut self) -> bool {
+        let Some(state) = self.active_sftp_session_state_mut() else {
+            return false;
+        };
+        state.mark_loading();
+        true
+    }
+
+    pub fn reenable_sftp_follow(&mut self) -> bool {
+        let Some(state) = self.active_sftp_session_state_mut() else {
+            return false;
+        };
+        let path = if state.current_path.is_empty() {
+            "/".to_string()
+        } else {
+            state.current_path.clone()
+        };
+        state.reenable_follow(path);
+        true
+    }
+
+    pub fn sftp_queue_drawer_open(&self) -> bool {
+        self.sftp_queue_drawer_open
+    }
+
+    pub fn toggle_sftp_queue_drawer(&mut self) {
+        self.sftp_queue_drawer_open = !self.sftp_queue_drawer_open;
+    }
+
+    pub fn sftp_conflict_modal_state(&self) -> &SftpConflictModalState {
+        &self.sftp_conflict_modal_state
     }
 
     pub fn vault_panel_state(&self) -> &VaultPanelViewState {
@@ -911,6 +1147,15 @@ impl ShellViewModel {
             draft_name,
         });
     }
+
+    pub fn open_sftp_new_folder_modal(&mut self) {
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.asset_modal_state = Some(AssetModalState::SftpNewFolder {
+            draft_name: self.next_default_sftp_folder_name(),
+        });
+    }
     pub fn open_new_snippet_modal(&mut self, parent_package_id: Option<String>) {
         let parent_package_id = self.normalize_snippet_package_parent_id(parent_package_id);
         self.dismiss_active_asset_rename();
@@ -1020,12 +1265,17 @@ impl ShellViewModel {
     }
 
     pub fn update_new_folder_modal_name(&mut self, value: String) {
-        let Some(AssetModalState::NewFolder { draft_name, .. }) = self.asset_modal_state.as_mut()
-        else {
+        let Some(modal_state) = self.asset_modal_state.as_mut() else {
             return;
         };
 
-        *draft_name = value;
+        match modal_state {
+            AssetModalState::NewFolder { draft_name, .. }
+            | AssetModalState::SftpNewFolder { draft_name } => {
+                *draft_name = value;
+            }
+            _ => {}
+        }
     }
 
     pub fn update_snippet_modal_field(&mut self, field: &str, value: String) {
@@ -1230,13 +1480,41 @@ impl ShellViewModel {
         });
     }
 
-    pub fn update_rename_asset_modal_name(&mut self, value: String) {
-        let Some(AssetModalState::RenameAsset { draft_name, .. }) = self.asset_modal_state.as_mut()
+    pub fn open_sftp_rename_entry_modal(&mut self, entry_id: String) {
+        let Some(entry) = self
+            .active_sftp_session_state()
+            .and_then(|state| state.entries.iter().find(|entry| entry.id == entry_id))
+            .cloned()
         else {
             return;
         };
 
-        *draft_name = value;
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        if let Some(state) = self.active_sftp_session_state_mut() {
+            state.selected_entry_ids = vec![entry.id.clone()];
+        }
+        self.context_target_asset_id = Some(entry.id.clone());
+        self.asset_modal_state = Some(AssetModalState::SftpRenameEntry {
+            entry_id: entry.id,
+            original_name: entry.name.clone(),
+            draft_name: entry.name,
+        });
+    }
+
+    pub fn update_rename_asset_modal_name(&mut self, value: String) {
+        let Some(modal_state) = self.asset_modal_state.as_mut() else {
+            return;
+        };
+
+        match modal_state {
+            AssetModalState::RenameAsset { draft_name, .. }
+            | AssetModalState::SftpRenameEntry { draft_name, .. } => {
+                *draft_name = value;
+            }
+            _ => {}
+        }
     }
 
     pub fn open_delete_asset_confirm(&mut self, asset_id: String) {
@@ -1278,6 +1556,40 @@ impl ShellViewModel {
             asset_id,
             label,
             descendant_count,
+        });
+    }
+
+    pub fn open_sftp_delete_confirm(&mut self, entry_ids: Vec<String>) {
+        let Some(state) = self.active_sftp_session_state() else {
+            return;
+        };
+        let selected_entries = state
+            .entries
+            .iter()
+            .filter(|entry| entry_ids.iter().any(|id| id == &entry.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        if selected_entries.is_empty() {
+            return;
+        }
+
+        let label = if selected_entries.len() == 1 {
+            selected_entries[0].name.clone()
+        } else {
+            format!("{} items", selected_entries.len())
+        };
+
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        if let Some(state) = self.active_sftp_session_state_mut() {
+            state.selected_entry_ids = entry_ids.clone();
+        }
+        self.context_target_asset_id = entry_ids.first().cloned();
+        self.asset_modal_state = Some(AssetModalState::SftpDeleteEntriesConfirm {
+            entry_ids,
+            label,
+            descendant_count: 0,
         });
     }
 
@@ -1434,6 +1746,7 @@ impl ShellViewModel {
     pub fn can_confirm_asset_modal(&self) -> bool {
         match &self.asset_modal_state {
             Some(AssetModalState::NewFolder { .. })
+            | Some(AssetModalState::SftpNewFolder { .. })
             | Some(AssetModalState::NewSnippet { .. })
             | Some(AssetModalState::NewSnippetPackage { .. })
             | Some(AssetModalState::NewKeychainSshKey { .. })
@@ -1448,6 +1761,13 @@ impl ShellViewModel {
                 self.rename_asset_modal_validation(asset_id, draft_name)
                     == AssetNameValidation::Valid
             }
+            Some(AssetModalState::SftpRenameEntry {
+                entry_id,
+                draft_name,
+                ..
+            }) => self.sftp_name_validation(draft_name, Some(entry_id.as_str()))
+                == AssetNameValidation::Valid,
+            Some(AssetModalState::SftpDeleteEntriesConfirm { .. }) => true,
             Some(AssetModalState::DeleteAssetConfirm { .. }) => true,
             None => false,
         }
@@ -1468,6 +1788,32 @@ impl ShellViewModel {
                 draft_name,
                 AssetNodePayload::Folder,
             ),
+            AssetModalState::SftpNewFolder { draft_name } => {
+                if self.sftp_name_validation(&draft_name, None) != AssetNameValidation::Valid {
+                    return false;
+                }
+
+                let Some(session_id) = self.active_workspace_session_id().map(str::to_string) else {
+                    return false;
+                };
+                let path = sftp_child_path(self.sftp_panel_path().as_str(), draft_name.trim());
+                let entry_id = format!("sftp-dir-{}", path);
+                let next_entry = SftpDirectoryEntry {
+                    id: entry_id.clone(),
+                    name: draft_name.trim().to_string(),
+                    path,
+                    kind: crate::app::sftp::SftpDirectoryEntryKind::Directory,
+                    size_bytes: None,
+                };
+
+                if let Some(state) = self.sftp_sessions.get_mut(&session_id) {
+                    state.entries.push(next_entry);
+                    state.selected_entry_ids = vec![entry_id.clone()];
+                }
+                self.context_target_asset_id = Some(entry_id);
+                self.asset_modal_state = None;
+                return true;
+            }
             AssetModalState::NewSnippet {
                 parent_package_id,
                 editing_asset_id,
@@ -1646,6 +1992,32 @@ impl ShellViewModel {
                 });
                 (parent_id, ConsoleAssetKind::SshConnection, label, payload)
             }
+            AssetModalState::SftpRenameEntry {
+                entry_id,
+                draft_name,
+                ..
+            } => {
+                if self.sftp_name_validation(&draft_name, Some(entry_id.as_str()))
+                    != AssetNameValidation::Valid
+                {
+                    return false;
+                }
+
+                let current_path = self.sftp_panel_path();
+                let next_name = draft_name.trim().to_string();
+                if let Some(state) = self.active_sftp_session_state_mut()
+                    && let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == entry_id)
+                {
+                    entry.name = next_name.clone();
+                    entry.path = sftp_child_path(current_path.as_str(), next_name.as_str());
+                    state.selected_entry_ids = vec![entry.id.clone()];
+                    self.context_target_asset_id = Some(entry.id.clone());
+                    self.asset_modal_state = None;
+                    return true;
+                }
+
+                return false;
+            }
             AssetModalState::RenameAsset {
                 asset_id,
                 draft_name,
@@ -1664,6 +2036,9 @@ impl ShellViewModel {
                 return true;
             }
             AssetModalState::DeleteAssetConfirm { .. } => {
+                return self.confirm_delete_asset();
+            }
+            AssetModalState::SftpDeleteEntriesConfirm { .. } => {
                 return self.confirm_delete_asset();
             }
         };
@@ -1733,6 +2108,33 @@ impl ShellViewModel {
     }
 
     pub fn confirm_delete_asset(&mut self) -> bool {
+        if let Some(AssetModalState::SftpDeleteEntriesConfirm { entry_ids, .. }) =
+            self.asset_modal_state.clone()
+        {
+            let should_clear_context_target = self
+                .context_target_asset_id
+                .as_deref()
+                .is_some_and(|entry_id| entry_ids.iter().any(|removed_id| removed_id == entry_id));
+            let Some(state) = self.active_sftp_session_state_mut() else {
+                return false;
+            };
+
+            let before_len = state.entries.len();
+            state.entries.retain(|entry| !entry_ids.iter().any(|id| id == &entry.id));
+            state.selected_entry_ids.retain(|selected_id| {
+                !entry_ids.iter().any(|entry_id| entry_id == selected_id)
+            });
+            if state.entries.len() == before_len {
+                return false;
+            }
+
+            if should_clear_context_target {
+                self.context_target_asset_id = state.selected_entry_ids.first().cloned();
+            }
+            self.asset_modal_state = None;
+            return true;
+        }
+
         let Some(AssetModalState::DeleteAssetConfirm { asset_id, .. }) =
             self.asset_modal_state.clone()
         else {
@@ -2061,6 +2463,32 @@ impl ShellViewModel {
         self.context_menu_feedback_text.clear();
         self.asset_create_menu_open = false;
 
+        if is_sftp_context_target(target_kind) {
+            match target_id.clone() {
+                Some(target_id)
+                    if matches!(target_kind, ContextTargetKind::SftpMultiSelection)
+                        && self
+                            .active_sftp_session_state()
+                            .is_some_and(|state| {
+                                state
+                                    .selected_entry_ids
+                                    .iter()
+                                    .any(|selected_id| selected_id == &target_id)
+                            }) => {}
+                Some(target_id) => {
+                    if let Some(state) = self.active_sftp_session_state_mut() {
+                        state.selected_entry_ids = vec![target_id.clone()];
+                    }
+                }
+                None => {
+                    if let Some(state) = self.active_sftp_session_state_mut() {
+                        state.selected_entry_ids.clear();
+                    }
+                }
+            }
+            return;
+        }
+
         match target_id {
             Some(target_id) => {
                 if self.selected_asset_ids.is_empty()
@@ -2148,6 +2576,14 @@ impl ShellViewModel {
     }
 
     pub fn handle_context_menu_leaf_action(&mut self, action_id: &str) {
+        if self
+            .context_menu_target_kind
+            .is_some_and(is_sftp_context_target)
+        {
+            self.handle_sftp_context_menu_leaf_action(action_id);
+            return;
+        }
+
         if matches!(
             action_id,
             "new-snippet" | "new-package" | "new-snippet-package"
@@ -2313,6 +2749,35 @@ impl ShellViewModel {
 
     pub fn set_context_menu_feedback(&mut self, text: impl Into<String>) {
         self.context_menu_feedback_text = text.into();
+    }
+
+    fn handle_sftp_context_menu_leaf_action(&mut self, action_id: &str) {
+        match action_id {
+            "new-folder" => self.open_sftp_new_folder_modal(),
+            "rename-sftp-entry" => {
+                if let Some(entry_id) = self.context_target_asset_id.clone() {
+                    self.open_sftp_rename_entry_modal(entry_id);
+                } else {
+                    self.close_context_menu();
+                }
+            }
+            "delete-sftp-entry" => {
+                if let Some(entry_id) = self.context_target_asset_id.clone() {
+                    self.open_sftp_delete_confirm(vec![entry_id]);
+                } else {
+                    self.close_context_menu();
+                }
+            }
+            "delete-selected" => {
+                let entry_ids = self.sftp_panel_selected_entry_ids().to_vec();
+                self.open_sftp_delete_confirm(entry_ids);
+            }
+            "refresh-sftp" => {
+                let _ = self.refresh_sftp_panel();
+                self.close_context_menu();
+            }
+            _ => self.close_context_menu(),
+        }
     }
 
     pub fn set_context_menu_placement(
@@ -2619,6 +3084,17 @@ impl ShellViewModel {
     }
 
     pub fn context_menu_selection(&self) -> SelectionContext {
+        if self
+            .context_menu_target_kind
+            .is_some_and(is_sftp_context_target)
+        {
+            return SelectionContext {
+                selected_ids: self.sftp_panel_selected_entry_ids().to_vec(),
+                clipboard_has_asset_payload: false,
+                target_mutable: matches!(self.sftp_panel_mode_id(), "ready"),
+            };
+        }
+
         SelectionContext {
             selected_ids: self.selected_asset_ids.clone(),
             clipboard_has_asset_payload: false,
@@ -2742,7 +3218,46 @@ fn asset_name_validation_message(validation: AssetNameValidation) -> String {
     }
 }
 
+fn is_sftp_context_target(target_kind: ContextTargetKind) -> bool {
+    matches!(
+        target_kind,
+        ContextTargetKind::SftpBlankArea
+            | ContextTargetKind::SftpDirectory
+            | ContextTargetKind::SftpFile
+            | ContextTargetKind::SftpMultiSelection
+    )
+}
+
+fn sftp_child_path(parent: &str, name: &str) -> String {
+    let trimmed_name = name.trim();
+    let trimmed_parent = parent.trim().trim_end_matches('/');
+    if trimmed_parent.is_empty() || trimmed_parent == "/" {
+        format!("/{trimmed_name}")
+    } else {
+        format!("{trimmed_parent}/{trimmed_name}")
+    }
+}
+
 impl ShellViewModel {
+    fn next_default_sftp_folder_name(&self) -> String {
+        let Some(state) = self.active_sftp_session_state() else {
+            return "New Folder".into();
+        };
+
+        let mut candidate_index = 1usize;
+        loop {
+            let candidate = if candidate_index == 1 {
+                "New Folder".to_string()
+            } else {
+                format!("New Folder {candidate_index}")
+            };
+            if state.entries.iter().all(|entry| entry.name != candidate) {
+                return candidate;
+            }
+            candidate_index += 1;
+        }
+    }
+
     fn snippet_modal_validation_message(
         &self,
         parent_package_id: Option<&str>,

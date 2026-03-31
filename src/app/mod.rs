@@ -8,6 +8,7 @@ pub mod keychain;
 pub mod logging;
 pub mod memory;
 pub mod runtime_profile;
+pub mod sftp;
 pub mod ssh;
 pub mod terminal_atlas;
 pub mod terminal_emoji;

@@ -9,6 +9,11 @@ use anyhow::{Context, Result, anyhow};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::app::sftp::{
+    SftpDirectoryEntry, SftpRuntimeHandle, SftpSessionBinding, SftpSessionBindingState,
+    TransferQueue, delete_entries as delete_sftp_entries, execute_queued_transfers,
+    move_entry_between_directories,
+};
 use crate::app::ssh::connection_progress::{
     ConnectionAttemptState, ConnectionDiagnosticLine, ConnectionHeadlineState,
     ConnectionHostKeyPrompt, ConnectionProgressEvent, ConnectionStepState,
@@ -64,6 +69,9 @@ pub trait SessionRuntimeControl: Send {
     }
     fn scroll_viewport_lines(&self, _delta: i32) -> Result<TerminalSurfaceState> {
         Err(anyhow!("session runtime does not support local scrollback"))
+    }
+    fn sftp_runtime(&self) -> Option<SftpRuntimeHandle> {
+        None
     }
 }
 
@@ -201,6 +209,72 @@ impl SessionManager {
         terminal_surface_signature_for_registry(&registry, session_id)
     }
 
+    pub fn sftp_binding(&self, session_id: Uuid) -> Option<SftpSessionBinding> {
+        self.registry
+            .lock()
+            .expect("lock session registry")
+            .sftp_bindings
+            .get(&session_id)
+            .cloned()
+    }
+
+    pub fn current_working_directory(&self, session_id: Uuid) -> Option<String> {
+        self.registry
+            .lock()
+            .expect("lock session registry")
+            .current_working_directories
+            .get(&session_id)
+            .cloned()
+    }
+
+    pub fn sftp_read_dir(&self, session_id: Uuid, path: &str) -> Result<Vec<SftpDirectoryEntry>> {
+        let runtime = self.sftp_runtime(session_id)?;
+        self.runtime_handle.block_on(runtime.read_dir(path))
+    }
+
+    pub fn sftp_execute_queued_transfers(
+        &self,
+        session_id: Uuid,
+        queue: &mut TransferQueue,
+    ) -> Result<()> {
+        let runtime = self.sftp_runtime(session_id)?;
+        self.runtime_handle
+            .block_on(execute_queued_transfers(&runtime, queue))
+    }
+
+    pub fn sftp_delete_entries(
+        &self,
+        session_id: Uuid,
+        queue: &mut TransferQueue,
+        state: &mut SftpSessionBindingState,
+        entry_ids: &[String],
+    ) -> Result<usize> {
+        let runtime = self.sftp_runtime(session_id)?;
+        self.runtime_handle.block_on(delete_sftp_entries(
+            &runtime,
+            queue,
+            session_id.to_string().as_str(),
+            state,
+            entry_ids,
+        ))
+    }
+
+    pub fn sftp_move_entry_between_directories(
+        &self,
+        session_id: Uuid,
+        state: &mut SftpSessionBindingState,
+        entry_id: &str,
+        destination_dir: &str,
+    ) -> Result<bool> {
+        let runtime = self.sftp_runtime(session_id)?;
+        self.runtime_handle.block_on(move_entry_between_directories(
+            &runtime,
+            state,
+            entry_id,
+            destination_dir,
+        ))
+    }
+
     pub fn probe_connection(&self, profile: ConnectionProfile) -> Result<()> {
         let result = self.runtime_handle.block_on(self.launcher.probe(profile));
         match &result {
@@ -240,6 +314,7 @@ impl SessionManager {
             registry.terminal_surfaces.remove(&session_id);
             registry.terminal_surface_revisions.remove(&session_id);
             let runtime_control = registry.runtime_controls.remove(&session_id);
+            mark_sftp_binding_disconnected(&mut registry, session_id);
             registry.pending_disconnects.remove(&session_id);
             (profile, attempt_id, updated, runtime_control)
         };
@@ -269,6 +344,7 @@ impl SessionManager {
             session.can_reconnect = true;
             let updated = session.clone();
             let runtime_control = registry.runtime_controls.remove(&session_id);
+            mark_sftp_binding_disconnected(&mut registry, session_id);
             registry.pending_disconnects.remove(&session_id);
             (updated, runtime_control)
         };
@@ -314,6 +390,7 @@ impl SessionManager {
             session.can_reconnect = true;
             let updated = session.clone();
             let runtime_control = registry.runtime_controls.remove(&session_id);
+            mark_sftp_binding_disconnected(&mut registry, session_id);
             if runtime_control.is_none() {
                 registry.pending_disconnects.insert(session_id);
             }
@@ -471,9 +548,11 @@ impl SessionManager {
             registry.connection_attempts.remove(&session_id);
             registry.session_profiles.remove(&session_id);
             registry.terminal_surfaces.remove(&session_id);
+            registry.current_working_directories.remove(&session_id);
             registry.terminal_surface_revisions.remove(&session_id);
             registry.pending_disconnects.remove(&session_id);
             registry.pending_resizes.remove(&session_id);
+            registry.sftp_bindings.remove(&session_id);
             let runtime_control = registry.runtime_controls.remove(&session_id);
             if registry.asset_sessions.get(&removed.asset_id) == Some(&session_id) {
                 let replacement = registry
@@ -609,6 +688,14 @@ impl SessionManager {
     }
 }
 
+impl SessionManager {
+    fn sftp_runtime(&self, session_id: Uuid) -> Result<SftpRuntimeHandle> {
+        self.sftp_binding(session_id)
+            .and_then(|binding| binding.runtime())
+            .ok_or_else(|| anyhow!("sftp runtime is unavailable for session `{session_id}`"))
+    }
+}
+
 struct SessionRegistry {
     sessions: HashMap<Uuid, SessionHandle>,
     asset_sessions: HashMap<String, Uuid>,
@@ -616,8 +703,10 @@ struct SessionRegistry {
     session_profiles: HashMap<Uuid, ConnectionProfile>,
     connection_attempts: HashMap<Uuid, ConnectionAttemptState>,
     terminal_surfaces: HashMap<Uuid, TerminalSurfaceState>,
+    current_working_directories: HashMap<Uuid, String>,
     terminal_surface_revisions: HashMap<Uuid, usize>,
     runtime_controls: HashMap<Uuid, Box<dyn SessionRuntimeControl>>,
+    sftp_bindings: HashMap<Uuid, SftpSessionBinding>,
     pending_disconnects: HashSet<Uuid>,
     pending_resizes: HashMap<Uuid, (u32, u32)>,
     theme_mode: ThemeMode,
@@ -632,8 +721,10 @@ impl Default for SessionRegistry {
             session_profiles: HashMap::new(),
             connection_attempts: HashMap::new(),
             terminal_surfaces: HashMap::new(),
+            current_working_directories: HashMap::new(),
             terminal_surface_revisions: HashMap::new(),
             runtime_controls: HashMap::new(),
+            sftp_bindings: HashMap::new(),
             pending_disconnects: HashSet::new(),
             pending_resizes: HashMap::new(),
             theme_mode: ThemeMode::Dark,
@@ -682,6 +773,13 @@ fn apply_runtime_event(
         }
         SessionRuntimeEvent::ConnectionProgress(progress_event) => {
             apply_connection_progress_event(registry, session_id, progress_event);
+        }
+        SessionRuntimeEvent::CurrentDirectoryChanged(path) => {
+            registry
+                .lock()
+                .expect("lock session registry")
+                .current_working_directories
+                .insert(session_id, path);
         }
         SessionRuntimeEvent::SurfaceChanged(surface) => {
             update_terminal_surface(registry, session_id, surface);
@@ -926,6 +1024,14 @@ fn attach_runtime_control(
                 session_id,
                 runtime_control.take().expect("runtime control available"),
             );
+            if let Some(binding) = registry
+                .runtime_controls
+                .get(&session_id)
+                .and_then(|runtime_control| runtime_control.sftp_runtime())
+                .map(|runtime| SftpSessionBinding::connecting(session_id, runtime))
+            {
+                registry.sftp_bindings.insert(session_id, binding);
+            }
             (
                 false,
                 registry.pending_resizes.remove(&session_id),
@@ -965,6 +1071,7 @@ fn attach_runtime_control(
 fn clear_runtime_control(registry: &Arc<Mutex<SessionRegistry>>, session_id: Uuid) {
     let mut registry = registry.lock().expect("lock session registry");
     registry.runtime_controls.remove(&session_id);
+    mark_sftp_binding_disconnected(&mut registry, session_id);
     registry.pending_disconnects.remove(&session_id);
     registry.pending_resizes.remove(&session_id);
     let surface_seqno = registry
@@ -977,6 +1084,12 @@ fn clear_runtime_control(registry: &Arc<Mutex<SessionRegistry>>, session_id: Uui
             .insert(session_id, surface_seqno);
     } else {
         registry.terminal_surface_revisions.remove(&session_id);
+    }
+}
+
+fn mark_sftp_binding_disconnected(registry: &mut SessionRegistry, session_id: Uuid) {
+    if let Some(binding) = registry.sftp_bindings.get_mut(&session_id) {
+        binding.mark_disconnected();
     }
 }
 
