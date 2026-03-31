@@ -21,7 +21,9 @@ struct MockVaultProviderState {
     remote_revision: Option<ProviderRevision>,
     read_error: Option<String>,
     write_error: Option<String>,
+    prune_error: Option<String>,
     recorded_writes: Vec<ProviderWriteRequest>,
+    recorded_prunes: Vec<(usize, VaultHead)>,
 }
 
 impl MockVaultProvider {
@@ -57,10 +59,23 @@ impl MockVaultProvider {
         }
     }
 
+    pub fn set_prune_error(&self, message: Option<&str>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.prune_error = message.map(ToOwned::to_owned);
+        }
+    }
+
     pub fn recorded_writes(&self) -> Vec<ProviderWriteRequest> {
         self.state
             .lock()
             .map(|state| state.recorded_writes.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn recorded_prunes(&self) -> Vec<(usize, VaultHead)> {
+        self.state
+            .lock()
+            .map(|state| state.recorded_prunes.clone())
             .unwrap_or_default()
     }
 }
@@ -146,6 +161,19 @@ impl VaultProvider for MockVaultProvider {
             manifest: request.manifest.clone(),
             encrypted_snapshot: request.encrypted_snapshot.clone(),
         });
+        Ok(())
+    }
+
+    fn prune_revisions(&self, keep_latest: usize, live_head: &VaultHead) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow!("mock provider state lock poisoned"))?;
+        state.recorded_prunes.push((keep_latest, live_head.clone()));
+        if let Some(message) = state.prune_error.as_deref() {
+            return Err(anyhow!(message.to_string()));
+        }
+
         Ok(())
     }
 }

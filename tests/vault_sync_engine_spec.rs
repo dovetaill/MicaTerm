@@ -288,3 +288,89 @@ fn sync_engine_writes_committed_metadata_instead_of_legacy_created_at() {
     let encoded = serde_json::to_value(&result.head).expect("serialize written head");
     assert!(encoded.get("created_at").is_none());
 }
+
+#[test]
+fn retention_runs_after_successful_primary_and_mirror_syncs() {
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    primary.set_remote_head(Some(sample_remote_head("rev-0001")));
+    let mirror = Arc::new(MockVaultProvider::new(
+        "remote-mirror",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let engine = SyncEngine::new(
+        primary.clone() as Arc<dyn VaultProvider>,
+        vec![mirror.clone() as Arc<dyn VaultProvider>],
+    );
+
+    let result = engine
+        .sync(sample_request("rev-0002", Some("rev-0001")))
+        .expect("sync succeeds");
+
+    assert_eq!(
+        primary.recorded_prunes(),
+        vec![(10, result.head.clone())],
+        "primary should prune retained revisions after committing"
+    );
+    assert_eq!(mirror.recorded_prunes().len(), 1);
+    assert_eq!(mirror.recorded_prunes()[0].0, 10);
+    assert_eq!(
+        mirror.recorded_prunes()[0].1.vault_revision,
+        result.primary_revision,
+        "mirror should prune retained revisions for the committed revision"
+    );
+}
+
+#[test]
+fn retention_primary_prune_failure_surfaces_as_sync_error() {
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    primary.set_remote_head(Some(sample_remote_head("rev-0001")));
+    primary.set_prune_error(Some("retention cleanup failed"));
+    let engine = SyncEngine::new(primary.clone() as Arc<dyn VaultProvider>, Vec::new());
+
+    let err = engine
+        .sync(sample_request("rev-0002", Some("rev-0001")))
+        .expect_err("primary prune failure should fail sync");
+
+    assert_eq!(
+        err,
+        SyncError::PrimaryWriteFailed {
+            remote_id: "remote-primary".into(),
+            message: "retention cleanup failed".into(),
+        }
+    );
+    assert_eq!(primary.recorded_writes().len(), 1);
+}
+
+#[test]
+fn retention_mirror_prune_failure_is_reported_as_mirror_degradation() {
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    primary.set_remote_head(Some(sample_remote_head("rev-0001")));
+    let mirror = Arc::new(MockVaultProvider::new(
+        "remote-mirror",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    mirror.set_prune_error(Some("mirror retention failed"));
+    let engine = SyncEngine::new(
+        primary.clone() as Arc<dyn VaultProvider>,
+        vec![mirror.clone() as Arc<dyn VaultProvider>],
+    );
+
+    let result = engine
+        .sync(sample_request("rev-0002", Some("rev-0001")))
+        .expect("mirror prune failure should not roll back primary");
+
+    assert_eq!(result.mirror_failures.len(), 1);
+    assert_eq!(result.mirror_failures[0].remote_id, "remote-mirror");
+    assert_eq!(result.mirror_failures[0].message, "mirror retention failed");
+    assert_eq!(primary.recorded_prunes().len(), 1);
+    assert_eq!(mirror.recorded_prunes().len(), 1);
+}

@@ -7,7 +7,8 @@ use crate::app::vault::model::{
     VaultSnapshot,
 };
 use crate::app::vault::provider::{
-    ProviderCapabilities, ProviderWriteRequest, VaultProvider, attach_snapshot_recovery_metadata,
+    DEFAULT_REVISION_RETENTION_LIMIT, ProviderCapabilities, ProviderWriteRequest, VaultProvider,
+    attach_snapshot_recovery_metadata,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +146,12 @@ impl SyncEngine {
                 remote_id: self.primary.remote_id().to_string(),
                 message: err.to_string(),
             })?;
+        self.primary
+            .prune_revisions(DEFAULT_REVISION_RETENTION_LIMIT, &primary_request.head)
+            .map_err(|err| SyncError::PrimaryWriteFailed {
+                remote_id: self.primary.remote_id().to_string(),
+                message: err.to_string(),
+            })?;
 
         let mut mirror_failures = Vec::new();
         for mirror in &self.mirrors {
@@ -155,6 +162,15 @@ impl SyncEngine {
                 false,
             );
             if let Err(err) = mirror.write_revision(&mirror_request) {
+                mirror_failures.push(SyncMirrorFailure {
+                    remote_id: mirror.remote_id().to_string(),
+                    message: err.to_string(),
+                });
+                continue;
+            }
+            if let Err(err) =
+                mirror.prune_revisions(DEFAULT_REVISION_RETENTION_LIMIT, &mirror_request.head)
+            {
                 mirror_failures.push(SyncMirrorFailure {
                     remote_id: mirror.remote_id().to_string(),
                     message: err.to_string(),

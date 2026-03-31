@@ -115,6 +115,8 @@ pub struct S3PutObjectRequest {
 pub trait S3ObjectStoreAdapter: Send + Sync {
     fn get_object(&self, bucket: &str, key: &str) -> Result<Option<Vec<u8>>>;
     fn put_object(&self, request: &S3PutObjectRequest) -> Result<()>;
+    fn list_objects(&self, bucket: &str, prefix: &str) -> Result<Vec<String>>;
+    fn delete_object(&self, bucket: &str, key: &str) -> Result<()>;
 }
 
 #[derive(Debug, Default)]
@@ -126,6 +128,14 @@ impl S3ObjectStoreAdapter for UnconfiguredS3ObjectStoreAdapter {
     }
 
     fn put_object(&self, _request: &S3PutObjectRequest) -> Result<()> {
+        Err(anyhow!("S3 object store adapter is not configured"))
+    }
+
+    fn list_objects(&self, _bucket: &str, _prefix: &str) -> Result<Vec<String>> {
+        Err(anyhow!("S3 object store adapter is not configured"))
+    }
+
+    fn delete_object(&self, _bucket: &str, _key: &str) -> Result<()> {
         Err(anyhow!("S3 object store adapter is not configured"))
     }
 }
@@ -301,6 +311,34 @@ impl VaultProvider for S3VaultProvider {
 
         Ok(())
     }
+
+    fn prune_revisions(&self, keep_latest: usize, live_head: &VaultHead) -> Result<()> {
+        let revision_prefix = format!("{}/", join_s3_key(&self.config.prefix, "revisions"));
+        let listed_keys = self
+            .object_store
+            .list_objects(&self.config.bucket, revision_prefix.as_str())?;
+        let retained = retained_revision_ids(
+            listed_keys
+                .iter()
+                .filter_map(|key| revision_from_object_key(&self.config.prefix, key)),
+            keep_latest,
+            live_head.vault_revision.as_str(),
+        );
+
+        for key in listed_keys {
+            let Some(revision) = revision_from_object_key(&self.config.prefix, key.as_str()) else {
+                continue;
+            };
+            if retained.contains(revision) {
+                continue;
+            }
+
+            self.object_store
+                .delete_object(&self.config.bucket, key.as_str())?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -357,4 +395,36 @@ fn join_s3_key(prefix: &str, suffix: &str) -> String {
     } else {
         format!("{prefix}/{suffix}")
     }
+}
+
+fn revision_from_object_key<'a>(prefix: &str, key: &'a str) -> Option<&'a str> {
+    let revisions_prefix = format!("{}/", join_s3_key(prefix, "revisions"));
+    let suffix = key.strip_prefix(revisions_prefix.as_str())?;
+    let (revision, _) = suffix.split_once('/')?;
+    if revision.is_empty() {
+        return None;
+    }
+
+    Some(revision)
+}
+
+fn retained_revision_ids<'a>(
+    revisions: impl Iterator<Item = &'a str>,
+    keep_latest: usize,
+    live_revision: &str,
+) -> std::collections::BTreeSet<String> {
+    let mut revisions = revisions
+        .map(ToOwned::to_owned)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    revisions.sort();
+    revisions.reverse();
+
+    let mut retained = revisions
+        .into_iter()
+        .take(keep_latest)
+        .collect::<std::collections::BTreeSet<_>>();
+    retained.insert(live_revision.to_string());
+    retained
 }
