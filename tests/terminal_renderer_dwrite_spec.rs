@@ -146,6 +146,16 @@ fn terminal_presenter_source_wires_windows_native_renderer() {
 }
 
 #[test]
+fn titlebar_source_uses_rasterized_logotype_asset_for_software_renderer_builds() {
+    let titlebar_source = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar");
+
+    assert!(
+        titlebar_source.contains("mica-term-header-logotype.png"),
+        "titlebar should use a rasterized wordmark asset so the software renderer does not have to re-rasterize the stroked SVG logo every frame"
+    );
+}
+
+#[test]
 fn bitmap_terminal_pipeline_sources_plumb_window_scale_factor_into_bitmap_rasterization() {
     let presenter_source =
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
