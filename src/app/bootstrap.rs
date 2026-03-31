@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
+use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use slint::{
     Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
@@ -643,15 +644,23 @@ fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_sftp_panel_can_go_forward(state.sftp_panel_can_go_forward());
     window.set_sftp_panel_can_go_up(state.sftp_panel_can_go_up());
     window.set_sftp_panel_actions_enabled(state.sftp_panel_actions_enabled());
+    window.set_sftp_panel_sort_column(state.sftp_panel_sort_column_id().into());
+    window.set_sftp_panel_sort_direction(state.sftp_panel_sort_direction_id().into());
+    window.set_sftp_panel_name_column_width(state.sftp_panel_name_column_width_px());
+    window.set_sftp_panel_type_column_width(state.sftp_panel_type_column_width_px());
+    window.set_sftp_panel_modified_column_width(state.sftp_panel_modified_column_width_px());
+    window.set_sftp_panel_size_column_width(state.sftp_panel_size_column_width_px());
     window.set_sftp_queue_drawer_open(state.sftp_queue_drawer_open());
 
     let items = state
-        .sftp_panel_entries()
+        .project_sftp_panel_entries(state.sftp_panel_entries())
         .iter()
         .map(|entry| SftpPanelItem {
-            id: entry.id.clone().into(),
-            name: entry.name.clone().into(),
-            detail: sftp_panel_entry_detail(entry).into(),
+            id: entry.id.as_str().into(),
+            name: entry.name.as_str().into(),
+            type_label: sftp_panel_entry_type_label(entry.kind).into(),
+            modified_label: sftp_panel_entry_modified_label(entry).into(),
+            size_label: sftp_panel_entry_size_label(entry).into(),
             kind: sftp_panel_entry_kind(entry.kind).into(),
             selected: state
                 .sftp_panel_selected_entry_ids()
@@ -687,16 +696,38 @@ fn sync_right_panel_state(window: &AppWindow, state: &ShellViewModel) {
     sync_sftp_panel_state(window, state);
 }
 
-fn sftp_panel_entry_detail(entry: &crate::app::sftp::SftpDirectoryEntry) -> String {
-    match entry.kind {
-        SftpDirectoryEntryKind::Directory => "Directory".into(),
-        SftpDirectoryEntryKind::Symlink => "Symlink".into(),
-        SftpDirectoryEntryKind::Unknown => "Unknown".into(),
-        SftpDirectoryEntryKind::File => entry
-            .size_bytes
-            .map(format_binary_size)
-            .unwrap_or_else(|| "File".into()),
+fn sync_sftp_remote_file_modal_state(window: &AppWindow, state: &ShellViewModel) {
+    let editor = state.sftp_remote_file_editor_state();
+    window.set_sftp_remote_file_modal_open(editor.open);
+    window.set_sftp_remote_file_modal_title(editor.title.clone().into());
+    window.set_sftp_remote_file_modal_path(editor.remote_path.clone().into());
+    window.set_sftp_remote_file_modal_content(editor.content.clone().into());
+    window.set_sftp_remote_file_modal_status_text(editor.status_text.clone().into());
+    window.set_sftp_remote_file_modal_error_text(editor.error_text.clone().into());
+    window.set_sftp_remote_file_modal_can_save(state.sftp_remote_file_editor_can_save());
+}
+
+fn sftp_panel_entry_type_label(kind: SftpDirectoryEntryKind) -> &'static str {
+    match kind {
+        SftpDirectoryEntryKind::Directory => "Folder",
+        SftpDirectoryEntryKind::Symlink => "Link",
+        SftpDirectoryEntryKind::Unknown => "Unknown",
+        SftpDirectoryEntryKind::File => "File",
     }
+}
+
+fn sftp_panel_entry_modified_label(entry: &crate::app::sftp::SftpDirectoryEntry) -> String {
+    let Some(unix_seconds) = entry.modified_unix_seconds else {
+        return String::new();
+    };
+    let Some(timestamp) = DateTime::<Utc>::from_timestamp(unix_seconds as i64, 0) else {
+        return String::new();
+    };
+    timestamp.format("%Y-%m-%d %H:%M").to_string()
+}
+
+fn sftp_panel_entry_size_label(entry: &crate::app::sftp::SftpDirectoryEntry) -> String {
+    entry.size_bytes.map(format_binary_size).unwrap_or_default()
 }
 
 fn sftp_panel_entry_kind(kind: SftpDirectoryEntryKind) -> &'static str {
@@ -1229,6 +1260,11 @@ fn schedule_asset_modal_focus(window: &AppWindow) {
             || window.get_workspace_paste_warning_modal_open()
         {
             window.set_asset_modal_focus_sequence(window.get_asset_modal_focus_sequence() + 1);
+        }
+        if window.get_sftp_remote_file_modal_open() {
+            window.set_sftp_remote_file_modal_focus_sequence(
+                window.get_sftp_remote_file_modal_focus_sequence() + 1,
+            );
         }
     });
 }
@@ -2170,6 +2206,80 @@ fn execute_sftp_browser_request(
         })
 }
 
+fn sftp_remote_file_title(remote_path: &str) -> String {
+    remote_path
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Remote File")
+        .to_string()
+}
+
+fn open_sftp_remote_file_editor_for_entry(
+    state: &mut ShellViewModel,
+    manager: &SessionManager,
+    session_id: Uuid,
+    remote_path: &str,
+) {
+    match manager.sftp_download_file(session_id, remote_path) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(text) => state.open_sftp_remote_file_editor(
+                session_id.to_string(),
+                remote_path.to_string(),
+                sftp_remote_file_title(remote_path),
+                text,
+                "Editing remote text file".to_string(),
+                String::new(),
+            ),
+            Err(err) => state.open_sftp_remote_file_editor(
+                session_id.to_string(),
+                remote_path.to_string(),
+                sftp_remote_file_title(remote_path),
+                String::from_utf8_lossy(err.as_bytes()).into_owned(),
+                "View only".to_string(),
+                "Only UTF-8 text files can be edited online right now.".to_string(),
+            ),
+        },
+        Err(err) => state.open_sftp_remote_file_editor(
+            session_id.to_string(),
+            remote_path.to_string(),
+            sftp_remote_file_title(remote_path),
+            String::new(),
+            "Open failed".to_string(),
+            format!("Failed to open remote file: {err}"),
+        ),
+    }
+}
+
+fn initial_sftp_browser_path(manager: &SessionManager, session_id: Uuid) -> Option<String> {
+    if let Some(cwd) = manager.current_working_directory(session_id) {
+        return Some(cwd);
+    }
+
+    manager
+        .sftp_binding(session_id)
+        .filter(|binding| binding.mode() != SftpPanelMode::Disconnected)
+        .map(|_| "/".to_string())
+}
+
+fn ensure_active_sftp_browser_started(
+    state: &mut ShellViewModel,
+    controller: &mut SftpBrowserController,
+    manager: &SessionManager,
+) -> bool {
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return false;
+    };
+    if controller.session_state(session_id).is_some() {
+        return false;
+    }
+
+    initial_sftp_browser_path(manager, session_id).is_some_and(|path| {
+        let request = controller.open(session_id, path.as_str());
+        execute_sftp_browser_request(state, controller, manager, request)
+    })
+}
+
 fn open_active_sftp_browser_for_current_session(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
@@ -2178,12 +2288,14 @@ fn open_active_sftp_browser_for_current_session(
     let Some(session_id) = active_workspace_session_uuid(state) else {
         return false;
     };
+    if controller.session_state(session_id).is_none() {
+        return ensure_active_sftp_browser_started(state, controller, manager);
+    }
+
     let request = if controller.session_state(session_id).is_some() {
         controller.session_activated(session_id)
     } else {
-        manager
-            .current_working_directory(session_id)
-            .map(|cwd| controller.open(session_id, cwd.as_str()))
+        None
     };
     request.is_some_and(|request| execute_sftp_browser_request(state, controller, manager, request))
 }
@@ -4043,6 +4155,7 @@ fn sync_shell_state(
     sync_workspace_tabs(window, state, follow_tracker);
     sync_assets_context_menu_state(window, state);
     sync_asset_modal_state(window, state);
+    sync_sftp_remote_file_modal_state(window, state);
     sync_ssh_host_key_modal_state(window, state);
 }
 
@@ -5534,17 +5647,23 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&manager),
                 );
-                let (sftp_retry_changed, sftp_follow_changed) = if state.show_right_panel {
+                let (sftp_open_changed, sftp_retry_changed, sftp_follow_changed) = if state.show_right_panel {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    let open_changed =
+                        ensure_active_sftp_browser_started(&mut state, &mut controller, &manager);
                     let retry_changed =
                         sync_active_sftp_browser_pending_request(&mut state, &mut controller, &manager);
                     let follow_changed =
                         sync_active_sftp_browser_follow_request(&mut state, &mut controller, &manager);
-                    (retry_changed, follow_changed)
+                    (open_changed, retry_changed, follow_changed)
                 } else {
-                    (false, false)
+                    (false, false, false)
                 };
-                if projection_delta.sftp_changed || sftp_retry_changed || sftp_follow_changed {
+                if projection_delta.sftp_changed
+                    || sftp_open_changed
+                    || sftp_retry_changed
+                    || sftp_follow_changed
+                {
                     sync_right_panel_state(&window, &state);
                 }
             }
@@ -6094,6 +6213,66 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    window.on_sftp_panel_item_selected(move |entry_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.select_sftp_panel_entry(entry_id.as_str()) {
+            sync_right_panel_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
+    window.on_sftp_panel_item_activated(move |entry_id, item_kind| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let selection_changed = state.select_sftp_panel_entry(entry_id.as_str());
+        let entry = state.active_sftp_entry(entry_id.as_str()).cloned();
+        let mut panel_changed = selection_changed;
+        let was_modal_open = state.sftp_remote_file_editor_state().open;
+
+        if let Some(entry) = entry {
+            if item_kind.as_str() == "directory" || entry.kind == SftpDirectoryEntryKind::Directory {
+                if let Some(session_bridge) = session_bridge_ref.as_ref()
+                    && let Some(session_id) = active_workspace_session_uuid(&state)
+                {
+                    let request = {
+                        let mut controller = sftp_browser_controller_ref.borrow_mut();
+                        controller.navigate(session_id, entry.path.as_str())
+                    };
+                    let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    panel_changed |= execute_sftp_browser_request(
+                        &mut state,
+                        &mut controller,
+                        &session_bridge.manager,
+                        request,
+                    );
+                }
+            } else if let Some(session_bridge) = session_bridge_ref.as_ref()
+                && let Some(session_id) = active_workspace_session_uuid(&state)
+            {
+                open_sftp_remote_file_editor_for_entry(
+                    &mut state,
+                    &session_bridge.manager,
+                    session_id,
+                    entry.path.as_str(),
+                );
+            }
+        }
+
+        if panel_changed {
+            sync_right_panel_state(&window, &state);
+        }
+        sync_sftp_remote_file_modal_state(&window, &state);
+        if !was_modal_open && state.sftp_remote_file_editor_state().open {
+            schedule_asset_modal_focus(&window);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
     window.on_sftp_panel_open_queue_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -6139,30 +6318,105 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
     window.on_sftp_panel_back_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        if state.navigate_sftp_panel_back() {
+        let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
+            if let Some(session_id) = active_workspace_session_uuid(&state) {
+                let request = {
+                    let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    controller.navigate_back(session_id)
+                };
+                if let Some(request) = request {
+                    let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    execute_sftp_browser_request(
+                        &mut state,
+                        &mut controller,
+                        &session_bridge.manager,
+                        request,
+                    )
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            state.navigate_sftp_panel_back()
+        };
+        if changed {
             sync_right_panel_state(&window, &state);
         }
     });
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
     window.on_sftp_panel_forward_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        if state.navigate_sftp_panel_forward() {
+        let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
+            if let Some(session_id) = active_workspace_session_uuid(&state) {
+                let request = {
+                    let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    controller.navigate_forward(session_id)
+                };
+                if let Some(request) = request {
+                    let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    execute_sftp_browser_request(
+                        &mut state,
+                        &mut controller,
+                        &session_bridge.manager,
+                        request,
+                    )
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            state.navigate_sftp_panel_forward()
+        };
+        if changed {
             sync_right_panel_state(&window, &state);
         }
     });
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
     window.on_sftp_panel_up_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        if state.navigate_sftp_panel_up() {
+        let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
+            if let Some(session_id) = active_workspace_session_uuid(&state) {
+                let request = {
+                    let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    controller.navigate_up(session_id)
+                };
+                if let Some(request) = request {
+                    let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    execute_sftp_browser_request(
+                        &mut state,
+                        &mut controller,
+                        &session_bridge.manager,
+                        request,
+                    )
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            state.navigate_sftp_panel_up()
+        };
+        if changed {
             sync_right_panel_state(&window, &state);
         }
     });
@@ -6298,6 +6552,72 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         if changed {
             sync_right_panel_state(&window, &state);
         }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_sort_requested(move |column_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.cycle_sftp_panel_sort(column_id.as_str()) {
+            sync_right_panel_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_column_width_change_requested(move |column_id, width| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.set_sftp_panel_column_width(column_id.as_str(), width) {
+            sync_right_panel_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_remote_file_modal_close_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_sftp_remote_file_editor();
+        window.set_blocking_modal_offset_x(0.0);
+        window.set_blocking_modal_offset_y(0.0);
+        sync_sftp_remote_file_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_sftp_remote_file_modal_content_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.update_sftp_remote_file_editor_content(value.to_string());
+        sync_sftp_remote_file_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    window.on_sftp_remote_file_modal_save_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if let Some((session_id, remote_path, content)) = state.sftp_remote_file_editor_save_payload()
+            && let Some(session_bridge) = session_bridge_ref.as_ref()
+        {
+            match Uuid::parse_str(session_id.as_str())
+                .map_err(anyhow::Error::from)
+                .and_then(|session_id| {
+                    session_bridge.manager.sftp_upload_file(
+                        session_id,
+                        remote_path.as_str(),
+                        content.into_bytes(),
+                    )
+                }) {
+                Ok(_) => state.mark_sftp_remote_file_editor_saved(),
+                Err(err) => state
+                    .set_sftp_remote_file_editor_error(format!("Failed to save remote file: {err}")),
+            }
+        }
+        sync_sftp_remote_file_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);

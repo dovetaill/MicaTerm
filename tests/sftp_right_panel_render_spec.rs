@@ -94,7 +94,7 @@ fn empty_sftp_panel_renders_empty_state_copy() {
         app.set_sftp_panel_mode("empty".into());
     });
 
-    let panel_surface = pixel_at(&buffer, PANEL_X + 24, 80);
+    let panel_surface = pixel_at(&buffer, PANEL_X + 280, 100);
     let headline_pixels =
         count_distinct_pixels(&buffer, PANEL_X + 12, 72, 340, 48, panel_surface, 14);
     let body_pixels =
@@ -129,24 +129,148 @@ fn right_panel_source_defines_single_line_toolbar_and_path_bar_contract() {
 }
 
 #[test]
-fn right_panel_source_defines_multi_column_remote_table_headers() {
+fn right_panel_source_defines_dense_remote_file_headers() {
     let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
 
     assert!(
-        source.contains("text: \"Name\""),
+        source.contains("text: \"Name\"") || source.contains("label: \"Name\""),
         "right panel should expose the Name column header"
     );
     assert!(
-        source.contains("text: \"Modified\""),
+        source.contains("text: \"Type\"") || source.contains("label: \"Type\""),
+        "right panel should expose the Type column header"
+    );
+    assert!(
+        source.contains("text: \"Modified\"") || source.contains("label: \"Modified\""),
         "right panel should expose the Modified column header"
     );
     assert!(
-        source.contains("text: \"Size\""),
+        source.contains("text: \"Size\"") || source.contains("label: \"Size\""),
         "right panel should expose the Size column header"
     );
     assert!(
         !source.contains("text: \"Remote items\""),
         "right panel should drop the legacy single-column list header"
+    );
+}
+
+#[test]
+fn right_panel_source_exposes_sort_indicator_and_column_resize_contract() {
+    let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
+
+    assert!(
+        source.contains("in property <string> sftp-panel-sort-column")
+            && source.contains("in property <string> sftp-panel-sort-direction"),
+        "right panel should accept runtime sort state from the shell view model"
+    );
+    assert!(
+        source.contains("in property <length> sftp-panel-name-column-width")
+            && source.contains("in property <length> sftp-panel-type-column-width")
+            && source.contains("in property <length> sftp-panel-modified-column-width")
+            && source.contains("in property <length> sftp-panel-size-column-width"),
+        "right panel should bind runtime column widths instead of hard-coded file table widths"
+    );
+    assert!(
+        source.contains("callback sftp-panel-sort-requested(string);")
+            && source.contains("callback sftp-panel-column-width-change-requested(string, length);"),
+        "right panel should expose sort and column-resize callbacks"
+    );
+    assert!(
+        source.contains("sort-indicator")
+            && source.contains("resize-handle"),
+        "right panel should render an explicit header sort indicator and resize handles"
+    );
+}
+
+#[test]
+fn right_panel_source_uses_borderless_toolbar_buttons_and_horizontal_file_scroll() {
+    let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
+    let toolbar_button_source = source
+        .split("component SftpToolbarButton inherits Rectangle {")
+        .nth(1)
+        .and_then(|rest| rest.split("export component RightPanel inherits Rectangle {").next())
+        .expect("toolbar button source should be present");
+
+    assert!(
+        toolbar_button_source.contains("border-width: 0px;"),
+        "sftp toolbar buttons should drop their visible border chrome"
+    );
+    assert!(
+        source.contains("horizontal-scrollbar-policy")
+            && source.contains("viewport-width: max(self.visible-width"),
+        "dense file list should support horizontal scrolling when the metadata columns overflow the panel"
+    );
+}
+
+#[test]
+fn app_window_source_threads_sftp_table_state_into_right_panel() {
+    let source = std::fs::read_to_string("ui/app-window.slint").unwrap();
+
+    assert!(
+        source.contains("sftp-panel-sort-column: root.sftp-panel-sort-column;")
+            && source.contains("sftp-panel-sort-direction: root.sftp-panel-sort-direction;"),
+        "app window should forward sort state into the right panel"
+    );
+    assert!(
+        source.contains("sftp-panel-name-column-width: root.sftp-panel-name-column-width;")
+            && source.contains("sftp-panel-type-column-width: root.sftp-panel-type-column-width;")
+            && source.contains("sftp-panel-modified-column-width: root.sftp-panel-modified-column-width;")
+            && source.contains("sftp-panel-size-column-width: root.sftp-panel-size-column-width;"),
+        "app window should forward current column widths into the right panel"
+    );
+    assert!(
+        source.contains("sftp-panel-sort-requested(column-id) => {")
+            && source.contains("root.sftp-panel-sort-requested(column-id);")
+            && source.contains("sftp-panel-column-width-change-requested(column-id, width) => {")
+            && source.contains("root.sftp-panel-column-width-change-requested(column-id, width);"),
+        "app window should proxy header sort and column resize callbacks from the right panel"
+    );
+}
+
+#[test]
+fn right_panel_source_uses_fluent_toolbar_icons_and_actions_menu_trigger() {
+    let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
+
+    for asset in [
+        "arrow-hook-up-left-20-regular.svg",
+        "arrow-clockwise-20-regular.svg",
+        "add-square-multiple-20-regular.svg",
+        "folder-20-regular.svg",
+        "document-20-regular.svg",
+    ] {
+        assert!(
+            source.contains(asset),
+            "right panel toolbar should load the Fluent `{asset}` icon asset"
+        );
+    }
+
+    assert!(
+        source.contains("sftp-panel-context-menu-requested(")
+            && source.contains("\"sftp-blank\""),
+        "toolbar overflow action should open the blank-area SFTP actions menu instead of directly firing a placeholder action"
+    );
+    assert!(
+        !source.contains("glyph: \"<\"")
+            && !source.contains("glyph: \">\"")
+            && !source.contains("glyph: \"^\"")
+            && !source.contains("glyph: \"+\"")
+            && !source.contains("glyph: \"R\""),
+        "toolbar should stop rendering ASCII placeholder glyphs"
+    );
+    assert!(
+        !source.contains("arrow-next-20-regular.svg")
+            && !source.contains("arrow-sort-up-20-regular.svg"),
+        "toolbar should drop the forward and up buttons from the compact browser rail"
+    );
+    assert!(
+        !source.contains("? \"BROWSE\" : \"LIVE\"")
+            && !source.contains("text: \"Follow\""),
+        "path bar should stop rendering the legacy live/follow chrome"
+    );
+    assert!(
+        source.contains("double-clicked => {")
+            && source.contains("sftp-panel-item-activated("),
+        "sftp rows should expose a double-click activation callback"
     );
 }
 
@@ -174,14 +298,18 @@ fn ready_sftp_panel_renders_compact_toolbar_and_file_table() {
         SftpPanelItem {
             id: "entry-app".into(),
             name: "app".into(),
-            detail: "Directory".into(),
+            type_label: "Folder".into(),
+            modified_label: "2026-03-31 10:05".into(),
+            size_label: "".into(),
             kind: "directory".into(),
             selected: true,
         },
         SftpPanelItem {
             id: "entry-release".into(),
             name: "release.tar.gz".into(),
-            detail: "14 KB".into(),
+            type_label: "File".into(),
+            modified_label: "2026-03-31 10:11".into(),
+            size_label: "14 KB".into(),
             kind: "file".into(),
             selected: false,
         },
@@ -236,13 +364,13 @@ fn disconnected_sftp_panel_renders_retry_guidance_shell() {
         app.set_sftp_panel_actions_enabled(false);
     });
 
-    let panel_surface = pixel_at(&buffer, PANEL_X + 24, 80);
+    let panel_surface = pixel_at(&buffer, PANEL_X + 280, 100);
     let headline_pixels =
         count_distinct_pixels(&buffer, PANEL_X + 12, 96, 340, 52, panel_surface, 14);
     let body_pixels =
         count_distinct_pixels(&buffer, PANEL_X + 12, 150, 340, 160, panel_surface, 14);
     let retry_pixels =
-        count_distinct_pixels(&buffer, PANEL_X + 12, 420, 180, 48, panel_surface, 14);
+        count_distinct_pixels(&buffer, PANEL_X + 280, 82, 96, 40, panel_surface, 14);
 
     assert!(
         headline_pixels >= 1100,

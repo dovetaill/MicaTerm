@@ -6,38 +6,37 @@ import { ThemeTokens } from "../theme/tokens.slint";
 export struct SftpPanelItem {
     id: string,
     name: string,
-    detail: string,
+    type_label: string,
+    modified_label: string,
+    size_label: string,
     kind: string,
     selected: bool,
 }
 
 component SftpToolbarButton inherits Rectangle {
-    in property <string> glyph: "";
+    in property <image> icon-source;
     in property <bool> enabled: true;
     callback clicked();
 
     width: 28px;
     height: 28px;
     border-radius: 6px;
-    border-width: 1px;
-    border-color: ThemeTokens.divider-subtle;
+    border-width: 0px;
+    border-color: transparent;
     background: !root.enabled ? ThemeTokens.control-disabled-surface
-        : touch.pressed ? ThemeTokens.control-active-surface
+        : touch.pressed ? ThemeTokens.control-pressed-surface
         : touch.has-hover ? ThemeTokens.control-hover-surface
-        : ThemeTokens.control-active-surface;
+        : transparent;
     opacity: root.enabled ? 1.0 : 0.42;
 
-    Text {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: parent.height;
-        text: root.glyph;
-        color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        font-size: 15px;
-        font-weight: 700;
+    if (root.icon-source.width > 0 && root.icon-source.height > 0) : Image {
+        x: 4px;
+        y: 4px;
+        width: parent.width - 8px;
+        height: parent.height - 8px;
+        source <=> root.icon-source;
+        image-fit: contain;
+        colorize: ThemeTokens.text-primary;
     }
 
     touch := TouchArea {
@@ -51,27 +50,100 @@ component SftpToolbarButton inherits Rectangle {
     }
 }
 
-component SftpModePill inherits Rectangle {
-    in property <string> label: "";
+component SftpHeaderCell inherits Rectangle {
+    in property <string> label;
+    in property <string> column-id;
+    in property <string> active-sort-column: "default";
+    in property <string> active-sort-direction: "none";
+    in property <bool> right-aligned: false;
+    callback sort-requested(string);
 
-    width: 48px;
-    height: 22px;
-    border-radius: 11px;
-    border-width: 1px;
-    border-color: ThemeTokens.divider-subtle;
-    background: ThemeTokens.control-hover-surface;
+    background: header-touch.has-hover ? ThemeTokens.control-hover-surface : transparent;
 
-    Text {
+    label-text := Text {
         x: 0px;
         y: 0px;
-        width: parent.width;
+        width: parent.width - (sort-indicator.visible ? 14px : 0px);
         height: parent.height;
         text: root.label;
         color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
+        opacity: 0.68;
+        font-size: 11px;
+        font-weight: 600;
+        horizontal-alignment: root.right-aligned ? right : left;
         vertical-alignment: center;
+        overflow: elide;
+    }
+
+    sort-indicator := Text {
+        x: parent.width - self.width;
+        y: 0px;
+        width: 12px;
+        height: parent.height;
+        visible: root.active-sort-column == root.column-id;
+        text: root.active-sort-direction == "desc" ? "↓" : "↑";
+        color: ThemeTokens.text-primary;
+        opacity: 0.82;
         font-size: 10px;
         font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    header-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        clicked => {
+            root.sort-requested(root.column-id);
+        }
+    }
+}
+
+component SftpColumnResizeHandle inherits Rectangle {
+    in property <string> column-id;
+    in property <length> column-origin-x: 0px;
+    in property <length> min-column-width: 0px;
+    callback width-change-requested(string, length);
+    private property <bool> drag-active: false;
+
+    width: 8px;
+    background: transparent;
+
+    if drag-active || resize-touch.has-hover : resize-handle := Rectangle {
+        x: parent.width / 2;
+        y: 6px;
+        width: 1px;
+        height: parent.height - 12px;
+        background: ThemeTokens.divider-strong;
+    }
+
+    resize-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                root.drag-active = true;
+                root.width-change-requested(
+                    root.column-id,
+                    max(
+                        root.min-column-width,
+                        self.absolute-position.x + self.mouse-x - root.column-origin-x,
+                    ),
+                );
+            } else if event.kind == PointerEventKind.move && root.drag-active {
+                root.width-change-requested(
+                    root.column-id,
+                    max(
+                        root.min-column-width,
+                        self.absolute-position.x + self.mouse-x - root.column-origin-x,
+                    ),
+                );
+            } else if event.kind == PointerEventKind.up {
+                root.drag-active = false;
+            }
+        }
     }
 }
 
@@ -86,6 +158,12 @@ export component RightPanel inherits Rectangle {
     in property <bool> sftp-panel-can-go-forward: false;
     in property <bool> sftp-panel-can-go-up: false;
     in property <bool> sftp-panel-actions-enabled: false;
+    in property <string> sftp-panel-sort-column: "default";
+    in property <string> sftp-panel-sort-direction: "none";
+    in property <length> sftp-panel-name-column-width: 226px;
+    in property <length> sftp-panel-type-column-width: 78px;
+    in property <length> sftp-panel-modified-column-width: 150px;
+    in property <length> sftp-panel-size-column-width: 72px;
     in property <[SftpPanelItem]> sftp-panel-items: [];
     in property <[string]> sftp-panel-selected-entry-ids: [];
     in property <int> sftp-panel-queue-active: 0;
@@ -94,11 +172,21 @@ export component RightPanel inherits Rectangle {
     in property <bool> sftp-queue-drawer-open: false;
     out property <length> layout-radius: root.border-radius;
     out property <length> layout-border-width: root.border-width;
+    in-out property <length> sftp-list-viewport-x: 0px;
+    private property <image> arrow-hook-up-left-icon: @image-url("../../assets/icons/fluent/arrow-hook-up-left-20-regular.svg");
+    private property <image> arrow-clockwise-icon: @image-url("../../assets/icons/fluent/arrow-clockwise-20-regular.svg");
+    private property <image> add-square-multiple-icon: @image-url("../../assets/icons/fluent/add-square-multiple-20-regular.svg");
+    private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
+    private property <image> document-icon: @image-url("../../assets/icons/fluent/document-20-regular.svg");
     callback sftp-panel-back-requested();
     callback sftp-panel-forward-requested();
     callback sftp-panel-refresh-requested();
     callback sftp-panel-up-requested();
     callback sftp-panel-path-submitted(string);
+    callback sftp-panel-sort-requested(string);
+    callback sftp-panel-column-width-change-requested(string, length);
+    callback sftp-panel-item-selected(string);
+    callback sftp-panel-item-activated(string, string);
     callback sftp-panel-context-menu-requested(string, string, length, length);
     callback sftp-panel-upload-requested();
     callback sftp-panel-new-folder-requested();
@@ -112,6 +200,13 @@ export component RightPanel inherits Rectangle {
         || root.sftp-panel-mode == "error"
             ? 60px
             : 0px;
+    private property <length> sftp-table-header-height: 28px;
+    private property <length> sftp-table-row-height: 30px;
+    private property <length> sftp-name-column-x: 14px;
+    private property <length> sftp-type-column-x: root.sftp-name-column-x + root.sftp-panel-name-column-width + 12px;
+    private property <length> sftp-modified-column-x: root.sftp-type-column-x + root.sftp-panel-type-column-width + 10px;
+    private property <length> sftp-size-column-x: root.sftp-modified-column-x + root.sftp-panel-modified-column-width + 10px;
+    private property <length> sftp-table-content-width: root.sftp-size-column-x + root.sftp-panel-size-column-width + 12px;
 
     function sftp-empty-headline() -> string {
         return "Open an SSH session";
@@ -155,20 +250,6 @@ export component RightPanel inherits Rectangle {
         return "";
     }
 
-    function sftp-item-kind-label(kind: string) -> string {
-        if (kind == "directory") {
-            return "Folder";
-        }
-        if (kind == "symlink") {
-            return "Link";
-        }
-        if (kind == "file") {
-            return "Remote";
-        }
-
-        return "Item";
-    }
-
     width: root.expanded ? 392px : 0px;
     visible: root.expanded;
     clip: true;
@@ -193,19 +274,21 @@ export component RightPanel inherits Rectangle {
         background: transparent;
 
         toolbar-row := Rectangle {
-            x: 16px;
-            y: 16px;
-            width: parent.width - 32px;
-            height: 32px;
-            border-radius: 10px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.control-hover-surface;
+            x: 8px;
+            y: 8px;
+            width: parent.width - 16px;
+            height: 30px;
+            border-radius: 0px;
+            border-width: 0px;
+            border-color: transparent;
+            background: transparent;
 
             back-button := SftpToolbarButton {
                 x: 0px;
-                y: 2px;
-                glyph: "<";
+                y: 1px;
+                width: 28px;
+                height: 28px;
+                icon-source: root.arrow-hook-up-left-icon;
                 enabled: root.sftp-panel-can-go-back;
 
                 clicked => {
@@ -213,43 +296,30 @@ export component RightPanel inherits Rectangle {
                 }
             }
 
-            forward-button := SftpToolbarButton {
-                x: back-button.x + back-button.width + 8px;
-                y: 2px;
-                glyph: ">";
-                enabled: root.sftp-panel-can-go-forward;
-
-                clicked => {
-                    root.sftp-panel-forward-requested();
-                }
-            }
-
-            up-button := SftpToolbarButton {
-                x: forward-button.x + forward-button.width + 8px;
-                y: 2px;
-                glyph: "^";
-                enabled: root.sftp-panel-can-go-up;
-
-                clicked => {
-                    root.sftp-panel-up-requested();
-                }
-            }
-
             overflow-button := SftpToolbarButton {
                 x: parent.width - self.width;
-                y: 2px;
-                glyph: "+";
+                y: 1px;
+                width: 28px;
+                height: 28px;
+                icon-source: root.add-square-multiple-icon;
                 enabled: root.sftp-panel-actions-enabled;
 
                 clicked => {
-                    root.sftp-panel-new-folder-requested();
+                    root.sftp-panel-context-menu-requested(
+                        "",
+                        "sftp-blank",
+                        self.absolute-position.x + self.width / 2,
+                        self.absolute-position.y + self.height,
+                    );
                 }
             }
 
             refresh-button := SftpToolbarButton {
-                x: overflow-button.x - self.width - 8px;
-                y: 2px;
-                glyph: "R";
+                x: overflow-button.x - self.width - 2px;
+                y: 1px;
+                width: 28px;
+                height: 28px;
+                icon-source: root.arrow-clockwise-icon;
                 enabled: root.sftp-panel-actions-enabled;
 
                 clicked => {
@@ -258,37 +328,23 @@ export component RightPanel inherits Rectangle {
             }
 
             path-bar := Rectangle {
-                x: up-button.x + up-button.width + 12px;
+                x: back-button.x + back-button.width + 4px;
                 y: 0px;
-                width: refresh-button.x - self.x - 12px;
+                width: refresh-button.x - self.x - 4px;
                 height: parent.height;
-                border-radius: 10px;
+                border-radius: 6px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-subtle;
                 background: ThemeTokens.workspace-surface;
 
-                Rectangle {
-                    x: 8px;
-                    y: 6px;
-                    width: 6px;
-                    height: parent.height - 12px;
-                    border-radius: 3px;
-                    background: ThemeTokens.accent;
-                }
-
-                mode-pill := SftpModePill {
-                    x: 22px;
-                    y: 5px;
-                    label: root.sftp-panel-follow-mode == "manual-browse" ? "BROWSE" : "LIVE";
-                }
-
                 path-input := TextInput {
-                    x: mode-pill.x + mode-pill.width + 10px;
-                    y: 5px;
-                    width: root.sftp-panel-follow-mode == "manual-browse"
-                        ? parent.width - self.x - 84px
-                        : parent.width - self.x - 12px;
-                    height: parent.height - 10px;
+                    x: 10px;
+                    y: 0px;
+                    width: parent.width - 20px;
+                    height: parent.height;
+                    single-line: true;
+                    font-size: 12px;
+                    vertical-alignment: center;
                     text: root.sftp-panel-path;
                     enabled: root.sftp-panel-actions-enabled;
                     color: ThemeTokens.text-primary;
@@ -307,50 +363,17 @@ export component RightPanel inherits Rectangle {
                         }
                     }
                 }
-
-                if root.sftp-panel-follow-mode == "manual-browse" : follow-chip := Rectangle {
-                    x: parent.width - 72px;
-                    y: 5px;
-                    width: 64px;
-                    height: 22px;
-                    border-radius: 11px;
-                    border-width: 1px;
-                    border-color: ThemeTokens.divider-subtle;
-                    background: ThemeTokens.control-hover-surface;
-
-                    Text {
-                        x: 0px;
-                        y: 0px;
-                        width: parent.width;
-                        height: parent.height;
-                        text: "Follow";
-                        color: ThemeTokens.text-primary;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        font-size: 10px;
-                        font-weight: 700;
-                    }
-
-                    TouchArea {
-                        width: parent.width;
-                        height: parent.height;
-
-                        clicked => {
-                            root.sftp-panel-reenable-follow-requested();
-                        }
-                    }
-                }
             }
         }
 
         table-card := Rectangle {
-            x: 16px;
-            y: 64px;
-            width: parent.width - 32px;
-            height: max(0px, parent.height - 80px);
+            x: 8px;
+            y: 46px;
+            width: parent.width - 8px;
+            height: max(0px, parent.height - 54px);
             border-radius: 0px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
+            border-width: 0px;
+            border-color: transparent;
             background: ThemeTokens.workspace-surface;
             clip: true;
 
@@ -358,49 +381,145 @@ export component RightPanel inherits Rectangle {
                 x: 0px;
                 y: 0px;
                 width: parent.width;
-                height: 34px;
-                background: ThemeTokens.control-hover-surface;
+                height: root.sftp-table-header-height;
+                background: ThemeTokens.workspace-surface;
+                clip: true;
 
-                Text {
-                    x: 14px;
-                    y: 8px;
-                    width: 164px;
-                    text: "Name";
-                    color: ThemeTokens.text-primary;
-                    font-size: 12px;
-                    font-weight: 700;
-                    overflow: elide;
-                }
+                header-content := Rectangle {
+                    x: root.sftp-list-viewport-x;
+                    y: 0px;
+                    width: max(parent.width, root.sftp-table-content-width);
+                    height: parent.height;
+                    background: transparent;
 
-                Text {
-                    x: 190px;
-                    y: 8px;
-                    width: 94px;
-                    text: "Modified";
-                    color: ThemeTokens.text-primary;
-                    font-size: 12px;
-                    font-weight: 700;
-                    overflow: elide;
-                }
+                    Rectangle {
+                        x: 0px;
+                        y: parent.height - 1px;
+                        width: parent.width;
+                        height: 1px;
+                        background: ThemeTokens.divider-subtle;
+                    }
 
-                Text {
-                    x: parent.width - 80px;
-                    y: 8px;
-                    width: 66px;
-                    text: "Size";
-                    color: ThemeTokens.text-primary;
-                    font-size: 12px;
-                    font-weight: 700;
-                    horizontal-alignment: right;
-                    overflow: elide;
+                    SftpHeaderCell {
+                        x: root.sftp-name-column-x;
+                        y: 0px;
+                        width: root.sftp-panel-name-column-width;
+                        height: parent.height;
+                        label: "Name";
+                        column-id: "name";
+                        active-sort-column: root.sftp-panel-sort-column;
+                        active-sort-direction: root.sftp-panel-sort-direction;
+
+                        sort-requested(column-id) => {
+                            root.sftp-panel-sort-requested(column-id);
+                        }
+                    }
+
+                    SftpHeaderCell {
+                        x: root.sftp-type-column-x;
+                        y: 0px;
+                        width: root.sftp-panel-type-column-width;
+                        height: parent.height;
+                        label: "Type";
+                        column-id: "type";
+                        active-sort-column: root.sftp-panel-sort-column;
+                        active-sort-direction: root.sftp-panel-sort-direction;
+
+                        sort-requested(column-id) => {
+                            root.sftp-panel-sort-requested(column-id);
+                        }
+                    }
+
+                    SftpHeaderCell {
+                        x: root.sftp-modified-column-x;
+                        y: 0px;
+                        width: root.sftp-panel-modified-column-width;
+                        height: parent.height;
+                        label: "Modified";
+                        column-id: "modified";
+                        active-sort-column: root.sftp-panel-sort-column;
+                        active-sort-direction: root.sftp-panel-sort-direction;
+
+                        sort-requested(column-id) => {
+                            root.sftp-panel-sort-requested(column-id);
+                        }
+                    }
+
+                    SftpHeaderCell {
+                        x: root.sftp-size-column-x;
+                        y: 0px;
+                        width: root.sftp-panel-size-column-width;
+                        height: parent.height;
+                        label: "Size";
+                        column-id: "size";
+                        active-sort-column: root.sftp-panel-sort-column;
+                        active-sort-direction: root.sftp-panel-sort-direction;
+                        right-aligned: true;
+
+                        sort-requested(column-id) => {
+                            root.sftp-panel-sort-requested(column-id);
+                        }
+                    }
+
+                    SftpColumnResizeHandle {
+                        x: root.sftp-type-column-x - self.width / 2;
+                        y: 0px;
+                        height: parent.height;
+                        column-id: "name";
+                        column-origin-x: header-content.absolute-position.x + root.sftp-name-column-x;
+                        min-column-width: 120px;
+
+                        width-change-requested(column-id, width) => {
+                            root.sftp-panel-column-width-change-requested(column-id, width);
+                        }
+                    }
+
+                    SftpColumnResizeHandle {
+                        x: root.sftp-modified-column-x - self.width / 2;
+                        y: 0px;
+                        height: parent.height;
+                        column-id: "type";
+                        column-origin-x: header-content.absolute-position.x + root.sftp-type-column-x;
+                        min-column-width: 72px;
+
+                        width-change-requested(column-id, width) => {
+                            root.sftp-panel-column-width-change-requested(column-id, width);
+                        }
+                    }
+
+                    SftpColumnResizeHandle {
+                        x: root.sftp-size-column-x - self.width / 2;
+                        y: 0px;
+                        height: parent.height;
+                        column-id: "modified";
+                        column-origin-x: header-content.absolute-position.x + root.sftp-modified-column-x;
+                        min-column-width: 132px;
+
+                        width-change-requested(column-id, width) => {
+                            root.sftp-panel-column-width-change-requested(column-id, width);
+                        }
+                    }
+
+                    SftpColumnResizeHandle {
+                        x: root.sftp-size-column-x + root.sftp-panel-size-column-width - self.width / 2;
+                        y: 0px;
+                        height: parent.height;
+                        column-id: "size";
+                        column-origin-x: header-content.absolute-position.x + root.sftp-size-column-x;
+                        min-column-width: 72px;
+
+                        width-change-requested(column-id, width) => {
+                            root.sftp-panel-column-width-change-requested(column-id, width);
+                        }
+                    }
                 }
             }
 
             if root.sftp-panel-mode == "empty" : empty-state := Rectangle {
                 x: 0px;
-                y: 34px;
+                y: root.sftp-table-header-height;
                 width: parent.width;
-                height: parent.height - 34px;
+                height: parent.height - root.sftp-table-header-height;
                 background: transparent;
 
                 empty-state-touch := TouchArea {
@@ -462,7 +581,7 @@ export component RightPanel inherits Rectangle {
 
             if root.sftp-status-row-height > 0px : status-row := Rectangle {
                 x: 0px;
-                y: 34px;
+                y: root.sftp-table-header-height;
                 width: parent.width;
                 height: root.sftp-status-row-height;
                 background: ThemeTokens.control-hover-surface;
@@ -536,13 +655,16 @@ export component RightPanel inherits Rectangle {
 
             if root.sftp-panel-mode != "empty" : list-host := ListView {
                 x: 0px;
-                y: 34px + root.sftp-status-row-height;
+                y: root.sftp-table-header-height + root.sftp-status-row-height;
                 width: parent.width;
-                height: parent.height - 34px - root.sftp-status-row-height;
+                height: parent.height - root.sftp-table-header-height - root.sftp-status-row-height;
+                viewport-x <=> root.sftp-list-viewport-x;
+                horizontal-scrollbar-policy: ScrollBarPolicy.as-needed;
+                viewport-width: max(self.visible-width, root.sftp-table-content-width);
 
                 for item in root.sftp-panel-items : Rectangle {
-                    width: list-host.width;
-                    height: 40px;
+                    width: list-host.viewport-width;
+                    height: root.sftp-table-row-height;
                     background: item.selected ? ThemeTokens.explorer-row-selected-surface
                         : row-touch.has-hover ? ThemeTokens.explorer-row-hover-surface
                         : transparent;
@@ -555,43 +677,80 @@ export component RightPanel inherits Rectangle {
                         background: ThemeTokens.divider-subtle;
                     }
 
+                    Image {
+                        x: root.sftp-name-column-x;
+                        y: 6px;
+                        width: 16px;
+                        height: 16px;
+                        source: item.kind == "directory" ? root.folder-icon : root.document-icon;
+                        image-fit: contain;
+                        colorize: ThemeTokens.text-primary;
+                    }
+
                     Text {
-                        x: 14px;
-                        y: 10px;
-                        width: 164px;
+                        x: root.sftp-name-column-x + 24px;
+                        y: 0px;
+                        width: root.sftp-panel-name-column-width - 28px;
+                        height: parent.height;
                         text: item.name;
                         color: ThemeTokens.text-primary;
-                        font-size: 12px;
-                        font-weight: item.selected ? 700 : 500;
-                        overflow: elide;
-                    }
-
-                    Text {
-                        x: 190px;
-                        y: 10px;
-                        width: 94px;
-                        text: root.sftp-item-kind-label(item.kind);
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.62;
                         font-size: 11px;
+                        font-weight: item.selected ? 700 : 500;
+                        vertical-alignment: center;
                         overflow: elide;
                     }
 
                     Text {
-                        x: parent.width - 80px;
-                        y: 10px;
-                        width: 66px;
-                        text: item.detail;
+                        x: root.sftp-type-column-x;
+                        y: 0px;
+                        width: root.sftp-panel-type-column-width;
+                        height: parent.height;
+                        text: item.type_label;
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.72;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: root.sftp-modified-column-x;
+                        y: 0px;
+                        width: root.sftp-panel-modified-column-width;
+                        height: parent.height;
+                        text: item.modified_label;
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.72;
+                        font-size: 11px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: root.sftp-size-column-x;
+                        y: 0px;
+                        width: root.sftp-panel-size-column-width;
+                        height: parent.height;
+                        text: item.size_label;
                         color: ThemeTokens.text-primary;
                         opacity: 0.72;
                         font-size: 11px;
                         horizontal-alignment: right;
+                        vertical-alignment: center;
                         overflow: elide;
                     }
 
                     row-touch := TouchArea {
                         width: parent.width;
                         height: parent.height;
+
+                        clicked => {
+                            root.sftp-panel-item-selected(item.id);
+                        }
+
+                        double-clicked => {
+                            root.sftp-panel-item-activated(item.id, item.kind);
+                        }
 
                         pointer-event(event) => {
                             if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {

@@ -2,7 +2,7 @@
 
 日期: 2026-03-31
 执行者: Codex
-状态: 方案已确认，待进入实现
+状态: 已完成并验证通过
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -406,4 +406,4 @@ Implementation follow-up notes:
 
 - `Transfer Center` is intentionally shipped as a first-iteration shell. The titlebar entry, badge, tabs, and empty state are live, but tab-specific row projection is deferred.
 - The SFTP browser now preserves manual browsing context across disconnect/retry, but reconnect completion is still finalized by the existing projection timer loop instead of a dedicated direct callback.
-- The right-panel table contract is in place, but `Modified` still shows a placeholder kind label until remote metadata is added to `SftpDirectoryEntry`.
+- The right-panel table now projects real `Modified` metadata and supports header sort plus runtime column resize. Sort and column widths are intentionally window-scoped only and reset on application restart.

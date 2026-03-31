@@ -34,6 +34,7 @@ impl SftpBackend for RecordingBackend {
                 name: "app".into(),
                 path: format!("{path}/app"),
                 kind: SftpDirectoryEntryKind::Directory,
+                modified_unix_seconds: None,
                 size_bytes: None,
             }])
         })

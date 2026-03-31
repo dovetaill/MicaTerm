@@ -171,6 +171,7 @@ fn file_entry(id: &str, name: &str, path: &str) -> SftpDirectoryEntry {
         name: name.into(),
         path: path.into(),
         kind: SftpDirectoryEntryKind::File,
+        modified_unix_seconds: None,
         size_bytes: Some(128),
     }
 }

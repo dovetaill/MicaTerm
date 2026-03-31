@@ -1012,6 +1012,7 @@ impl SftpBackend for RusshSftpBackend {
                     name,
                     path: child_path,
                     kind,
+                    modified_unix_seconds: metadata.mtime.map(u64::from),
                     size_bytes: metadata.size,
                 });
             }

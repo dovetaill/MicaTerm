@@ -1,5 +1,6 @@
 //! Central shell state mirrored into Slint properties and mutated by UI callbacks.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::app::keychain::{
@@ -83,6 +84,79 @@ impl RightPanelView {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SftpPanelSortColumn {
+    Name,
+    Type,
+    Modified,
+    Size,
+}
+
+impl SftpPanelSortColumn {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Type => "type",
+            Self::Modified => "modified",
+            Self::Size => "size",
+        }
+    }
+
+    fn from_id(value: &str) -> Option<Self> {
+        match value {
+            "name" => Some(Self::Name),
+            "type" => Some(Self::Type),
+            "modified" => Some(Self::Modified),
+            "size" => Some(Self::Size),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SftpPanelSortDirection {
+    Asc,
+    Desc,
+}
+
+impl SftpPanelSortDirection {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Asc => "asc",
+            Self::Desc => "desc",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct SftpPanelSortState {
+    column: Option<SftpPanelSortColumn>,
+    direction: Option<SftpPanelSortDirection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SftpPanelColumnLayout {
+    name_px: f32,
+    type_px: f32,
+    modified_px: f32,
+    size_px: f32,
+}
+
+impl Default for SftpPanelColumnLayout {
+    fn default() -> Self {
+        Self {
+            name_px: 226.0,
+            type_px: 78.0,
+            modified_px: 150.0,
+            size_px: 72.0,
+        }
+    }
+}
+
+const SFTP_TYPE_COLUMN_MIN_PX: f32 = 72.0;
+const SFTP_MODIFIED_COLUMN_MIN_PX: f32 = 132.0;
+const SFTP_SIZE_COLUMN_MIN_PX: f32 = 72.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncModalMode {
@@ -193,6 +267,18 @@ pub struct SftpConflictModalState {
     pub target_path: String,
     pub can_resume: bool,
     pub apply_to_all: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SftpRemoteFileEditorState {
+    pub open: bool,
+    pub session_id: Option<String>,
+    pub remote_path: String,
+    pub title: String,
+    pub content: String,
+    pub saved_content: String,
+    pub status_text: String,
+    pub error_text: String,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -419,6 +505,8 @@ pub struct ShellViewModel {
     saved_ssh_picker_query: String,
     saved_ssh_picker_selected_asset_id: Option<String>,
     pub sftp_sessions: HashMap<String, SftpSessionBindingState>,
+    sftp_panel_sort_state: SftpPanelSortState,
+    sftp_panel_column_layout: SftpPanelColumnLayout,
     pub sftp_queue_summary: TransferQueueSummary,
     pub sftp_queue_drawer_open: bool,
     workspace_tabs: Vec<WorkspaceTab>,
@@ -441,6 +529,7 @@ pub struct ShellViewModel {
     pub context_menu_open_path: Vec<usize>,
     pub context_menu_feedback_text: String,
     sftp_conflict_modal_state: SftpConflictModalState,
+    sftp_remote_file_editor_state: SftpRemoteFileEditorState,
     sync_modal_state: SyncModalViewState,
     sync_feedback_state: SyncFeedbackViewState,
     vault_panel_state: VaultPanelViewState,
@@ -484,6 +573,8 @@ impl Default for ShellViewModel {
             saved_ssh_picker_query: String::new(),
             saved_ssh_picker_selected_asset_id: None,
             sftp_sessions: HashMap::new(),
+            sftp_panel_sort_state: SftpPanelSortState::default(),
+            sftp_panel_column_layout: SftpPanelColumnLayout::default(),
             sftp_queue_summary: TransferQueueSummary::default(),
             sftp_queue_drawer_open: false,
             workspace_tabs: Vec::new(),
@@ -506,6 +597,7 @@ impl Default for ShellViewModel {
             context_menu_open_path: Vec::new(),
             context_menu_feedback_text: String::new(),
             sftp_conflict_modal_state: SftpConflictModalState::default(),
+            sftp_remote_file_editor_state: SftpRemoteFileEditorState::default(),
             sync_modal_state: SyncModalViewState::default(),
             sync_feedback_state: SyncFeedbackViewState::default(),
             vault_panel_state: VaultPanelViewState::default(),
@@ -515,6 +607,104 @@ impl Default for ShellViewModel {
             keychain_expanded_ids: BTreeSet::new(),
             window_placement: WindowPlacementKind::Restored,
         }
+    }
+}
+
+fn compare_sftp_panel_entries(
+    left: &SftpDirectoryEntry,
+    right: &SftpDirectoryEntry,
+    sort_state: SftpPanelSortState,
+) -> Ordering {
+    sftp_directory_group(left.kind)
+        .cmp(&sftp_directory_group(right.kind))
+        .then_with(|| match (sort_state.column, sort_state.direction) {
+            (Some(column), Some(direction)) => {
+                compare_sftp_panel_column(left, right, column, direction)
+            }
+            _ => compare_sftp_panel_names(left, right, SftpPanelSortDirection::Asc),
+        })
+        .then_with(|| compare_sftp_panel_names(left, right, SftpPanelSortDirection::Asc))
+        .then_with(|| left.path.cmp(&right.path))
+}
+
+fn compare_sftp_panel_column(
+    left: &SftpDirectoryEntry,
+    right: &SftpDirectoryEntry,
+    column: SftpPanelSortColumn,
+    direction: SftpPanelSortDirection,
+) -> Ordering {
+    match column {
+        SftpPanelSortColumn::Name => compare_sftp_panel_names(left, right, direction),
+        SftpPanelSortColumn::Type => compare_sftp_panel_type(left.kind, right.kind, direction),
+        SftpPanelSortColumn::Modified => {
+            compare_sftp_panel_optional_u64(left.modified_unix_seconds, right.modified_unix_seconds, direction)
+        }
+        SftpPanelSortColumn::Size => {
+            compare_sftp_panel_optional_u64(left.size_bytes, right.size_bytes, direction)
+        }
+    }
+}
+
+fn compare_sftp_panel_names(
+    left: &SftpDirectoryEntry,
+    right: &SftpDirectoryEntry,
+    direction: SftpPanelSortDirection,
+) -> Ordering {
+    compare_sftp_panel_text(left.name.as_str(), right.name.as_str(), direction)
+}
+
+fn compare_sftp_panel_type(
+    left: crate::app::sftp::SftpDirectoryEntryKind,
+    right: crate::app::sftp::SftpDirectoryEntryKind,
+    direction: SftpPanelSortDirection,
+) -> Ordering {
+    let ordering = sftp_kind_rank(left).cmp(&sftp_kind_rank(right));
+    match direction {
+        SftpPanelSortDirection::Asc => ordering,
+        SftpPanelSortDirection::Desc => ordering.reverse(),
+    }
+}
+
+fn compare_sftp_panel_optional_u64(
+    left: Option<u64>,
+    right: Option<u64>,
+    direction: SftpPanelSortDirection,
+) -> Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => match direction {
+            SftpPanelSortDirection::Asc => left.cmp(&right),
+            SftpPanelSortDirection::Desc => right.cmp(&left),
+        },
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
+}
+
+fn compare_sftp_panel_text(left: &str, right: &str, direction: SftpPanelSortDirection) -> Ordering {
+    let ordering = left
+        .to_ascii_lowercase()
+        .cmp(&right.to_ascii_lowercase())
+        .then_with(|| left.cmp(right));
+    match direction {
+        SftpPanelSortDirection::Asc => ordering,
+        SftpPanelSortDirection::Desc => ordering.reverse(),
+    }
+}
+
+fn sftp_directory_group(kind: crate::app::sftp::SftpDirectoryEntryKind) -> u8 {
+    match kind {
+        crate::app::sftp::SftpDirectoryEntryKind::Directory => 0,
+        _ => 1,
+    }
+}
+
+fn sftp_kind_rank(kind: crate::app::sftp::SftpDirectoryEntryKind) -> u8 {
+    match kind {
+        crate::app::sftp::SftpDirectoryEntryKind::Directory => 0,
+        crate::app::sftp::SftpDirectoryEntryKind::File => 1,
+        crate::app::sftp::SftpDirectoryEntryKind::Symlink => 2,
+        crate::app::sftp::SftpDirectoryEntryKind::Unknown => 3,
     }
 }
 
@@ -797,6 +987,27 @@ impl ShellViewModel {
         Some(self.sftp_sessions.entry(session_id).or_default())
     }
 
+    pub fn select_sftp_panel_entry(&mut self, entry_id: &str) -> bool {
+        {
+            let Some(state) = self.active_sftp_session_state_mut() else {
+                return false;
+            };
+            if state.selected_entry_ids.len() == 1 && state.selected_entry_ids[0] == entry_id {
+                return false;
+            }
+            state.selected_entry_ids = vec![entry_id.to_string()];
+        }
+        self.context_target_asset_id = Some(entry_id.to_string());
+        true
+    }
+
+    pub fn active_sftp_entry(&self, entry_id: &str) -> Option<&SftpDirectoryEntry> {
+        self.active_sftp_session_state()?
+            .entries
+            .iter()
+            .find(|entry| entry.id == entry_id)
+    }
+
     pub fn sftp_panel_mode_id(&self) -> &'static str {
         if self.active_workspace_session_id.is_none() {
             return SftpPanelMode::Empty.id();
@@ -852,6 +1063,83 @@ impl ShellViewModel {
                 )
             })
             .unwrap_or(false)
+    }
+
+    pub fn sftp_panel_sort_column_id(&self) -> &'static str {
+        self.sftp_panel_sort_state
+            .column
+            .map(SftpPanelSortColumn::id)
+            .unwrap_or("default")
+    }
+
+    pub fn sftp_panel_sort_direction_id(&self) -> &'static str {
+        self.sftp_panel_sort_state
+            .direction
+            .map(SftpPanelSortDirection::id)
+            .unwrap_or("none")
+    }
+
+    pub fn cycle_sftp_panel_sort(&mut self, column_id: &str) -> bool {
+        let Some(column) = SftpPanelSortColumn::from_id(column_id) else {
+            return false;
+        };
+
+        self.sftp_panel_sort_state = match self.sftp_panel_sort_state {
+            SftpPanelSortState {
+                column: Some(active_column),
+                direction: Some(SftpPanelSortDirection::Asc),
+            } if active_column == column => SftpPanelSortState {
+                column: Some(column),
+                direction: Some(SftpPanelSortDirection::Desc),
+            },
+            SftpPanelSortState {
+                column: Some(active_column),
+                direction: Some(SftpPanelSortDirection::Desc),
+            } if active_column == column => SftpPanelSortState::default(),
+            _ => SftpPanelSortState {
+                column: Some(column),
+                direction: Some(SftpPanelSortDirection::Asc),
+            },
+        };
+        true
+    }
+
+    pub fn sftp_panel_name_column_width_px(&self) -> f32 {
+        self.sftp_panel_column_layout.name_px
+    }
+
+    pub fn sftp_panel_type_column_width_px(&self) -> f32 {
+        self.sftp_panel_column_layout.type_px
+    }
+
+    pub fn sftp_panel_modified_column_width_px(&self) -> f32 {
+        self.sftp_panel_column_layout.modified_px
+    }
+
+    pub fn sftp_panel_size_column_width_px(&self) -> f32 {
+        self.sftp_panel_column_layout.size_px
+    }
+
+    pub fn set_sftp_panel_column_width(&mut self, column_id: &str, width_px: f32) -> bool {
+        match column_id {
+            "name" => self.sftp_panel_column_layout.name_px = width_px.max(0.0),
+            "type" => self.sftp_panel_column_layout.type_px = width_px.max(SFTP_TYPE_COLUMN_MIN_PX),
+            "modified" => {
+                self.sftp_panel_column_layout.modified_px = width_px.max(SFTP_MODIFIED_COLUMN_MIN_PX);
+            }
+            "size" => self.sftp_panel_column_layout.size_px = width_px.max(SFTP_SIZE_COLUMN_MIN_PX),
+            _ => return false,
+        }
+        true
+    }
+
+    pub fn project_sftp_panel_entries<'a>(
+        &self,
+        entries: &'a [SftpDirectoryEntry],
+    ) -> Vec<&'a SftpDirectoryEntry> {
+        let mut projection = entries.iter().collect::<Vec<_>>();
+        projection.sort_by(|left, right| compare_sftp_panel_entries(left, right, self.sftp_panel_sort_state));
+        projection
     }
 
     pub fn sftp_panel_entries(&self) -> &[SftpDirectoryEntry] {
@@ -925,6 +1213,83 @@ impl ShellViewModel {
         };
         state.reenable_follow(path);
         true
+    }
+
+    pub fn sftp_remote_file_editor_state(&self) -> &SftpRemoteFileEditorState {
+        &self.sftp_remote_file_editor_state
+    }
+
+    pub fn open_sftp_remote_file_editor(
+        &mut self,
+        session_id: impl Into<String>,
+        remote_path: impl Into<String>,
+        title: impl Into<String>,
+        content: impl Into<String>,
+        status_text: impl Into<String>,
+        error_text: impl Into<String>,
+    ) {
+        let content = content.into();
+        self.sftp_remote_file_editor_state = SftpRemoteFileEditorState {
+            open: true,
+            session_id: Some(session_id.into()),
+            remote_path: remote_path.into(),
+            title: title.into(),
+            saved_content: content.clone(),
+            content,
+            status_text: status_text.into(),
+            error_text: error_text.into(),
+        };
+    }
+
+    pub fn close_sftp_remote_file_editor(&mut self) {
+        self.sftp_remote_file_editor_state = SftpRemoteFileEditorState::default();
+    }
+
+    pub fn update_sftp_remote_file_editor_content(&mut self, value: String) {
+        if !self.sftp_remote_file_editor_state.open {
+            return;
+        }
+        self.sftp_remote_file_editor_state.content = value;
+        self.sftp_remote_file_editor_state.error_text.clear();
+    }
+
+    pub fn sftp_remote_file_editor_can_save(&self) -> bool {
+        let editor = &self.sftp_remote_file_editor_state;
+        editor.open
+            && editor.error_text.is_empty()
+            && editor.content != editor.saved_content
+            && editor.session_id.is_some()
+            && !editor.remote_path.is_empty()
+    }
+
+    pub fn sftp_remote_file_editor_save_payload(&self) -> Option<(String, String, String)> {
+        let editor = &self.sftp_remote_file_editor_state;
+        if !self.sftp_remote_file_editor_can_save() {
+            return None;
+        }
+
+        Some((
+            editor.session_id.clone()?,
+            editor.remote_path.clone(),
+            editor.content.clone(),
+        ))
+    }
+
+    pub fn mark_sftp_remote_file_editor_saved(&mut self) {
+        if !self.sftp_remote_file_editor_state.open {
+            return;
+        }
+        self.sftp_remote_file_editor_state.saved_content =
+            self.sftp_remote_file_editor_state.content.clone();
+        self.sftp_remote_file_editor_state.status_text = "Changes saved to the remote file.".into();
+        self.sftp_remote_file_editor_state.error_text.clear();
+    }
+
+    pub fn set_sftp_remote_file_editor_error(&mut self, message: impl Into<String>) {
+        if !self.sftp_remote_file_editor_state.open {
+            return;
+        }
+        self.sftp_remote_file_editor_state.error_text = message.into();
     }
 
     pub fn sftp_queue_drawer_open(&self) -> bool {
@@ -2182,6 +2547,7 @@ impl ShellViewModel {
                     name: draft_name.trim().to_string(),
                     path,
                     kind: crate::app::sftp::SftpDirectoryEntryKind::Directory,
+                    modified_unix_seconds: None,
                     size_bytes: None,
                 };
 
