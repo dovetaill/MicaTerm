@@ -42,6 +42,8 @@ pub struct TerminalPresentationOptions {
 }
 
 pub trait TerminalPresenter {
+    fn set_raster_scale(&mut self, _scale_factor: f32) {}
+
     fn present(
         &mut self,
         surface: &TerminalSurfaceState,
@@ -66,6 +68,10 @@ impl BitmapAtlasPresenter {
 }
 
 impl TerminalPresenter for BitmapAtlasPresenter {
+    fn set_raster_scale(&mut self, scale_factor: f32) {
+        self.renderer.set_raster_scale(scale_factor);
+    }
+
     fn present(
         &mut self,
         surface: &TerminalSurfaceState,

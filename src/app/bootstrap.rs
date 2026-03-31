@@ -3888,6 +3888,7 @@ fn sync_workspace_session_state_with_manager(
         let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
         WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
             let mut presenter = presenter.borrow_mut();
+            presenter.set_raster_scale(window.window().scale_factor());
             match presenter.present(
                 surface,
                 TerminalPresentationOptions {
