@@ -2,8 +2,11 @@
 
 use anyhow::Result;
 
+#[cfg(feature = "terminal-native-renderer")]
 const GLYPH_COVERAGE_GAMMA: f32 = 1.0;
+#[cfg(feature = "terminal-native-renderer")]
 const GLYPH_ALPHA_GAIN: f32 = 1.0;
+#[cfg(feature = "terminal-native-renderer")]
 const SYNTHETIC_EMBOLDEN_STRENGTH: f32 = 0.46;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -41,11 +44,13 @@ pub trait FontSystem {
     fn face_index(&self, face: FontFaceKey) -> u32;
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 pub(crate) fn map_glyph_coverage_to_alpha(coverage: f32) -> u8 {
     let adjusted = coverage.clamp(0.0, 1.0).powf(GLYPH_COVERAGE_GAMMA) * GLYPH_ALPHA_GAIN;
     (adjusted.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 pub(crate) fn apply_synthetic_embolden(alpha: &mut [u8], width: u32, height: u32) {
     let width = width as usize;
     let height = height as usize;
@@ -69,7 +74,7 @@ pub(crate) fn apply_synthetic_embolden(alpha: &mut [u8], width: u32, height: u32
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "terminal-native-renderer"))]
 mod tests {
     use super::{apply_synthetic_embolden, map_glyph_coverage_to_alpha};
 
