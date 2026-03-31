@@ -1,4 +1,5 @@
 import { ScrollView } from "std-widgets.slint";
+import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 
 component DialogButton inherits Rectangle {
@@ -138,272 +139,218 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
             }
         }
 
-        header := Rectangle {
+        header := ModalHeaderBar {
             x: 0px;
             y: 0px;
             width: parent.width;
-            height: root.header-height;
-            background: ThemeTokens.assets-surface;
+            title: root.dialog-title;
+            prominent: true;
 
-            Text {
-                x: 20px;
-                y: 0px;
-                width: parent.width - 72px;
-                height: parent.height;
-                text: root.dialog-title;
-                color: ThemeTokens.text-primary;
-                font-size: 18px;
-                font-weight: 600;
-                vertical-alignment: center;
+            close-requested => {
+                root.close-requested();
             }
 
-            drag-touch := TouchArea {
-                width: parent.width - 48px;
-                height: parent.height;
+            drag-requested(pointer-x, pointer-y) => {
+                root.drag-requested(pointer-x, pointer-y);
+            }
 
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down
-                        && event.button == PointerEventButton.left
-                    {
-                        root.drag-requested(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.move {
-                        root.drag-moved(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.up {
-                        root.drag-ended();
+            drag-moved(pointer-x, pointer-y) => {
+                root.drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.focus-restore-requested();
+            }
+        }
+
+        body-scroll := ModalBodyScrollArea {
+            x: 0px;
+            y: root.header-height;
+            width: parent.width;
+            height: parent.height - root.header-height - root.footer-height;
+            frame-padding: 12px;
+            content-padding-horizontal: 16px;
+            content-padding-vertical: 14px;
+            content-spacing: 14px;
+            viewport-surface: ThemeTokens.inspector-surface;
+            panel-surface: ThemeTokens.window-surface;
+            panel-border-color: ThemeTokens.divider-strong;
+
+            name-field := TextField {
+                width: parent.width;
+                label: "Name";
+                value: root.name;
+
+                value-changed(value) => {
+                    root.draft-changed("name", value);
+                }
+            }
+
+            Text {
+                width: parent.width;
+                text: "Private Key";
+                color: ThemeTokens.text-primary;
+                font-weight: 600;
+            }
+
+            HorizontalLayout {
+                width: parent.width;
+                spacing: 8px;
+
+                DialogButton {
+                    horizontal-stretch: 1;
+                    label: "Import Private Key";
+
+                    clicked => {
+                        root.action-requested("import-private-key");
+                    }
+                }
+
+                DialogButton {
+                    horizontal-stretch: 1;
+                    label: "Paste Private Key";
+
+                    clicked => {
+                        root.action-requested("paste-private-key");
                     }
                 }
             }
 
-            close-button := Rectangle {
-                x: parent.width - 40px;
-                y: 12px;
-                width: 28px;
-                height: 28px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
+            TextField {
+                width: parent.width;
+                label: "Private Key";
+                value: root.private-key;
+                multiline: true;
 
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: "×";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                value-changed(value) => {
+                    root.draft-changed("private_key", value);
+                }
+            }
+
+            Text {
+                width: parent.width;
+                text: "Public Key";
+                color: ThemeTokens.text-primary;
+                font-weight: 600;
+            }
+
+            HorizontalLayout {
+                width: parent.width;
+                spacing: 8px;
+
+                DialogButton {
+                    horizontal-stretch: 1;
+                    label: "Import Public Key";
+
+                    clicked => {
+                        root.action-requested("import-public-key");
+                    }
                 }
 
-                close-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
+                DialogButton {
+                    horizontal-stretch: 1;
+                    label: "Paste Public Key";
+
+                    clicked => {
+                        root.action-requested("paste-public-key");
+                    }
+                }
+
+                DialogButton {
+                    horizontal-stretch: 1;
+                    label: "Generate Key Pair";
+
+                    clicked => {
+                        root.action-requested("generate-key-pair");
+                    }
+                }
+
+                DialogButton {
+                    horizontal-stretch: 1;
+                    label: "Copy Public Key";
+
+                    clicked => {
+                        root.action-requested("copy-public-key");
+                    }
+                }
+            }
+
+            TextField {
+                width: parent.width;
+                label: "Public Key";
+                value: root.public-key;
+                multiline: true;
+
+                value-changed(value) => {
+                    root.draft-changed("public_key", value);
+                }
+            }
+
+            TextField {
+                width: parent.width;
+                label: "Fingerprint";
+                value: root.fingerprint;
+
+                value-changed(value) => {
+                    root.draft-changed("fingerprint", value);
+                }
+            }
+        }
+
+        footer := ModalFooterBar {
+            x: 0px;
+            y: parent.height - root.footer-height;
+            width: parent.width;
+            height: root.footer-height;
+            surface: ThemeTokens.activity-surface;
+            divider-color: ThemeTokens.divider-strong;
+            content-padding-top: 14px;
+            content-padding-bottom: 14px;
+
+            if root.validation-message != "" : Text {
+                width: parent.width;
+                text: root.validation-message;
+                color: ThemeTokens.text-primary;
+                opacity: 0.72;
+                wrap: word-wrap;
+            }
+
+            Rectangle {
+                vertical-stretch: 1;
+                background: transparent;
+            }
+
+            HorizontalLayout {
+                height: 34px;
+                spacing: 12px;
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
+                }
+
+                DialogButton {
+                    width: 88px;
+                    label: "Cancel";
 
                     clicked => {
                         root.focus-restore-requested();
                         root.close-requested();
                     }
                 }
-            }
-        }
 
-        body-scroll := ScrollView {
-            x: 0px;
-            y: root.header-height;
-            width: parent.width;
-            height: parent.height - root.header-height - root.footer-height;
-            viewport-width: max(self.width, body-layout.width + 40px);
-            viewport-height: body-layout.height + 36px;
+                DialogButton {
+                    width: 88px;
+                    label: "Save";
+                    primary: true;
+                    enabled: root.can-confirm;
 
-            body-layout := VerticalLayout {
-                x: 20px;
-                y: 18px;
-                width: parent.width - 40px;
-                spacing: 14px;
-
-                name-field := TextField {
-                    width: parent.width;
-                    label: "Name";
-                    value: root.name;
-
-                    value-changed(value) => {
-                        root.draft-changed("name", value);
-                    }
-                }
-
-                Text {
-                    width: parent.width;
-                    text: "Private Key";
-                    color: ThemeTokens.text-primary;
-                    font-weight: 600;
-                }
-
-                HorizontalLayout {
-                    width: parent.width;
-                    spacing: 8px;
-
-                    DialogButton {
-                        horizontal-stretch: 1;
-                        label: "Import Private Key";
-
-                        clicked => {
-                            root.action-requested("import-private-key");
-                        }
-                    }
-
-                    DialogButton {
-                        horizontal-stretch: 1;
-                        label: "Paste Private Key";
-
-                        clicked => {
-                            root.action-requested("paste-private-key");
-                        }
-                    }
-                }
-
-                TextField {
-                    width: parent.width;
-                    label: "Private Key";
-                    value: root.private-key;
-                    multiline: true;
-
-                    value-changed(value) => {
-                        root.draft-changed("private_key", value);
-                    }
-                }
-
-                Text {
-                    width: parent.width;
-                    text: "Public Key";
-                    color: ThemeTokens.text-primary;
-                    font-weight: 600;
-                }
-
-                HorizontalLayout {
-                    width: parent.width;
-                    spacing: 8px;
-
-                    DialogButton {
-                        horizontal-stretch: 1;
-                        label: "Import Public Key";
-
-                        clicked => {
-                            root.action-requested("import-public-key");
-                        }
-                    }
-
-                    DialogButton {
-                        horizontal-stretch: 1;
-                        label: "Paste Public Key";
-
-                        clicked => {
-                            root.action-requested("paste-public-key");
-                        }
-                    }
-
-                    DialogButton {
-                        horizontal-stretch: 1;
-                        label: "Generate Key Pair";
-
-                        clicked => {
-                            root.action-requested("generate-key-pair");
-                        }
-                    }
-
-                    DialogButton {
-                        horizontal-stretch: 1;
-                        label: "Copy Public Key";
-
-                        clicked => {
-                            root.action-requested("copy-public-key");
-                        }
-                    }
-                }
-
-                TextField {
-                    width: parent.width;
-                    label: "Public Key";
-                    value: root.public-key;
-                    multiline: true;
-
-                    value-changed(value) => {
-                        root.draft-changed("public_key", value);
-                    }
-                }
-
-                TextField {
-                    width: parent.width;
-                    label: "Fingerprint";
-                    value: root.fingerprint;
-
-                    value-changed(value) => {
-                        root.draft-changed("fingerprint", value);
-                    }
-                }
-            }
-        }
-
-        footer := Rectangle {
-            x: 0px;
-            y: parent.height - root.footer-height;
-            width: parent.width;
-            height: root.footer-height;
-            background: ThemeTokens.assets-surface;
-
-            VerticalLayout {
-                x: 20px;
-                y: 14px;
-                width: parent.width - 40px;
-                height: parent.height - 28px;
-                spacing: 8px;
-
-                if root.validation-message != "" : Text {
-                    width: parent.width;
-                    text: root.validation-message;
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.72;
-                    wrap: word-wrap;
-                }
-
-                Rectangle {
-                    vertical-stretch: 1;
-                    background: transparent;
-                }
-
-                HorizontalLayout {
-                    height: 34px;
-                    spacing: 12px;
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        background: transparent;
-                    }
-
-                    DialogButton {
-                        width: 88px;
-                        label: "Cancel";
-
-                        clicked => {
-                            root.focus-restore-requested();
-                            root.close-requested();
-                        }
-                    }
-
-                    DialogButton {
-                        width: 88px;
-                        label: "Save";
-                        primary: true;
-                        enabled: root.can-confirm;
-
-                        clicked => {
-                            root.confirm-requested();
-                        }
+                    clicked => {
+                        root.confirm-requested();
                     }
                 }
             }

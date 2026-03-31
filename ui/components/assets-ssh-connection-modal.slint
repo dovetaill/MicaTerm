@@ -1,4 +1,5 @@
 import { ComboBox, ScrollView } from "std-widgets.slint";
+import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 
 component ModalTabButton inherits Rectangle {
@@ -257,107 +258,46 @@ export component AssetsSshConnectionModal inherits Rectangle {
             }
         }
 
-        header := Rectangle {
+        header := ModalHeaderBar {
             x: 0px;
             y: 0px;
             width: parent.width;
-            height: root.header-height;
-            background: ThemeTokens.assets-surface;
+            title: root.dialog-title;
+            prominent: true;
 
-            Text {
-                x: 20px;
-                y: 0px;
-                width: parent.width - 72px;
-                height: parent.height;
-                text: root.dialog-title;
-                color: ThemeTokens.text-primary;
-                font-size: 18px;
-                font-weight: 600;
-                vertical-alignment: center;
-                overflow: elide;
+            close-requested => {
+                root.close-requested();
             }
 
-            drag-touch := TouchArea {
-                width: parent.width - 48px;
-                height: parent.height;
-
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down
-                        && event.button == PointerEventButton.left
-                    {
-                        root.drag-requested(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.move {
-                        root.drag-moved(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.up {
-                        root.drag-ended();
-                    }
-                }
+            drag-requested(pointer-x, pointer-y) => {
+                root.drag-requested(pointer-x, pointer-y);
             }
 
-            close-button := Rectangle {
-                x: parent.width - 40px;
-                y: 12px;
-                width: 28px;
-                height: 28px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
-
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: "×";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                close-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        root.focus-restore-requested();
-                        root.close-requested();
-                    }
-                }
+            drag-moved(pointer-x, pointer-y) => {
+                root.drag-moved(pointer-x, pointer-y);
             }
 
-            header-divider := Rectangle {
-                y: parent.height - 1px;
-                width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
+            drag-ended => {
+                root.drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.focus-restore-requested();
             }
         }
 
-        body-scroll := ScrollView {
+        body-scroll := ModalBodyScrollArea {
             x: 0px;
             y: root.header-height;
             width: parent.width;
             height: root.body-height;
-            viewport-width: scroll-body.width;
-            viewport-height: scroll-body.height;
-
-            scroll-body := Rectangle {
-                width: body-scroll.visible-width;
-                height: max(body-scroll.visible-height, body-column.preferred-height + 24px);
-                background: transparent;
-
-                body-column := VerticalLayout {
-                    x: 20px;
-                    y: 20px;
-                    width: parent.width - 40px;
-                    spacing: 18px;
+            frame-padding: 12px;
+            content-padding-horizontal: 16px;
+            content-padding-vertical: 14px;
+            content-spacing: 18px;
+            viewport-surface: ThemeTokens.inspector-surface;
+            panel-surface: ThemeTokens.window-surface;
+            panel-border-color: ThemeTokens.divider-strong;
 
                     Text {
                         width: parent.width;
@@ -963,80 +903,69 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
                     }
-                }
-            }
         }
 
-        footer := Rectangle {
+        footer := ModalFooterBar {
             x: 0px;
             y: parent.height - root.footer-height;
             width: parent.width;
             height: root.footer-height;
-            background: ThemeTokens.assets-surface;
+            surface: ThemeTokens.activity-surface;
+            divider-color: ThemeTokens.divider-strong;
+            content-padding-top: 14px;
+            content-padding-bottom: 14px;
 
-            footer-content := VerticalLayout {
-                x: 0px;
-                y: 0px;
+            if root.feedback-message != "" : FeedbackBanner {
                 width: parent.width;
-                height: parent.height;
-                padding-left: 20px;
-                padding-right: 20px;
-                padding-top: 14px;
-                padding-bottom: 14px;
-                spacing: 8px;
+                state: root.feedback-state;
+                message: root.feedback-message;
+            }
 
-                if root.feedback-message != "" : FeedbackBanner {
-                    width: parent.width;
-                    state: root.feedback-state;
-                    message: root.feedback-message;
-                }
+            if root.feedback-message == "" && root.validation-message != "" : Text {
+                width: parent.width;
+                text: root.validation-message;
+                color: ThemeTokens.text-primary;
+                opacity: 0.72;
+                wrap: word-wrap;
+            }
 
-                if root.feedback-message == "" && root.validation-message != "" : Text {
-                    width: parent.width;
-                    text: root.validation-message;
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.72;
-                    wrap: word-wrap;
+            Rectangle {
+                height: 0px;
+                vertical-stretch: 1;
+                background: transparent;
+            }
+
+            HorizontalLayout {
+                height: 34px;
+                spacing: 12px;
+
+                test-button := DialogActionButton {
+                    width: 84px;
+                    height: 34px;
+                    horizontal-stretch: 0;
+                    label: "Test";
+                    action-enabled: root.connect-family-enabled;
+
+                    clicked => {
+                        root.action-requested("test");
+                    }
                 }
 
                 Rectangle {
-                    height: 0px;
-                    vertical-stretch: 1;
+                    horizontal-stretch: 1;
                     background: transparent;
                 }
 
-                HorizontalLayout {
+                save-button := DialogActionButton {
+                    width: 84px;
                     height: 34px;
-                    spacing: 12px;
+                    horizontal-stretch: 0;
+                    label: "Save";
+                    primary: true;
+                    action-enabled: root.can-confirm;
 
-                    test-button := DialogActionButton {
-                        width: 84px;
-                        height: 34px;
-                        horizontal-stretch: 0;
-                        label: "Test";
-                        action-enabled: root.connect-family-enabled;
-
-                        clicked => {
-                            root.action-requested("test");
-                        }
-                    }
-
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        background: transparent;
-                    }
-
-                    save-button := DialogActionButton {
-                        width: 84px;
-                        height: 34px;
-                        horizontal-stretch: 0;
-                        label: "Save";
-                        primary: true;
-                        action-enabled: root.can-confirm;
-
-                        clicked => {
-                            root.action-requested("save");
-                        }
+                    clicked => {
+                        root.action-requested("save");
                     }
                 }
             }

@@ -1,0 +1,198 @@
+import { ScrollView } from "std-widgets.slint";
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component ModalHeaderBar inherits Rectangle {
+    in property <string> title: "";
+    in property <string> subtitle: "";
+    in property <bool> prominent: true;
+    in property <bool> show-drag-handle: false;
+    in property <length> horizontal-padding: 20px;
+    callback close-requested();
+    callback drag-requested(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended();
+    callback focus-restore-requested();
+
+    height: root.subtitle == "" ? 56px : 60px;
+    border-radius: 0px;
+    border-width: 0px;
+    background: root.prominent ? ThemeTokens.titlebar-surface : ThemeTokens.assets-surface;
+
+    drag-touch := TouchArea {
+        width: parent.width - 48px;
+        height: parent.height;
+
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down
+                && event.button == PointerEventButton.left
+            {
+                root.drag-requested(
+                    self.mouse-x + self.absolute-position.x,
+                    self.mouse-y + self.absolute-position.y,
+                );
+            } else if event.kind == PointerEventKind.move {
+                root.drag-moved(
+                    self.mouse-x + self.absolute-position.x,
+                    self.mouse-y + self.absolute-position.y,
+                );
+            } else if event.kind == PointerEventKind.up {
+                root.drag-ended();
+            }
+        }
+    }
+
+    Text {
+        x: root.horizontal-padding;
+        y: root.subtitle == "" ? 0px : 8px;
+        width: parent.width - root.horizontal-padding - 56px;
+        height: root.subtitle == "" ? parent.height : 20px;
+        text: root.title;
+        color: ThemeTokens.text-primary;
+        font-size: 18px;
+        font-weight: 600;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.subtitle != "" : subtitle-copy := Text {
+        x: root.horizontal-padding;
+        y: 32px;
+        width: parent.width - root.horizontal-padding - 56px;
+        text: root.subtitle;
+        color: ThemeTokens.text-primary;
+        opacity: 0.74;
+        font-size: 11px;
+        overflow: elide;
+    }
+
+    if root.show-drag-handle : drag-handle := Rectangle {
+        x: root.horizontal-padding;
+        y: parent.height - 8px;
+        width: 64px;
+        height: 2px;
+        background: ThemeTokens.divider-strong;
+    }
+
+    close-button := Rectangle {
+        x: parent.width - 44px;
+        y: (parent.height - 32px) / 2;
+        width: 32px;
+        height: 32px;
+        border-radius: 0px;
+        border-width: 1px;
+        border-color: ThemeTokens.divider-subtle;
+        background: close-touch.pressed ? ThemeTokens.control-pressed-surface
+            : close-touch.has-hover ? ThemeTokens.control-hover-surface
+            : ThemeTokens.control-active-surface;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: "×";
+            color: ThemeTokens.text-primary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-size: 18px;
+        }
+
+        close-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+
+            clicked => {
+                root.focus-restore-requested();
+                root.close-requested();
+            }
+        }
+    }
+
+    footer-divider := Rectangle {
+        x: 0px;
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: ThemeTokens.divider-subtle;
+    }
+}
+
+export component ModalBodyScrollArea inherits Rectangle {
+    in property <length> frame-padding: 12px;
+    in property <length> content-padding-horizontal: 16px;
+    in property <length> content-padding-vertical: 12px;
+    in property <length> content-spacing: 12px;
+    in property <color> viewport-surface: ThemeTokens.inspector-surface;
+    in property <color> panel-surface: ThemeTokens.window-surface;
+    in property <color> panel-border-color: ThemeTokens.divider-strong;
+
+    background: transparent;
+
+    body-scroll := ScrollView {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        mouse-drag-pan-enabled: true;
+        viewport-width: scroll-body.width;
+        viewport-height: scroll-body.height;
+
+        scroll-body := Rectangle {
+            width: body-scroll.visible-width;
+            height: max(body-scroll.visible-height, body-panel.height + (root.frame-padding * 2));
+            background: root.viewport-surface;
+
+            body-panel := Rectangle {
+                x: root.frame-padding;
+                y: root.frame-padding;
+                width: parent.width - (root.frame-padding * 2);
+                height: body-content.preferred-height + (root.content-padding-vertical * 2);
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: root.panel-border-color;
+                background: root.panel-surface;
+
+                body-content := VerticalLayout {
+                    x: root.content-padding-horizontal;
+                    y: root.content-padding-vertical;
+                    width: parent.width - (root.content-padding-horizontal * 2);
+                    spacing: root.content-spacing;
+
+                    @children
+                }
+            }
+        }
+    }
+}
+
+export component ModalFooterBar inherits Rectangle {
+    in property <color> surface: ThemeTokens.activity-surface;
+    in property <color> divider-color: ThemeTokens.divider-strong;
+    in property <length> content-padding-left: 20px;
+    in property <length> content-padding-right: 20px;
+    in property <length> content-padding-top: 12px;
+    in property <length> content-padding-bottom: 12px;
+    in property <length> content-spacing: 8px;
+
+    background: root.surface;
+
+    footer-divider := Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: 1px;
+        background: root.divider-color;
+    }
+
+    footer-content := VerticalLayout {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        padding-left: root.content-padding-left;
+        padding-right: root.content-padding-right;
+        padding-top: root.content-padding-top;
+        padding-bottom: root.content-padding-bottom;
+        spacing: root.content-spacing;
+
+        @children
+    }
+}

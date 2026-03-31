@@ -73,8 +73,17 @@ struct ModalRect {
 }
 
 fn blocking_modal_rect(modal_width: u32, modal_height: u32) -> ModalRect {
-    let available_height = WINDOW_HEIGHT - TITLEBAR_HEIGHT;
-    let x = ((WINDOW_WIDTH - modal_width) / 2).max(VIEWPORT_MARGIN);
+    blocking_modal_rect_for_viewport(WINDOW_WIDTH, WINDOW_HEIGHT, modal_width, modal_height)
+}
+
+fn blocking_modal_rect_for_viewport(
+    window_width: u32,
+    window_height: u32,
+    modal_width: u32,
+    modal_height: u32,
+) -> ModalRect {
+    let available_height = window_height - TITLEBAR_HEIGHT;
+    let x = ((window_width - modal_width) / 2).max(VIEWPORT_MARGIN);
     let y = (TITLEBAR_HEIGHT + (available_height - modal_height) / 2)
         .max(TITLEBAR_HEIGHT + VIEWPORT_MARGIN);
 
@@ -87,6 +96,14 @@ fn blocking_modal_rect(modal_width: u32, modal_height: u32) -> ModalRect {
 }
 
 fn render_app(setup: impl FnOnce(&AppWindow)) -> SharedPixelBuffer<Rgb8Pixel> {
+    render_app_with_size(WINDOW_WIDTH, WINDOW_HEIGHT, setup)
+}
+
+fn render_app_with_size(
+    window_width: u32,
+    window_height: u32,
+    setup: impl FnOnce(&AppWindow),
+) -> SharedPixelBuffer<Rgb8Pixel> {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
     slint::platform::set_platform(Box::new(SoftwareTestPlatform {
         window: window.clone(),
@@ -98,11 +115,11 @@ fn render_app(setup: impl FnOnce(&AppWindow)) -> SharedPixelBuffer<Rgb8Pixel> {
     bind_top_status_bar_with_store(&app, None);
     app.set_dark_mode(false);
     app.window()
-        .set_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
+        .set_size(PhysicalSize::new(window_width, window_height));
     setup(&app);
     app.show().unwrap();
 
-    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(WINDOW_WIDTH, WINDOW_HEIGHT);
+    let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(window_width, window_height);
     let stride = buffer.width() as usize;
     assert!(window.draw_if_needed(|renderer| {
         renderer.render(buffer.make_mut_slice(), stride);
@@ -302,5 +319,84 @@ fn sync_modal_renders_state_driven_content_and_footer_actions() {
     assert!(
         footer_pixels >= 1100,
         "sync modal footer should render visible action controls, only found {footer_pixels} distinct pixels"
+    );
+}
+
+#[test]
+fn sync_modal_footer_stays_visible_in_short_viewport() {
+    let short_height = 640;
+    let modal_height = 528;
+    let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, modal_height);
+    let buffer = render_app_with_size(WINDOW_WIDTH, short_height, |app| {
+        app.set_sync_modal_open(true);
+        app.set_sync_modal_mode("not-configured".into());
+        app.set_sync_modal_title("Sync".into());
+        app.set_sync_modal_headline("Unlock sync".into());
+        app.set_sync_modal_status_text(
+            "Configure a Gitee remote and unlock the vault before automatic sync can run."
+                .into(),
+        );
+        app.set_sync_modal_error_text(
+            "Primary remote must contain a valid vault-head.json before unlock can continue."
+                .into(),
+        );
+        app.set_sync_modal_primary_action_label("Unlock".into());
+        app.set_sync_modal_secondary_action_label("Close".into());
+        app.set_sync_modal_mirror_enabled(true);
+    });
+
+    let modal_surface = pixel_at(&buffer, modal.x + 12, modal.y + 12);
+    let footer_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 24,
+        modal.y + modal.height - 68,
+        modal.width - 48,
+        44,
+        modal_surface,
+        14,
+    );
+
+    assert!(
+        footer_pixels >= 1200,
+        "sync modal footer should stay visible in short viewports, only found {footer_pixels} distinct pixels"
+    );
+}
+
+#[test]
+fn ssh_modal_footer_stays_visible_in_short_viewport() {
+    let short_height = 640;
+    let modal_height = 528;
+    let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, modal_height);
+    let buffer = render_app_with_size(WINDOW_WIDTH, short_height, |app| {
+        app.set_asset_modal_open(true);
+        app.set_asset_modal_kind("new-ssh-connection".into());
+        app.set_asset_ssh_modal_name("SSH Connection 1".into());
+        app.set_asset_ssh_modal_host("10.0.0.12".into());
+        app.set_asset_ssh_modal_user("ops".into());
+        app.set_asset_ssh_modal_port("22".into());
+        app.set_asset_ssh_modal_remark(
+            "This is a long SSH note to prove the body scrolls while the footer remains reachable."
+                .into(),
+        );
+        app.set_asset_ssh_modal_feedback_state("busy".into());
+        app.set_asset_ssh_modal_feedback_message("Testing connection...".into());
+        app.set_asset_ssh_modal_connect_family_enabled(true);
+        app.set_asset_modal_can_confirm(true);
+    });
+
+    let modal_surface = pixel_at(&buffer, modal.x + 12, modal.y + 12);
+    let footer_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 18,
+        modal.y + modal.height - 72,
+        modal.width - 36,
+        48,
+        modal_surface,
+        14,
+    );
+
+    assert!(
+        footer_pixels >= 1300,
+        "ssh modal footer should stay visible in short viewports, only found {footer_pixels} distinct pixels"
     );
 }

@@ -12,6 +12,7 @@ DELETE_MODAL="$ROOT_DIR/ui/components/assets-delete-confirm-modal.slint"
 SNIPPET_MODAL="$ROOT_DIR/ui/components/assets-snippet-modal.slint"
 SNIPPET_PACKAGE_MODAL="$ROOT_DIR/ui/components/assets-snippet-package-modal.slint"
 MODAL_SHELL="$ROOT_DIR/ui/components/blocking-modal-shell.slint"
+MODAL_CHROME="$ROOT_DIR/ui/components/modal-chrome.slint"
 BOOTSTRAP="$ROOT_DIR/src/app/bootstrap.rs"
 TOKENS="$ROOT_DIR/ui/theme/tokens.slint"
 ASSETS_SIDEBAR="$ROOT_DIR/ui/shell/assets-sidebar.slint"
@@ -88,9 +89,10 @@ grep -F 'sync-vault-modal-overlay := SyncVaultModal {' "$APP_WINDOW" >/dev/null
 grep -F -A4 'sync-vault-modal-overlay := SyncVaultModal {' "$APP_WINDOW" | grep -F 'width: sync-modal-shell.content-width;' >/dev/null
 grep -F -A5 'sync-vault-modal-overlay := SyncVaultModal {' "$APP_WINDOW" | grep -F 'height: sync-modal-shell.content-height;' >/dev/null
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
-grep -F 'modal-height: 520px;' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: max(360px, min(520px, root.height - titlebar.height - 64px));' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 230px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: max(420px, min(560px, root.height - titlebar.height - 64px));' "$APP_WINDOW" >/dev/null
+grep -F 'modal-height: max(420px, min(620px, root.height - titlebar.height - 64px));' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 268px;' "$APP_WINDOW" >/dev/null
 grep -F 'modal-height: 332px;' "$APP_WINDOW" >/dev/null
 grep -F 'asset-folder-modal-overlay := AssetsFolderCreateModal {' "$APP_WINDOW" >/dev/null
@@ -118,7 +120,11 @@ grep -F 'x: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'y: 0px;' "$APP_WINDOW" >/dev/null
 grep -F 'export component AssetsSnippetModal inherits Rectangle {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'export component SyncVaultModal inherits Rectangle {' "$SYNC_MODAL" >/dev/null
+grep -F 'export component ModalHeaderBar inherits Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'export component ModalBodyScrollArea inherits Rectangle {' "$MODAL_CHROME" >/dev/null
+grep -F 'export component ModalFooterBar inherits Rectangle {' "$MODAL_CHROME" >/dev/null
 grep -F 'import { ScrollView } from "std-widgets.slint";' "$SYNC_MODAL" >/dev/null
+grep -F 'import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> mode: "not-configured";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> title: "Sync Settings";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <bool> auto-sync-enabled: false;' "$SYNC_MODAL" >/dev/null
@@ -130,18 +136,19 @@ grep -F 'callback primary-action-requested();' "$SYNC_MODAL" >/dev/null
 grep -F 'callback secondary-action-requested();' "$SYNC_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SYNC_MODAL" >/dev/null
 grep -F 'callback toggle-changed(string, bool);' "$SYNC_MODAL" >/dev/null
-grep -F 'body-scroll := ScrollView {' "$SYNC_MODAL" >/dev/null
-grep -F 'viewport-width: scroll-body.width;' "$SYNC_MODAL" >/dev/null
-grep -F 'viewport-height: scroll-body.height;' "$SYNC_MODAL" >/dev/null
-grep -F 'height: max(body-scroll.visible-height, body-panel.height + 12px);' "$SYNC_MODAL" >/dev/null
-grep -F 'body-panel := Rectangle {' "$SYNC_MODAL" >/dev/null
-grep -F 'footer := Rectangle {' "$SYNC_MODAL" >/dev/null
+grep -F 'body := ModalBodyScrollArea {' "$SYNC_MODAL" >/dev/null
+grep -F 'mouse-drag-pan-enabled: true;' "$MODAL_CHROME" >/dev/null
+grep -F 'viewport-width: scroll-body.width;' "$MODAL_CHROME" >/dev/null
+grep -F 'viewport-height: scroll-body.height;' "$MODAL_CHROME" >/dev/null
+grep -F 'height: max(body-scroll.visible-height, body-panel.height + (root.frame-padding * 2));' "$MODAL_CHROME" >/dev/null
+grep -F 'footer := ModalFooterBar {' "$SYNC_MODAL" >/dev/null
 grep -F 'y: parent.height - root.footer-height;' "$SYNC_MODAL" >/dev/null
-grep -F 'footer-divider := Rectangle {' "$SYNC_MODAL" >/dev/null
+grep -F 'divider-color: ThemeTokens.divider-strong;' "$SYNC_MODAL" >/dev/null
 grep -F 'error-banner := Rectangle {' "$SYNC_MODAL" >/dev/null
 grep -F 'SyncModalToggleRow {' "$SYNC_MODAL" >/dev/null
-grep -F 'background: ThemeTokens.titlebar-surface;' "$SYNC_MODAL" >/dev/null
-grep -F 'background: ThemeTokens.window-surface;' "$SYNC_MODAL" >/dev/null
+grep -F 'prominent: true;' "$SYNC_MODAL" >/dev/null
+grep -F 'panel-surface: ThemeTokens.window-surface;' "$SYNC_MODAL" >/dev/null
+grep -F 'surface: ThemeTokens.activity-surface;' "$SYNC_MODAL" >/dev/null
 grep -F 'SyncModalTextField {' "$SYNC_MODAL" >/dev/null
 grep -F 'if root.mode == "not-configured" || root.mode == "locked"' "$SYNC_MODAL" >/dev/null
 grep -F 'export component AssetsSnippetPackageModal inherits Rectangle {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
@@ -149,6 +156,7 @@ grep -F 'export component AssetsFolderCreateModal inherits Rectangle {' "$FOLDER
 grep -F 'export component AssetsSshConnectionModal inherits Rectangle {' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New Snippet";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'import { ComboBox, ScrollView } from "std-widgets.slint";' "$SNIPPET_MODAL" >/dev/null
+grep -F 'import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'in property <[string]> package-options: [];' "$SNIPPET_MODAL" >/dev/null
 grep -F 'in property <string> package-selected-label: "";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New Package";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
@@ -156,11 +164,11 @@ grep -F 'text: "Name";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'text: "Script";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'text: "Package";' "$SNIPPET_MODAL" >/dev/null
 grep -F 'text: "Package name";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
-grep -F 'body-scroll := ScrollView {' "$SNIPPET_MODAL" >/dev/null
+grep -F 'body := ModalBodyScrollArea {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'ComboBox {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'model: root.package-options;' "$SNIPPET_MODAL" >/dev/null
 grep -F 'current-value: root.package-selected-label;' "$SNIPPET_MODAL" >/dev/null
-grep -F 'footer-content := VerticalLayout {' "$SNIPPET_MODAL" >/dev/null
+grep -F 'footer := ModalFooterBar {' "$SNIPPET_MODAL" >/dev/null
 ! grep -F 'package-input := TextInput {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SNIPPET_MODAL" >/dev/null
 grep -F 'callback name-changed(string);' "$SNIPPET_PACKAGE_MODAL" >/dev/null
@@ -168,8 +176,7 @@ grep -F 'in property <string> validation-message: "";' "$SNIPPET_MODAL" >/dev/nu
 grep -F 'in property <bool> can-confirm: false;' "$SNIPPET_MODAL" >/dev/null
 grep -F 'in property <string> validation-message: "";' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm: false;' "$SNIPPET_PACKAGE_MODAL" >/dev/null
-grep -F 'drag-touch := TouchArea {' "$SNIPPET_MODAL" >/dev/null
-grep -F 'close-button := Rectangle {' "$SNIPPET_MODAL" >/dev/null
+grep -F 'header := ModalHeaderBar {' "$SNIPPET_MODAL" >/dev/null
 grep -F 'drag-touch := TouchArea {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'close-button := Rectangle {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New Folder";' "$FOLDER_MODAL" >/dev/null
@@ -206,7 +213,8 @@ grep -F 'in property <bool> can-confirm: false;' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsRenameModal inherits Rectangle {' "$RENAME_MODAL" >/dev/null
 grep -F 'export component AssetsDeleteConfirmModal inherits Rectangle {' "$DELETE_MODAL" >/dev/null
 grep -F 'in property <string> dialog-title: "New SSH Connection";' "$SSH_MODAL" >/dev/null
-grep -F 'header := Rectangle {' "$SSH_MODAL" >/dev/null
+grep -F 'import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";' "$SSH_MODAL" >/dev/null
+grep -F 'header := ModalHeaderBar {' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Basic";' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Authentication";' "$SSH_MODAL" >/dev/null
 grep -F 'text: "Proxy";' "$SSH_MODAL" >/dev/null
@@ -214,18 +222,13 @@ if grep -F 'text: "Connection Options";' "$SSH_MODAL" >/dev/null; then
   exit 1
 fi
 grep -F 'text: "Notes";' "$SSH_MODAL" >/dev/null
-grep -F 'footer := Rectangle {' "$SSH_MODAL" >/dev/null
-grep -F 'footer-content := VerticalLayout {' "$SSH_MODAL" >/dev/null
+grep -F 'body-scroll := ModalBodyScrollArea {' "$SSH_MODAL" >/dev/null
+grep -F 'footer := ModalFooterBar {' "$SSH_MODAL" >/dev/null
 if grep -F 'footer-panel := Rectangle {' "$SSH_MODAL" >/dev/null; then
   echo "ssh modal footer must not use an inner footer-panel wrapper" >&2
   exit 1
 fi
-if grep -F 'footer-divider := Rectangle {' "$SSH_MODAL" >/dev/null; then
-  echo "ssh modal footer must not draw a dedicated footer divider" >&2
-  exit 1
-fi
-grep -F 'drag-touch := TouchArea {' "$SSH_MODAL" >/dev/null
-grep -F 'close-button := Rectangle {' "$SSH_MODAL" >/dev/null
+grep -F 'surface: ThemeTokens.activity-surface;' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> validation-message: "";' "$SSH_MODAL" >/dev/null
 grep -F 'in property <bool> can-confirm: false;' "$SSH_MODAL" >/dev/null
 grep -F 'in property <string> auth-source: "manual";' "$SSH_MODAL" >/dev/null

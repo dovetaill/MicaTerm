@@ -1,4 +1,5 @@
 import { ListView } from "std-widgets.slint";
+import { ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AssetNodeRow } from "./asset-node-row.slint";
 import { ConsoleAssetItem } from "../shell/assets-sidebar.slint";
@@ -69,36 +70,31 @@ export component OpenSavedSshModal inherits Rectangle {
             }
         }
 
-        header := Rectangle {
+        header := ModalHeaderBar {
+            x: 0px;
+            y: 0px;
             width: parent.width;
-            height: 56px;
-            background: ThemeTokens.inspector-surface;
+            title: "Open Saved SSH Connections";
+            prominent: true;
 
-            drag-touch := TouchArea {
-                width: parent.width;
-                height: parent.height;
-
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
-                        root.drag-requested(self.mouse-x + self.absolute-position.x, self.mouse-y + self.absolute-position.y);
-                    } else if event.kind == PointerEventKind.move {
-                        root.drag-moved(self.mouse-x + self.absolute-position.x, self.mouse-y + self.absolute-position.y);
-                    } else if event.kind == PointerEventKind.up {
-                        root.drag-ended();
-                    }
-                }
+            close-requested => {
+                root.close-requested();
             }
 
-            Text {
-                x: 18px;
-                y: 0px;
-                width: parent.width - 36px;
-                height: parent.height;
-                text: "Open Saved SSH Connections";
-                color: ThemeTokens.text-primary;
-                font-size: 20px;
-                font-weight: 700;
-                vertical-alignment: center;
+            drag-requested(pointer-x, pointer-y) => {
+                root.drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.focus-restore-requested();
             }
         }
 
@@ -204,20 +200,32 @@ export component OpenSavedSshModal inherits Rectangle {
             }
         }
 
-        footer := Rectangle {
+        footer := ModalFooterBar {
             y: parent.height - self.height;
             width: parent.width;
             height: 56px;
-            background: ThemeTokens.assets-surface;
+            surface: ThemeTokens.activity-surface;
+            divider-color: ThemeTokens.divider-strong;
+            content-padding-top: 11px;
+            content-padding-bottom: 11px;
+            content-spacing: 0px;
 
-            cancel-button := DialogActionButton {
-                x: parent.width - self.width - 18px;
-                y: 11px;
-                label: "Cancel";
+            HorizontalLayout {
+                height: 34px;
+                spacing: 12px;
 
-                clicked => {
-                    root.focus-restore-requested();
-                    root.close-requested();
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
+                }
+
+                cancel-button := DialogActionButton {
+                    label: "Cancel";
+
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.close-requested();
+                    }
                 }
             }
         }

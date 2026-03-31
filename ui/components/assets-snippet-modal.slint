@@ -1,4 +1,5 @@
 import { ComboBox, ScrollView } from "std-widgets.slint";
+import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 
 component DialogButton inherits Rectangle {
@@ -83,284 +84,211 @@ export component AssetsSnippetModal inherits Rectangle {
             }
         }
 
-        header := Rectangle {
+        header := ModalHeaderBar {
             x: 0px;
             y: 0px;
             width: parent.width;
-            height: root.header-height;
-            background: ThemeTokens.assets-surface;
+            title: root.dialog-title;
+            prominent: true;
 
-            Text {
-                x: 20px;
-                y: 0px;
-                width: parent.width - 72px;
-                height: parent.height;
-                text: root.dialog-title;
-                color: ThemeTokens.text-primary;
-                font-size: 18px;
-                font-weight: 600;
-                vertical-alignment: center;
+            close-requested => {
+                root.close-requested();
             }
 
-            drag-touch := TouchArea {
-                width: parent.width - 48px;
-                height: parent.height;
-
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down
-                        && event.button == PointerEventButton.left
-                    {
-                        root.drag-requested(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.move {
-                        root.drag-moved(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.up {
-                        root.drag-ended();
-                    }
-                }
+            drag-requested(pointer-x, pointer-y) => {
+                root.drag-requested(pointer-x, pointer-y);
             }
 
-            close-button := Rectangle {
-                x: parent.width - 40px;
-                y: 12px;
-                width: 28px;
-                height: 28px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
-
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: "×";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                close-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        root.focus-restore-requested();
-                        root.close-requested();
-                    }
-                }
+            drag-moved(pointer-x, pointer-y) => {
+                root.drag-moved(pointer-x, pointer-y);
             }
 
-            header-divider := Rectangle {
-                y: parent.height - 1px;
-                width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
+            drag-ended => {
+                root.drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.focus-restore-requested();
             }
         }
 
-        body-scroll := ScrollView {
+        body := ModalBodyScrollArea {
             x: 0px;
-            y: root.header-height;
+            y: header.height;
             width: parent.width;
-            height: root.body-height;
-            viewport-width: scroll-body.width;
-            viewport-height: scroll-body.height;
+            height: parent.height - header.height - footer.height;
+            frame-padding: 12px;
+            content-padding-horizontal: 16px;
+            content-padding-vertical: 14px;
+            content-spacing: 16px;
+            viewport-surface: ThemeTokens.inspector-surface;
+            panel-surface: ThemeTokens.window-surface;
+            panel-border-color: ThemeTokens.divider-strong;
 
-            scroll-body := Rectangle {
-                width: body-scroll.visible-width;
-                height: max(body-scroll.visible-height, content.preferred-height + 36px);
+            Rectangle {
+                width: parent.width;
+                height: 72px;
                 background: transparent;
 
-                content := VerticalLayout {
-                    x: 20px;
-                    y: 18px;
-                    width: parent.width - 40px;
-                    spacing: 16px;
+                Text {
+                    text: "Name";
+                    color: ThemeTokens.text-primary;
+                    opacity: 0.78;
+                }
 
-                    Rectangle {
-                        width: parent.width;
-                        height: 72px;
-                        background: transparent;
+                Rectangle {
+                    y: 28px;
+                    width: parent.width;
+                    height: 40px;
+                    border-radius: 0px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.divider-subtle;
+                    background: ThemeTokens.inspector-surface;
 
-                        Text {
-                            text: "Name";
-                            color: ThemeTokens.text-primary;
-                            opacity: 0.78;
+                    name-input := TextInput {
+                        x: 12px;
+                        y: 9px;
+                        width: parent.width - 24px;
+                        height: 22px;
+                        text: root.name;
+                        color: ThemeTokens.text-primary;
+                        selection-background-color: ThemeTokens.accent;
+                        selection-foreground-color: ThemeTokens.text-primary;
+
+                        edited => {
+                            root.draft-changed("name", self.text);
                         }
+                    }
+                }
+            }
 
-                        Rectangle {
-                            y: 28px;
-                            width: parent.width;
-                            height: 40px;
-                            border-radius: 0px;
-                            border-width: 1px;
-                            border-color: ThemeTokens.divider-subtle;
-                            background: ThemeTokens.inspector-surface;
+            Rectangle {
+                width: parent.width;
+                height: 178px;
+                background: transparent;
 
-                            name-input := TextInput {
-                                x: 12px;
-                                y: 9px;
-                                width: parent.width - 24px;
-                                height: 22px;
-                                text: root.name;
-                                color: ThemeTokens.text-primary;
-                                selection-background-color: ThemeTokens.accent;
-                                selection-foreground-color: ThemeTokens.text-primary;
+                Text {
+                    text: "Script";
+                    color: ThemeTokens.text-primary;
+                    opacity: 0.78;
+                }
 
-                                edited => {
-                                    root.draft-changed("name", self.text);
-                                }
-                            }
+                Rectangle {
+                    y: 28px;
+                    width: parent.width;
+                    height: 146px;
+                    border-radius: 0px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.divider-subtle;
+                    background: ThemeTokens.inspector-surface;
+
+                    script-input := TextInput {
+                        x: 12px;
+                        y: 8px;
+                        width: parent.width - 24px;
+                        height: parent.height - 16px;
+                        text: root.script;
+                        color: ThemeTokens.text-primary;
+                        single-line: false;
+                        selection-background-color: ThemeTokens.accent;
+                        selection-foreground-color: ThemeTokens.text-primary;
+
+                        edited => {
+                            root.draft-changed("script", self.text);
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                width: parent.width;
+                height: 102px;
+                background: transparent;
+
+                VerticalLayout {
+                    width: parent.width;
+                    height: parent.height;
+                    spacing: 8px;
+
+                    Text {
+                        text: "Package";
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.78;
+                    }
+
+                    ComboBox {
+                        width: parent.width;
+                        height: 34px;
+                        model: root.package-options;
+                        current-value: root.package-selected-label;
+
+                        selected(value) => {
+                            root.draft-changed("package", value == "No Package" ? "" : value);
                         }
                     }
 
-                    Rectangle {
+                    Text {
                         width: parent.width;
-                        height: 178px;
-                        background: transparent;
-
-                        Text {
-                            text: "Script";
-                            color: ThemeTokens.text-primary;
-                            opacity: 0.78;
-                        }
-
-                        Rectangle {
-                            y: 28px;
-                            width: parent.width;
-                            height: 146px;
-                            border-radius: 0px;
-                            border-width: 1px;
-                            border-color: ThemeTokens.divider-subtle;
-                            background: ThemeTokens.inspector-surface;
-
-                            script-input := TextInput {
-                                x: 12px;
-                                y: 8px;
-                                width: parent.width - 24px;
-                                height: parent.height - 16px;
-                                text: root.script;
-                                color: ThemeTokens.text-primary;
-                                single-line: false;
-                                selection-background-color: ThemeTokens.accent;
-                                selection-foreground-color: ThemeTokens.text-primary;
-
-                                edited => {
-                                    root.draft-changed("script", self.text);
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: parent.width;
-                        height: 102px;
-                        background: transparent;
-
-                        VerticalLayout {
-                            width: parent.width;
-                            height: parent.height;
-                            spacing: 8px;
-
-                            Text {
-                                text: "Package";
-                                color: ThemeTokens.text-primary;
-                                opacity: 0.78;
-                            }
-
-                            ComboBox {
-                                width: parent.width;
-                                height: 34px;
-                                model: root.package-options;
-                                current-value: root.package-selected-label;
-
-                                selected(value) => {
-                                    root.draft-changed("package", value == "No Package" ? "" : value);
-                                }
-                            }
-
-                            Text {
-                                width: parent.width;
-                                text: "Optional. Choose a package or keep the snippet at the root level.";
-                                color: ThemeTokens.text-primary;
-                                opacity: 0.62;
-                                wrap: word-wrap;
-                            }
-                        }
+                        text: "Optional. Choose a package or keep the snippet at the root level.";
+                        color: ThemeTokens.text-primary;
+                        opacity: 0.62;
+                        wrap: word-wrap;
                     }
                 }
             }
         }
 
-        footer := Rectangle {
+        footer := ModalFooterBar {
             x: 0px;
             y: parent.height - root.footer-height;
             width: parent.width;
             height: root.footer-height;
-            background: ThemeTokens.assets-surface;
+            surface: ThemeTokens.activity-surface;
+            divider-color: ThemeTokens.divider-strong;
+            content-spacing: 12px;
 
-            footer-divider := Rectangle {
+            validation-copy := Text {
                 width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
+                text: root.validation-message;
+                color: ThemeTokens.text-primary;
+                opacity: 0.72;
+                visible: root.validation-message != "";
+                wrap: word-wrap;
             }
 
-            footer-content := VerticalLayout {
-                x: 20px;
-                y: 12px;
-                width: parent.width - 40px;
-                spacing: 12px;
+            Rectangle {
+                width: parent.width;
+                height: 34px;
+                background: transparent;
 
-                validation-copy := Text {
+                HorizontalLayout {
                     width: parent.width;
-                    text: root.validation-message;
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.72;
-                    visible: root.validation-message != "";
-                    wrap: word-wrap;
-                }
+                    height: parent.height;
+                    spacing: 12px;
 
-                Rectangle {
-                    width: parent.width;
-                    height: 34px;
-                    background: transparent;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: transparent;
+                    }
 
-                    HorizontalLayout {
-                        width: parent.width;
-                        height: parent.height;
-                        spacing: 12px;
+                    cancel-button := DialogButton {
+                        width: 88px;
+                        label: "Cancel";
 
-                        Rectangle {
-                            horizontal-stretch: 1;
-                            background: transparent;
+                        clicked => {
+                            root.focus-restore-requested();
+                            root.close-requested();
                         }
+                    }
 
-                        cancel-button := DialogButton {
-                            width: 88px;
-                            label: "Cancel";
+                    confirm-button := DialogButton {
+                        width: 84px;
+                        label: "Create";
+                        primary: true;
+                        enabled: root.can-confirm;
 
-                            clicked => {
-                                root.focus-restore-requested();
-                                root.close-requested();
-                            }
-                        }
-
-                        confirm-button := DialogButton {
-                            width: 84px;
-                            label: "Create";
-                            primary: true;
-                            enabled: root.can-confirm;
-
-                            clicked => {
-                                root.confirm-requested();
-                            }
+                        clicked => {
+                            root.confirm-requested();
                         }
                     }
                 }

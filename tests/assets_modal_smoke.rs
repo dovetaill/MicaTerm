@@ -683,7 +683,9 @@ fn blocking_modal_children_own_shared_asset_modal_chrome_contract() {
     assert!(folder.contains("in property <string> dialog-title: \"New Folder\";"));
     assert!(folder.contains("drag-touch := TouchArea {"));
     assert!(ssh.contains("in property <string> dialog-title: \"New SSH Connection\";"));
-    assert!(ssh.contains("drag-touch := TouchArea {"));
+    assert!(ssh.contains("import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from \"./modal-chrome.slint\";"));
+    assert!(ssh.contains("header := ModalHeaderBar {"));
+    assert!(ssh.contains("footer := ModalFooterBar {"));
     assert!(rename.contains("drag-touch := TouchArea {"));
     assert!(delete.contains("drag-touch := TouchArea {"));
     assert!(host_key.contains("drag-touch := TouchArea {"));
@@ -748,55 +750,53 @@ fn ssh_modal_header_body_and_footer_are_explicitly_anchored() {
         .expect("read ssh modal");
 
     assert!(
-        ssh.contains("header := Rectangle {\n            x: 0px;\n            y: 0px;"),
-        "ssh modal header must be pinned to the top-left corner"
+        ssh.contains("header := ModalHeaderBar {\n            x: 0px;\n            y: 0px;"),
+        "ssh modal should delegate its header chrome to the shared modal header"
     );
     assert!(
-        ssh.contains(
-            "body-scroll := ScrollView {\n            x: 0px;\n            y: root.header-height;"
-        ),
-        "ssh modal body scroll host must start directly below the chrome"
+        ssh.contains("body-scroll := ModalBodyScrollArea {\n            x: 0px;\n            y: root.header-height;"),
+        "ssh modal body scroll host must start directly below the shared header"
     );
     assert!(
         !ssh.contains("tabs-host := Rectangle {"),
         "ssh modal must not keep the legacy top-level tabs host"
     );
     assert!(
-        ssh.contains("footer := Rectangle {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
-        "ssh modal footer must be pinned to the bottom edge"
+        ssh.contains("footer := ModalFooterBar {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
+        "ssh modal footer must be pinned to the bottom edge via the shared footer bar"
     );
 }
 
 #[test]
 fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
     let sync = fs::read_to_string("ui/components/sync-vault-modal.slint").expect("read sync modal");
+    let modal_chrome =
+        fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome");
 
     assert!(
         sync.contains("import { ScrollView } from \"std-widgets.slint\";"),
         "sync modal should import ScrollView to keep long forms reachable"
     );
     assert!(
-        sync.contains("header := Rectangle {\n            x: 0px;\n            y: 0px;"),
-        "sync modal header must be pinned to the top-left corner"
+        sync.contains("header := ModalHeaderBar {\n            x: 0px;\n            y: 0px;"),
+        "sync modal should delegate its header chrome to the shared modal header"
     );
     assert!(
-        sync.contains(
-            "body-scroll := ScrollView {\n            x: 0px;\n            y: root.header-height;"
-        ),
+        sync.contains("body := ModalBodyScrollArea {\n            x: 0px;\n            y: header.height;"),
         "sync modal body must scroll from directly below the title bar"
     );
     assert!(
-        sync.contains("mouse-drag-pan-enabled: true;"),
-        "sync modal scroll host should allow direct drag scrolling when the content grows"
+        modal_chrome.contains("mouse-drag-pan-enabled: true;"),
+        "shared modal scroll host should allow direct drag scrolling when the content grows"
     );
     assert!(
-        sync.contains(
-            "height: max(body-scroll.visible-height, body-panel.height + 12px);"
+        modal_chrome.contains(
+            "height: max(body-scroll.visible-height, body-panel.height + (root.frame-padding * 2));"
         ),
-        "sync modal scroll body must expand with long error and password content"
+        "shared modal scroll body must expand with long error and password content"
     );
     assert!(
-        sync.contains("footer := Rectangle {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
+        sync.contains("footer := ModalFooterBar {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
         "sync modal footer must stay pinned to the bottom edge"
     );
 }
@@ -827,21 +827,128 @@ fn sync_modal_uses_distinct_header_body_and_footer_surfaces() {
     let sync = fs::read_to_string("ui/components/sync-vault-modal.slint").expect("read sync modal");
 
     assert!(
-        sync.contains("background: ThemeTokens.titlebar-surface;"),
-        "sync modal header should use a stronger chrome surface so it stops blending into the body"
+        sync.contains("prominent: true;"),
+        "sync modal should request the stronger shared header chrome"
     );
     assert!(
-        sync.contains("body-panel := Rectangle {"),
+        sync.contains("panel-surface: ThemeTokens.window-surface;"),
         "sync modal should render the body content inside a dedicated panel surface"
     );
     assert!(
-        sync.contains("background: ThemeTokens.window-surface;"),
-        "sync modal should introduce a clearer body or footer surface instead of reusing the same light panel everywhere"
+        sync.contains("surface: ThemeTokens.activity-surface;"),
+        "sync modal footer should use a stronger shared footer surface"
     );
     assert!(
-        sync.contains("footer-divider := Rectangle {"),
+        sync.contains("divider-color: ThemeTokens.divider-strong;"),
         "sync modal footer should expose an explicit divider so actions stay visually separated from error and form content"
     );
+}
+
+#[test]
+fn long_form_modals_share_common_modal_chrome_primitives() {
+    let modal_chrome =
+        fs::read_to_string("ui/components/modal-chrome.slint").expect("read shared modal chrome");
+    let sync = fs::read_to_string("ui/components/sync-vault-modal.slint").expect("read sync");
+    let snippet =
+        fs::read_to_string("ui/components/assets-snippet-modal.slint").expect("read snippet");
+    let ssh = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh");
+    let keychain_identity = fs::read_to_string("ui/components/assets-keychain-identity-modal.slint")
+        .expect("read keychain identity");
+    let keychain_ssh_key = fs::read_to_string("ui/components/assets-keychain-ssh-key-modal.slint")
+        .expect("read keychain ssh key");
+    let open_saved =
+        fs::read_to_string("ui/components/open-saved-ssh-modal.slint").expect("read open saved");
+
+    assert!(
+        modal_chrome.contains("export component ModalHeaderBar"),
+        "shared modal chrome should export a reusable header bar"
+    );
+    assert!(
+        modal_chrome.contains("export component ModalFooterBar"),
+        "shared modal chrome should export a reusable footer bar"
+    );
+    assert!(
+        modal_chrome.contains("export component ModalBodyScrollArea"),
+        "shared modal chrome should export a reusable scroll body wrapper"
+    );
+
+    for modal in [
+        ("sync", &sync),
+        ("snippet", &snippet),
+        ("ssh", &ssh),
+        ("keychain identity", &keychain_identity),
+        ("keychain ssh key", &keychain_ssh_key),
+        ("open saved ssh", &open_saved),
+    ] {
+        assert!(
+            modal.1.contains("modal-chrome.slint")
+                && modal.1.contains("ModalHeaderBar")
+                && modal.1.contains("ModalFooterBar"),
+            "{} modal should reuse the shared modal header/footer primitives",
+            modal.0
+        );
+    }
+
+    for modal in [
+        ("sync", &sync),
+        ("snippet", &snippet),
+        ("ssh", &ssh),
+        ("keychain identity", &keychain_identity),
+        ("keychain ssh key", &keychain_ssh_key),
+    ] {
+        assert!(
+            modal.1.contains("ModalBodyScrollArea {"),
+            "{} modal should render its long form content inside the shared scroll body wrapper",
+            modal.0
+        );
+    }
+}
+
+#[test]
+fn keychain_identity_modal_scrolls_body_inside_the_shared_scaffold() {
+    let identity_modal = fs::read_to_string("ui/components/assets-keychain-identity-modal.slint")
+        .expect("read keychain identity modal");
+
+    assert!(
+        identity_modal.contains("import { ScrollView } from \"std-widgets.slint\";"),
+        "keychain identity modal should import ScrollView so long forms can stay reachable"
+    );
+    assert!(
+        identity_modal.contains("ModalBodyScrollArea {"),
+        "keychain identity modal should use the shared scroll body wrapper"
+    );
+    assert!(
+        identity_modal.contains("footer := ModalFooterBar {"),
+        "keychain identity modal should pin its actions inside the shared footer bar"
+    );
+}
+
+#[test]
+fn long_form_modal_shells_use_viewport_constrained_heights_instead_of_fixed_frames() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    for fixed_height in [
+        "modal-height: 520px;",
+        "modal-height: 560px;",
+        "modal-height: 620px;",
+    ] {
+        assert!(
+            !app_window.contains(fixed_height),
+            "form modal shells should stop hardcoding `{fixed_height}` because short desktop windows clip footer reachability"
+        );
+    }
+
+    for expected_formula in [
+        "modal-height: max(360px, min(520px, root.height - titlebar.height - 64px));",
+        "modal-height: max(420px, min(560px, root.height - titlebar.height - 64px));",
+        "modal-height: max(420px, min(620px, root.height - titlebar.height - 64px));",
+    ] {
+        assert!(
+            app_window.contains(expected_formula),
+            "form modal shells should clamp their height to the viewport using `{expected_formula}`"
+        );
+    }
 }
 
 #[test]
