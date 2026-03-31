@@ -11,6 +11,8 @@ export component Titlebar inherits Rectangle {
     in property <string> sync-feedback-text: "";
     in property <int> sync-feedback-sequence: 0;
     in property <bool> show-right-panel: false;
+    in property <bool> transfer-center-open: false;
+    in property <int> transfer-queue-total: 0;
     in property <bool> show-global-menu: false;
     in property <bool> is-window-maximized: false;
     in property <bool> is-window-active: true;
@@ -23,6 +25,7 @@ export component Titlebar inherits Rectangle {
     private property <image> sync-icon: @image-url("../../assets/icons/fluent/arrow-clockwise-20-regular.svg");
     private property <image> panel-right-icon-regular: @image-url("../../assets/icons/fluent/panel-right-20-regular.svg");
     private property <image> panel-right-icon-filled: @image-url("../../assets/icons/fluent/panel-right-20-filled.svg");
+    private property <image> transfer-icon: @image-url("../../assets/icons/fluent/arrow-upload-20-regular.svg");
     private property <image> pin-icon: @image-url("../../assets/icons/fluent/pin-20-regular.svg");
     private property <image> pin-off-icon: @image-url("../../assets/icons/fluent/pin-off-20-regular.svg");
     private property <image> minimize-icon: @image-url("../../assets/icons/fluent/subtract-20-regular.svg");
@@ -59,6 +62,7 @@ export component Titlebar inherits Rectangle {
     callback sync-now-requested;
     callback open-sync-modal-requested;
     callback toggle-right-panel-requested;
+    callback open-transfer-center-requested;
     callback open-settings-panel-requested;
     callback open-appearance-panel-requested;
     callback toggle-global-menu-requested;
@@ -206,7 +210,7 @@ export component Titlebar inherits Rectangle {
         }
 
         utility-zone := Rectangle {
-            width: 176px;
+            width: 220px;
             height: parent.height;
             background: transparent;
             opacity: root.is-window-active ? 1 : 0.72;
@@ -274,8 +278,51 @@ export component Titlebar inherits Rectangle {
                 }
             }
 
+            transfer-button := TitlebarIconButton {
+                x: 120px;
+                y: 0px;
+                icon-source: root.transfer-icon;
+                active: root.transfer-center-open;
+                tooltip-text: "Open transfer center";
+                tooltip-source-id: "transfer-button";
+
+                clicked => {
+                    root.open-transfer-center-requested();
+                }
+
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y);
+                }
+
+                tooltip-close-requested(source-id) => {
+                    root.queue-tooltip-close(source-id);
+                }
+            }
+
+            if root.transfer-queue-total > 0 : transfer-badge := Rectangle {
+                x: transfer-button.x + 21px;
+                y: 1px;
+                min-width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                background: ThemeTokens.accent;
+
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.transfer-queue-total > 99 ? "99+" : "" + root.transfer-queue-total;
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    font-size: 9px;
+                    font-weight: 700;
+                }
+            }
+
             divider-line := Rectangle {
-                x: 124px;
+                x: 164px;
                 y: 8px;
                 width: 1px;
                 height: 20px;
@@ -284,7 +331,7 @@ export component Titlebar inherits Rectangle {
             }
 
             pin-button := TitlebarIconButton {
-                x: 140px;
+                x: 180px;
                 y: 0px;
                 icon-source: root.is-window-always-on-top ? root.pin-icon : root.pin-off-icon;
                 active: root.is-window-always-on-top;

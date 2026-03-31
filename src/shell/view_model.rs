@@ -390,6 +390,7 @@ struct PendingSnippetActivation {
 pub struct ShellViewModel {
     pub show_welcome: bool,
     pub show_right_panel: bool,
+    pub transfer_center_open: bool,
     pub right_panel_view: RightPanelView,
     pub show_global_menu: bool,
     pub show_assets_sidebar: bool,
@@ -454,6 +455,7 @@ impl Default for ShellViewModel {
         Self {
             show_welcome: true,
             show_right_panel: false,
+            transfer_center_open: false,
             right_panel_view: RightPanelView::Sftp,
             show_global_menu: false,
             show_assets_sidebar: true,
@@ -1376,6 +1378,14 @@ impl ShellViewModel {
     pub fn toggle_right_panel(&mut self) {
         self.show_right_panel = !self.show_right_panel;
         self.right_panel_view = RightPanelView::Sftp;
+    }
+
+    pub fn transfer_center_open(&self) -> bool {
+        self.transfer_center_open
+    }
+
+    pub fn toggle_transfer_center(&mut self) {
+        self.transfer_center_open = !self.transfer_center_open;
     }
 
     pub fn toggle_global_menu(&mut self) {

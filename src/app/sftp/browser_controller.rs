@@ -1,0 +1,158 @@
+use std::collections::HashMap;
+
+use uuid::Uuid;
+
+use crate::app::sftp::{SftpBrowserSessionState, SftpDirectoryEntry};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SftpBrowserLoadRequest {
+    pub session_id: Uuid,
+    pub path: String,
+    pub request_id: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct SftpBrowserController {
+    next_request_id: u64,
+    sessions: HashMap<Uuid, SftpBrowserSessionState>,
+}
+
+impl SftpBrowserController {
+    pub fn open(&mut self, session_id: Uuid, path: &str) -> SftpBrowserLoadRequest {
+        let request = self.new_request(session_id, path);
+        let state = self.sessions.entry(session_id).or_default();
+        state.set_connecting(request.path.as_str(), request.request_id);
+        request
+    }
+
+    pub fn session_activated(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
+        let path = self.sessions.get(&session_id)?.current_path.clone();
+        if path.is_empty() {
+            return None;
+        }
+
+        let request = self.new_request(session_id, path.as_str());
+        let state = self.sessions.get_mut(&session_id).expect("state must exist");
+        state.set_loading_follow(request.path.as_str(), request.request_id);
+        Some(request)
+    }
+
+    pub fn follow_cwd(&mut self, session_id: Uuid, path: &str) -> Option<SftpBrowserLoadRequest> {
+        let state = self.sessions.entry(session_id).or_default();
+        if !state.current_path.is_empty()
+            && state.follow_mode != crate::app::sftp::SftpFollowMode::FollowCwd
+        {
+            return None;
+        }
+        if state.current_path == path {
+            return None;
+        }
+
+        let request = self.new_request(session_id, path);
+        let state = self.sessions.entry(session_id).or_default();
+        state.set_loading_follow(request.path.as_str(), request.request_id);
+        Some(request)
+    }
+
+    pub fn navigate(&mut self, session_id: Uuid, path: &str) -> SftpBrowserLoadRequest {
+        let request = self.new_request(session_id, path);
+        let state = self.sessions.entry(session_id).or_default();
+        state.set_loading_manual(request.path.as_str(), request.request_id);
+        request
+    }
+
+    pub fn refresh(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
+        let path = self.sessions.get(&session_id)?.current_path.clone();
+        if path.is_empty() {
+            return None;
+        }
+
+        let request = self.new_request(session_id, path.as_str());
+        let state = self.sessions.get_mut(&session_id).expect("state must exist");
+        if state.follow_mode == crate::app::sftp::SftpFollowMode::FollowCwd {
+            state.set_loading_follow(request.path.as_str(), request.request_id);
+        } else {
+            state.set_loading_manual(request.path.as_str(), request.request_id);
+        }
+        Some(request)
+    }
+
+    pub fn retry(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
+        let path = self.sessions.get(&session_id)?.current_path.clone();
+        if path.is_empty() {
+            return None;
+        }
+
+        let request = self.new_request(session_id, path.as_str());
+        let state = self.sessions.get_mut(&session_id).expect("state must exist");
+        state.set_retrying(request.path.as_str(), request.request_id);
+        Some(request)
+    }
+
+    pub fn pending_request(&self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
+        let state = self.sessions.get(&session_id)?;
+        let request_id = state.active_request_id?;
+        if state.current_path.is_empty() {
+            return None;
+        }
+
+        Some(SftpBrowserLoadRequest {
+            session_id,
+            path: state.current_path.clone(),
+            request_id,
+        })
+    }
+
+    pub fn mark_disconnected(&mut self, session_id: Uuid) {
+        if let Some(state) = self.sessions.get_mut(&session_id) {
+            state.mark_disconnected();
+        }
+    }
+
+    pub fn apply_load_error(
+        &mut self,
+        session_id: Uuid,
+        request_id: u64,
+        path: &str,
+        message: String,
+    ) {
+        let Some(state) = self.sessions.get_mut(&session_id) else {
+            return;
+        };
+        if !state.accepts_request(request_id) {
+            return;
+        }
+
+        state.set_error(path, message);
+    }
+
+    pub fn apply_loaded_directory(
+        &mut self,
+        session_id: Uuid,
+        request_id: u64,
+        path: &str,
+        entries: Vec<SftpDirectoryEntry>,
+    ) {
+        let Some(state) = self.sessions.get_mut(&session_id) else {
+            return;
+        };
+        if !state.accepts_request(request_id) {
+            return;
+        }
+
+        state.set_ready(path, entries);
+    }
+
+    pub fn session_state(&self, session_id: Uuid) -> Option<&SftpBrowserSessionState> {
+        self.sessions.get(&session_id)
+    }
+
+    fn new_request(&mut self, session_id: Uuid, path: &str) -> SftpBrowserLoadRequest {
+        self.next_request_id += 1;
+        SftpBrowserLoadRequest {
+            session_id,
+            path: path.to_string(),
+            request_id: self.next_request_id,
+        }
+    }
+}

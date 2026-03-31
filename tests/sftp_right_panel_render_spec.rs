@@ -111,7 +111,65 @@ fn empty_sftp_panel_renders_empty_state_copy() {
 }
 
 #[test]
-fn ready_sftp_panel_renders_session_toolbar_list_and_queue_summary() {
+fn right_panel_source_defines_single_line_toolbar_and_path_bar_contract() {
+    let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
+
+    assert!(
+        source.contains("toolbar-row"),
+        "right panel should define a compact single-line toolbar row"
+    );
+    assert!(
+        source.contains("path-bar"),
+        "right panel should define a dedicated path bar shell"
+    );
+    assert!(
+        !source.contains("session-strip"),
+        "right panel should remove the legacy session strip"
+    );
+}
+
+#[test]
+fn right_panel_source_defines_multi_column_remote_table_headers() {
+    let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
+
+    assert!(
+        source.contains("text: \"Name\""),
+        "right panel should expose the Name column header"
+    );
+    assert!(
+        source.contains("text: \"Modified\""),
+        "right panel should expose the Modified column header"
+    );
+    assert!(
+        source.contains("text: \"Size\""),
+        "right panel should expose the Size column header"
+    );
+    assert!(
+        !source.contains("text: \"Remote items\""),
+        "right panel should drop the legacy single-column list header"
+    );
+}
+
+#[test]
+fn right_panel_source_no_longer_renders_queue_summary_inside_panel() {
+    let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
+
+    assert!(
+        !source.contains("Transfer queue"),
+        "right panel should remove the embedded transfer queue strip"
+    );
+    assert!(
+        !source.contains("queue-strip :="),
+        "right panel should remove the queue strip container"
+    );
+    assert!(
+        !source.contains("queue-drawer :="),
+        "right panel should remove the queue drawer container"
+    );
+}
+
+#[test]
+fn ready_sftp_panel_renders_compact_toolbar_and_file_table() {
     let rows = vec![
         SftpPanelItem {
             id: "entry-app".into(),
@@ -145,30 +203,24 @@ fn ready_sftp_panel_renders_session_toolbar_list_and_queue_summary() {
     });
 
     let panel_surface = pixel_at(&buffer, PANEL_X + 20, 28);
-    let session_pixels =
-        count_distinct_pixels(&buffer, PANEL_X + 12, 12, 360, 52, panel_surface, 14);
     let toolbar_pixels =
-        count_distinct_pixels(&buffer, PANEL_X + 12, 70, 360, 82, panel_surface, 14);
+        count_distinct_pixels(&buffer, PANEL_X + 12, 12, 360, 56, panel_surface, 14);
+    let path_bar_pixels =
+        count_distinct_pixels(&buffer, PANEL_X + 84, 12, 276, 56, panel_surface, 14);
     let list_pixels =
-        count_distinct_pixels(&buffer, PANEL_X + 12, 164, 360, 220, panel_surface, 14);
-    let queue_pixels =
-        count_distinct_pixels(&buffer, PANEL_X + 12, 780, 360, 72, panel_surface, 14);
+        count_distinct_pixels(&buffer, PANEL_X + 12, 88, 360, 260, panel_surface, 14);
 
     assert!(
-        session_pixels >= 1800,
-        "ready sftp panel should render the session strip, only found {session_pixels} distinct pixels"
-    );
-    assert!(
-        toolbar_pixels >= 3500,
+        toolbar_pixels >= 1600,
         "ready sftp panel should render the browser toolbar and path bar, only found {toolbar_pixels} distinct pixels"
     );
     assert!(
-        list_pixels >= 6000,
-        "ready sftp panel should render the file list shell, only found {list_pixels} distinct pixels"
+        path_bar_pixels >= 1400,
+        "ready sftp panel should render a visible path bar shell, only found {path_bar_pixels} distinct pixels"
     );
     assert!(
-        queue_pixels >= 1800,
-        "ready sftp panel should render the queue summary strip, only found {queue_pixels} distinct pixels"
+        list_pixels >= 6200,
+        "ready sftp panel should render the file list shell, only found {list_pixels} distinct pixels"
     );
 }
 

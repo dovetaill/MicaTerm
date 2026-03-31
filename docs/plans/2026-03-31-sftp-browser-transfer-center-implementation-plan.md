@@ -390,3 +390,20 @@ Update the design/plan docs only if the implementation revealed:
 git add docs/plans/2026-03-31-sftp-browser-transfer-center-design.md docs/plans/2026-03-31-sftp-browser-transfer-center-implementation-plan.md
 git commit -m "docs: finalize sftp browser redesign plan notes"
 ```
+
+## Task 7 Completion Notes
+
+Verification completed on `2026-03-31`:
+
+- Focused regression pass:
+  - `cargo test --test sftp_browser_controller_spec --test sftp_follow_cwd_spec --test sftp_right_panel_render_spec --test transfer_center_smoke --test top_status_bar_smoke -q`
+- Full workspace pass:
+  - `cargo test --workspace`
+  - `cargo check --workspace`
+  - `cargo clippy --workspace -- -D warnings`
+
+Implementation follow-up notes:
+
+- `Transfer Center` is intentionally shipped as a first-iteration shell. The titlebar entry, badge, tabs, and empty state are live, but tab-specific row projection is deferred.
+- The SFTP browser now preserves manual browsing context across disconnect/retry, but reconnect completion is still finalized by the existing projection timer loop instead of a dedicated direct callback.
+- The right-panel table contract is in place, but `Modified` still shows a placeholder kind label until remote metadata is added to `SftpDirectoryEntry`.

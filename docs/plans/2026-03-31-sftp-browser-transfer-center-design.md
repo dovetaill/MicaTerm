@@ -404,3 +404,8 @@
   - `cargo check --workspace`
   - `cargo clippy --workspace -- -D warnings`
 
+## 实施残留说明
+
+- `Transfer Center` 首轮实现已经包含 titlebar 入口、全局 queue badge、tab strip 和空态容器，但当前仍未投影逐条 transfer rows，也没有按 `Running/Queued/Paused/Failed/Completed` 做真实过滤。
+- 右侧 SFTP 三列表格当前只完成了布局壳层；`Modified` 列仍使用条目类型占位，真实修改时间需要在后续为 `SftpDirectoryEntry` 补充远端元数据后再接入。
+- `Retry` 已能在断线后保持 last path 和 manual/follow 上下文，但 pending reconnect request 仍由 `session_projection_timer` 轮询消费；当前行为正确，后续可收敛为更直接的事件驱动恢复。

@@ -26,6 +26,7 @@ import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
 import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow } from "shell/terminal-session-host.slint";
 import { WorkspaceTabItem } from "shell/tabbar.slint";
 import { Titlebar } from "shell/titlebar.slint";
+import { TransferCenter } from "shell/transfer-center.slint";
 import { WorkspacePane } from "shell/workspace-pane.slint";
 
 export component AppWindow inherits Window {
@@ -50,6 +51,8 @@ export component AppWindow inherits Window {
     in-out property <string> sync-feedback-text: "";
     in-out property <int> sync-feedback-sequence: 0;
     in-out property <bool> show-right-panel: false;
+    in-out property <bool> transfer-center-open: false;
+    in-out property <int> transfer-queue-total: 0;
     in-out property <string> right-panel-view: "sftp";
     in-out property <string> sftp-panel-mode: "empty";
     in-out property <string> sftp-panel-host-label: "";
@@ -285,6 +288,7 @@ export component AppWindow inherits Window {
     callback close-requested();
     callback toggle-right-panel-requested();
     callback sync-now-requested();
+    callback open-transfer-center-requested();
     callback open-sync-modal-requested();
     callback sync-modal-close-requested();
     callback sync-modal-submit-master-password(string);
@@ -491,6 +495,8 @@ export component AppWindow inherits Window {
                 sync-feedback-text: root.sync-feedback-text;
                 sync-feedback-sequence: root.sync-feedback-sequence;
                 show-right-panel: root.effective-show-right-panel;
+                transfer-center-open: root.transfer-center-open;
+                transfer-queue-total: root.transfer-queue-total;
                 show-global-menu: root.show-global-menu;
                 is-window-maximized: root.is-window-maximized;
                 is-window-active: root.is-window-active;
@@ -522,6 +528,8 @@ export component AppWindow inherits Window {
 
                 sync-now-requested => {
                     root.sync-now-requested();
+                open-transfer-center-requested => {
+                    root.open-transfer-center-requested();
                 }
 
                 open-sync-modal-requested => {
@@ -864,6 +872,15 @@ export component AppWindow inherits Window {
                         sftp-panel-reenable-follow-requested => {
                             root.sftp-panel-reenable-follow-requested();
                         }
+                    }
+
+                    transfer-center := TransferCenter {
+                        x: sidebar.width + 24px;
+                        y: 16px;
+                        width: max(0px, parent.width - sidebar.width - 48px);
+                        height: max(0px, parent.height - 32px);
+                        open: root.transfer-center-open;
+                        queue-total: root.transfer-queue-total;
                     }
                 }
             }
