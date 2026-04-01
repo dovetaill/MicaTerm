@@ -6711,9 +6711,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 save_ui_preferences(&store_ref, &state);
             }
 
-            if matches!(trigger, VaultSyncTrigger::Manual)
-                && let Some(runtime_handle) = async_runtime_handle_ref.clone()
-            {
+            if let Some(runtime_handle) = async_runtime_handle_ref.clone() {
                 let initial_state = (*state).clone();
                 let worker_state = initial_state.clone();
                 let worker_vault = (*vault).clone();
@@ -6741,7 +6739,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                         target: "app.vault",
                                         error = %err,
                                         vault_sync_trigger = ?trigger,
-                                        "manual vault sync failed in background worker"
+                                        "vault sync failed in background worker"
                                     );
                                     set_sync_modal_error_without_opening(
                                         &mut worker_state,
@@ -6772,7 +6770,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                         target: "app.vault",
                                         error = %err,
                                         vault_sync_trigger = ?trigger,
-                                        "manual vault refresh failed in background worker"
+                                        "vault refresh failed in background worker"
                                     );
                                     set_sync_modal_error_without_opening(
                                         &mut worker_state,

@@ -3198,6 +3198,57 @@ fn manual_sync_modal_returns_before_slow_primary_write_completes() {
 }
 
 #[test]
+fn debounced_auto_sync_returns_before_slow_primary_write_completes() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("debounced-auto-sync-background");
+    let primary_inner = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::s3_like(),
+    ));
+    let primary = Arc::new(DelayedVaultProvider::new(
+        Arc::clone(&primary_inner),
+        Duration::ZERO,
+        Duration::from_millis(250),
+    ));
+    let provider_factory = AnyVaultProviderFactory::default();
+    provider_factory.insert(primary as Arc<dyn VaultProvider>);
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store,
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_sync_modal_close_requested();
+
+    create_root_snippet(&app, "Deploy prod", "kubectl rollout restart deploy/api");
+    assert_eq!(primary_inner.recorded_writes().len(), 0);
+
+    let started = Instant::now();
+    settle_sync_scheduler(Duration::from_millis(1300));
+
+    assert!(
+        started.elapsed() < Duration::from_millis(120),
+        "debounced auto sync should return quickly while the provider writes in the background"
+    );
+    wait_for_condition(Duration::from_secs(2), || primary_inner.recorded_writes().len() == 1);
+}
+
+#[test]
 fn unlocking_existing_vault_waits_for_a_real_mutation_before_background_sync() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -3277,7 +3328,7 @@ fn asset_mutation_syncs_without_auto_sync_toggle() {
     app.invoke_confirm_asset_modal_requested();
     assert_eq!(primary.recorded_writes().len(), 0);
     settle_sync_scheduler(Duration::from_millis(1300));
-    assert_eq!(primary.recorded_writes().len(), 1);
+    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
 
     let folder_id = app
         .get_console_asset_items()
@@ -3292,13 +3343,14 @@ fn asset_mutation_syncs_without_auto_sync_toggle() {
     app.invoke_confirm_asset_rename_requested();
     assert_eq!(primary.recorded_writes().len(), 1);
     settle_sync_scheduler(Duration::from_millis(1300));
-    assert_eq!(primary.recorded_writes().len(), 2);
+    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 2);
 
     app.invoke_asset_context_menu_requested(folder_id.into(), "folder".into(), 96.0, 160.0);
     app.invoke_assets_context_menu_action_invoked("delete-asset".into());
     app.invoke_confirm_delete_asset_requested();
     assert_eq!(primary.recorded_writes().len(), 2);
     settle_sync_scheduler(Duration::from_millis(1300));
+    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 3);
     assert_eq!(primary.recorded_writes().len(), 3);
 }
 
@@ -3371,6 +3423,7 @@ fn periodic_sync_pulls_remote_changes_even_without_local_dirty_state() {
     primary.set_remote_revision(Some(remote_revision));
 
     settle_sync_scheduler(Duration::from_secs(121));
+    wait_for_condition(Duration::from_secs(2), || app.get_console_asset_items().row_count() == 1);
 
     assert_eq!(
         primary.recorded_writes().len(),
@@ -3384,6 +3437,86 @@ fn periodic_sync_pulls_remote_changes_even_without_local_dirty_state() {
             .unwrap()
             .is_some()
     );
+}
+
+#[test]
+fn periodic_sync_returns_before_slow_primary_refresh_completes() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("periodic-sync-background");
+    let primary_inner = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let primary = Arc::new(DelayedVaultProvider::new(
+        Arc::clone(&primary_inner),
+        Duration::from_millis(250),
+        Duration::ZERO,
+    ));
+    let provider_factory = AnyVaultProviderFactory::default();
+    provider_factory.insert(primary as Arc<dyn VaultProvider>);
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        credential_store.clone(),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root.clone()),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+    app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(Duration::from_secs(2), || primary_inner.recorded_writes().len() == 1);
+    app.invoke_sync_modal_close_requested();
+
+    let remote_store = Arc::new(MemoryCredentialStore::default());
+    let (remote_tree, remote_credential_ref) = sample_vault_asset_tree("10.0.0.99");
+    persist_secret_bundle(
+        remote_store.as_ref(),
+        &remote_credential_ref,
+        &StoredSshSecretBundle {
+            password: Some("hunter2".into()),
+            ..StoredSshSecretBundle::default()
+        },
+    )
+    .unwrap();
+    let local_state = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+        .unwrap()
+        .expect("local bootstrap state after initial sync");
+    let runtime_vault_key = load_runtime_vault_key(credential_store.as_ref(), "vault-main")
+        .unwrap()
+        .expect("runtime vault key after enabling sync");
+    let mut remote_revision = sample_remote_revision_for_existing_vault_key(
+        &remote_tree,
+        remote_store.as_ref(),
+        "rev-0002",
+        &runtime_vault_key,
+        &local_state.wrapped_vault_key,
+        &local_state.kdf,
+    );
+    remote_revision.head.parent_revision = Some("rev-0001".into());
+    remote_revision.head.committed_at = "99999999999999999999".into();
+    primary_inner.set_remote_head(Some(remote_revision.head.clone()));
+    primary_inner.set_remote_revision(Some(remote_revision));
+
+    let started = Instant::now();
+    settle_sync_scheduler(Duration::from_secs(121));
+
+    assert!(
+        started.elapsed() < Duration::from_millis(120),
+        "periodic sync should return quickly while the provider refresh runs in the background"
+    );
+    wait_for_condition(Duration::from_secs(2), || app.get_console_asset_items().row_count() == 1);
 }
 
 #[test]
@@ -3436,6 +3569,11 @@ fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies() {
     app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.24".into());
     app.invoke_asset_ssh_modal_action_requested("save".into());
     settle_sync_scheduler(Duration::from_millis(1300));
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_sync_modal_error_text()
+            .as_str()
+            .contains("temporary outage")
+    });
     assert_eq!(primary.recorded_writes().len(), 1);
     primary.set_write_error(None);
 
@@ -3477,6 +3615,7 @@ fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies() {
     primary.set_remote_revision(Some(remote_revision));
 
     settle_sync_scheduler(Duration::from_secs(121));
+    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 2);
 
     assert_eq!(primary.recorded_writes().len(), 2);
     let latest_write = primary
@@ -3553,6 +3692,7 @@ fn back_to_back_mutations_share_one_debounced_auto_sync_upload() {
 
     assert_eq!(primary.recorded_writes().len(), 0);
     settle_sync_scheduler(Duration::from_millis(1300));
+    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
 
     assert_eq!(
         primary.recorded_writes().len(),
