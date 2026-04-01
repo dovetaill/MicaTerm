@@ -1,8 +1,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, ensure};
+use git2::{
+    Cred, CredentialType, FetchOptions, Oid, PushOptions, RemoteCallbacks, Repository,
+    RepositoryInitOptions, Signature,
+};
 use serde::Deserialize;
 
 use crate::app::vault::auth::git::{
@@ -22,6 +25,8 @@ const REMOTE_NAME: &str = "origin";
 const HEAD_FILE_NAME: &str = "vault-head.json";
 const MANIFEST_FILE_NAME: &str = "vault-manifest.bin";
 const SNAPSHOT_FILE_NAME: &str = "vault-snapshot.bin";
+const COMMITTER_NAME: &str = "Mica Term Vault";
+const COMMITTER_EMAIL: &str = "vault@mica-term.local";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitRepoProviderConfig {
@@ -139,94 +144,222 @@ impl GitRepoProvider {
         &self.config
     }
 
-    fn ensure_repo_ready(&self) -> Result<()> {
-        if !self.config.cache_dir.join(".git").exists() {
+    fn ensure_repo_ready(&self) -> Result<Repository> {
+        let repo = if self.config.cache_dir.join(".git").exists() {
+            Repository::open(self.config.cache_dir.as_path()).with_context(|| {
+                format!(
+                    "failed to open git repo cache `{}`",
+                    self.config.cache_dir.display()
+                )
+            })?
+        } else {
             fs::create_dir_all(&self.config.cache_dir).with_context(|| {
                 format!(
                     "failed to create git repo cache `{}`",
                     self.config.cache_dir.display()
                 )
             })?;
-            self.run_git(["init"], None)?;
-        }
+            let mut options = RepositoryInitOptions::new();
+            options.initial_head(self.config.branch.as_str());
+            Repository::init_opts(self.config.cache_dir.as_path(), &options).with_context(|| {
+                format!(
+                    "failed to initialize git repo cache `{}`",
+                    self.config.cache_dir.display()
+                )
+            })?
+        };
 
-        self.ensure_remote()?;
-        self.run_git(["config", "user.name", "Mica Term Vault"], None)?;
-        self.run_git(["config", "user.email", "vault@mica-term.local"], None)?;
+        self.ensure_remote(&repo)?;
+        self.configure_repo(&repo)?;
+        Ok(repo)
+    }
+
+    fn configure_repo(&self, repo: &Repository) -> Result<()> {
+        let mut config = repo.config().context("failed to open git repo config")?;
+        config
+            .set_str("user.name", COMMITTER_NAME)
+            .context("failed to configure git repo committer name")?;
+        config
+            .set_str("user.email", COMMITTER_EMAIL)
+            .context("failed to configure git repo committer email")?;
         Ok(())
     }
 
-    fn ensure_remote(&self) -> Result<()> {
-        let output = self.run_git_capture(["remote", "get-url", REMOTE_NAME], None)?;
-        if output.status.success() {
-            let current = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if current != self.config.remote_url {
-                self.run_git(["remote", "set-url", REMOTE_NAME, self.config.remote_url.as_str()], None)?;
+    fn ensure_remote(&self, repo: &Repository) -> Result<()> {
+        match repo.find_remote(REMOTE_NAME) {
+            Ok(remote) => {
+                if remote.url() != Some(self.config.remote_url.as_str()) {
+                    repo.remote_set_url(REMOTE_NAME, self.config.remote_url.as_str())
+                        .with_context(|| {
+                            format!(
+                                "failed to update git remote URL for `{}`",
+                                self.config.remote_id
+                            )
+                        })?;
+                }
+                self.configure_remote_fetch_spec(repo)
             }
-            return Ok(());
+            Err(_) => {
+                repo.remote(REMOTE_NAME, self.config.remote_url.as_str())
+                    .map(|_| ())
+                    .with_context(|| {
+                        format!(
+                            "failed to create git remote `{}` for `{}`",
+                            REMOTE_NAME, self.config.remote_id
+                        )
+                    })?;
+                self.configure_remote_fetch_spec(repo)
+            }
         }
-
-        self.run_git(["remote", "add", REMOTE_NAME, self.config.remote_url.as_str()], None)
     }
 
-    fn remote_branch_exists(&self) -> Result<bool> {
-        let output =
-            self.run_git_capture(["ls-remote", "--heads", REMOTE_NAME, self.config.branch.as_str()], None)?;
-        if !output.status.success() {
-            return Err(command_error("git ls-remote", &output));
-        }
-
-        Ok(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
+    fn configure_remote_fetch_spec(&self, repo: &Repository) -> Result<()> {
+        let mut config = repo.config().context("failed to open git repo config")?;
+        let fetch_key = format!("remote.{REMOTE_NAME}.fetch");
+        config
+            .set_str(fetch_key.as_str(), format!("+{}", self.fetch_refspec()).as_str())
+            .with_context(|| format!("failed to configure `{fetch_key}`"))?;
+        Ok(())
     }
 
-    fn fetch_remote_branch(&self) -> Result<bool> {
-        if !self.remote_branch_exists()? {
-            return Ok(false);
-        }
+    fn remote_callbacks(&self) -> RemoteCallbacks<'static> {
+        let auth = self.config.auth.clone();
+        let mut callbacks = RemoteCallbacks::new();
+        callbacks.credentials(move |_url, username_from_url, allowed| {
+            match &auth {
+                GitTransportAuthPlan::HttpsCredentials { username, secret } => {
+                    if allowed.contains(CredentialType::USERNAME)
+                        && !allowed.contains(CredentialType::USER_PASS_PLAINTEXT)
+                    {
+                        Cred::username(username.as_str())
+                    } else {
+                        Cred::userpass_plaintext(username.as_str(), secret.as_str())
+                    }
+                }
+                GitTransportAuthPlan::SshKey {
+                    private_key,
+                    passphrase,
+                } => {
+                    let username = username_from_url.unwrap_or("git");
+                    if allowed.contains(CredentialType::USERNAME)
+                        && !allowed.contains(CredentialType::SSH_KEY)
+                    {
+                        Cred::username(username)
+                    } else {
+                        Cred::ssh_key_from_memory(
+                            username,
+                            None,
+                            private_key.as_str(),
+                            passphrase.as_deref(),
+                        )
+                    }
+                }
+            }
+        });
+        callbacks.push_update_reference(|_reference, status| match status {
+            Some(status) => Err(git2::Error::from_str(status)),
+            None => Ok(()),
+        });
+        callbacks
+    }
 
-        let refspec = format!(
+    fn fetch_refspec(&self) -> String {
+        format!(
             "refs/heads/{}:refs/remotes/{}/{}",
             self.config.branch, REMOTE_NAME, self.config.branch
-        );
-        self.run_git(["fetch", REMOTE_NAME, refspec.as_str(), "--quiet"], None)?;
-        Ok(true)
+        )
+    }
+
+    fn local_branch_ref(&self) -> String {
+        format!("refs/heads/{}", self.config.branch)
+    }
+
+    fn fetch_remote_branch(&self, repo: &Repository) -> Result<bool> {
+        let mut remote = repo.find_remote(REMOTE_NAME).with_context(|| {
+            format!(
+                "failed to open git remote `{}` for `{}`",
+                REMOTE_NAME, self.config.remote_id
+            )
+        })?;
+        let mut options = FetchOptions::new();
+        options.remote_callbacks(self.remote_callbacks());
+        match remote.fetch::<&str>(&[], Some(&mut options), None) {
+            Ok(()) => {
+                if repo.refname_to_id(self.tracking_ref().as_str()).is_ok() {
+                    return Ok(true);
+                }
+                match self.lookup_fetched_branch_oid(repo)? {
+                    Some(remote_oid) => {
+                    repo.reference(
+                        self.tracking_ref().as_str(),
+                        remote_oid,
+                        true,
+                        "mica-term update git primary tracking ref",
+                    )
+                    .context("failed to update Git tracking ref")?;
+                        Ok(true)
+                    }
+                    None => Ok(false),
+                }
+            }
+            Err(err) if is_missing_remote_branch_error(&err) => Ok(false),
+            Err(err) => Err(err).with_context(|| {
+                format!(
+                    "failed to fetch branch `{}` from `{}`",
+                    self.config.branch, self.config.remote_url
+                )
+            }),
+        }
+    }
+
+    fn lookup_fetched_branch_oid(&self, repo: &Repository) -> Result<Option<Oid>> {
+        let target_ref = format!("refs/heads/{}", self.config.branch);
+        let mut branch_oid = None;
+        repo.fetchhead_foreach(|reference_name, _remote_url, oid, _is_merge| {
+            if reference_name == target_ref {
+                branch_oid = Some(*oid);
+                false
+            } else {
+                true
+            }
+        })
+        .context("failed to inspect Git FETCH_HEAD")?;
+        Ok(branch_oid)
     }
 
     fn tracking_ref(&self) -> String {
         format!("refs/remotes/{}/{}", REMOTE_NAME, self.config.branch)
     }
 
-    fn checkout_target_branch(&self, has_remote_branch: bool) -> Result<()> {
-        if has_remote_branch {
-            let tracking_ref = self.tracking_ref();
-            self.run_git(
-                ["checkout", "-B", self.config.branch.as_str(), tracking_ref.as_str()],
-                None,
-            )?;
-            return Ok(());
-        }
-
-        self.run_git(["checkout", "--orphan", self.config.branch.as_str()], None)?;
-        let _ = self.run_git_capture(["rm", "-rf", "--cached", "--ignore-unmatch", "."], None)?;
-        clear_worktree(self.config.cache_dir.as_path())?;
-        Ok(())
+    fn resolve_commit<'repo>(&self, repo: &'repo Repository, git_ref: &str) -> Result<git2::Commit<'repo>> {
+        repo.revparse_single(git_ref)
+            .with_context(|| format!("failed to resolve git revision `{git_ref}`"))?
+            .peel_to_commit()
+            .with_context(|| format!("failed to peel git revision `{git_ref}` to a commit"))
     }
 
-    fn read_head_from_ref(&self, git_ref: &str) -> Result<VaultHead> {
-        let bytes = self.read_file_from_ref(git_ref, HEAD_FILE_NAME)?;
+    fn read_head_from_ref(&self, repo: &Repository, git_ref: &str) -> Result<VaultHead> {
+        let commit = self.resolve_commit(repo, git_ref)?;
+        self.read_head_from_commit(repo, &commit)
+    }
+
+    fn read_head_from_commit(&self, repo: &Repository, commit: &git2::Commit<'_>) -> Result<VaultHead> {
+        let bytes = self.read_file_from_commit(repo, commit, HEAD_FILE_NAME)?;
         serde_json::from_slice(bytes.as_slice()).context("failed to decode git repo vault head")
     }
 
-    fn read_revision_from_ref(&self, git_ref: &str) -> Result<ProviderRevision> {
-        let head = self.read_head_from_ref(git_ref)?;
+    fn read_revision_from_ref(&self, repo: &Repository, git_ref: &str) -> Result<ProviderRevision> {
+        let commit = self.resolve_commit(repo, git_ref)?;
+        let head = self.read_head_from_commit(repo, &commit)?;
         let manifest: VaultManifest = bincode::deserialize(
-            self.read_file_from_ref(git_ref, MANIFEST_FILE_NAME)?.as_slice(),
+            self.read_file_from_commit(repo, &commit, MANIFEST_FILE_NAME)?
+                .as_slice(),
         )
         .context("failed to decode git repo vault manifest")?;
         let encrypted_snapshot = rebuild_snapshot_from_manifest(
             &head,
             &manifest,
-            self.read_file_from_ref(git_ref, SNAPSHOT_FILE_NAME)?,
+            self.read_file_from_commit(repo, &commit, SNAPSHOT_FILE_NAME)?,
         )?;
 
         Ok(ProviderRevision {
@@ -236,33 +369,51 @@ impl GitRepoProvider {
         })
     }
 
-    fn read_file_from_ref(&self, git_ref: &str, file_name: &str) -> Result<Vec<u8>> {
-        let object = format!("{git_ref}:{file_name}");
-        let output = self.run_git_capture(["show", object.as_str()], None)?;
-        if !output.status.success() {
-            return Err(command_error("git show", &output));
-        }
-        Ok(output.stdout)
+    fn read_file_from_commit(
+        &self,
+        repo: &Repository,
+        commit: &git2::Commit<'_>,
+        file_name: &str,
+    ) -> Result<Vec<u8>> {
+        let tree = commit.tree().context("failed to load git commit tree")?;
+        let entry = tree.get_name(file_name).ok_or_else(|| {
+            anyhow!(
+                "git repo remote `{}` is missing `{file_name}` in commit `{}`",
+                self.config.remote_id,
+                commit.id()
+            )
+        })?;
+        let blob = repo.find_blob(entry.id()).with_context(|| {
+            format!(
+                "failed to load `{file_name}` blob from commit `{}`",
+                commit.id()
+            )
+        })?;
+        Ok(blob.content().to_vec())
     }
 
-    fn find_commit_for_revision(&self, revision: &str) -> Result<String> {
+    fn find_commit_for_revision(&self, repo: &Repository, revision: &str) -> Result<Oid> {
         let tracking_ref = self.tracking_ref();
-        let output = self.run_git_capture(["rev-list", tracking_ref.as_str()], None)?;
-        if !output.status.success() {
-            return Err(command_error("git rev-list", &output));
-        }
+        let mut walk = repo.revwalk().context("failed to create Git revision walk")?;
+        walk.push_ref(tracking_ref.as_str()).with_context(|| {
+            format!(
+                "failed to walk tracking ref `{}` for `{}`",
+                tracking_ref, self.config.remote_id
+            )
+        })?;
 
-        for line in String::from_utf8_lossy(&output.stdout).lines() {
-            let sha = line.trim();
-            if sha.is_empty() {
-                continue;
-            }
-            let candidate = match self.read_head_from_ref(sha) {
+        for oid in walk {
+            let oid = oid.context("failed to iterate Git revision walk")?;
+            let commit = match repo.find_commit(oid) {
+                Ok(commit) => commit,
+                Err(_) => continue,
+            };
+            let candidate = match self.read_head_from_commit(repo, &commit) {
                 Ok(candidate) => candidate,
                 Err(_) => continue,
             };
             if candidate.vault_revision == revision {
-                return Ok(sha.to_string());
+                return Ok(oid);
             }
         }
 
@@ -272,81 +423,8 @@ impl GitRepoProvider {
         ))
     }
 
-    fn run_git<const N: usize>(&self, args: [&str; N], cwd: Option<&Path>) -> Result<()> {
-        let output = self.run_git_capture(args, cwd)?;
-        if !output.status.success() {
-            return Err(command_error("git command", &output));
-        }
-        Ok(())
-    }
-
-    fn run_git_capture<const N: usize>(
-        &self,
-        args: [&str; N],
-        cwd: Option<&Path>,
-    ) -> Result<std::process::Output> {
-        let auth = PreparedGitAuth::prepare(&self.config.auth)?;
-        let mut command = Command::new("git");
-        command.args(args);
-        command.current_dir(cwd.unwrap_or(self.config.cache_dir.as_path()));
-        auth.apply(&mut command);
-        command
-            .output()
-            .with_context(|| format!("failed to run git command in `{}`", self.config.cache_dir.display()))
-    }
-}
-
-impl VaultProvider for GitRepoProvider {
-    fn remote_id(&self) -> &str {
-        self.config.remote_id.as_str()
-    }
-
-    fn capabilities(&self) -> ProviderCapabilities {
-        ProviderCapabilities::git_repo_primary()
-    }
-
-    fn read_head(&self) -> Result<ProviderReadResult> {
-        self.ensure_repo_ready()?;
-        if !self.fetch_remote_branch()? {
-            return Ok(ProviderReadResult::default());
-        }
-
-        Ok(ProviderReadResult {
-            head: Some(self.read_head_from_ref(self.tracking_ref().as_str())?),
-        })
-    }
-
-    fn read_revision(&self, head: &VaultHead) -> Result<ProviderRevision> {
-        self.ensure_repo_ready()?;
-        if !self.fetch_remote_branch()? {
-            return Err(anyhow!(
-                "git repo remote `{}` is empty",
-                self.config.remote_id
-            ));
-        }
-        let commit = self.find_commit_for_revision(head.vault_revision.as_str())?;
-        self.read_revision_from_ref(commit.as_str())
-    }
-
-    fn write_revision(&self, request: &ProviderWriteRequest) -> Result<()> {
-        self.ensure_repo_ready()?;
-        let has_remote_branch = self.fetch_remote_branch()?;
-        let remote_head = if has_remote_branch {
-            Some(self.read_head_from_ref(self.tracking_ref().as_str())?)
-        } else {
-            None
-        };
-        let actual_parent = remote_head.as_ref().map(|head| head.vault_revision.clone());
-        if request.expected_parent_revision != actual_parent {
-            return Err(anyhow!(
-                "non-fast-forward push rejected for git remote `{}`: expected {:?}, found {:?}",
-                self.config.remote_id,
-                request.expected_parent_revision,
-                actual_parent
-            ));
-        }
-
-        self.checkout_target_branch(has_remote_branch)?;
+    fn write_workspace_files(&self, request: &ProviderWriteRequest) -> Result<()> {
+        clear_worktree(self.config.cache_dir.as_path())?;
         fs::write(
             self.config.cache_dir.join(HEAD_FILE_NAME),
             serde_json::to_vec_pretty(&request.head).context("encode git repo vault head")?,
@@ -377,25 +455,137 @@ impl VaultProvider for GitRepoProvider {
                 self.config.cache_dir.display()
             )
         })?;
+        Ok(())
+    }
 
-        self.run_git(["add", HEAD_FILE_NAME, MANIFEST_FILE_NAME, SNAPSHOT_FILE_NAME], None)?;
+    fn commit_workspace(
+        &self,
+        repo: &Repository,
+        request: &ProviderWriteRequest,
+        has_remote_branch: bool,
+    ) -> Result<()> {
+        let mut index = repo.index().context("failed to open Git index")?;
+        index.clear().context("failed to clear Git index")?;
+        index
+            .add_path(Path::new(HEAD_FILE_NAME))
+            .context("failed to stage vault head")?;
+        index
+            .add_path(Path::new(MANIFEST_FILE_NAME))
+            .context("failed to stage vault manifest")?;
+        index
+            .add_path(Path::new(SNAPSHOT_FILE_NAME))
+            .context("failed to stage vault snapshot")?;
+        index.write().context("failed to persist Git index")?;
+        let tree_oid = index.write_tree().context("failed to write Git tree")?;
+        let tree = repo.find_tree(tree_oid).context("failed to load Git tree")?;
+        let signature = Signature::now(COMMITTER_NAME, COMMITTER_EMAIL)
+            .context("failed to build Git signature")?;
         let commit_message = format!("vault-revision: {}", request.head.vault_revision);
-        self.run_git(["commit", "--quiet", "-m", commit_message.as_str()], None)?;
 
-        let refspec = format!("HEAD:refs/heads/{}", self.config.branch);
-        let output = self.run_git_capture(["push", REMOTE_NAME, refspec.as_str()], None)?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("non-fast-forward") || stderr.contains("fetch first") {
-                return Err(anyhow!(
-                    "non-fast-forward push rejected for git remote `{}`",
-                    self.config.remote_id
-                ));
-            }
-            return Err(command_error("git push", &output));
+        let parent_commit = if has_remote_branch {
+            Some(
+                repo.find_commit(
+                    repo.refname_to_id(self.tracking_ref().as_str())
+                        .context("failed to resolve tracking ref to commit")?,
+                )
+                .context("failed to open parent commit")?,
+            )
+        } else {
+            None
+        };
+        let parents = parent_commit.iter().collect::<Vec<_>>();
+        let commit_oid = repo
+            .commit(None, &signature, &signature, commit_message.as_str(), &tree, &parents)
+            .context("failed to create Git commit")?;
+        repo.reference(
+            self.local_branch_ref().as_str(),
+            commit_oid,
+            true,
+            "mica-term update git primary cache",
+        )
+        .context("failed to update local Git branch ref")?;
+        Ok(())
+    }
+
+    fn push_local_branch(&self, repo: &Repository) -> Result<()> {
+        let mut remote = repo.find_remote(REMOTE_NAME).with_context(|| {
+            format!(
+                "failed to open git remote `{}` for `{}`",
+                REMOTE_NAME, self.config.remote_id
+            )
+        })?;
+        let mut options = PushOptions::new();
+        options.remote_callbacks(self.remote_callbacks());
+        let refspec = self.local_branch_ref();
+        match remote.push(&[refspec.as_str()], Some(&mut options)) {
+            Ok(()) => Ok(()),
+            Err(err) if is_non_fast_forward_error(&err) => Err(anyhow!(
+                "non-fast-forward push rejected for git remote `{}`",
+                self.config.remote_id
+            )),
+            Err(err) => Err(err).with_context(|| {
+                format!(
+                    "failed to push branch `{}` to `{}`",
+                    self.config.branch, self.config.remote_url
+                )
+            }),
+        }
+    }
+}
+
+impl VaultProvider for GitRepoProvider {
+    fn remote_id(&self) -> &str {
+        self.config.remote_id.as_str()
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities::git_repo_primary()
+    }
+
+    fn read_head(&self) -> Result<ProviderReadResult> {
+        let repo = self.ensure_repo_ready()?;
+        if !self.fetch_remote_branch(&repo)? {
+            return Ok(ProviderReadResult::default());
         }
 
-        Ok(())
+        Ok(ProviderReadResult {
+            head: Some(self.read_head_from_ref(&repo, self.tracking_ref().as_str())?),
+        })
+    }
+
+    fn read_revision(&self, head: &VaultHead) -> Result<ProviderRevision> {
+        let repo = self.ensure_repo_ready()?;
+        if !self.fetch_remote_branch(&repo)? {
+            return Err(anyhow!(
+                "git repo remote `{}` is empty",
+                self.config.remote_id
+            ));
+        }
+        let commit = self.find_commit_for_revision(&repo, head.vault_revision.as_str())?;
+        self.read_revision_from_ref(&repo, commit.to_string().as_str())
+    }
+
+    fn write_revision(&self, request: &ProviderWriteRequest) -> Result<()> {
+        let repo = self.ensure_repo_ready()?;
+        let has_remote_branch = self.fetch_remote_branch(&repo)?;
+        let remote_head = if has_remote_branch {
+            Some(self.read_head_from_ref(&repo, self.tracking_ref().as_str())?)
+        } else {
+            None
+        };
+        let actual_parent = remote_head.as_ref().map(|head| head.vault_revision.clone());
+        if request.expected_parent_revision != actual_parent {
+            return Err(anyhow!(
+                "non-fast-forward push rejected for git remote `{}`: expected {:?}, found {:?}",
+                self.config.remote_id,
+                request.expected_parent_revision,
+                actual_parent
+            ));
+        }
+
+        self.write_workspace_files(request)?;
+        self.commit_workspace(&repo, request, has_remote_branch)?;
+        self.push_local_branch(&repo)
     }
 }
 
@@ -440,122 +630,20 @@ fn clear_worktree(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn command_error(prefix: &str, output: &std::process::Output) -> anyhow::Error {
-    anyhow!(
-        "{prefix} failed: {}",
-        String::from_utf8_lossy(&output.stderr).trim()
-    )
+fn is_non_fast_forward_error(err: &git2::Error) -> bool {
+    let message = err.message().to_ascii_lowercase();
+    message.contains("non-fast-forward")
+        || message.contains("non-fastforward")
+        || message.contains("fetch first")
+        || message.contains("reference update failed")
+        || message.contains("failed to push some refs")
 }
 
-struct PreparedGitAuth {
-    envs: Vec<(String, String)>,
-    cleanup_paths: Vec<PathBuf>,
-}
-
-impl PreparedGitAuth {
-    fn prepare(plan: &GitTransportAuthPlan) -> Result<Self> {
-        match plan {
-            GitTransportAuthPlan::HttpsCredentials { username, secret } => {
-                let askpass_path = write_askpass_script()?;
-                Ok(Self {
-                    envs: vec![
-                        ("GIT_TERMINAL_PROMPT".into(), "0".into()),
-                        ("GIT_ASKPASS".into(), askpass_path.display().to_string()),
-                        ("MICA_TERM_GIT_USERNAME".into(), username.clone()),
-                        ("MICA_TERM_GIT_SECRET".into(), secret.clone()),
-                    ],
-                    cleanup_paths: vec![askpass_path],
-                })
-            }
-            GitTransportAuthPlan::SshKey {
-                private_key,
-                passphrase: _,
-            } => {
-                let key_path = write_ssh_private_key(private_key.as_str())?;
-                Ok(Self {
-                    envs: vec![
-                        (
-                            "GIT_SSH_COMMAND".into(),
-                            format!(
-                                "ssh -i \"{}\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes",
-                                key_path.display()
-                            ),
-                        ),
-                        ("GIT_TERMINAL_PROMPT".into(), "0".into()),
-                    ],
-                    cleanup_paths: vec![key_path],
-                })
-            }
-        }
-    }
-
-    fn apply(&self, command: &mut Command) {
-        for (key, value) in &self.envs {
-            command.env(key, value);
-        }
-    }
-}
-
-impl Drop for PreparedGitAuth {
-    fn drop(&mut self) {
-        for path in &self.cleanup_paths {
-            let _ = fs::remove_file(path);
-        }
-    }
-}
-
-fn write_askpass_script() -> Result<PathBuf> {
-    let suffix = if cfg!(windows) { "cmd" } else { "sh" };
-    let path = std::env::temp_dir().join(format!(
-        "mica-term-git-askpass-{}.{}",
-        uuid::Uuid::new_v4(),
-        suffix
-    ));
-    let body = if cfg!(windows) {
-        "@echo off\r\nset prompt=%~1\r\nif not x%prompt:Username=%==x%prompt% (\r\n  echo %MICA_TERM_GIT_USERNAME%\r\n) else (\r\n  echo %MICA_TERM_GIT_SECRET%\r\n)\r\n"
-            .to_string()
-    } else {
-        "#!/bin/sh\ncase \"$1\" in\n  *Username*) printf '%s' \"$MICA_TERM_GIT_USERNAME\" ;;\n  *) printf '%s' \"$MICA_TERM_GIT_SECRET\" ;;\nesac\n"
-            .to_string()
-    };
-    fs::write(&path, body).with_context(|| format!("failed to write `{}`", path.display()))?;
-    set_script_permissions(&path)?;
-    Ok(path)
-}
-
-fn write_ssh_private_key(private_key: &str) -> Result<PathBuf> {
-    let path = std::env::temp_dir().join(format!(
-        "mica-term-git-ssh-key-{}",
-        uuid::Uuid::new_v4()
-    ));
-    fs::write(&path, private_key)
-        .with_context(|| format!("failed to write `{}`", path.display()))?;
-    set_owner_only_permissions(&path)?;
-    Ok(path)
-}
-
-#[cfg(unix)]
-fn set_owner_only_permissions(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-        .with_context(|| format!("failed to update permissions for `{}`", path.display()))
-}
-
-#[cfg(unix)]
-fn set_script_permissions(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .with_context(|| format!("failed to update permissions for `{}`", path.display()))
-}
-
-#[cfg(not(unix))]
-fn set_owner_only_permissions(_path: &Path) -> Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_script_permissions(_path: &Path) -> Result<()> {
-    Ok(())
+fn is_missing_remote_branch_error(err: &git2::Error) -> bool {
+    let message = err.message().to_ascii_lowercase();
+    message.contains("couldn't find remote ref")
+        || message.contains("remote ref does not exist")
+        || message.contains("remote branch not found")
+        || message.contains("reference not found")
+        || message.contains("not our ref")
 }
