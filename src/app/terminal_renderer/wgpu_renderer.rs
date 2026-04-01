@@ -46,6 +46,8 @@ pub struct PreparedMonochromeGlyphDraw {
     pub upload: Option<PreparedMonochromeGlyphUploadPayload>,
     pub x_offset_px: i32,
     pub y_offset_px: i32,
+    pub dest_x_px: i32,
+    pub dest_y_px: i32,
     pub fg_rgba: u32,
 }
 
@@ -66,6 +68,8 @@ pub struct PreparedColorGlyphDraw {
     pub upload: Option<PreparedColorGlyphUploadPayload>,
     pub x_offset_px: i32,
     pub y_offset_px: i32,
+    pub dest_x_px: i32,
+    pub dest_y_px: i32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,9 +154,13 @@ impl WgpuTerminalRenderer {
             .flat_map(|row| row.runs.iter())
             .map(|run| run.glyphs.len())
             .sum::<usize>();
+        let (cell_width_px, cell_height_px) = frame.font.cell_size_px();
+        let baseline_px = frame.font.metrics().ascent_px.round() as i32;
 
         for row in &frame.rows {
+            let row_top_px = (row.row as i32).saturating_mul(cell_height_px as i32);
             for run in &row.runs {
+                let mut pen_x_px = (run.start_col() as i32).saturating_mul(cell_width_px as i32);
                 background_runs.push(PreparedBackgroundRun {
                     row: row.row,
                     start_col: run.start_col(),
@@ -177,6 +185,17 @@ impl WgpuTerminalRenderer {
                                     ColorGlyphCacheKey::new(frame.font.cache_key(), glyph.glyph_id),
                                     &rasterized,
                                 );
+                                let x_offset_px =
+                                    font_design_units_to_px(&frame.font, glyph.x_offset);
+                                let y_offset_px =
+                                    font_design_units_to_px(&frame.font, glyph.y_offset);
+                                let dest_x_px = pen_x_px.saturating_add(x_offset_px);
+                                let dest_y_px = row_top_px
+                                    .saturating_add(center_color_glyph_in_cell(
+                                        cell_height_px,
+                                        rasterized.height_px,
+                                    ))
+                                    .saturating_add(y_offset_px);
                                 color_glyph_draws.push(PreparedColorGlyphDraw {
                                     row: row.row,
                                     start_col: run.start_col(),
@@ -184,24 +203,49 @@ impl WgpuTerminalRenderer {
                                     glyph_id: glyph.glyph_id,
                                     cache_entry,
                                     upload,
-                                    x_offset_px: glyph.x_offset,
-                                    y_offset_px: glyph.y_offset,
+                                    x_offset_px,
+                                    y_offset_px,
+                                    dest_x_px,
+                                    dest_y_px,
                                 });
+                                pen_x_px = pen_x_px.saturating_add(color_glyph_advance_px(
+                                    &frame.font,
+                                    glyph.x_advance,
+                                    cell_width_px,
+                                    rasterized.width_px,
+                                ));
                                 color_glyphs_prepared = color_glyphs_prepared.saturating_add(1);
                             }
                             None => {
-                                let request = frame.font.raster_request(glyph.glyph_id, run.style.bold);
-                                let rasterized = fonts
-                                    .rasterize_glyph(&frame.font, glyph.glyph_id, run.style.bold)?;
-                                let upload = (!self.atlas.contains(request)).then(|| PreparedMonochromeGlyphUploadPayload {
-                                    width_px: rasterized.width_px,
-                                    height_px: rasterized.height_px,
-                                    bearing_x_px: rasterized.bearing_x_px,
-                                    bearing_y_px: rasterized.bearing_y_px,
-                                    advance_px: rasterized.advance_px,
-                                    coverage: rasterized.coverage.clone(),
+                                let request =
+                                    frame.font.raster_request(glyph.glyph_id, run.style.bold);
+                                let rasterized = fonts.rasterize_glyph(
+                                    &frame.font,
+                                    glyph.glyph_id,
+                                    run.style.bold,
+                                )?;
+                                let upload = (!self.atlas.contains(request)).then(|| {
+                                    PreparedMonochromeGlyphUploadPayload {
+                                        width_px: rasterized.width_px,
+                                        height_px: rasterized.height_px,
+                                        bearing_x_px: rasterized.bearing_x_px,
+                                        bearing_y_px: rasterized.bearing_y_px,
+                                        advance_px: rasterized.advance_px,
+                                        coverage: rasterized.coverage.clone(),
+                                    }
                                 });
                                 let atlas_entry = self.atlas.upsert(request, &rasterized);
+                                let x_offset_px =
+                                    font_design_units_to_px(&frame.font, glyph.x_offset);
+                                let y_offset_px =
+                                    font_design_units_to_px(&frame.font, glyph.y_offset);
+                                let dest_x_px = pen_x_px
+                                    .saturating_add(x_offset_px)
+                                    .saturating_add(rasterized.bearing_x_px);
+                                let dest_y_px = row_top_px
+                                    .saturating_add(baseline_px)
+                                    .saturating_add(y_offset_px)
+                                    .saturating_add(rasterized.bearing_y_px);
                                 monochrome_glyph_draws.push(PreparedMonochromeGlyphDraw {
                                     row: row.row,
                                     start_col: run.start_col(),
@@ -209,26 +253,46 @@ impl WgpuTerminalRenderer {
                                     glyph_id: glyph.glyph_id,
                                     atlas_entry,
                                     upload,
-                                    x_offset_px: glyph.x_offset,
-                                    y_offset_px: glyph.y_offset,
+                                    x_offset_px,
+                                    y_offset_px,
+                                    dest_x_px,
+                                    dest_y_px,
                                     fg_rgba: run.style.fg_rgba,
                                 });
-                                monochrome_glyphs_prepared = monochrome_glyphs_prepared.saturating_add(1);
+                                pen_x_px = pen_x_px.saturating_add(monochrome_glyph_advance_px(
+                                    &frame.font,
+                                    glyph.x_advance,
+                                    rasterized.advance_px,
+                                    cell_width_px,
+                                ));
+                                monochrome_glyphs_prepared =
+                                    monochrome_glyphs_prepared.saturating_add(1);
                             }
                         }
                     } else {
                         let request = frame.font.raster_request(glyph.glyph_id, run.style.bold);
                         let rasterized =
                             fonts.rasterize_glyph(&frame.font, glyph.glyph_id, run.style.bold)?;
-                        let upload = (!self.atlas.contains(request)).then(|| PreparedMonochromeGlyphUploadPayload {
-                            width_px: rasterized.width_px,
-                            height_px: rasterized.height_px,
-                            bearing_x_px: rasterized.bearing_x_px,
-                            bearing_y_px: rasterized.bearing_y_px,
-                            advance_px: rasterized.advance_px,
-                            coverage: rasterized.coverage.clone(),
+                        let upload = (!self.atlas.contains(request)).then(|| {
+                            PreparedMonochromeGlyphUploadPayload {
+                                width_px: rasterized.width_px,
+                                height_px: rasterized.height_px,
+                                bearing_x_px: rasterized.bearing_x_px,
+                                bearing_y_px: rasterized.bearing_y_px,
+                                advance_px: rasterized.advance_px,
+                                coverage: rasterized.coverage.clone(),
+                            }
                         });
                         let atlas_entry = self.atlas.upsert(request, &rasterized);
+                        let x_offset_px = font_design_units_to_px(&frame.font, glyph.x_offset);
+                        let y_offset_px = font_design_units_to_px(&frame.font, glyph.y_offset);
+                        let dest_x_px = pen_x_px
+                            .saturating_add(x_offset_px)
+                            .saturating_add(rasterized.bearing_x_px);
+                        let dest_y_px = row_top_px
+                            .saturating_add(baseline_px)
+                            .saturating_add(y_offset_px)
+                            .saturating_add(rasterized.bearing_y_px);
                         monochrome_glyph_draws.push(PreparedMonochromeGlyphDraw {
                             row: row.row,
                             start_col: run.start_col(),
@@ -236,10 +300,18 @@ impl WgpuTerminalRenderer {
                             glyph_id: glyph.glyph_id,
                             atlas_entry,
                             upload,
-                            x_offset_px: glyph.x_offset,
-                            y_offset_px: glyph.y_offset,
+                            x_offset_px,
+                            y_offset_px,
+                            dest_x_px,
+                            dest_y_px,
                             fg_rgba: run.style.fg_rgba,
                         });
+                        pen_x_px = pen_x_px.saturating_add(monochrome_glyph_advance_px(
+                            &frame.font,
+                            glyph.x_advance,
+                            rasterized.advance_px,
+                            cell_width_px,
+                        ));
                         monochrome_glyphs_prepared = monochrome_glyphs_prepared.saturating_add(1);
                     }
                 }
@@ -257,7 +329,6 @@ impl WgpuTerminalRenderer {
             self.next_frame_token = self.next_frame_token.saturating_add(1);
             self.last_frame_fingerprint = Some(fingerprint);
         }
-        let (cell_width_px, cell_height_px) = frame.font.cell_size_px();
         let mono_glyph_cache_entries = self.atlas.entry_count();
         let color_glyph_cache_entries = self.color_glyph_cache.len();
         let renderer_stats = PreparedNativeRendererStats {
@@ -293,7 +364,10 @@ impl WgpuTerminalRenderer {
         &mut self,
         key: ColorGlyphCacheKey,
         rasterized: &crate::app::terminal_font::ColorGlyphRaster,
-    ) -> (ColorGlyphCacheEntry, Option<PreparedColorGlyphUploadPayload>) {
+    ) -> (
+        ColorGlyphCacheEntry,
+        Option<PreparedColorGlyphUploadPayload>,
+    ) {
         if let Some(entry) = self.color_glyph_cache.get(&key) {
             return (*entry, None);
         }
@@ -350,4 +424,47 @@ fn hash_shaped_frame(frame: &ShapedTerminalFrame) -> u64 {
     }
 
     hasher.finish()
+}
+
+fn font_design_units_to_px(font: &LoadedFont, value: i32) -> i32 {
+    let metrics = font.metrics();
+    let units_per_em = metrics.units_per_em.max(1) as f32;
+    let px_size = font.px_size();
+    ((value as f32) * (px_size / units_per_em)).round() as i32
+}
+
+fn monochrome_glyph_advance_px(
+    font: &LoadedFont,
+    x_advance_units: i32,
+    raster_advance_px: i32,
+    cell_width_px: u32,
+) -> i32 {
+    let shaped_advance_px = font_design_units_to_px(font, x_advance_units);
+    if shaped_advance_px > 0 {
+        shaped_advance_px
+    } else if raster_advance_px > 0 {
+        raster_advance_px
+    } else {
+        cell_width_px as i32
+    }
+}
+
+fn color_glyph_advance_px(
+    font: &LoadedFont,
+    x_advance_units: i32,
+    cell_width_px: u32,
+    raster_width_px: u32,
+) -> i32 {
+    let shaped_advance_px = font_design_units_to_px(font, x_advance_units);
+    if shaped_advance_px > 0 {
+        shaped_advance_px
+    } else {
+        (cell_width_px.max(raster_width_px)) as i32
+    }
+}
+
+fn center_color_glyph_in_cell(cell_height_px: u32, glyph_height_px: u32) -> i32 {
+    let cell_height_px = cell_height_px as i32;
+    let glyph_height_px = glyph_height_px as i32;
+    (cell_height_px.saturating_sub(glyph_height_px) / 2).max(0)
 }

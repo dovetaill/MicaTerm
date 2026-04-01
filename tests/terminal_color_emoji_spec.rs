@@ -1,15 +1,17 @@
 use anyhow::Result;
-use std::fs;
 use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
 use mica_term::app::terminal_atlas::{ClusterSpriteKind, TerminalAtlasRenderer};
-use mica_term::app::terminal_presenter::{PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter, WindowsNativePresenter};
 use mica_term::app::terminal_emoji::{
     ClusterRenderKind, EmojiFallbackReason, EmojiFontRasterizeRequest, EmojiFontResolution,
     EmojiRasterizerBackend, EmojiRenderOutcome, EmojiSprite, ResolvedEmojiFont,
     TerminalEmojiRenderer, TerminalEmojiResolver, classify_cluster_render_kind,
     recommended_emoji_font_size_px,
 };
+use mica_term::app::terminal_presenter::{
+    PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter, WindowsNativePresenter,
+};
 use slint::Rgba8Pixel;
+use std::fs;
 use uuid::Uuid;
 
 fn render_surface(rows: usize, cols: usize, text: &str) -> TerminalSurfaceState {
@@ -49,7 +51,6 @@ fn present_native_frame(
         PresentedTerminalFrame::Native(frame) => Ok(*frame),
     }
 }
-
 
 #[test]
 fn emoji_clusters_are_not_treated_as_blank_terminal_cells() -> Result<()> {
@@ -303,6 +304,61 @@ fn first_color_native_frame_carries_upload_payload_then_reuses_cache() -> Result
 }
 
 #[test]
+fn monochrome_native_frame_draws_expose_stable_pixel_destinations() -> Result<()> {
+    let surface = render_surface(
+        4, 12, "AB
+",
+    );
+    let mut presenter = WindowsNativePresenter::new()?;
+
+    let frame = present_native_frame(&mut presenter, &surface)?;
+    let draws = &frame.presentable_frame.monochrome_glyph_draws;
+
+    assert!(
+        draws.len() >= 2,
+        "a two-character monochrome row should expose at least two monochrome glyph draws for placement inspection"
+    );
+    assert!(
+        draws[1].dest_x_px > draws[0].dest_x_px,
+        "monochrome glyph destinations should advance across the row instead of collapsing to one origin"
+    );
+    assert!(
+        draws.iter().all(|draw| draw.dest_y_px >= 0),
+        "monochrome glyph destinations should keep non-negative pixel baselines inside the terminal surface"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn presentable_native_frame_threads_palette_contract_and_color_destinations() -> Result<()> {
+    let surface = render_surface(
+        4, 12, "🦀
+",
+    );
+    let mut presenter = WindowsNativePresenter::new()?;
+
+    let frame = present_native_frame(&mut presenter, &surface)?;
+    let presentable = &frame.presentable_frame;
+
+    assert_eq!(presentable.default_fg_rgba, surface.default_fg_rgba);
+    assert_eq!(presentable.default_bg_rgba, surface.default_bg_rgba);
+    assert_eq!(presentable.row_bg_even_rgba, surface.row_bg_even_rgba);
+    assert_eq!(presentable.row_bg_odd_rgba, surface.row_bg_odd_rgba);
+    assert_eq!(presentable.grid_rows, surface.rows);
+    assert_eq!(presentable.grid_cols, surface.cols);
+    assert!(
+        presentable
+            .color_glyph_draws
+            .iter()
+            .any(|draw| draw.dest_x_px >= 0 && draw.dest_y_px >= 0),
+        "color glyph draws should expose stable destination pixels for the backend bitmap path"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn native_renderer_color_glyph_contract_uses_separate_cache_state() {
     let atlas_source =
         fs::read_to_string("src/app/terminal_renderer/atlas.rs").expect("read renderer atlas");
@@ -310,8 +366,8 @@ fn native_renderer_color_glyph_contract_uses_separate_cache_state() {
         .expect("read native renderer");
     let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
         .expect("read windows dwrite font backend");
-    let shaper_source = fs::read_to_string("src/app/terminal_layout/shaper.rs")
-        .expect("read terminal shaper");
+    let shaper_source =
+        fs::read_to_string("src/app/terminal_layout/shaper.rs").expect("read terminal shaper");
 
     assert!(
         atlas_source.contains("GlyphCacheKind::Monochrome"),

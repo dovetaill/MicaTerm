@@ -4,21 +4,21 @@ use anyhow::Result;
 
 use crate::app::ssh::runtime::{TerminalCursorShape, TerminalSurfaceState};
 use crate::app::terminal_atlas::TerminalAtlasSelection;
-use crate::app::terminal_semantic::{
-    SemanticInputOverlay, SemanticOutputOverlay, detect_input_line_overlays,
-    detect_output_block_overlays,
-};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_font::{DirectWriteFontSystem, FontRequest, FontSystem, LoadedFont};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_layout::{TerminalTextShaper, TextShaper};
 use crate::app::terminal_model::TerminalModelFrame;
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
-#[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::wgpu_renderer::{
     PreparedBackgroundRun, PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw,
     PreparedUnderlineRun,
+};
+#[cfg(feature = "terminal-native-renderer")]
+use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
+use crate::app::terminal_semantic::{
+    SemanticInputOverlay, SemanticOutputOverlay, detect_input_line_overlays,
+    detect_output_block_overlays,
 };
 
 #[derive(Clone, Debug)]
@@ -119,6 +119,12 @@ pub struct PresentableNativeFrame {
     pub glyph_run_count: usize,
     pub glyph_count: usize,
     pub dirty_row_count: usize,
+    pub default_fg_rgba: u32,
+    pub default_bg_rgba: u32,
+    pub row_bg_even_rgba: u32,
+    pub row_bg_odd_rgba: u32,
+    pub grid_rows: u32,
+    pub grid_cols: u32,
     pub background_runs: Vec<PreparedBackgroundRun>,
     pub monochrome_glyph_draws: Vec<PreparedMonochromeGlyphDraw>,
     pub color_glyph_draws: Vec<PreparedColorGlyphDraw>,
@@ -269,6 +275,12 @@ impl TerminalPresenter for WindowsNativePresenter {
             glyph_run_count: prepared.glyph_run_count,
             glyph_count: prepared.glyph_count,
             dirty_row_count: frame_model.dirty_rows.len(),
+            default_fg_rgba: frame_model.palette.default_fg_rgba,
+            default_bg_rgba: frame_model.palette.default_bg_rgba,
+            row_bg_even_rgba: frame_model.palette.row_bg_even_rgba,
+            row_bg_odd_rgba: frame_model.palette.row_bg_odd_rgba,
+            grid_rows: frame_model.grid_rows,
+            grid_cols: frame_model.grid_cols,
             background_runs: prepared.background_runs.clone(),
             monochrome_glyph_draws: prepared.monochrome_glyph_draws.clone(),
             color_glyph_draws: prepared.color_glyph_draws.clone(),
@@ -301,12 +313,14 @@ impl TerminalPresenter for WindowsNativePresenter {
         };
         self.previous_frame = Some(frame_model);
 
-        Ok(PresentedTerminalFrame::Native(Box::new(NativeTerminalFrame {
-            frame_token: prepared.frame_token,
-            cell_width_px: prepared.cell_width_px,
-            cell_height_px: prepared.cell_height_px,
-            presentable_frame,
-        })))
+        Ok(PresentedTerminalFrame::Native(Box::new(
+            NativeTerminalFrame {
+                frame_token: prepared.frame_token,
+                cell_width_px: prepared.cell_width_px,
+                cell_height_px: prepared.cell_height_px,
+                presentable_frame,
+            },
+        )))
     }
 
     fn default_cell_size(&self) -> (u32, u32) {
@@ -357,4 +371,3 @@ fn selection_overlay_rects(
         })
         .collect()
 }
-

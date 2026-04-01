@@ -116,8 +116,8 @@ fn runtime_profile_source_exposes_terminal_render_mode_contract() {
 fn native_surface_source_exposes_present_bridge_contract() {
     let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
         .expect("read native surface");
-    let renderer_mod_source = fs::read_to_string("src/app/terminal_renderer/mod.rs")
-        .expect("read terminal renderer mod");
+    let renderer_mod_source =
+        fs::read_to_string("src/app/terminal_renderer/mod.rs").expect("read terminal renderer mod");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
@@ -125,20 +125,27 @@ fn native_surface_source_exposes_present_bridge_contract() {
         "native surface bridge should define a retained native frame payload contract"
     );
     assert!(
-        native_surface_source.contains("retained_frame: Option<RetainedNativeTerminalSurfaceFrame>"),
+        native_surface_source
+            .contains("retained_frame: Option<RetainedNativeTerminalSurfaceFrame>"),
         "native surface bridge should retain full frame state instead of storing only a frame token"
     );
     assert!(
-        native_surface_source.contains("pub fn update_frame_state(&self, frame: NativeTerminalFrame)"),
+        native_surface_source
+            .contains("pub fn update_frame_state(&self, frame: NativeTerminalFrame)"),
         "native surface bridge should expose a retained frame-state update entrypoint"
     );
     assert!(
-        native_surface_source.contains("fn draw_retained_frame(state: &mut NativeTerminalSurfaceState)"),
+        native_surface_source
+            .contains("fn draw_retained_frame(state: &mut NativeTerminalSurfaceState)"),
         "native surface bridge should expose an explicit draw hook for retained native frames"
     );
     assert!(
-        native_surface_source.contains("RenderingState::BeforeRendering"),
-        "rendering notifier should reach the retained-frame draw hook during Slint rendering"
+        native_surface_source.contains("RenderingState::AfterRendering"),
+        "rendering notifier should reach the retained-frame draw hook after Slint paints the host surface so native terminal pixels are not overdrawn"
+    );
+    assert!(
+        !native_surface_source.contains("RenderingState::BeforeRendering => draw_retained_frame"),
+        "native surface bridge should stop presenting retained frames before Slint paints because the terminal region background would overdraw native text"
     );
     assert!(
         renderer_mod_source.contains("RetainedNativeTerminalSurfaceFrame"),
@@ -168,8 +175,8 @@ fn native_surface_source_exposes_present_bridge_contract() {
 
 #[test]
 fn retained_native_frame_sources_expose_background_display_list_contract() {
-    let segmentation_source =
-        fs::read_to_string("src/app/terminal_layout/run_segmentation.rs").expect("read run segmentation");
+    let segmentation_source = fs::read_to_string("src/app/terminal_layout/run_segmentation.rs")
+        .expect("read run segmentation");
     let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
         .expect("read native renderer");
     let presenter_source =
@@ -214,7 +221,8 @@ fn windows_backend_source_exposes_d2d_lifecycle_contract() {
         "windows native surface state should retain D2D factory ownership instead of only HWND and frame token bookkeeping"
     );
     assert!(
-        windows_backend_source.contains("pub hwnd_render_target: Option<WindowsHwndRenderTargetState>"),
+        windows_backend_source
+            .contains("pub hwnd_render_target: Option<WindowsHwndRenderTargetState>"),
         "windows native surface state should retain HWND render-target ownership instead of only HWND and frame token bookkeeping"
     );
     assert!(
@@ -321,6 +329,30 @@ fn windows_backend_source_exposes_background_and_monochrome_draw_contract() {
         windows_backend_source.contains("self.state.draw_monochrome_glyphs(frame);"),
         "windows backend present path should draw monochrome glyphs after background fills"
     );
+    assert!(
+        windows_backend_source.contains("BeginDraw();"),
+        "windows backend should start a real Direct2D draw pass before consuming retained frame stages"
+    );
+    assert!(
+        windows_backend_source.contains("EndDraw("),
+        "windows backend should finish the Direct2D draw pass and surface any target-loss errors"
+    );
+    assert!(
+        windows_backend_source.contains("PushAxisAlignedClip("),
+        "windows backend should clip drawing to the retained terminal surface rect"
+    );
+    assert!(
+        windows_backend_source.contains("PopAxisAlignedClip();"),
+        "windows backend should release the terminal clip after drawing the retained frame"
+    );
+    assert!(
+        windows_backend_source.contains("FillRectangle("),
+        "windows backend should use Direct2D rectangle fills for row backgrounds and ANSI background runs"
+    );
+    assert!(
+        windows_backend_source.contains("FillOpacityMask("),
+        "windows backend should draw monochrome glyph alpha masks through Direct2D instead of only counting cache entries"
+    );
 }
 
 #[test]
@@ -334,15 +366,13 @@ fn windows_backend_source_exposes_color_glyph_and_overlay_draw_contract() {
         "windows backend should define a retained color glyph bitmap cache contract"
     );
     assert!(
-        windows_backend_source.contains(
-            "pub color_glyph_bitmaps: HashMap<u32, WindowsColorGlyphBitmapState>"
-        ),
+        windows_backend_source
+            .contains("pub color_glyph_bitmaps: HashMap<u32, WindowsColorGlyphBitmapState>"),
         "windows native surface state should retain color glyph bitmap cache state keyed by color cache slot"
     );
     assert!(
-        windows_backend_source.contains(
-            "fn ensure_color_glyph_bitmap(&mut self, draw: &PreparedColorGlyphDraw)"
-        ),
+        windows_backend_source
+            .contains("fn ensure_color_glyph_bitmap(&mut self, draw: &PreparedColorGlyphDraw)"),
         "windows backend should expose a helper that creates retained color glyph bitmap resources from upload payloads"
     );
     assert!(
@@ -395,6 +425,14 @@ fn windows_backend_source_exposes_color_glyph_and_overlay_draw_contract() {
         windows_backend_source.contains("self.state.draw_ime_preview_overlay(frame);"),
         "windows backend present path should draw IME preview after the cursor overlay"
     );
+    assert!(
+        windows_backend_source.contains("DrawBitmap("),
+        "windows backend should draw color glyph bitmaps through Direct2D instead of only tracking cache slots"
+    );
+    assert!(
+        windows_backend_source.contains("D2DERR_RECREATE_TARGET"),
+        "windows backend should handle Direct2D target-loss by invalidating render-target owned resources"
+    );
 }
 
 #[test]
@@ -408,14 +446,14 @@ fn platform_surface_backend_source_exposes_shared_native_surface_abstraction() {
         "terminal renderer should add a shared backend contract for native surface backends"
     );
 
-    let platform_mod_source = fs::read_to_string("src/app/terminal_renderer/platform/mod.rs")
-        .expect("read platform mod");
+    let platform_mod_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/mod.rs").expect("read platform mod");
     let backend_source = fs::read_to_string("src/app/terminal_renderer/platform/backend.rs")
         .expect("read platform backend contract");
     let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
         .expect("read native surface");
-    let renderer_mod_source = fs::read_to_string("src/app/terminal_renderer/mod.rs")
-        .expect("read terminal renderer mod");
+    let renderer_mod_source =
+        fs::read_to_string("src/app/terminal_renderer/mod.rs").expect("read terminal renderer mod");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
@@ -427,7 +465,8 @@ fn platform_surface_backend_source_exposes_shared_native_surface_abstraction() {
         "shared platform backend contract should expose an attach hook"
     );
     assert!(
-        backend_source.contains("fn update_surface_rect(&mut self, rect: NativeTerminalSurfaceRect)"),
+        backend_source
+            .contains("fn update_surface_rect(&mut self, rect: NativeTerminalSurfaceRect)"),
         "shared platform backend contract should expose a surface-rect update hook"
     );
     assert!(
@@ -495,10 +534,10 @@ fn windows_platform_backend_source_exposes_backend_selection_contract() {
         "terminal renderer should add a Windows platform backend source file"
     );
 
-    let platform_mod_source = fs::read_to_string("src/app/terminal_renderer/platform/mod.rs")
-        .expect("read platform mod");
-    let renderer_mod_source = fs::read_to_string("src/app/terminal_renderer/mod.rs")
-        .expect("read terminal renderer mod");
+    let platform_mod_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/mod.rs").expect("read platform mod");
+    let renderer_mod_source =
+        fs::read_to_string("src/app/terminal_renderer/mod.rs").expect("read terminal renderer mod");
 
     assert!(
         platform_mod_source.contains("pub mod windows;"),
@@ -522,8 +561,8 @@ fn wayland_platform_backend_source_exposes_backend_selection_contract() {
     );
 
     let cargo_toml = fs::read_to_string("Cargo.toml").expect("read cargo toml");
-    let platform_mod_source = fs::read_to_string("src/app/terminal_renderer/platform/mod.rs")
-        .expect("read platform mod");
+    let platform_mod_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/mod.rs").expect("read platform mod");
     let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
         .expect("read native surface");
 
@@ -558,8 +597,8 @@ fn x11_platform_backend_source_exposes_backend_selection_contract() {
     );
 
     let cargo_toml = fs::read_to_string("Cargo.toml").expect("read cargo toml");
-    let platform_mod_source = fs::read_to_string("src/app/terminal_renderer/platform/mod.rs")
-        .expect("read platform mod");
+    let platform_mod_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/mod.rs").expect("read platform mod");
     let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
         .expect("read native surface");
 
@@ -576,8 +615,7 @@ fn x11_platform_backend_source_exposes_backend_selection_contract() {
         "platform backend factory should instantiate the X11 backend on X11 Linux hosts"
     );
     assert!(
-        platform_mod_source.contains("DISPLAY")
-            || platform_mod_source.contains("XDG_SESSION_TYPE"),
+        platform_mod_source.contains("DISPLAY") || platform_mod_source.contains("XDG_SESSION_TYPE"),
         "platform backend factory should detect X11 host sessions through standard Linux environment hints"
     );
     assert!(

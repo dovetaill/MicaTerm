@@ -59,7 +59,7 @@ impl NativeTerminalSurface {
             .set_rendering_notifier(move |rendering_state, _graphics_api| {
                 let mut state = state.borrow_mut();
                 match rendering_state {
-                    RenderingState::BeforeRendering => draw_retained_frame(&mut state),
+                    RenderingState::AfterRendering => draw_retained_frame(&mut state),
                     RenderingState::RenderingTeardown => teardown_native_surface(&mut state),
                     _ => {}
                 }

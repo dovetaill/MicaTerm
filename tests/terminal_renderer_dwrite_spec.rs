@@ -418,6 +418,14 @@ fn native_renderer_sources_expose_draw_ready_text_payloads() {
         "color glyph draws should expose an optional upload payload so platform backends can distinguish first upload from cache reuse"
     );
     assert!(
+        renderer_source.contains("pub dest_x_px: i32"),
+        "draw-ready glyph payloads should carry a stable destination x in pixels so the Windows backend does not need to reshape or infer pen positions"
+    );
+    assert!(
+        renderer_source.contains("pub dest_y_px: i32"),
+        "draw-ready glyph payloads should carry a stable destination y in pixels so the Windows backend can place glyph masks directly"
+    );
+    assert!(
         presenter_source.contains("pub background_runs: Vec<PreparedBackgroundRun>"),
         "presentable native frames should thread retained background runs alongside glyph draws"
     );
@@ -428,6 +436,30 @@ fn native_renderer_sources_expose_draw_ready_text_payloads() {
     assert!(
         presenter_source.contains("pub color_glyph_draws: Vec<PreparedColorGlyphDraw>"),
         "presentable native frames should thread color glyph draw payloads through the presenter contract"
+    );
+    assert!(
+        presenter_source.contains("pub default_fg_rgba: u32"),
+        "presentable native frames should keep the terminal default foreground color available to platform backends"
+    );
+    assert!(
+        presenter_source.contains("pub default_bg_rgba: u32"),
+        "presentable native frames should keep the terminal default background color available to platform backends"
+    );
+    assert!(
+        presenter_source.contains("pub row_bg_even_rgba: u32"),
+        "presentable native frames should keep even-row banding colors available for blank rows and cells"
+    );
+    assert!(
+        presenter_source.contains("pub row_bg_odd_rgba: u32"),
+        "presentable native frames should keep odd-row banding colors available for blank rows and cells"
+    );
+    assert!(
+        presenter_source.contains("pub grid_rows: u32"),
+        "presentable native frames should keep grid row counts so backends can paint blank rows"
+    );
+    assert!(
+        presenter_source.contains("pub grid_cols: u32"),
+        "presentable native frames should keep grid column counts so backends can size row and overlay fills correctly"
     );
 }
 
@@ -493,8 +525,9 @@ fn terminal_presenter_source_wires_windows_native_renderer() {
 
 #[test]
 fn windows_platform_surface_backend_source_exposes_hwnd_and_lifecycle_contract() {
-    let windows_backend_source = fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
-        .expect("read windows platform backend");
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
     let windows_frame_source =
         fs::read_to_string("src/app/windows_frame.rs").expect("read windows frame interop");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
@@ -512,7 +545,8 @@ fn windows_platform_surface_backend_source_exposes_hwnd_and_lifecycle_contract()
         "Windows backend state should track the resolved host HWND"
     );
     assert!(
-        windows_backend_source.contains("fn resolve_host_hwnd(window: &AppWindow) -> Option<isize>"),
+        windows_backend_source
+            .contains("fn resolve_host_hwnd(window: &AppWindow) -> Option<isize>"),
         "Windows backend should expose a helper that resolves the host HWND from the Slint shell"
     );
     assert!(
@@ -528,7 +562,8 @@ fn windows_platform_surface_backend_source_exposes_hwnd_and_lifecycle_contract()
         "Windows backend should expose a detach hook"
     );
     assert!(
-        windows_frame_source.contains("pub fn resolve_host_window_hwnd(window: &AppWindow) -> Option<isize>"),
+        windows_frame_source
+            .contains("pub fn resolve_host_window_hwnd(window: &AppWindow) -> Option<isize>"),
         "windows_frame should expose a reusable HWND resolution helper for the terminal backend"
     );
     assert!(
@@ -852,7 +887,8 @@ fn terminal_font_backend_owns_rasterization_contract_and_renderer_delegates_to_i
         "native renderer should depend on the font backend trait so the rendering seam can survive further backend extraction work"
     );
     assert!(
-        renderer_source.contains("fonts.rasterize_glyph(&frame.font, glyph.glyph_id, run.style.bold)?"),
+        renderer_source
+            .contains("fonts.rasterize_glyph(&frame.font, glyph.glyph_id, run.style.bold)?"),
         "native renderer should rasterize through the shared font backend contract"
     );
     assert!(
@@ -963,8 +999,8 @@ fn loaded_font_object_boundary_owns_cache_identity_and_cell_metrics() {
 fn loaded_font_object_boundary_carries_render_profile_into_cache_and_rasterization() {
     let backend_source =
         fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
-    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
-        .expect("read dwrite backend");
+    let dwrite_source =
+        fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite backend");
     let atlas_source =
         fs::read_to_string("src/app/terminal_renderer/atlas.rs").expect("read native atlas");
 
@@ -1002,8 +1038,8 @@ fn loaded_font_object_boundary_carries_render_profile_into_cache_and_rasterizati
 fn windows_native_font_backend_uses_a_non_neutral_render_profile() {
     let backend_source =
         fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
-    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
-        .expect("read dwrite backend");
+    let dwrite_source =
+        fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite backend");
 
     assert!(
         backend_source.contains("pub fn windows_native_default() -> Self"),
@@ -1032,8 +1068,8 @@ fn font_backend_source_exposes_bitmap_render_profile_defaults() {
 
 #[test]
 fn windows_native_font_backend_source_switches_to_hinted_swash_rasterization() {
-    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
-        .expect("read dwrite backend");
+    let dwrite_source =
+        fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite backend");
 
     assert!(
         dwrite_source.contains("SwashFontRef"),
