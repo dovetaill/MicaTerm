@@ -137,7 +137,7 @@ fn harfbuzz_layout_keeps_wide_cjk_and_emoji_cluster_boundaries_stable() -> anyho
 }
 
 #[test]
-fn harfbuzz_layout_splits_on_foreground_change_but_not_background_change() -> anyhow::Result<()> {
+fn harfbuzz_layout_splits_runs_when_foreground_or_background_changes() -> anyhow::Result<()> {
     let row = build_row(
         vec![
             TerminalModelCell {
@@ -186,9 +186,11 @@ fn harfbuzz_layout_splits_on_foreground_change_but_not_background_change() -> an
 
     let shaped = shape_row_with_mock_font(&row)?;
 
-    assert_eq!(shaped.runs.len(), 2);
-    assert_eq!(shaped.runs[0].cell_range, 0..3);
-    assert_eq!(shaped.runs[1].cell_range, 3..4);
+    assert_eq!(shaped.runs.len(), 4);
+    assert_eq!(shaped.runs[0].cell_range, 0..1);
+    assert_eq!(shaped.runs[1].cell_range, 1..2);
+    assert_eq!(shaped.runs[2].cell_range, 2..3);
+    assert_eq!(shaped.runs[3].cell_range, 3..4);
     Ok(())
 }
 

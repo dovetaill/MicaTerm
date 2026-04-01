@@ -1,6 +1,8 @@
 //! Windows-specific non-client frame interop for hit-testing, snap layouts, and placement queries.
 
 use crate::AppWindow;
+#[cfg(target_os = "windows")]
+use slint::ComponentHandle;
 use crate::app::window_state::WindowPlacementKind;
 #[cfg(target_os = "windows")]
 use crate::app::window_state::{Rect, classify_window_placement};

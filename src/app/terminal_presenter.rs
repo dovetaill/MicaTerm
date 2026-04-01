@@ -17,7 +17,8 @@ use crate::app::terminal_model::TerminalModelFrame;
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::wgpu_renderer::{
-    PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw, PreparedUnderlineRun,
+    PreparedBackgroundRun, PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw,
+    PreparedUnderlineRun,
 };
 
 #[derive(Clone, Debug)]
@@ -118,6 +119,7 @@ pub struct PresentableNativeFrame {
     pub glyph_run_count: usize,
     pub glyph_count: usize,
     pub dirty_row_count: usize,
+    pub background_runs: Vec<PreparedBackgroundRun>,
     pub monochrome_glyph_draws: Vec<PreparedMonochromeGlyphDraw>,
     pub color_glyph_draws: Vec<PreparedColorGlyphDraw>,
     pub underline_run_count: usize,
@@ -267,6 +269,7 @@ impl TerminalPresenter for WindowsNativePresenter {
             glyph_run_count: prepared.glyph_run_count,
             glyph_count: prepared.glyph_count,
             dirty_row_count: frame_model.dirty_rows.len(),
+            background_runs: prepared.background_runs.clone(),
             monochrome_glyph_draws: prepared.monochrome_glyph_draws.clone(),
             color_glyph_draws: prepared.color_glyph_draws.clone(),
             underline_run_count: prepared.underline_run_count,

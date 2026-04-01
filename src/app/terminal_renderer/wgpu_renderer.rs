@@ -19,24 +19,51 @@ pub struct ShapedTerminalFrame {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreparedBackgroundRun {
+    pub row: u32,
+    pub start_col: u32,
+    pub end_col: u32,
+    pub bg_rgba: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreparedMonochromeGlyphUploadPayload {
+    pub width_px: u32,
+    pub height_px: u32,
+    pub bearing_x_px: i32,
+    pub bearing_y_px: i32,
+    pub advance_px: i32,
+    pub coverage: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedMonochromeGlyphDraw {
     pub row: u32,
     pub start_col: u32,
     pub end_col: u32,
     pub glyph_id: u32,
     pub atlas_entry: GlyphAtlasEntry,
+    pub upload: Option<PreparedMonochromeGlyphUploadPayload>,
     pub x_offset_px: i32,
     pub y_offset_px: i32,
     pub fg_rgba: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreparedColorGlyphUploadPayload {
+    pub width_px: u32,
+    pub height_px: u32,
+    pub rgba: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedColorGlyphDraw {
     pub row: u32,
     pub start_col: u32,
     pub end_col: u32,
     pub glyph_id: u32,
     pub cache_entry: ColorGlyphCacheEntry,
+    pub upload: Option<PreparedColorGlyphUploadPayload>,
     pub x_offset_px: i32,
     pub y_offset_px: i32,
 }
@@ -78,6 +105,7 @@ pub struct PreparedNativeFrame {
     pub shaped_row_count: usize,
     pub glyph_run_count: usize,
     pub glyph_count: usize,
+    pub background_runs: Vec<PreparedBackgroundRun>,
     pub monochrome_glyph_draws: Vec<PreparedMonochromeGlyphDraw>,
     pub color_glyph_draws: Vec<PreparedColorGlyphDraw>,
     pub underline_run_count: usize,
@@ -110,6 +138,7 @@ impl WgpuTerminalRenderer {
     ) -> Result<PreparedNativeFrame> {
         let mut monochrome_glyphs_prepared = 0usize;
         let mut color_glyphs_prepared = 0usize;
+        let mut background_runs = Vec::new();
         let mut monochrome_glyph_draws = Vec::new();
         let mut color_glyph_draws = Vec::new();
         let mut underline_runs = Vec::new();
@@ -124,6 +153,13 @@ impl WgpuTerminalRenderer {
 
         for row in &frame.rows {
             for run in &row.runs {
+                background_runs.push(PreparedBackgroundRun {
+                    row: row.row,
+                    start_col: run.start_col(),
+                    end_col: run.end_col(),
+                    bg_rgba: run.style.bg_rgba,
+                });
+
                 if run.style.underline {
                     underline_runs.push(PreparedUnderlineRun {
                         row: row.row,
@@ -137,9 +173,9 @@ impl WgpuTerminalRenderer {
                     if run.has_color_glyphs {
                         match fonts.rasterize_color_glyph(&frame.font, glyph.glyph_id)? {
                             Some(rasterized) => {
-                                let cache_entry = self.upsert_color_glyph(
+                                let (cache_entry, upload) = self.upsert_color_glyph(
                                     ColorGlyphCacheKey::new(frame.font.cache_key(), glyph.glyph_id),
-                                    rasterized,
+                                    &rasterized,
                                 );
                                 color_glyph_draws.push(PreparedColorGlyphDraw {
                                     row: row.row,
@@ -147,6 +183,7 @@ impl WgpuTerminalRenderer {
                                     end_col: run.end_col(),
                                     glyph_id: glyph.glyph_id,
                                     cache_entry,
+                                    upload,
                                     x_offset_px: glyph.x_offset,
                                     y_offset_px: glyph.y_offset,
                                 });
@@ -156,6 +193,14 @@ impl WgpuTerminalRenderer {
                                 let request = frame.font.raster_request(glyph.glyph_id, run.style.bold);
                                 let rasterized = fonts
                                     .rasterize_glyph(&frame.font, glyph.glyph_id, run.style.bold)?;
+                                let upload = (!self.atlas.contains(request)).then(|| PreparedMonochromeGlyphUploadPayload {
+                                    width_px: rasterized.width_px,
+                                    height_px: rasterized.height_px,
+                                    bearing_x_px: rasterized.bearing_x_px,
+                                    bearing_y_px: rasterized.bearing_y_px,
+                                    advance_px: rasterized.advance_px,
+                                    coverage: rasterized.coverage.clone(),
+                                });
                                 let atlas_entry = self.atlas.upsert(request, &rasterized);
                                 monochrome_glyph_draws.push(PreparedMonochromeGlyphDraw {
                                     row: row.row,
@@ -163,6 +208,7 @@ impl WgpuTerminalRenderer {
                                     end_col: run.end_col(),
                                     glyph_id: glyph.glyph_id,
                                     atlas_entry,
+                                    upload,
                                     x_offset_px: glyph.x_offset,
                                     y_offset_px: glyph.y_offset,
                                     fg_rgba: run.style.fg_rgba,
@@ -174,6 +220,14 @@ impl WgpuTerminalRenderer {
                         let request = frame.font.raster_request(glyph.glyph_id, run.style.bold);
                         let rasterized =
                             fonts.rasterize_glyph(&frame.font, glyph.glyph_id, run.style.bold)?;
+                        let upload = (!self.atlas.contains(request)).then(|| PreparedMonochromeGlyphUploadPayload {
+                            width_px: rasterized.width_px,
+                            height_px: rasterized.height_px,
+                            bearing_x_px: rasterized.bearing_x_px,
+                            bearing_y_px: rasterized.bearing_y_px,
+                            advance_px: rasterized.advance_px,
+                            coverage: rasterized.coverage.clone(),
+                        });
                         let atlas_entry = self.atlas.upsert(request, &rasterized);
                         monochrome_glyph_draws.push(PreparedMonochromeGlyphDraw {
                             row: row.row,
@@ -181,6 +235,7 @@ impl WgpuTerminalRenderer {
                             end_col: run.end_col(),
                             glyph_id: glyph.glyph_id,
                             atlas_entry,
+                            upload,
                             x_offset_px: glyph.x_offset,
                             y_offset_px: glyph.y_offset,
                             fg_rgba: run.style.fg_rgba,
@@ -225,6 +280,7 @@ impl WgpuTerminalRenderer {
             shaped_row_count,
             glyph_run_count,
             glyph_count,
+            background_runs,
             monochrome_glyph_draws,
             color_glyph_draws,
             underline_run_count,
@@ -236,10 +292,10 @@ impl WgpuTerminalRenderer {
     fn upsert_color_glyph(
         &mut self,
         key: ColorGlyphCacheKey,
-        rasterized: crate::app::terminal_font::ColorGlyphRaster,
-    ) -> ColorGlyphCacheEntry {
+        rasterized: &crate::app::terminal_font::ColorGlyphRaster,
+    ) -> (ColorGlyphCacheEntry, Option<PreparedColorGlyphUploadPayload>) {
         if let Some(entry) = self.color_glyph_cache.get(&key) {
-            return *entry;
+            return (*entry, None);
         }
 
         let entry = ColorGlyphCacheEntry {
@@ -250,7 +306,15 @@ impl WgpuTerminalRenderer {
         };
         self.next_color_slot = self.next_color_slot.saturating_add(1);
         self.color_glyph_cache.insert(key, entry);
-        entry
+
+        (
+            entry,
+            Some(PreparedColorGlyphUploadPayload {
+                width_px: rasterized.width_px,
+                height_px: rasterized.height_px,
+                rgba: rasterized.rgba.clone(),
+            }),
+        )
     }
 }
 
@@ -271,6 +335,7 @@ fn hash_shaped_frame(frame: &ShapedTerminalFrame) -> u64 {
             run.cell_range.end.hash(&mut hasher);
             run.text.hash(&mut hasher);
             run.style.fg_rgba.hash(&mut hasher);
+            run.style.bg_rgba.hash(&mut hasher);
             run.style.bold.hash(&mut hasher);
             run.style.underline.hash(&mut hasher);
             for glyph in &run.glyphs {

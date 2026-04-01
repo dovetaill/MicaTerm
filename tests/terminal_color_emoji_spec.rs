@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::fs;
 use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
 use mica_term::app::terminal_atlas::{ClusterSpriteKind, TerminalAtlasRenderer};
+use mica_term::app::terminal_presenter::{PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter, WindowsNativePresenter};
 use mica_term::app::terminal_emoji::{
     ClusterRenderKind, EmojiFallbackReason, EmojiFontRasterizeRequest, EmojiFontResolution,
     EmojiRasterizerBackend, EmojiRenderOutcome, EmojiSprite, ResolvedEmojiFont,
@@ -39,6 +40,16 @@ fn fake_color_emoji_renderer() -> TerminalEmojiRenderer {
 fn atlas_renderer_with_fake_color_emoji() -> Result<TerminalAtlasRenderer> {
     TerminalAtlasRenderer::with_emoji_renderer_for_tests(fake_color_emoji_renderer())
 }
+
+fn present_native_frame(
+    presenter: &mut WindowsNativePresenter,
+    surface: &TerminalSurfaceState,
+) -> Result<mica_term::app::terminal_presenter::NativeTerminalFrame> {
+    match presenter.present(surface, TerminalPresentationOptions::default())? {
+        PresentedTerminalFrame::Native(frame) => Ok(*frame),
+    }
+}
+
 
 #[test]
 fn emoji_clusters_are_not_treated_as_blank_terminal_cells() -> Result<()> {
@@ -229,6 +240,69 @@ impl EmojiRasterizerBackend for FakeAtlasEmojiBackend {
 }
 
 #[test]
+fn first_monochrome_native_frame_carries_upload_payload_then_reuses_cache() -> Result<()> {
+    let surface = render_surface(4, 12, "A\r\n");
+    let mut presenter = WindowsNativePresenter::new()?;
+
+    let first = present_native_frame(&mut presenter, &surface)?;
+    let second = present_native_frame(&mut presenter, &surface)?;
+
+    assert!(
+        first
+            .presentable_frame
+            .monochrome_glyph_draws
+            .iter()
+            .any(|draw| draw.upload.as_ref().is_some_and(|upload| {
+                !upload.coverage.is_empty()
+                    && upload.width_px > 0
+                    && upload.height_px > 0
+                    && upload.advance_px >= 0
+            })),
+        "the first monochrome native frame should carry glyph upload payload bytes for backend resource creation"
+    );
+    assert!(
+        second
+            .presentable_frame
+            .monochrome_glyph_draws
+            .iter()
+            .all(|draw| draw.upload.is_none()),
+        "re-presenting the same monochrome frame should reuse cached glyph resources instead of resending upload payloads"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn first_color_native_frame_carries_upload_payload_then_reuses_cache() -> Result<()> {
+    let surface = render_surface(4, 12, "🦀\r\n");
+    let mut presenter = WindowsNativePresenter::new()?;
+
+    let first = present_native_frame(&mut presenter, &surface)?;
+    let second = present_native_frame(&mut presenter, &surface)?;
+
+    assert!(
+        first
+            .presentable_frame
+            .color_glyph_draws
+            .iter()
+            .any(|draw| draw.upload.as_ref().is_some_and(|upload| {
+                !upload.rgba.is_empty() && upload.width_px > 0 && upload.height_px > 0
+            })),
+        "the first color native frame should carry RGBA upload payload bytes for backend resource creation"
+    );
+    assert!(
+        second
+            .presentable_frame
+            .color_glyph_draws
+            .iter()
+            .all(|draw| draw.upload.is_none()),
+        "re-presenting the same color frame should reuse cached color glyph resources instead of resending upload payloads"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn native_renderer_color_glyph_contract_uses_separate_cache_state() {
     let atlas_source =
         fs::read_to_string("src/app/terminal_renderer/atlas.rs").expect("read renderer atlas");
@@ -282,6 +356,34 @@ fn native_renderer_color_glyph_contract_uses_separate_cache_state() {
     assert!(
         renderer_source.contains("color_glyphs_prepared"),
         "prepared frame metadata should count color glyph work separately from monochrome atlas uploads"
+    );
+}
+
+#[test]
+fn windows_backend_source_keeps_color_glyphs_separate_from_overlay_stages() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+
+    assert!(
+        windows_backend_source.contains("pub last_drawn_color_glyphs: usize"),
+        "windows backend should track color glyph draw counts separately from monochrome glyph draws"
+    );
+    assert!(
+        windows_backend_source.contains("pub last_drawn_selection_rects: usize"),
+        "windows backend should track selection overlay draws separately from text draws"
+    );
+    assert!(
+        windows_backend_source.contains("pub last_drawn_underline_runs: usize"),
+        "windows backend should track underline overlay draws separately from text draws"
+    );
+    assert!(
+        windows_backend_source.contains("pub last_drawn_cursor_overlay_visible: bool"),
+        "windows backend should track whether the cursor overlay draw stage ran"
+    );
+    assert!(
+        windows_backend_source.contains("pub last_drawn_ime_preview_active: bool"),
+        "windows backend should track whether the IME preview draw stage ran"
     );
 }
 

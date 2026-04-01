@@ -386,6 +386,42 @@ fn native_renderer_sources_expose_draw_ready_text_payloads() {
         "color glyph draws should keep dedicated color cache references for native presentation"
     );
     assert!(
+        renderer_source.contains("pub struct PreparedMonochromeGlyphUploadPayload"),
+        "native renderer should define an explicit monochrome glyph upload payload contract for backend resource creation"
+    );
+    assert!(
+        renderer_source.contains("pub coverage: Vec<u8>"),
+        "monochrome glyph upload payloads should retain the alpha mask bytes for the backend upload path"
+    );
+    assert!(
+        renderer_source.contains("pub bearing_x_px: i32"),
+        "monochrome glyph upload payloads should retain horizontal bearing metadata for backend placement"
+    );
+    assert!(
+        renderer_source.contains("pub advance_px: i32"),
+        "monochrome glyph upload payloads should retain advance metadata for backend placement"
+    );
+    assert!(
+        renderer_source.contains("pub upload: Option<PreparedMonochromeGlyphUploadPayload>"),
+        "monochrome glyph draws should expose an optional upload payload so platform backends can distinguish first upload from cache reuse"
+    );
+    assert!(
+        renderer_source.contains("pub struct PreparedColorGlyphUploadPayload"),
+        "native renderer should define an explicit color glyph upload payload contract for backend resource creation"
+    );
+    assert!(
+        renderer_source.contains("pub rgba: Vec<u8>"),
+        "color glyph upload payloads should retain RGBA bytes for backend upload"
+    );
+    assert!(
+        renderer_source.contains("pub upload: Option<PreparedColorGlyphUploadPayload>"),
+        "color glyph draws should expose an optional upload payload so platform backends can distinguish first upload from cache reuse"
+    );
+    assert!(
+        presenter_source.contains("pub background_runs: Vec<PreparedBackgroundRun>"),
+        "presentable native frames should thread retained background runs alongside glyph draws"
+    );
+    assert!(
         presenter_source.contains("pub monochrome_glyph_draws: Vec<PreparedMonochromeGlyphDraw>"),
         "presentable native frames should thread monochrome glyph draw payloads through the presenter contract"
     );
@@ -502,6 +538,66 @@ fn windows_platform_surface_backend_source_exposes_hwnd_and_lifecycle_contract()
 }
 
 #[test]
+fn windows_backend_source_consumes_retained_background_and_monochrome_payloads() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+
+    assert!(
+        windows_backend_source.contains("draw.upload.as_ref()"),
+        "windows backend should consume retained monochrome upload payloads instead of trying to regenerate glyph masks"
+    );
+    assert!(
+        windows_backend_source.contains("upload.coverage.len()"),
+        "windows backend should retain monochrome alpha-mask bytes when creating glyph bitmap resources"
+    );
+    assert!(
+        windows_backend_source.contains("draw.fg_rgba"),
+        "windows backend should draw monochrome glyphs with the retained foreground color instead of recomputing style"
+    );
+    assert!(
+        windows_backend_source.contains("run.bg_rgba"),
+        "windows backend should draw background runs with the retained ANSI background color instead of clearing only the default background"
+    );
+}
+
+#[test]
+fn windows_backend_source_consumes_retained_color_glyph_and_overlay_payloads() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+
+    assert!(
+        windows_backend_source.contains("draw.upload.as_ref()"),
+        "windows backend should consume retained color upload payloads instead of trying to regenerate RGBA emoji bitmaps"
+    );
+    assert!(
+        windows_backend_source.contains("upload.rgba.len()"),
+        "windows backend should retain RGBA upload bytes when creating color glyph bitmap resources"
+    );
+    assert!(
+        windows_backend_source.contains("frame.frame.presentable_frame.color_glyph_draws"),
+        "windows backend should iterate retained color glyph draws instead of inferring emoji runs again"
+    );
+    assert!(
+        windows_backend_source.contains("frame.frame.presentable_frame.selection_overlay.rects"),
+        "selection overlay draw stage should consume retained selection rectangles from the presenter"
+    );
+    assert!(
+        windows_backend_source.contains("frame.frame.presentable_frame.underline_overlay.runs"),
+        "underline overlay draw stage should consume retained underline runs from the presenter"
+    );
+    assert!(
+        windows_backend_source.contains("frame.frame.presentable_frame.cursor_overlay.visible"),
+        "cursor draw stage should consume retained cursor visibility and geometry from the presenter"
+    );
+    assert!(
+        windows_backend_source.contains("frame.frame.presentable_frame.ime_preview_overlay.active"),
+        "IME draw stage should consume retained IME preview state from the presenter"
+    );
+}
+
+#[test]
 fn native_terminal_pipeline_sources_remove_bitmap_raster_scale_hooks() {
     let presenter_source =
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
@@ -610,6 +706,10 @@ fn terminal_style_contract_threads_bold_and_underline_across_runtime_model_and_l
         "terminal model cells should preserve underline state from runtime snapshots"
     );
     assert!(
+        model_source.contains("pub bg_rgba: u32"),
+        "terminal model cells should preserve background color state from runtime snapshots"
+    );
+    assert!(
         segmentation_source.contains("pub bold: bool"),
         "text style keys should include bold state so shaped runs can split correctly"
     );
@@ -618,12 +718,20 @@ fn terminal_style_contract_threads_bold_and_underline_across_runtime_model_and_l
         "text style keys should include underline state so renderer prep does not drop decorations"
     );
     assert!(
+        segmentation_source.contains("pub bg_rgba: u32"),
+        "text style keys should include background color so retained native frames can draw ANSI background runs"
+    );
+    assert!(
         renderer_source.contains("run.style.bold.hash(&mut hasher);"),
         "native frame fingerprints should include bold state so style-only changes trigger redraws"
     );
     assert!(
         renderer_source.contains("run.style.underline.hash(&mut hasher);"),
         "native frame fingerprints should include underline state so decoration changes trigger redraws"
+    );
+    assert!(
+        renderer_source.contains("run.style.bg_rgba.hash(&mut hasher);"),
+        "native frame fingerprints should include background color so background-only style changes trigger redraws"
     );
 }
 

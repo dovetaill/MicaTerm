@@ -167,6 +167,237 @@ fn native_surface_source_exposes_present_bridge_contract() {
 }
 
 #[test]
+fn retained_native_frame_sources_expose_background_display_list_contract() {
+    let segmentation_source =
+        fs::read_to_string("src/app/terminal_layout/run_segmentation.rs").expect("read run segmentation");
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read native renderer");
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
+
+    assert!(
+        segmentation_source.contains("pub bg_rgba: u32"),
+        "text style keys should retain background color so the Windows backend can draw ANSI backgrounds without rebuilding style state"
+    );
+    assert!(
+        renderer_source.contains("pub struct PreparedBackgroundRun"),
+        "prepared native frames should define explicit background runs for the retained display list"
+    );
+    assert!(
+        renderer_source.contains("pub background_runs: Vec<PreparedBackgroundRun>"),
+        "prepared native frames should carry retained background runs for backend consumption"
+    );
+    assert!(
+        presenter_source.contains("pub background_runs: Vec<PreparedBackgroundRun>"),
+        "presentable native frames should thread background runs through the presenter contract"
+    );
+}
+
+#[test]
+fn windows_backend_source_exposes_d2d_lifecycle_contract() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+    let windows_frame_source =
+        fs::read_to_string("src/app/windows_frame.rs").expect("read windows frame interop");
+
+    assert!(
+        windows_backend_source.contains("pub struct WindowsD2DFactoryState"),
+        "windows backend should define an explicit D2D factory lifecycle state"
+    );
+    assert!(
+        windows_backend_source.contains("pub struct WindowsHwndRenderTargetState"),
+        "windows backend should define an explicit HWND render-target lifecycle state"
+    );
+    assert!(
+        windows_backend_source.contains("pub d2d_factory: Option<WindowsD2DFactoryState>"),
+        "windows native surface state should retain D2D factory ownership instead of only HWND and frame token bookkeeping"
+    );
+    assert!(
+        windows_backend_source.contains("pub hwnd_render_target: Option<WindowsHwndRenderTargetState>"),
+        "windows native surface state should retain HWND render-target ownership instead of only HWND and frame token bookkeeping"
+    );
+    assert!(
+        windows_backend_source.contains("pub render_target_generation: u64"),
+        "windows backend should track render-target generation so recreate events can invalidate stale resources"
+    );
+    assert!(
+        windows_backend_source.contains("pub render_target_dirty: bool"),
+        "windows backend should track whether the HWND render target needs rebuild after attach or rect changes"
+    );
+    assert!(
+        windows_backend_source.contains("fn mark_render_target_dirty(&mut self)"),
+        "windows backend should expose a helper that marks the render target dirty when HWND, geometry, or retained resources change"
+    );
+    assert!(
+        windows_backend_source.contains("fn ensure_d2d_factory(&mut self)"),
+        "windows backend should expose a helper that ensures D2D factory state exists before render-target creation"
+    );
+    assert!(
+        windows_backend_source.contains("fn ensure_hwnd_render_target(&mut self)"),
+        "windows backend should expose a helper that ensures an HWND render target exists before present"
+    );
+    assert!(
+        windows_backend_source.contains("fn clear_device_resources(&mut self)"),
+        "windows backend should expose a helper that clears render-target owned resources during recreate and detach"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.mark_render_target_dirty();"),
+        "windows backend should mark the render target dirty when backend state changes"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.ensure_hwnd_render_target();"),
+        "windows backend present path should ensure the HWND render target exists before consuming retained frames"
+    );
+    assert!(
+        windows_frame_source.contains("use slint::ComponentHandle;"),
+        "windows frame interop should import ComponentHandle so host HWND resolution compiles on Windows targets"
+    );
+}
+
+#[test]
+fn windows_backend_source_exposes_background_and_monochrome_draw_contract() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+
+    assert!(
+        windows_backend_source.contains("pub struct WindowsD2DBrushState"),
+        "windows backend should define a retained brush cache contract for Direct2D background and glyph fills"
+    );
+    assert!(
+        windows_backend_source.contains("pub struct WindowsMonochromeGlyphBitmapState"),
+        "windows backend should define a retained monochrome glyph bitmap cache contract"
+    );
+    assert!(
+        windows_backend_source.contains("pub d2d_brushes: HashMap<u32, WindowsD2DBrushState>"),
+        "windows native surface state should retain Direct2D brush cache state for repeated background and glyph colors"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "pub monochrome_glyph_bitmaps: HashMap<u32, WindowsMonochromeGlyphBitmapState>"
+        ),
+        "windows native surface state should retain monochrome glyph bitmap cache state keyed by atlas slot"
+    );
+    assert!(
+        windows_backend_source.contains("fn ensure_brush(&mut self, rgba: u32)"),
+        "windows backend should expose a helper that ensures a brush exists before background or glyph drawing"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "fn ensure_monochrome_glyph_bitmap(&mut self, draw: &PreparedMonochromeGlyphDraw)"
+        ),
+        "windows backend should expose a helper that creates retained monochrome glyph bitmap resources from upload payloads"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "fn draw_background_runs(&mut self, frame: &RetainedNativeTerminalSurfaceFrame)"
+        ),
+        "windows backend should expose an explicit background-run draw stage"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "fn draw_monochrome_glyphs(&mut self, frame: &RetainedNativeTerminalSurfaceFrame)"
+        ),
+        "windows backend should expose an explicit monochrome glyph draw stage"
+    );
+    assert!(
+        windows_backend_source.contains("frame.frame.presentable_frame.background_runs"),
+        "background draw stage should iterate retained background runs instead of inferring ANSI colors again"
+    );
+    assert!(
+        windows_backend_source.contains("frame.frame.presentable_frame.monochrome_glyph_draws"),
+        "monochrome glyph draw stage should iterate retained monochrome glyph draws instead of reshaping text"
+    );
+    assert!(
+        windows_backend_source.contains("draw.upload.as_ref()"),
+        "monochrome glyph bitmap creation should consume upload payloads on first use"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.draw_background_runs(frame);"),
+        "windows backend present path should draw background runs before text"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.draw_monochrome_glyphs(frame);"),
+        "windows backend present path should draw monochrome glyphs after background fills"
+    );
+}
+
+#[test]
+fn windows_backend_source_exposes_color_glyph_and_overlay_draw_contract() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+
+    assert!(
+        windows_backend_source.contains("pub struct WindowsColorGlyphBitmapState"),
+        "windows backend should define a retained color glyph bitmap cache contract"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "pub color_glyph_bitmaps: HashMap<u32, WindowsColorGlyphBitmapState>"
+        ),
+        "windows native surface state should retain color glyph bitmap cache state keyed by color cache slot"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "fn ensure_color_glyph_bitmap(&mut self, draw: &PreparedColorGlyphDraw)"
+        ),
+        "windows backend should expose a helper that creates retained color glyph bitmap resources from upload payloads"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "fn draw_color_glyphs(&mut self, frame: &RetainedNativeTerminalSurfaceFrame)"
+        ),
+        "windows backend should expose an explicit color glyph draw stage"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "fn draw_selection_overlay(&mut self, frame: &RetainedNativeTerminalSurfaceFrame)"
+        ),
+        "windows backend should expose an explicit selection overlay draw stage"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "fn draw_underline_overlay(&mut self, frame: &RetainedNativeTerminalSurfaceFrame)"
+        ),
+        "windows backend should expose an explicit underline overlay draw stage"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "fn draw_cursor_overlay(&mut self, frame: &RetainedNativeTerminalSurfaceFrame)"
+        ),
+        "windows backend should expose an explicit cursor overlay draw stage"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "fn draw_ime_preview_overlay(&mut self, frame: &RetainedNativeTerminalSurfaceFrame)"
+        ),
+        "windows backend should expose an explicit IME preview overlay draw stage"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.draw_selection_overlay(frame);"),
+        "windows backend present path should draw selection overlays after background fills"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.draw_color_glyphs(frame);"),
+        "windows backend present path should draw color glyphs after monochrome glyphs are prepared"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.draw_underline_overlay(frame);"),
+        "windows backend present path should draw underline overlays after text"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.draw_cursor_overlay(frame);"),
+        "windows backend present path should draw the cursor overlay after text and underline passes"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.draw_ime_preview_overlay(frame);"),
+        "windows backend present path should draw IME preview after the cursor overlay"
+    );
+}
+
+#[test]
 fn platform_surface_backend_source_exposes_shared_native_surface_abstraction() {
     assert!(
         Path::new("src/app/terminal_renderer/platform/mod.rs").exists(),

@@ -61,6 +61,10 @@ pub struct GlyphAtlas {
 }
 
 impl GlyphAtlas {
+    pub fn contains(&self, request: GlyphRasterRequest) -> bool {
+        self.entries.contains_key(&GlyphAtlasKey::from(request))
+    }
+
     pub fn upsert(
         &mut self,
         request: GlyphRasterRequest,
