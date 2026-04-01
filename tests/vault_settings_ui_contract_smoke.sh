@@ -28,6 +28,13 @@ ensure_absent() {
 grep -F 'callback open-settings-panel-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback open-sync-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> sync-modal-open: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-remote-url: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-branch: "main";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-auth-mode: "https";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-https-username: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-https-secret: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-ssh-private-key: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-ssh-passphrase: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> right-panel-view: "sftp";' "$APP_WINDOW" >/dev/null
 grep -F 'open-settings-panel-requested => {' "$APP_WINDOW" >/dev/null
 grep -F 'root.open-settings-panel-requested();' "$APP_WINDOW" >/dev/null
@@ -44,4 +51,6 @@ ensure_absent 'label: "Appearance";' "$TITLEBAR_MENU"
 ensure_absent 'text: "Sync & Vault"' "$RIGHT_PANEL"
 ensure_absent 'panel-view == "vault"' "$RIGHT_PANEL"
 ensure_absent 'VaultProviderCard' "$RIGHT_PANEL"
+ensure_absent 'sync-modal-primary-gist-id' "$APP_WINDOW"
+ensure_absent 'sync-modal-primary-pat' "$APP_WINDOW"
 ensure_absent 'self.right_panel_view = RightPanelView::Vault;' "$VIEW_MODEL"

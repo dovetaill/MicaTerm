@@ -7,6 +7,23 @@ use serde::{Deserialize, Serialize};
 pub struct KeychainCatalog {
     pub root_ids: Vec<String>,
     pub nodes: BTreeMap<String, KeychainNode>,
+    pub merge_metadata: BTreeMap<String, KeychainNodeMergeMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct KeychainNodeMergeMetadata {
+    pub last_modified_at: Option<String>,
+    pub last_modified_by_device: Option<String>,
+    pub deleted_at: Option<String>,
+}
+
+impl KeychainNodeMergeMetadata {
+    pub fn is_deleted(&self) -> bool {
+        self.deleted_at
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

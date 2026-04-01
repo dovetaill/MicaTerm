@@ -14,8 +14,8 @@ use mica_term::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService};
 use mica_term::app::ui_preferences::UiPreferences;
 use mica_term::app::vault::model::{
     SnapshotSyncPreferences, SnapshotUiPreferences, VaultAssetCatalog, VaultAssetDomain,
-    VaultAssetKind, VaultAssetNode, VaultAssetPayload, VaultKnownHostEntry, VaultSnapshot,
-    VaultSnippetSpec,
+    VaultAssetKind, VaultAssetNode, VaultAssetPayload, VaultKnownHostEntry, VaultNodeMergeMetadata,
+    VaultSnapshot, VaultSnippetSpec,
 };
 use mica_term::app::vault::snapshot::{apply_vault_snapshot, export_vault_snapshot};
 use mica_term::shell::assets::{
@@ -121,6 +121,7 @@ fn sample_keychain_catalog(
                 },
             ),
         ]),
+        merge_metadata: BTreeMap::new(),
     }
 }
 
@@ -283,6 +284,7 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_def
                 },
             ),
         ]),
+        merge_metadata: BTreeMap::new(),
     };
     let snapshot = VaultSnapshot {
         schema_version: 1,
@@ -487,6 +489,7 @@ fn vault_snapshot_catalog_preserves_snippets_alongside_console_assets() {
                     },
                 ),
             ]),
+            merge_metadata: BTreeMap::new(),
         },
         ssh_secret_bundles: BTreeMap::new(),
         keychain_catalog: KeychainCatalog::default(),
@@ -539,6 +542,117 @@ fn vault_snapshot_catalog_preserves_snippets_alongside_console_assets() {
 }
 
 #[test]
+fn vault_snapshot_round_trip_preserves_merge_metadata_and_tombstones() {
+    let snapshot = VaultSnapshot {
+        schema_version: 1,
+        asset_catalog: VaultAssetCatalog {
+            root_ids: vec!["asset-live".into()],
+            nodes: BTreeMap::from([(
+                "asset-live".into(),
+                VaultAssetNode {
+                    id: "asset-live".into(),
+                    parent_id: None,
+                    title: "Live".into(),
+                    kind: VaultAssetKind::Folder,
+                    child_ids: Vec::new(),
+                    payload: VaultAssetPayload::Folder,
+                },
+            )]),
+            merge_metadata: BTreeMap::from([
+                (
+                    "asset-live".into(),
+                    VaultNodeMergeMetadata {
+                        last_modified_at: Some("2026-04-01T09:00:00Z".into()),
+                        last_modified_by_device: Some("device-live".into()),
+                        deleted_at: None,
+                    },
+                ),
+                (
+                    "asset-deleted".into(),
+                    VaultNodeMergeMetadata {
+                        last_modified_at: Some("2026-04-01T08:00:00Z".into()),
+                        last_modified_by_device: Some("device-delete".into()),
+                        deleted_at: Some("2026-04-01T08:30:00Z".into()),
+                    },
+                ),
+            ]),
+        },
+        ssh_secret_bundles: BTreeMap::new(),
+        keychain_catalog: KeychainCatalog {
+            root_ids: vec!["identity-ops".into()],
+            nodes: BTreeMap::from([(
+                "identity-ops".into(),
+                KeychainNode {
+                    id: "identity-ops".into(),
+                    parent_id: None,
+                    title: "Ops".into(),
+                    kind: KeychainNodeKind::Identity,
+                    child_ids: Vec::new(),
+                    payload: KeychainNodePayload::Identity(KeychainIdentitySpec {
+                        username: "ops".into(),
+                        auth_kind: KeychainIdentityAuthKind::Password,
+                        ssh_key_id: None,
+                        credential_ref: Some("keychain/identity/identity-ops".into()),
+                        remark: String::new(),
+                    }),
+                },
+            )]),
+            merge_metadata: BTreeMap::from([
+                (
+                    "identity-ops".into(),
+                    mica_term::app::keychain::model::KeychainNodeMergeMetadata {
+                        last_modified_at: Some("2026-04-01T09:10:00Z".into()),
+                        last_modified_by_device: Some("device-live".into()),
+                        deleted_at: None,
+                    },
+                ),
+                (
+                    "identity-old".into(),
+                    mica_term::app::keychain::model::KeychainNodeMergeMetadata {
+                        last_modified_at: Some("2026-04-01T07:00:00Z".into()),
+                        last_modified_by_device: Some("device-legacy".into()),
+                        deleted_at: Some("2026-04-01T07:30:00Z".into()),
+                    },
+                ),
+            ]),
+        },
+        keychain_identity_secret_bundles: BTreeMap::new(),
+        keychain_key_secret_bundles: BTreeMap::new(),
+        known_hosts: Vec::new(),
+        sync_preferences: SnapshotSyncPreferences::default(),
+        ui_preferences: SnapshotUiPreferences::default(),
+    };
+
+    let encoded = serde_json::to_vec_pretty(&snapshot).expect("encode snapshot");
+    let decoded: VaultSnapshot = serde_json::from_slice(&encoded).expect("decode snapshot");
+
+    assert_eq!(
+        decoded.asset_catalog.merge_metadata["asset-live"]
+            .last_modified_by_device
+            .as_deref(),
+        Some("device-live")
+    );
+    assert_eq!(
+        decoded.asset_catalog.merge_metadata["asset-deleted"]
+            .deleted_at
+            .as_deref(),
+        Some("2026-04-01T08:30:00Z")
+    );
+    assert_eq!(
+        decoded.keychain_catalog.merge_metadata["identity-ops"]
+            .last_modified_at
+            .as_deref(),
+        Some("2026-04-01T09:10:00Z")
+    );
+    assert_eq!(
+        decoded.keychain_catalog.merge_metadata["identity-old"]
+            .deleted_at
+            .as_deref(),
+        Some("2026-04-01T07:30:00Z")
+    );
+}
+
+#[test]
 fn apply_vault_snapshot_keeps_empty_secret_entries_absent() {
     let credential_ref = "ssh/saved-secrets/asset-empty";
     let identity_credential_ref = "keychain/identity/identity-empty";
@@ -586,6 +700,7 @@ fn apply_vault_snapshot_keeps_empty_secret_entries_absent() {
                     )),
                 },
             )]),
+            merge_metadata: BTreeMap::new(),
         },
         ssh_secret_bundles: BTreeMap::new(),
         keychain_catalog: sample_keychain_catalog(identity_credential_ref, key_credential_ref),

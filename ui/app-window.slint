@@ -40,13 +40,17 @@ export component AppWindow inherits Window {
     in-out property <string> sync-modal-error-text: "";
     in-out property <string> sync-modal-provider-label: "";
     in-out property <string> sync-modal-target-label: "";
+    in-out property <int> sync-modal-conflict-count: 0;
+    in-out property <string> sync-modal-conflict-summary: "";
     in-out property <string> sync-modal-primary-action-label: "Save and enable";
     in-out property <string> sync-modal-secondary-action-label: "Close";
-    in-out property <string> sync-modal-primary-gist-id: "";
-    in-out property <string> sync-modal-primary-pat: "";
-    in-out property <bool> sync-modal-mirror-enabled: false;
-    in-out property <string> sync-modal-mirror-gist-id: "";
-    in-out property <string> sync-modal-mirror-pat: "";
+    in-out property <string> sync-modal-git-remote-url: "";
+    in-out property <string> sync-modal-git-branch: "main";
+    in-out property <string> sync-modal-git-auth-mode: "https";
+    in-out property <string> sync-modal-git-https-username: "";
+    in-out property <string> sync-modal-git-https-secret: "";
+    in-out property <string> sync-modal-git-ssh-private-key: "";
+    in-out property <string> sync-modal-git-ssh-passphrase: "";
     in-out property <string> sync-modal-master-password: "";
     in-out property <string> sync-feedback-text: "";
     in-out property <int> sync-feedback-sequence: 0;
@@ -1168,13 +1172,17 @@ export component AppWindow inherits Window {
             error-text: root.sync-modal-error-text;
             provider-label: root.sync-modal-provider-label;
             target-label: root.sync-modal-target-label;
+            conflict-count: root.sync-modal-conflict-count;
+            conflict-summary: root.sync-modal-conflict-summary;
             primary-action-label: root.sync-modal-primary-action-label;
             secondary-action-label: root.sync-modal-secondary-action-label;
-            primary-gist-id: root.sync-modal-primary-gist-id;
-            primary-pat: root.sync-modal-primary-pat;
-            mirror-enabled: root.sync-modal-mirror-enabled;
-            mirror-gist-id: root.sync-modal-mirror-gist-id;
-            mirror-pat: root.sync-modal-mirror-pat;
+            git-remote-url: root.sync-modal-git-remote-url;
+            git-branch: root.sync-modal-git-branch;
+            git-auth-mode: root.sync-modal-git-auth-mode;
+            git-https-username: root.sync-modal-git-https-username;
+            git-https-secret: root.sync-modal-git-https-secret;
+            git-ssh-private-key: root.sync-modal-git-ssh-private-key;
+            git-ssh-passphrase: root.sync-modal-git-ssh-passphrase;
             master-password: root.sync-modal-master-password;
 
             close-requested => {

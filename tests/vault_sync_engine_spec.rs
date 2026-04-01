@@ -178,6 +178,26 @@ fn sync_engine_enables_conditional_head_write_for_s3_like_primary() {
 }
 
 #[test]
+fn sync_engine_disables_conditional_head_write_for_git_repo_primary() {
+    let primary = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::git_repo_primary(),
+    ));
+    primary.set_remote_head(Some(sample_remote_head("rev-0001")));
+    let engine = SyncEngine::new(primary.clone() as Arc<dyn VaultProvider>, Vec::new());
+
+    let result = engine
+        .sync(sample_request("rev-0002", Some("rev-0001")))
+        .expect("git repo sync succeeds");
+
+    assert_eq!(result.primary_revision, "rev-0002");
+    let writes = primary.recorded_writes();
+    assert_eq!(writes.len(), 1);
+    assert!(!writes[0].conditional_head_write);
+    assert_eq!(writes[0].head.pack_layout, PackLayout::BundledFiles);
+}
+
+#[test]
 fn sync_engine_surfaces_primary_read_failures_without_touching_mirrors() {
     let primary = Arc::new(MockVaultProvider::new(
         "remote-primary",

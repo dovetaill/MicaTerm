@@ -185,13 +185,18 @@ pub struct SyncModalViewState {
     pub error_text: String,
     pub provider_label: String,
     pub target_label: String,
+    pub conflict_count: i32,
+    pub conflict_summary: String,
+    pub conflict_review_available: bool,
     pub primary_action_label: String,
     pub secondary_action_label: String,
-    pub primary_gist_id: String,
-    pub primary_pat: String,
-    pub mirror_enabled: bool,
-    pub mirror_gist_id: String,
-    pub mirror_pat: String,
+    pub git_remote_url: String,
+    pub git_branch: String,
+    pub git_auth_mode: String,
+    pub git_https_username: String,
+    pub git_https_secret: String,
+    pub git_ssh_private_key: String,
+    pub git_ssh_passphrase: String,
     pub master_password: String,
 }
 
@@ -202,17 +207,22 @@ impl Default for SyncModalViewState {
             mode: SyncModalMode::NotConfigured,
             title: "Sync Settings".into(),
             headline: "Configure sync".into(),
-            status_text: "Configure at least one Gitee target to enable sync.".into(),
+            status_text: "Configure a Gitee Git remote to enable sync.".into(),
             error_text: String::new(),
             provider_label: "Gitee".into(),
             target_label: String::new(),
+            conflict_count: 0,
+            conflict_summary: String::new(),
+            conflict_review_available: false,
             primary_action_label: "Save and enable".into(),
             secondary_action_label: "Close".into(),
-            primary_gist_id: String::new(),
-            primary_pat: String::new(),
-            mirror_enabled: false,
-            mirror_gist_id: String::new(),
-            mirror_pat: String::new(),
+            git_remote_url: String::new(),
+            git_branch: "main".into(),
+            git_auth_mode: "https".into(),
+            git_https_username: String::new(),
+            git_https_secret: String::new(),
+            git_ssh_private_key: String::new(),
+            git_ssh_passphrase: String::new(),
             master_password: String::new(),
         }
     }
@@ -921,23 +931,21 @@ impl ShellViewModel {
     pub fn update_sync_modal_field(&mut self, field: &str, value: String) {
         let modal = self.sync_modal_state_mut();
         match field {
-            "primary-gist-id" => modal.primary_gist_id = value,
-            "primary-pat" => modal.primary_pat = value,
-            "mirror-gist-id" => modal.mirror_gist_id = value,
-            "mirror-pat" => modal.mirror_pat = value,
+            "git-remote-url" => modal.git_remote_url = value,
+            "git-branch" => modal.git_branch = value,
+            "git-auth-mode" => modal.git_auth_mode = value,
+            "git-https-username" => modal.git_https_username = value,
+            "git-https-secret" => modal.git_https_secret = value,
+            "git-ssh-private-key" => modal.git_ssh_private_key = value,
+            "git-ssh-passphrase" => modal.git_ssh_passphrase = value,
             "master-password" => modal.master_password = value,
             _ => return,
         }
         modal.error_text.clear();
     }
 
-    pub fn update_sync_modal_toggle(&mut self, field: &str, value: bool) {
-        let modal = self.sync_modal_state_mut();
-        match field {
-            "mirror-enabled" => modal.mirror_enabled = value,
-            _ => return,
-        }
-        modal.error_text.clear();
+    pub fn update_sync_modal_toggle(&mut self, _field: &str, _value: bool) {
+        self.sync_modal_state_mut().error_text.clear();
     }
 
     pub fn open_appearance_panel(&mut self) {

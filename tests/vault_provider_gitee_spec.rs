@@ -12,6 +12,7 @@ use mica_term::app::vault::provider::gitee_gist::{
     GiteeGistApi, GiteeGistAuth, GiteeGistDocument, GiteeGistFile, GiteeGistProvider,
     GiteeGistProviderConfig, GiteeGistUpdateRequest,
 };
+use mica_term::app::vault::provider::first_release_formal_provider_kind;
 
 fn sample_gitee_remote(auth_kind: ProviderAuthKind) -> BootstrapRemoteConfig {
     BootstrapRemoteConfig {
@@ -524,4 +525,10 @@ fn gitee_provider_prune_revisions_older_than_keep_latest_limit() {
             "vault-rev-0002-pack-0000.bin".to_string(),
         ]
     );
+}
+
+#[test]
+fn gitee_provider_is_retained_for_payload_io_but_not_formal_primary() {
+    assert_eq!(first_release_formal_provider_kind(), ProviderKind::GitRepo);
+    assert_ne!(first_release_formal_provider_kind(), ProviderKind::GiteeGist);
 }

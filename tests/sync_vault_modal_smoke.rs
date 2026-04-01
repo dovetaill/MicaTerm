@@ -18,9 +18,10 @@ use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::vault::bootstrap::load_local_vault_bootstrap_state;
+use mica_term::app::vault::conflict_inbox::{ConflictInboxEntry, persist_conflict_entries};
 use mica_term::app::vault::model::{
     BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind,
-    KdfConfig, PackLayout, ProviderAuthKind, ProviderKind, RemoteRole, VaultHead,
+    GitHostKind, KdfConfig, PackLayout, ProviderAuthKind, ProviderKind, RemoteRole, VaultHead,
 };
 use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
@@ -205,9 +206,57 @@ fn sync_modal_defaults_to_not_configured_state() {
     app.invoke_open_sync_modal_requested();
 
     assert_eq!(app.get_sync_modal_mode().as_str(), "not-configured");
+    assert_eq!(app.get_sync_modal_provider_label().as_str(), "Gitee");
+    assert_eq!(app.get_sync_modal_git_remote_url().as_str(), "");
+    assert_eq!(app.get_sync_modal_git_branch().as_str(), "main");
+    assert_eq!(app.get_sync_modal_git_auth_mode().as_str(), "https");
     assert_eq!(
         app.get_sync_modal_primary_action_label().as_str(),
         "Save and enable"
+    );
+}
+
+#[test]
+fn sync_modal_projects_persisted_conflict_summary_from_local_inbox() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("conflict-summary");
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+    persist_conflict_entries(
+        temp_root.join("conflicts").as_path(),
+        &[ConflictInboxEntry {
+            vault_id: bundle.vault_id.clone(),
+            target_id: "asset-prod".into(),
+            conflict_kind: "asset-delete-vs-modify".into(),
+            local_device_id: "device-local".into(),
+            remote_device_id: "device-remote".into(),
+            captured_at: "00000000000000000042".into(),
+        }],
+    )
+    .expect("persist conflict inbox entry");
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(RecordingVaultProviderFactory::default()),
+            bootstrap_template: Some(bundle),
+        },
+    );
+
+    app.invoke_open_sync_modal_requested();
+
+    assert_eq!(app.get_sync_modal_conflict_count(), 1);
+    let summary = app.get_sync_modal_conflict_summary().to_string();
+    assert!(summary.contains("asset-prod"), "unexpected summary: {summary}");
+    assert!(
+        summary.contains("asset-delete-vs-modify"),
+        "unexpected summary: {summary}"
     );
 }
 
@@ -249,7 +298,7 @@ fn first_enable_flow_requires_a_remote_before_local_vault_is_created() {
     assert!(
         app.get_sync_modal_error_text()
             .as_str()
-            .contains("Configure a Gitee remote first")
+            .contains("Configure a Gitee Git remote first")
     );
     assert!(!temp_root.join("vault-bootstrap-state.json").exists());
 }
@@ -276,8 +325,14 @@ fn sync_settings_primary_action_persists_primary_target_and_creates_local_vault(
     );
 
     app.invoke_open_sync_modal_requested();
-    app.invoke_sync_modal_draft_changed("primary-gist-id".into(), "gist-primary-123".into());
-    app.invoke_sync_modal_draft_changed("primary-pat".into(), "pat-primary-secret".into());
+    app.invoke_sync_modal_draft_changed(
+        "git-remote-url".into(),
+        "https://gitee.com/demo/mica-vault.git".into(),
+    );
+    app.invoke_sync_modal_draft_changed("git-branch".into(), "mica-vault".into());
+    app.invoke_sync_modal_draft_changed("git-auth-mode".into(), "https".into());
+    app.invoke_sync_modal_draft_changed("git-https-username".into(), "demo-user".into());
+    app.invoke_sync_modal_draft_changed("git-https-secret".into(), "pat-primary-secret".into());
     app.invoke_sync_modal_draft_changed("master-password".into(), "vault-pass".into());
 
     app.invoke_sync_modal_primary_action_requested();
@@ -287,75 +342,41 @@ fn sync_settings_primary_action_persists_primary_target_and_creates_local_vault(
             .expect("load local bootstrap state")
             .expect("expected persisted local bootstrap state");
     let primary = saved.bundle.primary_remote().expect("primary remote");
-    assert_eq!(primary.provider, ProviderKind::GiteeGist);
-    assert_eq!(primary.auth_kind, ProviderAuthKind::Pat);
+    assert_eq!(primary.provider, ProviderKind::GitRepo);
+    assert_eq!(primary.auth_kind, ProviderAuthKind::HttpsCredentials);
     match &primary.locator {
-        BootstrapRemoteLocator::GiteeGist { gist_id } => {
-            assert_eq!(gist_id, "gist-primary-123");
+        BootstrapRemoteLocator::GitRepo {
+            host_kind,
+            remote_url,
+            branch,
+        } => {
+            assert_eq!(*host_kind, GitHostKind::Gitee);
+            assert_eq!(remote_url, "https://gitee.com/demo/mica-vault.git");
+            assert_eq!(branch, "mica-vault");
         }
         other => panic!("unexpected primary locator: {other:?}"),
     }
 }
 
 #[test]
-fn sync_settings_supports_one_optional_mirror_target() {
+fn sync_modal_can_switch_between_https_and_ssh_auth_modes() {
     i_slint_backend_testing::init_no_event_loop();
 
-    let temp_root = sample_vault_runtime_root("settings-mirror");
-    let provider_factory = RecordingVaultProviderFactory::default();
-    provider_factory.insert(Arc::new(MockVaultProvider::new(
-        "remote-primary",
-        ProviderCapabilities::bundled_files_like(),
-    )));
-    provider_factory.insert(Arc::new(MockVaultProvider::new(
-        "remote-mirror",
-        ProviderCapabilities::bundled_files_like(),
-    )));
     let app = AppWindow::new().unwrap();
-    bind_with_vault_runtime(
-        &app,
-        Arc::new(MemoryCredentialStore::default()),
-        VaultRuntimeOptions {
-            root_dir: Some(temp_root.clone()),
-            provider_factory: Arc::new(provider_factory),
-            bootstrap_template: None,
-        },
-    );
+    bind_top_status_bar_with_store(&app, None);
 
     app.invoke_open_sync_modal_requested();
-    app.invoke_sync_modal_draft_changed("primary-gist-id".into(), "gist-primary-123".into());
-    app.invoke_sync_modal_draft_changed("primary-pat".into(), "pat-primary-secret".into());
-    app.invoke_sync_modal_toggle_changed("mirror-enabled".into(), true);
-    app.invoke_sync_modal_draft_changed("mirror-gist-id".into(), "gist-mirror-456".into());
-    app.invoke_sync_modal_draft_changed("mirror-pat".into(), "pat-mirror-secret".into());
-    app.invoke_sync_modal_draft_changed("master-password".into(), "vault-pass".into());
-
-    app.invoke_sync_modal_primary_action_requested();
-
-    let saved =
-        load_local_vault_bootstrap_state(temp_root.join("vault-bootstrap-state.json").as_path())
-            .expect("load local bootstrap state")
-            .expect("expected persisted local bootstrap state");
-    assert_eq!(saved.bundle.remotes.len(), 2);
-    assert!(
-        saved
-            .bundle
-            .remotes
-            .iter()
-            .any(|remote| remote.role == RemoteRole::Mirror)
+    app.invoke_sync_modal_draft_changed("git-auth-mode".into(), "ssh".into());
+    app.invoke_sync_modal_draft_changed(
+        "git-ssh-private-key".into(),
+        "-----BEGIN OPENSSH PRIVATE KEY-----".into(),
     );
-    let mirror = saved
-        .bundle
-        .remotes
-        .iter()
-        .find(|remote| remote.role == RemoteRole::Mirror)
-        .expect("mirror remote");
-    match &mirror.locator {
-        BootstrapRemoteLocator::GiteeGist { gist_id } => {
-            assert_eq!(gist_id, "gist-mirror-456");
-        }
-        other => panic!("unexpected mirror locator: {other:?}"),
-    }
+
+    assert_eq!(app.get_sync_modal_git_auth_mode().as_str(), "ssh");
+    assert_eq!(
+        app.get_sync_modal_git_ssh_private_key().as_str(),
+        "-----BEGIN OPENSSH PRIVATE KEY-----"
+    );
 }
 
 #[test]
@@ -544,11 +565,14 @@ fn sync_modal_primary_action_routes_to_sync_and_secondary_action_closes() {
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
 
-    app.invoke_sync_modal_draft_changed("primary-gist-id".into(), "gist-primary-123".into());
-    app.invoke_sync_modal_draft_changed("primary-pat".into(), "pat-primary-secret".into());
-    app.invoke_sync_modal_toggle_changed("mirror-enabled".into(), true);
-    app.invoke_sync_modal_draft_changed("mirror-gist-id".into(), "gist-mirror-456".into());
-    app.invoke_sync_modal_draft_changed("mirror-pat".into(), "pat-mirror-secret".into());
+    app.invoke_sync_modal_draft_changed(
+        "git-remote-url".into(),
+        "https://gitee.com/demo/mica-vault.git".into(),
+    );
+    app.invoke_sync_modal_draft_changed("git-branch".into(), "mica-vault".into());
+    app.invoke_sync_modal_draft_changed("git-auth-mode".into(), "https".into());
+    app.invoke_sync_modal_draft_changed("git-https-username".into(), "demo-user".into());
+    app.invoke_sync_modal_draft_changed("git-https-secret".into(), "pat-primary-secret".into());
     app.invoke_sync_modal_primary_action_requested();
     assert_eq!(primary.recorded_writes().len(), 1);
 
@@ -624,4 +648,15 @@ fn sync_modal_window_contract_drops_legacy_vault_panel_callbacks() {
     assert!(!source.contains("callback vault-sync-now-requested();"));
     assert!(!source.contains("callback vault-lock-requested();"));
     assert!(!source.contains("in-out property <string> vault-panel-title: \"Sync & Vault\";"));
+}
+
+#[test]
+fn sync_modal_window_contract_exposes_conflict_summary_fields() {
+    let app_window = fs::read_to_string("ui/app-window.slint").unwrap();
+    let component = fs::read_to_string("ui/components/sync-vault-modal.slint").unwrap();
+
+    assert!(app_window.contains("in-out property <int> sync-modal-conflict-count: 0;"));
+    assert!(app_window.contains("in-out property <string> sync-modal-conflict-summary: \"\";"));
+    assert!(component.contains("in property <int> conflict-count: 0;"));
+    assert!(component.contains("in property <string> conflict-summary: \"\";"));
 }

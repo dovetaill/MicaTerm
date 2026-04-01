@@ -99,74 +99,6 @@ component SyncModalTextField inherits Rectangle {
     }
 }
 
-component SyncModalToggleRow inherits Rectangle {
-    in property <string> label: "";
-    in property <string> description: "";
-    in property <bool> value: false;
-    callback toggled(bool);
-
-    min-width: 0px;
-    preferred-width: 0px;
-    horizontal-stretch: 1;
-    height: 54px;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: ThemeTokens.divider-strong;
-    background: ThemeTokens.workspace-surface;
-
-    Text {
-        x: 12px;
-        y: 8px;
-        width: parent.width - 78px;
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        font-weight: 600;
-        overflow: elide;
-    }
-
-    Text {
-        x: 12px;
-        y: 28px;
-        width: parent.width - 78px;
-        text: root.description;
-        color: ThemeTokens.text-primary;
-        opacity: 0.72;
-        font-size: 11px;
-        overflow: elide;
-    }
-
-    toggle-shell := Rectangle {
-        x: parent.width - 44px;
-        y: 14px;
-        width: 20px;
-        height: 20px;
-        border-radius: 0px;
-        border-width: 1px;
-        border-color: root.value ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-        background: root.value ? ThemeTokens.accent : ThemeTokens.control-active-surface;
-
-        if root.value : toggle-check := Text {
-            width: parent.width;
-            height: parent.height;
-            text: "✓";
-            color: ThemeTokens.text-primary;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            font-size: 12px;
-            font-weight: 700;
-        }
-    }
-
-    toggle-touch := TouchArea {
-        width: parent.width;
-        height: parent.height;
-
-        clicked => {
-            root.toggled(!root.value);
-        }
-    }
-}
-
 export component SyncVaultModal inherits Rectangle {
     in property <string> mode: "not-configured";
     in property <string> title: "Sync Settings";
@@ -175,13 +107,17 @@ export component SyncVaultModal inherits Rectangle {
     in property <string> error-text: "";
     in property <string> provider-label: "";
     in property <string> target-label: "";
+    in property <int> conflict-count: 0;
+    in property <string> conflict-summary: "";
     in property <string> primary-action-label: "Set up sync";
     in property <string> secondary-action-label: "";
-    in property <string> primary-gist-id: "";
-    in property <string> primary-pat: "";
-    in property <bool> mirror-enabled: false;
-    in property <string> mirror-gist-id: "";
-    in property <string> mirror-pat: "";
+    in property <string> git-remote-url: "";
+    in property <string> git-branch: "main";
+    in property <string> git-auth-mode: "https";
+    in property <string> git-https-username: "";
+    in property <string> git-https-secret: "";
+    in property <string> git-ssh-private-key: "";
+    in property <string> git-ssh-passphrase: "";
     in property <string> master-password: "";
     callback close-requested();
     callback primary-action-requested();
@@ -314,56 +250,140 @@ export component SyncVaultModal inherits Rectangle {
                         }
                     }
 
-                    SyncModalTextField {
+                    if root.conflict-count > 0 : conflict-summary-card := Rectangle {
                         width: parent.width;
-                        label: "Primary Gist ID";
-                        value: root.primary-gist-id;
+                        height: max(56px, conflict-summary-copy.preferred-height + 30px);
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-strong;
+                        background: ThemeTokens.workspace-surface;
 
-                        value-changed(value) => {
-                            root.draft-changed("primary-gist-id", value);
+                        Text {
+                            x: 12px;
+                            y: 8px;
+                            width: parent.width - 24px;
+                            text: root.conflict-count == 1
+                                ? "1 conflict/recovery copy needs review"
+                                : root.conflict-count + " conflict/recovery copies need review";
+                            color: ThemeTokens.text-primary;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+
+                        conflict-summary-copy := Text {
+                            x: 12px;
+                            y: 28px;
+                            width: parent.width - 24px;
+                            text: root.conflict-summary;
+                            color: ThemeTokens.text-primary;
+                            opacity: 0.78;
+                            wrap: word-wrap;
                         }
                     }
 
                     SyncModalTextField {
                         width: parent.width;
-                        label: "Primary Personal Access Token";
-                        value: root.primary-pat;
+                        label: "Git remote URL";
+                        value: root.git-remote-url;
+
+                        value-changed(value) => {
+                            root.draft-changed("git-remote-url", value);
+                        }
+                    }
+
+                    SyncModalTextField {
+                        width: parent.width;
+                        label: "Branch";
+                        value: root.git-branch;
+
+                        value-changed(value) => {
+                            root.draft-changed("git-branch", value);
+                        }
+                    }
+
+                    auth-mode-card := Rectangle {
+                        width: parent.width;
+                        height: 84px;
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-strong;
+                        background: ThemeTokens.workspace-surface;
+
+                        Text {
+                            x: 12px;
+                            y: 10px;
+                            width: parent.width - 24px;
+                            text: "Auth mode";
+                            color: ThemeTokens.text-primary;
+                            opacity: 0.78;
+                        }
+
+                        HorizontalLayout {
+                            x: 12px;
+                            y: 36px;
+                            width: parent.width - 24px;
+                            spacing: 8px;
+
+                            SyncModalActionButton {
+                                label: "HTTPS";
+                                primary: root.git-auth-mode == "https";
+
+                                clicked => {
+                                    root.draft-changed("git-auth-mode", "https");
+                                }
+                            }
+
+                            SyncModalActionButton {
+                                label: "SSH";
+                                primary: root.git-auth-mode == "ssh";
+
+                                clicked => {
+                                    root.draft-changed("git-auth-mode", "ssh");
+                                }
+                            }
+                        }
+                    }
+
+                    if root.git-auth-mode == "https" : https-username-field := SyncModalTextField {
+                        width: parent.width;
+                        label: "HTTPS username";
+                        value: root.git-https-username;
+
+                        value-changed(value) => {
+                            root.draft-changed("git-https-username", value);
+                        }
+                    }
+
+                    if root.git-auth-mode == "https" : https-secret-field := SyncModalTextField {
+                        width: parent.width;
+                        label: "HTTPS secret";
+                        value: root.git-https-secret;
                         password-mode: true;
 
                         value-changed(value) => {
-                            root.draft-changed("primary-pat", value);
+                            root.draft-changed("git-https-secret", value);
                         }
                     }
 
-                    SyncModalToggleRow {
+                    if root.git-auth-mode == "ssh" : ssh-private-key-field := SyncModalTextField {
                         width: parent.width;
-                        label: "Mirror target";
-                        description: "Keep a second Gitee gist updated as a backup target.";
-                        value: root.mirror-enabled;
-
-                        toggled(value) => {
-                            root.toggle-changed("mirror-enabled", value);
-                        }
-                    }
-
-                    if root.mirror-enabled : mirror-gist-field := SyncModalTextField {
-                        width: parent.width;
-                        label: "Mirror Gist ID";
-                        value: root.mirror-gist-id;
-
-                        value-changed(value) => {
-                            root.draft-changed("mirror-gist-id", value);
-                        }
-                    }
-
-                    if root.mirror-enabled : mirror-pat-field := SyncModalTextField {
-                        width: parent.width;
-                        label: "Mirror Personal Access Token";
-                        value: root.mirror-pat;
+                        label: "SSH private key";
+                        value: root.git-ssh-private-key;
                         password-mode: true;
 
                         value-changed(value) => {
-                            root.draft-changed("mirror-pat", value);
+                            root.draft-changed("git-ssh-private-key", value);
+                        }
+                    }
+
+                    if root.git-auth-mode == "ssh" : ssh-passphrase-field := SyncModalTextField {
+                        width: parent.width;
+                        label: "SSH passphrase";
+                        value: root.git-ssh-passphrase;
+                        password-mode: true;
+
+                        value-changed(value) => {
+                            root.draft-changed("git-ssh-passphrase", value);
                         }
                     }
 

@@ -206,11 +206,29 @@ pub struct VaultAssetNode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct VaultNodeMergeMetadata {
+    pub last_modified_at: Option<String>,
+    pub last_modified_by_device: Option<String>,
+    pub deleted_at: Option<String>,
+}
+
+impl VaultNodeMergeMetadata {
+    pub fn is_deleted(&self) -> bool {
+        self.deleted_at
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct VaultAssetCatalog {
     #[serde(default)]
     pub root_ids: Vec<String>,
     #[serde(default)]
     pub nodes: BTreeMap<String, VaultAssetNode>,
+    #[serde(default)]
+    pub merge_metadata: BTreeMap<String, VaultNodeMergeMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -291,6 +309,7 @@ pub enum RemoteRole {
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderKind {
     S3Compatible,
+    GitRepo,
     GitHubGist,
     GitLabSnippet,
     GiteeGist,
@@ -300,9 +319,21 @@ pub enum ProviderKind {
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderAuthKind {
     AwsStandardChain,
+    HttpsCredentials,
+    SshKey,
     DeviceFlow,
     Pkce,
     Pat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum GitHostKind {
+    #[default]
+    Gitee,
+    GitHub,
+    GitLab,
+    Generic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -336,6 +367,50 @@ impl Default for GiteeRemoteDraft {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitRepoRemoteDraft {
+    #[serde(default)]
+    pub host_kind: GitHostKind,
+    #[serde(default)]
+    pub remote_url: String,
+    #[serde(default = "default_git_repo_branch")]
+    pub branch: String,
+    #[serde(default = "default_git_repo_auth_kind")]
+    pub auth_kind: ProviderAuthKind,
+    #[serde(default)]
+    pub https_username: String,
+    #[serde(default)]
+    pub https_secret: String,
+    #[serde(default)]
+    pub ssh_private_key: String,
+    #[serde(default)]
+    pub ssh_passphrase: String,
+}
+
+impl GitRepoRemoteDraft {
+    pub fn setup_summary(&self) -> String {
+        format!(
+            "Configure a {} Git remote URL, branch, and either HTTPS credentials or SSH key to enable sync.",
+            self.host_kind.label()
+        )
+    }
+}
+
+impl Default for GitRepoRemoteDraft {
+    fn default() -> Self {
+        Self {
+            host_kind: GitHostKind::default(),
+            remote_url: String::new(),
+            branch: default_git_repo_branch(),
+            auth_kind: ProviderAuthKind::HttpsCredentials,
+            https_username: String::new(),
+            https_secret: String::new(),
+            ssh_private_key: String::new(),
+            ssh_passphrase: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BootstrapRemoteLocator {
     S3 {
@@ -352,6 +427,11 @@ pub enum BootstrapRemoteLocator {
         base_url: Option<String>,
         project_id: Option<String>,
         snippet_id: String,
+    },
+    GitRepo {
+        host_kind: GitHostKind,
+        remote_url: String,
+        branch: String,
     },
     GiteeGist {
         gist_id: String,
@@ -415,6 +495,25 @@ impl Default for BootstrapBundle {
             auto_sync_enabled: false,
             bootstrap_cipher: CipherKind::default(),
             bootstrap_kdf: None,
+        }
+    }
+}
+
+fn default_git_repo_branch() -> String {
+    "main".into()
+}
+
+const fn default_git_repo_auth_kind() -> ProviderAuthKind {
+    ProviderAuthKind::HttpsCredentials
+}
+
+impl GitHostKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Gitee => "Gitee",
+            Self::GitHub => "GitHub",
+            Self::GitLab => "GitLab",
+            Self::Generic => "Git",
         }
     }
 }

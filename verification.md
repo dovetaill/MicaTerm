@@ -856,3 +856,38 @@ Date: 2026-03-27 09:55:02 CST
 - [x] `TerminalSessionHost` exposes the planned local shortcut and scrollbar callback contract
 - [x] `SessionManager` can scroll an active session to top, bottom, or a clamped ratio target
 - [x] `bootstrap` projects active viewport state into `AppWindow` and refreshes it immediately after local terminal commands
+
+## Asset Sync Git Primary Verification
+
+Date: 2026-04-01 CST
+
+### Source Documents
+
+- Design: `docs/plans/2026-04-01-asset-sync-git-primary-design.md`
+- Implementation Plan: `docs/plans/2026-04-01-asset-sync-git-primary-implementation-plan.md`
+- TDD Handoff: `docs/plans/2026-04-01-asset-sync-git-primary-tdd-spec.md`
+
+### Commands Executed
+
+- [x] `cargo test --test vault_model_spec --test vault_bootstrap_spec --test vault_device_identity_spec --test vault_provider_git_repo_spec --test vault_merge_spec --test vault_attach_merge_spec --test vault_sync_engine_spec --test vault_sync_decision_spec --test vault_snapshot_spec --test bootstrap_smoke --test sync_vault_modal_smoke --test vault_settings_smoke -- --nocapture`
+- [x] `bash tests/vault_settings_ui_contract_smoke.sh`
+- [x] `cargo test --test vault_provider_gitee_spec --test vault_provider_github_spec --test vault_provider_gitlab_spec --test vault_provider_s3_spec -- --nocapture`
+- [x] `cargo check --workspace`
+- [x] `cargo clippy --workspace -- -D warnings`
+
+### Automated Results
+
+- `cargo test --test vault_model_spec --test vault_bootstrap_spec --test vault_device_identity_spec --test vault_provider_git_repo_spec --test vault_merge_spec --test vault_attach_merge_spec --test vault_sync_engine_spec --test vault_sync_decision_spec --test vault_snapshot_spec --test bootstrap_smoke --test sync_vault_modal_smoke --test vault_settings_smoke -- --nocapture`: passed
+- `bash tests/vault_settings_ui_contract_smoke.sh`: passed
+- `cargo test --test vault_provider_gitee_spec --test vault_provider_github_spec --test vault_provider_gitlab_spec --test vault_provider_s3_spec -- --nocapture`: passed
+- `cargo check --workspace`: passed
+- `cargo clippy --workspace -- -D warnings`: passed
+
+### Verification Conclusions
+
+- [x] 正式 primary 路径固定为 `ProviderKind::GitRepo`，首发 host 为 `GitHostKind::Gitee`
+- [x] sync settings 文案与字段已经切换到 `Git remote URL + branch + HTTPS credentials / SSH key`
+- [x] attach-time merge 已覆盖“本地已有资产再接入已有远端”场景，不再 remote-first 覆盖
+- [x] `GitRepoProvider` 的 stale push 会因 non-fast-forward 检测被拒绝
+- [x] merge/recovery 结果会写入本地 `conflicts/` 与 `recovery/`，且 sync modal 会显示 conflict summary
+- [x] `gitee_gist` / `github_gist` / `gitlab_snippet` / `s3` 兼容 provider 回归通过，旧 provider 仍可保留为 backup / import-export 能力

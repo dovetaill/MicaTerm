@@ -10,10 +10,10 @@ use mica_term::app::vault::bootstrap::{
 };
 use mica_term::app::vault::model::{
     BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind,
-    KdfConfig, PackLayout, PackRef, ProviderAuthKind, ProviderKind, RemoteHealth,
-    RemoteHealthStatus, RemoteRole, SnapshotSyncPreferences, SnapshotUiPreferences,
-    VaultAssetCatalog, VaultAssetKind, VaultAssetNode, VaultAssetPayload, VaultHead,
-    VaultKnownHostEntry, VaultManifest, VaultSnapshot, VaultSocks5ProxySpec,
+    GitHostKind, GitRepoRemoteDraft, KdfConfig, PackLayout, PackRef, ProviderAuthKind,
+    ProviderKind, RemoteHealth, RemoteHealthStatus, RemoteRole, SnapshotSyncPreferences,
+    SnapshotUiPreferences, VaultAssetCatalog, VaultAssetKind, VaultAssetNode, VaultAssetPayload,
+    VaultHead, VaultKnownHostEntry, VaultManifest, VaultSnapshot, VaultSocks5ProxySpec,
     VaultSshConnectionSpec, VaultSshProxySpec,
 };
 use serde_json::json;
@@ -69,6 +69,7 @@ fn sample_keychain_catalog() -> KeychainCatalog {
                 },
             ),
         ]),
+        merge_metadata: BTreeMap::new(),
     }
 }
 
@@ -179,6 +180,9 @@ fn local_bootstrap_state_persists_durable_sync_state_fields() {
             parallelism: 1,
             salt_b64: "vault-salt".into(),
         },
+        device_id: "device-laptop".into(),
+        logical_revision: Some("logical-merge-0042".into()),
+        transport_revision_hint: Some("git:0123456789abcdef".into()),
         current_revision: Some("rev-0042".into()),
         local_snapshot_hash: Some("sha256:local-snapshot".into()),
         last_local_change_at: Some("2026-03-31T09:40:00Z".into()),
@@ -192,6 +196,15 @@ fn local_bootstrap_state_persists_durable_sync_state_fields() {
         .unwrap()
         .expect("persisted local bootstrap state");
 
+    assert_eq!(loaded.device_id, "device-laptop");
+    assert_eq!(
+        loaded.logical_revision.as_deref(),
+        Some("logical-merge-0042")
+    );
+    assert_eq!(
+        loaded.transport_revision_hint.as_deref(),
+        Some("git:0123456789abcdef")
+    );
     assert_eq!(loaded.current_revision.as_deref(), Some("rev-0042"));
     assert_eq!(
         loaded.local_snapshot_hash.as_deref(),
@@ -212,6 +225,16 @@ fn local_bootstrap_state_persists_durable_sync_state_fields() {
     assert_eq!(loaded.last_sync_error.as_deref(), Some("mirror degraded"));
 
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn git_repo_remote_draft_defaults_to_gitee_https_contract() {
+    let draft = GitRepoRemoteDraft::default();
+
+    assert_eq!(draft.host_kind, GitHostKind::Gitee);
+    assert_eq!(draft.remote_url, "");
+    assert_eq!(draft.branch, "main");
+    assert_eq!(draft.auth_kind, ProviderAuthKind::HttpsCredentials);
 }
 
 #[test]
@@ -310,6 +333,7 @@ fn vault_snapshot_roundtrip_preserves_assets_secrets_hosts_and_preferences() {
                     },
                 ),
             ]),
+            merge_metadata: BTreeMap::new(),
         },
         ssh_secret_bundles: BTreeMap::from([(
             "ssh-jump".into(),
@@ -398,6 +422,74 @@ fn vault_snapshot_roundtrip_preserves_assets_secrets_hosts_and_preferences() {
     assert!(defaults.keychain_catalog.root_ids.is_empty());
     assert!(defaults.keychain_identity_secret_bundles.is_empty());
     assert!(defaults.keychain_key_secret_bundles.is_empty());
+}
+
+#[test]
+fn bootstrap_bundle_roundtrip_preserves_git_repo_locator_and_dual_auth_kinds() {
+    let bundle = BootstrapBundle {
+        format_version: 1,
+        vault_id: "vault-main".into(),
+        remotes: vec![
+            BootstrapRemoteConfig {
+                remote_id: "remote-primary".into(),
+                role: RemoteRole::Primary,
+                provider: ProviderKind::GitRepo,
+                locator: BootstrapRemoteLocator::GitRepo {
+                    host_kind: GitHostKind::Gitee,
+                    remote_url: "https://gitee.com/demo/mica-vault.git".into(),
+                    branch: "mica-vault".into(),
+                },
+                credential_ref: Some("vault/bootstrap/remote-primary".into()),
+                auth_kind: ProviderAuthKind::HttpsCredentials,
+                last_health: None,
+            },
+            BootstrapRemoteConfig {
+                remote_id: "remote-mirror".into(),
+                role: RemoteRole::Mirror,
+                provider: ProviderKind::GitRepo,
+                locator: BootstrapRemoteLocator::GitRepo {
+                    host_kind: GitHostKind::Gitee,
+                    remote_url: "git@gitee.com:demo/mica-vault.git".into(),
+                    branch: "mirror".into(),
+                },
+                credential_ref: Some("vault/bootstrap/remote-mirror".into()),
+                auth_kind: ProviderAuthKind::SshKey,
+                last_health: Some(RemoteHealth {
+                    status: RemoteHealthStatus::Healthy,
+                    checked_at: Some("2026-04-01T09:00:00Z".into()),
+                    message: None,
+                }),
+            },
+        ],
+        auto_sync_enabled: true,
+        bootstrap_cipher: CipherKind::XChaCha20Poly1305,
+        bootstrap_kdf: Some(KdfConfig::Argon2id {
+            memory_cost_kib: 65_536,
+            time_cost: 3,
+            parallelism: 1,
+            salt_b64: "Ym9vdHN0cmFwLXNhbHQ=".into(),
+        }),
+    };
+
+    let encoded = serde_json::to_string_pretty(&bundle).unwrap();
+    let decoded: BootstrapBundle = serde_json::from_str(&encoded).unwrap();
+
+    assert_eq!(decoded.remotes.len(), 2);
+    assert_eq!(decoded.remotes[0].provider, ProviderKind::GitRepo);
+    assert_eq!(decoded.remotes[0].auth_kind, ProviderAuthKind::HttpsCredentials);
+    assert_eq!(decoded.remotes[1].auth_kind, ProviderAuthKind::SshKey);
+    match &decoded.remotes[0].locator {
+        BootstrapRemoteLocator::GitRepo {
+            host_kind,
+            remote_url,
+            branch,
+        } => {
+            assert_eq!(*host_kind, GitHostKind::Gitee);
+            assert_eq!(remote_url, "https://gitee.com/demo/mica-vault.git");
+            assert_eq!(branch, "mica-vault");
+        }
+        other => panic!("unexpected locator: {other:?}"),
+    }
 }
 
 #[test]

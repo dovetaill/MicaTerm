@@ -29,8 +29,9 @@ use mica_term::app::vault::bootstrap::{
 use mica_term::app::vault::cache::store_encrypted_cache;
 use mica_term::app::vault::crypto::{encrypt_snapshot, generate_vault_key, wrap_vault_key};
 use mica_term::app::vault::model::{
-    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, GiteeRemoteDraft,
-    KdfConfig, ProviderAuthKind, ProviderKind, RemoteRole, SnapshotSyncPreferences,
+    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, GitHostKind,
+    GitRepoRemoteDraft, GiteeRemoteDraft, KdfConfig, ProviderAuthKind, ProviderKind, RemoteRole,
+    SnapshotSyncPreferences,
 };
 use mica_term::app::vault::snapshot::export_vault_snapshot;
 use mica_term::app::window_effects::default_platform_window_effects;
@@ -166,6 +167,7 @@ fn sample_keychain_catalog(
                 },
             ),
         ]),
+        merge_metadata: std::collections::BTreeMap::new(),
     }
 }
 
@@ -276,6 +278,9 @@ fn seed_locked_vault_runtime(
             bundle: sample_bootstrap_bundle(),
             wrapped_vault_key,
             kdf: sample_vault_kdf(),
+            device_id: "device-bootstrap-smoke".into(),
+            logical_revision: Some("rev-0001".into()),
+            transport_revision_hint: None,
             current_revision: Some("rev-0001".into()),
             local_snapshot_hash: Some(format!("sha256:{}", encrypted.payload_sha256)),
             last_local_change_at: Some("2026-03-31T10:00:00Z".into()),
@@ -533,7 +538,7 @@ fn gitee_remote_draft_tracks_pat_and_gist_target_for_first_release() {
 }
 
 #[test]
-fn sync_modal_first_release_copy_mentions_gitee_pat_targeting_only() {
+fn sync_modal_first_release_copy_mentions_git_repo_dual_auth_only() {
     init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -543,12 +548,51 @@ fn sync_modal_first_release_copy_mentions_gitee_pat_targeting_only() {
 
     let status = app.get_sync_modal_status_text();
     assert!(status.contains("Gitee"));
-    assert!(status.contains("Personal Access Token"));
-    assert!(status.contains("Gist ID"));
+    assert!(status.contains("Git remote"));
+    assert!(status.contains("HTTPS"));
+    assert!(status.contains("SSH"));
     assert!(!status.contains("GitHub"));
     assert!(!status.contains("GitLab"));
     assert!(!status.contains("S3"));
     assert!(!status.contains("OAuth"));
+}
+
+#[test]
+fn git_repo_remote_draft_describes_dual_auth_gitee_repo_setup() {
+    let draft = GitRepoRemoteDraft::default();
+
+    assert_eq!(draft.host_kind, GitHostKind::Gitee);
+    assert_eq!(draft.branch, "main");
+    assert_eq!(draft.auth_kind, ProviderAuthKind::HttpsCredentials);
+    assert!(draft.setup_summary().contains("Gitee"));
+    assert!(draft.setup_summary().contains("HTTPS"));
+    assert!(draft.setup_summary().contains("SSH"));
+}
+
+#[test]
+fn bootstrap_bundle_validation_accepts_git_repo_primary() {
+    let bundle = BootstrapBundle {
+        format_version: 1,
+        vault_id: "vault-main".into(),
+        remotes: vec![BootstrapRemoteConfig {
+            remote_id: "remote-primary".into(),
+            role: RemoteRole::Primary,
+            provider: ProviderKind::GitRepo,
+            locator: BootstrapRemoteLocator::GitRepo {
+                host_kind: GitHostKind::Gitee,
+                remote_url: "git@gitee.com:demo/mica-vault.git".into(),
+                branch: "mica-vault".into(),
+            },
+            credential_ref: Some(bootstrap_provider_credential_ref("remote-primary")),
+            auth_kind: ProviderAuthKind::SshKey,
+            last_health: None,
+        }],
+        auto_sync_enabled: true,
+        bootstrap_cipher: CipherKind::XChaCha20Poly1305,
+        bootstrap_kdf: Some(sample_vault_kdf()),
+    };
+
+    validate_bootstrap_bundle(&bundle).expect("git repo primary should validate");
 }
 
 #[test]
