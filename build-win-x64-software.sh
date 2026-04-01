@@ -41,6 +41,7 @@ export CARGO_FEATURES="slint-renderer-software"
 export MICA_TERM_BUILD_FLAVOR="windows-software-compat"
 export MICA_TERM_PACKAGE_RENDERER="software"
 export MICA_TERM_PACKAGE_TERMINAL_RENDERER="bitmap"
+export MICA_TERM_PACKAGE_PORTABLE=1
 export PACKAGE_FLAVOR_SUFFIX="-software"
 
 exec "$ROOT_DIR/build-desktop.sh" "$@"

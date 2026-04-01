@@ -49,6 +49,9 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
+    if let Some(runtime) = &logging {
+        mica_term::app::logging::runtime::emit_app_root_metadata(&runtime.paths);
+    }
     mica_term::app::logging::runtime::emit_runtime_profile_metadata(profile);
     apply_renderer_selector(profile)?;
 

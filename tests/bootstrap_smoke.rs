@@ -5034,6 +5034,7 @@ fn save_failure_logs_error_without_persisting_ui_session_state() {
     let paths = LoggingPaths {
         root_source: LoggingRootSource::EnvOverride,
         root_dir: temp_root.clone(),
+        data_dir: temp_root.join("data"),
         logs_dir: temp_root.join("logs"),
         crash_dir: temp_root.join("crash"),
     };
@@ -5546,6 +5547,7 @@ fn asset_activation_omits_internal_ssh_runtime_logs() {
     let paths = LoggingPaths {
         root_source: LoggingRootSource::EnvOverride,
         root_dir: temp_root.clone(),
+        data_dir: temp_root.join("data"),
         logs_dir: temp_root.join("logs"),
         crash_dir: temp_root.join("crash"),
     };
@@ -5601,6 +5603,7 @@ fn context_menu_open_omits_ssh_action_logs() {
     let paths = LoggingPaths {
         root_source: LoggingRootSource::EnvOverride,
         root_dir: temp_root.clone(),
+        data_dir: temp_root.join("data"),
         logs_dir: temp_root.join("logs"),
         crash_dir: temp_root.join("crash"),
     };

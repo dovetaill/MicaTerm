@@ -42,6 +42,7 @@ Environment overrides:
   DIST_DIR=<output directory>
   CARGO_FEATURES=<space or comma separated cargo features>
   CARGO_NO_DEFAULT_FEATURES=1
+  MICA_TERM_PACKAGE_PORTABLE=1  create .mica-term-portable in staged Windows packages
   CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=<gnu linker path>
   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=<linux arm64 linker path>
 
@@ -212,6 +213,10 @@ fi
 
 if [[ "$TARGET" == *windows* && -f "$ICON_PATH" ]]; then
   cp "$ICON_PATH" "$STAGE_DIR/"
+fi
+
+if [[ "$TARGET" == *windows* && "${MICA_TERM_PACKAGE_PORTABLE:-0}" == "1" ]]; then
+  : > "$STAGE_DIR/.mica-term-portable"
 fi
 
 echo "==> Creating archive $ARCHIVE_PATH"

@@ -18,6 +18,7 @@ pub enum LoggingRootSource {
 pub struct LoggingPaths {
     pub root_source: LoggingRootSource,
     pub root_dir: PathBuf,
+    pub data_dir: PathBuf,
     pub logs_dir: PathBuf,
     pub crash_dir: PathBuf,
 }
@@ -41,6 +42,7 @@ pub fn resolve_logging_paths(inputs: &LoggingPathInputs) -> Result<LoggingPaths>
     Ok(LoggingPaths {
         root_source: map_root_source(app_paths.root_source),
         root_dir: app_paths.root_dir,
+        data_dir: app_paths.data_dir,
         logs_dir: app_paths.logs_dir,
         crash_dir: app_paths.crash_dir,
     })

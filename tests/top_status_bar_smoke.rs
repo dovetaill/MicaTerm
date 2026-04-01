@@ -545,6 +545,7 @@ fn bootstrap_logs_backdrop_error_details_when_native_sync_fails() {
     let paths = LoggingPaths {
         root_source: LoggingRootSource::EnvOverride,
         root_dir: temp_root.clone(),
+        data_dir: temp_root.join("data"),
         logs_dir: temp_root.join("logs"),
         crash_dir: temp_root.join("crash"),
     };

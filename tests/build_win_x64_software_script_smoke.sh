@@ -27,4 +27,5 @@ grep -F 'export CARGO_FEATURES="slint-renderer-software"' "$SCRIPT_PATH" >/dev/n
 grep -F 'export MICA_TERM_BUILD_FLAVOR="windows-software-compat"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export MICA_TERM_PACKAGE_RENDERER="software"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export MICA_TERM_PACKAGE_TERMINAL_RENDERER="bitmap"' "$SCRIPT_PATH" >/dev/null
+grep -F 'export MICA_TERM_PACKAGE_PORTABLE=1' "$SCRIPT_PATH" >/dev/null
 grep -F 'export PACKAGE_FLAVOR_SUFFIX="-software"' "$SCRIPT_PATH" >/dev/null
