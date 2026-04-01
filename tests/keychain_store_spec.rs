@@ -76,6 +76,7 @@ fn sample_catalog() -> KeychainCatalog {
                 },
             ),
         ]),
+        merge_metadata: BTreeMap::new(),
     }
 }
 

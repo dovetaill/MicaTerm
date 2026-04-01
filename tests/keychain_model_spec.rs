@@ -58,6 +58,7 @@ fn keychain_catalog_roundtrip_preserves_folder_identity_and_key_nodes() {
                 },
             ),
         ]),
+        merge_metadata: BTreeMap::new(),
     };
 
     let encoded = serde_json::to_string_pretty(&catalog).unwrap();

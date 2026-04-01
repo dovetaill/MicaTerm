@@ -45,6 +45,7 @@ fn sample_snapshot() -> VaultSnapshot {
                     })),
                 },
             )]),
+            merge_metadata: BTreeMap::new(),
         },
         ssh_secret_bundles: BTreeMap::from([(
             "ssh-prod".into(),

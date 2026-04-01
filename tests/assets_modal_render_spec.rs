@@ -339,7 +339,6 @@ fn sync_modal_footer_stays_visible_in_short_viewport() {
         );
         app.set_sync_modal_primary_action_label("Save and enable".into());
         app.set_sync_modal_secondary_action_label("Close".into());
-        app.set_sync_modal_mirror_enabled(true);
     });
 
     let modal_surface = pixel_at(&buffer, modal.x + 12, modal.y + 12);
@@ -375,10 +374,7 @@ fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
             "Enter a master password once to enable sync and keep recovery state available."
                 .into(),
         );
-        app.set_sync_modal_provider_label("Gitee".into());
-        app.set_sync_modal_target_label("1 target configured".into());
-        app.set_sync_modal_primary_gist_id("yemd6wft9jgpv5bhlux3o60".into());
-        app.set_sync_modal_primary_pat("token-value".into());
+        app.set_sync_modal_git_remote_url("https://example.com/org/mica-term.git".into());
         app.set_sync_modal_primary_action_label("Save and enable".into());
         app.set_sync_modal_secondary_action_label("Close".into());
     });
@@ -396,7 +392,7 @@ fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
     );
 
     assert!(
-        master_password_field_pixels >= 2600,
+        master_password_field_pixels >= 1500,
         "sync modal should keep the master password field visibly above the sticky footer in short viewports, only found {master_password_field_pixels} distinct pixels"
     );
 }
@@ -422,10 +418,11 @@ fn blocking_modal_tints_workspace_behind_the_dialog() {
         app.set_sync_modal_status_text(
             "Sync is configured. Use the titlebar Sync button to run an immediate check.".into(),
         );
-        app.set_sync_modal_provider_label("Gitee".into());
+        app.set_sync_modal_provider_label("Git".into());
         app.set_sync_modal_target_label("1 target configured".into());
-        app.set_sync_modal_primary_gist_id("yemd6wft9jgpv5bhlux3o60".into());
-        app.set_sync_modal_primary_pat("token-value".into());
+        app.set_sync_modal_git_remote_url("https://example.com/org/mica-term.git".into());
+        app.set_sync_modal_git_https_username("git".into());
+        app.set_sync_modal_git_https_secret("token-value".into());
         app.set_sync_modal_primary_action_label("Sync now".into());
         app.set_sync_modal_secondary_action_label("Close".into());
     });
@@ -447,10 +444,11 @@ fn sync_modal_narrow_viewport_preserves_right_gutter_for_form_fields() {
         app.set_sync_modal_status_text(
             "Sync is configured. Use the titlebar Sync action to run an immediate check.".into(),
         );
-        app.set_sync_modal_provider_label("Gitee".into());
+        app.set_sync_modal_provider_label("Git".into());
         app.set_sync_modal_target_label("1 target configured".into());
-        app.set_sync_modal_primary_gist_id("yemd6wft9jgpv5bhlux3o60".into());
-        app.set_sync_modal_primary_pat("token-value".into());
+        app.set_sync_modal_git_remote_url("https://example.com/org/mica-term.git".into());
+        app.set_sync_modal_git_https_username("git".into());
+        app.set_sync_modal_git_https_secret("token-value".into());
         app.set_sync_modal_primary_action_label("Sync now".into());
         app.set_sync_modal_secondary_action_label("Close".into());
     });

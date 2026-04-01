@@ -29,12 +29,15 @@ grep -F 'in-out property <string> sync-modal-provider-label: "";' "$APP_WINDOW" 
 grep -F 'in-out property <string> sync-modal-target-label: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-primary-action-label: "Save and enable";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-secondary-action-label: "Close";' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <bool> sync-modal-auto-sync-enabled: false;' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <string> sync-modal-primary-gist-id: "";' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <string> sync-modal-primary-pat: "";' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <bool> sync-modal-mirror-enabled: false;' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <string> sync-modal-mirror-gist-id: "";' "$APP_WINDOW" >/dev/null
-grep -F 'in-out property <string> sync-modal-mirror-pat: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <int> sync-modal-conflict-count: 0;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-conflict-summary: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-remote-url: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-branch: "main";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-auth-mode: "https";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-https-username: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-https-secret: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-ssh-private-key: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-git-ssh-passphrase: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-master-password: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> asset-modal-kind: "";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <int> asset-modal-focus-sequence: 0;' "$APP_WINDOW" >/dev/null
