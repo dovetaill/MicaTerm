@@ -38,7 +38,7 @@ use crate::app::assets_catalog::{
 };
 use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::keychain::{
-    KeychainNodePayload, derive_public_key_material_from_private_key,
+    KeychainCatalog, KeychainNodePayload, derive_public_key_material_from_private_key,
     derive_public_key_material_from_public_key, resolve_saved_ssh_profile,
 };
 use crate::app::quick_launch_preferences::{
@@ -118,7 +118,9 @@ use crate::app::vault::provider::{
 use crate::app::vault::recovery::{
     RecoverySnapshotRecord, RecoverySource, persist_recovery_snapshot,
 };
-use crate::app::vault::snapshot::{apply_vault_snapshot, export_vault_snapshot};
+use crate::app::vault::snapshot::{
+    apply_vault_snapshot, export_vault_snapshot, normalize_snapshot_secret_refs,
+};
 use crate::app::vault::sync_decision::{
     LocalSyncState, SyncAction, decide_sync_action,
 };
@@ -150,7 +152,8 @@ use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descr
 use crate::shell::tabs::WorkspaceTab;
 use crate::shell::view_model::{
     AssetModalState, AssetSshConnectionDraft, KeychainSshKeyDraft, RightPanelView, ShellViewModel,
-    SnippetActivation, SnippetCreateAction, SshModalAction, SyncModalMode,
+    SnippetActivation, SnippetCreateAction, SshModalAction, SyncModalMode, SyncModalViewState,
+    VaultPanelViewState,
 };
 use crate::theme::ThemeMode;
 use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
@@ -224,6 +227,7 @@ struct VaultSyncSchedulerState {
 const VAULT_AUTO_SYNC_DEBOUNCE_MS: u64 = 1_200;
 const VAULT_PERIODIC_SYNC_INTERVAL_MS: u64 = 120_000;
 
+#[derive(Clone)]
 struct VaultSessionState {
     root_dir: PathBuf,
     provider_factory: Arc<dyn VaultProviderFactory>,
@@ -231,6 +235,38 @@ struct VaultSessionState {
     local_state: Option<LocalVaultBootstrapState>,
     unlocked_vault_key: Option<[u8; 32]>,
     decrypted_snapshot: Option<VaultSnapshot>,
+}
+
+#[derive(Clone)]
+struct VaultProjectionUpdate {
+    console_tree: AssetTree,
+    snippet_tree: AssetTree,
+    keychain_catalog: KeychainCatalog,
+}
+
+#[derive(Clone)]
+struct VaultSyncBackgroundSuccess {
+    projection: Option<VaultProjectionUpdate>,
+    sync_modal_state: SyncModalViewState,
+    vault_panel_state: VaultPanelViewState,
+    local_state: Option<LocalVaultBootstrapState>,
+    decrypted_snapshot: Option<VaultSnapshot>,
+    should_clear_dirty: bool,
+}
+
+#[derive(Clone)]
+struct VaultSyncBackgroundFailure {
+    sync_modal_state: SyncModalViewState,
+    vault_panel_state: VaultPanelViewState,
+    local_state: Option<LocalVaultBootstrapState>,
+    should_clear_dirty: bool,
+}
+
+enum VaultSyncBackgroundMessage {
+    Completed {
+        trigger: VaultSyncTrigger,
+        result: std::result::Result<VaultSyncBackgroundSuccess, VaultSyncBackgroundFailure>,
+    },
 }
 
 impl VaultSessionState {
@@ -4834,7 +4870,8 @@ fn silently_restore_vault_session_from_runtime_key(
     let recovery_attempt = (|| -> Result<VaultSnapshot> {
         let encrypted_snapshot = load_encrypted_cache(vault.cache_root().as_path(), &vault_id)?
             .ok_or_else(|| anyhow!("encrypted cache is unavailable"))?;
-        let snapshot = decrypt_snapshot(&encrypted_snapshot, &runtime_vault_key)?;
+        let snapshot =
+            normalize_snapshot_secret_refs(decrypt_snapshot(&encrypted_snapshot, &runtime_vault_key)?);
         apply_vault_snapshot_to_shell(
             state,
             &snapshot,
@@ -5042,7 +5079,10 @@ fn recover_local_vault_from_primary_remote(
         .context("failed to decode wrapped vault key from remote head")?;
     let vault_key = unwrap_vault_key(password, &wrapped)?;
     let device_id = load_or_create_device_id(vault.root_dir.as_path())?;
-    let remote_snapshot = decrypt_snapshot(&remote_revision.encrypted_snapshot, &vault_key)?;
+    let remote_snapshot = normalize_snapshot_secret_refs(decrypt_snapshot(
+        &remote_revision.encrypted_snapshot,
+        &vault_key,
+    )?);
     let local_snapshot = export_vault_snapshot(
         &combined_asset_tree(state),
         state.keychain_catalog(),
@@ -5079,7 +5119,7 @@ fn recover_local_vault_from_primary_remote(
                 captured_at.as_str(),
             )?;
         }
-        let merged_snapshot = merge_result.merged;
+        let merged_snapshot = normalize_snapshot_secret_refs(merge_result.merged);
         let next_revision = next_vault_revision(Some(remote_head.vault_revision.as_str()));
         let committed_at = current_sync_timestamp();
         let request = SyncRequest {
@@ -5236,7 +5276,8 @@ fn unlock_local_vault_into_shell(
     let encrypted_snapshot =
         load_encrypted_cache(vault.cache_root().as_path(), &local_state.bundle.vault_id)?
             .ok_or_else(|| anyhow!("encrypted cache is unavailable"))?;
-    let snapshot = decrypt_snapshot(&encrypted_snapshot, &vault_key)?;
+    let snapshot =
+        normalize_snapshot_secret_refs(decrypt_snapshot(&encrypted_snapshot, &vault_key)?);
     apply_vault_snapshot_to_shell(
         state,
         &snapshot,
@@ -5599,7 +5640,11 @@ fn sync_local_vault(
         .read_head()
         .map_err(|err| anyhow!("failed to inspect primary remote `{}`: {err}", primary_remote.remote_id))?
         .head;
-    let base_snapshot = vault.decrypted_snapshot.clone().unwrap_or_default();
+    let base_snapshot = vault
+        .decrypted_snapshot
+        .clone()
+        .map(normalize_snapshot_secret_refs)
+        .unwrap_or_default();
     let decision = decide_sync_action(&local_sync_state, primary_head.as_ref());
     match decision.action {
         SyncAction::Noop => {
@@ -5649,7 +5694,10 @@ fn sync_local_vault(
                     primary_remote.remote_id
                 )
             })?;
-            let remote_snapshot = decrypt_snapshot(&remote_revision.encrypted_snapshot, &vault_key)?;
+            let remote_snapshot = normalize_snapshot_secret_refs(decrypt_snapshot(
+                &remote_revision.encrypted_snapshot,
+                &vault_key,
+            )?);
             clear_vault_decrypted_state(state, vault.decrypted_snapshot.as_ref(), credential_store)?;
             apply_vault_snapshot_to_shell(
                 state,
@@ -5708,7 +5756,10 @@ fn sync_local_vault(
                 primary_remote.remote_id
             )
         })?;
-        let remote_snapshot = decrypt_snapshot(&remote_revision.encrypted_snapshot, &vault_key)?;
+        let remote_snapshot = normalize_snapshot_secret_refs(decrypt_snapshot(
+            &remote_revision.encrypted_snapshot,
+            &vault_key,
+        )?);
         let merge_remote_snapshot =
             prepare_remote_snapshot_for_merge(&base_snapshot, &snapshot, &remote_snapshot);
         let merge_result = merge_snapshots(MergeInput {
@@ -5738,8 +5789,8 @@ fn sync_local_vault(
             merge_conflicts_present = true;
         }
         parent_revision = Some(remote_head.vault_revision.clone());
-        snapshot_to_display = merge_result.merged.clone();
-        snapshot_to_commit = merge_result.merged;
+        snapshot_to_display = normalize_snapshot_secret_refs(merge_result.merged.clone());
+        snapshot_to_commit = snapshot_to_display.clone();
     }
 
     let request = SyncRequest {
@@ -5906,7 +5957,10 @@ fn refresh_local_vault_from_primary_remote_if_changed(
     let vault_key = vault
         .unlocked_vault_key
         .ok_or_else(|| anyhow!("vault is locked"))?;
-    let snapshot = decrypt_snapshot(&remote_revision.encrypted_snapshot, &vault_key)?;
+    let snapshot = normalize_snapshot_secret_refs(decrypt_snapshot(
+        &remote_revision.encrypted_snapshot,
+        &vault_key,
+    )?);
     clear_vault_decrypted_state(state, vault.decrypted_snapshot.as_ref(), credential_store)?;
     apply_vault_snapshot_to_shell(
         state,
@@ -5947,8 +6001,52 @@ fn refresh_local_vault_from_primary_remote_if_changed(
     Ok(true)
 }
 
+fn vault_sync_background_success(
+    initial_state: &ShellViewModel,
+    worker_state: ShellViewModel,
+    worker_vault: VaultSessionState,
+    should_clear_dirty: bool,
+) -> VaultSyncBackgroundSuccess {
+    let projection = (initial_state.console_asset_tree() != worker_state.console_asset_tree()
+        || initial_state.snippet_asset_tree() != worker_state.snippet_asset_tree()
+        || initial_state.keychain_catalog() != worker_state.keychain_catalog())
+    .then(|| VaultProjectionUpdate {
+        console_tree: worker_state.console_asset_tree().clone(),
+        snippet_tree: worker_state.snippet_asset_tree().clone(),
+        keychain_catalog: worker_state.keychain_catalog().clone(),
+    });
+
+    VaultSyncBackgroundSuccess {
+        projection,
+        sync_modal_state: worker_state.sync_modal_state().clone(),
+        vault_panel_state: worker_state.vault_panel_state().clone(),
+        local_state: worker_vault.local_state.clone(),
+        decrypted_snapshot: worker_vault.decrypted_snapshot.clone(),
+        should_clear_dirty,
+    }
+}
+
+fn vault_sync_background_failure(
+    worker_state: ShellViewModel,
+    worker_vault: VaultSessionState,
+    should_clear_dirty: bool,
+) -> VaultSyncBackgroundFailure {
+    VaultSyncBackgroundFailure {
+        sync_modal_state: worker_state.sync_modal_state().clone(),
+        vault_panel_state: worker_state.vault_panel_state().clone(),
+        local_state: worker_vault.local_state.clone(),
+        should_clear_dirty,
+    }
+}
+
 fn vault_background_sync_ready(vault: &VaultSessionState) -> bool {
     vault.local_state.is_some() && vault.unlocked_vault_key.is_some()
+}
+
+fn vault_requires_initial_remote_sync(vault: &VaultSessionState) -> bool {
+    vault.local_state.as_ref().is_some_and(|local_state| {
+        local_state.current_revision.is_none() && local_state.local_snapshot_hash.is_some()
+    })
 }
 
 fn mark_local_vault_dirty_and_arm_sync(
@@ -6586,6 +6684,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let vault_sync_scheduler = Rc::new(RefCell::new(VaultSyncSchedulerState::default()));
     let vault_auto_sync_timer = Rc::new(Timer::default());
     let vault_periodic_sync_timer = Rc::new(Timer::default());
+    let vault_sync_completion_timer = Rc::new(Timer::default());
+    let async_runtime_handle = session_runtime_guard.as_ref().map(AppAsyncRuntime::handle);
+    let (vault_sync_result_tx, vault_sync_result_rx) =
+        std::sync::mpsc::channel::<VaultSyncBackgroundMessage>();
+    let vault_sync_result_rx = Rc::new(RefCell::new(vault_sync_result_rx));
     let run_vault_sync: Rc<dyn Fn(VaultSyncTrigger)> = {
         let state = Rc::clone(&view_model);
         let handle = window.as_weak();
@@ -6597,6 +6700,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let scheduler_ref = Rc::clone(&vault_sync_scheduler);
         let auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
         let periodic_timer_keepalive = Rc::clone(&vault_periodic_sync_timer);
+        let async_runtime_handle_ref = async_runtime_handle.clone();
+        let vault_sync_result_tx_ref = vault_sync_result_tx.clone();
         Rc::new(move |trigger| {
             let _keep_periodic_timer_alive = &periodic_timer_keepalive;
             let Some(window) = handle.upgrade() else {
@@ -6610,7 +6715,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 if scheduler.running {
                     return;
                 }
-                let should_attempt_push = scheduler.dirty;
+                let should_attempt_push = scheduler.dirty
+                    || (matches!(trigger, VaultSyncTrigger::Manual)
+                        && vault_requires_initial_remote_sync(&vault));
                 let should_attempt_refresh = !should_attempt_push
                     && matches!(trigger, VaultSyncTrigger::Manual | VaultSyncTrigger::Periodic);
                 if matches!(trigger, VaultSyncTrigger::DebouncedAuto | VaultSyncTrigger::Periodic)
@@ -6643,6 +6750,120 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 );
                 sync_shell_layout(&window, &mut state, width, height);
                 save_ui_preferences(&store_ref, &state);
+            }
+
+            if matches!(trigger, VaultSyncTrigger::Manual)
+                && let Some(runtime_handle) = async_runtime_handle_ref.clone()
+            {
+                let initial_state = (*state).clone();
+                let worker_state = initial_state.clone();
+                let worker_vault = (*vault).clone();
+                let credential_store = Arc::clone(&credential_store_ref);
+                let completion_tx = vault_sync_result_tx_ref.clone();
+
+                runtime_handle.spawn(async move {
+                    let completion = tokio::task::spawn_blocking(move || {
+                        let mut worker_state = worker_state;
+                        let mut worker_vault = worker_vault;
+                        let result = if should_attempt_push {
+                            match sync_local_vault(
+                                &mut worker_state,
+                                &mut worker_vault,
+                                credential_store.as_ref(),
+                            ) {
+                                Ok(()) => Ok(vault_sync_background_success(
+                                    &initial_state,
+                                    worker_state,
+                                    worker_vault,
+                                    true,
+                                )),
+                                Err(err) => {
+                                    tracing::error!(
+                                        target: "app.vault",
+                                        error = %err,
+                                        vault_sync_trigger = ?trigger,
+                                        "manual vault sync failed in background worker"
+                                    );
+                                    set_sync_modal_error_without_opening(
+                                        &mut worker_state,
+                                        &worker_vault,
+                                        err.to_string(),
+                                    );
+                                    Err(vault_sync_background_failure(
+                                        worker_state,
+                                        worker_vault,
+                                        false,
+                                    ))
+                                }
+                            }
+                        } else if should_attempt_refresh {
+                            match refresh_local_vault_from_primary_remote_if_changed(
+                                &mut worker_state,
+                                &mut worker_vault,
+                                credential_store.as_ref(),
+                            ) {
+                                Ok(_) => Ok(vault_sync_background_success(
+                                    &initial_state,
+                                    worker_state,
+                                    worker_vault,
+                                    false,
+                                )),
+                                Err(err) => {
+                                    tracing::error!(
+                                        target: "app.vault",
+                                        error = %err,
+                                        vault_sync_trigger = ?trigger,
+                                        "manual vault refresh failed in background worker"
+                                    );
+                                    set_sync_modal_error_without_opening(
+                                        &mut worker_state,
+                                        &worker_vault,
+                                        err.to_string(),
+                                    );
+                                    Err(vault_sync_background_failure(
+                                        worker_state,
+                                        worker_vault,
+                                        false,
+                                    ))
+                                }
+                            }
+                        } else {
+                            Ok(vault_sync_background_success(
+                                &initial_state,
+                                worker_state,
+                                worker_vault,
+                                false,
+                            ))
+                        };
+
+                        VaultSyncBackgroundMessage::Completed { trigger, result }
+                    })
+                    .await;
+
+                    match completion {
+                        Ok(message) => {
+                            let _ = completion_tx.send(message);
+                        }
+                        Err(err) => {
+                            tracing::error!(
+                                target: "app.vault",
+                                error = %err,
+                                vault_sync_trigger = ?trigger,
+                                "vault background sync task join failed"
+                            );
+                            let _ = completion_tx.send(VaultSyncBackgroundMessage::Completed {
+                                trigger,
+                                result: Err(VaultSyncBackgroundFailure {
+                                    sync_modal_state: SyncModalViewState::default(),
+                                    vault_panel_state: VaultPanelViewState::default(),
+                                    local_state: None,
+                                    should_clear_dirty: false,
+                                }),
+                            });
+                        }
+                    }
+                });
+                return;
             }
 
             let result = if should_attempt_push {
@@ -6712,6 +6933,123 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             save_ui_preferences(&store_ref, &state);
         })
     };
+    {
+        let state = Rc::clone(&view_model);
+        let handle = window.as_weak();
+        let store_ref = store.clone();
+        let effects_ref = Rc::clone(&effects);
+        let vault_session_ref = Rc::clone(&vault_session);
+        let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+        let scheduler_ref = Rc::clone(&vault_sync_scheduler);
+        let vault_sync_result_rx_ref = Rc::clone(&vault_sync_result_rx);
+        let completion_timer_keepalive = Rc::clone(&vault_sync_completion_timer);
+        vault_sync_completion_timer.start(
+            TimerMode::Repeated,
+            Duration::from_millis(50),
+            move || {
+                let _keep_completion_timer_alive = &completion_timer_keepalive;
+                let Some(window) = handle.upgrade() else {
+                    return;
+                };
+                loop {
+                    let message = {
+                        let receiver = vault_sync_result_rx_ref.borrow();
+                        receiver.try_recv().ok()
+                    };
+                    let Some(message) = message else {
+                        break;
+                    };
+                    let mut state = state.borrow_mut();
+                    let mut vault = vault_session_ref.borrow_mut();
+                    let (width, height) = current_window_size(&window);
+
+                    match message {
+                        VaultSyncBackgroundMessage::Completed { trigger, result } => match result {
+                            Ok(success) => {
+                                if let Some(projection) = success.projection {
+                                    state.replace_vault_projection(
+                                        projection.console_tree,
+                                        projection.snippet_tree,
+                                        projection.keychain_catalog,
+                                    );
+                                }
+                                vault.local_state = success.local_state;
+                                vault.decrypted_snapshot = success.decrypted_snapshot;
+                                update_vault_panel_for_local_state(&mut state, &vault);
+                                update_sync_modal_for_local_state(&mut state, &vault);
+                                state.vault_panel_state_mut().primary_status_label =
+                                    success.vault_panel_state.primary_status_label.clone();
+                                state.sync_modal_state_mut().status_text =
+                                    success.sync_modal_state.status_text.clone();
+                                state.sync_modal_state_mut().error_text =
+                                    success.sync_modal_state.error_text.clone();
+
+                                {
+                                    let mut scheduler = scheduler_ref.borrow_mut();
+                                    scheduler.running = false;
+                                    if success.should_clear_dirty {
+                                        scheduler.dirty = false;
+                                    }
+                                }
+
+                                if matches!(trigger, VaultSyncTrigger::Manual) {
+                                    let feedback = if !success
+                                        .vault_panel_state
+                                        .primary_status_label
+                                        .trim()
+                                        .is_empty()
+                                    {
+                                        success.vault_panel_state.primary_status_label
+                                    } else {
+                                        "Sync completed".into()
+                                    };
+                                    state.show_sync_feedback(feedback);
+                                } else {
+                                    state.clear_sync_feedback();
+                                }
+                            }
+                            Err(failure) => {
+                                if let Some(local_state) = failure.local_state {
+                                    vault.local_state = Some(local_state);
+                                }
+                                update_vault_panel_for_local_state(&mut state, &vault);
+                                update_sync_modal_for_local_state(&mut state, &vault);
+                                state.vault_panel_state_mut().primary_status_label =
+                                    failure.vault_panel_state.primary_status_label.clone();
+                                state.sync_modal_state_mut().status_text =
+                                    failure.sync_modal_state.status_text.clone();
+                                state.sync_modal_state_mut().error_text =
+                                    failure.sync_modal_state.error_text.clone();
+
+                                {
+                                    let mut scheduler = scheduler_ref.borrow_mut();
+                                    scheduler.running = false;
+                                    if failure.should_clear_dirty {
+                                        scheduler.dirty = false;
+                                    }
+                                }
+
+                                if matches!(trigger, VaultSyncTrigger::Manual) {
+                                    state.show_sync_feedback("Sync failed");
+                                } else {
+                                    state.clear_sync_feedback();
+                                }
+                            }
+                        },
+                    }
+
+                    sync_shell_state(
+                        &window,
+                        &state,
+                        effects_ref.as_ref(),
+                        &mut workspace_follow_tracker_ref.borrow_mut(),
+                    );
+                    sync_shell_layout(&window, &mut state, width, height);
+                    save_ui_preferences(&store_ref, &state);
+                }
+            },
+        );
+    }
     {
         let run_vault_sync_ref = Rc::clone(&run_vault_sync);
         vault_periodic_sync_timer.start(
@@ -6881,34 +7219,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         save_ui_preferences(&store_ref, &state);
     });
 
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let store_ref = store.clone();
-    let effects_ref = Rc::clone(&effects);
-    let vault_session_ref = Rc::clone(&vault_session);
-    let credential_store_ref = Arc::clone(&credential_store);
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let run_vault_sync_ref = Rc::clone(&run_vault_sync);
     window.on_sync_modal_sync_now_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let mut vault = vault_session_ref.borrow_mut();
-        let (width, height) = current_window_size(&window);
-        if let Err(err) = sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()) {
-            tracing::error!(target: "app.vault", error = %err, "failed to sync local vault from sync modal");
-            set_sync_modal_error(&mut state, &vault, err.to_string());
-            state.show_sync_feedback("Sync failed");
-        } else {
-            let feedback = state.vault_panel_state().primary_status_label.clone();
-            state.show_sync_feedback(feedback);
-        }
-        sync_shell_state(
-            &window,
-            &state,
-            effects_ref.as_ref(),
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-        );
-        sync_shell_layout(&window, &mut state, width, height);
-        save_ui_preferences(&store_ref, &state);
+        run_vault_sync_ref(VaultSyncTrigger::Manual);
     });
 
     let state = Rc::clone(&view_model);
@@ -6918,6 +7231,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let vault_session_ref = Rc::clone(&vault_session);
     let credential_store_ref = Arc::clone(&credential_store);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let run_vault_sync_ref = Rc::clone(&run_vault_sync);
     window.on_sync_modal_primary_action_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -6950,15 +7264,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     persist_sync_modal_settings(&mut state, &mut vault, credential_store_ref.as_ref())
                 {
                     set_sync_modal_error(&mut state, &vault, err.to_string());
-                } else if let Err(err) =
-                    sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref())
-                {
-                    tracing::error!(target: "app.vault", error = %err, "failed to sync local vault from primary sync modal action");
-                    set_sync_modal_error(&mut state, &vault, err.to_string());
-                    state.show_sync_feedback("Sync failed");
                 } else {
-                    let feedback = state.vault_panel_state().primary_status_label.clone();
-                    state.show_sync_feedback(feedback);
+                    drop(vault);
+                    drop(state);
+                    run_vault_sync_ref(VaultSyncTrigger::Manual);
+                    return;
                 }
             }
             SyncModalMode::SyncError => state.close_sync_modal(),

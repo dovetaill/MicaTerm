@@ -95,6 +95,7 @@ fn sample_keychain_catalog_for_view_model() -> KeychainCatalog {
                 },
             ),
         ]),
+        merge_metadata: std::collections::BTreeMap::new(),
     }
 }
 

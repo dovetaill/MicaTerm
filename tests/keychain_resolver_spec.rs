@@ -84,6 +84,7 @@ fn password_identity_catalog() -> KeychainCatalog {
                 }),
             },
         )]),
+        merge_metadata: BTreeMap::new(),
     }
 }
 
@@ -129,6 +130,7 @@ fn ssh_key_identity_catalog(ssh_key_id: Option<&str>) -> KeychainCatalog {
     KeychainCatalog {
         root_ids: vec!["identity-prod".into()],
         nodes,
+        merge_metadata: BTreeMap::new(),
     }
 }
 

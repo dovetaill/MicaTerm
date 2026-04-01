@@ -8,7 +8,8 @@ use mica_term::app::keychain::{
     KeychainNodeKind, KeychainNodePayload, KeychainSshKeySpec,
 };
 use mica_term::app::ssh::credentials::{
-    CredentialStore, MemoryCredentialStore, StoredSshSecretBundle, persist_secret_bundle,
+    CredentialStore, MemoryCredentialStore, SshCredentialKind, StoredSshSecretBundle,
+    load_secret_bundle, persist_secret_bundle, ssh_credential_ref,
 };
 use mica_term::app::ssh::known_hosts::{KnownHostCheck, KnownHostsService};
 use mica_term::app::ui_preferences::UiPreferences;
@@ -716,6 +717,140 @@ fn apply_vault_snapshot_keeps_empty_secret_entries_absent() {
     assert_eq!(store.get_secret(credential_ref).unwrap(), None);
     assert_eq!(store.get_secret(identity_credential_ref).unwrap(), None);
     assert_eq!(store.get_secret(key_credential_ref).unwrap(), None);
+
+    let _ = fs::remove_file(known_hosts_path);
+}
+
+#[test]
+fn apply_vault_snapshot_rekeys_duplicate_saved_ssh_secret_refs_per_asset() {
+    let store = MemoryCredentialStore::default();
+    let known_hosts_path = temp_known_hosts_path("duplicate-ssh-secret-refs");
+    let shared_ref = "ssh/saved-secrets/shared";
+    let snapshot = VaultSnapshot {
+        schema_version: 1,
+        asset_catalog: VaultAssetCatalog {
+            root_ids: vec!["asset-a".into(), "asset-b".into()],
+            nodes: BTreeMap::from([
+                (
+                    "asset-a".into(),
+                    VaultAssetNode {
+                        id: "asset-a".into(),
+                        parent_id: None,
+                        title: "A".into(),
+                        kind: VaultAssetKind::SshConnection,
+                        child_ids: Vec::new(),
+                        payload: VaultAssetPayload::SshConnection(Box::new(
+                            mica_term::app::vault::model::VaultSshConnectionSpec {
+                                host: "a.example.com".into(),
+                                user: "ops".into(),
+                                port: "22".into(),
+                                auth_method: "password".into(),
+                                auth_source: "manual".into(),
+                                keychain_identity_id: None,
+                                private_key_source: "content".into(),
+                                private_key_path: String::new(),
+                                environment: "prod".into(),
+                                proxy: mica_term::app::vault::model::VaultSshProxySpec::None,
+                                remark: String::new(),
+                                credential_ref: Some(shared_ref.into()),
+                            },
+                        )),
+                    },
+                ),
+                (
+                    "asset-b".into(),
+                    VaultAssetNode {
+                        id: "asset-b".into(),
+                        parent_id: None,
+                        title: "B".into(),
+                        kind: VaultAssetKind::SshConnection,
+                        child_ids: Vec::new(),
+                        payload: VaultAssetPayload::SshConnection(Box::new(
+                            mica_term::app::vault::model::VaultSshConnectionSpec {
+                                host: "b.example.com".into(),
+                                user: "ops".into(),
+                                port: "22".into(),
+                                auth_method: "password".into(),
+                                auth_source: "manual".into(),
+                                keychain_identity_id: None,
+                                private_key_source: "content".into(),
+                                private_key_path: String::new(),
+                                environment: "prod".into(),
+                                proxy: mica_term::app::vault::model::VaultSshProxySpec::None,
+                                remark: String::new(),
+                                credential_ref: Some(shared_ref.into()),
+                            },
+                        )),
+                    },
+                ),
+            ]),
+            merge_metadata: BTreeMap::new(),
+        },
+        ssh_secret_bundles: BTreeMap::from([
+            (
+                "asset-a".into(),
+                StoredSshSecretBundle {
+                    password: Some("alpha".into()),
+                    ..StoredSshSecretBundle::default()
+                },
+            ),
+            (
+                "asset-b".into(),
+                StoredSshSecretBundle {
+                    password: Some("bravo".into()),
+                    ..StoredSshSecretBundle::default()
+                },
+            ),
+        ]),
+        keychain_catalog: KeychainCatalog::default(),
+        keychain_identity_secret_bundles: BTreeMap::new(),
+        keychain_key_secret_bundles: BTreeMap::new(),
+        known_hosts: Vec::new(),
+        sync_preferences: SnapshotSyncPreferences::default(),
+        ui_preferences: SnapshotUiPreferences::default(),
+    };
+
+    let applied =
+        apply_vault_snapshot(&snapshot, &store, &known_hosts_path).expect("apply vault snapshot");
+    let asset_a_ref = applied
+        .asset_tree
+        .ssh_connection_spec("asset-a")
+        .expect("asset a spec")
+        .credential_ref
+        .clone()
+        .expect("asset a credential ref");
+    let asset_b_ref = applied
+        .asset_tree
+        .ssh_connection_spec("asset-b")
+        .expect("asset b spec")
+        .credential_ref
+        .clone()
+        .expect("asset b credential ref");
+
+    assert_eq!(
+        asset_a_ref,
+        ssh_credential_ref("asset-a", SshCredentialKind::SavedSecrets)
+    );
+    assert_eq!(
+        asset_b_ref,
+        ssh_credential_ref("asset-b", SshCredentialKind::SavedSecrets)
+    );
+    assert_ne!(asset_a_ref, asset_b_ref);
+    assert_eq!(
+        load_secret_bundle(&store, asset_a_ref.as_str())
+            .expect("load asset a secret")
+            .password
+            .as_deref(),
+        Some("alpha")
+    );
+    assert_eq!(
+        load_secret_bundle(&store, asset_b_ref.as_str())
+            .expect("load asset b secret")
+            .password
+            .as_deref(),
+        Some("bravo")
+    );
+    assert_eq!(store.get_secret(shared_ref).unwrap(), None);
 
     let _ = fs::remove_file(known_hosts_path);
 }
