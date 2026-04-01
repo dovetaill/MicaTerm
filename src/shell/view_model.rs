@@ -636,9 +636,11 @@ fn compare_sftp_panel_column(
     match column {
         SftpPanelSortColumn::Name => compare_sftp_panel_names(left, right, direction),
         SftpPanelSortColumn::Type => compare_sftp_panel_type(left.kind, right.kind, direction),
-        SftpPanelSortColumn::Modified => {
-            compare_sftp_panel_optional_u64(left.modified_unix_seconds, right.modified_unix_seconds, direction)
-        }
+        SftpPanelSortColumn::Modified => compare_sftp_panel_optional_u64(
+            left.modified_unix_seconds,
+            right.modified_unix_seconds,
+            direction,
+        ),
         SftpPanelSortColumn::Size => {
             compare_sftp_panel_optional_u64(left.size_bytes, right.size_bytes, direction)
         }
@@ -1125,7 +1127,8 @@ impl ShellViewModel {
             "name" => self.sftp_panel_column_layout.name_px = width_px.max(0.0),
             "type" => self.sftp_panel_column_layout.type_px = width_px.max(SFTP_TYPE_COLUMN_MIN_PX),
             "modified" => {
-                self.sftp_panel_column_layout.modified_px = width_px.max(SFTP_MODIFIED_COLUMN_MIN_PX);
+                self.sftp_panel_column_layout.modified_px =
+                    width_px.max(SFTP_MODIFIED_COLUMN_MIN_PX);
             }
             "size" => self.sftp_panel_column_layout.size_px = width_px.max(SFTP_SIZE_COLUMN_MIN_PX),
             _ => return false,
@@ -1138,7 +1141,9 @@ impl ShellViewModel {
         entries: &'a [SftpDirectoryEntry],
     ) -> Vec<&'a SftpDirectoryEntry> {
         let mut projection = entries.iter().collect::<Vec<_>>();
-        projection.sort_by(|left, right| compare_sftp_panel_entries(left, right, self.sftp_panel_sort_state));
+        projection.sort_by(|left, right| {
+            compare_sftp_panel_entries(left, right, self.sftp_panel_sort_state)
+        });
         projection
     }
 

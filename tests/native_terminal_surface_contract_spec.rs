@@ -19,6 +19,14 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         host_source.contains("in property <int> session-native-frame-token: 0;"),
         "terminal session host should expose a native frame token for renderer hook invalidation"
     );
+    assert!(
+        host_source.contains("image-fit: contain;"),
+        "terminal session host should keep the bitmap fallback on aspect-preserving image composition instead of stretching the surface image with fill"
+    );
+    assert!(
+        !host_source.contains("image-fit: fill;"),
+        "terminal session host should stop stretching the bitmap surface image because that reintroduces blur after hidpi atlas rendering"
+    );
 }
 
 #[test]

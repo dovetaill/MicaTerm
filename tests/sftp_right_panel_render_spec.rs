@@ -172,12 +172,12 @@ fn right_panel_source_exposes_sort_indicator_and_column_resize_contract() {
     );
     assert!(
         source.contains("callback sftp-panel-sort-requested(string);")
-            && source.contains("callback sftp-panel-column-width-change-requested(string, length);"),
+            && source
+                .contains("callback sftp-panel-column-width-change-requested(string, length);"),
         "right panel should expose sort and column-resize callbacks"
     );
     assert!(
-        source.contains("sort-indicator")
-            && source.contains("resize-handle"),
+        source.contains("sort-indicator") && source.contains("resize-handle"),
         "right panel should render an explicit header sort indicator and resize handles"
     );
 }
@@ -188,7 +188,10 @@ fn right_panel_source_uses_borderless_toolbar_buttons_and_horizontal_file_scroll
     let toolbar_button_source = source
         .split("component SftpToolbarButton inherits Rectangle {")
         .nth(1)
-        .and_then(|rest| rest.split("export component RightPanel inherits Rectangle {").next())
+        .and_then(|rest| {
+            rest.split("export component RightPanel inherits Rectangle {")
+                .next()
+        })
         .expect("toolbar button source should be present");
 
     assert!(
@@ -214,7 +217,9 @@ fn app_window_source_threads_sftp_table_state_into_right_panel() {
     assert!(
         source.contains("sftp-panel-name-column-width: root.sftp-panel-name-column-width;")
             && source.contains("sftp-panel-type-column-width: root.sftp-panel-type-column-width;")
-            && source.contains("sftp-panel-modified-column-width: root.sftp-panel-modified-column-width;")
+            && source.contains(
+                "sftp-panel-modified-column-width: root.sftp-panel-modified-column-width;"
+            )
             && source.contains("sftp-panel-size-column-width: root.sftp-panel-size-column-width;"),
         "app window should forward current column widths into the right panel"
     );
@@ -245,8 +250,7 @@ fn right_panel_source_uses_fluent_toolbar_icons_and_actions_menu_trigger() {
     }
 
     assert!(
-        source.contains("sftp-panel-context-menu-requested(")
-            && source.contains("\"sftp-blank\""),
+        source.contains("sftp-panel-context-menu-requested(") && source.contains("\"sftp-blank\""),
         "toolbar overflow action should open the blank-area SFTP actions menu instead of directly firing a placeholder action"
     );
     assert!(
@@ -263,13 +267,11 @@ fn right_panel_source_uses_fluent_toolbar_icons_and_actions_menu_trigger() {
         "toolbar should drop the forward and up buttons from the compact browser rail"
     );
     assert!(
-        !source.contains("? \"BROWSE\" : \"LIVE\"")
-            && !source.contains("text: \"Follow\""),
+        !source.contains("? \"BROWSE\" : \"LIVE\"") && !source.contains("text: \"Follow\""),
         "path bar should stop rendering the legacy live/follow chrome"
     );
     assert!(
-        source.contains("double-clicked => {")
-            && source.contains("sftp-panel-item-activated("),
+        source.contains("double-clicked => {") && source.contains("sftp-panel-item-activated("),
         "sftp rows should expose a double-click activation callback"
     );
 }
@@ -369,8 +371,7 @@ fn disconnected_sftp_panel_renders_retry_guidance_shell() {
         count_distinct_pixels(&buffer, PANEL_X + 12, 96, 340, 52, panel_surface, 14);
     let body_pixels =
         count_distinct_pixels(&buffer, PANEL_X + 12, 150, 340, 160, panel_surface, 14);
-    let retry_pixels =
-        count_distinct_pixels(&buffer, PANEL_X + 280, 82, 96, 40, panel_surface, 14);
+    let retry_pixels = count_distinct_pixels(&buffer, PANEL_X + 280, 82, 96, 40, panel_surface, 14);
 
     assert!(
         headline_pixels >= 1100,

@@ -45,8 +45,8 @@ use crate::app::quick_launch_preferences::{
 };
 use crate::app::runtime_profile::{AppRuntimeProfile, TerminalRenderMode};
 use crate::app::sftp::{
-    SftpBrowserController, SftpBrowserLoadRequest, SftpBrowserSessionState,
-    SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode, SftpSessionBindingState,
+    SftpBrowserController, SftpBrowserLoadRequest, SftpBrowserSessionState, SftpDirectoryEntryKind,
+    SftpFollowMode, SftpPanelMode, SftpSessionBindingState,
 };
 use crate::app::ssh::connection_progress::{
     ConnectionAttemptState, ConnectionHeadlineState, ConnectionStepState, ConnectionStepStateItem,
@@ -67,8 +67,8 @@ use crate::app::ssh::runtime::{
     load_optional_stored_secret_bundle, stored_secret_lookup_message,
 };
 use crate::app::ssh::session_manager::{
-    EnhancedSessionState, OpenSessionMode, SessionHandle, SessionManager,
-    SessionRuntimeControl, SessionRuntimeLauncher, SessionState,
+    EnhancedSessionState, OpenSessionMode, SessionHandle, SessionManager, SessionRuntimeControl,
+    SessionRuntimeLauncher, SessionState,
 };
 use crate::app::terminal_atlas::TerminalAtlasSelection;
 #[cfg(all(target_os = "windows", feature = "terminal-native-renderer"))]
@@ -5007,8 +5007,10 @@ fn refresh_local_vault_from_primary_remote_if_changed(
         update_sync_modal_for_local_state(state, vault);
         state.vault_panel_state_mut().primary_status_label =
             format!("Already synced {}", remote_head.vault_revision);
-        state.sync_modal_state_mut().status_text =
-            format!("No remote changes found. Primary stays at {}.", remote_head.vault_revision);
+        state.sync_modal_state_mut().status_text = format!(
+            "No remote changes found. Primary stays at {}.",
+            remote_head.vault_revision
+        );
         return Ok(false);
     }
 
@@ -5647,14 +5649,22 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&manager),
                 );
-                let (sftp_open_changed, sftp_retry_changed, sftp_follow_changed) = if state.show_right_panel {
+                let (sftp_open_changed, sftp_retry_changed, sftp_follow_changed) = if state
+                    .show_right_panel
+                {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     let open_changed =
                         ensure_active_sftp_browser_started(&mut state, &mut controller, &manager);
-                    let retry_changed =
-                        sync_active_sftp_browser_pending_request(&mut state, &mut controller, &manager);
-                    let follow_changed =
-                        sync_active_sftp_browser_follow_request(&mut state, &mut controller, &manager);
+                    let retry_changed = sync_active_sftp_browser_pending_request(
+                        &mut state,
+                        &mut controller,
+                        &manager,
+                    );
+                    let follow_changed = sync_active_sftp_browser_follow_request(
+                        &mut state,
+                        &mut controller,
+                        &manager,
+                    );
                     (open_changed, retry_changed, follow_changed)
                 } else {
                     (false, false, false)
@@ -5699,9 +5709,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 }
                 let should_attempt_push = scheduler.dirty;
                 let should_attempt_refresh = !should_attempt_push
-                    && matches!(trigger, VaultSyncTrigger::Manual | VaultSyncTrigger::Periodic);
-                if matches!(trigger, VaultSyncTrigger::DebouncedAuto | VaultSyncTrigger::Periodic)
-                    && !vault_auto_sync_ready(&vault)
+                    && matches!(
+                        trigger,
+                        VaultSyncTrigger::Manual | VaultSyncTrigger::Periodic
+                    );
+                if matches!(
+                    trigger,
+                    VaultSyncTrigger::DebouncedAuto | VaultSyncTrigger::Periodic
+                ) && !vault_auto_sync_ready(&vault)
                 {
                     return;
                 }
@@ -5733,7 +5748,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             }
 
             let result = if should_attempt_push {
-                sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref()).map(|_| true)
+                sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref())
+                    .map(|_| true)
             } else if should_attempt_refresh {
                 refresh_local_vault_from_primary_remote_if_changed(
                     &mut state,
@@ -5755,7 +5771,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             match result {
                 Ok(changed) => {
                     if matches!(trigger, VaultSyncTrigger::Manual) {
-                        let feedback = if !state.vault_panel_state().primary_status_label.trim().is_empty()
+                        let feedback = if !state
+                            .vault_panel_state()
+                            .primary_status_label
+                            .trim()
+                            .is_empty()
                         {
                             state.vault_panel_state().primary_status_label.clone()
                         } else if changed {
@@ -6234,7 +6254,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let was_modal_open = state.sftp_remote_file_editor_state().open;
 
         if let Some(entry) = entry {
-            if item_kind.as_str() == "directory" || entry.kind == SftpDirectoryEntryKind::Directory {
+            if item_kind.as_str() == "directory" || entry.kind == SftpDirectoryEntryKind::Directory
+            {
                 if let Some(session_bridge) = session_bridge_ref.as_ref()
                     && let Some(session_id) = active_workspace_session_uuid(&state)
                 {
@@ -6479,11 +6500,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     let browser_changed = {
                         let mut controller = sftp_browser_controller_ref.borrow_mut();
                         if let Some(request) = controller.retry(session_id) {
-                            if session_bridge
-                                .manager
-                                .sftp_binding(session_id)
-                                .is_some_and(|binding| binding.mode() != SftpPanelMode::Disconnected)
-                            {
+                            if session_bridge.manager.sftp_binding(session_id).is_some_and(
+                                |binding| binding.mode() != SftpPanelMode::Disconnected,
+                            ) {
                                 execute_sftp_browser_request(
                                     &mut state,
                                     &mut controller,
@@ -6491,13 +6510,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                     request,
                                 )
                             } else {
-                                controller.session_state(session_id).is_some_and(|browser_state| {
-                                    project_sftp_browser_state_into_view_model(
-                                        &mut state,
-                                        session_id,
-                                        browser_state,
-                                    )
-                                })
+                                controller
+                                    .session_state(session_id)
+                                    .is_some_and(|browser_state| {
+                                        project_sftp_browser_state_into_view_model(
+                                            &mut state,
+                                            session_id,
+                                            browser_state,
+                                        )
+                                    })
                             }
                         } else {
                             false
@@ -6600,7 +6621,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_sftp_remote_file_modal_save_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        if let Some((session_id, remote_path, content)) = state.sftp_remote_file_editor_save_payload()
+        if let Some((session_id, remote_path, content)) =
+            state.sftp_remote_file_editor_save_payload()
             && let Some(session_bridge) = session_bridge_ref.as_ref()
         {
             match Uuid::parse_str(session_id.as_str())
@@ -6613,8 +6635,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     )
                 }) {
                 Ok(_) => state.mark_sftp_remote_file_editor_saved(),
-                Err(err) => state
-                    .set_sftp_remote_file_editor_error(format!("Failed to save remote file: {err}")),
+                Err(err) => state.set_sftp_remote_file_editor_error(format!(
+                    "Failed to save remote file: {err}"
+                )),
             }
         }
         sync_sftp_remote_file_modal_state(&window, &state);

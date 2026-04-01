@@ -1,21 +1,22 @@
 //! Renders the active terminal grid into a single image surface using a Sarasa-backed sprite atlas.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
+use swash::FontRef as SwashFontRef;
 use swash::scale::image::Content as SwashContent;
 use swash::scale::{Render, ScaleContext, Scaler, Source};
 use swash::zeno::{Format as SwashFormat, Vector as SwashVector};
-use swash::FontRef as SwashFontRef;
 
 use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
+use crate::app::terminal_font::backend::{FontRenderProfile, map_glyph_coverage_to_alpha};
 use crate::app::terminal_emoji::{
-    classify_cluster_render_kind, ClusterRenderKind as EmojiClusterRenderKind, EmojiRenderOutcome,
-    TerminalEmojiRenderer,
+    ClusterRenderKind as EmojiClusterRenderKind, EmojiRenderOutcome, TerminalEmojiRenderer,
+    classify_cluster_render_kind,
 };
 
 const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-Regular.ttf");
@@ -113,6 +114,7 @@ pub struct TerminalAtlasRenderer {
     font: FontArc,
     swash_font: SwashFontRef<'static>,
     mono_scale_context: ScaleContext,
+    mono_render_profile: FontRenderProfile,
     emoji_renderer: TerminalEmojiRenderer,
     logical_metrics: TerminalAtlasMetrics,
     raster_metrics: TerminalAtlasMetrics,
@@ -181,6 +183,7 @@ struct MonoRasterRequest<'a> {
     text: &'a str,
     span: u32,
     bold: bool,
+    render_profile: FontRenderProfile,
 }
 
 impl CachedClusterSprite {
@@ -211,6 +214,7 @@ impl TerminalAtlasRenderer {
             font,
             swash_font,
             mono_scale_context: ScaleContext::new(),
+            mono_render_profile: FontRenderProfile::bitmap_default(),
             emoji_renderer,
             logical_metrics,
             raster_metrics: logical_metrics,
@@ -499,6 +503,7 @@ impl TerminalAtlasRenderer {
                         font: &self.font,
                         swash_font: self.swash_font,
                         scale_context: &mut self.mono_scale_context,
+                        render_profile: self.mono_render_profile,
                         metrics: self.raster_metrics,
                         px_size: TERMINAL_FONT_SIZE_PX * self.raster_scale,
                         text: &replacement_text,
@@ -513,6 +518,7 @@ impl TerminalAtlasRenderer {
             font: &self.font,
             swash_font: self.swash_font,
             scale_context: &mut self.mono_scale_context,
+            render_profile: self.mono_render_profile,
             metrics: self.raster_metrics,
             px_size: TERMINAL_FONT_SIZE_PX * self.raster_scale,
             text,
@@ -589,6 +595,7 @@ fn rasterize_mono_cluster_sprite(request: MonoRasterRequest<'_>) -> CachedCluste
         text,
         span,
         bold,
+        render_profile,
     } = request;
     let width = (span.max(1) * metrics.cell_width) as usize;
     let height = metrics.cell_height as usize;
@@ -613,7 +620,13 @@ fn rasterize_mono_cluster_sprite(request: MonoRasterRequest<'_>) -> CachedCluste
         let glyph_id = scaled.glyph_id(ch);
 
         let (origin_x, offset_x) = split_fractional_offset(pen_x);
-        if let Some(image) = render_hinted_mono_glyph(&mut scaler, glyph_id.0, embolden, offset_x) {
+        if let Some(image) = render_hinted_mono_glyph(
+            &mut scaler,
+            glyph_id.0,
+            embolden,
+            offset_x,
+            render_profile,
+        ) {
             let left = origin_x + image.left;
             min_x = min_x.min(left as f32);
             rendered_glyphs.push(RenderedMonoGlyph {
@@ -679,6 +692,7 @@ fn render_hinted_mono_glyph(
     glyph_id: u16,
     embolden: f32,
     offset_x: f32,
+    render_profile: FontRenderProfile,
 ) -> Option<RenderedMonoGlyph> {
     let mut renderer = Render::new(&[Source::Outline]);
     renderer
@@ -691,10 +705,15 @@ fn render_hinted_mono_glyph(
     }
 
     let alpha = match image.content {
-        SwashContent::Mask => image.data,
+        SwashContent::Mask => image
+            .data
+            .into_iter()
+            .map(|value| map_glyph_coverage_to_alpha(f32::from(value) / 255.0, render_profile))
+            .collect(),
         SwashContent::SubpixelMask => rgba_pixels_from_bytes(&image.data)
             .into_iter()
             .map(|pixel| pixel.g.max(pixel.r).max(pixel.b))
+            .map(|value| map_glyph_coverage_to_alpha(f32::from(value) / 255.0, render_profile))
             .collect(),
         _ => return None,
     };

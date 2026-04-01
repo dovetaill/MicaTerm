@@ -100,7 +100,10 @@ impl SftpBrowserController {
 
     pub fn navigate_back(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
         let request_id = self.next_request_id();
-        let path = self.sessions.get_mut(&session_id)?.navigate_back(request_id)?;
+        let path = self
+            .sessions
+            .get_mut(&session_id)?
+            .navigate_back(request_id)?;
         Some(SftpBrowserLoadRequest {
             session_id,
             path,
@@ -110,7 +113,10 @@ impl SftpBrowserController {
 
     pub fn navigate_forward(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
         let request_id = self.next_request_id();
-        let path = self.sessions.get_mut(&session_id)?.navigate_forward(request_id)?;
+        let path = self
+            .sessions
+            .get_mut(&session_id)?
+            .navigate_forward(request_id)?;
         Some(SftpBrowserLoadRequest {
             session_id,
             path,
@@ -120,7 +126,10 @@ impl SftpBrowserController {
 
     pub fn navigate_up(&mut self, session_id: Uuid) -> Option<SftpBrowserLoadRequest> {
         let request_id = self.next_request_id();
-        let path = self.sessions.get_mut(&session_id)?.navigate_up(request_id)?;
+        let path = self
+            .sessions
+            .get_mut(&session_id)?
+            .navigate_up(request_id)?;
         Some(SftpBrowserLoadRequest {
             session_id,
             path,

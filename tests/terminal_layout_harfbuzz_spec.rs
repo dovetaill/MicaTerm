@@ -1,4 +1,5 @@
 use mica_term::app::terminal_font::mock::mock_font_system;
+use mica_term::app::terminal_font::{FontRequest, FontSystem};
 use mica_term::app::terminal_layout::shape_row;
 use mica_term::app::terminal_model::{TerminalModelCell, TerminalModelRow};
 
@@ -21,6 +22,14 @@ fn unique_clusters(row: &mica_term::app::terminal_layout::ShapedRow) -> Vec<u32>
     values.sort_unstable();
     values.dedup();
     values
+}
+
+fn shape_row_with_mock_font(
+    row: &TerminalModelRow,
+) -> anyhow::Result<mica_term::app::terminal_layout::ShapedRow> {
+    let mut fonts = mock_font_system();
+    let loaded_font = fonts.load_font(&FontRequest::default())?;
+    shape_row(row, &loaded_font, &mut fonts)
 }
 
 #[test]
@@ -81,7 +90,7 @@ fn harfbuzz_layout_keeps_ascii_prompt_in_one_run_when_style_is_consistent() -> a
         "$ pwd",
     );
 
-    let shaped = shape_row(&row, &mut mock_font_system())?;
+    let shaped = shape_row_with_mock_font(&row)?;
 
     assert_eq!(shaped.runs.len(), 1);
     assert_eq!(shaped.runs[0].cell_range, 0..5);
@@ -118,7 +127,7 @@ fn harfbuzz_layout_keeps_wide_cjk_and_emoji_cluster_boundaries_stable() -> anyho
         "界🙂",
     );
 
-    let shaped = shape_row(&row, &mut mock_font_system())?;
+    let shaped = shape_row_with_mock_font(&row)?;
     let clusters = unique_clusters(&shaped);
 
     assert_eq!(shaped.runs.len(), 1);
@@ -175,7 +184,7 @@ fn harfbuzz_layout_splits_on_foreground_change_but_not_background_change() -> an
         "abcd",
     );
 
-    let shaped = shape_row(&row, &mut mock_font_system())?;
+    let shaped = shape_row_with_mock_font(&row)?;
 
     assert_eq!(shaped.runs.len(), 2);
     assert_eq!(shaped.runs[0].cell_range, 0..3);
@@ -200,7 +209,7 @@ fn harfbuzz_layout_clusters_combining_sequences_instead_of_iterating_raw_chars()
         "A\u{0301}",
     );
 
-    let shaped = shape_row(&row, &mut mock_font_system())?;
+    let shaped = shape_row_with_mock_font(&row)?;
     let clusters = unique_clusters(&shaped);
 
     assert_eq!(shaped.runs.len(), 1);
@@ -247,7 +256,7 @@ fn harfbuzz_layout_splits_runs_when_bold_or_underline_changes() -> anyhow::Resul
         "abc",
     );
 
-    let shaped = shape_row(&row, &mut mock_font_system())?;
+    let shaped = shape_row_with_mock_font(&row)?;
 
     assert_eq!(shaped.runs.len(), 3);
     assert!(!shaped.runs[0].style.bold);

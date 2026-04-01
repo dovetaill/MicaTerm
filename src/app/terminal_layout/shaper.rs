@@ -1,9 +1,8 @@
-//! HarfBuzz-backed shaping for segmented terminal text runs.
+//! Segmented terminal text shaping driven by the active font backend.
 
 use anyhow::Result;
-use harfbuzz_rs::{Face, Font, GlyphBuffer, UnicodeBuffer, shape};
 
-use crate::app::terminal_font::{FontRequest, FontSystem};
+use crate::app::terminal_font::{FontSystem, LoadedFont, ShapedGlyph};
 use crate::app::terminal_layout::run_segmentation::{SegmentedRun, TextStyleKey, segment_row};
 use crate::app::terminal_model::TerminalModelRow;
 
@@ -36,24 +35,24 @@ pub trait TextShaper {
     fn shape_row(
         &mut self,
         row: &TerminalModelRow,
+        font: &LoadedFont,
         fonts: &mut dyn FontSystem,
     ) -> Result<ShapedRow>;
 }
 
 #[derive(Default)]
-pub struct HarfBuzzTextShaper {
-    request: FontRequest,
-}
+pub struct TerminalTextShaper;
 
-impl TextShaper for HarfBuzzTextShaper {
+impl TextShaper for TerminalTextShaper {
     fn shape_row(
         &mut self,
         row: &TerminalModelRow,
+        font: &LoadedFont,
         fonts: &mut dyn FontSystem,
     ) -> Result<ShapedRow> {
         let runs = segment_row(row)
             .into_iter()
-            .map(|run| self.shape_segment(run, fonts))
+            .map(|run| self.shape_segment(run, font, fonts))
             .collect::<Result<Vec<_>>>()?;
 
         Ok(ShapedRow {
@@ -63,43 +62,42 @@ impl TextShaper for HarfBuzzTextShaper {
     }
 }
 
-impl HarfBuzzTextShaper {
-    fn shape_segment(&mut self, run: SegmentedRun, fonts: &mut dyn FontSystem) -> Result<GlyphRun> {
-        let face_key = fonts.resolve_face(&self.request)?;
-        let _metrics = fonts.metrics(face_key, self.request.px_size)?;
-        let face = Face::from_bytes(fonts.face_bytes(face_key)?, fonts.face_index(face_key));
-        let font = Font::new(face);
-        let buffer = UnicodeBuffer::new()
-            .add_str(run.text.as_str())
-            .guess_segment_properties();
-        let glyph_buffer = shape(&font, buffer, &[]);
+impl TerminalTextShaper {
+    fn shape_segment(
+        &mut self,
+        run: SegmentedRun,
+        font: &LoadedFont,
+        fonts: &mut dyn FontSystem,
+    ) -> Result<GlyphRun> {
+        let glyphs = fonts.shape_text(font, run.text.as_str())?;
 
         Ok(GlyphRun {
             row: run.row,
             cell_range: run.cell_range,
             text: run.text,
-            glyphs: positioned_glyphs(&glyph_buffer),
+            glyphs: glyphs.into_iter().map(PositionedGlyph::from).collect(),
             style: run.style,
         })
     }
 }
 
-fn positioned_glyphs(buffer: &GlyphBuffer) -> Vec<PositionedGlyph> {
-    buffer
-        .get_glyph_infos()
-        .iter()
-        .zip(buffer.get_glyph_positions())
-        .map(|(info, position)| PositionedGlyph {
-            glyph_id: info.codepoint,
-            cluster: info.cluster,
-            x_advance: position.x_advance,
-            y_advance: position.y_advance,
-            x_offset: position.x_offset,
-            y_offset: position.y_offset,
-        })
-        .collect()
+impl From<ShapedGlyph> for PositionedGlyph {
+    fn from(glyph: ShapedGlyph) -> Self {
+        Self {
+            glyph_id: glyph.glyph_id,
+            cluster: glyph.cluster,
+            x_advance: glyph.x_advance,
+            y_advance: glyph.y_advance,
+            x_offset: glyph.x_offset,
+            y_offset: glyph.y_offset,
+        }
+    }
 }
 
-pub fn shape_row(row: &TerminalModelRow, fonts: &mut dyn FontSystem) -> Result<ShapedRow> {
-    HarfBuzzTextShaper::default().shape_row(row, fonts)
+pub fn shape_row(
+    row: &TerminalModelRow,
+    font: &LoadedFont,
+    fonts: &mut dyn FontSystem,
+) -> Result<ShapedRow> {
+    TerminalTextShaper.shape_row(row, font, fonts)
 }

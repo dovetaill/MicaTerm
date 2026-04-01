@@ -2,9 +2,16 @@
 
 pub mod backend;
 pub mod mock;
+pub mod wezterm_font;
 #[cfg(feature = "terminal-native-renderer")]
 pub mod windows_dwrite;
 
-pub use backend::{FontFaceKey, FontMetrics, FontRequest, FontSystem};
+pub use backend::{
+    FontFaceKey, FontMetrics, FontRenderProfile, FontRequest, FontSystem, LoadedFont,
+    LoadedFontKey,
+};
 #[cfg(feature = "terminal-native-renderer")]
-pub use windows_dwrite::{DirectWriteFontSystem, GlyphRasterRequest, RasterizedGlyph};
+pub use backend::{GlyphRasterRequest, RasterizedGlyph, ShapedGlyph};
+pub use wezterm_font::WeztermFontSystem;
+#[cfg(feature = "terminal-native-renderer")]
+pub use windows_dwrite::DirectWriteFontSystem;

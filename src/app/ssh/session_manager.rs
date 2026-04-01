@@ -338,10 +338,16 @@ impl SessionManager {
 
     pub fn sftp_download_file(&self, session_id: Uuid, remote_path: &str) -> Result<Vec<u8>> {
         let runtime = self.sftp_runtime(session_id)?;
-        self.runtime_handle.block_on(runtime.download_file(remote_path))
+        self.runtime_handle
+            .block_on(runtime.download_file(remote_path))
     }
 
-    pub fn sftp_upload_file(&self, session_id: Uuid, remote_path: &str, data: Vec<u8>) -> Result<u64> {
+    pub fn sftp_upload_file(
+        &self,
+        session_id: Uuid,
+        remote_path: &str,
+        data: Vec<u8>,
+    ) -> Result<u64> {
         let runtime = self.sftp_runtime(session_id)?;
         self.runtime_handle
             .block_on(runtime.upload_file(remote_path, data))

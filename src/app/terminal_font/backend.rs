@@ -1,16 +1,46 @@
 //! Shared terminal font contracts used by the shaping and renderer pipeline.
 
 use anyhow::Result;
+#[cfg(feature = "terminal-native-renderer")]
+use anyhow::anyhow;
+#[cfg(feature = "terminal-native-renderer")]
+use rustybuzz::{BufferClusterLevel, Face, UnicodeBuffer, shape};
 
-#[cfg(feature = "terminal-native-renderer")]
 const GLYPH_COVERAGE_GAMMA: f32 = 1.0;
-#[cfg(feature = "terminal-native-renderer")]
 const GLYPH_ALPHA_GAIN: f32 = 1.0;
-#[cfg(feature = "terminal-native-renderer")]
 const SYNTHETIC_EMBOLDEN_STRENGTH: f32 = 0.46;
+#[cfg(feature = "terminal-native-renderer")]
+const WINDOWS_NATIVE_COVERAGE_GAMMA: f32 = 1.08;
+#[cfg(feature = "terminal-native-renderer")]
+const WINDOWS_NATIVE_ALPHA_GAIN: f32 = 1.10;
+#[cfg(feature = "terminal-native-renderer")]
+const WINDOWS_NATIVE_SYNTHETIC_EMBOLDEN_STRENGTH: f32 = 0.52;
+const BITMAP_ATLAS_COVERAGE_GAMMA: f32 = 1.06;
+const BITMAP_ATLAS_ALPHA_GAIN: f32 = 1.08;
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct FontFaceKey(pub u64);
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct LoadedFontKey {
+    face: FontFaceKey,
+    px_size_bits: u32,
+    render_profile: FontRenderProfileKey,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FontRenderProfile {
+    pub coverage_gamma: f32,
+    pub alpha_gain: f32,
+    pub synthetic_embolden_strength: f32,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct FontRenderProfileKey {
+    coverage_gamma_bits: u32,
+    alpha_gain_bits: u32,
+    synthetic_embolden_strength_bits: u32,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FontRequest {
@@ -37,21 +67,224 @@ pub struct FontMetrics {
     pub cell_height_px: f32,
 }
 
-pub trait FontSystem {
-    fn resolve_face(&mut self, request: &FontRequest) -> Result<FontFaceKey>;
-    fn metrics(&mut self, face: FontFaceKey, px_size: f32) -> Result<FontMetrics>;
-    fn face_bytes(&self, face: FontFaceKey) -> Result<&[u8]>;
-    fn face_index(&self, face: FontFaceKey) -> u32;
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoadedFont {
+    cache_key: LoadedFontKey,
+    request: FontRequest,
+    metrics: FontMetrics,
+    render_profile: FontRenderProfile,
+}
+
+impl Default for FontRenderProfile {
+    fn default() -> Self {
+        Self {
+            coverage_gamma: GLYPH_COVERAGE_GAMMA,
+            alpha_gain: GLYPH_ALPHA_GAIN,
+            synthetic_embolden_strength: SYNTHETIC_EMBOLDEN_STRENGTH,
+        }
+    }
+}
+
+impl FontRenderProfile {
+    pub fn bitmap_default() -> Self {
+        Self {
+            coverage_gamma: BITMAP_ATLAS_COVERAGE_GAMMA,
+            alpha_gain: BITMAP_ATLAS_ALPHA_GAIN,
+            synthetic_embolden_strength: SYNTHETIC_EMBOLDEN_STRENGTH,
+        }
+    }
+
+    #[cfg(feature = "terminal-native-renderer")]
+    pub fn windows_native_default() -> Self {
+        Self {
+            coverage_gamma: WINDOWS_NATIVE_COVERAGE_GAMMA,
+            alpha_gain: WINDOWS_NATIVE_ALPHA_GAIN,
+            synthetic_embolden_strength: WINDOWS_NATIVE_SYNTHETIC_EMBOLDEN_STRENGTH,
+        }
+    }
+}
+
+impl FontRenderProfileKey {
+    fn new(render_profile: FontRenderProfile) -> Self {
+        Self {
+            coverage_gamma_bits: render_profile.coverage_gamma.to_bits(),
+            alpha_gain_bits: render_profile.alpha_gain.to_bits(),
+            synthetic_embolden_strength_bits: render_profile.synthetic_embolden_strength.to_bits(),
+        }
+    }
+}
+
+impl LoadedFontKey {
+    fn new(face: FontFaceKey, request: &FontRequest, render_profile: FontRenderProfile) -> Self {
+        Self {
+            face,
+            px_size_bits: request.px_size.to_bits(),
+            render_profile: FontRenderProfileKey::new(render_profile),
+        }
+    }
+}
+
+impl LoadedFont {
+    pub fn new(
+        face_key: FontFaceKey,
+        request: FontRequest,
+        metrics: FontMetrics,
+        render_profile: FontRenderProfile,
+    ) -> Self {
+        Self {
+            cache_key: LoadedFontKey::new(face_key, &request, render_profile),
+            request,
+            metrics,
+            render_profile,
+        }
+    }
+
+    pub fn cache_key(&self) -> LoadedFontKey {
+        self.cache_key
+    }
+
+    pub fn metrics(&self) -> FontMetrics {
+        self.metrics
+    }
+
+    pub fn render_profile(&self) -> FontRenderProfile {
+        self.render_profile
+    }
+
+    pub fn cell_size_px(&self) -> (u32, u32) {
+        (
+            self.metrics.cell_width_px.ceil() as u32,
+            self.metrics.cell_height_px.ceil() as u32,
+        )
+    }
+
+    #[cfg(feature = "terminal-native-renderer")]
+    pub fn raster_request(&self, glyph_id: u32, bold: bool) -> GlyphRasterRequest {
+        GlyphRasterRequest::new(self, glyph_id, bold)
+    }
+
+    pub(crate) fn face_key(&self) -> FontFaceKey {
+        self.cache_key.face
+    }
+
+    pub(crate) fn px_size(&self) -> f32 {
+        f32::from_bits(self.cache_key.px_size_bits)
+    }
+
+    #[cfg(feature = "terminal-native-renderer")]
+    pub fn map_coverage_to_alpha(&self, coverage: f32) -> u8 {
+        map_glyph_coverage_to_alpha(coverage, self.render_profile())
+    }
+
+    #[cfg(feature = "terminal-native-renderer")]
+    pub fn apply_synthetic_embolden(&self, alpha: &mut [u8], width: u32, height: u32) {
+        apply_synthetic_embolden(
+            alpha,
+            width,
+            height,
+            self.render_profile().synthetic_embolden_strength,
+        )
+    }
 }
 
 #[cfg(feature = "terminal-native-renderer")]
-pub(crate) fn map_glyph_coverage_to_alpha(coverage: f32) -> u8 {
-    let adjusted = coverage.clamp(0.0, 1.0).powf(GLYPH_COVERAGE_GAMMA) * GLYPH_ALPHA_GAIN;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShapedGlyph {
+    pub glyph_id: u32,
+    pub cluster: u32,
+    pub x_advance: i32,
+    pub y_advance: i32,
+    pub x_offset: i32,
+    pub y_offset: i32,
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GlyphRasterRequest {
+    pub font_key: LoadedFontKey,
+    pub glyph_id: u32,
+    pub bold: bool,
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+impl GlyphRasterRequest {
+    pub fn new(font: &LoadedFont, glyph_id: u32, bold: bool) -> Self {
+        Self {
+            font_key: font.cache_key(),
+            glyph_id,
+            bold,
+        }
+    }
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RasterizedGlyph {
+    pub width_px: u32,
+    pub height_px: u32,
+    pub bearing_x_px: i32,
+    pub bearing_y_px: i32,
+    pub advance_px: i32,
+    pub coverage: Vec<u8>,
+}
+
+pub trait FontSystem {
+    fn load_font(&mut self, request: &FontRequest) -> Result<LoadedFont>;
+    #[cfg(feature = "terminal-native-renderer")]
+    fn shape_text(&mut self, font: &LoadedFont, text: &str) -> Result<Vec<ShapedGlyph>>;
+    #[cfg(feature = "terminal-native-renderer")]
+    fn rasterize_glyph(
+        &mut self,
+        font: &LoadedFont,
+        glyph_id: u32,
+        bold: bool,
+    ) -> Result<RasterizedGlyph>;
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+pub(crate) fn shape_text_with_rustybuzz(
+    face_data: &[u8],
+    face_index: u32,
+    text: &str,
+) -> Result<Vec<ShapedGlyph>> {
+    let face = Face::from_slice(face_data, face_index)
+        .ok_or_else(|| anyhow!("failed to parse font face index {face_index}"))?;
+    let mut buffer = UnicodeBuffer::new();
+    buffer.push_str(text);
+    buffer.set_cluster_level(BufferClusterLevel::MonotoneGraphemes);
+    buffer.guess_segment_properties();
+    let glyph_buffer = shape(&face, &[], buffer);
+
+    Ok(glyph_buffer
+        .glyph_infos()
+        .iter()
+        .zip(glyph_buffer.glyph_positions())
+        .map(|(info, position)| ShapedGlyph {
+            glyph_id: info.glyph_id,
+            cluster: info.cluster,
+            x_advance: position.x_advance,
+            y_advance: position.y_advance,
+            x_offset: position.x_offset,
+            y_offset: position.y_offset,
+        })
+        .collect())
+}
+
+pub(crate) fn map_glyph_coverage_to_alpha(coverage: f32, render_profile: FontRenderProfile) -> u8 {
+    let adjusted = coverage
+        .clamp(0.0, 1.0)
+        .powf(render_profile.coverage_gamma)
+        * render_profile.alpha_gain;
     (adjusted.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 #[cfg(feature = "terminal-native-renderer")]
-pub(crate) fn apply_synthetic_embolden(alpha: &mut [u8], width: u32, height: u32) {
+pub(crate) fn apply_synthetic_embolden(
+    alpha: &mut [u8],
+    width: u32,
+    height: u32,
+    synthetic_embolden_strength: f32,
+) {
     let width = width as usize;
     let height = height as usize;
     if width < 2 || height == 0 || alpha.is_empty() {
@@ -67,40 +300,86 @@ pub(crate) fn apply_synthetic_embolden(alpha: &mut [u8], width: u32, height: u32
                 continue;
             }
 
-            let boosted = (f32::from(base) * SYNTHETIC_EMBOLDEN_STRENGTH).round() as u8;
+            let boosted = (f32::from(base) * synthetic_embolden_strength).round() as u8;
             let target = &mut alpha[row_offset + x + 1];
             *target = (*target).max(boosted);
         }
     }
 }
 
-#[cfg(all(test, feature = "terminal-native-renderer"))]
+#[cfg(test)]
 mod tests {
-    use super::{apply_synthetic_embolden, map_glyph_coverage_to_alpha};
+    use super::{FontRenderProfile, map_glyph_coverage_to_alpha};
+    #[cfg(feature = "terminal-native-renderer")]
+    use super::apply_synthetic_embolden;
 
     #[test]
     fn glyph_coverage_mapping_keeps_regular_weight_edges_close_to_source_coverage() {
-        assert_eq!(map_glyph_coverage_to_alpha(1.0), 255);
+        let profile = FontRenderProfile::default();
+
+        assert_eq!(map_glyph_coverage_to_alpha(1.0, profile), 255);
         assert!(
-            map_glyph_coverage_to_alpha(0.5) <= 140,
+            map_glyph_coverage_to_alpha(0.5, profile) <= 140,
             "regular-weight grayscale coverage should stay close to the source mask instead of inflating edge alpha and making glyphs look soft"
         );
         assert!(
-            map_glyph_coverage_to_alpha(0.2) <= 60,
+            map_glyph_coverage_to_alpha(0.2, profile) <= 60,
             "low-coverage anti-aliased edge pixels should not be boosted so much that thin stems start glowing"
         );
     }
 
     #[test]
+    #[cfg(feature = "terminal-native-renderer")]
     fn synthetic_embolden_spreads_ink_one_pixel_to_the_right() {
         let mut alpha = vec![0, 200, 0, 0];
 
-        apply_synthetic_embolden(&mut alpha, 4, 1);
+        apply_synthetic_embolden(
+            &mut alpha,
+            4,
+            1,
+            FontRenderProfile::default().synthetic_embolden_strength,
+        );
 
         assert_eq!(alpha[1], 200);
         assert!(
             alpha[2] >= 90,
             "synthetic embolden should strengthen the adjacent pixel enough to visibly thicken a regular-weight stem"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "terminal-native-renderer")]
+    fn windows_native_render_profile_makes_mid_coverage_darker_without_glowing_edges() {
+        let neutral = FontRenderProfile::default();
+        let windows_native = FontRenderProfile::windows_native_default();
+
+        assert!(
+            map_glyph_coverage_to_alpha(0.5, windows_native)
+                > map_glyph_coverage_to_alpha(0.5, neutral),
+            "windows-native tuning should darken mid-coverage pixels so regular stems stop looking washed out"
+        );
+        assert!(
+            map_glyph_coverage_to_alpha(0.2, windows_native) <= 56,
+            "windows-native tuning should still keep low-coverage fringe pixels restrained so anti-aliased edges do not start glowing"
+        );
+        assert!(
+            windows_native.synthetic_embolden_strength > neutral.synthetic_embolden_strength,
+            "windows-native tuning should slightly strengthen synthetic embolden so bold terminal runs feel closer to the software atlas path"
+        );
+    }
+
+    #[test]
+    fn bitmap_render_profile_darkens_mid_coverage_without_widening_fringe_pixels() {
+        let neutral = FontRenderProfile::default();
+        let bitmap = FontRenderProfile::bitmap_default();
+
+        assert!(
+            map_glyph_coverage_to_alpha(0.5, bitmap) > map_glyph_coverage_to_alpha(0.5, neutral),
+            "bitmap tuning should darken mid-coverage pixels so the Windows atlas path looks less gray at Skia scale"
+        );
+        assert!(
+            map_glyph_coverage_to_alpha(0.2, bitmap) <= 58,
+            "bitmap tuning should keep low-coverage edge pixels restrained so hinted grayscale masks stay crisp"
         );
     }
 }

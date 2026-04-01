@@ -118,8 +118,8 @@ fn atlas_renderer_loads_sarasa_metrics_and_emits_a_surface_image() -> Result<()>
 }
 
 #[test]
-fn atlas_renderer_rasterizes_bitmap_surface_at_hidpi_scale_without_changing_logical_cell_metrics(
-) -> Result<()> {
+fn atlas_renderer_rasterizes_bitmap_surface_at_hidpi_scale_without_changing_logical_cell_metrics()
+-> Result<()> {
     let surface = render_surface(4, 12, "hidpi\r\n");
     let mut renderer = TerminalAtlasRenderer::new()?;
     let logical_metrics = renderer.metrics();

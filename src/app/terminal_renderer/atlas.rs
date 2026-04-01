@@ -2,22 +2,20 @@
 
 use std::collections::HashMap;
 
-use crate::app::terminal_font::{FontFaceKey, GlyphRasterRequest, RasterizedGlyph};
+use crate::app::terminal_font::{GlyphRasterRequest, LoadedFontKey, RasterizedGlyph};
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct GlyphAtlasKey {
-    pub face: FontFaceKey,
+    pub font_key: LoadedFontKey,
     pub glyph_id: u32,
-    pub px_size_bits: u32,
     pub bold: bool,
 }
 
 impl From<GlyphRasterRequest> for GlyphAtlasKey {
     fn from(request: GlyphRasterRequest) -> Self {
         Self {
-            face: request.face,
+            font_key: request.font_key,
             glyph_id: request.glyph_id,
-            px_size_bits: request.px_size.to_bits(),
             bold: request.bold,
         }
     }

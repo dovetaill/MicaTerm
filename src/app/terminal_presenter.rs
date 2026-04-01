@@ -6,11 +6,9 @@ use slint::Image;
 use crate::app::ssh::runtime::TerminalSurfaceState;
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_font::{
-    DirectWriteFontSystem, FontFaceKey, FontMetrics, FontRequest, FontSystem,
-};
+use crate::app::terminal_font::{DirectWriteFontSystem, FontRequest, FontSystem, LoadedFont};
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_layout::{HarfBuzzTextShaper, TextShaper};
+use crate::app::terminal_layout::{TerminalTextShaper, TextShaper};
 use crate::app::terminal_model::TerminalModelFrame;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
@@ -102,11 +100,9 @@ impl TerminalPresenter for BitmapAtlasPresenter {
 #[cfg(feature = "terminal-native-renderer")]
 pub struct WindowsNativePresenter {
     font_system: DirectWriteFontSystem,
-    shaper: HarfBuzzTextShaper,
+    shaper: TerminalTextShaper,
     renderer: WgpuTerminalRenderer,
-    request: FontRequest,
-    face: FontFaceKey,
-    metrics: FontMetrics,
+    loaded_font: LoadedFont,
     previous_frame: Option<TerminalModelFrame>,
 }
 
@@ -115,16 +111,13 @@ impl WindowsNativePresenter {
     pub fn new() -> Result<Self> {
         let request = FontRequest::default();
         let mut font_system = DirectWriteFontSystem::new()?;
-        let face = font_system.resolve_face(&request)?;
-        let metrics = font_system.metrics(face, request.px_size)?;
+        let loaded_font = font_system.load_font(&request)?;
 
         Ok(Self {
             font_system,
-            shaper: HarfBuzzTextShaper::default(),
+            shaper: TerminalTextShaper::default(),
             renderer: WgpuTerminalRenderer::new(),
-            request,
-            face,
-            metrics,
+            loaded_font,
             previous_frame: None,
         })
     }
@@ -141,14 +134,15 @@ impl TerminalPresenter for WindowsNativePresenter {
         let rows = frame_model
             .rows
             .iter()
-            .map(|row| self.shaper.shape_row(row, &mut self.font_system))
+            .map(|row| {
+                self.shaper
+                    .shape_row(row, &self.loaded_font, &mut self.font_system)
+            })
             .collect::<Result<Vec<_>>>()?;
         let prepared = self.renderer.prepare(
             &ShapedTerminalFrame {
                 seqno: frame_model.seqno as u64,
-                face: self.face,
-                px_size: self.request.px_size,
-                metrics: self.metrics,
+                font: self.loaded_font.clone(),
                 rows,
             },
             &mut self.font_system,
@@ -163,10 +157,7 @@ impl TerminalPresenter for WindowsNativePresenter {
     }
 
     fn default_cell_size(&self) -> (u32, u32) {
-        (
-            self.metrics.cell_width_px.ceil() as u32,
-            self.metrics.cell_height_px.ceil() as u32,
-        )
+        self.loaded_font.cell_size_px()
     }
 }
 

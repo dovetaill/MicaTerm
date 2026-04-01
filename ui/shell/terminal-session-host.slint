@@ -821,7 +821,7 @@ export component TerminalSessionHost inherits Rectangle {
                 width: blank-surface.width;
                 height: blank-surface.height;
                 source: root.session-surface-image;
-                image-fit: fill;
+                image-fit: contain;
                 visible: root.session-render-mode == "bitmap";
             }
 

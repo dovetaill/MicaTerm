@@ -6927,8 +6927,10 @@ fn opening_sftp_reads_the_active_session_directory_instead_of_staying_connecting
             .as_str(),
         "Folder"
     );
-    assert_eq!(sftp_state.take_read_dir_calls(), vec!["/srv/app".to_string()]);
-    
+    assert_eq!(
+        sftp_state.take_read_dir_calls(),
+        vec!["/srv/app".to_string()]
+    );
 }
 
 #[test]
@@ -6954,10 +6956,7 @@ fn opening_sftp_without_initial_cwd_falls_back_to_root_until_follow_cwd_arrives(
 
     assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
     assert_eq!(app.get_sftp_panel_path().as_str(), "/");
-    assert_eq!(
-        sftp_state.take_read_dir_calls(),
-        vec!["/".to_string()]
-    );
+    assert_eq!(sftp_state.take_read_dir_calls(), vec!["/".to_string()]);
 
     sftp_state.emit_cwd("/srv/app");
     flush_runtime_projection();
@@ -7004,10 +7003,7 @@ fn refresh_and_path_submit_trigger_real_directory_reads() {
             .as_str(),
         "release.tar.gz"
     );
-    let release_row = app
-        .get_sftp_panel_items()
-        .row_data(0)
-        .expect("release row");
+    let release_row = app.get_sftp_panel_items().row_data(0).expect("release row");
     assert_eq!(release_row.type_label.as_str(), "File");
     assert_eq!(release_row.size_label.as_str(), "14 KB");
     assert!(
@@ -7070,7 +7066,10 @@ fn activating_sftp_rows_navigates_directories_and_opens_remote_text_files() {
         app.get_sftp_remote_file_modal_path().as_str(),
         "/srv/app/releases/release.tar.gz"
     );
-    assert_eq!(app.get_sftp_remote_file_modal_content().as_str(), "port=22\n");
+    assert_eq!(
+        app.get_sftp_remote_file_modal_content().as_str(),
+        "port=22\n"
+    );
     assert_eq!(
         sftp_state.take_download_file_calls(),
         vec!["/srv/app/releases/release.tar.gz".to_string()]
@@ -7087,7 +7086,10 @@ fn activating_sftp_rows_navigates_directories_and_opens_remote_text_files() {
             b"port=2022\n".to_vec(),
         )]
     );
-    assert_eq!(app.get_sftp_remote_file_modal_content().as_str(), "port=2022\n");
+    assert_eq!(
+        app.get_sftp_remote_file_modal_content().as_str(),
+        "port=2022\n"
+    );
 }
 
 #[test]

@@ -49,8 +49,12 @@ fn cargo_manifest_exposes_software_and_skia_renderers() {
     );
     assert!(content.contains("slint-renderer-software ="));
     assert!(content.contains("slint-renderer-skia ="));
-    assert!(content.contains("terminal-native-renderer = [\"dep:harfbuzz_rs\"]"));
-    assert!(content.contains("harfbuzz_rs = { version = \"2.0.1\", optional = true }"));
+    assert!(content.contains("terminal-native-renderer = [\"dep:rustybuzz\"]"));
+    assert!(content.contains("rustybuzz = { version = \"0.20.1\", optional = true }"));
+    assert!(
+        !content.contains("harfbuzz_rs ="),
+        "native terminal shaping should stop depending on the C harfbuzz binding so the repo can move toward a WezTerm-style pure-Rust shaping boundary"
+    );
     assert!(content.contains("renderer-software"));
     assert!(content.contains("renderer-skia"));
     assert!(content.contains("unstable-fontique-07"));

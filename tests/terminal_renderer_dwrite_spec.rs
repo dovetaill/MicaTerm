@@ -12,16 +12,16 @@ fn windows_dwrite_font_backend_source_exposes_rasterization_contract() {
         "windows font backend should define a DirectWriteFontSystem"
     );
     assert!(
-        source.contains("pub struct GlyphRasterRequest"),
-        "windows font backend should define glyph raster requests for renderer staging"
-    );
-    assert!(
-        source.contains("pub struct RasterizedGlyph"),
-        "windows font backend should define rasterized glyph payloads"
+        source.contains("impl FontSystem for DirectWriteFontSystem"),
+        "windows font backend should implement the shared font backend trait"
     );
     assert!(
         source.contains("pub fn rasterize"),
-        "windows font backend should expose a rasterize entrypoint"
+        "windows font backend should keep a concrete rasterize entrypoint for its local implementation details"
+    );
+    assert!(
+        source.contains("fn rasterize_glyph("),
+        "windows font backend should expose rasterization through the shared backend trait"
     );
 }
 
@@ -104,8 +104,17 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         "bitmap atlas renderer should centralize regular and bold faux-weight tuning in the swash raster path"
     );
     assert!(
-        dwrite_source.contains("map_glyph_coverage_to_alpha"),
-        "native font rasterization should route glyph coverage through the shared coverage mapping helper"
+        atlas_source.contains("FontRenderProfile::bitmap_default()"),
+        "bitmap atlas renderer should load a dedicated grayscale render profile instead of using raw swash mask values"
+    );
+    assert!(
+        atlas_source.contains("map_glyph_coverage_to_alpha"),
+        "bitmap atlas renderer should route swash mono masks through the shared alpha mapping helper so Windows bitmap packages can darken mid-coverage stems without letting fringe pixels glow"
+    );
+    assert!(
+        dwrite_source.contains("map_glyph_coverage_to_alpha")
+            || dwrite_source.contains("font.map_coverage_to_alpha"),
+        "native font rasterization should route glyph coverage through the shared coverage mapping helper or the loaded-font wrapper around it"
     );
     assert!(
         dwrite_source.contains("if request.bold"),
@@ -264,5 +273,327 @@ fn terminal_style_contract_threads_bold_and_underline_across_runtime_model_and_l
     assert!(
         renderer_source.contains("run.style.underline.hash(&mut hasher);"),
         "native frame fingerprints should include underline state so decoration changes trigger redraws"
+    );
+}
+
+#[test]
+fn wezterm_font_backend_source_is_wired_into_the_terminal_font_stack() {
+    let terminal_font_mod =
+        fs::read_to_string("src/app/terminal_font/mod.rs").expect("read terminal font mod");
+    let wezterm_font_source = fs::read_to_string("src/app/terminal_font/wezterm_font.rs")
+        .expect("read wezterm font adapter source");
+
+    assert!(
+        std::path::Path::new("src/app/terminal_font/wezterm_font.rs").exists(),
+        "phase-1 terminal font adoption should add a dedicated wezterm font adapter source file"
+    );
+    assert!(
+        terminal_font_mod.contains("pub mod wezterm_font;"),
+        "terminal font module should declare the new wezterm font adapter module"
+    );
+    assert!(
+        terminal_font_mod.contains("pub use wezterm_font::WeztermFontSystem;"),
+        "terminal font module should re-export the wezterm font adapter"
+    );
+    assert!(
+        wezterm_font_source.contains("Phase-1 WezTerm font adapter scaffold"),
+        "the phase-1 adapter file should document that it tracks the WezTerm migration path"
+    );
+}
+
+#[test]
+fn wezterm_font_backend_source_exposes_phase_one_migration_contracts() {
+    let wezterm_font_source = fs::read_to_string("src/app/terminal_font/wezterm_font.rs")
+        .expect("read wezterm font adapter source");
+
+    assert!(
+        wezterm_font_source.contains("pub enum WeztermFontIntegrationStage"),
+        "the phase-1 adapter should publish its current migration stage"
+    );
+    assert!(
+        wezterm_font_source.contains("pub fn new() -> Self"),
+        "the phase-1 adapter should expose a constructor"
+    );
+    assert!(
+        wezterm_font_source.contains("pub fn integration_stage(&self)"),
+        "the phase-1 adapter should expose a stage accessor"
+    );
+    assert!(
+        wezterm_font_source.contains("pub fn upstream_sources(&self)"),
+        "the phase-1 adapter should expose the exact upstream sources it is tracking"
+    );
+    assert!(
+        wezterm_font_source.contains("pub fn integration_blocker(&self)"),
+        "the phase-1 adapter should expose the current blocker for direct cargo integration"
+    );
+}
+
+#[test]
+fn terminal_font_backend_owns_rustybuzz_shaping_contract_and_layout_delegates_to_it() {
+    let backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let shaper_source =
+        fs::read_to_string("src/app/terminal_layout/shaper.rs").expect("read terminal shaper");
+
+    assert!(
+        backend_source.contains("pub struct ShapedGlyph"),
+        "font backend should own the shaped glyph payload so the local WezTerm-style font stack can keep shaping and raster contracts together"
+    );
+    assert!(
+        backend_source.contains("fn shape_text("),
+        "font backend should expose a shape_text contract instead of forcing terminal_layout to parse font faces directly"
+    );
+    assert!(
+        backend_source.contains("shape_text_with_rustybuzz"),
+        "font backend should centralize the pure-Rust shaping helper so future WezTerm extraction work stays in the font module"
+    );
+    assert!(
+        !backend_source.contains("fn face_bytes("),
+        "font backend should stop exposing raw face byte accessors once shaping moves behind the backend contract"
+    );
+    assert!(
+        !backend_source.contains("fn face_index("),
+        "font backend should stop exposing raw face index accessors once shaping moves behind the backend contract"
+    );
+    assert!(
+        shaper_source.contains("fonts.shape_text("),
+        "terminal_layout should delegate shaping to the font backend instead of constructing rustybuzz faces itself"
+    );
+    assert!(
+        !shaper_source.contains("use rustybuzz"),
+        "terminal_layout should stop importing rustybuzz directly once shaping lives behind the font backend contract"
+    );
+    assert!(
+        !shaper_source.contains("Face::from_slice"),
+        "terminal_layout should stop parsing font blobs directly once the font backend owns shaping"
+    );
+}
+
+#[test]
+fn terminal_font_backend_owns_rasterization_contract_and_renderer_delegates_to_it() {
+    let backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read native renderer");
+
+    assert!(
+        backend_source.contains("pub struct GlyphRasterRequest"),
+        "font backend should own the glyph raster request payload so renderer and backend stay decoupled from a concrete Windows font implementation"
+    );
+    assert!(
+        backend_source.contains("pub struct RasterizedGlyph"),
+        "font backend should own the rasterized glyph payload so future WezTerm-style backends can plug into the same renderer contract"
+    );
+    assert!(
+        backend_source.contains("fn rasterize_glyph("),
+        "font backend should expose a rasterize_glyph contract instead of forcing the renderer to know about DirectWriteFontSystem"
+    );
+    assert!(
+        renderer_source.contains("fonts: &mut dyn FontSystem"),
+        "native renderer should depend on the font backend trait so the rendering seam can survive further backend extraction work"
+    );
+    assert!(
+        renderer_source.contains("fonts.rasterize_glyph(&frame.font, glyph.glyph_id, run.style.bold)?"),
+        "native renderer should rasterize through the shared font backend contract"
+    );
+    assert!(
+        !renderer_source.contains("DirectWriteFontSystem"),
+        "native renderer should stop naming DirectWriteFontSystem directly once rasterization moves behind the backend contract"
+    );
+}
+
+#[test]
+fn loaded_font_contract_moves_presenter_layout_and_renderer_off_raw_face_keys() {
+    let backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
+    let shaper_source =
+        fs::read_to_string("src/app/terminal_layout/shaper.rs").expect("read terminal shaper");
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read native renderer");
+
+    assert!(
+        backend_source.contains("pub struct LoadedFont"),
+        "font backend should define a LoadedFont object so the local stack can converge on a WezTerm-style loaded-font boundary"
+    );
+    assert!(
+        backend_source.contains("fn load_font("),
+        "font backend should expose a load_font contract instead of making callers stitch together face keys and metrics manually"
+    );
+    assert!(
+        !backend_source.contains("fn resolve_face("),
+        "font backend should stop exposing resolve_face once LoadedFont becomes the shared object boundary"
+    );
+    assert!(
+        !backend_source.contains("fn metrics(&mut self, face: FontFaceKey"),
+        "font backend should stop exposing raw face-key metric lookups once LoadedFont carries the metrics"
+    );
+    assert!(
+        presenter_source.contains("loaded_font: LoadedFont"),
+        "terminal presenter should cache a LoadedFont instead of separate request, face key, and metrics fields"
+    );
+    assert!(
+        presenter_source.contains("font_system.load_font(&request)?"),
+        "terminal presenter should build its native font state through the LoadedFont contract"
+    );
+    assert!(
+        shaper_source.contains("font: &LoadedFont"),
+        "terminal layout should accept a LoadedFont handle so shaping stays backend-driven"
+    );
+    assert!(
+        !shaper_source.contains("resolve_face("),
+        "terminal layout should stop resolving raw face keys once LoadedFont is threaded through"
+    );
+    assert!(
+        renderer_source.contains("pub font: LoadedFont"),
+        "native renderer frame contracts should carry a LoadedFont instead of loose face and metric fields"
+    );
+    assert!(
+        !renderer_source.contains("pub face: FontFaceKey"),
+        "native renderer frame contracts should stop storing a raw face key once LoadedFont is available"
+    );
+}
+
+#[test]
+fn loaded_font_object_boundary_owns_cache_identity_and_cell_metrics() {
+    let backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read native renderer");
+    let atlas_source =
+        fs::read_to_string("src/app/terminal_renderer/atlas.rs").expect("read native atlas");
+
+    assert!(
+        backend_source.contains("pub struct LoadedFontKey"),
+        "font backend should define a stable LoadedFontKey so cache identity belongs to the loaded-font object instead of being reconstructed in the renderer"
+    );
+    assert!(
+        backend_source.contains("pub fn cache_key(&self) -> LoadedFontKey"),
+        "LoadedFont should expose its cache identity through a method so renderer code no longer peeks into raw face and size fields"
+    );
+    assert!(
+        backend_source.contains("pub fn cell_size_px(&self) -> (u32, u32)"),
+        "LoadedFont should expose cell sizing through an object method so presenter and renderer stop reading metrics fields directly"
+    );
+    assert!(
+        renderer_source.contains("frame.font.cache_key()"),
+        "native renderer should hash the loaded-font cache key instead of rebuilding font identity from raw fields"
+    );
+    assert!(
+        !renderer_source.contains("frame.font.face_key"),
+        "native renderer should stop reading raw face keys once LoadedFont owns cache identity"
+    );
+    assert!(
+        !renderer_source.contains("frame.font.request.px_size"),
+        "native renderer should stop reading raw request size once LoadedFont owns cache identity"
+    );
+    assert!(
+        presenter_source.contains("self.loaded_font.cell_size_px()"),
+        "terminal presenter should read cell size through LoadedFont methods instead of reaching into raw metric fields"
+    );
+    assert!(
+        atlas_source.contains("pub font_key: LoadedFontKey"),
+        "glyph atlas keys should track the loaded-font cache identity instead of separate face and pixel-size fields"
+    );
+}
+
+#[test]
+fn loaded_font_object_boundary_carries_render_profile_into_cache_and_rasterization() {
+    let backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
+        .expect("read dwrite backend");
+    let atlas_source =
+        fs::read_to_string("src/app/terminal_renderer/atlas.rs").expect("read native atlas");
+
+    assert!(
+        backend_source.contains("pub struct FontRenderProfile"),
+        "font backend should define a FontRenderProfile so raster tuning lives with the loaded-font object instead of leaking into the renderer"
+    );
+    assert!(
+        backend_source.contains("render_profile: FontRenderProfile"),
+        "LoadedFont should carry a render profile so a loaded font fully describes how glyphs are rasterized"
+    );
+    assert!(
+        backend_source.contains("pub fn render_profile(&self) -> FontRenderProfile"),
+        "LoadedFont should expose its render profile through an object method so backend-owned tuning stays queryable without reopening raw struct fields"
+    );
+    assert!(
+        backend_source.contains("render_profile: FontRenderProfileKey"),
+        "LoadedFontKey should include the render profile cache identity so glyph atlas entries split when raster tuning changes"
+    );
+    assert!(
+        atlas_source.contains("pub font_key: LoadedFontKey"),
+        "glyph atlas should continue keying entries by LoadedFontKey so render-profile changes naturally partition cache entries"
+    );
+    assert!(
+        dwrite_source.contains("font.map_coverage_to_alpha"),
+        "Windows native rasterization should route glyph coverage through the loaded-font render profile instead of a hard-coded global transform"
+    );
+    assert!(
+        dwrite_source.contains("font.apply_synthetic_embolden"),
+        "Windows native rasterization should pull synthetic embolden strength from the loaded-font render profile"
+    );
+}
+
+#[test]
+fn windows_native_font_backend_uses_a_non_neutral_render_profile() {
+    let backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
+        .expect("read dwrite backend");
+
+    assert!(
+        backend_source.contains("pub fn windows_native_default() -> Self"),
+        "font backend should define a dedicated Windows-native render profile instead of only exposing the neutral default profile"
+    );
+    assert!(
+        dwrite_source.contains("FontRenderProfile::windows_native_default()"),
+        "Windows native font loading should use the dedicated Windows profile so native glyph masks are darker and less washed out than the neutral baseline"
+    );
+    assert!(
+        !dwrite_source.contains("FontRenderProfile::default()"),
+        "Windows native font loading should stop using the neutral render profile once the Windows-specific tuning path exists"
+    );
+}
+
+#[test]
+fn font_backend_source_exposes_bitmap_render_profile_defaults() {
+    let backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+
+    assert!(
+        backend_source.contains("pub fn bitmap_default() -> Self"),
+        "font backend should define a dedicated bitmap render profile so software atlas packages can tune grayscale masks separately from the Windows native path"
+    );
+}
+
+#[test]
+fn windows_native_font_backend_source_switches_to_hinted_swash_rasterization() {
+    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
+        .expect("read dwrite backend");
+
+    assert!(
+        dwrite_source.contains("SwashFontRef"),
+        "Windows native font backend should keep a swash font handle so it can reuse the hinted grayscale rasterizer instead of the softer ab_glyph outline draw path"
+    );
+    assert!(
+        dwrite_source.contains("ScaleContext"),
+        "Windows native font backend should keep a swash scale context for hinted glyph rasterization"
+    );
+    assert!(
+        dwrite_source.contains(".hint(true)"),
+        "Windows native font backend should enable swash hinting so mono terminal glyphs stop looking soft on Windows"
+    );
+    assert!(
+        dwrite_source.contains("Render::new(&[Source::Outline])"),
+        "Windows native font backend should rasterize through swash outline rendering instead of ab_glyph outline drawing"
+    );
+    assert!(
+        dwrite_source.contains("SwashFormat::Alpha"),
+        "Windows native font backend should keep the native path on grayscale glyph masks instead of LCD subpixel masks"
     );
 }

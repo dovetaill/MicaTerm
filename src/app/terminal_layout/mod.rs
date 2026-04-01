@@ -6,4 +6,4 @@ pub mod shaper;
 
 pub use run_segmentation::{SegmentedRun, TextStyleKey, segment_row};
 #[cfg(feature = "terminal-native-renderer")]
-pub use shaper::{GlyphRun, HarfBuzzTextShaper, PositionedGlyph, ShapedRow, TextShaper, shape_row};
+pub use shaper::{GlyphRun, PositionedGlyph, ShapedRow, TerminalTextShaper, TextShaper, shape_row};
