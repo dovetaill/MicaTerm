@@ -161,8 +161,6 @@ const SFTP_SIZE_COLUMN_MIN_PX: f32 = 72.0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncModalMode {
     NotConfigured,
-    Locked,
-    UnlockedButRemoteIncomplete,
     Ready,
     SyncError,
 }
@@ -171,8 +169,6 @@ impl SyncModalMode {
     pub fn id(self) -> &'static str {
         match self {
             Self::NotConfigured => "not-configured",
-            Self::Locked => "locked",
-            Self::UnlockedButRemoteIncomplete => "unlocked-but-remote-incomplete",
             Self::Ready => "ready",
             Self::SyncError => "sync-error",
         }
@@ -191,7 +187,6 @@ pub struct SyncModalViewState {
     pub target_label: String,
     pub primary_action_label: String,
     pub secondary_action_label: String,
-    pub auto_sync_enabled: bool,
     pub primary_gist_id: String,
     pub primary_pat: String,
     pub mirror_enabled: bool,
@@ -213,7 +208,6 @@ impl Default for SyncModalViewState {
             target_label: String::new(),
             primary_action_label: "Save and enable".into(),
             secondary_action_label: "Close".into(),
-            auto_sync_enabled: false,
             primary_gist_id: String::new(),
             primary_pat: String::new(),
             mirror_enabled: false,
@@ -234,28 +228,14 @@ pub struct SyncFeedbackViewState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultPanelViewState {
     pub title: String,
-    pub lock_state_label: String,
     pub primary_status_label: String,
-    pub primary_action_label: String,
-    pub secondary_action_label: String,
-    pub tertiary_action_label: String,
-    pub sync_now_label: String,
-    pub export_bootstrap_label: String,
-    pub import_bootstrap_label: String,
 }
 
 impl Default for VaultPanelViewState {
     fn default() -> Self {
         Self {
             title: "Sync & Vault".into(),
-            lock_state_label: "Locked".into(),
             primary_status_label: "Primary not configured".into(),
-            primary_action_label: "Set".into(),
-            secondary_action_label: "Change".into(),
-            tertiary_action_label: "Lock now".into(),
-            sync_now_label: "Sync now".into(),
-            export_bootstrap_label: "Export bootstrap".into(),
-            import_bootstrap_label: "Import bootstrap".into(),
         }
     }
 }
@@ -954,7 +934,6 @@ impl ShellViewModel {
     pub fn update_sync_modal_toggle(&mut self, field: &str, value: bool) {
         let modal = self.sync_modal_state_mut();
         match field {
-            "auto-sync" => modal.auto_sync_enabled = value,
             "mirror-enabled" => modal.mirror_enabled = value,
             _ => return,
         }

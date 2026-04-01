@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, ensure};
 use chacha20poly1305::{
     KeyInit, XChaCha20Poly1305, XNonce,
     aead::{Aead, Payload},
@@ -366,6 +366,45 @@ pub fn required_secret_bundle_field(
             credential_ref: credential_ref.to_string(),
             field,
         })
+}
+
+pub fn persist_binary_secret(
+    store: &dyn CredentialStore,
+    credential_ref: &str,
+    secret: &[u8],
+) -> Result<()> {
+    let mut encoded = String::with_capacity(secret.len() * 2);
+    for byte in secret {
+        use std::fmt::Write as _;
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    store.put_secret(credential_ref, encoded.as_str())
+}
+
+pub fn load_fixed_binary_secret<const N: usize>(
+    store: &dyn CredentialStore,
+    credential_ref: &str,
+) -> Result<Option<[u8; N]>> {
+    let Some(encoded) = store.get_secret(credential_ref)? else {
+        return Ok(None);
+    };
+    let encoded = encoded.trim();
+    ensure!(
+        encoded.len() == N * 2,
+        "credential `{credential_ref}` must contain exactly {} hex characters",
+        N * 2
+    );
+
+    let mut decoded = [0u8; N];
+    for (index, pair) in encoded.as_bytes().chunks_exact(2).enumerate() {
+        let hex = std::str::from_utf8(pair)
+            .with_context(|| format!("credential `{credential_ref}` contains non-UTF-8 hex data"))?;
+        decoded[index] = u8::from_str_radix(hex, 16).with_context(|| {
+            format!("credential `{credential_ref}` contains invalid hex byte `{hex}`")
+        })?;
+    }
+
+    Ok(Some(decoded))
 }
 
 pub fn merge_edit_bundle(

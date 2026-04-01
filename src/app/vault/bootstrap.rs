@@ -13,13 +13,16 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use crate::app::ssh::credentials::CredentialStore;
+use crate::app::ssh::credentials::{
+    CredentialStore, load_fixed_binary_secret, persist_binary_secret,
+};
 use crate::app::vault::model::{BootstrapBundle, CipherKind, KdfConfig};
 
 const BOOTSTRAP_FORMAT_VERSION: u32 = 1;
 const BOOTSTRAP_KEY_LEN: usize = 32;
 const BOOTSTRAP_NONCE_LEN: usize = 24;
 const BOOTSTRAP_SALT_LEN: usize = 16;
+const VAULT_RUNTIME_KEY_LEN: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedBootstrapBundle {
@@ -33,6 +36,16 @@ pub struct LocalVaultBootstrapState {
     pub wrapped_vault_key: String,
     pub kdf: KdfConfig,
     pub current_revision: Option<String>,
+    #[serde(default)]
+    pub local_snapshot_hash: Option<String>,
+    #[serde(default)]
+    pub last_local_change_at: Option<String>,
+    #[serde(default)]
+    pub last_successful_push_at: Option<String>,
+    #[serde(default)]
+    pub last_successful_pull_at: Option<String>,
+    #[serde(default)]
+    pub last_sync_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,6 +66,10 @@ struct EncryptedBootstrapExport {
 
 pub fn bootstrap_provider_credential_ref(remote_id: &str) -> String {
     format!("vault/bootstrap/{remote_id}")
+}
+
+pub fn vault_runtime_key_credential_ref(vault_id: &str) -> String {
+    format!("vault/runtime-key/{vault_id}")
 }
 
 pub fn persist_provider_credential(
@@ -77,6 +94,21 @@ pub fn load_provider_credential(
     Ok(store
         .get_secret(credential_ref)?
         .filter(|value| !value.trim().is_empty()))
+}
+
+pub fn persist_runtime_vault_key(
+    store: &dyn CredentialStore,
+    vault_id: &str,
+    key: &[u8; VAULT_RUNTIME_KEY_LEN],
+) -> Result<()> {
+    persist_binary_secret(store, &vault_runtime_key_credential_ref(vault_id), key)
+}
+
+pub fn load_runtime_vault_key(
+    store: &dyn CredentialStore,
+    vault_id: &str,
+) -> Result<Option<[u8; VAULT_RUNTIME_KEY_LEN]>> {
+    load_fixed_binary_secret(store, &vault_runtime_key_credential_ref(vault_id))
 }
 
 pub fn restore_provider_credentials(

@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Result, anyhow};
 
 use mica_term::app::vault::model::{
-    BootstrapRemoteConfig, BootstrapRemoteLocator, PackLayout, ProviderAuthKind, ProviderKind,
-    RemoteRole,
+    BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind, KdfConfig,
+    PackLayout, ProviderAuthKind, ProviderKind, RemoteRole, VaultHead,
 };
 use mica_term::app::vault::provider::VaultProvider;
 use mica_term::app::vault::provider::github_gist::{
@@ -45,6 +45,7 @@ fn sample_pat_remote() -> BootstrapRemoteConfig {
 struct RecordingGitHubGistApi {
     gist: Mutex<Option<GitHubGistDocument>>,
     raw_reads: Mutex<Vec<String>>,
+    update_calls: Mutex<Vec<(String, GitHubGistUpdateRequest, Option<String>)>>,
 }
 
 impl RecordingGitHubGistApi {
@@ -52,6 +53,7 @@ impl RecordingGitHubGistApi {
         Self {
             gist: Mutex::new(Some(gist)),
             raw_reads: Mutex::new(Vec::new()),
+            update_calls: Mutex::new(Vec::new()),
         }
     }
 }
@@ -75,12 +77,71 @@ impl GitHubGistApi for RecordingGitHubGistApi {
 
     fn update_gist(
         &self,
-        _gist_id: &str,
-        _request: &GitHubGistUpdateRequest,
-        _access_token: Option<&str>,
+        gist_id: &str,
+        request: &GitHubGistUpdateRequest,
+        access_token: Option<&str>,
     ) -> Result<()> {
+        self.update_calls
+            .lock()
+            .map_err(|_| anyhow!("update calls lock poisoned"))?
+            .push((
+                gist_id.to_string(),
+                request.clone(),
+                access_token.map(ToOwned::to_owned),
+            ));
         Ok(())
     }
+}
+
+fn sample_kdf() -> KdfConfig {
+    KdfConfig::Argon2id {
+        memory_cost_kib: 19_456,
+        time_cost: 2,
+        parallelism: 1,
+        salt_b64: "github-provider-salt".into(),
+    }
+}
+
+fn sample_head(revision: &str) -> VaultHead {
+    VaultHead {
+        format_version: 1,
+        vault_id: "vault-main".into(),
+        vault_revision: revision.into(),
+        parent_revision: Some("rev-0000".into()),
+        device_id: "device-a".into(),
+        committed_at: "2026-03-31T08:00:00Z".into(),
+        committed_by_device: "device-a".into(),
+        payload_hash: "sha256:payload".into(),
+        manifest_ref: format!("bundle/{revision}/manifest.bin"),
+        wrapped_vault_key: "wrapped-key".into(),
+        kdf: sample_kdf(),
+        cipher: CipherKind::XChaCha20Poly1305,
+        compression: CompressionKind::Zstd,
+        pack_layout: PackLayout::BundledFiles,
+    }
+}
+
+fn gist_revision_payload_file_set(revision: &str) -> [(String, GitHubGistFile); 2] {
+    [
+        (
+            format!("vault-{revision}-manifest.bin"),
+            GitHubGistFile {
+                filename: format!("vault-{revision}-manifest.bin"),
+                raw_url: None,
+                truncated: false,
+                content: Some("manifest".into()),
+            },
+        ),
+        (
+            format!("vault-{revision}-pack-0000.bin"),
+            GitHubGistFile {
+                filename: format!("vault-{revision}-pack-0000.bin"),
+                raw_url: None,
+                truncated: false,
+                content: Some("pack".into()),
+            },
+        ),
+    ]
 }
 
 #[test]
@@ -143,4 +204,52 @@ fn github_gist_reads_use_raw_url_when_file_is_truncated() {
         .expect("load truncated gist file");
 
     assert_eq!(content, "full-file-from-raw-url");
+}
+
+#[test]
+fn github_provider_prune_revisions_older_than_keep_latest_limit() {
+    let mut files = BTreeMap::from([(
+        "vault-head.json".into(),
+        GitHubGistFile {
+            filename: "vault-head.json".into(),
+            raw_url: None,
+            truncated: false,
+            content: Some(
+                serde_json::to_string(&sample_head("rev-0012")).expect("encode live head"),
+            ),
+        },
+    )]);
+    for revision in 1..=12 {
+        files.extend(gist_revision_payload_file_set(format!("rev-{revision:04}").as_str()));
+    }
+
+    let api = Arc::new(RecordingGitHubGistApi::with_gist(GitHubGistDocument {
+        gist_id: "gist-pat-456".into(),
+        truncated: false,
+        files,
+    }));
+    let provider = GitHubGistProvider::with_api(
+        GitHubGistProviderConfig::try_from(&sample_pat_remote()).expect("parse pat config"),
+        api.clone(),
+    )
+    .expect("build provider with fake api");
+
+    provider
+        .prune_revisions(10, &sample_head("rev-0012"))
+        .expect("prune old github revisions");
+
+    let update_calls = api.update_calls.lock().expect("lock update calls");
+    assert_eq!(update_calls.len(), 1);
+    let (gist_id, update, access_token) = &update_calls[0];
+    assert_eq!(gist_id, "gist-pat-456");
+    assert_eq!(access_token, &None);
+    assert_eq!(
+        update.deleted_files,
+        vec![
+            "vault-rev-0001-manifest.bin".to_string(),
+            "vault-rev-0001-pack-0000.bin".to_string(),
+            "vault-rev-0002-manifest.bin".to_string(),
+            "vault-rev-0002-pack-0000.bin".to_string(),
+        ]
+    );
 }

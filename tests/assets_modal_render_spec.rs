@@ -329,16 +329,15 @@ fn sync_modal_footer_stays_visible_in_short_viewport() {
     let buffer = render_app_with_size(WINDOW_WIDTH, short_height, |app| {
         app.set_sync_modal_open(true);
         app.set_sync_modal_mode("not-configured".into());
-        app.set_sync_modal_title("Sync".into());
-        app.set_sync_modal_headline("Unlock sync".into());
+        app.set_sync_modal_title("Sync Settings".into());
+        app.set_sync_modal_headline("Configure sync".into());
         app.set_sync_modal_status_text(
-            "Configure a Gitee remote and unlock the vault before automatic sync can run.".into(),
+            "Configure a sync target once. After that, background sync runs automatically.".into(),
         );
         app.set_sync_modal_error_text(
-            "Primary remote must contain a valid vault-head.json before unlock can continue."
-                .into(),
+            "Primary remote is missing the required configuration.".into(),
         );
-        app.set_sync_modal_primary_action_label("Unlock".into());
+        app.set_sync_modal_primary_action_label("Save and enable".into());
         app.set_sync_modal_secondary_action_label("Close".into());
         app.set_sync_modal_mirror_enabled(true);
     });
@@ -369,17 +368,18 @@ fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
     let footer_top = modal.y + modal.height - footer_height;
     let buffer = render_app_with_size(WINDOW_WIDTH, short_height, |app| {
         app.set_sync_modal_open(true);
-        app.set_sync_modal_mode("locked".into());
-        app.set_sync_modal_title("Unlock sync".into());
-        app.set_sync_modal_headline("Unlock sync".into());
+        app.set_sync_modal_mode("not-configured".into());
+        app.set_sync_modal_title("Sync Settings".into());
+        app.set_sync_modal_headline("Configure sync".into());
         app.set_sync_modal_status_text(
-            "Run sync automatically after local changes when the vault is unlocked.".into(),
+            "Enter a master password once to enable sync and keep recovery state available."
+                .into(),
         );
         app.set_sync_modal_provider_label("Gitee".into());
         app.set_sync_modal_target_label("1 target configured".into());
         app.set_sync_modal_primary_gist_id("yemd6wft9jgpv5bhlux3o60".into());
         app.set_sync_modal_primary_pat("token-value".into());
-        app.set_sync_modal_primary_action_label("Unlock".into());
+        app.set_sync_modal_primary_action_label("Save and enable".into());
         app.set_sync_modal_secondary_action_label("Close".into());
     });
     write_ppm(&buffer, "/tmp/sync-vault-short-modal.ppm");
@@ -416,17 +416,17 @@ fn blocking_modal_tints_workspace_behind_the_dialog() {
 
     let modal_buffer = render_app_with_size(WINDOW_WIDTH, short_height, |app| {
         app.set_sync_modal_open(true);
-        app.set_sync_modal_mode("locked".into());
-        app.set_sync_modal_title("Unlock sync".into());
-        app.set_sync_modal_headline("Unlock sync".into());
+        app.set_sync_modal_mode("ready".into());
+        app.set_sync_modal_title("Sync Settings".into());
+        app.set_sync_modal_headline("Sync ready".into());
         app.set_sync_modal_status_text(
-            "Run sync automatically after local changes when the vault is unlocked.".into(),
+            "Sync is configured. Use the titlebar Sync button to run an immediate check.".into(),
         );
         app.set_sync_modal_provider_label("Gitee".into());
         app.set_sync_modal_target_label("1 target configured".into());
         app.set_sync_modal_primary_gist_id("yemd6wft9jgpv5bhlux3o60".into());
         app.set_sync_modal_primary_pat("token-value".into());
-        app.set_sync_modal_primary_action_label("Unlock".into());
+        app.set_sync_modal_primary_action_label("Sync now".into());
         app.set_sync_modal_secondary_action_label("Close".into());
     });
     let tinted_pixel = pixel_at(&modal_buffer, sample_x, sample_y);
@@ -441,27 +441,38 @@ fn blocking_modal_tints_workspace_behind_the_dialog() {
 fn sync_modal_narrow_viewport_preserves_right_gutter_for_form_fields() {
     let buffer = render_app_with_size(663, 744, |app| {
         app.set_sync_modal_open(true);
-        app.set_sync_modal_mode("locked".into());
-        app.set_sync_modal_title("Unlock sync".into());
-        app.set_sync_modal_headline("Unlock sync".into());
+        app.set_sync_modal_mode("ready".into());
+        app.set_sync_modal_title("Sync Settings".into());
+        app.set_sync_modal_headline("Sync ready".into());
         app.set_sync_modal_status_text(
-            "Sync is configured. Enter your master password to unlock local secrets and resume sync."
-                .into(),
+            "Sync is configured. Use the titlebar Sync action to run an immediate check.".into(),
         );
         app.set_sync_modal_provider_label("Gitee".into());
         app.set_sync_modal_target_label("1 target configured".into());
         app.set_sync_modal_primary_gist_id("yemd6wft9jgpv5bhlux3o60".into());
         app.set_sync_modal_primary_pat("token-value".into());
-        app.set_sync_modal_primary_action_label("Unlock".into());
+        app.set_sync_modal_primary_action_label("Sync now".into());
         app.set_sync_modal_secondary_action_label("Close".into());
     });
-    let field_border = pixel_at(&buffer, 100, 585);
-    let right_gutter_pixels = count_distinct_pixels(&buffer, 639, 585, 9, 1, field_border, 10);
+
+    let field_border = pixel_at(&buffer, 620, 420);
+    let right_gutter_pixels = count_distinct_pixels(&buffer, 639, 420, 9, 4, field_border, 10);
 
     assert!(
-        right_gutter_pixels >= 9,
+        right_gutter_pixels >= 24,
         "sync modal should preserve a visible right gutter inside the body panel in narrow viewports, only found {right_gutter_pixels} distinct pixels"
     );
+}
+
+#[test]
+fn sync_modal_source_no_longer_advertises_lock_unlock_or_auto_sync_copy() {
+    let source = fs::read_to_string("ui/components/sync-vault-modal.slint").unwrap();
+
+    assert!(!source.contains("label: \"Auto sync\""));
+    assert!(!source.contains("auto-sync-enabled"));
+    assert!(!source.contains("mode == \"locked\""));
+    assert!(!source.contains("Unlock"));
+    assert!(!source.contains("Lock"));
 }
 
 #[test]

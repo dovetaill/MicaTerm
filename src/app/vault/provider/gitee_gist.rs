@@ -114,6 +114,7 @@ pub struct GiteeGistDocument {
 pub struct GiteeGistUpdateRequest {
     pub description: String,
     pub files: BTreeMap<String, String>,
+    pub deleted_files: Vec<String>,
 }
 
 pub trait GiteeGistApi: Send + Sync {
@@ -140,7 +141,7 @@ struct GiteeGistPatchPayload<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     access_token: Option<&'a str>,
     description: &'a str,
-    files: BTreeMap<String, GiteeGistUpdateFile<'a>>,
+    files: BTreeMap<String, Option<GiteeGistUpdateFile<'a>>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,12 +207,16 @@ impl GiteeGistApi for ReqwestGiteeGistApi {
             .map(|(name, content)| {
                 (
                     name.clone(),
-                    GiteeGistUpdateFile {
+                    Some(GiteeGistUpdateFile {
                         content: content.as_str(),
-                    },
+                    }),
                 )
             })
             .collect::<BTreeMap<_, _>>();
+        let mut files = files;
+        for file_name in &request.deleted_files {
+            files.insert(file_name.clone(), None);
+        }
         let payload = GiteeGistPatchPayload {
             access_token,
             description: request.description.as_str(),
@@ -393,6 +398,39 @@ impl VaultProvider for GiteeGistProvider {
             &GiteeGistUpdateRequest {
                 description: GIST_DESCRIPTION.into(),
                 files,
+                deleted_files: Vec::new(),
+            },
+            self.config.access_token(),
+        )
+    }
+
+    fn prune_revisions(&self, keep_latest: usize, live_head: &VaultHead) -> Result<()> {
+        let gist = self.load_gist_document(self.config.access_token())?;
+        let retained = retained_revision_ids(
+            gist.files.keys().filter_map(|name| revision_id_from_payload_file(name.as_str())),
+            keep_latest,
+            live_head.vault_revision.as_str(),
+        );
+        let deleted_files = gist
+            .files
+            .keys()
+            .filter(|name| {
+                revision_id_from_payload_file(name.as_str())
+                    .is_some_and(|revision| !retained.contains(revision))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if deleted_files.is_empty() {
+            return Ok(());
+        }
+
+        self.api.update_gist(
+            &self.config.gist_id,
+            &GiteeGistUpdateRequest {
+                description: GIST_DESCRIPTION.into(),
+                files: BTreeMap::new(),
+                deleted_files,
             },
             self.config.access_token(),
         )
@@ -462,8 +500,38 @@ fn gist_has_revision_payloads(gist: &GiteeGistDocument) -> bool {
 }
 
 fn is_revision_payload_file(name: &str) -> bool {
-    name.starts_with("vault-")
-        && (name.ends_with("-manifest.bin") || (name.contains("-pack-") && name.ends_with(".bin")))
+    revision_id_from_payload_file(name).is_some()
+}
+
+fn revision_id_from_payload_file(name: &str) -> Option<&str> {
+    let name = name.strip_prefix("vault-")?;
+    if let Some(revision) = name.strip_suffix("-manifest.bin") {
+        return Some(revision);
+    }
+
+    let revision = name.strip_suffix(".bin")?;
+    revision.split_once("-pack-").map(|(revision, _)| revision)
+}
+
+fn retained_revision_ids<'a>(
+    revisions: impl Iterator<Item = &'a str>,
+    keep_latest: usize,
+    live_revision: &str,
+) -> std::collections::BTreeSet<String> {
+    let mut revisions = revisions
+        .map(ToOwned::to_owned)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    revisions.sort();
+    revisions.reverse();
+
+    let mut retained = revisions
+        .into_iter()
+        .take(keep_latest)
+        .collect::<std::collections::BTreeSet<_>>();
+    retained.insert(live_revision.to_string());
+    retained
 }
 
 fn split_bytes(bytes: &[u8], chunk_count: usize) -> Vec<Vec<u8>> {

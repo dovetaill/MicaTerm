@@ -5,6 +5,9 @@ use mica_term::app::keychain::model::{
     KeychainNodeKind, KeychainNodePayload, KeychainSshKeySpec,
 };
 use mica_term::app::ssh::credentials::StoredSshSecretBundle;
+use mica_term::app::vault::bootstrap::{
+    LocalVaultBootstrapState, load_local_vault_bootstrap_state, save_local_vault_bootstrap_state,
+};
 use mica_term::app::vault::model::{
     BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind,
     KdfConfig, PackLayout, PackRef, ProviderAuthKind, ProviderKind, RemoteHealth,
@@ -77,7 +80,8 @@ fn vault_head_roundtrip_preserves_core_revision_fields() {
         vault_revision: "rev-0001".into(),
         parent_revision: Some("rev-0000".into()),
         device_id: "device-laptop".into(),
-        created_at: "2026-03-28T16:12:00Z".into(),
+        committed_at: "2026-03-28T16:12:00Z".into(),
+        committed_by_device: "device-laptop".into(),
         payload_hash: "sha256:payload-001".into(),
         manifest_ref: "manifest/rev-0001.bin".into(),
         wrapped_vault_key: "base64:wrapped-key".into(),
@@ -97,9 +101,117 @@ fn vault_head_roundtrip_preserves_core_revision_fields() {
 
     assert_eq!(decoded.vault_revision, "rev-0001");
     assert_eq!(decoded.parent_revision.as_deref(), Some("rev-0000"));
+    assert_eq!(decoded.committed_at, "2026-03-28T16:12:00Z");
+    assert_eq!(decoded.committed_by_device, "device-laptop");
     assert_eq!(decoded.payload_hash, "sha256:payload-001");
     assert_eq!(decoded.manifest_ref, "manifest/rev-0001.bin");
     assert_eq!(decoded.wrapped_vault_key, "base64:wrapped-key");
+}
+
+#[test]
+fn vault_head_serializes_real_commit_metadata() {
+    let head = VaultHead {
+        format_version: 1,
+        vault_id: "vault-main".into(),
+        vault_revision: "rev-0042".into(),
+        parent_revision: Some("rev-0041".into()),
+        device_id: "device-laptop".into(),
+        committed_at: "2026-03-31T09:30:15Z".into(),
+        committed_by_device: "device-workstation".into(),
+        payload_hash: "sha256:payload-0042".into(),
+        manifest_ref: "manifest/rev-0042.bin".into(),
+        wrapped_vault_key: "base64:wrapped-key".into(),
+        kdf: KdfConfig::Argon2id {
+            memory_cost_kib: 65_536,
+            time_cost: 3,
+            parallelism: 1,
+            salt_b64: "c2FsdC0wNDI=".into(),
+        },
+        cipher: CipherKind::XChaCha20Poly1305,
+        compression: CompressionKind::Zstd,
+        pack_layout: PackLayout::ObjectSet,
+    };
+
+    let encoded = serde_json::to_value(&head).unwrap();
+    let decoded: VaultHead = serde_json::from_value(encoded.clone()).unwrap();
+
+    assert_eq!(encoded["committed_at"], "2026-03-31T09:30:15Z");
+    assert_eq!(encoded["committed_by_device"], "device-workstation");
+    assert!(encoded.get("created_at").is_none());
+    assert_eq!(decoded.committed_at, "2026-03-31T09:30:15Z");
+    assert_eq!(decoded.committed_by_device, "device-workstation");
+}
+
+#[test]
+fn local_bootstrap_state_persists_durable_sync_state_fields() {
+    let path = std::env::temp_dir().join(format!(
+        "mica-term-local-vault-state-{}.json",
+        uuid::Uuid::new_v4()
+    ));
+    let state = LocalVaultBootstrapState {
+        bundle: BootstrapBundle {
+            format_version: 1,
+            vault_id: "vault-main".into(),
+            remotes: vec![BootstrapRemoteConfig {
+                remote_id: "remote-primary".into(),
+                role: RemoteRole::Primary,
+                provider: ProviderKind::GiteeGist,
+                locator: BootstrapRemoteLocator::GiteeGist {
+                    gist_id: "gist-main".into(),
+                },
+                credential_ref: Some("vault/bootstrap/remote-primary".into()),
+                auth_kind: ProviderAuthKind::Pat,
+                last_health: None,
+            }],
+            auto_sync_enabled: true,
+            bootstrap_cipher: CipherKind::XChaCha20Poly1305,
+            bootstrap_kdf: Some(KdfConfig::Argon2id {
+                memory_cost_kib: 19_456,
+                time_cost: 2,
+                parallelism: 1,
+                salt_b64: "bootstrap-salt".into(),
+            }),
+        },
+        wrapped_vault_key: "wrapped-key".into(),
+        kdf: KdfConfig::Argon2id {
+            memory_cost_kib: 19_456,
+            time_cost: 2,
+            parallelism: 1,
+            salt_b64: "vault-salt".into(),
+        },
+        current_revision: Some("rev-0042".into()),
+        local_snapshot_hash: Some("sha256:local-snapshot".into()),
+        last_local_change_at: Some("2026-03-31T09:40:00Z".into()),
+        last_successful_push_at: Some("2026-03-31T09:41:00Z".into()),
+        last_successful_pull_at: Some("2026-03-31T09:39:30Z".into()),
+        last_sync_error: Some("mirror degraded".into()),
+    };
+
+    save_local_vault_bootstrap_state(&path, &state).unwrap();
+    let loaded = load_local_vault_bootstrap_state(&path)
+        .unwrap()
+        .expect("persisted local bootstrap state");
+
+    assert_eq!(loaded.current_revision.as_deref(), Some("rev-0042"));
+    assert_eq!(
+        loaded.local_snapshot_hash.as_deref(),
+        Some("sha256:local-snapshot")
+    );
+    assert_eq!(
+        loaded.last_local_change_at.as_deref(),
+        Some("2026-03-31T09:40:00Z")
+    );
+    assert_eq!(
+        loaded.last_successful_push_at.as_deref(),
+        Some("2026-03-31T09:41:00Z")
+    );
+    assert_eq!(
+        loaded.last_successful_pull_at.as_deref(),
+        Some("2026-03-31T09:39:30Z")
+    );
+    assert_eq!(loaded.last_sync_error.as_deref(), Some("mirror degraded"));
+
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]

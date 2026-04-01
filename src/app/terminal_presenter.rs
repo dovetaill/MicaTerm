@@ -115,7 +115,7 @@ impl WindowsNativePresenter {
 
         Ok(Self {
             font_system,
-            shaper: TerminalTextShaper::default(),
+            shaper: TerminalTextShaper,
             renderer: WgpuTerminalRenderer::new(),
             loaded_font,
             previous_frame: None,

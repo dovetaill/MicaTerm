@@ -62,6 +62,7 @@ const SNAPSHOT_NONCE_HEX_KEY: &str = "snapshot.nonce_hex";
 const SNAPSHOT_PLAINTEXT_LEN_KEY: &str = "snapshot.plaintext_len";
 const SNAPSHOT_COMPRESSED_LEN_KEY: &str = "snapshot.compressed_len";
 const SNAPSHOT_PAYLOAD_SHA256_KEY: &str = "snapshot.payload_sha256";
+pub const DEFAULT_REVISION_RETENTION_LIMIT: usize = 10;
 
 pub trait VaultProvider: Send + Sync {
     fn remote_id(&self) -> &str;
@@ -69,6 +70,9 @@ pub trait VaultProvider: Send + Sync {
     fn read_head(&self) -> Result<ProviderReadResult>;
     fn read_revision(&self, head: &VaultHead) -> Result<ProviderRevision>;
     fn write_revision(&self, request: &ProviderWriteRequest) -> Result<()>;
+    fn prune_revisions(&self, _keep_latest: usize, _live_head: &VaultHead) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub fn first_release_formal_provider_kind() -> ProviderKind {

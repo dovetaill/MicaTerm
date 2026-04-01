@@ -104,6 +104,7 @@ pub struct GitHubGistDocument {
 pub struct GitHubGistUpdateRequest {
     pub description: String,
     pub files: BTreeMap<String, String>,
+    pub deleted_files: Vec<String>,
 }
 
 pub trait GitHubGistApi: Send + Sync {
@@ -279,6 +280,39 @@ impl VaultProvider for GitHubGistProvider {
             &GitHubGistUpdateRequest {
                 description: GIST_DESCRIPTION.into(),
                 files,
+                deleted_files: Vec::new(),
+            },
+            None,
+        )
+    }
+
+    fn prune_revisions(&self, keep_latest: usize, live_head: &VaultHead) -> Result<()> {
+        let gist = self.api.get_gist(&self.config.gist_id, None)?;
+        let retained = retained_revision_ids(
+            gist.files.keys().filter_map(|name| revision_id_from_payload_file(name.as_str())),
+            keep_latest,
+            live_head.vault_revision.as_str(),
+        );
+        let deleted_files = gist
+            .files
+            .keys()
+            .filter(|name| {
+                revision_id_from_payload_file(name.as_str())
+                    .is_some_and(|revision| !retained.contains(revision))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if deleted_files.is_empty() {
+            return Ok(());
+        }
+
+        self.api.update_gist(
+            &self.config.gist_id,
+            &GitHubGistUpdateRequest {
+                description: GIST_DESCRIPTION.into(),
+                files: BTreeMap::new(),
+                deleted_files,
             },
             None,
         )
@@ -291,6 +325,37 @@ fn bundled_manifest_file_name(revision: &str) -> String {
 
 fn bundled_pack_file_name(revision: &str, index: usize) -> String {
     format!("vault-{revision}-pack-{index:04}.bin")
+}
+
+fn revision_id_from_payload_file(name: &str) -> Option<&str> {
+    let name = name.strip_prefix("vault-")?;
+    if let Some(revision) = name.strip_suffix("-manifest.bin") {
+        return Some(revision);
+    }
+
+    let revision = name.strip_suffix(".bin")?;
+    revision.split_once("-pack-").map(|(revision, _)| revision)
+}
+
+fn retained_revision_ids<'a>(
+    revisions: impl Iterator<Item = &'a str>,
+    keep_latest: usize,
+    live_revision: &str,
+) -> std::collections::BTreeSet<String> {
+    let mut revisions = revisions
+        .map(ToOwned::to_owned)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    revisions.sort();
+    revisions.reverse();
+
+    let mut retained = revisions
+        .into_iter()
+        .take(keep_latest)
+        .collect::<std::collections::BTreeSet<_>>();
+    retained.insert(live_revision.to_string());
+    retained
 }
 
 fn split_bytes(bytes: &[u8], chunk_count: usize) -> Vec<Vec<u8>> {

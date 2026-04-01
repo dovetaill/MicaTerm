@@ -7,7 +7,8 @@ use crate::app::vault::model::{
     VaultSnapshot,
 };
 use crate::app::vault::provider::{
-    ProviderCapabilities, ProviderWriteRequest, VaultProvider, attach_snapshot_recovery_metadata,
+    DEFAULT_REVISION_RETENTION_LIMIT, ProviderCapabilities, ProviderWriteRequest, VaultProvider,
+    attach_snapshot_recovery_metadata,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,7 +18,8 @@ pub struct SyncRequest {
     pub next_revision: String,
     pub parent_revision: Option<String>,
     pub device_id: String,
-    pub created_at: String,
+    pub committed_at: String,
+    pub committed_by_device: String,
     pub wrapped_vault_key: String,
     pub kdf: KdfConfig,
     pub provider_kind: ProviderKind,
@@ -144,6 +146,12 @@ impl SyncEngine {
                 remote_id: self.primary.remote_id().to_string(),
                 message: err.to_string(),
             })?;
+        self.primary
+            .prune_revisions(DEFAULT_REVISION_RETENTION_LIMIT, &primary_request.head)
+            .map_err(|err| SyncError::PrimaryWriteFailed {
+                remote_id: self.primary.remote_id().to_string(),
+                message: err.to_string(),
+            })?;
 
         let mut mirror_failures = Vec::new();
         for mirror in &self.mirrors {
@@ -154,6 +162,15 @@ impl SyncEngine {
                 false,
             );
             if let Err(err) = mirror.write_revision(&mirror_request) {
+                mirror_failures.push(SyncMirrorFailure {
+                    remote_id: mirror.remote_id().to_string(),
+                    message: err.to_string(),
+                });
+                continue;
+            }
+            if let Err(err) =
+                mirror.prune_revisions(DEFAULT_REVISION_RETENTION_LIMIT, &mirror_request.head)
+            {
                 mirror_failures.push(SyncMirrorFailure {
                     remote_id: mirror.remote_id().to_string(),
                     message: err.to_string(),
@@ -198,7 +215,8 @@ fn build_provider_write_request(
         vault_revision: request.next_revision.clone(),
         parent_revision: request.parent_revision.clone(),
         device_id: request.device_id.clone(),
-        created_at: request.created_at.clone(),
+        committed_at: request.committed_at.clone(),
+        committed_by_device: request.committed_by_device.clone(),
         payload_hash: format!("sha256:{}", encrypted_snapshot.payload_sha256),
         manifest_ref,
         wrapped_vault_key: request.wrapped_vault_key.clone(),

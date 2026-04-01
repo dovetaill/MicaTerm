@@ -7,4 +7,6 @@ pub mod crypto;
 pub mod engine;
 pub mod model;
 pub mod provider;
+pub mod recovery;
 pub mod snapshot;
+pub mod sync_decision;

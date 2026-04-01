@@ -43,7 +43,8 @@ fn sample_head(revision: &str) -> VaultHead {
         vault_revision: revision.into(),
         parent_revision: Some("rev-0000".into()),
         device_id: "device-a".into(),
-        created_at: "2026-03-31T08:00:00Z".into(),
+        committed_at: "2026-03-31T08:00:00Z".into(),
+        committed_by_device: "device-a".into(),
         payload_hash: "sha256:payload".into(),
         manifest_ref: format!("bundle/{revision}/manifest.bin"),
         wrapped_vault_key: "wrapped-key".into(),
@@ -108,6 +109,29 @@ impl RecordingGiteeGistApi {
             update_calls: Mutex::new(Vec::new()),
         }
     }
+}
+
+fn gist_revision_payload_file_set(revision: &str) -> [(String, GiteeGistFile); 2] {
+    [
+        (
+            format!("vault-{revision}-manifest.bin"),
+            GiteeGistFile {
+                filename: format!("vault-{revision}-manifest.bin"),
+                raw_url: None,
+                truncated: false,
+                content: Some("manifest".into()),
+            },
+        ),
+        (
+            format!("vault-{revision}-pack-0000.bin"),
+            GiteeGistFile {
+                filename: format!("vault-{revision}-pack-0000.bin"),
+                raw_url: None,
+                truncated: false,
+                content: Some("pack".into()),
+            },
+        ),
+    ]
 }
 
 impl GiteeGistApi for RecordingGiteeGistApi {
@@ -455,4 +479,49 @@ fn gitee_provider_reads_revision_payloads_back_from_manifest_metadata_and_pack_f
     assert_eq!(revision.head, request.head);
     assert_eq!(revision.manifest, manifest);
     assert_eq!(revision.encrypted_snapshot, request.encrypted_snapshot);
+}
+
+#[test]
+fn gitee_provider_prune_revisions_older_than_keep_latest_limit() {
+    let mut files = BTreeMap::from([(
+        "vault-head.json".into(),
+        GiteeGistFile {
+            filename: "vault-head.json".into(),
+            raw_url: None,
+            truncated: false,
+            content: Some(
+                serde_json::to_string(&sample_head("rev-0012")).expect("encode live head"),
+            ),
+        },
+    )]);
+    for revision in 1..=12 {
+        files.extend(gist_revision_payload_file_set(format!("rev-{revision:04}").as_str()));
+    }
+
+    let api = Arc::new(RecordingGiteeGistApi::with_gist(GiteeGistDocument {
+        gist_id: "gitee-gist-456".into(),
+        truncated: false,
+        files,
+    }));
+    let config = GiteeGistProviderConfig::try_from(&sample_gitee_remote(ProviderAuthKind::Pat))
+        .expect("parse gitee provider config")
+        .with_access_token(Some("gitee-pat".into()));
+    let provider = GiteeGistProvider::with_api(config, api.clone()).expect("build provider");
+
+    provider
+        .prune_revisions(10, &sample_head("rev-0012"))
+        .expect("prune old gitee revisions");
+
+    let update_calls = api.update_calls.lock().expect("lock update calls");
+    assert_eq!(update_calls.len(), 1);
+    let (_, update, _) = &update_calls[0];
+    assert_eq!(
+        update.deleted_files,
+        vec![
+            "vault-rev-0001-manifest.bin".to_string(),
+            "vault-rev-0001-pack-0000.bin".to_string(),
+            "vault-rev-0002-manifest.bin".to_string(),
+            "vault-rev-0002-pack-0000.bin".to_string(),
+        ]
+    );
 }
