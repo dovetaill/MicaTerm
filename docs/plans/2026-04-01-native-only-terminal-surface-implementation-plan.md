@@ -1,5 +1,8 @@
 # Native-Only Terminal Surface Implementation Plan
 
+> Superseded on 2026-04-01. This plan remains for historical traceability only.
+> Do not use it as the active execution plan; use `mustdo.md`, `docs/plans/2026-04-01-windows-native-terminal-surface-recovery-design.md`, `docs/plans/2026-04-01-windows-native-terminal-surface-recovery-implementation-plan.md` instead.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Replace the terminal bitmap pipeline with a native-only terminal surface architecture that works on Windows, Linux X11, and Linux Wayland, ships with `Fusion-JetBrainsMapleMono` as the default terminal font, and adds optional semantic highlighting for normal shell text flows.
@@ -8,11 +11,11 @@
 
 **Tech Stack:** Rust, Slint, Tokio, wezterm-term, termwiz, windows-sys, DirectWrite/Direct2D/DirectComposition, Wayland, X11, raw-window-handle, regex, optional tree-sitter, focused Rust/unit/contract tests
 
-**Status:** Completed on 2026-04-01.
+**Status:** Superseded on 2026-04-01. The recovery documents now define the active plan.
 
-**Final Verification:** `cargo test --workspace -q`, `cargo check --workspace`, and `cargo clippy --workspace -- -D warnings` all pass after the Task 12 handoff docs land.
+**Final Verification:** Historical only. Do not treat this as proof that the Windows native terminal surface is working on a real machine.
 
-**TDD Handoff:** `docs/plans/2026-04-01-native-only-terminal-surface-tdd-spec.md`
+**TDD Handoff:** Historical only; recovery execution should follow `mustdo.md`, `docs/plans/2026-04-01-windows-native-terminal-surface-recovery-design.md`, `docs/plans/2026-04-01-windows-native-terminal-surface-recovery-implementation-plan.md`
 
 ---
 

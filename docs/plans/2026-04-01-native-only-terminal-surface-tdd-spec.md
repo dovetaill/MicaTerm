@@ -1,5 +1,8 @@
 # Native-Only Terminal Surface TDD Spec
 
+> Superseded on 2026-04-01. This handoff note is retained only for historical traceability.
+> It should not be used as evidence that the Windows native terminal surface is finished; use `mustdo.md`, `docs/plans/2026-04-01-windows-native-terminal-surface-recovery-design.md`, `docs/plans/2026-04-01-windows-native-terminal-surface-recovery-implementation-plan.md` until a new recovery TDD doc is produced after real Windows validation.
+
 日期: 2026-04-01
 范围: `2026-04-01-native-only-terminal-surface-implementation-plan.md` 全部 12 个 Task 的实现收口说明。
 

@@ -1,8 +1,11 @@
 # Native-Only Terminal Surface Design
 
+> Superseded on 2026-04-01. This document is kept only as historical context.
+> The earlier "completed" framing is no longer authoritative; use `mustdo.md`, `docs/plans/2026-04-01-windows-native-terminal-surface-recovery-design.md`, `docs/plans/2026-04-01-windows-native-terminal-surface-recovery-implementation-plan.md` as the current source of truth.
+
 日期: 2026-04-01
 执行者: Codex
-状态: 已完成实现并通过 Workspace 验证
+状态: Superseded on 2026-04-01; 保留作历史记录，不再作为当前实现事实依据
 
 ## 背景
 
