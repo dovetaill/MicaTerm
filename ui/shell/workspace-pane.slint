@@ -14,7 +14,6 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-session-state: "";
     in property <string> workspace-session-error-detail: "";
     in property <bool> workspace-session-can-reconnect: false;
-    in property <string> workspace-session-render-mode: "bitmap";
     in property <string> workspace-session-connection-headline: "";
     in property <string> workspace-session-connection-current-hop: "";
     in property <string> workspace-session-connection-current-detail: "";
@@ -37,7 +36,6 @@ export component WorkspacePane inherits Rectangle {
         recent_label: "",
     };
     in property <string> welcome-quick-launch-search-query: "";
-    in property <image> workspace-session-surface-image;
     in property <int> workspace-session-native-frame-token: 0;
     in property <int> workspace-session-rows: 24;
     in property <int> workspace-session-cols: 80;
@@ -139,7 +137,6 @@ export component WorkspacePane inherits Rectangle {
                 session-state: root.workspace-session-state;
                 session-error-detail: root.workspace-session-error-detail;
                 can-reconnect: root.workspace-session-can-reconnect;
-                session-render-mode: root.workspace-session-render-mode;
                 connection-progress-headline: root.workspace-session-connection-headline;
                 connection-progress-current-hop: root.workspace-session-connection-current-hop;
                 connection-progress-current-detail: root.workspace-session-connection-current-detail;
@@ -153,7 +150,6 @@ export component WorkspacePane inherits Rectangle {
                 welcome-quick-launch-visible-group-items: root.welcome-quick-launch-visible-group-items;
                 welcome-quick-launch-selected-detail: root.welcome-quick-launch-selected-detail;
                 welcome-quick-launch-search-query: root.welcome-quick-launch-search-query;
-                session-surface-image: root.workspace-session-surface-image;
                 session-native-frame-token: root.workspace-session-native-frame-token;
                 session-rows: root.workspace-session-rows;
                 session-cols: root.workspace-session-cols;

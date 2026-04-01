@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use slint::{
-    Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
+    Color, ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -44,7 +44,7 @@ use crate::app::keychain::{
 use crate::app::quick_launch_preferences::{
     QuickLaunchPreferences, QuickLaunchPreferencesStore, retain_known_ssh_asset_ids,
 };
-use crate::app::runtime_profile::{AppRuntimeProfile, TerminalRenderMode};
+use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::sftp::{
     SftpBrowserController, SftpBrowserLoadRequest, SftpBrowserSessionState, SftpDirectoryEntryKind,
     SftpFollowMode, SftpPanelMode, SftpSessionBindingState,
@@ -72,11 +72,11 @@ use crate::app::ssh::session_manager::{
     SessionRuntimeLauncher, SessionState,
 };
 use crate::app::terminal_atlas::TerminalAtlasSelection;
-#[cfg(all(target_os = "windows", feature = "terminal-native-renderer"))]
+#[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_presenter::{
-    BitmapAtlasPresenter, NativeCursorFrameState, NativeImePreviewOverlay, NativeTerminalFrame,
-    PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter,
+    NativeCursorFrameState, NativeImePreviewOverlay, NativeTerminalFrame, PresentedTerminalFrame,
+    TerminalPresentationOptions, TerminalPresenter,
 };
 use crate::app::terminal_renderer::{NativeTerminalSurface, NativeTerminalSurfaceRect};
 use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
@@ -166,9 +166,7 @@ const WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD: usize = 4;
 
 thread_local! {
     static WORKSPACE_TERMINAL_PRESENTER: RefCell<Box<dyn TerminalPresenter>> = RefCell::new(
-        Box::new(
-            BitmapAtlasPresenter::new().expect("bundled Sarasa presenter should initialize")
-        )
+        build_native_terminal_presenter().expect("native terminal presenter should initialize")
     );
     static WORKSPACE_NATIVE_TERMINAL_SURFACE: RefCell<Option<NativeTerminalSurface>> = const {
         RefCell::new(None)
@@ -3765,26 +3763,17 @@ where
 
 fn build_workspace_terminal_presenter(
     profile: AppRuntimeProfile,
-) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)> {
-    if cfg!(target_os = "windows") && profile.prefers_native_terminal_renderer() {
-        return Ok((
-            build_native_terminal_presenter()?,
-            TerminalRenderMode::Native,
-        ));
-    }
-
-    Ok((
-        Box::new(BitmapAtlasPresenter::new()?),
-        TerminalRenderMode::Bitmap,
-    ))
+) -> Result<Box<dyn TerminalPresenter>> {
+    let _ = profile.prefers_native_terminal_renderer();
+    build_native_terminal_presenter()
 }
 
-#[cfg(all(target_os = "windows", feature = "terminal-native-renderer"))]
+#[cfg(feature = "terminal-native-renderer")]
 fn build_native_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
     Ok(Box::new(WindowsNativePresenter::new()?))
 }
 
-#[cfg(not(all(target_os = "windows", feature = "terminal-native-renderer")))]
+#[cfg(not(feature = "terminal-native-renderer"))]
 fn build_native_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
     Err(anyhow!(
         "native terminal renderer is unavailable in this build"
@@ -3792,31 +3781,13 @@ fn build_native_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
 }
 
 fn install_workspace_terminal_presenter(window: &AppWindow, profile: AppRuntimeProfile) {
-    let (presenter, active_render_mode) = match build_workspace_terminal_presenter(profile) {
-        Ok(presenter) => presenter,
-        Err(err) => {
-            tracing::error!(
-                target: "app.terminal",
-                error = %err,
-                "failed to build requested terminal presenter; falling back to bitmap presenter"
-            );
-            (
-                Box::new(
-                    BitmapAtlasPresenter::new()
-                        .expect("bundled Sarasa presenter should initialize after fallback"),
-                ) as Box<dyn TerminalPresenter>,
-                TerminalRenderMode::Bitmap,
-            )
-        }
-    };
+    let presenter = build_workspace_terminal_presenter(profile)
+        .expect("native terminal presenter should initialize during bootstrap");
 
     WORKSPACE_TERMINAL_PRESENTER.with(|cell| {
         *cell.borrow_mut() = presenter;
     });
-    window.set_workspace_session_render_mode(active_render_mode.as_str().into());
-    if matches!(active_render_mode, TerminalRenderMode::Bitmap) {
-        window.set_workspace_session_native_frame_token(0);
-    }
+    window.set_workspace_session_native_frame_token(0);
 }
 
 fn workspace_native_terminal_rect(window: &AppWindow) -> NativeTerminalSurfaceRect {
@@ -3838,20 +3809,24 @@ fn sync_workspace_native_terminal_surface_geometry(window: &AppWindow) {
 }
 
 fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerminalFrame) {
-    window.set_workspace_session_surface_image(Image::default());
     window.set_workspace_session_native_frame_token(
         i32::try_from(frame.frame_token).unwrap_or(i32::MAX),
     );
-    let presentable_frame = frame.presentable_frame;
+    let presentable_frame = frame.presentable_frame.clone();
     tracing::trace!(
         target: "app.terminal",
         frame_token = frame.frame_token,
         shaped_rows = presentable_frame.shaped_row_count,
+        monochrome_draws = presentable_frame.monochrome_glyph_draws.len(),
+        color_draws = presentable_frame.color_glyph_draws.len(),
         glyph_cache_entries = presentable_frame.renderer_stats.glyph_cache_entries,
         selection_overlay_rects = presentable_frame.selection_overlay.rect_count,
+        semantic_overlay_count = presentable_frame.semantic_overlays.len(),
+        semantic_input_overlay_count = presentable_frame.semantic_input_overlays.len(),
         underline_overlay_runs = presentable_frame.underline_overlay.run_count,
         ime_preview_active = presentable_frame.ime_preview_overlay.active,
         cursor_visible = presentable_frame.cursor.visible,
+        cursor_overlay_visible = presentable_frame.cursor_overlay.visible,
         "presenting retained native terminal frame state"
     );
     let rect = workspace_native_terminal_rect(window);
@@ -3884,7 +3859,6 @@ fn sync_workspace_session_cursor_from_native_frame(
 }
 
 fn clear_workspace_native_terminal_frame(window: &AppWindow) {
-    window.set_workspace_session_surface_image(Image::default());
     window.set_workspace_session_native_frame_token(0);
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
         if let Some(surface) = surface.borrow().as_ref() {
@@ -4089,7 +4063,6 @@ fn sync_workspace_session_state_with_manager(
         let mut native_cursor = None;
         WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
             let mut presenter = presenter.borrow_mut();
-            presenter.set_raster_scale(window.window().scale_factor());
             match presenter.present(
                 surface,
                 TerminalPresentationOptions {
@@ -4098,21 +4071,10 @@ fn sync_workspace_session_state_with_manager(
                     ime_preview_overlay: NativeImePreviewOverlay::default(),
                 },
             ) {
-                Ok(PresentedTerminalFrame::Bitmap(frame)) => {
-                    window.set_workspace_session_render_mode(
-                        TerminalRenderMode::Bitmap.as_str().into(),
-                    );
-                    window.set_workspace_session_surface_image(frame.image);
-                    window.set_workspace_session_native_frame_token(0);
-                    window.set_workspace_session_cell_width(frame.cell_width_px as f32);
-                    window.set_workspace_session_cell_height(frame.cell_height_px as f32);
-                }
                 Ok(PresentedTerminalFrame::Native(frame)) => {
-                    let presentable_frame = frame.presentable_frame;
+                    let frame = *frame;
+                    let presentable_frame = frame.presentable_frame.clone();
                     native_cursor = Some(presentable_frame.cursor);
-                    window.set_workspace_session_render_mode(
-                        TerminalRenderMode::Native.as_str().into(),
-                    );
                     window.set_workspace_session_cell_width(frame.cell_width_px as f32);
                     window.set_workspace_session_cell_height(frame.cell_height_px as f32);
                     present_workspace_native_terminal_frame(window, frame);
@@ -4122,10 +4084,7 @@ fn sync_workspace_session_state_with_manager(
                         target: "app.terminal",
                         session_id = surface.session_id.to_string(),
                         error = %err,
-                        "failed to render workspace terminal atlas surface"
-                    );
-                    window.set_workspace_session_render_mode(
-                        TerminalRenderMode::Bitmap.as_str().into(),
+                        "failed to render workspace native terminal surface"
                     );
                     window.set_workspace_session_cell_width(default_cell_width_px as f32);
                     window.set_workspace_session_cell_height(default_cell_height_px as f32);
@@ -6488,7 +6447,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let asset_click_tracker = Rc::new(RefCell::new(None::<PendingAssetClick>));
     let pending_double_click_activation = Rc::new(RefCell::new(None::<String>));
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
-        *surface.borrow_mut() = Some(NativeTerminalSurface::attach_or_detach(window));
+        *surface.borrow_mut() = Some(NativeTerminalSurface::attach(window));
     });
     install_workspace_terminal_presenter(window, profile);
 
@@ -9684,7 +9643,7 @@ mod tests {
 
         sync_workspace_session_state(&window, &state, &mut follow_tracker);
         let initial_lines_model = window.get_workspace_session_visible_lines();
-        let initial_image = window.get_workspace_session_surface_image();
+        let initial_frame_token = window.get_workspace_session_native_frame_token();
 
         let mut updated_surface = TerminalSurfaceState::from_visible_lines(
             session_id,
@@ -9713,21 +9672,14 @@ mod tests {
             "terminal visible line projection should reuse the same VecModel instance"
         );
         assert_ne!(
-            window
-                .get_workspace_session_surface_image()
-                .to_rgba8()
-                .expect("updated terminal atlas image")
-                .as_bytes(),
-            initial_image
-                .to_rgba8()
-                .expect("initial terminal atlas image")
-                .as_bytes(),
-            "terminal atlas image should refresh when the active surface changes"
+            window.get_workspace_session_native_frame_token(),
+            initial_frame_token,
+            "native frame token should refresh when the active surface changes"
         );
     }
 
     #[test]
-    fn workspace_session_state_clears_terminal_image_when_surface_clears() {
+    fn workspace_session_state_clears_native_terminal_frame_when_surface_clears() {
         i_slint_backend_testing::init_no_event_loop();
 
         let window = AppWindow::new().expect("create app window");
@@ -9762,9 +9714,9 @@ mod tests {
         sync_workspace_session_state(&window, &state, &mut follow_tracker);
         let initial_lines_model = window.get_workspace_session_visible_lines();
         assert_ne!(
-            window.get_workspace_session_surface_image(),
-            Image::default(),
-            "rendered terminal surfaces should publish a non-empty atlas image"
+            window.get_workspace_session_native_frame_token(),
+            0,
+            "rendered terminal surfaces should publish a non-zero native frame token"
         );
 
         state.set_active_workspace_terminal_surface(None);
@@ -9775,12 +9727,10 @@ mod tests {
             initial_lines_model,
             "clearing the surface should keep reusing the visible line model"
         );
-        assert!(
-            window
-                .get_workspace_session_surface_image()
-                .to_rgba8()
-                .is_none(),
-            "clearing the surface should reset the atlas image to an empty handle"
+        assert_eq!(
+            window.get_workspace_session_native_frame_token(),
+            0,
+            "clearing the surface should reset the retained native frame token"
         );
         assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
     }

@@ -8,7 +8,7 @@ use anyhow::Result;
 use crate::app::terminal_font::{FontSystem, LoadedFont};
 use crate::app::terminal_layout::ShapedRow;
 use crate::app::terminal_renderer::atlas::{
-    ColorGlyphCacheEntry, ColorGlyphCacheKey, GlyphAtlas,
+    ColorGlyphCacheEntry, ColorGlyphCacheKey, GlyphAtlas, GlyphAtlasEntry,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -16,6 +16,37 @@ pub struct ShapedTerminalFrame {
     pub seqno: u64,
     pub font: LoadedFont,
     pub rows: Vec<ShapedRow>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreparedMonochromeGlyphDraw {
+    pub row: u32,
+    pub start_col: u32,
+    pub end_col: u32,
+    pub glyph_id: u32,
+    pub atlas_entry: GlyphAtlasEntry,
+    pub x_offset_px: i32,
+    pub y_offset_px: i32,
+    pub fg_rgba: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreparedColorGlyphDraw {
+    pub row: u32,
+    pub start_col: u32,
+    pub end_col: u32,
+    pub glyph_id: u32,
+    pub cache_entry: ColorGlyphCacheEntry,
+    pub x_offset_px: i32,
+    pub y_offset_px: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PreparedUnderlineRun {
+    pub row: u32,
+    pub start_col: u32,
+    pub end_col: u32,
+    pub fg_rgba: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,13 +58,14 @@ pub struct PreparedNativeRendererStats {
     pub color_glyphs_prepared: usize,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PreparedUnderlineOverlay {
     pub visible: bool,
     pub run_count: usize,
+    pub runs: Vec<PreparedUnderlineRun>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedNativeFrame {
     pub frame_token: u64,
     pub cell_width_px: u32,
@@ -46,6 +78,8 @@ pub struct PreparedNativeFrame {
     pub shaped_row_count: usize,
     pub glyph_run_count: usize,
     pub glyph_count: usize,
+    pub monochrome_glyph_draws: Vec<PreparedMonochromeGlyphDraw>,
+    pub color_glyph_draws: Vec<PreparedColorGlyphDraw>,
     pub underline_run_count: usize,
     pub underline_overlay: PreparedUnderlineOverlay,
     pub renderer_stats: PreparedNativeRendererStats,
@@ -76,6 +110,9 @@ impl WgpuTerminalRenderer {
     ) -> Result<PreparedNativeFrame> {
         let mut monochrome_glyphs_prepared = 0usize;
         let mut color_glyphs_prepared = 0usize;
+        let mut monochrome_glyph_draws = Vec::new();
+        let mut color_glyph_draws = Vec::new();
+        let mut underline_runs = Vec::new();
         let shaped_row_count = frame.rows.len();
         let glyph_run_count = frame.rows.iter().map(|row| row.runs.len()).sum::<usize>();
         let glyph_count = frame
@@ -84,34 +121,52 @@ impl WgpuTerminalRenderer {
             .flat_map(|row| row.runs.iter())
             .map(|run| run.glyphs.len())
             .sum::<usize>();
-        let underline_run_count = frame
-            .rows
-            .iter()
-            .flat_map(|row| row.runs.iter())
-            .filter(|run| run.style.underline)
-            .count();
-        let underline_overlay = PreparedUnderlineOverlay {
-            visible: underline_run_count > 0,
-            run_count: underline_run_count,
-        };
 
         for row in &frame.rows {
             for run in &row.runs {
+                if run.style.underline {
+                    underline_runs.push(PreparedUnderlineRun {
+                        row: row.row,
+                        start_col: run.start_col(),
+                        end_col: run.end_col(),
+                        fg_rgba: run.style.fg_rgba,
+                    });
+                }
+
                 for glyph in &run.glyphs {
                     if run.has_color_glyphs {
                         match fonts.rasterize_color_glyph(&frame.font, glyph.glyph_id)? {
                             Some(rasterized) => {
-                                self.upsert_color_glyph(
+                                let cache_entry = self.upsert_color_glyph(
                                     ColorGlyphCacheKey::new(frame.font.cache_key(), glyph.glyph_id),
                                     rasterized,
                                 );
+                                color_glyph_draws.push(PreparedColorGlyphDraw {
+                                    row: row.row,
+                                    start_col: run.start_col(),
+                                    end_col: run.end_col(),
+                                    glyph_id: glyph.glyph_id,
+                                    cache_entry,
+                                    x_offset_px: glyph.x_offset,
+                                    y_offset_px: glyph.y_offset,
+                                });
                                 color_glyphs_prepared = color_glyphs_prepared.saturating_add(1);
                             }
                             None => {
                                 let request = frame.font.raster_request(glyph.glyph_id, run.style.bold);
                                 let rasterized = fonts
                                     .rasterize_glyph(&frame.font, glyph.glyph_id, run.style.bold)?;
-                                self.atlas.upsert(request, &rasterized);
+                                let atlas_entry = self.atlas.upsert(request, &rasterized);
+                                monochrome_glyph_draws.push(PreparedMonochromeGlyphDraw {
+                                    row: row.row,
+                                    start_col: run.start_col(),
+                                    end_col: run.end_col(),
+                                    glyph_id: glyph.glyph_id,
+                                    atlas_entry,
+                                    x_offset_px: glyph.x_offset,
+                                    y_offset_px: glyph.y_offset,
+                                    fg_rgba: run.style.fg_rgba,
+                                });
                                 monochrome_glyphs_prepared = monochrome_glyphs_prepared.saturating_add(1);
                             }
                         }
@@ -119,13 +174,29 @@ impl WgpuTerminalRenderer {
                         let request = frame.font.raster_request(glyph.glyph_id, run.style.bold);
                         let rasterized =
                             fonts.rasterize_glyph(&frame.font, glyph.glyph_id, run.style.bold)?;
-                        self.atlas.upsert(request, &rasterized);
+                        let atlas_entry = self.atlas.upsert(request, &rasterized);
+                        monochrome_glyph_draws.push(PreparedMonochromeGlyphDraw {
+                            row: row.row,
+                            start_col: run.start_col(),
+                            end_col: run.end_col(),
+                            glyph_id: glyph.glyph_id,
+                            atlas_entry,
+                            x_offset_px: glyph.x_offset,
+                            y_offset_px: glyph.y_offset,
+                            fg_rgba: run.style.fg_rgba,
+                        });
                         monochrome_glyphs_prepared = monochrome_glyphs_prepared.saturating_add(1);
                     }
                 }
             }
         }
 
+        let underline_overlay = PreparedUnderlineOverlay {
+            visible: !underline_runs.is_empty(),
+            run_count: underline_runs.len(),
+            runs: underline_runs,
+        };
+        let underline_run_count = underline_overlay.run_count;
         let fingerprint = hash_shaped_frame(frame);
         if self.last_frame_fingerprint != Some(fingerprint) {
             self.next_frame_token = self.next_frame_token.saturating_add(1);
@@ -154,6 +225,8 @@ impl WgpuTerminalRenderer {
             shaped_row_count,
             glyph_run_count,
             glyph_count,
+            monochrome_glyph_draws,
+            color_glyph_draws,
             underline_run_count,
             underline_overlay,
             renderer_stats,

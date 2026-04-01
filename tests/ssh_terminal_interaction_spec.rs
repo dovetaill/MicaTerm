@@ -163,6 +163,21 @@ fn keyboard_input_snaps_local_scrollback_back_to_bottom() {
 }
 
 #[test]
+fn surface_state_tracks_alternate_screen_activity_for_semantic_guards() {
+    let mut session = TerminalSession::new(24, 80);
+
+    let initial = session.surface_state(Uuid::new_v4());
+    session.apply_remote_bytes(b"\x1b[?1049h");
+    let alternate = session.surface_state(Uuid::new_v4());
+    session.apply_remote_bytes(b"\x1b[?1049l");
+    let restored = session.surface_state(Uuid::new_v4());
+
+    assert!(!initial.alternate_screen_active);
+    assert!(alternate.alternate_screen_active);
+    assert!(!restored.alternate_screen_active);
+}
+
+#[test]
 fn light_theme_palette_changes_default_background_projection() {
     let mut session = TerminalSession::new(24, 80);
 
@@ -245,8 +260,8 @@ fn terminal_host_uses_startup_safe_font_stack_and_stable_clipboard_shortcut_toke
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        terminal_host.contains("in property <image> session-surface-image"),
-        "TerminalSessionHost should accept a rendered image surface instead of a font stack contract"
+        !terminal_host.contains("session-surface-image"),
+        "TerminalSessionHost should remove the rendered image surface contract once the terminal host becomes native-only"
     );
     assert!(
         terminal_host.contains("private property <length> terminal-font-size: 16px;"),

@@ -10,6 +10,7 @@ APP_NAME="${APP_NAME:-$(awk -F'"' '/^name = / { print $2; exit }' "$ROOT_DIR/Car
 BIN_NAME="${BIN_NAME:-$APP_NAME}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 ICON_PATH="$ROOT_DIR/assets/icons/windows/mica-term.ico"
+DEFAULT_TERMINAL_FONT_OFL_PATH="$ROOT_DIR/assets/fonts/Fusion-JetBrainsMapleMono/OFL.txt"
 PACKAGE_FLAVOR_SUFFIX="${PACKAGE_FLAVOR_SUFFIX:-}"
 ARCHIVE_STEM="${APP_NAME}-${TARGET}-${PROFILE}${PACKAGE_FLAVOR_SUFFIX}"
 
@@ -42,6 +43,7 @@ Environment overrides:
   DIST_DIR=<output directory>
   CARGO_FEATURES=<space or comma separated cargo features>
   CARGO_NO_DEFAULT_FEATURES=1
+  MICA_TERM_PACKAGE_PORTABLE=1  create .mica-term-portable in staged Windows packages
   CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=<gnu linker path>
   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=<linux arm64 linker path>
 
@@ -212,6 +214,14 @@ fi
 
 if [[ "$TARGET" == *windows* && -f "$ICON_PATH" ]]; then
   cp "$ICON_PATH" "$STAGE_DIR/"
+fi
+
+if [[ -f "$DEFAULT_TERMINAL_FONT_OFL_PATH" ]]; then
+  cp "$DEFAULT_TERMINAL_FONT_OFL_PATH" "$STAGE_DIR/OFL.txt"
+fi
+
+if [[ "$TARGET" == *windows* && "${MICA_TERM_PACKAGE_PORTABLE:-0}" == "1" ]]; then
+  : > "$STAGE_DIR/.mica-term-portable"
 fi
 
 echo "==> Creating archive $ARCHIVE_PATH"

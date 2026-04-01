@@ -112,8 +112,8 @@ fn bootstrap_source_threads_native_terminal_surface_contract() {
         "bootstrap should depend on a native terminal surface hook once native terminal rendering is introduced"
     );
     assert!(
-        bootstrap_source.contains("set_workspace_session_render_mode"),
-        "bootstrap should publish the active terminal render mode to the Slint window"
+        !bootstrap_source.contains("set_workspace_session_render_mode"),
+        "bootstrap should stop publishing a bitmap/native render mode selector once only native frames remain"
     );
     assert!(
         bootstrap_source.contains("set_workspace_session_native_frame_token"),
@@ -5305,6 +5305,7 @@ fn save_failure_logs_error_without_persisting_ui_session_state() {
     let paths = LoggingPaths {
         root_source: LoggingRootSource::EnvOverride,
         root_dir: temp_root.clone(),
+        data_dir: temp_root.join("data"),
         logs_dir: temp_root.join("logs"),
         crash_dir: temp_root.join("crash"),
     };
@@ -5817,6 +5818,7 @@ fn asset_activation_omits_internal_ssh_runtime_logs() {
     let paths = LoggingPaths {
         root_source: LoggingRootSource::EnvOverride,
         root_dir: temp_root.clone(),
+        data_dir: temp_root.join("data"),
         logs_dir: temp_root.join("logs"),
         crash_dir: temp_root.join("crash"),
     };
@@ -5872,6 +5874,7 @@ fn context_menu_open_omits_ssh_action_logs() {
     let paths = LoggingPaths {
         root_source: LoggingRootSource::EnvOverride,
         root_dir: temp_root.clone(),
+        data_dir: temp_root.join("data"),
         logs_dir: temp_root.join("logs"),
         crash_dir: temp_root.join("crash"),
     };
@@ -6558,7 +6561,7 @@ fn workspace_terminal_ctrl_shift_c_copies_selected_text_to_clipboard() {
 }
 
 #[test]
-fn workspace_terminal_selection_updates_surface_image() {
+fn workspace_terminal_selection_keeps_native_frame_contract_active() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -6570,45 +6573,19 @@ fn workspace_terminal_selection_updates_surface_image() {
     settle_terminal_projection();
     focus_workspace_terminal(&app);
 
-    let before = app
-        .get_workspace_session_surface_image()
-        .to_rgba8()
-        .expect("rgba image before selection");
+    let before = app.get_workspace_session_native_frame_token();
 
     select_terminal_welcome_span(&app);
     settle_terminal_projection();
 
-    let after = app
-        .get_workspace_session_surface_image()
-        .to_rgba8()
-        .expect("rgba image after selection");
-    let cell_width = after.width() / app.get_workspace_session_cols() as u32;
-    let cell_height = after.height() / app.get_workspace_session_rows() as u32;
-    let selected_space_x = 7 * cell_width + (cell_width / 2);
-    let selected_space_y = cell_height / 2;
-    let selected_pixel =
-        after.as_slice()[(selected_space_y * after.width() + selected_space_x) as usize];
+    let after = app.get_workspace_session_native_frame_token();
 
     assert!(
         app.get_workspace_session_selection_active(),
         "pointer drag should activate terminal selection state"
     );
-    assert_ne!(
-        before.as_slice(),
-        after.as_slice(),
-        "terminal selection should visibly repaint the atlas surface image"
-    );
-    assert!(
-        selected_pixel.r >= 90
-            && selected_pixel.r <= 140
-            && selected_pixel.g >= 100
-            && selected_pixel.g <= 150
-            && selected_pixel.b >= 130
-            && selected_pixel.b <= 175
-            && selected_pixel.b > selected_pixel.g
-            && selected_pixel.g >= selected_pixel.r,
-        "selected blank cells should render as a muted iris-blue highlight instead of a saturated bright blue"
-    );
+    assert_ne!(before, 0, "native terminal projection should publish a retained frame token before selection");
+    assert_ne!(after, 0, "native terminal projection should keep a retained frame token after selection");
 }
 
 #[test]

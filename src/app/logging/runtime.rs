@@ -32,6 +32,18 @@ pub fn emit_runtime_profile_metadata(profile: AppRuntimeProfile) {
     );
 }
 
+pub fn emit_app_root_metadata(paths: &LoggingPaths) {
+    tracing::info!(
+        target: "app.paths",
+        root_source = ?paths.root_source,
+        root_dir = %paths.root_dir.display(),
+        data_dir = %paths.data_dir.display(),
+        logs_dir = %paths.logs_dir.display(),
+        crash_dir = %paths.crash_dir.display(),
+        "resolved app root directories"
+    );
+}
+
 pub fn build_test_logging_runtime(
     paths: &LoggingPaths,
     config: &AppLoggingConfig,

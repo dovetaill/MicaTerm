@@ -72,6 +72,16 @@ impl TextShaper for TerminalTextShaper {
     }
 }
 
+impl GlyphRun {
+    pub fn start_col(&self) -> u32 {
+        self.cell_range.start
+    }
+
+    pub fn end_col(&self) -> u32 {
+        self.cell_range.end.saturating_sub(1)
+    }
+}
+
 impl TerminalTextShaper {
     fn shape_segment(
         &mut self,

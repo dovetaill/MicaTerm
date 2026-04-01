@@ -1,5 +1,7 @@
 //! Phase-1 WezTerm font adapter scaffold for the terminal rendering stack.
 
+use crate::app::terminal_font::backend::DEFAULT_TERMINAL_FONT_FAMILY;
+
 /// Captures where the local WezTerm font adoption work currently stands.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WeztermFontIntegrationStage {
@@ -11,6 +13,7 @@ pub enum WeztermFontIntegrationStage {
 
 /// Placeholder adapter for the first WezTerm font adoption phase.
 ///
+/// The current bundled default terminal font family remains Fusion JetBrains Maple Mono.
 /// Later tasks will replace this with a concrete wrapper around `wezterm-font`
 /// shaping and rasterization primitives once the existing HarfBuzz dependency
 /// path has been replaced.
@@ -36,6 +39,10 @@ impl WeztermFontSystem {
             "wezterm-gui/src/renderstate.rs",
             "wezterm-gui/src/termwindow/webgpu.rs",
         ]
+    }
+
+    pub fn preferred_default_family(&self) -> &'static str {
+        DEFAULT_TERMINAL_FONT_FAMILY
     }
 
     pub fn integration_blocker(&self) -> &'static str {

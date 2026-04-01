@@ -1,8 +1,29 @@
 use mica_term::app::ssh::runtime::{
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
+    TerminalSurfaceState,
+};
+use mica_term::app::terminal_model::TerminalModelFrame;
+use mica_term::app::terminal_semantic::{
+    SemanticInputSpanKind, SemanticOutputBlockKind, detect_input_line_overlays,
+    detect_output_block_overlays,
 };
 use std::fs;
 use uuid::Uuid;
+
+fn semantic_surface(lines: &[&str]) -> TerminalSurfaceState {
+    TerminalSurfaceState::from_visible_lines(
+        Uuid::new_v4(),
+        1,
+        lines.len() as u32,
+        120,
+        lines.iter().map(|line| (*line).to_string()).collect(),
+    )
+}
+
+fn semantic_model_frame(lines: &[&str]) -> TerminalModelFrame {
+    let surface = semantic_surface(lines);
+    TerminalModelFrame::from_surface(&surface, None)
+}
 
 #[test]
 fn wheel_without_mouse_grab_scrolls_local_viewport() {
@@ -83,7 +104,90 @@ fn remote_output_keeps_following_when_viewport_is_at_bottom() {
 }
 
 #[test]
-fn renderer_migration_docs_describe_windows_native_status_and_bitmap_fallback() {
+fn semantic_overlay_detects_json_blocks_over_normal_shell_output() {
+    let frame = semantic_model_frame(&["{", "  \"name\": \"mica-term\"", "}"]);
+
+    let overlays = detect_output_block_overlays(&frame);
+
+    assert_eq!(overlays.len(), 1);
+    assert_eq!(overlays[0].kind, SemanticOutputBlockKind::Json);
+    assert_eq!(overlays[0].start_row, 0);
+    assert_eq!(overlays[0].end_row, 2);
+    assert_eq!(overlays[0].row_ranges.len(), 3);
+    assert_eq!(frame.rows[1].text, "  \"name\": \"mica-term\"");
+}
+
+#[test]
+fn semantic_overlay_detects_xml_blocks_over_normal_shell_output() {
+    let frame = semantic_model_frame(&["<root>", "  <item>mica-term</item>", "</root>"]);
+
+    let overlays = detect_output_block_overlays(&frame);
+
+    assert_eq!(overlays.len(), 1);
+    assert_eq!(overlays[0].kind, SemanticOutputBlockKind::Xml);
+    assert_eq!(overlays[0].start_row, 0);
+    assert_eq!(overlays[0].end_row, 2);
+    assert_eq!(overlays[0].row_ranges.len(), 3);
+}
+
+#[test]
+fn semantic_overlay_detects_log_blocks_over_normal_shell_output() {
+    let frame = semantic_model_frame(&[
+        "[INFO] booting mica-term",
+        "[WARN] startup fallback disabled",
+        "[ERROR] native surface unavailable",
+    ]);
+
+    let overlays = detect_output_block_overlays(&frame);
+
+    assert_eq!(overlays.len(), 1);
+    assert_eq!(overlays[0].kind, SemanticOutputBlockKind::Log);
+    assert_eq!(overlays[0].start_row, 0);
+    assert_eq!(overlays[0].end_row, 2);
+    assert_eq!(overlays[0].row_ranges.len(), 3);
+}
+
+#[test]
+fn semantic_input_overlay_highlights_shell_prompt_command_option_and_argument() {
+    let frame = semantic_model_frame(&["[root@host ~]$ cargo test --workspace"]);
+
+    let overlays = detect_input_line_overlays(&frame);
+
+    assert_eq!(overlays.len(), 4);
+    assert_eq!(overlays[0].kind, SemanticInputSpanKind::Prompt);
+    assert_eq!(overlays[1].kind, SemanticInputSpanKind::Command);
+    assert_eq!(overlays[2].kind, SemanticInputSpanKind::Argument);
+    assert_eq!(overlays[3].kind, SemanticInputSpanKind::Option);
+    assert_eq!(overlays[1].start_col, 15);
+    assert_eq!(overlays[1].end_col, 19);
+    assert_eq!(overlays[3].start_col, 26);
+    assert_eq!(overlays[3].end_col, 36);
+}
+
+#[test]
+fn semantic_input_overlay_is_disabled_in_alternate_screen_mode() {
+    let mut surface = semantic_surface(&["$ cargo test --workspace"]);
+    surface.alternate_screen_active = true;
+    let frame = TerminalModelFrame::from_surface(&surface, None);
+
+    let overlays = detect_input_line_overlays(&frame);
+
+    assert!(overlays.is_empty());
+}
+
+#[test]
+fn semantic_input_overlay_is_disabled_when_tui_mouse_grab_is_active() {
+    let mut surface = semantic_surface(&["$ cargo test --workspace"]);
+    surface.mouse_grabbed = true;
+    let frame = TerminalModelFrame::from_surface(&surface, None);
+
+    let overlays = detect_input_line_overlays(&frame);
+
+    assert!(overlays.is_empty());
+}
+
+#[test]
+fn renderer_migration_docs_describe_windows_native_status_and_native_only_shipping_path() {
     let readme = fs::read_to_string("readme.md").expect("read readme");
     let verification = fs::read_to_string("verification.md").expect("read verification");
     let mainline_build = fs::read_to_string("build-win-x64.sh").expect("read mainline build script");
@@ -107,19 +211,19 @@ fn renderer_migration_docs_describe_windows_native_status_and_bitmap_fallback() 
         "verification notes should include the Windows-first native renderer verification status"
     );
     assert!(
-        mainline_build.contains("native-first terminal renderer path"),
-        "the primary Windows build wrapper should document the native renderer as the preferred shipping path"
+        mainline_build.contains("Preferred native-only terminal surface path"),
+        "the primary Windows build wrapper should document the native-only terminal surface as the preferred shipping path"
     );
     assert!(
         mainline_build.contains("MICA_TERM_PACKAGE_TERMINAL_RENDERER=\"native\""),
         "the primary Windows build wrapper should package the native terminal renderer"
     );
     assert!(
-        software_build.contains("fallback-only bitmap compatibility path"),
-        "the software compatibility wrapper should describe itself as the fallback-only bitmap path"
+        software_build.contains("Transitional Linux-host Windows native-only terminal surface path"),
+        "the software compatibility wrapper should describe itself as the transitional native-only Linux-host Windows path"
     );
     assert!(
-        software_build.contains("MICA_TERM_PACKAGE_TERMINAL_RENDERER=\"bitmap\""),
-        "the software compatibility wrapper should keep packaging the bitmap terminal renderer"
+        software_build.contains("MICA_TERM_PACKAGE_TERMINAL_RENDERER=\"native\""),
+        "the software compatibility wrapper should package the native terminal renderer"
     );
 }

@@ -1,5 +1,6 @@
 //! Windows-specific non-client frame interop for hit-testing, snap layouts, and placement queries.
 
+use crate::AppWindow;
 use crate::app::window_state::WindowPlacementKind;
 #[cfg(target_os = "windows")]
 use crate::app::window_state::{Rect, classify_window_placement};
@@ -32,6 +33,25 @@ struct WindowFrameState {
 pub fn uses_native_maximize_button_hit_test(placement: WindowPlacementKind) -> bool {
     let _ = placement;
     false
+}
+
+pub fn resolve_host_window_hwnd(window: &AppWindow) -> Option<isize> {
+    #[cfg(target_os = "windows")]
+    {
+        use slint::winit_030::WinitWindowAccessor;
+
+        let mut hwnd = None;
+        let _ = window.window().with_winit_window(|winit_window| {
+            hwnd = hwnd_from_winit_window(winit_window).map(|value| value as isize);
+        });
+        hwnd
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        None
+    }
 }
 
 pub fn point_hits_outer_resize_band(

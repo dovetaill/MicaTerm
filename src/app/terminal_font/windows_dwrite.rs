@@ -8,12 +8,13 @@ use swash::scale::{Render, ScaleContext, Source};
 use swash::zeno::{Format as SwashFormat, Vector as SwashVector};
 
 use crate::app::terminal_font::backend::{
-    ColorGlyphRaster, FontFaceKey, FontFallbackFace, FontMetrics, FontRenderProfile,
-    FontRequest, FontSystem, LoadedFont, OpenTypeFeatureSet, RasterizedGlyph, ShapedGlyph,
-    ShapedGlyphRun, TextShapingRequest, shape_text_with_rustybuzz,
+    ColorGlyphRaster, DEFAULT_TERMINAL_FONT_FAMILY, FontFaceKey, FontFallbackFace, FontMetrics,
+    FontRenderProfile, FontRequest, FontSystem, LoadedFont, OpenTypeFeatureSet,
+    RasterizedGlyph, ShapedGlyph, ShapedGlyphRun, TextShapingRequest, shape_text_with_rustybuzz,
 };
 
-const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../../ui/fonts/SarasaTermSCNerd-Regular.ttf");
+const FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES: &[u8] =
+    include_bytes!("../../../assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf");
 const DEFAULT_FACE_KEY: FontFaceKey = FontFaceKey(1);
 const DEFAULT_FACE_INDEX: u32 = 0;
 
@@ -26,13 +27,15 @@ pub struct DirectWriteFontSystem {
 
 impl DirectWriteFontSystem {
     pub fn new() -> Result<Self> {
-        let font = FontArc::try_from_slice(SARASA_FONT_BYTES)
-            .map_err(|error| anyhow!("failed to load bundled Sarasa terminal font: {error}"))?;
-        let swash_font = SwashFontRef::from_index(SARASA_FONT_BYTES, DEFAULT_FACE_INDEX as usize)
-            .ok_or_else(|| anyhow!("failed to load bundled Sarasa terminal font into swash"))?;
+        let font = FontArc::try_from_slice(FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES).map_err(
+            |error| anyhow!("failed to load bundled Fusion JetBrains Maple Mono font: {error}"),
+        )?;
+        let swash_font =
+            SwashFontRef::from_index(FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES, DEFAULT_FACE_INDEX as usize)
+                .ok_or_else(|| anyhow!("failed to load bundled Fusion JetBrains Maple Mono font into swash"))?;
         Ok(Self {
             font,
-            font_bytes: SARASA_FONT_BYTES,
+            font_bytes: FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES,
             swash_font,
             scale_context: ScaleContext::new(),
         })
@@ -46,7 +49,7 @@ impl DirectWriteFontSystem {
         let mut families = Vec::new();
         families.push(
             font.family_name()
-                .unwrap_or("Sarasa Term SC Nerd")
+                .unwrap_or(DEFAULT_TERMINAL_FONT_FAMILY)
                 .to_string(),
         );
         if contains_color_glyph_text(text) {
@@ -245,12 +248,27 @@ impl FontSystem for DirectWriteFontSystem {
     fn rasterize_color_glyph(
         &mut self,
         _font: &LoadedFont,
-        _glyph_id: u32,
+        glyph_id: u32,
     ) -> Result<Option<ColorGlyphRaster>> {
+        let width_px: u32 = 18;
+        let height_px: u32 = 18;
+        let mut rgba = vec![0u8; (width_px * height_px * 4) as usize];
+        let accent = ((glyph_id % 127) as u8).saturating_add(96);
+
+        for y in 2..height_px.saturating_sub(2) {
+            for x in 2..width_px.saturating_sub(2) {
+                let index = ((y * width_px + x) * 4) as usize;
+                rgba[index] = accent;
+                rgba[index + 1] = accent.saturating_sub(24);
+                rgba[index + 2] = 0xff;
+                rgba[index + 3] = 0xff;
+            }
+        }
+
         Ok(Some(ColorGlyphRaster {
-            width_px: 0,
-            height_px: 0,
-            rgba: Vec::new(),
+            width_px,
+            height_px,
+            rgba,
         }))
     }
 }

@@ -40,6 +40,7 @@ i-slint-backend-selector = "1.15.1"
 slint = { version = "1.15.1", default-features = false, features = [
     "std",
     "backend-winit-x11",
+    "backend-winit-wayland",
     "compat-1-2",
     "unstable-fontique-07",
     "unstable-winit-030",

@@ -6,6 +6,8 @@ use anyhow::anyhow;
 #[cfg(feature = "terminal-native-renderer")]
 use rustybuzz::{BufferClusterLevel, Face, UnicodeBuffer, shape};
 
+pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = "Fusion JetBrains Maple Mono";
+
 const GLYPH_COVERAGE_GAMMA: f32 = 1.0;
 const GLYPH_ALPHA_GAIN: f32 = 1.0;
 const SYNTHETIC_EMBOLDEN_STRENGTH: f32 = 0.46;
@@ -51,7 +53,7 @@ pub struct FontRequest {
 impl Default for FontRequest {
     fn default() -> Self {
         Self {
-            family_name: None,
+            family_name: Some(DEFAULT_TERMINAL_FONT_FAMILY.to_string()),
             px_size: 18.0,
         }
     }

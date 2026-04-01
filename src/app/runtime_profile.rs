@@ -15,14 +15,12 @@ pub enum RendererMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalRenderMode {
-    Bitmap,
     Native,
 }
 
 impl TerminalRenderMode {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Bitmap => "bitmap",
             Self::Native => "native",
         }
     }
@@ -40,7 +38,7 @@ impl AppRuntimeProfile {
         Self {
             build_flavor: AppBuildFlavor::Development,
             renderer_mode: RendererMode::Software,
-            terminal_render_mode: TerminalRenderMode::Bitmap,
+            terminal_render_mode: TerminalRenderMode::Native,
         }
     }
 
@@ -48,25 +46,21 @@ impl AppRuntimeProfile {
         Self {
             build_flavor: AppBuildFlavor::WindowsMainline,
             renderer_mode: RendererMode::SkiaSoftware,
-            terminal_render_mode: TerminalRenderMode::Bitmap,
-        }
-    }
-
-    /// Preferred Windows shipping profile for packaged mainline builds.
-    pub fn mainline_native() -> Self {
-        Self {
-            build_flavor: AppBuildFlavor::WindowsMainline,
-            renderer_mode: RendererMode::SkiaSoftware,
             terminal_render_mode: TerminalRenderMode::Native,
         }
     }
 
-    /// Bitmap fallback-only compatibility profile for software packages.
+    /// Preferred native-only shipping profile for packaged mainline builds.
+    pub fn mainline_native() -> Self {
+        Self::mainline()
+    }
+
+    /// Transitional non-shipping software profile while native Linux terminal surfaces are still landing.
     pub fn software_compat() -> Self {
         Self {
             build_flavor: AppBuildFlavor::WindowsSoftwareCompat,
             renderer_mode: RendererMode::Software,
-            terminal_render_mode: TerminalRenderMode::Bitmap,
+            terminal_render_mode: TerminalRenderMode::Native,
         }
     }
 
@@ -76,12 +70,7 @@ impl AppRuntimeProfile {
             option_env!("MICA_TERM_PACKAGE_RENDERER"),
             option_env!("MICA_TERM_PACKAGE_TERMINAL_RENDERER"),
         ) {
-            (Some("windows-mainline"), Some("skia-software"), Some("native")) => {
-                Self::mainline_native()
-            }
-            (Some("windows-mainline"), Some("skia-software"), Some("bitmap") | None) => {
-                Self::mainline()
-            }
+            (Some("windows-mainline"), Some("skia-software"), _) => Self::mainline_native(),
             (Some("windows-software-compat"), Some("software"), _) => Self::software_compat(),
             _ => Self::development(),
         }
@@ -110,8 +99,12 @@ impl AppRuntimeProfile {
     }
 
     pub fn prefers_native_terminal_renderer(self) -> bool {
-        matches!(self.build_flavor, AppBuildFlavor::WindowsMainline)
-            || matches!(self.terminal_render_mode, TerminalRenderMode::Native)
+        matches!(
+            self.build_flavor,
+            AppBuildFlavor::Development
+                | AppBuildFlavor::WindowsMainline
+                | AppBuildFlavor::WindowsSoftwareCompat
+        ) && matches!(self.terminal_render_mode, TerminalRenderMode::Native)
     }
 
     pub fn terminal_render_mode_label(self) -> &'static str {
