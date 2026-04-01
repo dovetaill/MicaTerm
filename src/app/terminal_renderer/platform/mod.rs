@@ -5,6 +5,7 @@ pub mod wayland;
 pub mod windows;
 pub mod x11;
 
+#[cfg(not(target_os = "windows"))]
 use crate::AppWindow;
 
 pub use backend::{
@@ -17,21 +18,24 @@ pub use x11::X11NativeSurfaceBackend;
 pub fn create_platform_native_surface_backend() -> Box<dyn PlatformNativeSurfaceBackend> {
     #[cfg(target_os = "windows")]
     {
-        return Box::new(WindowsNativeSurfaceBackend::default());
+        Box::new(WindowsNativeSurfaceBackend::default())
     }
 
     #[cfg(target_os = "linux")]
     {
         if host_prefers_wayland_backend() {
-            return Box::new(WaylandNativeSurfaceBackend::default());
-        }
-
-        if host_prefers_x11_backend() {
-            return Box::new(X11NativeSurfaceBackend::default());
+            Box::new(WaylandNativeSurfaceBackend::default())
+        } else if host_prefers_x11_backend() {
+            Box::new(X11NativeSurfaceBackend::default())
+        } else {
+            Box::new(DetachedPlatformSurfaceBackend::default())
         }
     }
 
-    Box::new(DetachedPlatformSurfaceBackend::default())
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        Box::new(DetachedPlatformSurfaceBackend::default())
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -50,12 +54,14 @@ fn host_prefers_x11_backend() -> bool {
             .unwrap_or(false)
 }
 
+#[cfg(not(target_os = "windows"))]
 #[derive(Default)]
 struct DetachedPlatformSurfaceBackend {
     rect: NativeTerminalSurfaceRect,
     frame: Option<RetainedNativeTerminalSurfaceFrame>,
 }
 
+#[cfg(not(target_os = "windows"))]
 impl PlatformNativeSurfaceBackend for DetachedPlatformSurfaceBackend {
     fn attach(&mut self, _window: &AppWindow) -> anyhow::Result<()> {
         Ok(())
