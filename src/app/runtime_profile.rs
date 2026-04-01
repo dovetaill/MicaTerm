@@ -52,6 +52,7 @@ impl AppRuntimeProfile {
         }
     }
 
+    /// Preferred Windows shipping profile for packaged mainline builds.
     pub fn mainline_native() -> Self {
         Self {
             build_flavor: AppBuildFlavor::WindowsMainline,
@@ -60,6 +61,7 @@ impl AppRuntimeProfile {
         }
     }
 
+    /// Bitmap fallback-only compatibility profile for software packages.
     pub fn software_compat() -> Self {
         Self {
             build_flavor: AppBuildFlavor::WindowsSoftwareCompat,
@@ -105,6 +107,11 @@ impl AppRuntimeProfile {
 
     pub fn terminal_render_mode(self) -> TerminalRenderMode {
         self.terminal_render_mode
+    }
+
+    pub fn prefers_native_terminal_renderer(self) -> bool {
+        matches!(self.build_flavor, AppBuildFlavor::WindowsMainline)
+            || matches!(self.terminal_render_mode, TerminalRenderMode::Native)
     }
 
     pub fn terminal_render_mode_label(self) -> &'static str {

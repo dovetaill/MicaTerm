@@ -22,10 +22,36 @@ impl From<GlyphRasterRequest> for GlyphAtlasKey {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GlyphCacheKind {
+    Monochrome,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GlyphAtlasEntry {
     pub slot: u32,
     pub width_px: u32,
     pub height_px: u32,
+    pub cache_kind: GlyphCacheKind,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct ColorGlyphCacheKey {
+    pub font_key: LoadedFontKey,
+    pub glyph_id: u32,
+}
+
+impl ColorGlyphCacheKey {
+    pub fn new(font_key: LoadedFontKey, glyph_id: u32) -> Self {
+        Self { font_key, glyph_id }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ColorGlyphCacheEntry {
+    pub slot: u32,
+    pub width_px: u32,
+    pub height_px: u32,
+    pub rgba_bytes: usize,
 }
 
 #[derive(Default)]
@@ -49,6 +75,7 @@ impl GlyphAtlas {
             slot: self.next_slot,
             width_px: rasterized.width_px,
             height_px: rasterized.height_px,
+            cache_kind: GlyphCacheKind::Monochrome,
         };
         self.next_slot = self.next_slot.saturating_add(1);
         self.entries.insert(key, entry);

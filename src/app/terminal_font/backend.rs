@@ -174,6 +174,11 @@ impl LoadedFont {
     }
 
     #[cfg(feature = "terminal-native-renderer")]
+    pub fn family_name(&self) -> Option<&str> {
+        self.request.family_name.as_deref()
+    }
+
+    #[cfg(feature = "terminal-native-renderer")]
     pub fn map_coverage_to_alpha(&self, coverage: f32) -> u8 {
         map_glyph_coverage_to_alpha(coverage, self.render_profile())
     }
@@ -230,6 +235,76 @@ pub struct RasterizedGlyph {
     pub coverage: Vec<u8>,
 }
 
+#[cfg(feature = "terminal-native-renderer")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FontFallbackFace {
+    pub face_key: FontFaceKey,
+    pub family_name: String,
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+impl FontFallbackFace {
+    pub fn primary(font: &LoadedFont) -> Self {
+        Self {
+            face_key: font.face_key(),
+            family_name: font.family_name().unwrap_or("terminal-primary").to_string(),
+        }
+    }
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OpenTypeFeatureSet {
+    pub feature_tags: Vec<String>,
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+impl OpenTypeFeatureSet {
+    pub fn common_terminal_features() -> Self {
+        Self {
+            feature_tags: vec!["liga".to_string(), "calt".to_string()],
+        }
+    }
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TextShapingRequest {
+    pub text: String,
+    pub feature_set: OpenTypeFeatureSet,
+    pub allow_ligatures: bool,
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+impl TextShapingRequest {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            feature_set: OpenTypeFeatureSet::common_terminal_features(),
+            allow_ligatures: true,
+        }
+    }
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShapedGlyphRun {
+    pub text: String,
+    pub glyphs: Vec<ShapedGlyph>,
+    pub resolved_face: FontFallbackFace,
+    pub feature_set: OpenTypeFeatureSet,
+    pub allow_ligatures: bool,
+    pub has_color_glyphs: bool,
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ColorGlyphRaster {
+    pub width_px: u32,
+    pub height_px: u32,
+    pub rgba: Vec<u8>,
+}
+
 pub trait FontSystem {
     fn load_font(&mut self, request: &FontRequest) -> Result<LoadedFont>;
     #[cfg(feature = "terminal-native-renderer")]
@@ -241,6 +316,48 @@ pub trait FontSystem {
         glyph_id: u32,
         bold: bool,
     ) -> Result<RasterizedGlyph>;
+
+    #[cfg(feature = "terminal-native-renderer")]
+    fn discover_fallback_faces(
+        &mut self,
+        font: &LoadedFont,
+        text: &str,
+    ) -> Result<Vec<FontFallbackFace>> {
+        let _ = text;
+        Ok(vec![FontFallbackFace::primary(font)])
+    }
+
+    #[cfg(feature = "terminal-native-renderer")]
+    fn shape_text_runs(
+        &mut self,
+        font: &LoadedFont,
+        request: &TextShapingRequest,
+    ) -> Result<Vec<ShapedGlyphRun>> {
+        let resolved_face = self
+            .discover_fallback_faces(font, request.text.as_str())?
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| FontFallbackFace::primary(font));
+        let glyphs = self.shape_text(font, request.text.as_str())?;
+
+        Ok(vec![ShapedGlyphRun {
+            text: request.text.clone(),
+            glyphs,
+            resolved_face,
+            feature_set: request.feature_set.clone(),
+            allow_ligatures: request.allow_ligatures,
+            has_color_glyphs: false,
+        }])
+    }
+
+    #[cfg(feature = "terminal-native-renderer")]
+    fn rasterize_color_glyph(
+        &mut self,
+        _font: &LoadedFont,
+        _glyph_id: u32,
+    ) -> Result<Option<ColorGlyphRaster>> {
+        Ok(None)
+    }
 }
 
 #[cfg(feature = "terminal-native-renderer")]

@@ -74,8 +74,8 @@ use crate::app::terminal_atlas::TerminalAtlasSelection;
 #[cfg(all(target_os = "windows", feature = "terminal-native-renderer"))]
 use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_presenter::{
-    BitmapAtlasPresenter, NativeTerminalFrame, PresentedTerminalFrame, TerminalPresentationOptions,
-    TerminalPresenter,
+    BitmapAtlasPresenter, NativeCursorFrameState, NativeImePreviewOverlay, NativeTerminalFrame,
+    PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter,
 };
 use crate::app::terminal_renderer::{NativeTerminalSurface, NativeTerminalSurfaceRect};
 use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
@@ -3718,9 +3718,7 @@ where
 fn build_workspace_terminal_presenter(
     profile: AppRuntimeProfile,
 ) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)> {
-    if cfg!(target_os = "windows")
-        && matches!(profile.terminal_render_mode, TerminalRenderMode::Native)
-    {
+    if cfg!(target_os = "windows") && profile.prefers_native_terminal_renderer() {
         return Ok((
             build_native_terminal_presenter()?,
             TerminalRenderMode::Native,
@@ -3796,11 +3794,45 @@ fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerm
     window.set_workspace_session_native_frame_token(
         i32::try_from(frame.frame_token).unwrap_or(i32::MAX),
     );
+    let presentable_frame = frame.presentable_frame;
+    tracing::trace!(
+        target: "app.terminal",
+        frame_token = frame.frame_token,
+        shaped_rows = presentable_frame.shaped_row_count,
+        glyph_cache_entries = presentable_frame.renderer_stats.glyph_cache_entries,
+        selection_overlay_rects = presentable_frame.selection_overlay.rect_count,
+        underline_overlay_runs = presentable_frame.underline_overlay.run_count,
+        ime_preview_active = presentable_frame.ime_preview_overlay.active,
+        cursor_visible = presentable_frame.cursor.visible,
+        "presenting retained native terminal frame state"
+    );
+    let rect = workspace_native_terminal_rect(window);
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
         if let Some(surface) = surface.borrow().as_ref() {
-            surface.present(frame);
+            surface.update_terminal_rect(rect);
+            surface.update_frame_state(frame);
         }
     });
+}
+
+fn sync_workspace_session_cursor_from_native_frame(
+    window: &AppWindow,
+    cursor: NativeCursorFrameState,
+) {
+    window.set_workspace_session_cursor_row(i32::try_from(cursor.row).unwrap_or(i32::MAX));
+    window.set_workspace_session_cursor_col(i32::try_from(cursor.col).unwrap_or(i32::MAX));
+    window.set_workspace_session_cursor_visible(cursor.visible);
+    window.set_workspace_session_cursor_blinking(cursor.blinking);
+    window.set_workspace_session_cursor_shape(
+        match cursor.shape {
+            crate::app::ssh::runtime::TerminalCursorShape::Block => "block",
+            crate::app::ssh::runtime::TerminalCursorShape::Underline => "underline",
+            crate::app::ssh::runtime::TerminalCursorShape::Bar => "bar",
+        }
+        .into(),
+    );
+    window.set_workspace_session_cursor_fg(slint_color_from_rgba(cursor.fg_rgba));
+    window.set_workspace_session_cursor_bg(slint_color_from_rgba(cursor.bg_rgba));
 }
 
 fn clear_workspace_native_terminal_frame(window: &AppWindow) {
@@ -4006,6 +4038,7 @@ fn sync_workspace_session_state_with_manager(
     if let Some(surface) = state.active_workspace_terminal_surface() {
         let selection = active_workspace_terminal_selection(window);
         let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
+        let mut native_cursor = None;
         WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
             let mut presenter = presenter.borrow_mut();
             presenter.set_raster_scale(window.window().scale_factor());
@@ -4014,6 +4047,7 @@ fn sync_workspace_session_state_with_manager(
                 TerminalPresentationOptions {
                     selection,
                     selection_overlay_rgba,
+                    ime_preview_overlay: NativeImePreviewOverlay::default(),
                 },
             ) {
                 Ok(PresentedTerminalFrame::Bitmap(frame)) => {
@@ -4026,6 +4060,8 @@ fn sync_workspace_session_state_with_manager(
                     window.set_workspace_session_cell_height(frame.cell_height_px as f32);
                 }
                 Ok(PresentedTerminalFrame::Native(frame)) => {
+                    let presentable_frame = frame.presentable_frame;
+                    native_cursor = Some(presentable_frame.cursor);
                     window.set_workspace_session_render_mode(
                         TerminalRenderMode::Native.as_str().into(),
                     );
@@ -4051,24 +4087,28 @@ fn sync_workspace_session_state_with_manager(
         });
         window.set_workspace_session_rows(i32::try_from(surface.rows).unwrap_or(i32::MAX));
         window.set_workspace_session_cols(i32::try_from(surface.cols).unwrap_or(i32::MAX));
-        window.set_workspace_session_cursor_row(
-            i32::try_from(surface.cursor.row).unwrap_or(i32::MAX),
-        );
-        window.set_workspace_session_cursor_col(
-            i32::try_from(surface.cursor.col).unwrap_or(i32::MAX),
-        );
-        window.set_workspace_session_cursor_visible(surface.cursor.visible);
-        window.set_workspace_session_cursor_blinking(surface.cursor.blinking);
-        window.set_workspace_session_cursor_shape(
-            match surface.cursor.shape {
-                crate::app::ssh::runtime::TerminalCursorShape::Block => "block",
-                crate::app::ssh::runtime::TerminalCursorShape::Underline => "underline",
-                crate::app::ssh::runtime::TerminalCursorShape::Bar => "bar",
-            }
-            .into(),
-        );
-        window.set_workspace_session_cursor_fg(slint_color_from_rgba(surface.cursor.fg_rgba));
-        window.set_workspace_session_cursor_bg(slint_color_from_rgba(surface.cursor.bg_rgba));
+        if let Some(cursor) = native_cursor {
+            sync_workspace_session_cursor_from_native_frame(window, cursor);
+        } else {
+            window.set_workspace_session_cursor_row(
+                i32::try_from(surface.cursor.row).unwrap_or(i32::MAX),
+            );
+            window.set_workspace_session_cursor_col(
+                i32::try_from(surface.cursor.col).unwrap_or(i32::MAX),
+            );
+            window.set_workspace_session_cursor_visible(surface.cursor.visible);
+            window.set_workspace_session_cursor_blinking(surface.cursor.blinking);
+            window.set_workspace_session_cursor_shape(
+                match surface.cursor.shape {
+                    crate::app::ssh::runtime::TerminalCursorShape::Block => "block",
+                    crate::app::ssh::runtime::TerminalCursorShape::Underline => "underline",
+                    crate::app::ssh::runtime::TerminalCursorShape::Bar => "bar",
+                }
+                .into(),
+            );
+            window.set_workspace_session_cursor_fg(slint_color_from_rgba(surface.cursor.fg_rgba));
+            window.set_workspace_session_cursor_bg(slint_color_from_rgba(surface.cursor.bg_rgba));
+        }
         window.set_workspace_session_default_fg(slint_color_from_rgba(surface.default_fg_rgba));
         window.set_workspace_session_default_bg(slint_color_from_rgba(surface.default_bg_rgba));
         window.set_workspace_session_mouse_grabbed(surface.mouse_grabbed);

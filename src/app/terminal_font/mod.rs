@@ -11,7 +11,10 @@ pub use backend::{
     LoadedFontKey,
 };
 #[cfg(feature = "terminal-native-renderer")]
-pub use backend::{GlyphRasterRequest, RasterizedGlyph, ShapedGlyph};
+pub use backend::{
+    ColorGlyphRaster, FontFallbackFace, GlyphRasterRequest, OpenTypeFeatureSet, RasterizedGlyph,
+    ShapedGlyph, ShapedGlyphRun, TextShapingRequest,
+};
 pub use wezterm_font::WeztermFontSystem;
 #[cfg(feature = "terminal-native-renderer")]
 pub use windows_dwrite::DirectWriteFontSystem;

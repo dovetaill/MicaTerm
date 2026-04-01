@@ -8,6 +8,8 @@ pub mod wgpu_renderer;
 
 #[cfg(feature = "terminal-native-renderer")]
 pub use atlas::{GlyphAtlas, GlyphAtlasEntry, GlyphAtlasKey};
-pub use native_surface::{NativeTerminalSurface, NativeTerminalSurfaceRect};
+pub use native_surface::{
+    NativeTerminalSurface, NativeTerminalSurfaceRect, RetainedNativeTerminalSurfaceFrame,
+};
 #[cfg(feature = "terminal-native-renderer")]
 pub use wgpu_renderer::{PreparedNativeFrame, ShapedTerminalFrame, WgpuTerminalRenderer};

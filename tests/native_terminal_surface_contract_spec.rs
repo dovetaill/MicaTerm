@@ -86,4 +86,74 @@ fn runtime_profile_source_exposes_terminal_render_mode_contract() {
         runtime_profile_source.contains("TerminalRenderMode::Native"),
         "runtime profile should expose a native terminal render mode"
     );
+    assert!(
+        runtime_profile_source.contains("Preferred Windows shipping profile"),
+        "runtime profile docs should mark the native-first Windows mainline profile as the preferred shipping path"
+    );
+    assert!(
+        runtime_profile_source.contains("fallback-only compatibility profile"),
+        "runtime profile docs should keep the bitmap software compatibility package documented as fallback-only"
+    );
+    assert!(
+        runtime_profile_source.contains("pub fn mainline_native() -> Self"),
+        "runtime profile should keep an explicit native-first Windows mainline constructor"
+    );
+    assert!(
+        runtime_profile_source.contains("pub fn prefers_native_terminal_renderer(self) -> bool"),
+        "runtime profile should expose an explicit native-first preference helper for Windows presenter installation"
+    );
+}
+
+#[test]
+fn native_surface_source_exposes_present_bridge_contract() {
+    let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
+        .expect("read native surface");
+    let renderer_mod_source = fs::read_to_string("src/app/terminal_renderer/mod.rs")
+        .expect("read terminal renderer mod");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        native_surface_source.contains("RetainedNativeTerminalSurfaceFrame"),
+        "native surface bridge should define a retained native frame payload contract"
+    );
+    assert!(
+        native_surface_source.contains("retained_frame: Option<RetainedNativeTerminalSurfaceFrame>"),
+        "native surface bridge should retain full frame state instead of storing only a frame token"
+    );
+    assert!(
+        native_surface_source.contains("pub fn update_frame_state(&self, frame: NativeTerminalFrame)"),
+        "native surface bridge should expose a retained frame-state update entrypoint"
+    );
+    assert!(
+        native_surface_source.contains("fn draw_retained_frame(state: &mut NativeTerminalSurfaceState)"),
+        "native surface bridge should expose an explicit draw hook for retained native frames"
+    );
+    assert!(
+        native_surface_source.contains("RenderingState::BeforeRendering"),
+        "rendering notifier should reach the retained-frame draw hook during Slint rendering"
+    );
+    assert!(
+        renderer_mod_source.contains("RetainedNativeTerminalSurfaceFrame"),
+        "terminal renderer module should re-export the retained native surface frame contract"
+    );
+    assert!(
+        bootstrap_source.contains("let rect = workspace_native_terminal_rect(window);"),
+        "bootstrap should materialize geometry before updating the native surface bridge"
+    );
+    assert!(
+        bootstrap_source.contains("surface.update_terminal_rect(rect);"),
+        "bootstrap should keep updating the native surface geometry when presenting native frames"
+    );
+    assert!(
+        bootstrap_source.contains("surface.update_frame_state(frame);"),
+        "bootstrap should update the native surface bridge with retained frame state, not just a token"
+    );
+    assert!(
+        bootstrap_source.contains("presentable_frame.selection_overlay"),
+        "native surface host should keep selection overlay payloads attached to the retained native frame state"
+    );
+    assert!(
+        bootstrap_source.contains("presentable_frame.ime_preview_overlay"),
+        "native surface host should keep IME preview overlay payloads attached to the retained native frame state"
+    );
 }

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::fs;
 use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
 use mica_term::app::terminal_atlas::{ClusterSpriteKind, TerminalAtlasRenderer};
 use mica_term::app::terminal_emoji::{
@@ -225,6 +226,31 @@ impl EmojiRasterizerBackend for FakeAtlasEmojiBackend {
             rgba,
         })
     }
+}
+
+#[test]
+fn native_renderer_color_glyph_contract_uses_separate_cache_state() {
+    let atlas_source =
+        fs::read_to_string("src/app/terminal_renderer/atlas.rs").expect("read renderer atlas");
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read native renderer");
+
+    assert!(
+        atlas_source.contains("GlyphCacheKind::Monochrome"),
+        "native atlas contract should reserve the atlas path for monochrome glyph entries"
+    );
+    assert!(
+        renderer_source.contains("color_glyph_cache"),
+        "native renderer should keep color glyphs in a dedicated cache state instead of the monochrome atlas"
+    );
+    assert!(
+        renderer_source.contains("rasterize_color_glyph"),
+        "renderer preparation should call the explicit color glyph raster contract for emoji runs"
+    );
+    assert!(
+        renderer_source.contains("color_glyphs_prepared"),
+        "prepared frame metadata should count color glyph work separately from monochrome atlas uploads"
+    );
 }
 
 #[test]

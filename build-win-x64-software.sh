@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Thin wrapper around the Windows x64 software compatibility package used by CI and manual packaging.
+# Explicit fallback-only bitmap compatibility path for Windows packaging.
 
 set -euo pipefail
 
@@ -10,11 +11,13 @@ usage() {
 Usage: ./build-win-x64-software.sh [--help]
 
 Windows software compatibility wrapper.
+Fallback-only bitmap compatibility path.
 
 Default target:
   x86_64-pc-windows-gnu
   requires Linux host tools: x86_64-w64-mingw32-gcc and nasm
   packaged renderer: winit-software
+  packaged terminal renderer: bitmap fallback-only
 
 Override example:
   TARGET=x86_64-pc-windows-msvc ./build-win-x64-software.sh

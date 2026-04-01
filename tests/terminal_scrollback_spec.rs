@@ -86,6 +86,9 @@ fn remote_output_keeps_following_when_viewport_is_at_bottom() {
 fn renderer_migration_docs_describe_windows_native_status_and_bitmap_fallback() {
     let readme = fs::read_to_string("readme.md").expect("read readme");
     let verification = fs::read_to_string("verification.md").expect("read verification");
+    let mainline_build = fs::read_to_string("build-win-x64.sh").expect("read mainline build script");
+    let software_build =
+        fs::read_to_string("build-win-x64-software.sh").expect("read software build script");
 
     assert!(
         readme.contains("Windows-first native renderer"),
@@ -102,5 +105,21 @@ fn renderer_migration_docs_describe_windows_native_status_and_bitmap_fallback() 
     assert!(
         verification.contains("Windows-first native renderer"),
         "verification notes should include the Windows-first native renderer verification status"
+    );
+    assert!(
+        mainline_build.contains("native-first terminal renderer path"),
+        "the primary Windows build wrapper should document the native renderer as the preferred shipping path"
+    );
+    assert!(
+        mainline_build.contains("MICA_TERM_PACKAGE_TERMINAL_RENDERER=\"native\""),
+        "the primary Windows build wrapper should package the native terminal renderer"
+    );
+    assert!(
+        software_build.contains("fallback-only bitmap compatibility path"),
+        "the software compatibility wrapper should describe itself as the fallback-only bitmap path"
+    );
+    assert!(
+        software_build.contains("MICA_TERM_PACKAGE_TERMINAL_RENDERER=\"bitmap\""),
+        "the software compatibility wrapper should keep packaging the bitmap terminal renderer"
     );
 }

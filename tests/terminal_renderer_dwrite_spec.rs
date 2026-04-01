@@ -26,6 +26,77 @@ fn windows_dwrite_font_backend_source_exposes_rasterization_contract() {
 }
 
 #[test]
+fn windows_text_engine_source_exposes_fallback_and_feature_contracts() {
+    let font_backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let font_mod_source =
+        fs::read_to_string("src/app/terminal_font/mod.rs").expect("read font mod");
+    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
+        .expect("read windows dwrite font backend");
+    let shaper_source =
+        fs::read_to_string("src/app/terminal_layout/shaper.rs").expect("read shaper");
+
+    assert!(
+        font_backend_source.contains("pub struct FontFallbackFace"),
+        "font backend should define a fallback-face contract for Windows text fallback discovery"
+    );
+    assert!(
+        font_backend_source.contains("pub struct OpenTypeFeatureSet"),
+        "font backend should expose an OpenType feature configuration contract"
+    );
+    assert!(
+        font_backend_source.contains("pub struct ColorGlyphRaster"),
+        "font backend should define a color glyph raster contract"
+    );
+    assert!(
+        font_backend_source.contains("fn discover_fallback_faces("),
+        "font backend should expose fallback chain discovery through the shared font-system trait"
+    );
+    assert!(
+        font_backend_source.contains("fn shape_text_runs("),
+        "font backend should expose glyph-run shaping that is richer than a single bundled-font output"
+    );
+    assert!(
+        font_backend_source.contains("fn rasterize_color_glyph("),
+        "font backend should expose an explicit color glyph raster contract"
+    );
+    assert!(
+        font_mod_source.contains("FontFallbackFace")
+            && font_mod_source.contains("OpenTypeFeatureSet")
+            && font_mod_source.contains("ShapedGlyphRun"),
+        "terminal font module should re-export the richer Windows text engine contracts"
+    );
+    assert!(
+        dwrite_source.contains("discover_fallback_chain"),
+        "Windows text backend should expose a fallback-chain discovery helper"
+    );
+    assert!(
+        dwrite_source.contains("OpenTypeFeatureSet"),
+        "Windows text backend should accept OpenType feature configuration"
+    );
+    assert!(
+        dwrite_source.contains("allow_ligatures"),
+        "Windows text backend should make ligature-aware shaping explicit in its shaping contract"
+    );
+    assert!(
+        dwrite_source.contains("has_color_glyphs"),
+        "Windows text backend should flag color glyph runs explicitly"
+    );
+    assert!(
+        shaper_source.contains("TextShapingRequest"),
+        "terminal shaper should issue structured shaping requests instead of raw text-only calls"
+    );
+    assert!(
+        shaper_source.contains("shape_text_runs"),
+        "terminal shaper should accept the richer glyph-run shaping contract"
+    );
+    assert!(
+        shaper_source.contains("resolved_face"),
+        "terminal glyph runs should record which fallback face resolved each run"
+    );
+}
+
+#[test]
 fn native_renderer_sources_expose_atlas_and_prepare_contracts() {
     let atlas_source =
         fs::read_to_string("src/app/terminal_renderer/atlas.rs").expect("read renderer atlas");
@@ -51,6 +122,30 @@ fn native_renderer_sources_expose_atlas_and_prepare_contracts() {
     assert!(
         renderer_source.contains("glyph_cache_entries"),
         "prepared native frames should report glyph cache entry counts for reuse checks"
+    );
+    assert!(
+        atlas_source.contains("pub enum GlyphCacheKind"),
+        "native glyph atlas should tag monochrome atlas entries explicitly"
+    );
+    assert!(
+        atlas_source.contains("cache_kind: GlyphCacheKind"),
+        "atlas entries should record whether they belong to the monochrome atlas contract"
+    );
+    assert!(
+        renderer_source.contains("color_glyph_cache"),
+        "native renderer should keep a separate cache for color glyph resources"
+    );
+    assert!(
+        renderer_source.contains("mono_glyph_cache_entries"),
+        "prepared native frames should report monochrome atlas entry counts separately"
+    );
+    assert!(
+        renderer_source.contains("color_glyph_cache_entries"),
+        "prepared native frames should report color glyph cache counts separately"
+    );
+    assert!(
+        renderer_source.contains("run.has_color_glyphs"),
+        "renderer preparation should branch explicitly between monochrome atlas and color glyph cache paths"
     );
 }
 
@@ -129,6 +224,142 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         "shared glyph raster settings should include a light synthetic embolden pass to thicken regular-weight strokes"
     );
     assert!(font_backend_source.contains("px_size: 18.0,"));
+}
+
+#[test]
+fn terminal_presenter_threads_presentable_native_frame_state() {
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read native renderer");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        presenter_source.contains("pub struct PresentableNativeFrame"),
+        "native presenter should define a retained presentable native frame payload"
+    );
+    assert!(
+        presenter_source.contains("pub presentable_frame: PresentableNativeFrame"),
+        "native terminal frames should carry the retained presentable frame payload instead of only a frame token"
+    );
+    assert!(
+        presenter_source.contains("NativeCursorFrameState"),
+        "native terminal frames should thread cursor metadata into the presentable frame payload"
+    );
+    assert!(
+        presenter_source.contains("NativeSelectionFrameState"),
+        "native terminal frames should thread selection metadata into the presentable frame payload"
+    );
+    assert!(
+        presenter_source.contains("underline_run_count"),
+        "native terminal frames should thread underline metadata into the presentable frame payload"
+    );
+    assert!(
+        renderer_source.contains("shaped_row_count"),
+        "prepared native frames should retain shaped-row metadata from renderer preparation"
+    );
+    assert!(
+        renderer_source.contains("glyph_run_count"),
+        "prepared native frames should retain glyph-run metadata from renderer preparation"
+    );
+    assert!(
+        renderer_source.contains("pub struct PreparedNativeRendererStats"),
+        "renderer preparation should expose a structured renderer-stats payload for presentable native frames"
+    );
+    assert!(
+        bootstrap_source.contains("frame.presentable_frame"),
+        "bootstrap should thread the presentable native frame state instead of only consuming the frame token"
+    );
+    assert!(
+        bootstrap_source.contains("surface.update_frame_state(frame);"),
+        "bootstrap should still hand the full native frame state to the retained native surface bridge"
+    );
+}
+
+#[test]
+fn terminal_presenter_threads_native_overlay_render_contracts() {
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read native renderer");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        presenter_source.contains("pub struct NativeSelectionOverlay"),
+        "native presenter should define an explicit selection overlay payload instead of leaving selection state implicit in the bitmap path"
+    );
+    assert!(
+        presenter_source.contains("pub rect_count: usize"),
+        "selection overlays should describe how many grid-aligned rectangles the native renderer should draw"
+    );
+    assert!(
+        presenter_source.contains("pub struct NativeUnderlineOverlay"),
+        "native presenter should define an explicit underline overlay payload"
+    );
+    assert!(
+        presenter_source.contains("pub struct NativeImePreviewOverlay"),
+        "native presenter should define an explicit IME preview overlay payload"
+    );
+    assert!(
+        presenter_source.contains("pub selection_overlay: NativeSelectionOverlay"),
+        "presentable native frames should carry selection overlay data"
+    );
+    assert!(
+        presenter_source.contains("pub underline_overlay: NativeUnderlineOverlay"),
+        "presentable native frames should carry underline overlay data"
+    );
+    assert!(
+        presenter_source.contains("pub ime_preview_overlay: NativeImePreviewOverlay"),
+        "presentable native frames should carry IME preview overlay data"
+    );
+    assert!(
+        renderer_source.contains("pub struct PreparedUnderlineOverlay"),
+        "renderer preparation should expose an explicit underline overlay contract for native frame payload assembly"
+    );
+    assert!(
+        renderer_source.contains("pub underline_overlay: PreparedUnderlineOverlay"),
+        "prepared native frames should carry underline overlay metadata for presenter assembly"
+    );
+    assert!(
+        bootstrap_source.contains("presentable_frame.cursor"),
+        "bootstrap should consume cursor state from the presentable native frame payload when the native path is active"
+    );
+    assert!(
+        bootstrap_source.contains("presentable_frame.selection_overlay"),
+        "bootstrap should keep the native selection overlay payload alongside the retained frame state"
+    );
+    assert!(
+        bootstrap_source.contains("presentable_frame.ime_preview_overlay"),
+        "bootstrap should keep the native IME preview overlay payload alongside the retained frame state"
+    );
+}
+
+#[test]
+fn windows_presenter_installation_prefers_native_with_bitmap_fallback() {
+    let runtime_profile_source =
+        fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        runtime_profile_source.contains("pub fn prefers_native_terminal_renderer(self) -> bool"),
+        "runtime profile should expose a helper that marks Windows mainline builds as native-first without removing the bitmap mode contract"
+    );
+    assert!(
+        runtime_profile_source.contains("AppBuildFlavor::WindowsMainline"),
+        "runtime profile should still distinguish the Windows mainline build flavor when deciding native-first terminal installation"
+    );
+    assert!(
+        bootstrap_source.contains("profile.prefers_native_terminal_renderer()"),
+        "workspace terminal presenter installation should consult the runtime-profile native preference helper instead of only looking at the raw terminal render mode"
+    );
+    assert!(
+        bootstrap_source.contains("build_native_terminal_presenter()?"),
+        "Windows presenter installation should attempt to construct the native presenter before accepting bitmap fallback"
+    );
+    assert!(
+        bootstrap_source.contains("falling back to bitmap presenter"),
+        "bitmap presenter should remain available only as the fallback path when native presenter construction fails"
+    );
 }
 
 #[test]

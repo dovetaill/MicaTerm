@@ -3,7 +3,7 @@
 use anyhow::Result;
 use slint::Image;
 
-use crate::app::ssh::runtime::TerminalSurfaceState;
+use crate::app::ssh::runtime::{TerminalCursorShape, TerminalSurfaceState};
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_font::{DirectWriteFontSystem, FontRequest, FontSystem, LoadedFont};
@@ -27,16 +27,90 @@ pub struct BitmapTerminalFrame {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeCursorFrameState {
+    pub row: u32,
+    pub col: u32,
+    pub visible: bool,
+    pub blinking: bool,
+    pub shape: TerminalCursorShape,
+    pub fg_rgba: u32,
+    pub bg_rgba: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeSelectionFrameState {
+    pub active: bool,
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+    pub overlay_rgba: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeSelectionOverlay {
+    pub active: bool,
+    pub rect_count: usize,
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+    pub overlay_rgba: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeUnderlineOverlay {
+    pub visible: bool,
+    pub run_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NativeImePreviewOverlay {
+    pub active: bool,
+    pub row: u32,
+    pub start_col: u32,
+    pub end_col: u32,
+    pub cursor_col: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeRendererFrameStats {
+    pub glyph_cache_entries: usize,
+    pub mono_glyph_cache_entries: usize,
+    pub color_glyph_cache_entries: usize,
+    pub monochrome_glyphs_prepared: usize,
+    pub color_glyphs_prepared: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PresentableNativeFrame {
+    pub seqno: u64,
+    pub shaped_row_count: usize,
+    pub glyph_run_count: usize,
+    pub glyph_count: usize,
+    pub dirty_row_count: usize,
+    pub underline_run_count: usize,
+    pub cursor: NativeCursorFrameState,
+    pub selection: NativeSelectionFrameState,
+    pub selection_overlay: NativeSelectionOverlay,
+    pub underline_overlay: NativeUnderlineOverlay,
+    pub ime_preview_overlay: NativeImePreviewOverlay,
+    pub renderer_stats: NativeRendererFrameStats,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativeTerminalFrame {
     pub frame_token: u64,
     pub cell_width_px: u32,
     pub cell_height_px: u32,
+    pub presentable_frame: PresentableNativeFrame,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TerminalPresentationOptions {
     pub selection: Option<TerminalAtlasSelection>,
     pub selection_overlay_rgba: u32,
+    pub ime_preview_overlay: NativeImePreviewOverlay,
 }
 
 pub trait TerminalPresenter {
@@ -128,7 +202,7 @@ impl TerminalPresenter for WindowsNativePresenter {
     fn present(
         &mut self,
         surface: &TerminalSurfaceState,
-        _options: TerminalPresentationOptions,
+        options: TerminalPresentationOptions,
     ) -> Result<PresentedTerminalFrame> {
         let frame_model = TerminalModelFrame::from_surface(surface, self.previous_frame.as_ref());
         let rows = frame_model
@@ -147,18 +221,80 @@ impl TerminalPresenter for WindowsNativePresenter {
             },
             &mut self.font_system,
         )?;
+        let selection = options.selection;
+        let selection_state = match selection {
+            Some(selection) => NativeSelectionFrameState {
+                active: true,
+                start_row: selection.start_row,
+                start_col: selection.start_col,
+                end_row: selection.end_row,
+                end_col: selection.end_col,
+                overlay_rgba: options.selection_overlay_rgba,
+            },
+            None => NativeSelectionFrameState::default(),
+        };
+        let selection_overlay = match selection {
+            Some(selection) => NativeSelectionOverlay {
+                active: true,
+                rect_count: selection_overlay_rect_count(selection),
+                start_row: selection.start_row,
+                start_col: selection.start_col,
+                end_row: selection.end_row,
+                end_col: selection.end_col,
+                overlay_rgba: options.selection_overlay_rgba,
+            },
+            None => NativeSelectionOverlay::default(),
+        };
+        let presentable_frame = PresentableNativeFrame {
+            seqno: frame_model.seqno as u64,
+            shaped_row_count: prepared.shaped_row_count,
+            glyph_run_count: prepared.glyph_run_count,
+            glyph_count: prepared.glyph_count,
+            dirty_row_count: frame_model.dirty_rows.len(),
+            underline_run_count: prepared.underline_run_count,
+            cursor: NativeCursorFrameState {
+                row: frame_model.cursor.row,
+                col: frame_model.cursor.col,
+                visible: frame_model.cursor.visible,
+                blinking: frame_model.cursor.blinking,
+                shape: frame_model.cursor.shape,
+                fg_rgba: frame_model.cursor.fg_rgba,
+                bg_rgba: frame_model.cursor.bg_rgba,
+            },
+            selection: selection_state,
+            selection_overlay,
+            underline_overlay: NativeUnderlineOverlay {
+                visible: prepared.underline_overlay.visible,
+                run_count: prepared.underline_overlay.run_count,
+            },
+            ime_preview_overlay: options.ime_preview_overlay,
+            renderer_stats: NativeRendererFrameStats {
+                glyph_cache_entries: prepared.renderer_stats.glyph_cache_entries,
+                mono_glyph_cache_entries: prepared.renderer_stats.mono_glyph_cache_entries,
+                color_glyph_cache_entries: prepared.renderer_stats.color_glyph_cache_entries,
+                monochrome_glyphs_prepared: prepared.renderer_stats.monochrome_glyphs_prepared,
+                color_glyphs_prepared: prepared.renderer_stats.color_glyphs_prepared,
+            },
+        };
         self.previous_frame = Some(frame_model);
 
         Ok(PresentedTerminalFrame::Native(NativeTerminalFrame {
             frame_token: prepared.frame_token,
             cell_width_px: prepared.cell_width_px,
             cell_height_px: prepared.cell_height_px,
+            presentable_frame,
         }))
     }
 
     fn default_cell_size(&self) -> (u32, u32) {
         self.loaded_font.cell_size_px()
     }
+}
+
+fn selection_overlay_rect_count(selection: TerminalAtlasSelection) -> usize {
+    usize::try_from(selection.end_row.saturating_sub(selection.start_row))
+        .unwrap_or(usize::MAX)
+        .saturating_add(1)
 }
 
 fn model_frame_to_surface(model: &TerminalModelFrame) -> TerminalSurfaceState {

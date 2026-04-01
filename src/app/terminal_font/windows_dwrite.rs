@@ -8,8 +8,9 @@ use swash::scale::{Render, ScaleContext, Source};
 use swash::zeno::{Format as SwashFormat, Vector as SwashVector};
 
 use crate::app::terminal_font::backend::{
-    FontFaceKey, FontMetrics, FontRenderProfile, FontRequest, FontSystem, LoadedFont,
-    RasterizedGlyph, ShapedGlyph, shape_text_with_rustybuzz,
+    ColorGlyphRaster, FontFaceKey, FontFallbackFace, FontMetrics, FontRenderProfile,
+    FontRequest, FontSystem, LoadedFont, OpenTypeFeatureSet, RasterizedGlyph, ShapedGlyph,
+    ShapedGlyphRun, TextShapingRequest, shape_text_with_rustybuzz,
 };
 
 const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../../ui/fonts/SarasaTermSCNerd-Regular.ttf");
@@ -35,6 +36,24 @@ impl DirectWriteFontSystem {
             swash_font,
             scale_context: ScaleContext::new(),
         })
+    }
+
+    pub fn default_feature_set(&self) -> OpenTypeFeatureSet {
+        OpenTypeFeatureSet::common_terminal_features()
+    }
+
+    pub fn discover_fallback_chain(&self, font: &LoadedFont, text: &str) -> Vec<String> {
+        let mut families = Vec::new();
+        families.push(
+            font.family_name()
+                .unwrap_or("Sarasa Term SC Nerd")
+                .to_string(),
+        );
+        if contains_color_glyph_text(text) {
+            families.push("Segoe UI Emoji".to_string());
+        }
+        families.push("Segoe UI Symbol".to_string());
+        families
     }
 
     pub fn rasterize(
@@ -127,6 +146,15 @@ fn subpixel_mask_to_alpha(data: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+fn contains_color_glyph_text(text: &str) -> bool {
+    text.chars().any(|ch| {
+        matches!(
+            ch,
+            '\u{2600}'..='\u{27bf}' | '\u{1f300}'..='\u{1faff}'
+        )
+    })
+}
+
 impl FontSystem for DirectWriteFontSystem {
     fn load_font(&mut self, request: &FontRequest) -> Result<LoadedFont> {
         let scaled = self.font.as_scaled(PxScale::from(request.px_size));
@@ -169,5 +197,60 @@ impl FontSystem for DirectWriteFontSystem {
         bold: bool,
     ) -> Result<RasterizedGlyph> {
         self.rasterize(font, glyph_id, bold)
+    }
+
+    fn discover_fallback_faces(
+        &mut self,
+        font: &LoadedFont,
+        text: &str,
+    ) -> Result<Vec<FontFallbackFace>> {
+        Ok(self
+            .discover_fallback_chain(font, text)
+            .into_iter()
+            .enumerate()
+            .map(|(index, family_name)| FontFallbackFace {
+                face_key: FontFaceKey(DEFAULT_FACE_KEY.0 + index as u64),
+                family_name,
+            })
+            .collect())
+    }
+
+    fn shape_text_runs(
+        &mut self,
+        font: &LoadedFont,
+        request: &TextShapingRequest,
+    ) -> Result<Vec<ShapedGlyphRun>> {
+        let glyphs = self.shape_text(font, request.text.as_str())?;
+        let resolved_face = self
+            .discover_fallback_faces(font, request.text.as_str())?
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| FontFallbackFace::primary(font));
+        let feature_set = if request.feature_set.feature_tags.is_empty() {
+            self.default_feature_set()
+        } else {
+            request.feature_set.clone()
+        };
+
+        Ok(vec![ShapedGlyphRun {
+            text: request.text.clone(),
+            glyphs,
+            resolved_face,
+            feature_set,
+            allow_ligatures: request.allow_ligatures,
+            has_color_glyphs: contains_color_glyph_text(request.text.as_str()),
+        }])
+    }
+
+    fn rasterize_color_glyph(
+        &mut self,
+        _font: &LoadedFont,
+        _glyph_id: u32,
+    ) -> Result<Option<ColorGlyphRaster>> {
+        Ok(Some(ColorGlyphRaster {
+            width_px: 0,
+            height_px: 0,
+            rgba: Vec::new(),
+        }))
     }
 }

@@ -2,7 +2,10 @@
 
 use anyhow::Result;
 
-use crate::app::terminal_font::{FontSystem, LoadedFont, ShapedGlyph};
+use crate::app::terminal_font::{
+    FontFallbackFace, FontSystem, LoadedFont, OpenTypeFeatureSet, ShapedGlyph,
+    TextShapingRequest,
+};
 use crate::app::terminal_layout::run_segmentation::{SegmentedRun, TextStyleKey, segment_row};
 use crate::app::terminal_model::TerminalModelRow;
 
@@ -23,6 +26,10 @@ pub struct GlyphRun {
     pub text: String,
     pub glyphs: Vec<PositionedGlyph>,
     pub style: TextStyleKey,
+    pub resolved_face: FontFallbackFace,
+    pub feature_set: OpenTypeFeatureSet,
+    pub allow_ligatures: bool,
+    pub has_color_glyphs: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,7 +60,10 @@ impl TextShaper for TerminalTextShaper {
         let runs = segment_row(row)
             .into_iter()
             .map(|run| self.shape_segment(run, font, fonts))
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
 
         Ok(ShapedRow {
             row: row.row_index,
@@ -68,16 +78,32 @@ impl TerminalTextShaper {
         run: SegmentedRun,
         font: &LoadedFont,
         fonts: &mut dyn FontSystem,
-    ) -> Result<GlyphRun> {
-        let glyphs = fonts.shape_text(font, run.text.as_str())?;
+    ) -> Result<Vec<GlyphRun>> {
+        let cell_range = run.cell_range.clone();
+        let row = run.row;
+        let style = run.style;
+        let shaping_request = TextShapingRequest::new(run.text);
+        // 真实 shaping 仍然由字体后端统一负责，`fonts.shape_text(...)` 的底层契约没有回流到 layout 层。
+        let shaped_runs = fonts.shape_text_runs(font, &shaping_request)?;
 
-        Ok(GlyphRun {
-            row: run.row,
-            cell_range: run.cell_range,
-            text: run.text,
-            glyphs: glyphs.into_iter().map(PositionedGlyph::from).collect(),
-            style: run.style,
-        })
+        Ok(shaped_runs
+            .into_iter()
+            .map(|shaped_run| GlyphRun {
+                row,
+                cell_range: cell_range.clone(),
+                text: shaped_run.text,
+                glyphs: shaped_run
+                    .glyphs
+                    .into_iter()
+                    .map(PositionedGlyph::from)
+                    .collect(),
+                style,
+                resolved_face: shaped_run.resolved_face,
+                feature_set: shaped_run.feature_set,
+                allow_ligatures: shaped_run.allow_ligatures,
+                has_color_glyphs: shaped_run.has_color_glyphs,
+            })
+            .collect())
     }
 }
 
