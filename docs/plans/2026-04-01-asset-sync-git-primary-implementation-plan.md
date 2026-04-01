@@ -791,3 +791,9 @@ git commit -m "docs: verify git primary asset sync rollout"
 - 如果 `gix` 的 SSH key 注入在 Windows 上出现库能力缺口，不要把系统 Git 依赖直接硬编码进产品路径；应先把 transport auth 隔离在 `src/app/vault/auth/git.rs`，确保 backend 替换只影响一层。
 - 如果发现 keychain/secret merge 复杂度高于预期，优先保证“引用完整 + 不静默丢数据”，而不是冒险做过度自动合并。
 - 如果 attach-time merge 的无共同 base 情况无法安全自动提交，允许先落“生成 merge preview + conflict inbox”，但不能回退成 remote-first 覆盖。
+
+## Task 8 落地差异记录
+
+- focused regression 中补齐了旧测试对 `VaultAssetCatalog` / `KeychainCatalog` 的 `merge_metadata` 初始化，保持 Task 5/6 引入的 merge contract 与旧测试用例一致。
+- sync modal 文案相关回归已从旧 `gist + PAT` 断言切到 `Git remote + HTTPS/SSH` 断言，避免旧首发文案误报。
+- Task 7 的 conflict inbox 首批实现形态已在本计划中确认：正式 UI 入口为 modal summary，而不是额外新增 review window。

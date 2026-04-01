@@ -32,6 +32,8 @@ fn sync_settings_starts_closed_until_explicitly_requested() {
     app.invoke_open_sync_modal_requested();
 
     assert!(app.get_sync_modal_open());
+    assert_eq!(app.get_sync_modal_provider_label().as_str(), "Gitee");
+    assert_eq!(app.get_sync_modal_git_auth_mode().as_str(), "https");
 }
 
 #[test]
@@ -74,4 +76,16 @@ fn formal_ui_no_longer_contains_vault_right_panel_entry() {
 
     assert!(!source.contains("text: \"Sync & Vault\""));
     assert!(!source.contains("panel-view == \"vault\""));
+}
+
+#[test]
+fn formal_sync_settings_contract_no_longer_exposes_gitee_gist_primary() {
+    let app_window = fs::read_to_string("ui/app-window.slint").unwrap();
+    let provider_contract = fs::read_to_string("src/app/vault/provider/mod.rs").unwrap();
+
+    assert!(!app_window.contains("sync-modal-primary-gist-id"));
+    assert!(!app_window.contains("sync-modal-primary-pat"));
+    assert!(!app_window.contains("Gitee Gist"));
+    assert!(provider_contract.contains("ProviderKind::GitRepo"));
+    assert!(!provider_contract.contains("first_release_formal_provider_kind() -> ProviderKind::GiteeGist"));
 }

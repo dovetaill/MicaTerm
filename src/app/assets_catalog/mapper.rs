@@ -112,6 +112,7 @@ pub fn asset_tree_to_vault_catalog(tree: &AssetTree) -> VaultAssetCatalog {
     VaultAssetCatalog {
         root_ids: tree.root_ids().to_vec(),
         nodes,
+        merge_metadata: BTreeMap::new(),
     }
 }
 

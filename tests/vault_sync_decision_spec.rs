@@ -34,7 +34,7 @@ fn sample_remote_head(revision: &str, payload_hash: &str, committed_at: &str) ->
 }
 
 #[test]
-fn newer_local_snapshot_pushes_and_stashes_remote_backup() {
+fn diverged_local_and_remote_changes_require_merge_then_push() {
     let local = LocalSyncState {
         base_revision: Some("rev-0001".into()),
         local_snapshot_hash: Some("sha256:local-new".into()),
@@ -50,17 +50,15 @@ fn newer_local_snapshot_pushes_and_stashes_remote_backup() {
 
     let decision = decide_sync_action(&local, Some(&remote));
 
-    assert_eq!(decision.action, SyncAction::Push);
-    assert!(!decision.backup_local_snapshot);
-    assert!(decision.backup_remote_snapshot);
+    assert_eq!(decision.action, SyncAction::MergeThenPush);
 }
 
 #[test]
-fn newer_remote_revision_pulls_and_stashes_local_backup() {
+fn remote_only_changes_pull_without_merge() {
     let local = LocalSyncState {
         base_revision: Some("rev-0001".into()),
-        local_snapshot_hash: Some("sha256:local-new".into()),
-        last_local_change_at: Some("00000000000000000120".into()),
+        local_snapshot_hash: Some("sha256:local-old".into()),
+        last_local_change_at: Some("00000000000000000100".into()),
         last_successful_push_at: Some("00000000000000000100".into()),
         last_successful_pull_at: Some("00000000000000000100".into()),
     };
@@ -72,9 +70,27 @@ fn newer_remote_revision_pulls_and_stashes_local_backup() {
 
     let decision = decide_sync_action(&local, Some(&remote));
 
-    assert_eq!(decision.action, SyncAction::Pull);
-    assert!(decision.backup_local_snapshot);
-    assert!(!decision.backup_remote_snapshot);
+    assert_eq!(decision.action, SyncAction::PullOnly);
+}
+
+#[test]
+fn local_only_changes_push_without_merge() {
+    let local = LocalSyncState {
+        base_revision: Some("rev-0001".into()),
+        local_snapshot_hash: Some("sha256:local-new".into()),
+        last_local_change_at: Some("00000000000000000200".into()),
+        last_successful_push_at: Some("00000000000000000100".into()),
+        last_successful_pull_at: Some("00000000000000000100".into()),
+    };
+    let remote = sample_remote_head(
+        "rev-0001",
+        "sha256:remote-base",
+        "00000000000000000100",
+    );
+
+    let decision = decide_sync_action(&local, Some(&remote));
+
+    assert_eq!(decision.action, SyncAction::PushOnly);
 }
 
 #[test]
@@ -91,6 +107,4 @@ fn identical_hashes_short_circuit_to_noop() {
     let decision = decide_sync_action(&local, Some(&remote));
 
     assert_eq!(decision.action, SyncAction::Noop);
-    assert!(!decision.backup_local_snapshot);
-    assert!(!decision.backup_remote_snapshot);
 }

@@ -58,7 +58,11 @@ impl RedbKeychainCatalogStore {
             nodes.insert(node_id, node);
         }
 
-        Ok(KeychainCatalog { root_ids, nodes })
+        Ok(KeychainCatalog {
+            root_ids,
+            nodes,
+            merge_metadata: BTreeMap::new(),
+        })
     }
 }
 

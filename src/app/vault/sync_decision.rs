@@ -12,43 +12,36 @@ pub struct LocalSyncState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncAction {
     Noop,
-    Push,
-    Pull,
+    PullOnly,
+    PushOnly,
+    MergeThenPush,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyncDecision {
     pub action: SyncAction,
-    pub backup_local_snapshot: bool,
-    pub backup_remote_snapshot: bool,
 }
 
 pub fn decide_sync_action(local: &LocalSyncState, remote: Option<&VaultHead>) -> SyncDecision {
     let Some(local_snapshot_hash) = local.local_snapshot_hash.as_deref() else {
         return SyncDecision {
             action: if remote.is_some() {
-                SyncAction::Pull
+                SyncAction::PullOnly
             } else {
                 SyncAction::Noop
             },
-            backup_local_snapshot: false,
-            backup_remote_snapshot: false,
         };
     };
 
     let Some(remote) = remote else {
         return SyncDecision {
-            action: SyncAction::Push,
-            backup_local_snapshot: false,
-            backup_remote_snapshot: false,
+            action: SyncAction::PushOnly,
         };
     };
 
     if remote.payload_hash == local_snapshot_hash {
         return SyncDecision {
             action: SyncAction::Noop,
-            backup_local_snapshot: false,
-            backup_remote_snapshot: false,
         };
     }
 
@@ -57,40 +50,17 @@ pub fn decide_sync_action(local: &LocalSyncState, remote: Option<&VaultHead>) ->
 
     match (local_changed, remote_changed) {
         (false, false) => SyncDecision {
-            action: SyncAction::Push,
-            backup_local_snapshot: false,
-            backup_remote_snapshot: false,
+            action: SyncAction::PushOnly,
         },
         (true, false) => SyncDecision {
-            action: SyncAction::Push,
-            backup_local_snapshot: false,
-            backup_remote_snapshot: false,
+            action: SyncAction::PushOnly,
         },
         (false, true) => SyncDecision {
-            action: SyncAction::Pull,
-            backup_local_snapshot: false,
-            backup_remote_snapshot: false,
+            action: SyncAction::PullOnly,
         },
-        (true, true) => {
-            if local
-                .last_local_change_at
-                .as_deref()
-                .unwrap_or_default()
-                > remote.committed_at.as_str()
-            {
-                SyncDecision {
-                    action: SyncAction::Push,
-                    backup_local_snapshot: false,
-                    backup_remote_snapshot: true,
-                }
-            } else {
-                SyncDecision {
-                    action: SyncAction::Pull,
-                    backup_local_snapshot: true,
-                    backup_remote_snapshot: false,
-                }
-            }
-        }
+        (true, true) => SyncDecision {
+            action: SyncAction::MergeThenPush,
+        },
     }
 }
 

@@ -16,6 +16,7 @@ use zeroize::Zeroizing;
 use crate::app::ssh::credentials::{
     CredentialStore, load_fixed_binary_secret, persist_binary_secret,
 };
+use crate::app::vault::device_identity::load_or_create_device_id;
 use crate::app::vault::model::{BootstrapBundle, CipherKind, KdfConfig};
 
 const BOOTSTRAP_FORMAT_VERSION: u32 = 1;
@@ -35,6 +36,13 @@ pub struct LocalVaultBootstrapState {
     pub bundle: BootstrapBundle,
     pub wrapped_vault_key: String,
     pub kdf: KdfConfig,
+    #[serde(default)]
+    pub device_id: String,
+    #[serde(default)]
+    pub logical_revision: Option<String>,
+    #[serde(default)]
+    pub transport_revision_hint: Option<String>,
+    #[serde(default)]
     pub current_revision: Option<String>,
     #[serde(default)]
     pub local_snapshot_hash: Option<String>,
@@ -213,6 +221,10 @@ pub fn save_local_vault_bootstrap_state(
         !state.wrapped_vault_key.trim().is_empty(),
         "local vault bootstrap state requires a wrapped_vault_key"
     );
+    ensure!(
+        !state.device_id.trim().is_empty(),
+        "local vault bootstrap state requires a stable device_id"
+    );
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| {
@@ -245,12 +257,19 @@ pub fn load_local_vault_bootstrap_state(path: &Path) -> Result<Option<LocalVault
             path.display()
         )
     })?;
-    let state: LocalVaultBootstrapState = serde_json::from_slice(encoded.as_slice())
+    let mut state: LocalVaultBootstrapState = serde_json::from_slice(encoded.as_slice())
         .context("failed to decode local vault bootstrap state")?;
     ensure!(
         !state.bundle.vault_id.trim().is_empty(),
         "local vault bootstrap state requires a non-empty vault_id"
     );
+    if state.device_id.trim().is_empty() {
+        let root = path.parent().unwrap_or_else(|| Path::new("."));
+        state.device_id = load_or_create_device_id(root)?;
+    }
+    if state.logical_revision.is_none() {
+        state.logical_revision = state.current_revision.clone();
+    }
     Ok(Some(state))
 }
 

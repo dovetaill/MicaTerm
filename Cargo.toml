@@ -20,6 +20,8 @@ chrono = { version = "0.4.44", default-features = false, features = ["clock", "s
 directories = "5"
 ab_glyph = "0.2.32"
 fontdb = "0.23.0"
+gix = "0.81.0"
+gix-credentials = "0.37.1"
 keyring = "3.6.3"
 oauth2 = "5"
 rand_core = { version = "0.6.4", features = ["getrandom"] }

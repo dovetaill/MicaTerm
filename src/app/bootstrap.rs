@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
 use directories::ProjectDirs;
+use serde::{Deserialize, Serialize};
 use slint::{
     Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
 };
@@ -87,25 +88,32 @@ use crate::app::vault::bootstrap::{
     vault_runtime_key_credential_ref,
 };
 use crate::app::vault::cache::{load_encrypted_cache, store_encrypted_cache};
+use crate::app::vault::conflict_inbox::{
+    ConflictInboxEntry, load_conflict_entries, persist_conflict_entries,
+};
 use crate::app::vault::crypto::{
     WrappedVaultKey, decrypt_snapshot, encrypt_snapshot, generate_vault_key, unwrap_vault_key,
     wrap_vault_key,
 };
+use crate::app::vault::device_identity::{git_remote_cache_dir, load_or_create_device_id};
 use crate::app::vault::engine::{SyncEngine, SyncError, SyncRequest};
+use crate::app::vault::merge::{MergeInput, merge_snapshots};
 use crate::app::vault::model::{
-    BootstrapBundle, BootstrapRemoteConfig, GiteeRemoteDraft, KdfConfig, ProviderAuthKind,
-    ProviderKind, RemoteRole, SnapshotSyncPreferences, VaultAssetPayload, VaultHead,
-    VaultSnapshot,
+    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, GitHostKind,
+    GitRepoRemoteDraft, KdfConfig, ProviderAuthKind, ProviderKind, RemoteRole,
+    SnapshotSyncPreferences, VaultAssetPayload, VaultHead, VaultSnapshot, VaultSshProxySpec,
 };
 use crate::app::vault::provider::gitee_gist::{GiteeGistProvider, GiteeGistProviderConfig};
+use crate::app::vault::provider::git_repo::{
+    GitRepoProvider, GitRepoProviderConfig, validate_first_release_git_host,
+};
 use crate::app::vault::provider::github_gist::{GitHubGistProvider, GitHubGistProviderConfig};
 use crate::app::vault::provider::gitlab_snippet::{
     GitLabSnippetProvider, GitLabSnippetProviderConfig,
 };
 use crate::app::vault::provider::s3::{S3VaultProvider, S3VaultProviderConfig};
 use crate::app::vault::provider::{
-    VaultProvider, first_release_formal_auth_label, first_release_formal_provider_kind,
-    first_release_formal_provider_label,
+    VaultProvider, first_release_formal_provider_label,
 };
 use crate::app::vault::recovery::{
     RecoverySnapshotRecord, RecoverySource, persist_recovery_snapshot,
@@ -275,6 +283,14 @@ struct LiveSessionRuntimeLauncher {
 
 pub trait VaultProviderFactory: Send + Sync {
     fn build_provider(&self, remote: &BootstrapRemoteConfig) -> Result<Arc<dyn VaultProvider>>;
+
+    fn build_provider_for_vault(
+        &self,
+        remote: &BootstrapRemoteConfig,
+        _vault_root: &Path,
+    ) -> Result<Arc<dyn VaultProvider>> {
+        self.build_provider(remote)
+    }
 }
 
 #[derive(Clone)]
@@ -303,6 +319,9 @@ impl VaultProviderFactory for DefaultVaultProviderFactory {
             ProviderKind::S3Compatible => Ok(Arc::new(S3VaultProvider::new(
                 S3VaultProviderConfig::try_from(remote)?,
             )?)),
+            ProviderKind::GitRepo => Err(anyhow!(
+                "git repo provider requires a vault runtime root"
+            )),
             ProviderKind::GitHubGist => Ok(Arc::new(GitHubGistProvider::new(
                 GitHubGistProviderConfig::try_from(remote)?,
             )?)),
@@ -312,6 +331,31 @@ impl VaultProviderFactory for DefaultVaultProviderFactory {
             ProviderKind::GiteeGist => Ok(Arc::new(GiteeGistProvider::new(
                 GiteeGistProviderConfig::try_from(remote)?,
             )?)),
+        }
+    }
+
+    fn build_provider_for_vault(
+        &self,
+        remote: &BootstrapRemoteConfig,
+        vault_root: &Path,
+    ) -> Result<Arc<dyn VaultProvider>> {
+        match remote.provider {
+            ProviderKind::GitRepo => {
+                let BootstrapRemoteLocator::GitRepo { host_kind, .. } = &remote.locator else {
+                    return Err(anyhow!(
+                        "bootstrap remote `{}` is missing a Git repo locator",
+                        remote.remote_id
+                    ));
+                };
+                validate_first_release_git_host(*host_kind)?;
+                Ok(Arc::new(GitRepoProvider::new(
+                    GitRepoProviderConfig::from_bootstrap_remote(
+                        remote,
+                        git_remote_cache_dir(vault_root, remote.remote_id.as_str()),
+                    )?,
+                )?))
+            }
+            _ => self.build_provider(remote),
         }
     }
 }
@@ -633,13 +677,17 @@ fn sync_sync_modal_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_sync_modal_error_text(modal.error_text.clone().into());
     window.set_sync_modal_provider_label(modal.provider_label.clone().into());
     window.set_sync_modal_target_label(modal.target_label.clone().into());
+    window.set_sync_modal_conflict_count(modal.conflict_count);
+    window.set_sync_modal_conflict_summary(modal.conflict_summary.clone().into());
     window.set_sync_modal_primary_action_label(modal.primary_action_label.clone().into());
     window.set_sync_modal_secondary_action_label(modal.secondary_action_label.clone().into());
-    window.set_sync_modal_primary_gist_id(modal.primary_gist_id.clone().into());
-    window.set_sync_modal_primary_pat(modal.primary_pat.clone().into());
-    window.set_sync_modal_mirror_enabled(modal.mirror_enabled);
-    window.set_sync_modal_mirror_gist_id(modal.mirror_gist_id.clone().into());
-    window.set_sync_modal_mirror_pat(modal.mirror_pat.clone().into());
+    window.set_sync_modal_git_remote_url(modal.git_remote_url.clone().into());
+    window.set_sync_modal_git_branch(modal.git_branch.clone().into());
+    window.set_sync_modal_git_auth_mode(modal.git_auth_mode.clone().into());
+    window.set_sync_modal_git_https_username(modal.git_https_username.clone().into());
+    window.set_sync_modal_git_https_secret(modal.git_https_secret.clone().into());
+    window.set_sync_modal_git_ssh_private_key(modal.git_ssh_private_key.clone().into());
+    window.set_sync_modal_git_ssh_passphrase(modal.git_ssh_passphrase.clone().into());
     window.set_sync_modal_master_password(modal.master_password.clone().into());
 }
 
@@ -4318,48 +4366,103 @@ fn local_sync_state_for_snapshot(
     }
 }
 
-fn persist_local_recovery_snapshot(
-    vault: &VaultSessionState,
+fn persist_snapshot_recovery_record(
+    recovery_root: &Path,
+    vault_id: &str,
+    source: RecoverySource,
+    base_revision: Option<String>,
+    losing_revision: Option<String>,
+    payload_hash: Option<String>,
     snapshot: &VaultSnapshot,
-    local_snapshot_hash: String,
 ) -> Result<()> {
-    let local_state = vault
-        .local_state
-        .as_ref()
-        .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
     let recovery_record = RecoverySnapshotRecord::new(
-        local_state.bundle.vault_id.clone(),
-        RecoverySource::LocalBeforePull,
+        vault_id.to_string(),
+        source,
         current_sync_timestamp(),
-        local_state.current_revision.clone(),
-        local_state.current_revision.clone(),
-        Some(local_snapshot_hash),
+        base_revision,
+        losing_revision,
+        payload_hash,
         snapshot.clone(),
     );
-    persist_recovery_snapshot(vault.root_dir.join("recovery").as_path(), &recovery_record)?;
+    persist_recovery_snapshot(recovery_root, &recovery_record)?;
     Ok(())
 }
 
-fn persist_remote_recovery_snapshot(
-    vault: &VaultSessionState,
+fn persist_merge_conflict_recovery_snapshots(
+    recovery_root: &Path,
+    vault_id: &str,
+    base_revision: Option<String>,
+    local_snapshot: &VaultSnapshot,
     remote_head: &VaultHead,
-    snapshot: &VaultSnapshot,
+    remote_snapshot: &VaultSnapshot,
 ) -> Result<()> {
-    let local_state = vault
-        .local_state
-        .as_ref()
-        .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
-    let recovery_record = RecoverySnapshotRecord::new(
-        local_state.bundle.vault_id.clone(),
-        RecoverySource::RemoteBeforePush,
-        current_sync_timestamp(),
-        local_state.current_revision.clone(),
+    persist_snapshot_recovery_record(
+        recovery_root,
+        vault_id,
+        RecoverySource::LocalConflictCopy,
+        base_revision.clone(),
+        base_revision,
+        None,
+        local_snapshot,
+    )?;
+    persist_snapshot_recovery_record(
+        recovery_root,
+        vault_id,
+        RecoverySource::RemoteConflictCopy,
+        Some(remote_head.vault_revision.clone()),
         Some(remote_head.vault_revision.clone()),
         Some(remote_head.payload_hash.clone()),
-        snapshot.clone(),
-    );
-    persist_recovery_snapshot(vault.root_dir.join("recovery").as_path(), &recovery_record)?;
+        remote_snapshot,
+    )
+}
+
+fn persist_merge_conflict_inbox_entries(
+    conflict_root: &Path,
+    vault_id: &str,
+    conflicts: &[crate::app::vault::merge::MergeConflict],
+    local_device_id: &str,
+    remote_device_id: &str,
+    captured_at: &str,
+) -> Result<()> {
+    if conflicts.is_empty() {
+        return Ok(());
+    }
+
+    let entries = conflicts
+        .iter()
+        .map(|conflict| ConflictInboxEntry {
+            vault_id: vault_id.to_string(),
+            target_id: conflict.node_id.clone(),
+            conflict_kind: conflict.message.clone(),
+            local_device_id: local_device_id.to_string(),
+            remote_device_id: remote_device_id.to_string(),
+            captured_at: captured_at.to_string(),
+        })
+        .collect::<Vec<_>>();
+    persist_conflict_entries(conflict_root, entries.as_slice())?;
     Ok(())
+}
+
+fn sync_modal_conflict_projection(vault: &VaultSessionState) -> (i32, String, bool) {
+    let Some(vault_id) = configured_sync_bundle(vault)
+        .map(|bundle| bundle.vault_id.as_str())
+        .filter(|vault_id| !vault_id.trim().is_empty())
+    else {
+        return (0, String::new(), false);
+    };
+
+    let entries = load_conflict_entries(vault.root_dir.join("conflicts").as_path(), vault_id)
+        .unwrap_or_default();
+    let Some(latest) = entries.first() else {
+        return (0, String::new(), false);
+    };
+
+    let count = entries.len().min(i32::MAX as usize) as i32;
+    let summary = format!(
+        "Latest: {} ({}) from {} against {}.",
+        latest.target_id, latest.conflict_kind, latest.remote_device_id, latest.local_device_id
+    );
+    (count, summary, true)
 }
 
 fn update_vault_panel_for_local_state(state: &mut ShellViewModel, vault: &VaultSessionState) {
@@ -4398,6 +4501,71 @@ fn configured_sync_bundle(vault: &VaultSessionState) -> Option<&BootstrapBundle>
         .or(vault.bootstrap_template.as_ref())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+struct PersistedGitRepoCredentialMaterial {
+    #[serde(default)]
+    https_username: String,
+    #[serde(default)]
+    https_secret: String,
+    #[serde(default)]
+    ssh_private_key: String,
+    #[serde(default)]
+    ssh_passphrase: String,
+}
+
+fn git_auth_mode_for_provider_auth(auth_kind: ProviderAuthKind) -> &'static str {
+    match auth_kind {
+        ProviderAuthKind::HttpsCredentials => "https",
+        ProviderAuthKind::SshKey => "ssh",
+        _ => "https",
+    }
+}
+
+fn provider_auth_for_git_auth_mode(mode: &str) -> Result<ProviderAuthKind> {
+    match mode.trim() {
+        "" | "https" => Ok(ProviderAuthKind::HttpsCredentials),
+        "ssh" => Ok(ProviderAuthKind::SshKey),
+        other => Err(anyhow!("Unsupported Git auth mode `{other}`")),
+    }
+}
+
+fn load_git_repo_credential_material(
+    credential_store: &dyn CredentialStore,
+    credential_ref: Option<&str>,
+    auth_kind: ProviderAuthKind,
+) -> PersistedGitRepoCredentialMaterial {
+    let Some(raw) = load_provider_credential(credential_store, credential_ref)
+        .ok()
+        .flatten()
+    else {
+        return PersistedGitRepoCredentialMaterial::default();
+    };
+
+    serde_json::from_str::<PersistedGitRepoCredentialMaterial>(&raw).unwrap_or_else(|_| match auth_kind
+    {
+        ProviderAuthKind::SshKey => PersistedGitRepoCredentialMaterial {
+            ssh_private_key: raw,
+            ..PersistedGitRepoCredentialMaterial::default()
+        },
+        _ => PersistedGitRepoCredentialMaterial {
+            https_secret: raw,
+            ..PersistedGitRepoCredentialMaterial::default()
+        },
+    })
+}
+
+fn build_git_repo_credential_material(
+    modal: &crate::shell::view_model::SyncModalViewState,
+) -> Result<String> {
+    serde_json::to_string(&PersistedGitRepoCredentialMaterial {
+        https_username: modal.git_https_username.clone(),
+        https_secret: modal.git_https_secret.clone(),
+        ssh_private_key: modal.git_ssh_private_key.clone(),
+        ssh_passphrase: modal.git_ssh_passphrase.clone(),
+    })
+    .context("failed to encode git repo credential material")
+}
+
 fn hydrate_sync_modal_draft(
     state: &mut ShellViewModel,
     vault: &VaultSessionState,
@@ -4406,38 +4574,34 @@ fn hydrate_sync_modal_draft(
     let modal = state.sync_modal_state_mut();
     let bundle = configured_sync_bundle(vault);
     let primary = bundle.and_then(BootstrapBundle::primary_remote);
-    let mirror = bundle.and_then(|bundle| {
-        bundle
-            .remotes
-            .iter()
-            .find(|remote| remote.role == RemoteRole::Mirror)
-    });
-
-    modal.primary_gist_id = match primary.map(|remote| &remote.locator) {
-        Some(crate::app::vault::model::BootstrapRemoteLocator::GiteeGist { gist_id }) => {
-            gist_id.clone()
-        }
-        _ => String::new(),
-    };
-    modal.primary_pat = primary
-        .and_then(|remote| {
-            load_provider_credential(credential_store, remote.credential_ref.as_deref()).ok()
-        })
-        .flatten()
-        .unwrap_or_default();
-    modal.mirror_enabled = mirror.is_some();
-    modal.mirror_gist_id = match mirror.map(|remote| &remote.locator) {
-        Some(crate::app::vault::model::BootstrapRemoteLocator::GiteeGist { gist_id }) => {
-            gist_id.clone()
-        }
-        _ => String::new(),
-    };
-    modal.mirror_pat = mirror
-        .and_then(|remote| {
-            load_provider_credential(credential_store, remote.credential_ref.as_deref()).ok()
-        })
-        .flatten()
-        .unwrap_or_default();
+    let defaults = GitRepoRemoteDraft::default();
+    modal.git_remote_url = defaults.remote_url.clone();
+    modal.git_branch = defaults.branch.clone();
+    modal.git_auth_mode = git_auth_mode_for_provider_auth(defaults.auth_kind).into();
+    modal.git_https_username.clear();
+    modal.git_https_secret.clear();
+    modal.git_ssh_private_key.clear();
+    modal.git_ssh_passphrase.clear();
+    if let Some(remote) = primary
+        && let BootstrapRemoteLocator::GitRepo {
+            host_kind: _,
+            remote_url,
+            branch,
+        } = &remote.locator
+    {
+        let credentials = load_git_repo_credential_material(
+            credential_store,
+            remote.credential_ref.as_deref(),
+            remote.auth_kind,
+        );
+        modal.git_remote_url = remote_url.clone();
+        modal.git_branch = branch.clone();
+        modal.git_auth_mode = git_auth_mode_for_provider_auth(remote.auth_kind).into();
+        modal.git_https_username = credentials.https_username;
+        modal.git_https_secret = credentials.https_secret;
+        modal.git_ssh_private_key = credentials.ssh_private_key;
+        modal.git_ssh_passphrase = credentials.ssh_passphrase;
+    }
     modal.master_password.clear();
 }
 
@@ -4446,61 +4610,49 @@ fn build_sync_bundle_from_modal(
     existing_bundle: Option<&BootstrapBundle>,
 ) -> Result<BootstrapBundle> {
     let modal = state.sync_modal_state();
-    let primary_gist_id = modal.primary_gist_id.trim();
-    let primary_pat = modal.primary_pat.trim();
+    let git_remote_url = modal.git_remote_url.trim();
+    let git_branch = modal.git_branch.trim();
+    let auth_kind = provider_auth_for_git_auth_mode(modal.git_auth_mode.as_str())?;
 
-    if primary_gist_id.is_empty() {
-        return Err(anyhow!("Enter a primary Gist ID before enabling sync"));
+    if git_remote_url.is_empty() {
+        return Err(anyhow!("Enter a Git remote URL before enabling sync"));
     }
-    if primary_pat.is_empty() {
-        return Err(anyhow!(
-            "Enter a primary Personal Access Token before enabling sync"
-        ));
+    if git_branch.is_empty() {
+        return Err(anyhow!("Enter a Git branch before enabling sync"));
     }
-    if modal.mirror_enabled {
-        if modal.mirror_gist_id.trim().is_empty() {
-            return Err(anyhow!(
-                "Enter a mirror Gist ID or disable the mirror target"
-            ));
+    match auth_kind {
+        ProviderAuthKind::HttpsCredentials => {
+            if modal.git_https_username.trim().is_empty() {
+                return Err(anyhow!("Enter an HTTPS username before enabling sync"));
+            }
+            if modal.git_https_secret.trim().is_empty() {
+                return Err(anyhow!("Enter an HTTPS secret before enabling sync"));
+            }
         }
-        if modal.mirror_pat.trim().is_empty() {
-            return Err(anyhow!(
-                "Enter a mirror Personal Access Token or disable the mirror target"
-            ));
+        ProviderAuthKind::SshKey => {
+            if modal.git_ssh_private_key.trim().is_empty() {
+                return Err(anyhow!("Enter an SSH private key before enabling sync"));
+            }
         }
+        _ => {}
     }
 
     let mut bundle = existing_bundle.cloned().unwrap_or_default();
-    bundle.remotes.clear();
-    bundle.remotes.push(BootstrapRemoteConfig {
+    bundle.remotes = vec![BootstrapRemoteConfig {
         remote_id: sync_settings_remote_id(RemoteRole::Primary).into(),
         role: RemoteRole::Primary,
-        provider: first_release_formal_provider_kind(),
-        locator: crate::app::vault::model::BootstrapRemoteLocator::GiteeGist {
-            gist_id: primary_gist_id.into(),
+        provider: ProviderKind::GitRepo,
+        locator: BootstrapRemoteLocator::GitRepo {
+            host_kind: GitHostKind::Gitee,
+            remote_url: git_remote_url.into(),
+            branch: git_branch.into(),
         },
         credential_ref: Some(bootstrap_provider_credential_ref(sync_settings_remote_id(
             RemoteRole::Primary,
         ))),
-        auth_kind: ProviderAuthKind::Pat,
+        auth_kind,
         last_health: None,
-    });
-
-    if modal.mirror_enabled {
-        bundle.remotes.push(BootstrapRemoteConfig {
-            remote_id: sync_settings_remote_id(RemoteRole::Mirror).into(),
-            role: RemoteRole::Mirror,
-            provider: first_release_formal_provider_kind(),
-            locator: crate::app::vault::model::BootstrapRemoteLocator::GiteeGist {
-                gist_id: modal.mirror_gist_id.trim().into(),
-            },
-            credential_ref: Some(bootstrap_provider_credential_ref(sync_settings_remote_id(
-                RemoteRole::Mirror,
-            ))),
-            auth_kind: ProviderAuthKind::Pat,
-            last_health: None,
-        });
-    }
+    }];
 
     Ok(bundle)
 }
@@ -4513,20 +4665,12 @@ fn persist_sync_modal_settings(
     let existing_bundle = configured_sync_bundle(vault);
     let bundle = build_sync_bundle_from_modal(state, existing_bundle)?;
     let modal = state.sync_modal_state();
+    let credential_material = build_git_repo_credential_material(modal)?;
 
     persist_provider_credential(
         credential_store,
         bootstrap_provider_credential_ref(sync_settings_remote_id(RemoteRole::Primary)).as_str(),
-        Some(modal.primary_pat.as_str()),
-    )?;
-    persist_provider_credential(
-        credential_store,
-        bootstrap_provider_credential_ref(sync_settings_remote_id(RemoteRole::Mirror)).as_str(),
-        if modal.mirror_enabled {
-            Some(modal.mirror_pat.as_str())
-        } else {
-            None
-        },
+        Some(credential_material.as_str()),
     )?;
 
     let bootstrap_state_path = vault.bootstrap_state_path();
@@ -4543,33 +4687,21 @@ fn persist_sync_modal_settings(
 
 fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vault: &VaultSessionState) {
     let has_primary_remote = vault_primary_remote(vault).is_some();
-    let gitee_setup = GiteeRemoteDraft::default();
-    let mirror_count = configured_sync_bundle(vault)
-        .map(|bundle| {
-            bundle
-                .remotes
-                .iter()
-                .filter(|remote| remote.role == RemoteRole::Mirror)
-                .count()
-        })
-        .unwrap_or(0);
+    let git_repo_setup = GitRepoRemoteDraft::default();
+    let (conflict_count, conflict_summary, conflict_review_available) =
+        sync_modal_conflict_projection(vault);
     let modal = state.sync_modal_state_mut();
 
     modal.title = "Sync Settings".into();
-    debug_assert_eq!(
-        first_release_formal_provider_kind(),
-        ProviderKind::GiteeGist
-    );
     modal.provider_label = first_release_formal_provider_label().into();
     modal.target_label = if has_primary_remote {
-        if mirror_count == 0 {
-            "1 target configured".into()
-        } else {
-            format!("1 primary + {mirror_count} mirror")
-        }
+        "1 Git primary configured".into()
     } else {
         String::new()
     };
+    modal.conflict_count = conflict_count;
+    modal.conflict_summary = conflict_summary;
+    modal.conflict_review_available = conflict_review_available;
     modal.error_text.clear();
 
     if vault.local_state.is_none() && vault.unlocked_vault_key.is_some() {
@@ -4586,25 +4718,23 @@ fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vault: &VaultSe
         (None, false) => {
             modal.mode = SyncModalMode::NotConfigured;
             modal.headline = "Configure sync".into();
-            modal.status_text = gitee_setup.setup_summary();
+            modal.status_text = git_repo_setup.setup_summary();
             modal.primary_action_label = "Save and enable".into();
             modal.secondary_action_label = "Close".into();
         }
         (None, true) => {
             modal.mode = SyncModalMode::NotConfigured;
             modal.headline = "Enable or recover sync".into();
-            modal.status_text = "The target is configured. Enter a master password to recover from the remote if it already has data, or create a new local vault if it is still empty.".into();
+            modal.status_text = "The Git primary is configured. Enter a master password to recover from the remote if it already has data, or create a new local vault if it is still empty.".into();
             modal.primary_action_label = "Save and enable".into();
             modal.secondary_action_label = "Close".into();
         }
         (Some(_), false) => {
             modal.mode = SyncModalMode::NotConfigured;
             modal.headline = "Finish sync settings".into();
-            modal.status_text = format!(
-                "Add a {} target authenticated with {} before sync can run.",
-                first_release_formal_provider_label(),
-                first_release_formal_auth_label()
-            );
+            modal.status_text =
+                "Add a Gitee Git remote plus HTTPS credentials or SSH key before sync can run."
+                    .into();
             modal.primary_action_label = "Save settings".into();
             modal.secondary_action_label = "Close".into();
         }
@@ -4757,6 +4887,12 @@ fn sync_preferences_for_bundle(
     }
 }
 
+fn shell_has_materialized_local_data(state: &ShellViewModel) -> bool {
+    !state.console_asset_tree().root_ids().is_empty()
+        || !state.snippet_asset_tree().root_ids().is_empty()
+        || !state.keychain_catalog().nodes.is_empty()
+}
+
 fn apply_vault_snapshot_to_shell(
     state: &mut ShellViewModel,
     snapshot: &VaultSnapshot,
@@ -4812,9 +4948,9 @@ fn create_local_vault_from_shell_state(
     let mut bundle = vault
         .bootstrap_template
         .clone()
-        .ok_or_else(|| anyhow!("Configure a Gitee remote first"))?;
+        .ok_or_else(|| anyhow!("Configure a Gitee Git remote first"))?;
     if bundle.primary_remote().is_none() {
-        return Err(anyhow!("Configure a Gitee remote first"));
+        return Err(anyhow!("Configure a Gitee Git remote first"));
     }
     if bundle.vault_id.trim().is_empty() {
         bundle.vault_id = format!("vault-{}", Uuid::new_v4().simple());
@@ -4834,6 +4970,7 @@ fn create_local_vault_from_shell_state(
     )?;
     let encrypted_snapshot = encrypt_snapshot(&snapshot, &vault_key)?;
     let bootstrap_created_at = current_sync_timestamp();
+    let device_id = load_or_create_device_id(vault.root_dir.as_path())?;
     store_encrypted_cache(
         vault.cache_root().as_path(),
         &bundle.vault_id,
@@ -4843,6 +4980,9 @@ fn create_local_vault_from_shell_state(
         bundle,
         wrapped_vault_key,
         kdf: kdf.clone(),
+        device_id,
+        logical_revision: None,
+        transport_revision_hint: None,
         current_revision: None,
         local_snapshot_hash: Some(payload_hash_from_encrypted_snapshot_sha(
             &encrypted_snapshot.payload_sha256,
@@ -4876,7 +5016,9 @@ fn recover_local_vault_from_primary_remote(
         return Ok(false);
     };
     let primary_remote = resolve_remote_for_sync(&primary_remote, credential_store)?;
-    let provider = vault.provider_factory.build_provider(&primary_remote)?;
+    let provider = vault
+        .provider_factory
+        .build_provider_for_vault(&primary_remote, vault.root_dir.as_path())?;
     let Some(remote_head) = provider
         .read_head()
         .with_context(|| {
@@ -4899,7 +5041,107 @@ fn recover_local_vault_from_primary_remote(
     let wrapped: WrappedVaultKey = serde_json::from_str(&remote_head.wrapped_vault_key)
         .context("failed to decode wrapped vault key from remote head")?;
     let vault_key = unwrap_vault_key(password, &wrapped)?;
-    let snapshot = decrypt_snapshot(&remote_revision.encrypted_snapshot, &vault_key)?;
+    let device_id = load_or_create_device_id(vault.root_dir.as_path())?;
+    let remote_snapshot = decrypt_snapshot(&remote_revision.encrypted_snapshot, &vault_key)?;
+    let local_snapshot = export_vault_snapshot(
+        &combined_asset_tree(state),
+        state.keychain_catalog(),
+        credential_store,
+        vault.known_hosts_path().as_path(),
+        sync_preferences_for_bundle(&bundle, None),
+        &UiPreferences::from(&*state),
+    )?;
+    if shell_has_materialized_local_data(state) {
+        let merge_remote_snapshot =
+            prepare_remote_snapshot_for_merge(&VaultSnapshot::default(), &local_snapshot, &remote_snapshot);
+        let merge_result = merge_snapshots(MergeInput {
+            base: VaultSnapshot::default(),
+            local: local_snapshot.clone(),
+            remote: merge_remote_snapshot.clone(),
+            device_id: device_id.clone(),
+        });
+        if !merge_result.conflicts.is_empty() {
+            let captured_at = current_sync_timestamp();
+            persist_merge_conflict_recovery_snapshots(
+                vault.root_dir.join("recovery").as_path(),
+                &remote_head.vault_id,
+                None,
+                &local_snapshot,
+                &remote_head,
+                &merge_remote_snapshot,
+            )?;
+            persist_merge_conflict_inbox_entries(
+                vault.root_dir.join("conflicts").as_path(),
+                &remote_head.vault_id,
+                merge_result.conflicts.as_slice(),
+                device_id.as_str(),
+                remote_head.device_id.as_str(),
+                captured_at.as_str(),
+            )?;
+        }
+        let merged_snapshot = merge_result.merged;
+        let next_revision = next_vault_revision(Some(remote_head.vault_revision.as_str()));
+        let committed_at = current_sync_timestamp();
+        let request = SyncRequest {
+            vault_id: remote_head.vault_id.clone(),
+            snapshot: merged_snapshot.clone(),
+            next_revision: next_revision.clone(),
+            parent_revision: Some(remote_head.vault_revision.clone()),
+            device_id: device_id.clone(),
+            committed_at: committed_at.clone(),
+            committed_by_device: device_id.clone(),
+            wrapped_vault_key: remote_head.wrapped_vault_key.clone(),
+            kdf: remote_head.kdf.clone(),
+            provider_kind: primary_remote.provider,
+            vault_key,
+        };
+        let mirror_providers = build_mirror_providers(&bundle, vault, credential_store)?;
+        let engine = SyncEngine::new(provider, mirror_providers);
+        let report = engine.sync(request).map_err(|err| anyhow!(err.to_string()))?;
+
+        bundle.vault_id = remote_head.vault_id.clone();
+        store_encrypted_cache(
+            vault.cache_root().as_path(),
+            &bundle.vault_id,
+            &report.encrypted_snapshot,
+        )?;
+        let local_state = LocalVaultBootstrapState {
+            bundle,
+            wrapped_vault_key: remote_head.wrapped_vault_key.clone(),
+            kdf: remote_head.kdf.clone(),
+            device_id,
+            logical_revision: Some(report.primary_revision.clone()),
+            transport_revision_hint: None,
+            current_revision: Some(report.primary_revision.clone()),
+            local_snapshot_hash: Some(report.head.payload_hash.clone()),
+            last_local_change_at: Some(committed_at.clone()),
+            last_successful_push_at: Some(committed_at),
+            last_successful_pull_at: None,
+            last_sync_error: None,
+        };
+        save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
+        persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
+        apply_vault_snapshot_to_shell(
+            state,
+            &merged_snapshot,
+            credential_store,
+            vault.known_hosts_path().as_path(),
+        )?;
+        vault.local_state = Some(local_state);
+        vault.unlocked_vault_key = Some(vault_key);
+        vault.decrypted_snapshot = Some(merged_snapshot);
+        update_vault_panel_for_local_state(state, vault);
+        update_sync_modal_for_local_state(state, vault);
+        state.vault_panel_state_mut().primary_status_label =
+            format!("Attached and merged {}", report.primary_revision);
+        state.sync_modal_state_mut().status_text = format!(
+            "Attached local assets to primary remote and pushed merged revision {}.",
+            report.primary_revision
+        );
+
+        return Ok(true);
+    }
+
     let recovery_pulled_at = current_sync_timestamp();
     bundle.vault_id = remote_head.vault_id.clone();
     store_encrypted_cache(
@@ -4911,6 +5153,9 @@ fn recover_local_vault_from_primary_remote(
         bundle,
         wrapped_vault_key: remote_head.wrapped_vault_key.clone(),
         kdf: remote_head.kdf.clone(),
+        device_id,
+        logical_revision: Some(remote_head.vault_revision.clone()),
+        transport_revision_hint: None,
         current_revision: Some(remote_head.vault_revision.clone()),
         local_snapshot_hash: Some(remote_head.payload_hash.clone()),
         last_local_change_at: None,
@@ -4922,13 +5167,13 @@ fn recover_local_vault_from_primary_remote(
     persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
     apply_vault_snapshot_to_shell(
         state,
-        &snapshot,
+        &remote_snapshot,
         credential_store,
         vault.known_hosts_path().as_path(),
     )?;
     vault.local_state = Some(local_state);
     vault.unlocked_vault_key = Some(vault_key);
-    vault.decrypted_snapshot = Some(snapshot);
+    vault.decrypted_snapshot = Some(remote_snapshot);
     update_vault_panel_for_local_state(state, vault);
     update_sync_modal_for_local_state(state, vault);
     state.vault_panel_state_mut().primary_status_label =
@@ -4951,7 +5196,9 @@ fn ensure_primary_remote_is_empty_before_first_local_bootstrap(
         .cloned()
         .ok_or_else(|| anyhow!("primary remote is not configured"))?;
     let resolved = resolve_remote_for_sync(&primary_remote, credential_store)?;
-    let provider = vault.provider_factory.build_provider(&resolved)?;
+    let provider = vault
+        .provider_factory
+        .build_provider_for_vault(&resolved, vault.root_dir.as_path())?;
     let remote_head = provider
         .read_head()
         .with_context(|| {
@@ -5037,7 +5284,274 @@ fn resolve_remote_for_sync(
         resolved.credential_ref = Some(inline_secret);
     }
 
+    if remote.provider == ProviderKind::GitRepo
+        && matches!(
+            remote.auth_kind,
+            ProviderAuthKind::HttpsCredentials | ProviderAuthKind::SshKey
+        )
+    {
+        let inline_secret =
+            load_provider_credential(credential_store, remote.credential_ref.as_deref())?;
+        let inline_secret = inline_secret.ok_or_else(|| {
+            anyhow!(
+                "missing saved provider credential for remote `{}`",
+                remote.remote_id
+            )
+        })?;
+        resolved.credential_ref = Some(inline_secret);
+    }
+
     Ok(resolved)
+}
+
+fn build_mirror_providers(
+    bundle: &BootstrapBundle,
+    vault: &VaultSessionState,
+    credential_store: &dyn CredentialStore,
+) -> Result<Vec<Arc<dyn VaultProvider>>> {
+    bundle
+        .remotes
+        .iter()
+        .filter(|remote| remote.role == RemoteRole::Mirror)
+        .map(|remote| {
+            let resolved = resolve_remote_for_sync(remote, credential_store)?;
+            vault
+                .provider_factory
+                .build_provider_for_vault(&resolved, vault.root_dir.as_path())
+        })
+        .collect()
+}
+
+fn prepare_remote_snapshot_for_merge(
+    base: &VaultSnapshot,
+    local: &VaultSnapshot,
+    remote: &VaultSnapshot,
+) -> VaultSnapshot {
+    let mut remote = remote.clone();
+    let asset_id_remap =
+        concurrent_addition_asset_id_remap(&base.asset_catalog, &local.asset_catalog, &remote.asset_catalog);
+    if !asset_id_remap.is_empty() {
+        apply_remote_asset_id_remap(&mut remote, &asset_id_remap);
+    }
+    let keychain_id_remap = concurrent_addition_keychain_id_remap(
+        &base.keychain_catalog,
+        &local.keychain_catalog,
+        &remote.keychain_catalog,
+    );
+    if !keychain_id_remap.is_empty() {
+        apply_remote_keychain_id_remap(&mut remote, &keychain_id_remap);
+    }
+    remote
+}
+
+fn concurrent_addition_asset_id_remap(
+    base: &crate::app::vault::model::VaultAssetCatalog,
+    local: &crate::app::vault::model::VaultAssetCatalog,
+    remote: &crate::app::vault::model::VaultAssetCatalog,
+) -> BTreeMap<String, String> {
+    let mut occupied = base
+        .nodes
+        .keys()
+        .chain(local.nodes.keys())
+        .chain(remote.nodes.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut remap = BTreeMap::new();
+    for (node_id, remote_node) in &remote.nodes {
+        let Some(local_node) = local.nodes.get(node_id) else {
+            continue;
+        };
+        if base.nodes.contains_key(node_id) || local_node == remote_node {
+            continue;
+        }
+        let next_id = next_merge_collision_id(&occupied, node_id);
+        occupied.insert(next_id.clone());
+        remap.insert(node_id.clone(), next_id);
+    }
+    remap
+}
+
+fn concurrent_addition_keychain_id_remap(
+    base: &crate::app::keychain::model::KeychainCatalog,
+    local: &crate::app::keychain::model::KeychainCatalog,
+    remote: &crate::app::keychain::model::KeychainCatalog,
+) -> BTreeMap<String, String> {
+    let mut occupied = base
+        .nodes
+        .keys()
+        .chain(local.nodes.keys())
+        .chain(remote.nodes.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut remap = BTreeMap::new();
+    for (node_id, remote_node) in &remote.nodes {
+        let Some(local_node) = local.nodes.get(node_id) else {
+            continue;
+        };
+        if base.nodes.contains_key(node_id) || local_node == remote_node {
+            continue;
+        }
+        let next_id = next_merge_collision_id(&occupied, node_id);
+        occupied.insert(next_id.clone());
+        remap.insert(node_id.clone(), next_id);
+    }
+    remap
+}
+
+fn next_merge_collision_id(occupied: &BTreeSet<String>, original: &str) -> String {
+    let mut suffix = 1_u64;
+    loop {
+        let candidate = format!("{original}-remote-merge-{suffix}");
+        if !occupied.contains(&candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn apply_remote_asset_id_remap(snapshot: &mut VaultSnapshot, remap: &BTreeMap<String, String>) {
+    snapshot.asset_catalog.root_ids = snapshot
+        .asset_catalog
+        .root_ids
+        .iter()
+        .map(|node_id| remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()))
+        .collect();
+    snapshot.asset_catalog.nodes = snapshot
+        .asset_catalog
+        .nodes
+        .iter()
+        .map(|(node_id, node)| {
+            let mut node = node.clone();
+            node.id = remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone());
+            node.parent_id = node
+                .parent_id
+                .and_then(|parent_id| remap.get(&parent_id).cloned().or(Some(parent_id)));
+            node.child_ids = node
+                .child_ids
+                .iter()
+                .map(|child_id| remap.get(child_id).cloned().unwrap_or_else(|| child_id.clone()))
+                .collect();
+            match &mut node.payload {
+                VaultAssetPayload::Folder | VaultAssetPayload::SnippetPackage => {}
+                VaultAssetPayload::SshConnection(spec) => {
+                    if let VaultSshProxySpec::SshAsset { asset_id } = &mut spec.proxy
+                        && let Some(next_id) = remap.get(asset_id)
+                    {
+                        *asset_id = next_id.clone();
+                    }
+                }
+                VaultAssetPayload::Snippet(spec) => {
+                    if let Some(package_id) = &mut spec.package_id
+                        && let Some(next_id) = remap.get(package_id)
+                    {
+                        *package_id = next_id.clone();
+                    }
+                }
+            }
+            (node.id.clone(), node)
+        })
+        .collect();
+    snapshot.ssh_secret_bundles = snapshot
+        .ssh_secret_bundles
+        .iter()
+        .map(|(node_id, bundle)| {
+            (
+                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
+                bundle.clone(),
+            )
+        })
+        .collect();
+    snapshot.asset_catalog.merge_metadata = snapshot
+        .asset_catalog
+        .merge_metadata
+        .iter()
+        .map(|(node_id, metadata)| {
+            (
+                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
+                metadata.clone(),
+            )
+        })
+        .collect();
+}
+
+fn apply_remote_keychain_id_remap(snapshot: &mut VaultSnapshot, remap: &BTreeMap<String, String>) {
+    snapshot.keychain_catalog.root_ids = snapshot
+        .keychain_catalog
+        .root_ids
+        .iter()
+        .map(|node_id| remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()))
+        .collect();
+    snapshot.keychain_catalog.nodes = snapshot
+        .keychain_catalog
+        .nodes
+        .iter()
+        .map(|(node_id, node)| {
+            let mut node = node.clone();
+            node.id = remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone());
+            node.parent_id = node
+                .parent_id
+                .and_then(|parent_id| remap.get(&parent_id).cloned().or(Some(parent_id)));
+            node.child_ids = node
+                .child_ids
+                .iter()
+                .map(|child_id| remap.get(child_id).cloned().unwrap_or_else(|| child_id.clone()))
+                .collect();
+            match &mut node.payload {
+                KeychainNodePayload::Folder => {}
+                KeychainNodePayload::Identity(spec) => {
+                    if let Some(ssh_key_id) = &mut spec.ssh_key_id
+                        && let Some(next_id) = remap.get(ssh_key_id)
+                    {
+                        *ssh_key_id = next_id.clone();
+                    }
+                }
+                KeychainNodePayload::SshKey(_) => {}
+            }
+            (node.id.clone(), node)
+        })
+        .collect();
+    snapshot.keychain_identity_secret_bundles = snapshot
+        .keychain_identity_secret_bundles
+        .iter()
+        .map(|(node_id, bundle)| {
+            (
+                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
+                bundle.clone(),
+            )
+        })
+        .collect();
+    snapshot.keychain_key_secret_bundles = snapshot
+        .keychain_key_secret_bundles
+        .iter()
+        .map(|(node_id, bundle)| {
+            (
+                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
+                bundle.clone(),
+            )
+        })
+        .collect();
+    snapshot.keychain_catalog.merge_metadata = snapshot
+        .keychain_catalog
+        .merge_metadata
+        .iter()
+        .map(|(node_id, metadata)| {
+            (
+                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
+                metadata.clone(),
+            )
+        })
+        .collect();
+
+    for node in snapshot.asset_catalog.nodes.values_mut() {
+        let VaultAssetPayload::SshConnection(spec) = &mut node.payload else {
+            continue;
+        };
+        if let Some(identity_id) = &mut spec.keychain_identity_id
+            && let Some(next_id) = remap.get(identity_id)
+        {
+            *identity_id = next_id.clone();
+        }
+    }
 }
 
 fn sync_local_vault(
@@ -5054,6 +5568,7 @@ fn sync_local_vault(
         .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
     let local_bundle = local_state.bundle.clone();
     let current_revision = local_state.current_revision.clone();
+    let local_device_id = local_state.device_id.clone();
     let wrapped_vault_key = local_state.wrapped_vault_key.clone();
     let kdf = local_state.kdf.clone();
     let vault_key = vault
@@ -5077,11 +5592,14 @@ fn sync_local_vault(
         .cloned()
         .ok_or_else(|| anyhow!("primary remote is not configured"))?;
     let primary_remote = resolve_remote_for_sync(&primary_remote, credential_store)?;
-    let primary_provider = vault.provider_factory.build_provider(&primary_remote)?;
+    let primary_provider = vault
+        .provider_factory
+        .build_provider_for_vault(&primary_remote, vault.root_dir.as_path())?;
     let primary_head = primary_provider
         .read_head()
         .map_err(|err| anyhow!("failed to inspect primary remote `{}`: {err}", primary_remote.remote_id))?
         .head;
+    let base_snapshot = vault.decrypted_snapshot.clone().unwrap_or_default();
     let decision = decide_sync_action(&local_sync_state, primary_head.as_ref());
     match decision.action {
         SyncAction::Noop => {
@@ -5120,13 +5638,10 @@ fn sync_local_vault(
             }
             return Ok(());
         }
-        SyncAction::Pull => {
+        SyncAction::PullOnly => {
             let remote_head = primary_head.ok_or_else(|| {
                 anyhow!("primary remote `{}` is missing a readable head", primary_remote.remote_id)
             })?;
-            if decision.backup_local_snapshot {
-                persist_local_recovery_snapshot(vault, &snapshot, local_snapshot_hash.clone())?;
-            }
             let remote_revision = primary_provider.read_revision(&remote_head).map_err(|err| {
                 anyhow!(
                     "failed to read primary revision `{}` from remote `{}`: {err}",
@@ -5170,49 +5685,71 @@ fn sync_local_vault(
             );
             return Ok(());
         }
-        SyncAction::Push => {}
+        SyncAction::PushOnly | SyncAction::MergeThenPush => {}
     }
 
-    let mirror_providers = local_bundle
-        .remotes
-        .iter()
-        .filter(|remote| remote.role == RemoteRole::Mirror)
-        .map(|remote| {
-            let resolved = resolve_remote_for_sync(remote, credential_store)?;
-            vault.provider_factory.build_provider(&resolved)
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mirror_providers = build_mirror_providers(&local_bundle, vault, credential_store)?;
+    let mut snapshot_to_commit = snapshot.clone();
+    let mut snapshot_to_display = snapshot.clone();
+    let mut parent_revision = primary_head
+        .as_ref()
+        .map(|head| head.vault_revision.clone())
+        .or(current_revision.clone());
+    let mut merge_conflicts_present = false;
 
-    if decision.backup_remote_snapshot {
-        let remote_head = primary_head.as_ref().ok_or_else(|| {
-            anyhow!(
-                "primary remote `{}` is missing a recoverable head for overwrite backup",
-                primary_remote.remote_id
-            )
+    if matches!(decision.action, SyncAction::MergeThenPush) {
+        let remote_head = primary_head.clone().ok_or_else(|| {
+            anyhow!("primary remote `{}` is missing a readable head", primary_remote.remote_id)
         })?;
-        let remote_revision = primary_provider.read_revision(remote_head).map_err(|err| {
+        let remote_revision = primary_provider.read_revision(&remote_head).map_err(|err| {
             anyhow!(
-                "failed to read primary revision `{}` from remote `{}` for recovery backup: {err}",
+                "failed to read primary revision `{}` from remote `{}`: {err}",
                 remote_head.vault_revision,
                 primary_remote.remote_id
             )
         })?;
         let remote_snapshot = decrypt_snapshot(&remote_revision.encrypted_snapshot, &vault_key)?;
-        persist_remote_recovery_snapshot(vault, remote_head, &remote_snapshot)?;
+        let merge_remote_snapshot =
+            prepare_remote_snapshot_for_merge(&base_snapshot, &snapshot, &remote_snapshot);
+        let merge_result = merge_snapshots(MergeInput {
+            base: base_snapshot,
+            local: snapshot.clone(),
+            remote: merge_remote_snapshot.clone(),
+            device_id: local_device_id.clone(),
+        });
+        if !merge_result.conflicts.is_empty() {
+            let captured_at = current_sync_timestamp();
+            persist_merge_conflict_recovery_snapshots(
+                vault.root_dir.join("recovery").as_path(),
+                &local_bundle.vault_id,
+                current_revision.clone(),
+                &snapshot,
+                &remote_head,
+                &merge_remote_snapshot,
+            )?;
+            persist_merge_conflict_inbox_entries(
+                vault.root_dir.join("conflicts").as_path(),
+                &local_bundle.vault_id,
+                merge_result.conflicts.as_slice(),
+                local_device_id.as_str(),
+                remote_head.device_id.as_str(),
+                captured_at.as_str(),
+            )?;
+            merge_conflicts_present = true;
+        }
+        parent_revision = Some(remote_head.vault_revision.clone());
+        snapshot_to_display = merge_result.merged.clone();
+        snapshot_to_commit = merge_result.merged;
     }
 
-    let parent_revision = primary_head
-        .as_ref()
-        .map(|head| head.vault_revision.clone())
-        .or(current_revision);
     let request = SyncRequest {
         vault_id: local_bundle.vault_id.clone(),
-        snapshot: snapshot.clone(),
+        snapshot: snapshot_to_commit.clone(),
         next_revision: next_vault_revision(parent_revision.as_deref()),
         parent_revision,
-        device_id: "local-device".into(),
+        device_id: local_device_id.clone(),
         committed_at: current_sync_timestamp(),
-        committed_by_device: "local-device".into(),
+        committed_by_device: local_device_id,
         wrapped_vault_key,
         kdf,
         provider_kind: primary_remote.provider,
@@ -5236,9 +5773,42 @@ fn sync_local_vault(
             local_state.last_successful_push_at = Some(report.head.committed_at.clone());
             local_state.last_sync_error = None;
             save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
-            vault.decrypted_snapshot = Some(snapshot);
+            if matches!(decision.action, SyncAction::MergeThenPush) {
+                clear_vault_decrypted_state(state, Some(&snapshot), credential_store)?;
+                apply_vault_snapshot_to_shell(
+                    state,
+                    &snapshot_to_display,
+                    credential_store,
+                    vault.known_hosts_path().as_path(),
+                )?;
+            }
+            vault.decrypted_snapshot = Some(snapshot_to_display.clone());
             update_vault_panel_for_local_state(state, vault);
             update_sync_modal_for_local_state(state, vault);
+            let primary_status = if matches!(decision.action, SyncAction::MergeThenPush) {
+                if merge_conflicts_present {
+                    format!("Merged with conflicts {}", report.primary_revision)
+                } else {
+                    format!("Merged and synced {}", report.primary_revision)
+                }
+            } else {
+                format!("Primary synced {}", report.primary_revision)
+            };
+            let sync_status = if matches!(decision.action, SyncAction::MergeThenPush) {
+                if merge_conflicts_present {
+                    format!(
+                        "Merged local and remote changes with conflict copies saved locally. Primary is now at {}.",
+                        report.primary_revision
+                    )
+                } else {
+                    format!(
+                        "Merged local and remote changes. Primary is now at {}.",
+                        report.primary_revision
+                    )
+                }
+            } else {
+                format!("Sync completed. Primary is now at {}.", report.primary_revision)
+            };
             if report.is_mirror_degraded() {
                 let mirror_degraded_message = format!(
                     "Mirror degraded: {}",
@@ -5248,19 +5818,14 @@ fn sync_local_vault(
                         .map(|failure| failure.message.as_str())
                         .unwrap_or("unknown mirror failure")
                 );
-                state.vault_panel_state_mut().primary_status_label =
-                    mirror_degraded_message.clone();
+                state.vault_panel_state_mut().primary_status_label = primary_status.clone();
                 state.sync_modal_state_mut().status_text = format!(
-                    "Primary synced {}. {}",
-                    report.primary_revision, mirror_degraded_message
+                    "{} {}",
+                    sync_status, mirror_degraded_message
                 );
             } else {
-                state.vault_panel_state_mut().primary_status_label =
-                    format!("Primary synced {}", report.primary_revision);
-                state.sync_modal_state_mut().status_text = format!(
-                    "Sync completed. Primary is now at {}.",
-                    report.primary_revision
-                );
+                state.vault_panel_state_mut().primary_status_label = primary_status;
+                state.sync_modal_state_mut().status_text = sync_status;
             }
             Ok(())
         }
@@ -5304,7 +5869,9 @@ fn refresh_local_vault_from_primary_remote_if_changed(
         .cloned()
         .ok_or_else(|| anyhow!("primary remote is not configured"))?;
     let primary_remote = resolve_remote_for_sync(&primary_remote, credential_store)?;
-    let provider = vault.provider_factory.build_provider(&primary_remote)?;
+    let provider = vault
+        .provider_factory
+        .build_provider_for_vault(&primary_remote, vault.root_dir.as_path())?;
     let Some(remote_head) = provider
         .read_head()
         .map_err(|err| {

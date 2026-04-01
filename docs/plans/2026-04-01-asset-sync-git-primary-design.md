@@ -549,3 +549,9 @@
 - GitHub personal access token：<https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens>
 - Gitee 通过 HTTPS / SSH 推拉代码：<https://gitee.com/help/articles/4238>
 - Gitee SSH 公钥设置：<https://gitee.com/help/articles/4191>
+
+## 最终落地备注
+
+- 冲突结果的产品级入口首批实现为 `Sync Settings` modal 中的 `conflict count + latest summary`，底层数据落在本地 `conflicts/<vault_id>/`，而不是单独新增完整冲突中心窗口。
+- merge 冲突时会同时保留 `recovery` 快照与 `conflict inbox` 记录，保证“可恢复”与“可见化”同时成立。
+- 正式 primary 设置路径已经完全切到 `Gitee Git repo`；`gist/snippet` provider 代码保留，但只作为兼容 backup / import-export 路径存在。

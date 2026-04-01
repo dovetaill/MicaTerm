@@ -4,6 +4,7 @@ use crate::app::vault::crypto::EncryptedSnapshot;
 use crate::app::vault::model::{PackLayout, ProviderKind, VaultHead, VaultManifest};
 
 pub mod gitee_gist;
+pub mod git_repo;
 pub mod github_gist;
 pub mod gitlab_snippet;
 pub mod mock;
@@ -35,6 +36,15 @@ impl ProviderCapabilities {
             preferred_pack_strategy: PackLayout::BundledFiles,
         }
     }
+
+    pub fn git_repo_primary() -> Self {
+        Self {
+            supports_conditional_head_write: false,
+            max_pack_count: 1,
+            max_pack_bytes: 16 * 1024 * 1024,
+            preferred_pack_strategy: PackLayout::BundledFiles,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -47,6 +57,7 @@ pub struct ProviderWriteRequest {
     pub head: VaultHead,
     pub manifest: VaultManifest,
     pub encrypted_snapshot: EncryptedSnapshot,
+    // Git primary will later separate logical revision from transport ancestry.
     pub expected_parent_revision: Option<String>,
     pub conditional_head_write: bool,
 }
@@ -76,7 +87,7 @@ pub trait VaultProvider: Send + Sync {
 }
 
 pub fn first_release_formal_provider_kind() -> ProviderKind {
-    ProviderKind::GiteeGist
+    ProviderKind::GitRepo
 }
 
 pub fn first_release_formal_provider_label() -> &'static str {
@@ -84,7 +95,11 @@ pub fn first_release_formal_provider_label() -> &'static str {
 }
 
 pub fn first_release_formal_auth_label() -> &'static str {
-    "Personal Access Token"
+    "HTTPS credentials / SSH key"
+}
+
+pub fn git_repo_provider_not_implemented() -> anyhow::Error {
+    anyhow!("git repo provider is not implemented yet")
 }
 
 pub fn attach_snapshot_recovery_metadata(

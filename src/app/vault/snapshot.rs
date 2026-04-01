@@ -31,6 +31,7 @@ pub fn export_vault_snapshot(
     _ui_preferences: &UiPreferences,
 ) -> Result<VaultSnapshot> {
     let asset_catalog = asset_tree_to_vault_catalog(asset_tree);
+    let keychain_catalog = normalize_keychain_merge_metadata(keychain_catalog.clone());
     let mut ssh_secret_bundles = std::collections::BTreeMap::new();
     let mut keychain_identity_secret_bundles = std::collections::BTreeMap::new();
     let mut keychain_key_secret_bundles = std::collections::BTreeMap::new();
@@ -75,13 +76,21 @@ pub fn export_vault_snapshot(
         schema_version: 1,
         asset_catalog,
         ssh_secret_bundles,
-        keychain_catalog: keychain_catalog.clone(),
+        keychain_catalog,
         keychain_identity_secret_bundles,
         keychain_key_secret_bundles,
         known_hosts,
         sync_preferences,
         ui_preferences: Default::default(),
     })
+}
+
+fn normalize_keychain_merge_metadata(catalog: KeychainCatalog) -> KeychainCatalog {
+    let mut catalog = catalog;
+    catalog
+        .merge_metadata
+        .retain(|node_id, metadata| catalog.nodes.contains_key(node_id) || metadata.is_deleted());
+    catalog
 }
 
 pub fn apply_vault_snapshot(

@@ -13,6 +13,8 @@ const RECOVERY_FORMAT_VERSION: u32 = 1;
 pub enum RecoverySource {
     LocalBeforePull,
     RemoteBeforePush,
+    LocalConflictCopy,
+    RemoteConflictCopy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,6 +108,8 @@ fn recovery_file_name(record: &RecoverySnapshotRecord) -> String {
     let source = match record.source {
         RecoverySource::LocalBeforePull => "local-before-pull",
         RecoverySource::RemoteBeforePush => "remote-before-push",
+        RecoverySource::LocalConflictCopy => "local-conflict-copy",
+        RecoverySource::RemoteConflictCopy => "remote-conflict-copy",
     };
     let revision = record
         .losing_revision
