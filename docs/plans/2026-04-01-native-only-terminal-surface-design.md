@@ -2,7 +2,7 @@
 
 日期: 2026-04-01
 执行者: Codex
-状态: 已确认方向，待进入实现规划
+状态: 已完成实现并通过 Workspace 验证
 
 ## 背景
 
@@ -31,6 +31,15 @@
 - 使用统一 text layout/shaping/display list，再按平台后端绘制
 - Windows 与 Linux 的两个宿主打包脚本都能输出 native-only 包
 - 默认内置并使用 `Fusion-JetBrainsMapleMono`
+
+## 完成态回写
+
+当前实现已经落到完成态：
+- runtime、bootstrap、Slint shell contract 已全部切到 native-only，`session-surface-image` 与 bitmap render mode 合同已移除
+- `PlatformNativeSurfaceBackend` 已提供 Windows / Wayland / X11 / detached fallback 选择逻辑
+- semantic overlay 已覆盖 output block(`Json` / `Xml` / `Log`) 与 input-line(`Prompt` / `Command` / `Argument` / `Option` / `Operator`) 两类增强，并在 `alternate screen`、TUI mouse-grab、非底部视口下自动禁用输入高亮
+- 默认终端字体已切换为 `Fusion-JetBrainsMapleMono`，打包脚本同步携带 `OFL.txt`
+- 最终交接契约见 `docs/plans/2026-04-01-native-only-terminal-surface-tdd-spec.md`
 
 ## 非目标
 

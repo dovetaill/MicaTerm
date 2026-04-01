@@ -8,6 +8,12 @@
 
 **Tech Stack:** Rust, Slint, Tokio, wezterm-term, termwiz, windows-sys, DirectWrite/Direct2D/DirectComposition, Wayland, X11, raw-window-handle, regex, optional tree-sitter, focused Rust/unit/contract tests
 
+**Status:** Completed on 2026-04-01.
+
+**Final Verification:** `cargo test --workspace -q`, `cargo check --workspace`, and `cargo clippy --workspace -- -D warnings` all pass after the Task 12 handoff docs land.
+
+**TDD Handoff:** `docs/plans/2026-04-01-native-only-terminal-surface-tdd-spec.md`
+
 ---
 
 ### Task 1: Lock the native-only architecture contract in tests and docs
