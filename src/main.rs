@@ -4,6 +4,7 @@
 use mica_term::app::{async_runtime::AppAsyncRuntime, runtime_profile::AppRuntimeProfile};
 
 fn select_runtime_profile() -> AppRuntimeProfile {
+    // Packaged wrappers now carry the native-only terminal contract through AppRuntimeProfile.
     AppRuntimeProfile::packaged()
 }
 

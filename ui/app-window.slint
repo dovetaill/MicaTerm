@@ -186,7 +186,6 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-session-state: "";
     in-out property <string> workspace-session-error-detail: "";
     in-out property <bool> workspace-session-can-reconnect: false;
-    in-out property <string> workspace-session-render-mode: "bitmap";
     in-out property <string> workspace-session-connection-headline: "";
     in-out property <string> workspace-session-connection-current-hop: "";
     in-out property <string> workspace-session-connection-current-detail: "";
@@ -212,7 +211,6 @@ export component AppWindow inherits Window {
     in-out property <bool> open-saved-ssh-modal-open: false;
     in-out property <string> open-saved-ssh-modal-query: "";
     in-out property <[ConsoleAssetItem]> open-saved-ssh-modal-items: [];
-    in-out property <image> workspace-session-surface-image;
     in-out property <int> workspace-session-native-frame-token: 0;
     in-out property <int> workspace-session-rows: 24;
     in-out property <int> workspace-session-cols: 80;
@@ -700,7 +698,6 @@ export component AppWindow inherits Window {
                         workspace-session-state: root.workspace-session-state;
                         workspace-session-error-detail: root.workspace-session-error-detail;
                         workspace-session-can-reconnect: root.workspace-session-can-reconnect;
-                        workspace-session-render-mode: root.workspace-session-render-mode;
                         workspace-session-connection-headline: root.workspace-session-connection-headline;
                         workspace-session-connection-current-hop: root.workspace-session-connection-current-hop;
                         workspace-session-connection-current-detail: root.workspace-session-connection-current-detail;
@@ -714,7 +711,6 @@ export component AppWindow inherits Window {
                         welcome-quick-launch-visible-group-items: root.welcome-quick-launch-visible-group-items;
                         welcome-quick-launch-selected-detail: root.welcome-quick-launch-selected-detail;
                         welcome-quick-launch-search-query: root.welcome-quick-launch-search-query;
-                        workspace-session-surface-image: root.workspace-session-surface-image;
                         workspace-session-native-frame-token: root.workspace-session-native-frame-token;
                         workspace-session-rows: root.workspace-session-rows;
                         workspace-session-cols: root.workspace-session-cols;

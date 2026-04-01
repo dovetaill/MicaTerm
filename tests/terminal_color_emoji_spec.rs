@@ -234,10 +234,18 @@ fn native_renderer_color_glyph_contract_uses_separate_cache_state() {
         fs::read_to_string("src/app/terminal_renderer/atlas.rs").expect("read renderer atlas");
     let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
         .expect("read native renderer");
+    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
+        .expect("read windows dwrite font backend");
+    let shaper_source = fs::read_to_string("src/app/terminal_layout/shaper.rs")
+        .expect("read terminal shaper");
 
     assert!(
         atlas_source.contains("GlyphCacheKind::Monochrome"),
         "native atlas contract should reserve the atlas path for monochrome glyph entries"
+    );
+    assert!(
+        atlas_source.contains("pub struct ColorGlyphCacheEntry"),
+        "native renderer should expose a dedicated color glyph cache entry contract"
     );
     assert!(
         renderer_source.contains("color_glyph_cache"),
@@ -248,8 +256,62 @@ fn native_renderer_color_glyph_contract_uses_separate_cache_state() {
         "renderer preparation should call the explicit color glyph raster contract for emoji runs"
     );
     assert!(
+        renderer_source.contains("pub color_glyph_draws: Vec<PreparedColorGlyphDraw>"),
+        "prepared native frames should expose dedicated color glyph draw payloads"
+    );
+    assert!(
+        renderer_source.contains("pub monochrome_glyph_draws: Vec<PreparedMonochromeGlyphDraw>"),
+        "prepared native frames should keep monochrome atlas draw payloads separate from color glyph draws"
+    );
+    assert!(
+        renderer_source.contains("cache_entry: ColorGlyphCacheEntry"),
+        "color glyph draw payloads should retain color cache references instead of reusing monochrome atlas entries"
+    );
+    assert!(
+        renderer_source.contains("atlas_entry: GlyphAtlasEntry"),
+        "monochrome glyph draw payloads should keep atlas entry references for non-color runs"
+    );
+    assert!(
+        dwrite_source.contains("ColorGlyphRaster"),
+        "Windows DWrite backend should expose RGBA color glyph rasters for emoji presentation"
+    );
+    assert!(
+        shaper_source.contains("has_color_glyphs"),
+        "text shaping should keep color glyph intent explicit so the renderer can separate cache paths"
+    );
+    assert!(
         renderer_source.contains("color_glyphs_prepared"),
         "prepared frame metadata should count color glyph work separately from monochrome atlas uploads"
+    );
+}
+
+#[test]
+fn semantic_output_overlay_contract_stays_in_display_list_layer() {
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
+    let semantic_source = fs::read_to_string("src/app/terminal_semantic/output_blocks.rs")
+        .expect("read terminal semantic output blocks");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        presenter_source.contains("pub semantic_overlays: Vec<SemanticOutputOverlay>"),
+        "presentable native frames should carry semantic overlays as retained display-list payloads"
+    );
+    assert!(
+        presenter_source.contains("detect_output_block_overlays(&frame_model)"),
+        "native presenter should derive semantic overlays from the terminal model instead of rewriting terminal colors"
+    );
+    assert!(
+        semantic_source.contains("TerminalModelFrame"),
+        "semantic output detection should analyze the shared terminal model layer"
+    );
+    assert!(
+        !semantic_source.contains("TerminalCellState"),
+        "semantic overlays should not mutate the runtime terminal cell state or ANSI truth"
+    );
+    assert!(
+        bootstrap_source.contains("presentable_frame.semantic_overlays"),
+        "bootstrap should thread semantic overlays alongside the retained native frame payload"
     );
 }
 

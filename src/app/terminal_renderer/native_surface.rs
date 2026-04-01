@@ -8,13 +8,10 @@ use slint::{ComponentHandle, RenderingState};
 use crate::AppWindow;
 use crate::app::terminal_presenter::NativeTerminalFrame;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct NativeTerminalSurfaceRect {
-    pub x: i32,
-    pub y: i32,
-    pub width: i32,
-    pub height: i32,
-}
+use super::platform::{
+    NativeTerminalSurfaceRect, PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
+    create_platform_native_surface_backend,
+};
 
 #[derive(Clone)]
 pub struct NativeTerminalSurface {
@@ -22,24 +19,38 @@ pub struct NativeTerminalSurface {
     state: Rc<RefCell<NativeTerminalSurfaceState>>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RetainedNativeTerminalSurfaceFrame {
-    pub frame: NativeTerminalFrame,
-    pub rect: NativeTerminalSurfaceRect,
-}
-
-#[derive(Debug, Default)]
 struct NativeTerminalSurfaceState {
+    backend: Box<dyn PlatformNativeSurfaceBackend>,
     retained_frame: Option<RetainedNativeTerminalSurfaceFrame>,
     rect: NativeTerminalSurfaceRect,
     last_drawn_frame_token: u64,
 }
 
+impl NativeTerminalSurfaceState {
+    fn new() -> Self {
+        Self {
+            backend: create_platform_native_surface_backend(),
+            retained_frame: None,
+            rect: NativeTerminalSurfaceRect::default(),
+            last_drawn_frame_token: 0,
+        }
+    }
+}
+
 impl NativeTerminalSurface {
-    pub fn attach_or_detach(window: &AppWindow) -> Self {
+    pub fn attach(window: &AppWindow) -> Self {
+        let mut native_surface_state = NativeTerminalSurfaceState::new();
+        if let Err(err) = native_surface_state.backend.attach(window) {
+            tracing::warn!(
+                target: "app.terminal",
+                error = %err,
+                "platform native terminal surface backend failed to attach; keeping detached fallback"
+            );
+        }
+
         let surface = Self {
             window: window.as_weak(),
-            state: Rc::new(RefCell::new(NativeTerminalSurfaceState::default())),
+            state: Rc::new(RefCell::new(native_surface_state)),
         };
 
         let state = Rc::clone(&surface.state);
@@ -49,7 +60,7 @@ impl NativeTerminalSurface {
                 let mut state = state.borrow_mut();
                 match rendering_state {
                     RenderingState::BeforeRendering => draw_retained_frame(&mut state),
-                    RenderingState::RenderingTeardown => clear_retained_frame(&mut state),
+                    RenderingState::RenderingTeardown => teardown_native_surface(&mut state),
                     _ => {}
                 }
             }) {
@@ -73,10 +84,12 @@ impl NativeTerminalSurface {
                 false
             } else {
                 state.rect = rect;
-                if let Some(mut retained_frame) = state.retained_frame {
+                if let Some(retained_frame) = state.retained_frame.as_mut() {
                     retained_frame.rect = rect;
-                    state.retained_frame = Some(retained_frame);
                 }
+                state.backend.update_surface_rect(rect);
+                let retained_frame = state.retained_frame.clone();
+                state.backend.update_frame(retained_frame);
                 true
             }
         };
@@ -93,10 +106,12 @@ impl NativeTerminalSurface {
                 frame,
                 rect: state.rect,
             };
-            if state.retained_frame == Some(next_frame) {
+            if state.retained_frame.as_ref() == Some(&next_frame) {
                 false
             } else {
                 state.retained_frame = Some(next_frame);
+                let retained_frame = state.retained_frame.clone();
+                state.backend.update_frame(retained_frame);
                 true
             }
         };
@@ -133,12 +148,19 @@ impl NativeTerminalSurface {
 }
 
 fn draw_retained_frame(state: &mut NativeTerminalSurfaceState) {
-    if let Some(retained_frame) = state.retained_frame {
+    if let Some(retained_frame) = state.retained_frame.as_ref() {
         state.last_drawn_frame_token = retained_frame.frame.frame_token;
     }
+    state.backend.present();
 }
 
 fn clear_retained_frame(state: &mut NativeTerminalSurfaceState) {
     state.retained_frame = None;
     state.last_drawn_frame_token = 0;
+    state.backend.update_frame(state.retained_frame.clone());
+}
+
+fn teardown_native_surface(state: &mut NativeTerminalSurfaceState) {
+    clear_retained_frame(state);
+    state.backend.detach();
 }

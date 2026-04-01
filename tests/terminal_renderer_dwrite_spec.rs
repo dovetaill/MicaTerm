@@ -285,20 +285,40 @@ fn terminal_presenter_threads_native_overlay_render_contracts() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
+        presenter_source.contains("pub struct NativeCursorOverlay"),
+        "native presenter should define an explicit cursor overlay payload instead of leaving cursor drawing implicit in the surface backend"
+    );
+    assert!(
         presenter_source.contains("pub struct NativeSelectionOverlay"),
         "native presenter should define an explicit selection overlay payload instead of leaving selection state implicit in the bitmap path"
     );
     assert!(
-        presenter_source.contains("pub rect_count: usize"),
-        "selection overlays should describe how many grid-aligned rectangles the native renderer should draw"
+        presenter_source.contains("pub struct NativeSelectionRect"),
+        "selection overlays should expose grid-aligned rectangle payloads for the retained native display list"
+    );
+    assert!(
+        presenter_source.contains("pub rects: Vec<NativeSelectionRect>"),
+        "selection overlays should carry explicit rectangle payloads instead of only a count"
     );
     assert!(
         presenter_source.contains("pub struct NativeUnderlineOverlay"),
         "native presenter should define an explicit underline overlay payload"
     );
     assert!(
+        presenter_source.contains("pub struct NativeUnderlineRun"),
+        "underline overlays should carry per-run payloads for retained native drawing"
+    );
+    assert!(
+        presenter_source.contains("pub runs: Vec<NativeUnderlineRun>"),
+        "underline overlays should carry explicit underline runs instead of only a count"
+    );
+    assert!(
         presenter_source.contains("pub struct NativeImePreviewOverlay"),
         "native presenter should define an explicit IME preview overlay payload"
+    );
+    assert!(
+        presenter_source.contains("pub cursor_overlay: NativeCursorOverlay"),
+        "presentable native frames should carry cursor overlay data"
     );
     assert!(
         presenter_source.contains("pub selection_overlay: NativeSelectionOverlay"),
@@ -317,12 +337,12 @@ fn terminal_presenter_threads_native_overlay_render_contracts() {
         "renderer preparation should expose an explicit underline overlay contract for native frame payload assembly"
     );
     assert!(
-        renderer_source.contains("pub underline_overlay: PreparedUnderlineOverlay"),
-        "prepared native frames should carry underline overlay metadata for presenter assembly"
+        renderer_source.contains("pub runs: Vec<PreparedUnderlineRun>"),
+        "prepared underline overlays should keep draw-ready underline runs for presenter assembly"
     );
     assert!(
-        bootstrap_source.contains("presentable_frame.cursor"),
-        "bootstrap should consume cursor state from the presentable native frame payload when the native path is active"
+        bootstrap_source.contains("presentable_frame.cursor_overlay"),
+        "bootstrap should keep the native cursor overlay payload alongside the retained frame state"
     );
     assert!(
         bootstrap_source.contains("presentable_frame.selection_overlay"),
@@ -335,30 +355,80 @@ fn terminal_presenter_threads_native_overlay_render_contracts() {
 }
 
 #[test]
-fn windows_presenter_installation_prefers_native_with_bitmap_fallback() {
+fn native_renderer_sources_expose_draw_ready_text_payloads() {
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read native renderer");
+
+    assert!(
+        renderer_source.contains("pub struct PreparedMonochromeGlyphDraw"),
+        "native renderer should define an explicit monochrome glyph draw payload"
+    );
+    assert!(
+        renderer_source.contains("pub struct PreparedColorGlyphDraw"),
+        "native renderer should define an explicit color glyph draw payload"
+    );
+    assert!(
+        renderer_source.contains("pub monochrome_glyph_draws: Vec<PreparedMonochromeGlyphDraw>"),
+        "prepared native frames should carry retained monochrome glyph draw payloads"
+    );
+    assert!(
+        renderer_source.contains("pub color_glyph_draws: Vec<PreparedColorGlyphDraw>"),
+        "prepared native frames should carry retained color glyph draw payloads"
+    );
+    assert!(
+        renderer_source.contains("atlas_entry: GlyphAtlasEntry"),
+        "monochrome glyph draws should keep atlas entry references for native presentation"
+    );
+    assert!(
+        renderer_source.contains("cache_entry: ColorGlyphCacheEntry"),
+        "color glyph draws should keep dedicated color cache references for native presentation"
+    );
+    assert!(
+        presenter_source.contains("pub monochrome_glyph_draws: Vec<PreparedMonochromeGlyphDraw>"),
+        "presentable native frames should thread monochrome glyph draw payloads through the presenter contract"
+    );
+    assert!(
+        presenter_source.contains("pub color_glyph_draws: Vec<PreparedColorGlyphDraw>"),
+        "presentable native frames should thread color glyph draw payloads through the presenter contract"
+    );
+}
+
+#[test]
+fn windows_presenter_installation_prefers_native_while_shipping_contract_moves_to_native_only() {
     let runtime_profile_source =
         fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
         runtime_profile_source.contains("pub fn prefers_native_terminal_renderer(self) -> bool"),
-        "runtime profile should expose a helper that marks Windows mainline builds as native-first without removing the bitmap mode contract"
+        "runtime profile should keep a helper that marks packaged profiles as native-only terminal builds"
     );
     assert!(
         runtime_profile_source.contains("AppBuildFlavor::WindowsMainline"),
         "runtime profile should still distinguish the Windows mainline build flavor when deciding native-first terminal installation"
     );
     assert!(
-        bootstrap_source.contains("profile.prefers_native_terminal_renderer()"),
-        "workspace terminal presenter installation should consult the runtime-profile native preference helper instead of only looking at the raw terminal render mode"
+        runtime_profile_source.contains("Preferred native-only shipping profile"),
+        "runtime profile docs should make the Windows presenter stack target a native-only shipping contract"
     );
     assert!(
-        bootstrap_source.contains("build_native_terminal_presenter()?"),
-        "Windows presenter installation should attempt to construct the native presenter before accepting bitmap fallback"
+        runtime_profile_source
+            .contains("Transitional non-shipping software profile while native Linux terminal surfaces are still landing."),
+        "runtime profile docs should describe the Linux-host software package as transitional while native Linux surfaces land"
     );
     assert!(
-        bootstrap_source.contains("falling back to bitmap presenter"),
-        "bitmap presenter should remain available only as the fallback path when native presenter construction fails"
+        bootstrap_source.contains("build_native_terminal_presenter()"),
+        "workspace terminal presenter installation should construct the native presenter directly in the native-only pipeline"
+    );
+    assert!(
+        !bootstrap_source.contains("falling back to bitmap presenter"),
+        "bitmap presenter fallback logging should disappear once the bitmap pipeline is removed"
+    );
+    assert!(
+        !bootstrap_source.contains("BitmapAtlasPresenter"),
+        "bootstrap should not reference the bitmap presenter once the terminal host becomes native-only"
     );
 }
 
@@ -386,22 +456,72 @@ fn terminal_presenter_source_wires_windows_native_renderer() {
 }
 
 #[test]
-fn bitmap_terminal_pipeline_sources_plumb_window_scale_factor_into_bitmap_rasterization() {
+fn windows_platform_surface_backend_source_exposes_hwnd_and_lifecycle_contract() {
+    let windows_backend_source = fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+        .expect("read windows platform backend");
+    let windows_frame_source =
+        fs::read_to_string("src/app/windows_frame.rs").expect("read windows frame interop");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        windows_backend_source.contains("pub struct WindowsNativeSurfaceBackend"),
+        "Windows platform layer should define a concrete native surface backend"
+    );
+    assert!(
+        windows_backend_source.contains("pub struct WindowsNativeSurfaceState"),
+        "Windows platform layer should keep a native surface state object"
+    );
+    assert!(
+        windows_backend_source.contains("hwnd: Option<isize>"),
+        "Windows backend state should track the resolved host HWND"
+    );
+    assert!(
+        windows_backend_source.contains("fn resolve_host_hwnd(window: &AppWindow) -> Option<isize>"),
+        "Windows backend should expose a helper that resolves the host HWND from the Slint shell"
+    );
+    assert!(
+        windows_backend_source.contains("fn attach(&mut self, window: &AppWindow) -> Result<()>"),
+        "Windows backend should expose an attach hook"
+    );
+    assert!(
+        windows_backend_source.contains("fn present(&mut self)"),
+        "Windows backend should expose a present hook"
+    );
+    assert!(
+        windows_backend_source.contains("fn detach(&mut self)"),
+        "Windows backend should expose a detach hook"
+    );
+    assert!(
+        windows_frame_source.contains("pub fn resolve_host_window_hwnd(window: &AppWindow) -> Option<isize>"),
+        "windows_frame should expose a reusable HWND resolution helper for the terminal backend"
+    );
+    assert!(
+        bootstrap_source.contains("NativeTerminalSurface::attach(window)"),
+        "bootstrap should instantiate the backend-aware native surface bridge so the Windows backend can be selected during startup"
+    );
+}
+
+#[test]
+fn native_terminal_pipeline_sources_remove_bitmap_raster_scale_hooks() {
     let presenter_source =
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
-        presenter_source.contains("fn set_raster_scale"),
-        "terminal presenter seam should expose a bitmap raster scale hook so hidpi windows can request a denser atlas backing image"
+        !presenter_source.contains("BitmapAtlasPresenter"),
+        "terminal presenter seam should remove the bitmap atlas presenter from the native-only pipeline"
     );
     assert!(
-        presenter_source.contains("self.renderer.set_raster_scale"),
-        "bitmap atlas presenter should forward the window raster scale into the atlas renderer"
+        !presenter_source.contains("PresentedTerminalFrame::Bitmap"),
+        "terminal presenter seam should remove the bitmap frame variant once only retained native frames remain"
     );
     assert!(
-        bootstrap_source.contains("presenter.set_raster_scale(window.window().scale_factor())"),
-        "workspace terminal sync should push the current Slint window scale factor into the bitmap presenter before rendering so the atlas is not blurred by post-scale stretching"
+        !presenter_source.contains("fn set_raster_scale"),
+        "terminal presenter seam should remove the bitmap raster scale hook once the atlas image path is deleted"
+    );
+    assert!(
+        !bootstrap_source.contains("presenter.set_raster_scale(window.window().scale_factor())"),
+        "workspace terminal sync should stop pushing Slint window scale into the deleted bitmap raster path"
     );
 }
 

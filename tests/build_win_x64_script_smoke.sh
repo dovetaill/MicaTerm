@@ -18,6 +18,7 @@ HELP_OUTPUT="$("$SCRIPT_PATH" --help)"
 
 grep -F "./build-win-x64.sh" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "Windows Skia wrapper." <<<"$HELP_OUTPUT" >/dev/null
+grep -F "Native-only terminal surface path." <<<"$HELP_OUTPUT" >/dev/null
 grep -F "x86_64-pc-windows-msvc" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "Git Bash environment" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "winit-skia-software" <<<"$HELP_OUTPUT" >/dev/null
@@ -31,10 +32,12 @@ grep -F 'export CARGO_NO_DEFAULT_FEATURES=1' "$SCRIPT_PATH" >/dev/null
 grep -F 'export CARGO_FEATURES="slint-renderer-skia,terminal-native-renderer"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export MICA_TERM_BUILD_FLAVOR="windows-mainline"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export MICA_TERM_PACKAGE_RENDERER="skia-software"' "$SCRIPT_PATH" >/dev/null
+grep -F 'packaged terminal renderer: native' <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'export MICA_TERM_PACKAGE_TERMINAL_RENDERER="native"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export MICA_TERM_PACKAGE_PORTABLE=1' "$SCRIPT_PATH" >/dev/null
 grep -F 'export PACKAGE_FLAVOR_SUFFIX="-skia"' "$SCRIPT_PATH" >/dev/null
 grep -F 'rust-skia does not ship Windows GNU Skia binaries' "$SCRIPT_PATH" >/dev/null
+grep -F 'Preferred native-only terminal surface path for Windows mainline shipping.' "$SCRIPT_PATH" >/dev/null
 
 if ! grep -F 'terminal-native-renderer' "$SCRIPT_PATH" >/dev/null; then
   echo "build-win-x64.sh must compile terminal-native-renderer for the Windows mainline package" >&2

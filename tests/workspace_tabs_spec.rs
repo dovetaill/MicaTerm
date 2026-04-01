@@ -275,19 +275,13 @@ fn runtime_profile_source_exposes_terminal_render_mode_accessor() {
 }
 
 #[test]
-fn native_profile_falls_back_to_bitmap_terminal_render_mode_off_windows() {
+fn native_profile_binding_keeps_native_terminal_frame_contract_available() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().expect("create app window");
     bind_top_status_bar_with_profile(&app, AppRuntimeProfile::mainline_native());
 
-    let expected = if cfg!(target_os = "windows") {
-        "native"
-    } else {
-        "bitmap"
-    };
-
-    assert_eq!(app.get_workspace_session_render_mode(), expected);
+    assert_eq!(app.get_workspace_session_native_frame_token(), 0);
 }
 
 #[test]
@@ -615,8 +609,12 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        app_window.contains("workspace-session-surface-image"),
-        "AppWindow should expose a rendered terminal image surface for atlas-backed terminal output"
+        !app_window.contains("workspace-session-surface-image"),
+        "AppWindow should remove the rendered terminal image surface once terminal presentation becomes native-only"
+    );
+    assert!(
+        app_window.contains("workspace-session-native-frame-token"),
+        "AppWindow should expose the retained native frame token for native surface invalidation"
     );
     assert!(
         app_window.contains("workspace-session-cell-width"),
@@ -693,8 +691,12 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose terminal selection state for native clipboard shortcut fallbacks"
     );
     assert!(
-        workspace_pane.contains("workspace-session-surface-image"),
-        "WorkspacePane should forward the rendered terminal image surface into TerminalSessionHost"
+        !workspace_pane.contains("workspace-session-surface-image"),
+        "WorkspacePane should remove the rendered terminal image surface binding in the native-only path"
+    );
+    assert!(
+        workspace_pane.contains("workspace-session-native-frame-token"),
+        "WorkspacePane should forward the retained native frame token into TerminalSessionHost"
     );
     assert!(
         workspace_pane.contains("workspace-session-cell-width"),
@@ -798,8 +800,12 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should default to a desktop-readable font size"
     );
     assert!(
-        terminal_host.contains("in property <image> session-surface-image"),
-        "TerminalSessionHost should accept a rendered terminal surface image as a root-level contract"
+        !terminal_host.contains("session-surface-image"),
+        "TerminalSessionHost should remove the rendered terminal surface image contract in the native-only path"
+    );
+    assert!(
+        terminal_host.contains("in property <int> session-native-frame-token: 0;"),
+        "TerminalSessionHost should accept a native frame token as the root-level retained surface contract"
     );
     assert!(
         terminal_host.contains("function terminal-cell-x("),
@@ -830,8 +836,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should paint the cursor from the runtime-projected cursor background"
     );
     assert!(
-        terminal_host.contains("Image {"),
-        "TerminalSessionHost should display the terminal body through a single image surface"
+        !terminal_host.contains("Image {"),
+        "TerminalSessionHost should stop displaying the terminal body through a Slint image surface in the native-only path"
     );
     assert!(
         !terminal_host.contains("for cell in root.session-cells"),

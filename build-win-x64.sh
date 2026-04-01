@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Thin wrapper around the Windows x64 Skia mainline package used by CI and manual packaging.
-# Preferred native-first terminal renderer path for Windows mainline shipping.
+# Preferred native-only terminal surface path for Windows mainline shipping.
 
 set -euo pipefail
 
@@ -11,7 +11,7 @@ usage() {
 Usage: ./build-win-x64.sh [--help]
 
 Windows Skia wrapper.
-Native-first terminal renderer path.
+Native-only terminal surface path.
 
 Default target:
   x86_64-pc-windows-msvc

@@ -19,8 +19,16 @@ fn app_window_has_no_legacy_terminal_font_imports() {
 }
 
 #[test]
-fn terminal_font_assets_switch_to_sarasa_regular_only() {
-    assert!(Path::new("ui/fonts/SarasaTermSCNerd-Regular.ttf").exists());
+fn terminal_font_assets_switch_to_fusion_jetbrains_maple_mono_bundle() {
+    assert!(
+        Path::new("assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf")
+            .exists(),
+        "the default terminal font bundle should ship a Fusion-JetBrainsMapleMono regular face"
+    );
+    assert!(
+        Path::new("assets/fonts/Fusion-JetBrainsMapleMono/OFL.txt").exists(),
+        "the default terminal font bundle should ship the upstream OFL license text"
+    );
     assert!(!Path::new("ui/fonts/IosevkaTerm-Regular.ttf").exists());
     assert!(!Path::new("ui/fonts/MapleMonoNormalNL-NF-CN-Regular.ttf").exists());
 }
@@ -37,6 +45,41 @@ fn terminal_host_font_contract_drops_maple_and_legacy_faces() {
     assert!(
         !content.contains("Iosevka Term"),
         "terminal host should stop exposing the retired Iosevka face"
+    );
+}
+
+#[test]
+fn native_terminal_font_default_switches_to_fusion_jetbrains_maple_mono() {
+    let backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
+        .expect("read windows dwrite font backend");
+    let wezterm_source = fs::read_to_string("src/app/terminal_font/wezterm_font.rs")
+        .expect("read wezterm font adapter");
+
+    assert!(
+        backend_source.contains("DEFAULT_TERMINAL_FONT_FAMILY"),
+        "font backend should expose a shared default terminal font family contract"
+    );
+    assert!(
+        backend_source.contains("Fusion JetBrains Maple Mono"),
+        "font backend should set Fusion JetBrains Maple Mono as the default terminal font family"
+    );
+    assert!(
+        backend_source.contains("family_name: Some(DEFAULT_TERMINAL_FONT_FAMILY.to_string())"),
+        "default font requests should explicitly target the Fusion-JetBrainsMapleMono family"
+    );
+    assert!(
+        dwrite_source.contains("assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"),
+        "Windows native font backend should load the bundled Fusion-JetBrainsMapleMono regular face by default"
+    );
+    assert!(
+        !dwrite_source.contains("ui/fonts/SarasaTermSCNerd-Regular.ttf"),
+        "the old Sarasa bundle path should no longer be the default native terminal font"
+    );
+    assert!(
+        wezterm_source.contains("Fusion JetBrains Maple Mono"),
+        "WezTerm font migration scaffold should track the new default terminal font family"
     );
 }
 

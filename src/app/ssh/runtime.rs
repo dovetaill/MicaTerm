@@ -804,6 +804,7 @@ pub struct TerminalSurfaceState {
     pub visible_lines: Vec<String>,
     pub cells: Vec<TerminalCellState>,
     pub cursor: TerminalCursorState,
+    pub alternate_screen_active: bool,
     pub mouse_grabbed: bool,
     pub bracketed_paste_enabled: bool,
 }
@@ -828,6 +829,7 @@ pub struct TerminalSurfaceSignature {
     pub cursor_shape: TerminalCursorShape,
     pub cursor_fg_rgba: u32,
     pub cursor_bg_rgba: u32,
+    pub alternate_screen_active: bool,
     pub mouse_grabbed: bool,
     pub bracketed_paste_enabled: bool,
 }
@@ -2340,6 +2342,7 @@ impl TerminalSession {
             visible_rows,
             cells,
             cursor,
+            alternate_screen_active: self.terminal.is_alt_screen_active(),
             mouse_grabbed: self.terminal.is_mouse_grabbed(),
             bracketed_paste_enabled: self.terminal.bracketed_paste_enabled(),
         }
@@ -2872,6 +2875,7 @@ impl TerminalSurfaceState {
             cursor_shape: self.cursor.shape,
             cursor_fg_rgba: self.cursor.fg_rgba,
             cursor_bg_rgba: self.cursor.bg_rgba,
+            alternate_screen_active: self.alternate_screen_active,
             mouse_grabbed: self.mouse_grabbed,
             bracketed_paste_enabled: self.bracketed_paste_enabled,
         }
@@ -2916,6 +2920,7 @@ impl TerminalSurfaceState {
                 fg_rgba: 0xff00_0000,
                 bg_rgba: 0xff52_ad70,
             },
+            alternate_screen_active: false,
             mouse_grabbed: false,
             bracketed_paste_enabled: false,
         }
