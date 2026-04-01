@@ -414,6 +414,86 @@ impl VaultProviderFactory for RecordingVaultProviderFactory {
     }
 }
 
+#[derive(Clone)]
+struct DelayedVaultProvider {
+    inner: Arc<MockVaultProvider>,
+    read_delay: Duration,
+    write_delay: Duration,
+}
+
+impl DelayedVaultProvider {
+    fn new(inner: Arc<MockVaultProvider>, read_delay: Duration, write_delay: Duration) -> Self {
+        Self {
+            inner,
+            read_delay,
+            write_delay,
+        }
+    }
+}
+
+impl VaultProvider for DelayedVaultProvider {
+    fn remote_id(&self) -> &str {
+        self.inner.remote_id()
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        self.inner.capabilities()
+    }
+
+    fn read_head(&self) -> Result<mica_term::app::vault::provider::ProviderReadResult> {
+        if !self.read_delay.is_zero() {
+            std::thread::sleep(self.read_delay);
+        }
+        self.inner.read_head()
+    }
+
+    fn read_revision(&self, head: &VaultHead) -> Result<ProviderRevision> {
+        if !self.read_delay.is_zero() {
+            std::thread::sleep(self.read_delay);
+        }
+        self.inner.read_revision(head)
+    }
+
+    fn write_revision(
+        &self,
+        request: &mica_term::app::vault::provider::ProviderWriteRequest,
+    ) -> Result<()> {
+        if !self.write_delay.is_zero() {
+            std::thread::sleep(self.write_delay);
+        }
+        self.inner.write_revision(request)
+    }
+
+    fn prune_revisions(&self, keep_latest: usize, live_head: &VaultHead) -> Result<()> {
+        self.inner.prune_revisions(keep_latest, live_head)
+    }
+}
+
+#[derive(Clone, Default)]
+struct AnyVaultProviderFactory {
+    providers: Arc<Mutex<BTreeMap<String, Arc<dyn VaultProvider>>>>,
+}
+
+impl AnyVaultProviderFactory {
+    fn insert(&self, provider: Arc<dyn VaultProvider>) {
+        self.providers
+            .lock()
+            .expect("lock vault provider factory")
+            .insert(provider.remote_id().to_string(), provider);
+    }
+}
+
+impl VaultProviderFactory for AnyVaultProviderFactory {
+    fn build_provider(&self, remote: &BootstrapRemoteConfig) -> Result<Arc<dyn VaultProvider>> {
+        self.providers
+            .lock()
+            .expect("lock vault provider factory")
+            .get(&remote.remote_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("missing mock vault provider `{}`", remote.remote_id))
+    }
+}
+
 struct InteractiveProjectionRuntimeControl {
     session_id: uuid::Uuid,
     event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
@@ -2190,6 +2270,23 @@ fn settle_sync_scheduler(delay: Duration) {
     slint::platform::update_timers_and_animations();
 }
 
+fn wait_for_condition(timeout: Duration, mut predicate: impl FnMut() -> bool) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if predicate() {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "condition not met within {:?}",
+            timeout
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        slint::platform::update_timers_and_animations();
+    }
+}
+
 fn terminal_interaction_position(app: &AppWindow) -> LogicalPosition {
     LogicalPosition::new(
         app.get_layout_main_workspace_x() + 96.0,
@@ -2903,6 +3000,7 @@ fn manual_sync_merges_divergent_local_and_remote_additions_before_push() {
     app.invoke_open_sync_modal_requested();
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
     assert_eq!(primary.recorded_writes().len(), 1);
 
     let local_added_asset_id = create_root_ssh(&app, "DB Replica", "10.0.0.24");
@@ -2992,6 +3090,7 @@ fn manual_sync_merges_divergent_local_and_remote_additions_before_push() {
     primary.set_remote_revision(Some(remote_revision));
 
     app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 2);
 
     assert_eq!(primary.recorded_writes().len(), 2);
     let latest_write = primary
@@ -3034,6 +3133,67 @@ fn manual_sync_merges_divergent_local_and_remote_additions_before_push() {
             "expected merged snapshot to contain host `{host}`, got {:?}",
             cached_hosts
         );
+    }
+}
+
+#[test]
+fn manual_sync_modal_returns_before_slow_primary_write_completes() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("manual-sync-background");
+    let primary_inner = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let primary = Arc::new(DelayedVaultProvider::new(
+        Arc::clone(&primary_inner),
+        Duration::ZERO,
+        Duration::from_millis(250),
+    ));
+    let provider_factory = AnyVaultProviderFactory::default();
+    provider_factory.insert(primary as Arc<dyn VaultProvider>);
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+
+    let started = Instant::now();
+    app.invoke_sync_modal_sync_now_requested();
+
+    assert!(
+        started.elapsed() < Duration::from_millis(120),
+        "manual sync should return quickly while the provider runs in the background"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if primary_inner.recorded_writes().len() == 1 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "background sync never completed within the deadline"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        slint::platform::update_timers_and_animations();
     }
 }
 
@@ -3174,6 +3334,7 @@ fn periodic_sync_pulls_remote_changes_even_without_local_dirty_state() {
     app.invoke_open_sync_modal_requested();
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
     app.invoke_sync_modal_close_requested();
 
     assert_eq!(primary.recorded_writes().len(), 1);
@@ -3259,6 +3420,7 @@ fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies() {
     app.invoke_open_sync_modal_requested();
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
     assert_eq!(primary.recorded_writes().len(), 1);
 
     let ssh_id = app
@@ -3482,6 +3644,7 @@ fn manual_vault_sync_reports_mirror_degradation_after_primary_commit() {
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
 
     app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
 
     assert_eq!(primary.recorded_writes().len(), 1);
     assert_eq!(mirror.recorded_writes().len(), 0);
@@ -3527,6 +3690,11 @@ fn manual_vault_sync_surfaces_provider_auth_errors_in_panel_state() {
     primary.set_read_error(Some("token expired"));
 
     app.invoke_sync_modal_sync_now_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_sync_modal_error_text()
+            .as_str()
+            .contains("token expired")
+    });
 
     assert!(
         app.get_sync_modal_error_text()

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::Result;
@@ -7,11 +8,14 @@ use crate::app::keychain::{
     KeychainCatalog, KeychainIdentitySpec, KeychainNodePayload, KeychainSshKeySpec,
 };
 use crate::app::ssh::credentials::{
-    CredentialStore, StoredSshSecretBundle, restore_snapshot_secret_bundle, snapshot_secret_bundle,
+    CredentialStore, SshCredentialKind, StoredSshSecretBundle, restore_snapshot_secret_bundle,
+    snapshot_secret_bundle, ssh_credential_ref,
 };
 use crate::app::ssh::known_hosts::KnownHostsService;
 use crate::app::ui_preferences::UiPreferences;
-use crate::app::vault::model::{SnapshotSyncPreferences, VaultAssetPayload, VaultSnapshot};
+use crate::app::vault::model::{
+    SnapshotSyncPreferences, VaultAssetPayload, VaultSnapshot, VaultSshProxySpec,
+};
 use crate::shell::assets::AssetTree;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,7 +76,7 @@ pub fn export_vault_snapshot(
 
     let known_hosts = KnownHostsService::new(known_hosts_path).export_snapshot_entries()?;
 
-    Ok(VaultSnapshot {
+    Ok(normalize_snapshot_secret_refs(VaultSnapshot {
         schema_version: 1,
         asset_catalog,
         ssh_secret_bundles,
@@ -82,7 +86,7 @@ pub fn export_vault_snapshot(
         known_hosts,
         sync_preferences,
         ui_preferences: Default::default(),
-    })
+    }))
 }
 
 fn normalize_keychain_merge_metadata(catalog: KeychainCatalog) -> KeychainCatalog {
@@ -98,9 +102,11 @@ pub fn apply_vault_snapshot(
     credential_store: &dyn CredentialStore,
     known_hosts_path: &Path,
 ) -> Result<AppliedVaultSnapshot> {
-    let asset_tree = vault_catalog_to_asset_tree(&snapshot.asset_catalog);
+    let normalized_snapshot = normalize_snapshot_secret_refs(snapshot.clone());
+    let obsolete_secret_refs = obsolete_ssh_secret_refs(snapshot, &normalized_snapshot);
+    let asset_tree = vault_catalog_to_asset_tree(&normalized_snapshot.asset_catalog);
 
-    for node in snapshot.asset_catalog.nodes.values() {
+    for node in normalized_snapshot.asset_catalog.nodes.values() {
         let VaultAssetPayload::SshConnection(spec) = &node.payload else {
             continue;
         };
@@ -108,34 +114,151 @@ pub fn apply_vault_snapshot(
         restore_snapshot_secret_bundle(
             credential_store,
             spec.credential_ref.as_deref(),
-            snapshot.ssh_secret_bundles.get(&node.id),
+            normalized_snapshot.ssh_secret_bundles.get(&node.id),
         )?;
     }
 
-    for node in snapshot.keychain_catalog.nodes.values() {
+    for credential_ref in obsolete_secret_refs {
+        credential_store.delete_secret(credential_ref.as_str())?;
+    }
+
+    for node in normalized_snapshot.keychain_catalog.nodes.values() {
         match &node.payload {
             KeychainNodePayload::Folder => {}
             KeychainNodePayload::Identity(spec) => restore_keychain_bundle(
                 credential_store,
                 spec,
-                snapshot.keychain_identity_secret_bundles.get(&node.id),
+                normalized_snapshot.keychain_identity_secret_bundles.get(&node.id),
             )?,
             KeychainNodePayload::SshKey(spec) => restore_keychain_bundle(
                 credential_store,
                 spec,
-                snapshot.keychain_key_secret_bundles.get(&node.id),
+                normalized_snapshot.keychain_key_secret_bundles.get(&node.id),
             )?,
         }
     }
 
-    KnownHostsService::new(known_hosts_path).replace_snapshot_entries(&snapshot.known_hosts)?;
+    KnownHostsService::new(known_hosts_path)
+        .replace_snapshot_entries(&normalized_snapshot.known_hosts)?;
 
     Ok(AppliedVaultSnapshot {
         asset_tree,
-        keychain_catalog: snapshot.keychain_catalog.clone(),
-        sync_preferences: snapshot.sync_preferences.clone(),
+        keychain_catalog: normalized_snapshot.keychain_catalog.clone(),
+        sync_preferences: normalized_snapshot.sync_preferences.clone(),
         ui_preferences: UiPreferences::default(),
     })
+}
+
+pub fn normalize_snapshot_secret_refs(snapshot: VaultSnapshot) -> VaultSnapshot {
+    let mut snapshot = snapshot;
+    let duplicated_refs = duplicated_ssh_secret_refs(&snapshot.asset_catalog);
+
+    for (node_id, node) in &mut snapshot.asset_catalog.nodes {
+        let VaultAssetPayload::SshConnection(spec) = &mut node.payload else {
+            continue;
+        };
+        let saved_bundle = snapshot.ssh_secret_bundles.get(node_id);
+        let bundle_has_proxy_secret = saved_bundle
+            .and_then(|bundle| bundle.proxy_socks5_password.as_deref())
+            .is_some_and(|value| !value.trim().is_empty());
+        let proxy_needs_saved_secret = match &spec.proxy {
+            VaultSshProxySpec::Socks5(proxy) | VaultSshProxySpec::Http(proxy) => {
+                proxy.password_credential_ref.is_some() || bundle_has_proxy_secret
+            }
+            VaultSshProxySpec::None | VaultSshProxySpec::SshAsset { .. } => false,
+        };
+        let needs_canonical_secret_ref = spec.credential_ref.is_some()
+            || proxy_needs_saved_secret
+            || saved_bundle.is_some();
+        let duplicated_secret_ref = spec
+            .credential_ref
+            .as_ref()
+            .is_some_and(|credential_ref| duplicated_refs.contains(credential_ref));
+        let canonical_ref = if needs_canonical_secret_ref {
+            Some(if duplicated_secret_ref {
+                ssh_credential_ref(node_id, SshCredentialKind::SavedSecrets)
+            } else {
+                spec.credential_ref.clone().unwrap_or_else(|| {
+                    ssh_credential_ref(node_id, SshCredentialKind::SavedSecrets)
+                })
+            })
+        } else {
+            None
+        };
+        spec.credential_ref = canonical_ref.clone();
+
+        match &mut spec.proxy {
+            VaultSshProxySpec::Socks5(proxy) | VaultSshProxySpec::Http(proxy) => {
+                proxy.password_credential_ref = if proxy_needs_saved_secret {
+                    canonical_ref.clone()
+                } else {
+                    None
+                };
+            }
+            VaultSshProxySpec::None | VaultSshProxySpec::SshAsset { .. } => {}
+        }
+    }
+
+    snapshot
+}
+
+fn duplicated_ssh_secret_refs(
+    catalog: &crate::app::vault::model::VaultAssetCatalog,
+) -> BTreeSet<String> {
+    let mut seen = BTreeSet::new();
+    let mut duplicated = BTreeSet::new();
+
+    for node in catalog.nodes.values() {
+        let VaultAssetPayload::SshConnection(spec) = &node.payload else {
+            continue;
+        };
+        let Some(credential_ref) = spec.credential_ref.as_deref() else {
+            continue;
+        };
+        if !seen.insert(credential_ref.to_string()) {
+            duplicated.insert(credential_ref.to_string());
+        }
+    }
+
+    duplicated
+}
+
+fn obsolete_ssh_secret_refs(
+    original: &VaultSnapshot,
+    normalized: &VaultSnapshot,
+) -> BTreeSet<String> {
+    let normalized_refs = normalized
+        .asset_catalog
+        .nodes
+        .values()
+        .filter_map(|node| match &node.payload {
+            VaultAssetPayload::SshConnection(spec) => spec.credential_ref.clone(),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let mut obsolete = BTreeSet::new();
+
+    for (node_id, node) in &original.asset_catalog.nodes {
+        let VaultAssetPayload::SshConnection(spec) = &node.payload else {
+            continue;
+        };
+        let Some(previous_ref) = spec.credential_ref.as_ref() else {
+            continue;
+        };
+        let Some(normalized_node) = normalized.asset_catalog.nodes.get(node_id) else {
+            continue;
+        };
+        let VaultAssetPayload::SshConnection(normalized_spec) = &normalized_node.payload else {
+            continue;
+        };
+        if normalized_spec.credential_ref.as_ref() != Some(previous_ref)
+            && !normalized_refs.contains(previous_ref)
+        {
+            obsolete.insert(previous_ref.clone());
+        }
+    }
+
+    obsolete
 }
 
 fn insert_keychain_bundle<T>(
