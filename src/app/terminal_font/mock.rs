@@ -18,6 +18,7 @@ const DEFAULT_FACE_INDEX: u32 = 0;
 
 pub struct MockFontSystem {
     font: FontArc,
+    #[cfg(feature = "terminal-native-renderer")]
     font_bytes: &'static [u8],
 }
 
@@ -31,6 +32,7 @@ impl MockFontSystem {
             .map_err(|error| anyhow!("failed to load bundled Sarasa terminal font: {error}"))?;
         Ok(Self {
             font,
+            #[cfg(feature = "terminal-native-renderer")]
             font_bytes: SARASA_FONT_BYTES,
         })
     }

@@ -163,10 +163,12 @@ impl LoadedFont {
         GlyphRasterRequest::new(self, glyph_id, bold)
     }
 
+    #[cfg(feature = "terminal-native-renderer")]
     pub(crate) fn face_key(&self) -> FontFaceKey {
         self.cache_key.face
     }
 
+    #[cfg(feature = "terminal-native-renderer")]
     pub(crate) fn px_size(&self) -> f32 {
         f32::from_bits(self.cache_key.px_size_bits)
     }
