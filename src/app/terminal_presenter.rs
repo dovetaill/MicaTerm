@@ -291,6 +291,7 @@ impl TerminalPresenter for WindowsNativePresenter {
     }
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 fn selection_overlay_rect_count(selection: TerminalAtlasSelection) -> usize {
     usize::try_from(selection.end_row.saturating_sub(selection.start_row))
         .unwrap_or(usize::MAX)
