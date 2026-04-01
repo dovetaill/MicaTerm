@@ -4117,6 +4117,36 @@ fn current_sync_timestamp() -> String {
     format!("{:020}", elapsed.as_millis())
 }
 
+fn sync_timestamp_after(candidate: &str, floor: Option<&str>) -> String {
+    let Some(floor) = floor.filter(|value| !value.trim().is_empty()) else {
+        return candidate.to_string();
+    };
+
+    if candidate > floor {
+        return candidate.to_string();
+    }
+
+    floor
+        .parse::<u128>()
+        .ok()
+        .and_then(|value| value.checked_add(1))
+        .map(|value| format!("{value:020}"))
+        .unwrap_or_else(|| candidate.to_string())
+}
+
+fn next_local_change_timestamp(local_state: &LocalVaultBootstrapState) -> String {
+    let floor = [
+        local_state.last_local_change_at.as_deref(),
+        local_state.last_successful_push_at.as_deref(),
+        local_state.last_successful_pull_at.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .max();
+
+    sync_timestamp_after(current_sync_timestamp().as_str(), floor)
+}
+
 fn payload_hash_from_encrypted_snapshot_sha(payload_sha256: &str) -> String {
     format!("sha256:{payload_sha256}")
 }
@@ -5208,7 +5238,7 @@ fn mark_local_vault_dirty_and_arm_sync(
     scheduler.borrow_mut().dirty = true;
     let bootstrap_state_path = vault.bootstrap_state_path();
     if let Some(local_state) = vault.local_state.as_mut() {
-        local_state.last_local_change_at = Some(current_sync_timestamp());
+        local_state.last_local_change_at = Some(next_local_change_timestamp(local_state));
         if let Err(err) = save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state) {
             tracing::error!(
                 target: "app.vault",
@@ -8560,6 +8590,14 @@ mod tests {
             auth_kind: ProviderAuthKind::Pat,
             last_health: None,
         }
+    }
+
+    #[test]
+    fn sync_timestamp_after_bumps_equal_floor_by_one() {
+        assert_eq!(
+            sync_timestamp_after("00000000000000000042", Some("00000000000000000042")),
+            "00000000000000000043"
+        );
     }
 
     #[test]
