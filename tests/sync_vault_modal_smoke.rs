@@ -6,6 +6,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
 use mica_term::AppWindow;
@@ -117,6 +118,23 @@ impl PrivateKeyImporter for CancelledPrivateKeyImporter {
 
 fn sample_vault_runtime_root(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("mica-term-sync-modal-{label}-{}", Uuid::new_v4()))
+}
+
+fn wait_for_condition(timeout: Duration, mut predicate: impl FnMut() -> bool) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if predicate() {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "condition not met within {:?}",
+            timeout
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+        slint::platform::update_timers_and_animations();
+    }
 }
 
 fn sample_bootstrap_bundle_with_primary_and_mirror() -> BootstrapBundle {
@@ -574,7 +592,7 @@ fn sync_modal_primary_action_routes_to_sync_and_secondary_action_closes() {
     app.invoke_sync_modal_draft_changed("git-https-username".into(), "demo-user".into());
     app.invoke_sync_modal_draft_changed("git-https-secret".into(), "pat-primary-secret".into());
     app.invoke_sync_modal_primary_action_requested();
-    assert_eq!(primary.recorded_writes().len(), 1);
+    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
 
     app.invoke_sync_modal_secondary_action_requested();
     assert!(!app.get_sync_modal_open());
@@ -617,8 +635,16 @@ fn titlebar_sync_failure_updates_error_state_without_reopening_modal() {
 
     app.invoke_sync_now_requested();
 
-    assert!(!app.get_sync_modal_open());
+    wait_for_condition(Duration::from_secs(2), || {
+        !app.get_sync_modal_open()
+            && app
+                .get_sync_modal_error_text()
+                .to_string()
+                .contains("token expired")
+    });
+
     let error = app.get_sync_modal_error_text().to_string();
+    assert!(!app.get_sync_modal_open());
     assert!(error.contains("token expired"), "unexpected error: {error}");
 }
 
