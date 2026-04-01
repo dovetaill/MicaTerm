@@ -1,7 +1,9 @@
 use std::fs;
+use std::ffi::OsString;
 use std::path::PathBuf;
-use std::process::Command;
+use std::sync::{Mutex, MutexGuard};
 
+use git2::Repository;
 use mica_term::app::vault::auth::git::{
     GitTransportAuthPlan, build_https_auth_plan, build_ssh_auth_plan,
 };
@@ -18,6 +20,8 @@ use mica_term::app::vault::provider::{
     ProviderWriteRequest, VaultProvider, attach_snapshot_recovery_metadata,
 };
 use uuid::Uuid;
+
+static PATH_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn sample_root(label: &str) -> PathBuf {
     std::env::temp_dir().join(format!("mica-term-git-repo-provider-{label}-{}", Uuid::new_v4()))
@@ -48,25 +52,47 @@ fn sample_snapshot() -> VaultSnapshot {
     }
 }
 
-fn run_git(args: &[&str], cwd: Option<&std::path::Path>) {
-    let mut command = Command::new("git");
-    command.args(args);
-    if let Some(cwd) = cwd {
-        command.current_dir(cwd);
-    }
-    let output = command.output().expect("run git command");
-    assert!(
-        output.status.success(),
-        "git {:?} failed: stdout=`{}` stderr=`{}`",
-        args,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+fn lock_path_env() -> MutexGuard<'static, ()> {
+    PATH_ENV_LOCK.lock().expect("lock PATH env")
 }
 
 fn init_bare_remote_repo(path: &std::path::Path) {
     fs::create_dir_all(path.parent().expect("remote parent")).expect("create remote parent");
-    run_git(&["init", "--bare", path.to_str().expect("remote path")], None);
+    Repository::init_bare(path).expect("init bare remote repo");
+}
+
+struct MissingGitPathGuard {
+    original_path: Option<OsString>,
+    sandbox_path: PathBuf,
+}
+
+impl MissingGitPathGuard {
+    fn install() -> Self {
+        let sandbox_path = sample_root("missing-git-path").join("bin");
+        fs::create_dir_all(&sandbox_path).expect("create missing git path sandbox");
+        let original_path = std::env::var_os("PATH");
+        unsafe {
+            std::env::set_var("PATH", &sandbox_path);
+        }
+        Self {
+            original_path,
+            sandbox_path,
+        }
+    }
+}
+
+impl Drop for MissingGitPathGuard {
+    fn drop(&mut self) {
+        match self.original_path.as_ref() {
+            Some(path) => unsafe {
+                std::env::set_var("PATH", path);
+            },
+            None => unsafe {
+                std::env::remove_var("PATH");
+            },
+        }
+        let _ = fs::remove_dir_all(&self.sandbox_path);
+    }
 }
 
 fn sample_remote(
@@ -233,6 +259,50 @@ fn git_repo_provider_reads_remote_head_from_repo_branch() {
         .head
         .expect("remote head should exist");
     let revision = reader.read_revision(&head).expect("read remote revision");
+
+    assert_eq!(head.vault_revision, "rev-0001");
+    assert_eq!(revision.head.vault_revision, "rev-0001");
+    assert_eq!(
+        revision.encrypted_snapshot.payload_sha256,
+        request.encrypted_snapshot.payload_sha256
+    );
+}
+
+#[test]
+fn git_repo_provider_round_trip_does_not_require_system_git() {
+    let _env_lock = lock_path_env();
+    let remote_repo = sample_remote_bare_repo("without-system-git");
+    init_bare_remote_repo(remote_repo.as_path());
+
+    let writer_remote = sample_remote(
+        remote_repo.display().to_string(),
+        ProviderAuthKind::HttpsCredentials,
+        Some(inline_https_credentials()),
+        GitHostKind::Gitee,
+    );
+    let reader_remote = sample_remote(
+        remote_repo.display().to_string(),
+        ProviderAuthKind::HttpsCredentials,
+        Some(inline_https_credentials()),
+        GitHostKind::Gitee,
+    );
+    let writer = sample_provider(&writer_remote, sample_cache_dir("without-system-git-writer"));
+    let reader = sample_provider(&reader_remote, sample_cache_dir("without-system-git-reader"));
+    let request = sample_write_request("rev-0001", None, "device-a");
+    let _missing_git = MissingGitPathGuard::install();
+
+    writer
+        .write_revision(&request)
+        .expect("write revision without system git");
+
+    let head = reader
+        .read_head()
+        .expect("read remote head without system git")
+        .head
+        .expect("remote head should exist");
+    let revision = reader
+        .read_revision(&head)
+        .expect("read remote revision without system git");
 
     assert_eq!(head.vault_revision, "rev-0001");
     assert_eq!(revision.head.vault_revision, "rev-0001");
