@@ -611,6 +611,7 @@ fn rasterize_mono_cluster_sprite(request: MonoRasterRequest<'_>) -> CachedCluste
     let embolden = mono_embolden_strength(bold);
     let mut rendered_glyphs = Vec::new();
     let mut min_x = f32::MAX;
+    let mut max_x = f32::MIN;
 
     for ch in text.chars() {
         if ch.is_control() {
@@ -629,6 +630,7 @@ fn rasterize_mono_cluster_sprite(request: MonoRasterRequest<'_>) -> CachedCluste
         ) {
             let left = origin_x + image.left;
             min_x = min_x.min(left as f32);
+            max_x = max_x.max(left as f32 + image.width as f32);
             rendered_glyphs.push(RenderedMonoGlyph {
                 left,
                 top: baseline.round() as i32 - image.top,
@@ -650,14 +652,13 @@ fn rasterize_mono_cluster_sprite(request: MonoRasterRequest<'_>) -> CachedCluste
     }
 
     let content_advance = pen_x.ceil().max(0.0);
-    let left_padding = match classify_cluster_layout(text, span) {
-        ClusterLayout::Ascii => ASCII_LEFT_INSET_PX,
-        ClusterLayout::Wide => ((width as f32 - content_advance).max(0.0) / 2.0).floor(),
-        ClusterLayout::Mixed => {
-            ((width as f32 - content_advance).max(0.0) / 2.0).floor() + MIXED_LEFT_INSET_PX
-        }
-    };
-    let offset_x = left_padding + (-min_x).max(0.0);
+    let offset_x = compute_cluster_offset_x(
+        classify_cluster_layout(text, span),
+        width as u32,
+        min_x,
+        max_x,
+        content_advance,
+    );
 
     for glyph in rendered_glyphs {
         blit_alpha_mask(
@@ -937,6 +938,31 @@ fn classify_cluster_layout(text: &str, span: u32) -> ClusterLayout {
     }
 }
 
+fn compute_cluster_offset_x(
+    layout: ClusterLayout,
+    width_px: u32,
+    min_x: f32,
+    max_x: f32,
+    content_advance: f32,
+) -> f32 {
+    let width = width_px as f32;
+    let left_padding = match layout {
+        ClusterLayout::Ascii => ASCII_LEFT_INSET_PX,
+        ClusterLayout::Wide => ((width - content_advance).max(0.0) / 2.0).floor(),
+        ClusterLayout::Mixed => ((width - content_advance).max(0.0) / 2.0).floor() + MIXED_LEFT_INSET_PX,
+    };
+    let mut offset_x = left_padding + (-min_x).max(0.0);
+    let right_overflow = max_x + offset_x - width;
+    if right_overflow > 0.0 {
+        offset_x -= right_overflow;
+    }
+    let left_overflow = min_x + offset_x;
+    if left_overflow < 0.0 {
+        offset_x -= left_overflow;
+    }
+    offset_x
+}
+
 fn blit_cached_sprite(
     pixels: &mut [Rgba8Pixel],
     surface_width_px: u32,
@@ -1029,4 +1055,34 @@ fn rgba_pixels_from_bytes(bytes: &[u8]) -> Vec<Rgba8Pixel> {
             a: chunk[3],
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClusterLayout, compute_cluster_offset_x};
+
+    #[test]
+    fn ascii_cluster_offset_clamps_right_overhang_back_inside_the_cell() {
+        let offset = compute_cluster_offset_x(ClusterLayout::Ascii, 8, 1.0, 8.4, 7.0);
+
+        assert!(
+            1.0 + offset >= -0.001,
+            "placement should keep the left edge inside the cell after clamping the glyph bounds"
+        );
+        assert!(
+            8.4 + offset <= 8.001,
+            "placement should pull right-overhanging glyph ink back inside the fixed terminal cell instead of letting the right edge get clipped"
+        );
+        assert!(
+            offset < 0.0,
+            "a right-overhanging ASCII glyph should shift slightly left when the raw placement would clip the right edge"
+        );
+    }
+
+    #[test]
+    fn wide_cluster_offset_keeps_center_alignment_when_no_clamp_is_needed() {
+        let offset = compute_cluster_offset_x(ClusterLayout::Wide, 16, 0.0, 8.0, 8.0);
+
+        assert_eq!(offset, 4.0);
+    }
 }
