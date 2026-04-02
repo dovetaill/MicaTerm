@@ -6190,6 +6190,36 @@ fn launcher_picker_folder_activation_does_not_attempt_to_open_session() {
 }
 
 #[test]
+fn asset_activation_restores_native_terminal_surface_rect_from_welcome() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "activating an SSH asset from the welcome shell should restore the native terminal rect immediately so the first live terminal frame is not presented into a still-collapsed retained surface"
+    );
+    assert!(
+        app.get_workspace_session_surface_seqno() > 0,
+        "activating an SSH asset from the welcome shell should stage a terminal payload together with the host mode transition so the revived geometry is backed by a real frame"
+    );
+}
+
+#[test]
 fn save_and_connect_persists_saved_secret_before_probe() {
     i_slint_backend_testing::init_no_event_loop();
 
