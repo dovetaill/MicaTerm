@@ -199,6 +199,11 @@ pub struct SyncModalViewState {
     pub git_ssh_private_key: String,
     pub git_ssh_passphrase: String,
     pub master_password: String,
+    pub local_last_sync_text: String,
+    pub remote_last_update_text: String,
+    pub primary_revision_text: String,
+    pub remote_status_text: String,
+    pub remote_status_loading: bool,
 }
 
 impl Default for SyncModalViewState {
@@ -225,6 +230,11 @@ impl Default for SyncModalViewState {
             git_ssh_private_key: String::new(),
             git_ssh_passphrase: String::new(),
             master_password: String::new(),
+            local_last_sync_text: "Never synced".into(),
+            remote_last_update_text: "Unknown".into(),
+            primary_revision_text: "Unknown".into(),
+            remote_status_text: String::new(),
+            remote_status_loading: false,
         }
     }
 }

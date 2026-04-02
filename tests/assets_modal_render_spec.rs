@@ -322,6 +322,45 @@ fn sync_modal_renders_state_driven_content_and_footer_actions() {
 }
 
 #[test]
+fn sync_modal_renders_sync_status_card_with_timestamps() {
+    let modal = blocking_modal_rect(560, 360);
+    let buffer = render_app(|app| {
+        app.set_sync_modal_open(true);
+        app.set_sync_modal_mode("ready".into());
+        app.set_sync_modal_title("Sync Settings".into());
+        app.set_sync_modal_headline("Sync ready".into());
+        app.set_sync_modal_status_text(
+            "Sync is configured. Use the titlebar Sync button to run an immediate check.".into(),
+        );
+        app.set_sync_modal_provider_label("Gitee".into());
+        app.set_sync_modal_target_label("1 Git primary configured".into());
+        app.set_sync_modal_local_last_sync_text("2026-04-02 10:30".into());
+        app.set_sync_modal_remote_last_update_text("2026-04-02 10:31".into());
+        app.set_sync_modal_primary_revision_text("rev-0042".into());
+        app.set_sync_modal_remote_status_text("Primary remote is currently at rev-0042.".into());
+        app.set_sync_modal_git_remote_url("https://example.com/org/mica-term.git".into());
+        app.set_sync_modal_primary_action_label("Sync now".into());
+        app.set_sync_modal_secondary_action_label("Close".into());
+    });
+
+    let modal_surface = pixel_at(&buffer, modal.x + 10, modal.y + 10);
+    let status_card_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 28,
+        modal.y + 150,
+        modal.width - 56,
+        120,
+        modal_surface,
+        14,
+    );
+
+    assert!(
+        status_card_pixels >= 1800,
+        "sync modal status card should render visible timestamp content, only found {status_card_pixels} distinct pixels"
+    );
+}
+
+#[test]
 fn sync_modal_footer_stays_visible_in_short_viewport() {
     let short_height = 640;
     let modal_height = 528;

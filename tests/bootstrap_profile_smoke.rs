@@ -32,12 +32,12 @@ fn run_with_profile_accepts_external_async_handle_for_ssh_services() {
     );
     assert!(
         content.contains(
-            "let session_bridge =\n                build_session_bridge(async_runtime_handle,"
+            "let session_bridge =\n                build_session_bridge(async_runtime_handle.clone(),"
         ),
         "run_with_profile should thread the supplied runtime handle into session bridge construction"
     );
     assert!(
-        !content.contains("_async_runtime_handle"),
+        !content.contains("    _async_runtime_handle: tokio::runtime::Handle,"),
         "the runtime handle should be consumed for ssh services instead of being ignored"
     );
 }

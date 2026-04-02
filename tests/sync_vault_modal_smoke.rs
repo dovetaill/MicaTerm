@@ -64,6 +64,83 @@ impl VaultProviderFactory for RecordingVaultProviderFactory {
     }
 }
 
+#[derive(Clone)]
+struct DelayedVaultProvider {
+    inner: Arc<MockVaultProvider>,
+    read_delay: Duration,
+}
+
+impl DelayedVaultProvider {
+    fn new(inner: Arc<MockVaultProvider>, read_delay: Duration) -> Self {
+        Self { inner, read_delay }
+    }
+}
+
+impl VaultProvider for DelayedVaultProvider {
+    fn remote_id(&self) -> &str {
+        self.inner.remote_id()
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        self.inner.capabilities()
+    }
+
+    fn read_head(&self) -> Result<mica_term::app::vault::provider::ProviderReadResult> {
+        if !self.read_delay.is_zero() {
+            std::thread::sleep(self.read_delay);
+        }
+        self.inner.read_head()
+    }
+
+    fn read_revision(
+        &self,
+        head: &VaultHead,
+    ) -> Result<mica_term::app::vault::provider::ProviderRevision> {
+        if !self.read_delay.is_zero() {
+            std::thread::sleep(self.read_delay);
+        }
+        self.inner.read_revision(head)
+    }
+
+    fn write_revision(
+        &self,
+        request: &mica_term::app::vault::provider::ProviderWriteRequest,
+    ) -> Result<()> {
+        self.inner.write_revision(request)
+    }
+
+    fn prune_revisions(&self, keep_latest: usize, live_head: &VaultHead) -> Result<()> {
+        self.inner.prune_revisions(keep_latest, live_head)
+    }
+}
+
+#[derive(Clone, Default)]
+struct AnyVaultProviderFactory {
+    providers: Arc<Mutex<BTreeMap<String, Arc<dyn VaultProvider>>>>,
+}
+
+impl AnyVaultProviderFactory {
+    fn insert(&self, provider: Arc<dyn VaultProvider>) {
+        self.providers
+            .lock()
+            .expect("lock vault provider factory")
+            .insert(provider.remote_id().to_string(), provider);
+    }
+}
+
+impl VaultProviderFactory for AnyVaultProviderFactory {
+    fn build_provider(&self, remote: &BootstrapRemoteConfig) -> Result<Arc<dyn VaultProvider>> {
+        let provider = self
+            .providers
+            .lock()
+            .expect("lock vault provider factory")
+            .get(&remote.remote_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("missing mock vault provider `{}`", remote.remote_id))?;
+        Ok(provider)
+    }
+}
+
 impl SessionRuntimeControl for NoopRuntimeControl {
     fn disconnect(&self) -> Result<()> {
         Ok(())
@@ -685,4 +762,132 @@ fn sync_modal_window_contract_exposes_conflict_summary_fields() {
     assert!(app_window.contains("in-out property <string> sync-modal-conflict-summary: \"\";"));
     assert!(component.contains("in property <int> conflict-count: 0;"));
     assert!(component.contains("in property <string> conflict-summary: \"\";"));
+}
+
+#[test]
+fn sync_modal_shows_local_and_remote_sync_timestamps() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.set_sync_modal_open(true);
+    app.set_sync_modal_local_last_sync_text("2026-04-02 10:30".into());
+    app.set_sync_modal_remote_last_update_text("2026-04-02 10:31".into());
+    app.set_sync_modal_primary_revision_text("rev-0042".into());
+    app.set_sync_modal_remote_status_text("Primary remote is currently at rev-0042.".into());
+
+    assert_eq!(app.get_sync_modal_local_last_sync_text().as_str(), "2026-04-02 10:30");
+    assert_eq!(app.get_sync_modal_remote_last_update_text().as_str(), "2026-04-02 10:31");
+    assert_eq!(app.get_sync_modal_primary_revision_text().as_str(), "rev-0042");
+    assert_eq!(
+        app.get_sync_modal_remote_status_text().as_str(),
+        "Primary remote is currently at rev-0042."
+    );
+}
+
+#[test]
+fn opening_sync_settings_refreshes_primary_head_in_background() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("remote-head-refresh-success");
+    let primary_inner = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    primary_inner.set_remote_head(Some(sample_remote_head("rev-0042")));
+    let primary = Arc::new(DelayedVaultProvider::new(
+        Arc::clone(&primary_inner),
+        Duration::from_millis(250),
+    ));
+    let provider_factory = AnyVaultProviderFactory::default();
+    provider_factory.insert(primary as Arc<dyn VaultProvider>);
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+
+    let started = Instant::now();
+    app.invoke_open_sync_modal_requested();
+
+    assert!(app.get_sync_modal_open());
+    assert!(
+        started.elapsed() < Duration::from_millis(120),
+        "sync settings should open immediately while remote head refresh runs in the background"
+    );
+
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_sync_modal_primary_revision_text().as_str() == "rev-0042"
+    });
+
+    assert_eq!(app.get_sync_modal_remote_last_update_text().as_str(), "2026-03-31 08:00");
+    assert_eq!(app.get_sync_modal_primary_revision_text().as_str(), "rev-0042");
+    assert!(
+        app.get_sync_modal_remote_status_text()
+            .to_string()
+            .contains("rev-0042")
+    );
+}
+
+#[test]
+fn remote_head_refresh_failure_keeps_sync_settings_non_blocking() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("remote-head-refresh-failure");
+    let primary_inner = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    primary_inner.set_read_error(Some("token expired"));
+    let primary = Arc::new(DelayedVaultProvider::new(
+        Arc::clone(&primary_inner),
+        Duration::from_millis(250),
+    ));
+    let provider_factory = AnyVaultProviderFactory::default();
+    provider_factory.insert(primary as Arc<dyn VaultProvider>);
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    bind_with_vault_runtime(
+        &app,
+        Arc::new(MemoryCredentialStore::default()),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+
+    let started = Instant::now();
+    app.invoke_open_sync_modal_requested();
+
+    assert!(app.get_sync_modal_open());
+    assert!(
+        started.elapsed() < Duration::from_millis(120),
+        "sync settings should stay non-blocking even when remote head refresh fails"
+    );
+
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_sync_modal_remote_status_text()
+            .to_string()
+            .contains("Failed to refresh remote status")
+    });
+
+    assert!(app.get_sync_modal_error_text().to_string().contains("token expired"));
 }

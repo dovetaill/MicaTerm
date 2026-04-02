@@ -12,4 +12,5 @@ pub mod model;
 pub mod provider;
 pub mod recovery;
 pub mod snapshot;
+pub mod sync_service;
 pub mod sync_decision;
