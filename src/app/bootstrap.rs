@@ -4193,6 +4193,7 @@ fn sync_workspace_session_state_with_manager(
                     window.set_workspace_session_cell_width(frame.cell_width_px as f32 / scale_factor);
                     window
                         .set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);
+                    sync_workspace_native_terminal_surface_geometry(window);
                     present_workspace_native_terminal_frame(window, frame);
                     window.set_workspace_session_render_mode(
                         TerminalRenderMode::Native.as_str().into(),

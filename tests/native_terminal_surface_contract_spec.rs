@@ -511,9 +511,16 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     let native_present = native_block
         .find("present_workspace_native_terminal_frame(window, frame);")
         .expect("native present");
+    let native_resync = native_block
+        .find("sync_workspace_native_terminal_surface_geometry(window);")
+        .expect("native geometry resync");
     assert!(
         native_rows < native_present && native_cols < native_present,
         "native path should project rows/cols from the retained frame payload before presenting it so overlay geometry and host hit-testing stay tied to the exact frame staged for display"
+    );
+    assert!(
+        native_resync < native_present,
+        "native path should resync the host-reported terminal rect after applying frame cell metrics so the retained surface presents into the same geometry the Slint host just committed"
     );
     assert!(
         !native_block.contains("window.set_workspace_session_surface_image(Image::default());"),
