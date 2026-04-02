@@ -5965,6 +5965,40 @@ fn workspace_new_tab_request_opens_single_launcher_tab() {
 }
 
 #[test]
+fn workspace_new_tab_request_collapses_native_terminal_surface_rect_immediately() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "terminal mode should expose a concrete native surface rect before switching back to the launcher"
+    );
+
+    app.invoke_workspace_new_tab_requested();
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_width(),
+        0.0,
+        "opening the launcher tab should collapse the retained native terminal width immediately so the old child surface cannot keep covering the welcome host until a later layout invalidation"
+    );
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_height(),
+        0.0,
+        "opening the launcher tab should collapse the retained native terminal height immediately so the old child surface cannot keep intercepting paint and hit-testing outside terminal mode"
+    );
+}
+
+#[test]
 fn launcher_recent_connection_replaces_launcher_tab_with_real_session_tab() {
     i_slint_backend_testing::init_no_event_loop();
 

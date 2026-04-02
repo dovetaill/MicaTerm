@@ -239,18 +239,30 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function terminal-surface-origin-x() -> length {
+        if root.mode != "terminal" {
+            return 0px;
+        }
         return root.snap-length-to-device-pixel(root.terminal-padding-left);
     }
 
     function terminal-surface-origin-y() -> length {
+        if root.mode != "terminal" {
+            return 0px;
+        }
         return root.snap-length-to-device-pixel(root.terminal-padding-top);
     }
 
     function snapped-terminal-visible-grid-width() -> length {
+        if root.mode != "terminal" {
+            return 0px;
+        }
         return root.snap-length-to-device-pixel(root.terminal-visible-grid-width());
     }
 
     function snapped-terminal-visible-grid-height() -> length {
+        if root.mode != "terminal" {
+            return 0px;
+        }
         return root.snap-length-to-device-pixel(root.terminal-visible-grid-height());
     }
 
