@@ -5,11 +5,12 @@ use anyhow::Result;
 
 use crate::app::assets_catalog::{asset_tree_to_vault_catalog, vault_catalog_to_asset_tree};
 use crate::app::keychain::{
-    KeychainCatalog, KeychainIdentitySpec, KeychainNodePayload, KeychainSshKeySpec,
+    KeychainCatalog, KeychainIdentitySpec, KeychainNode, KeychainNodePayload, KeychainSshKeySpec,
 };
 use crate::app::ssh::credentials::{
-    CredentialStore, SshCredentialKind, StoredSshSecretBundle, restore_snapshot_secret_bundle,
-    snapshot_secret_bundle, ssh_credential_ref,
+    CredentialStore, SshCredentialKind, StoredSshSecretBundle, keychain_identity_credential_ref,
+    keychain_key_credential_ref, restore_snapshot_secret_bundle, snapshot_secret_bundle,
+    ssh_credential_ref,
 };
 use crate::app::ssh::known_hosts::KnownHostsService;
 use crate::app::ui_preferences::UiPreferences;
@@ -104,6 +105,7 @@ pub fn apply_vault_snapshot(
 ) -> Result<AppliedVaultSnapshot> {
     let normalized_snapshot = normalize_snapshot_secret_refs(snapshot.clone());
     let obsolete_secret_refs = obsolete_ssh_secret_refs(snapshot, &normalized_snapshot);
+    let obsolete_keychain_refs = obsolete_keychain_secret_refs(snapshot, &normalized_snapshot);
     let asset_tree = vault_catalog_to_asset_tree(&normalized_snapshot.asset_catalog);
 
     for node in normalized_snapshot.asset_catalog.nodes.values() {
@@ -138,6 +140,10 @@ pub fn apply_vault_snapshot(
         }
     }
 
+    for credential_ref in obsolete_keychain_refs {
+        credential_store.delete_secret(credential_ref.as_str())?;
+    }
+
     KnownHostsService::new(known_hosts_path)
         .replace_snapshot_entries(&normalized_snapshot.known_hosts)?;
 
@@ -152,6 +158,16 @@ pub fn apply_vault_snapshot(
 pub fn normalize_snapshot_secret_refs(snapshot: VaultSnapshot) -> VaultSnapshot {
     let mut snapshot = snapshot;
     let duplicated_refs = duplicated_ssh_secret_refs(&snapshot.asset_catalog);
+    let identity_bundle_ids = snapshot
+        .keychain_identity_secret_bundles
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let key_bundle_ids = snapshot
+        .keychain_key_secret_bundles
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<_>>();
 
     for (node_id, node) in &mut snapshot.asset_catalog.nodes {
         let VaultAssetPayload::SshConnection(spec) = &mut node.payload else {
@@ -196,6 +212,24 @@ pub fn normalize_snapshot_secret_refs(snapshot: VaultSnapshot) -> VaultSnapshot 
                 };
             }
             VaultSshProxySpec::None | VaultSshProxySpec::SshAsset { .. } => {}
+        }
+    }
+
+    for (node_id, node) in &mut snapshot.keychain_catalog.nodes {
+        match &mut node.payload {
+            KeychainNodePayload::Folder => {}
+            KeychainNodePayload::Identity(spec) => {
+                let needs_canonical_ref =
+                    spec.credential_ref.is_some() || identity_bundle_ids.contains(node_id);
+                spec.credential_ref = needs_canonical_ref
+                    .then(|| keychain_identity_credential_ref(node_id.as_str()));
+            }
+            KeychainNodePayload::SshKey(spec) => {
+                let needs_canonical_ref =
+                    spec.credential_ref.is_some() || key_bundle_ids.contains(node_id);
+                spec.credential_ref =
+                    needs_canonical_ref.then(|| keychain_key_credential_ref(node_id.as_str()));
+            }
         }
     }
 
@@ -259,6 +293,43 @@ fn obsolete_ssh_secret_refs(
     }
 
     obsolete
+}
+
+fn obsolete_keychain_secret_refs(
+    original: &VaultSnapshot,
+    normalized: &VaultSnapshot,
+) -> BTreeSet<String> {
+    let normalized_refs = normalized
+        .keychain_catalog
+        .nodes
+        .values()
+        .filter_map(keychain_node_credential_ref)
+        .collect::<BTreeSet<_>>();
+    let mut obsolete = BTreeSet::new();
+
+    for (node_id, node) in &original.keychain_catalog.nodes {
+        let Some(previous_ref) = keychain_node_credential_ref(node) else {
+            continue;
+        };
+        let Some(normalized_node) = normalized.keychain_catalog.nodes.get(node_id) else {
+            continue;
+        };
+        if keychain_node_credential_ref(normalized_node).as_ref() != Some(&previous_ref)
+            && !normalized_refs.contains(&previous_ref)
+        {
+            obsolete.insert(previous_ref);
+        }
+    }
+
+    obsolete
+}
+
+fn keychain_node_credential_ref(node: &KeychainNode) -> Option<String> {
+    match &node.payload {
+        KeychainNodePayload::Folder => None,
+        KeychainNodePayload::Identity(spec) => spec.credential_ref.clone(),
+        KeychainNodePayload::SshKey(spec) => spec.credential_ref.clone(),
+    }
 }
 
 fn insert_keychain_bundle<T>(

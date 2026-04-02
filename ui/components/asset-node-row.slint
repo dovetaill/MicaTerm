@@ -33,6 +33,8 @@ export component AssetNodeRow inherits Rectangle {
     private property <image> snippet-package-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
     private property <image> snippet-package-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
     private property <image> snippet-icon: @image-url("../../assets/icons/fluent/document-code-16-regular.svg");
+    private property <image> keychain-identity-icon: @image-url("../../assets/icons/fluent/key-multiple-20-regular.svg");
+    private property <image> keychain-ssh-key-icon: @image-url("../../assets/icons/fluent/key-multiple-20-regular.svg");
     private property <image> ssh-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
     private property <image> disclosure-icon: root.disclosure-state == "expanded"
         ? root.chevron-down-icon
@@ -43,7 +45,11 @@ export component AssetNodeRow inherits Rectangle {
             ? (root.expanded ? root.snippet-package-open-icon : root.snippet-package-icon)
             : root.item-kind == "snippet"
                 ? root.snippet-icon
-                : root.ssh-icon;
+                : root.item-kind == "identity"
+                    ? root.keychain-identity-icon
+                    : root.item-kind == "ssh-key"
+                        ? root.keychain-ssh-key-icon
+                        : root.ssh-icon;
 
     height: root.row-height;
     border-radius: 0px;

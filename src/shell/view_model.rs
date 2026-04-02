@@ -12,7 +12,8 @@ use crate::app::sftp::{
     TransferQueueSummary,
 };
 use crate::app::ssh::credentials::{
-    SshCredentialKind, keychain_key_credential_ref, ssh_credential_ref,
+    SshCredentialKind, keychain_identity_credential_ref, keychain_key_credential_ref,
+    ssh_credential_ref,
 };
 use crate::app::ssh::runtime::TerminalSurfaceState;
 use crate::app::window_state::WindowPlacementKind;
@@ -287,8 +288,14 @@ pub enum AssetModalState {
         editing_asset_id: Option<String>,
         draft_name: String,
     },
+    NewKeychainIdentity {
+        parent_id: Option<String>,
+        editing_item_id: Option<String>,
+        draft: KeychainIdentityDraft,
+    },
     NewKeychainSshKey {
         parent_id: Option<String>,
+        editing_item_id: Option<String>,
         draft: KeychainSshKeyDraft,
     },
     NewSshConnection {
@@ -357,6 +364,17 @@ pub struct AssetSnippetDraft {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct KeychainIdentityDraft {
+    pub name: String,
+    pub username: String,
+    pub auth_kind: String,
+    pub password: String,
+    pub ssh_key_id: String,
+    pub ssh_key_label: String,
+    pub remark: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct KeychainSshKeyDraft {
     pub name: String,
     pub private_key: String,
@@ -373,6 +391,12 @@ struct SshProxyTargetOption {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SshKeychainIdentityOption {
     identity_id: String,
+    label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KeychainSshKeyOption {
+    key_id: String,
     label: String,
 }
 
@@ -715,9 +739,22 @@ impl ShellViewModel {
         asset_id: &str,
         draft_name: &str,
     ) -> AssetNameValidation {
-        let parent_id = self.console_asset_tree.parent_id(asset_id).flatten();
-        self.console_asset_tree
-            .validate_name_in_parent(parent_id, draft_name, Some(asset_id))
+        if self.console_asset_tree.contains(asset_id) {
+            let parent_id = self.console_asset_tree.parent_id(asset_id).flatten();
+            return self
+                .console_asset_tree
+                .validate_name_in_parent(parent_id, draft_name, Some(asset_id));
+        }
+
+        if let Some(node) = self.keychain_catalog.nodes.get(asset_id) {
+            return self.keychain_name_validation(
+                node.parent_id.as_deref(),
+                draft_name,
+                Some(asset_id),
+            );
+        }
+
+        AssetNameValidation::Empty
     }
 
     fn sftp_name_validation(
@@ -789,9 +826,24 @@ impl ShellViewModel {
                 draft_name,
                 editing_asset_id.as_deref(),
             )),
-            Some(AssetModalState::NewKeychainSshKey { parent_id, draft }) => {
-                self.keychain_ssh_key_modal_validation_message(parent_id.as_deref(), draft)
-            }
+            Some(AssetModalState::NewKeychainIdentity {
+                parent_id,
+                editing_item_id,
+                draft,
+            }) => self.keychain_identity_modal_validation_message(
+                parent_id.as_deref(),
+                editing_item_id.as_deref(),
+                draft,
+            ),
+            Some(AssetModalState::NewKeychainSshKey {
+                parent_id,
+                editing_item_id,
+                draft,
+            }) => self.keychain_ssh_key_modal_validation_message(
+                parent_id.as_deref(),
+                editing_item_id.as_deref(),
+                draft,
+            ),
             Some(AssetModalState::NewSshConnection {
                 parent_id,
                 editing_asset_id,
@@ -839,9 +891,24 @@ impl ShellViewModel {
                     editing_asset_id.as_deref(),
                 ) == AssetNameValidation::Valid
             }
-            Some(AssetModalState::NewKeychainSshKey { parent_id, draft }) => {
-                self.keychain_ssh_key_modal_can_confirm(parent_id.as_deref(), draft)
-            }
+            Some(AssetModalState::NewKeychainIdentity {
+                parent_id,
+                editing_item_id,
+                draft,
+            }) => self.keychain_identity_modal_can_confirm(
+                parent_id.as_deref(),
+                editing_item_id.as_deref(),
+                draft,
+            ),
+            Some(AssetModalState::NewKeychainSshKey {
+                parent_id,
+                editing_item_id,
+                draft,
+            }) => self.keychain_ssh_key_modal_can_confirm(
+                parent_id.as_deref(),
+                editing_item_id.as_deref(),
+                draft,
+            ),
             Some(AssetModalState::NewSshConnection {
                 parent_id,
                 editing_asset_id,
@@ -1979,12 +2046,80 @@ impl ShellViewModel {
         });
     }
 
+    pub fn open_new_keychain_identity_modal(&mut self, parent_id: Option<String>) {
+        let parent_id = self.normalize_keychain_folder_parent_id(parent_id);
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.context_target_asset_id = parent_id.clone();
+        self.asset_modal_state = Some(AssetModalState::NewKeychainIdentity {
+            editing_item_id: None,
+            draft: KeychainIdentityDraft {
+                name: next_default_keychain_name_for_parent(
+                    &self.keychain_catalog,
+                    parent_id.as_deref(),
+                    KeychainItemKind::Identity,
+                ),
+                auth_kind: "password".into(),
+                ..KeychainIdentityDraft::default()
+            },
+            parent_id,
+        });
+    }
+
+    pub fn open_edit_keychain_identity_modal(
+        &mut self,
+        item_id: String,
+        password: Option<String>,
+    ) {
+        let Some(node) = self.keychain_catalog.nodes.get(&item_id).cloned() else {
+            return;
+        };
+        let KeychainNodePayload::Identity(spec) = node.payload.clone() else {
+            return;
+        };
+
+        let ssh_key_id = spec.ssh_key_id.unwrap_or_default();
+        let ssh_key_label = self
+            .keychain_ssh_key_options()
+            .into_iter()
+            .find(|option| option.key_id == ssh_key_id)
+            .map(|option| option.label)
+            .unwrap_or_else(|| ssh_key_id.clone());
+
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.focused_keychain_id = Some(item_id.clone());
+        self.selected_keychain_ids = vec![item_id.clone()];
+        self.context_target_asset_id = Some(item_id.clone());
+        let auth_kind = keychain_identity_auth_kind_id(spec.auth_kind).to_string();
+        self.asset_modal_state = Some(AssetModalState::NewKeychainIdentity {
+            parent_id: node.parent_id,
+            editing_item_id: Some(item_id),
+            draft: KeychainIdentityDraft {
+                name: node.title,
+                username: spec.username,
+                auth_kind: auth_kind.clone(),
+                password: if auth_kind == "password" {
+                    password.unwrap_or_default()
+                } else {
+                    String::new()
+                },
+                ssh_key_id,
+                ssh_key_label,
+                remark: spec.remark,
+            },
+        });
+    }
+
     pub fn open_new_keychain_ssh_key_modal(&mut self, parent_id: Option<String>) {
         let parent_id = self.normalize_keychain_folder_parent_id(parent_id);
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
         self.asset_modal_state = Some(AssetModalState::NewKeychainSshKey {
+            editing_item_id: None,
             draft: KeychainSshKeyDraft {
                 name: next_default_keychain_name_for_parent(
                     &self.keychain_catalog,
@@ -1994,6 +2129,32 @@ impl ShellViewModel {
                 ..KeychainSshKeyDraft::default()
             },
             parent_id,
+        });
+    }
+
+    pub fn open_edit_keychain_ssh_key_modal(&mut self, item_id: String, private_key: Option<String>) {
+        let Some(node) = self.keychain_catalog.nodes.get(&item_id).cloned() else {
+            return;
+        };
+        let KeychainNodePayload::SshKey(spec) = node.payload.clone() else {
+            return;
+        };
+
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.focused_keychain_id = Some(item_id.clone());
+        self.selected_keychain_ids = vec![item_id.clone()];
+        self.context_target_asset_id = Some(item_id.clone());
+        self.asset_modal_state = Some(AssetModalState::NewKeychainSshKey {
+            parent_id: node.parent_id,
+            editing_item_id: Some(item_id),
+            draft: KeychainSshKeyDraft {
+                name: node.title,
+                private_key: private_key.unwrap_or_default(),
+                public_key: spec.public_key,
+                fingerprint: spec.fingerprint,
+            },
         });
     }
 
@@ -2025,6 +2186,67 @@ impl ShellViewModel {
         }
     }
 
+    pub fn update_keychain_identity_modal_field(&mut self, field: &str, value: String) {
+        let Some(AssetModalState::NewKeychainIdentity { draft, .. }) =
+            self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        match field {
+            "name" => draft.name = value,
+            "username" => draft.username = value,
+            "auth_kind" => {
+                let next_auth_kind = normalized_keychain_identity_auth_kind_id(value.as_str());
+                if draft.auth_kind != next_auth_kind {
+                    draft.auth_kind = next_auth_kind.to_string();
+                    if next_auth_kind == "password" {
+                        draft.ssh_key_id.clear();
+                        draft.ssh_key_label.clear();
+                    } else {
+                        draft.password.clear();
+                    }
+                }
+            }
+            "password" => draft.password = value,
+            "ssh_key_id" => draft.ssh_key_id = value,
+            "ssh_key_label" => draft.ssh_key_label = value,
+            "remark" => draft.remark = value,
+            _ => {}
+        }
+    }
+
+    pub fn hydrate_edit_keychain_identity_secret(&mut self, password: Option<String>) {
+        let Some(AssetModalState::NewKeychainIdentity {
+            editing_item_id: Some(_),
+            draft,
+            ..
+        }) = self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        draft.password = if draft.auth_kind == "password" {
+            password.unwrap_or_default()
+        } else {
+            String::new()
+        };
+    }
+
+    pub fn select_first_keychain_identity_modal_ssh_key(&mut self) -> bool {
+        let Some(option) = self.keychain_ssh_key_options().into_iter().next() else {
+            return false;
+        };
+        let Some(AssetModalState::NewKeychainIdentity { draft, .. }) =
+            self.asset_modal_state.as_mut()
+        else {
+            return false;
+        };
+        draft.ssh_key_id = option.key_id;
+        draft.ssh_key_label = option.label;
+        true
+    }
+
     pub fn update_keychain_ssh_key_modal_field(&mut self, field: &str, value: String) {
         let Some(AssetModalState::NewKeychainSshKey { draft, .. }) =
             self.asset_modal_state.as_mut()
@@ -2039,6 +2261,19 @@ impl ShellViewModel {
             "fingerprint" => draft.fingerprint = value,
             _ => {}
         }
+    }
+
+    pub fn hydrate_edit_keychain_ssh_key_secret(&mut self, private_key: Option<String>) {
+        let Some(AssetModalState::NewKeychainSshKey {
+            editing_item_id: Some(_),
+            draft,
+            ..
+        }) = self.asset_modal_state.as_mut()
+        else {
+            return;
+        };
+
+        draft.private_key = private_key.unwrap_or_default();
     }
 
     pub fn update_snippet_package_modal_name(&mut self, value: String) {
@@ -2191,20 +2426,25 @@ impl ShellViewModel {
     }
 
     pub fn open_rename_asset_modal(&mut self, asset_id: String) {
-        if !self.console_asset_tree.contains(&asset_id) {
-            return;
-        }
-
-        let Some(original_name) = self.console_asset_tree.title(&asset_id).map(str::to_string)
-        else {
+        let original_name = if let Some(name) = self.console_asset_tree.title(&asset_id) {
+            self.focused_asset_id = Some(asset_id.clone());
+            self.selected_asset_ids = vec![asset_id.clone()];
+            self.focused_keychain_id = None;
+            self.selected_keychain_ids.clear();
+            name.to_string()
+        } else if let Some(node) = self.keychain_catalog.nodes.get(&asset_id) {
+            self.focused_keychain_id = Some(asset_id.clone());
+            self.selected_keychain_ids = vec![asset_id.clone()];
+            self.focused_asset_id = None;
+            self.selected_asset_ids.clear();
+            node.title.clone()
+        } else {
             return;
         };
 
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
-        self.focused_asset_id = Some(asset_id.clone());
-        self.selected_asset_ids = vec![asset_id.clone()];
         self.context_target_asset_id = Some(asset_id.clone());
         self.asset_modal_state = Some(AssetModalState::RenameAsset {
             asset_id,
@@ -2251,29 +2491,36 @@ impl ShellViewModel {
     }
 
     pub fn open_delete_asset_confirm(&mut self, asset_id: String) {
-        let snippet_first = self.active_sidebar_destination == SidebarDestination::Snippets;
-        let asset_summary = if snippet_first {
-            self.snippet_asset_tree
-                .title(&asset_id)
-                .map(str::to_string)
-                .zip(self.snippet_asset_tree.descendant_count(&asset_id))
-                .or_else(|| {
-                    self.console_asset_tree
-                        .title(&asset_id)
-                        .map(str::to_string)
-                        .zip(self.console_asset_tree.descendant_count(&asset_id))
-                })
+        let asset_summary = if let Some(node) = self.keychain_catalog.nodes.get(&asset_id) {
+            Some((
+                node.title.clone(),
+                self.keychain_descendant_count(&asset_id).unwrap_or_default(),
+            ))
         } else {
-            self.console_asset_tree
-                .title(&asset_id)
-                .map(str::to_string)
-                .zip(self.console_asset_tree.descendant_count(&asset_id))
-                .or_else(|| {
-                    self.snippet_asset_tree
-                        .title(&asset_id)
-                        .map(str::to_string)
-                        .zip(self.snippet_asset_tree.descendant_count(&asset_id))
-                })
+            let snippet_first = self.active_sidebar_destination == SidebarDestination::Snippets;
+            if snippet_first {
+                self.snippet_asset_tree
+                    .title(&asset_id)
+                    .map(str::to_string)
+                    .zip(self.snippet_asset_tree.descendant_count(&asset_id))
+                    .or_else(|| {
+                        self.console_asset_tree
+                            .title(&asset_id)
+                            .map(str::to_string)
+                            .zip(self.console_asset_tree.descendant_count(&asset_id))
+                    })
+            } else {
+                self.console_asset_tree
+                    .title(&asset_id)
+                    .map(str::to_string)
+                    .zip(self.console_asset_tree.descendant_count(&asset_id))
+                    .or_else(|| {
+                        self.snippet_asset_tree
+                            .title(&asset_id)
+                            .map(str::to_string)
+                            .zip(self.snippet_asset_tree.descendant_count(&asset_id))
+                    })
+            }
         };
         let Some((label, descendant_count)) = asset_summary else {
             return;
@@ -2282,8 +2529,17 @@ impl ShellViewModel {
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
-        self.focused_asset_id = Some(asset_id.clone());
-        self.selected_asset_ids = vec![asset_id.clone()];
+        if self.keychain_catalog.nodes.contains_key(&asset_id) {
+            self.focused_keychain_id = Some(asset_id.clone());
+            self.selected_keychain_ids = vec![asset_id.clone()];
+            self.focused_asset_id = None;
+            self.selected_asset_ids.clear();
+        } else {
+            self.focused_asset_id = Some(asset_id.clone());
+            self.selected_asset_ids = vec![asset_id.clone()];
+            self.focused_keychain_id = None;
+            self.selected_keychain_ids.clear();
+        }
         self.context_target_asset_id = Some(asset_id.clone());
         self.asset_modal_state = Some(AssetModalState::DeleteAssetConfirm {
             asset_id,
@@ -2482,6 +2738,7 @@ impl ShellViewModel {
             | Some(AssetModalState::SftpNewFolder { .. })
             | Some(AssetModalState::NewSnippet { .. })
             | Some(AssetModalState::NewSnippetPackage { .. })
+            | Some(AssetModalState::NewKeychainIdentity { .. })
             | Some(AssetModalState::NewKeychainSshKey { .. })
             | Some(AssetModalState::NewSshConnection { .. }) => {
                 self.asset_create_modal_can_confirm()
@@ -2628,20 +2885,91 @@ impl ShellViewModel {
                     AssetNodePayload::SnippetPackage,
                 )
             }
-            AssetModalState::NewKeychainSshKey { parent_id, draft } => {
-                if !self.keychain_ssh_key_modal_can_confirm(parent_id.as_deref(), &draft) {
+            AssetModalState::NewKeychainIdentity {
+                parent_id,
+                editing_item_id,
+                draft,
+            } => {
+                if !self.keychain_identity_modal_can_confirm(
+                    parent_id.as_deref(),
+                    editing_item_id.as_deref(),
+                    &draft,
+                ) {
                     return false;
                 }
 
-                let item_id = create_keychain_node(
-                    &mut self.keychain_catalog,
+                let item_id = if let Some(item_id) = editing_item_id {
+                    let auth_kind = keychain_identity_auth_kind_from_id(draft.auth_kind.as_str());
+                    if self.rename_keychain_item(&item_id, draft.name.trim()).is_err() {
+                        return false;
+                    }
+                    let credential_ref = (auth_kind == KeychainIdentityAuthKind::Password)
+                        .then(|| keychain_identity_credential_ref(item_id.as_str()));
+                    let spec = crate::app::keychain::KeychainIdentitySpec {
+                        username: draft.username.trim().to_string(),
+                        auth_kind,
+                        ssh_key_id: (normalized_keychain_identity_auth_kind_id(
+                            draft.auth_kind.as_str(),
+                        ) == "ssh-key")
+                            .then(|| draft.ssh_key_id.trim().to_string())
+                            .filter(|value| !value.is_empty()),
+                        credential_ref,
+                        remark: draft.remark.trim().to_string(),
+                    };
+                    if let Some(node) = self.keychain_catalog.nodes.get_mut(&item_id) {
+                        node.payload = KeychainNodePayload::Identity(spec);
+                    }
+                    item_id
+                } else {
+                    let item_id = create_keychain_node(
+                        &mut self.keychain_catalog,
+                        parent_id.as_deref(),
+                        KeychainItemKind::Identity,
+                        Some(draft.name.trim()),
+                    );
+                    let auth_kind = keychain_identity_auth_kind_from_id(draft.auth_kind.as_str());
+                    let credential_ref = (auth_kind == KeychainIdentityAuthKind::Password)
+                        .then(|| keychain_identity_credential_ref(item_id.as_str()));
+                    let spec = crate::app::keychain::KeychainIdentitySpec {
+                        username: draft.username.trim().to_string(),
+                        auth_kind,
+                        ssh_key_id: (normalized_keychain_identity_auth_kind_id(
+                            draft.auth_kind.as_str(),
+                        ) == "ssh-key")
+                            .then(|| draft.ssh_key_id.trim().to_string())
+                            .filter(|value| !value.is_empty()),
+                        credential_ref,
+                        remark: draft.remark.trim().to_string(),
+                    };
+                    if let Some(node) = self.keychain_catalog.nodes.get_mut(&item_id) {
+                        node.payload = KeychainNodePayload::Identity(spec);
+                    }
+                    if let Some(parent_id) = parent_id {
+                        self.keychain_expanded_ids.insert(parent_id);
+                    }
+                    item_id
+                };
+
+                self.selected_keychain_ids = vec![item_id.clone()];
+                self.focused_keychain_id = Some(item_id.clone());
+                self.context_target_asset_id = Some(item_id);
+                self.asset_modal_state = None;
+                return true;
+            }
+            AssetModalState::NewKeychainSshKey {
+                parent_id,
+                editing_item_id,
+                draft,
+            } => {
+                if !self.keychain_ssh_key_modal_can_confirm(
                     parent_id.as_deref(),
-                    KeychainItemKind::SshKey,
-                    Some(draft.name.trim()),
-                );
+                    editing_item_id.as_deref(),
+                    &draft,
+                ) {
+                    return false;
+                }
+
                 let trimmed_public_key = draft.public_key.trim().to_string();
-                let credential_ref = (!draft.private_key.trim().is_empty())
-                    .then(|| keychain_key_credential_ref(item_id.as_str()));
                 let comment = trimmed_public_key
                     .split_whitespace()
                     .nth(2)
@@ -2652,20 +2980,49 @@ impl ShellViewModel {
                     .next()
                     .unwrap_or_default()
                     .to_string();
-                let spec = KeychainSshKeySpec {
-                    algorithm,
-                    fingerprint: draft.fingerprint.trim().to_string(),
-                    public_key: trimmed_public_key,
-                    comment,
-                    credential_ref,
-                    remark: String::new(),
+                let item_id = if let Some(item_id) = editing_item_id {
+                    if self.rename_keychain_item(&item_id, draft.name.trim()).is_err() {
+                        return false;
+                    }
+                    let credential_ref = (!draft.private_key.trim().is_empty())
+                        .then(|| keychain_key_credential_ref(item_id.as_str()));
+                    let spec = KeychainSshKeySpec {
+                        algorithm,
+                        fingerprint: draft.fingerprint.trim().to_string(),
+                        public_key: trimmed_public_key,
+                        comment,
+                        credential_ref,
+                        remark: String::new(),
+                    };
+                    if let Some(node) = self.keychain_catalog.nodes.get_mut(&item_id) {
+                        node.payload = KeychainNodePayload::SshKey(spec);
+                    }
+                    item_id
+                } else {
+                    let item_id = create_keychain_node(
+                        &mut self.keychain_catalog,
+                        parent_id.as_deref(),
+                        KeychainItemKind::SshKey,
+                        Some(draft.name.trim()),
+                    );
+                    let credential_ref = (!draft.private_key.trim().is_empty())
+                        .then(|| keychain_key_credential_ref(item_id.as_str()));
+                    let spec = KeychainSshKeySpec {
+                        algorithm,
+                        fingerprint: draft.fingerprint.trim().to_string(),
+                        public_key: trimmed_public_key,
+                        comment,
+                        credential_ref,
+                        remark: String::new(),
+                    };
+                    if let Some(node) = self.keychain_catalog.nodes.get_mut(&item_id) {
+                        node.payload = KeychainNodePayload::SshKey(spec);
+                    }
+                    if let Some(parent_id) = parent_id {
+                        self.keychain_expanded_ids.insert(parent_id);
+                    }
+                    item_id
                 };
-                if let Some(node) = self.keychain_catalog.nodes.get_mut(&item_id) {
-                    node.payload = KeychainNodePayload::SshKey(spec);
-                }
-                if let Some(parent_id) = parent_id {
-                    self.keychain_expanded_ids.insert(parent_id);
-                }
                 self.selected_keychain_ids = vec![item_id.clone()];
                 self.focused_keychain_id = Some(item_id);
                 self.asset_modal_state = None;
@@ -2764,10 +3121,22 @@ impl ShellViewModel {
                     return false;
                 }
 
-                self.console_asset_tree
-                    .set_title(&asset_id, draft_name.trim().to_string());
-                self.focused_asset_id = Some(asset_id.clone());
-                self.selected_asset_ids = vec![asset_id.clone()];
+                if self.keychain_catalog.nodes.contains_key(&asset_id) {
+                    if self.rename_keychain_item(&asset_id, draft_name.trim()).is_err() {
+                        return false;
+                    }
+                    self.focused_keychain_id = Some(asset_id.clone());
+                    self.selected_keychain_ids = vec![asset_id.clone()];
+                    self.focused_asset_id = None;
+                    self.selected_asset_ids.clear();
+                } else {
+                    self.console_asset_tree
+                        .set_title(&asset_id, draft_name.trim().to_string());
+                    self.focused_asset_id = Some(asset_id.clone());
+                    self.selected_asset_ids = vec![asset_id.clone()];
+                    self.focused_keychain_id = None;
+                    self.selected_keychain_ids.clear();
+                }
                 self.context_target_asset_id = Some(asset_id);
                 self.asset_modal_state = None;
                 return true;
@@ -2880,6 +3249,23 @@ impl ShellViewModel {
             return false;
         };
 
+        if self.keychain_catalog.nodes.contains_key(&asset_id) {
+            match self.delete_keychain_item(&asset_id) {
+                Ok(true) => {
+                    self.asset_modal_state = None;
+                    if self.context_target_asset_id.as_deref() == Some(asset_id.as_str()) {
+                        self.context_target_asset_id = self.focused_keychain_id.clone();
+                    }
+                    return true;
+                }
+                Ok(false) => return false,
+                Err(err) => {
+                    self.set_context_menu_feedback(err.to_string());
+                    return false;
+                }
+            }
+        }
+
         let snippet_first = self.active_sidebar_destination == SidebarDestination::Snippets;
         let removed = if snippet_first {
             if self.snippet_asset_tree.remove_subtree(&asset_id).is_some() {
@@ -2963,7 +3349,7 @@ impl ShellViewModel {
                 self.create_keychain_item(None, KeychainItemKind::Folder);
             }
             "new-identity" => {
-                self.create_keychain_item(None, KeychainItemKind::Identity);
+                self.open_new_keychain_identity_modal(None);
             }
             "new-ssh-key" => {
                 self.open_new_keychain_ssh_key_modal(None);
@@ -3226,6 +3612,26 @@ impl ShellViewModel {
             return;
         }
 
+        if is_keychain_context_target(target_kind) {
+            match target_id {
+                Some(target_id) => {
+                    if self.selected_keychain_ids.is_empty()
+                        || !self.selected_keychain_ids.iter().any(|id| id == &target_id)
+                    {
+                        self.selected_keychain_ids = vec![target_id.clone()];
+                    }
+                    self.focused_keychain_id = Some(target_id);
+                }
+                None => {
+                    self.selected_keychain_ids.clear();
+                    self.focused_keychain_id = None;
+                }
+            }
+            self.selected_asset_ids.clear();
+            self.focused_asset_id = None;
+            return;
+        }
+
         match target_id {
             Some(target_id) => {
                 if self.selected_asset_ids.is_empty()
@@ -3321,6 +3727,35 @@ impl ShellViewModel {
             return;
         }
 
+        if matches!(action_id, "new-folder" | "new-identity" | "new-ssh-key")
+            && self
+                .context_menu_target_kind
+                .is_some_and(is_keychain_context_target)
+        {
+            let parent_id = match (
+                self.context_menu_target_kind,
+                self.context_target_asset_id.as_deref(),
+            ) {
+                (Some(ContextTargetKind::KeychainFolder), Some(asset_id))
+                    if self.keychain_catalog.nodes.contains_key(asset_id) =>
+                {
+                    Some(asset_id.to_string())
+                }
+                _ => None,
+            };
+
+            match action_id {
+                "new-folder" => {
+                    self.close_context_menu();
+                    self.create_keychain_item(parent_id, KeychainItemKind::Folder);
+                }
+                "new-identity" => self.open_new_keychain_identity_modal(parent_id),
+                "new-ssh-key" => self.open_new_keychain_ssh_key_modal(parent_id),
+                _ => {}
+            }
+            return;
+        }
+
         if matches!(
             action_id,
             "new-snippet" | "new-package" | "new-snippet-package"
@@ -3392,7 +3827,10 @@ impl ShellViewModel {
                     if let Some(asset_id) = self
                         .context_target_asset_id
                         .clone()
-                        .filter(|asset_id| self.console_asset_tree.contains(asset_id))
+                        .filter(|asset_id| {
+                            self.console_asset_tree.contains(asset_id)
+                                || self.keychain_catalog.nodes.contains_key(asset_id)
+                        })
                     {
                         if self.console_asset_tree.kind(&asset_id)
                             == Some(ConsoleAssetKind::SshConnection)
@@ -3409,6 +3847,7 @@ impl ShellViewModel {
                     if let Some(asset_id) =
                         self.context_target_asset_id.clone().filter(|asset_id| {
                             self.console_asset_tree.contains(asset_id)
+                                || self.keychain_catalog.nodes.contains_key(asset_id)
                                 || self.snippet_asset_tree.contains(asset_id)
                         })
                     {
@@ -3437,6 +3876,36 @@ impl ShellViewModel {
                         })
                     {
                         self.open_edit_snippet_package_modal(asset_id);
+                    } else {
+                        self.close_context_menu();
+                    }
+                }
+                "edit-keychain-identity" => {
+                    if let Some(item_id) =
+                        self.context_target_asset_id.clone().filter(|item_id| {
+                            self.keychain_catalog
+                                .nodes
+                                .get(item_id)
+                                .is_some_and(|node| {
+                                    matches!(node.payload, KeychainNodePayload::Identity(_))
+                                })
+                        })
+                    {
+                        self.open_edit_keychain_identity_modal(item_id, None);
+                    } else {
+                        self.close_context_menu();
+                    }
+                }
+                "edit-keychain-ssh-key" => {
+                    if let Some(item_id) =
+                        self.context_target_asset_id.clone().filter(|item_id| {
+                            self.keychain_catalog
+                                .nodes
+                                .get(item_id)
+                                .is_some_and(|node| matches!(node.payload, KeychainNodePayload::SshKey(_)))
+                        })
+                    {
+                        self.open_edit_keychain_ssh_key_modal(item_id, None);
                     } else {
                         self.close_context_menu();
                     }
@@ -4053,6 +4522,10 @@ impl ShellViewModel {
         ssh_keychain_identity_options_for_catalog(&self.keychain_catalog)
     }
 
+    fn keychain_ssh_key_options(&self) -> Vec<KeychainSshKeyOption> {
+        keychain_ssh_key_options_for_catalog(&self.keychain_catalog)
+    }
+
     fn selected_ssh_keychain_identity(
         &self,
     ) -> Option<&crate::app::keychain::KeychainIdentitySpec> {
@@ -4102,6 +4575,17 @@ impl ShellViewModel {
                 selected_ids: self.sftp_panel_selected_entry_ids().to_vec(),
                 clipboard_has_asset_payload: false,
                 target_mutable: matches!(self.sftp_panel_mode_id(), "ready"),
+            };
+        }
+
+        if self
+            .context_menu_target_kind
+            .is_some_and(is_keychain_context_target)
+        {
+            return SelectionContext {
+                selected_ids: self.selected_keychain_ids.clone(),
+                clipboard_has_asset_payload: false,
+                target_mutable: true,
             };
         }
 
@@ -4238,6 +4722,16 @@ fn is_sftp_context_target(target_kind: ContextTargetKind) -> bool {
     )
 }
 
+fn is_keychain_context_target(target_kind: ContextTargetKind) -> bool {
+    matches!(
+        target_kind,
+        ContextTargetKind::KeychainBlankArea
+            | ContextTargetKind::KeychainFolder
+            | ContextTargetKind::KeychainIdentity
+            | ContextTargetKind::KeychainSshKey
+    )
+}
+
 fn sftp_child_path(parent: &str, name: &str) -> String {
     let trimmed_name = name.trim();
     let trimmed_parent = parent.trim().trim_end_matches('/');
@@ -4333,20 +4827,94 @@ impl ShellViewModel {
         }
     }
 
+    fn keychain_descendant_count(&self, node_id: &str) -> Option<usize> {
+        let node = self.keychain_catalog.nodes.get(node_id)?;
+        let mut count = 0;
+        for child_id in &node.child_ids {
+            count += 1;
+            count += self.keychain_descendant_count(child_id).unwrap_or_default();
+        }
+        Some(count)
+    }
+
     fn keychain_ssh_key_modal_validation_message(
         &self,
         parent_id: Option<&str>,
+        editing_item_id: Option<&str>,
         draft: &KeychainSshKeyDraft,
     ) -> String {
-        asset_name_validation_message(self.keychain_name_validation(parent_id, &draft.name, None))
+        asset_name_validation_message(self.keychain_name_validation(
+            parent_id,
+            &draft.name,
+            editing_item_id,
+        ))
+    }
+
+    fn keychain_identity_modal_validation_message(
+        &self,
+        parent_id: Option<&str>,
+        editing_item_id: Option<&str>,
+        draft: &KeychainIdentityDraft,
+    ) -> String {
+        let name_message = asset_name_validation_message(
+            self.keychain_name_validation(parent_id, &draft.name, editing_item_id),
+        );
+        if !name_message.is_empty() {
+            return name_message;
+        }
+
+        if draft.username.trim().is_empty() {
+            return "Username is required.".into();
+        }
+
+        match normalized_keychain_identity_auth_kind_id(draft.auth_kind.as_str()) {
+            "password" => {
+                if draft.password.trim().is_empty() {
+                    return "Password is required.".into();
+                }
+            }
+            "ssh-key" => {
+                if draft.ssh_key_id.trim().is_empty() {
+                    return "SSH key selection is required.".into();
+                }
+                let Some(node) = self.keychain_catalog.nodes.get(draft.ssh_key_id.trim()) else {
+                    return "Selected SSH key was not found.".into();
+                };
+                let KeychainNodePayload::SshKey(spec) = &node.payload else {
+                    return "Selected SSH key was not found.".into();
+                };
+                if spec
+                    .credential_ref
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty())
+                {
+                    return "Selected SSH key must include private key material.".into();
+                }
+            }
+            _ => {}
+        }
+
+        String::new()
+    }
+
+    fn keychain_identity_modal_can_confirm(
+        &self,
+        parent_id: Option<&str>,
+        editing_item_id: Option<&str>,
+        draft: &KeychainIdentityDraft,
+    ) -> bool {
+        self.keychain_identity_modal_validation_message(parent_id, editing_item_id, draft)
+            .is_empty()
     }
 
     fn keychain_ssh_key_modal_can_confirm(
         &self,
         parent_id: Option<&str>,
+        editing_item_id: Option<&str>,
         draft: &KeychainSshKeyDraft,
     ) -> bool {
-        self.keychain_name_validation(parent_id, &draft.name, None) == AssetNameValidation::Valid
+        self.keychain_name_validation(parent_id, &draft.name, editing_item_id)
+            == AssetNameValidation::Valid
     }
 
     fn ssh_modal_validation_message(
@@ -4590,6 +5158,27 @@ fn saved_ssh_credential_ref(
         .unwrap_or_else(|| ssh_credential_ref(asset_id, SshCredentialKind::SavedSecrets))
 }
 
+fn normalized_keychain_identity_auth_kind_id(value: &str) -> &'static str {
+    match value.trim() {
+        "ssh-key" => "ssh-key",
+        _ => "password",
+    }
+}
+
+fn keychain_identity_auth_kind_from_id(value: &str) -> KeychainIdentityAuthKind {
+    match normalized_keychain_identity_auth_kind_id(value) {
+        "ssh-key" => KeychainIdentityAuthKind::SshKey,
+        _ => KeychainIdentityAuthKind::Password,
+    }
+}
+
+fn keychain_identity_auth_kind_id(value: KeychainIdentityAuthKind) -> &'static str {
+    match value {
+        KeychainIdentityAuthKind::Password => "password",
+        KeychainIdentityAuthKind::SshKey => "ssh-key",
+    }
+}
+
 pub fn welcome_actions() -> &'static [WelcomeAction] {
     &[
         WelcomeAction::NewConnection,
@@ -4651,6 +5240,35 @@ fn ssh_keychain_identity_options_for_catalog(
                 title
             },
             identity_id,
+        })
+        .collect()
+}
+
+fn keychain_ssh_key_options_for_catalog(catalog: &KeychainCatalog) -> Vec<KeychainSshKeyOption> {
+    let mut entries = catalog
+        .nodes
+        .values()
+        .filter_map(|node| match node.payload {
+            KeychainNodePayload::SshKey(_) => Some((node.id.clone(), node.title.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
+
+    let mut title_counts = HashMap::<String, usize>::new();
+    for (_, title) in &entries {
+        *title_counts.entry(title.clone()).or_default() += 1;
+    }
+
+    entries
+        .into_iter()
+        .map(|(key_id, title)| KeychainSshKeyOption {
+            label: if title_counts.get(&title).copied().unwrap_or_default() > 1 {
+                format!("{title} · {key_id}")
+            } else {
+                title
+            },
+            key_id,
         })
         .collect()
 }

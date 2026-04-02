@@ -204,3 +204,28 @@ fn missing_ssh_key_reference_reports_explicit_diagnostics() {
             .contains("keychain identity `identity-prod` is missing SSH key reference")
     );
 }
+
+#[test]
+fn public_only_ssh_key_reference_reports_missing_private_key_material() {
+    let mut catalog = ssh_key_identity_catalog(Some("key-prod"));
+    let Some(KeychainNodePayload::SshKey(ssh_key)) = catalog
+        .nodes
+        .get_mut("key-prod")
+        .map(|node| &mut node.payload)
+    else {
+        panic!("expected key-prod ssh key node");
+    };
+    ssh_key.credential_ref = None;
+
+    let err = resolve_saved_ssh_profile(
+        "asset-prod",
+        "Prod Bastion",
+        &identity_backed_host_spec("identity-prod"),
+        &catalog,
+    )
+    .expect_err("public-only key reference should fail");
+
+    assert!(err.to_string().contains(
+        "keychain SSH key `key-prod` referenced by identity `identity-prod` is missing private key material"
+    ));
+}

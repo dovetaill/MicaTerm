@@ -4,8 +4,12 @@
 pub enum ContextTargetKind {
     BlankArea,
     SnippetsBlankArea,
+    KeychainBlankArea,
     SshConnection,
     Folder,
+    KeychainFolder,
+    KeychainIdentity,
+    KeychainSshKey,
     SnippetPackage,
     Snippet,
     SftpBlankArea,
@@ -102,8 +106,12 @@ pub fn resolve_action_tree(
     match target {
         ContextTargetKind::BlankArea => resolve_blank_area_actions(selection),
         ContextTargetKind::SnippetsBlankArea => resolve_snippets_blank_area_actions(selection),
+        ContextTargetKind::KeychainBlankArea => resolve_keychain_blank_area_actions(selection),
         ContextTargetKind::SshConnection => resolve_ssh_actions(selection),
         ContextTargetKind::Folder => resolve_folder_actions(selection),
+        ContextTargetKind::KeychainFolder => resolve_keychain_folder_actions(selection),
+        ContextTargetKind::KeychainIdentity => resolve_keychain_identity_actions(selection),
+        ContextTargetKind::KeychainSshKey => resolve_keychain_ssh_key_actions(selection),
         ContextTargetKind::SnippetPackage => resolve_snippet_package_actions(selection),
         ContextTargetKind::Snippet => resolve_snippet_actions(selection),
         ContextTargetKind::SftpBlankArea => resolve_sftp_blank_area_actions(selection),
@@ -238,6 +246,90 @@ fn resolve_blank_area_actions(selection: &SelectionContext) -> Vec<ContextMenuAc
 fn resolve_snippets_blank_area_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
     let _ = selection;
     snippet_create_actions(false)
+}
+
+fn resolve_keychain_blank_area_actions(
+    selection: &SelectionContext,
+) -> Vec<ContextMenuActionNode> {
+    let _ = selection;
+    keychain_create_actions(false)
+}
+
+fn resolve_keychain_folder_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
+    let mut actions = keychain_create_actions(false);
+    actions.extend([
+        action_with_state(
+            "rename-asset",
+            "Rename",
+            "edit",
+            mutable_selection_state(selection),
+            true,
+        ),
+        action_with_state(
+            "delete-asset",
+            "Delete",
+            "delete",
+            mutable_selection_state(selection),
+            false,
+        ),
+    ]);
+    actions
+}
+
+fn resolve_keychain_identity_actions(
+    selection: &SelectionContext,
+) -> Vec<ContextMenuActionNode> {
+    vec![
+        action_with_state(
+            "edit-keychain-identity",
+            "Edit",
+            "edit",
+            mutable_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "rename-asset",
+            "Rename",
+            "edit",
+            mutable_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "delete-asset",
+            "Delete",
+            "delete",
+            mutable_selection_state(selection),
+            false,
+        ),
+    ]
+}
+
+fn resolve_keychain_ssh_key_actions(
+    selection: &SelectionContext,
+) -> Vec<ContextMenuActionNode> {
+    vec![
+        action_with_state(
+            "edit-keychain-ssh-key",
+            "Edit",
+            "edit",
+            mutable_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "rename-asset",
+            "Rename",
+            "edit",
+            mutable_selection_state(selection),
+            false,
+        ),
+        action_with_state(
+            "delete-asset",
+            "Delete",
+            "delete",
+            mutable_selection_state(selection),
+            false,
+        ),
+    ]
 }
 
 fn resolve_ssh_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
@@ -728,6 +820,32 @@ fn snippet_create_actions(divider_before: bool) -> Vec<ContextMenuActionNode> {
             "new-package",
             "New Package",
             "folder",
+            ContextMenuActionState::Enabled,
+            false,
+        ),
+    ]
+}
+
+fn keychain_create_actions(divider_before: bool) -> Vec<ContextMenuActionNode> {
+    vec![
+        action_with_state(
+            "new-folder",
+            "New Folder",
+            "folder",
+            ContextMenuActionState::Enabled,
+            divider_before,
+        ),
+        action_with_state(
+            "new-identity",
+            "New Identity",
+            "edit",
+            ContextMenuActionState::Enabled,
+            false,
+        ),
+        action_with_state(
+            "new-ssh-key",
+            "New SSH Key",
+            "edit",
             ContextMenuActionState::Enabled,
             false,
         ),

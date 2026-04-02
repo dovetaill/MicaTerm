@@ -1085,6 +1085,39 @@ fn create_modals_project_inline_validation_message_and_confirm_state() {
 }
 
 #[test]
+fn keychain_identity_modal_blocks_confirm_until_required_fields_are_present() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_assets_create_action_selected("new-identity".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-keychain-identity");
+    assert_eq!(app.get_keychain_asset_items().row_count(), 0);
+    assert!(!app.get_asset_modal_can_confirm());
+
+    app.invoke_confirm_asset_modal_requested();
+    assert_eq!(app.get_keychain_asset_items().row_count(), 0);
+
+    app.invoke_keychain_identity_modal_draft_changed("username".into(), "ops".into());
+    assert!(!app.get_asset_modal_can_confirm());
+
+    app.invoke_keychain_identity_modal_draft_changed("password".into(), "secret".into());
+    assert!(app.get_asset_modal_can_confirm());
+
+    app.invoke_confirm_asset_modal_requested();
+
+    let rows = app.get_keychain_asset_items();
+    assert_eq!(rows.row_count(), 1);
+    let row = rows.row_data(0).expect("created keychain identity row");
+    assert_eq!(row.kind.as_str(), "identity");
+    assert_eq!(row.label.as_str(), "Identity 1");
+}
+
+#[test]
 fn ssh_modal_confirm_updates_runtime_tree_and_persists_ssh_fields() {
     i_slint_backend_testing::init_no_event_loop();
 

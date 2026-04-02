@@ -22,9 +22,10 @@ use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, Termin
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::vault::bootstrap::{
     LocalVaultBootstrapState, bootstrap_provider_credential_ref, export_bootstrap_bundle,
-    import_bootstrap_bundle, load_provider_credential, load_runtime_vault_key,
-    persist_provider_credential, persist_runtime_vault_key, restore_provider_credentials,
-    save_local_vault_bootstrap_state, validate_bootstrap_bundle, vault_runtime_key_credential_ref,
+    import_bootstrap_bundle, load_local_vault_bootstrap_state, load_provider_credential,
+    load_runtime_vault_key, persist_provider_credential, persist_runtime_vault_key,
+    restore_provider_credentials, save_local_vault_bootstrap_state, validate_bootstrap_bundle,
+    vault_runtime_key_credential_ref,
 };
 use mica_term::app::vault::cache::store_encrypted_cache;
 use mica_term::app::vault::crypto::{encrypt_snapshot, generate_vault_key, wrap_vault_key};
@@ -691,4 +692,35 @@ fn closing_sync_modal_keeps_decrypted_keychain_and_asset_state_available() {
             .unwrap()
             .is_some()
     );
+}
+
+#[test]
+fn creating_keychain_folder_after_unlock_marks_local_vault_dirty() {
+    init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("keychain-dirty");
+    let password = SecretString::new("vault-pass".into());
+    let _ = seed_locked_vault_runtime(&temp_root, &password);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store = Arc::new(MemoryCredentialStore::default());
+    bind_with_vault_runtime(&app, credential_store, temp_root.clone());
+
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+
+    let before = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+        .expect("load bootstrap state before mutation")
+        .expect("bootstrap state before mutation");
+
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_assets_create_action_selected("new-folder".into());
+
+    assert_eq!(app.get_keychain_asset_items().row_count(), 4);
+
+    let after = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+        .expect("load bootstrap state after mutation")
+        .expect("bootstrap state after mutation");
+
+    assert_ne!(after.last_local_change_at, before.last_local_change_at);
 }

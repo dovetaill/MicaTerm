@@ -1,5 +1,9 @@
 use std::fs;
 
+use mica_term::AppWindow;
+use mica_term::app::bootstrap::bind_top_status_bar_with_store;
+use slint::Model;
+
 #[test]
 fn keychain_panel_contract_replaces_placeholder_copy_with_tree_projection() {
     let sidebar = fs::read_to_string("ui/shell/assets-sidebar.slint").expect("read assets sidebar");
@@ -73,4 +77,44 @@ fn keychain_ssh_key_modal_contract_exposes_import_generate_and_copy_actions() {
             "ssh key modal should include `{required_copy}`"
         );
     }
+}
+
+#[test]
+fn keychain_asset_rows_map_identity_and_ssh_key_to_dedicated_icons() {
+    let asset_row =
+        fs::read_to_string("ui/components/asset-node-row.slint").expect("read asset node row");
+
+    assert!(
+        asset_row.contains("key-multiple-20-regular.svg"),
+        "keychain rows should use a dedicated key icon asset"
+    );
+    assert!(
+        asset_row.contains("root.item-kind == \"identity\""),
+        "identity rows should get a dedicated icon mapping"
+    );
+    assert!(
+        asset_row.contains("root.item-kind == \"ssh-key\""),
+        "ssh-key rows should get a dedicated icon mapping"
+    );
+    assert!(
+        !asset_row.contains(
+            ": root.item-kind == \"snippet\"\n                ? root.snippet-icon\n                : root.ssh-icon;"
+        ),
+        "identity and ssh-key rows should no longer fall through to the console SSH icon"
+    );
+}
+
+#[test]
+fn new_identity_create_action_opens_modal_before_creating_a_keychain_node() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_assets_create_action_selected("new-identity".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-keychain-identity");
+    assert_eq!(app.get_keychain_asset_items().row_count(), 0);
 }

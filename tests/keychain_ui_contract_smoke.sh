@@ -9,6 +9,8 @@ IDENTITY_MODAL="$ROOT_DIR/ui/components/assets-keychain-identity-modal.slint"
 SSH_KEY_MODAL="$ROOT_DIR/ui/components/assets-keychain-ssh-key-modal.slint"
 SSH_MODAL="$ROOT_DIR/ui/components/assets-ssh-connection-modal.slint"
 CREATE_MENU="$ROOT_DIR/ui/components/assets-create-menu.slint"
+ASSET_NODE_ROW="$ROOT_DIR/ui/components/asset-node-row.slint"
+CONTEXT_MENU="$ROOT_DIR/src/shell/context_menu.rs"
 
 [[ -f "$SIDEBAR" ]] || {
   echo "missing ui/shell/assets-sidebar.slint" >&2
@@ -25,11 +27,27 @@ CREATE_MENU="$ROOT_DIR/ui/components/assets-create-menu.slint"
   exit 1
 }
 
+[[ -f "$ASSET_NODE_ROW" ]] || {
+  echo "missing ui/components/asset-node-row.slint" >&2
+  exit 1
+}
+
+[[ -f "$CONTEXT_MENU" ]] || {
+  echo "missing src/shell/context_menu.rs" >&2
+  exit 1
+}
+
 grep -F 'keychain-asset-items' "$SIDEBAR" >/dev/null
 grep -F 'Identity' "$IDENTITY_MODAL" >/dev/null
 grep -F 'SSH Key' "$IDENTITY_MODAL" >/dev/null
 grep -F 'Generate Key Pair' "$SSH_KEY_MODAL" >/dev/null
 grep -F 'Copy Public Key' "$SSH_KEY_MODAL" >/dev/null
+grep -F 'root.item-kind == "identity"' "$ASSET_NODE_ROW" >/dev/null
+grep -F 'root.item-kind == "ssh-key"' "$ASSET_NODE_ROW" >/dev/null
+grep -F 'key-multiple-20-regular.svg' "$ASSET_NODE_ROW" >/dev/null
+grep -F 'ContextTargetKind::KeychainBlankArea' "$CONTEXT_MENU" >/dev/null
+grep -F 'ContextTargetKind::KeychainIdentity' "$CONTEXT_MENU" >/dev/null
+grep -F 'ContextTargetKind::KeychainSshKey' "$CONTEXT_MENU" >/dev/null
 grep -F 'Manual' "$SSH_MODAL" >/dev/null
 grep -F 'Keychain Identity' "$SSH_MODAL" >/dev/null
 grep -F 'Authentication Summary' "$SSH_MODAL" >/dev/null

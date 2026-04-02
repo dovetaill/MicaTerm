@@ -38,8 +38,9 @@ use crate::app::assets_catalog::{
 };
 use crate::app::async_runtime::AppAsyncRuntime;
 use crate::app::keychain::{
-    KeychainCatalog, KeychainNodePayload, derive_public_key_material_from_private_key,
-    derive_public_key_material_from_public_key, resolve_saved_ssh_profile,
+    KeychainCatalog, KeychainCatalogRepository, KeychainNodePayload, RedbKeychainCatalogStore,
+    derive_public_key_material_from_private_key, derive_public_key_material_from_public_key,
+    resolve_saved_ssh_profile,
 };
 use crate::app::quick_launch_preferences::{
     QuickLaunchPreferences, QuickLaunchPreferencesStore, retain_known_ssh_asset_ids,
@@ -54,10 +55,13 @@ use crate::app::ssh::connection_progress::{
 };
 use crate::app::ssh::credentials::{
     CachedCredentialStore, CredentialStore, EncryptedFileCredentialStore, FallbackCredentialStore,
-    FileCredentialStore, MirroredCredentialStore, StoredKeychainKeySecretBundle,
-    StoredSecretLookupError, StoredSshSecretBundle, SystemCredentialStore,
-    load_secret_bundle_with_diagnostics, persist_keychain_key_secret_bundle, persist_secret_bundle,
-    required_secret_bundle_field, restore_snapshot_secret_bundle,
+    FileCredentialStore, MirroredCredentialStore, StoredKeychainIdentitySecretBundle,
+    StoredKeychainKeySecretBundle, StoredSecretLookupError, StoredSshSecretBundle,
+    SystemCredentialStore, keychain_identity_credential_ref, keychain_key_credential_ref,
+    load_keychain_identity_secret_bundle, load_keychain_key_secret_bundle,
+    load_secret_bundle_with_diagnostics,
+    persist_keychain_identity_secret_bundle, persist_keychain_key_secret_bundle,
+    persist_secret_bundle, required_secret_bundle_field, restore_snapshot_secret_bundle,
 };
 use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, SshAuthMethod};
@@ -151,9 +155,9 @@ use crate::shell::metrics::ShellMetrics;
 use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descriptor_for};
 use crate::shell::tabs::WorkspaceTab;
 use crate::shell::view_model::{
-    AssetModalState, AssetSshConnectionDraft, KeychainSshKeyDraft, RightPanelView, ShellViewModel,
-    SnippetActivation, SnippetCreateAction, SshModalAction, SyncModalMode, SyncModalViewState,
-    VaultPanelViewState,
+    AssetModalState, AssetSshConnectionDraft, KeychainIdentityDraft, KeychainSshKeyDraft,
+    RightPanelView, ShellViewModel, SnippetActivation, SnippetCreateAction, SshModalAction,
+    SyncModalMode, SyncModalViewState, VaultPanelViewState,
 };
 use crate::theme::ThemeMode;
 use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
@@ -1048,10 +1052,45 @@ fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
             window.set_asset_delete_confirm_descendant_count(0);
             clear_asset_ssh_modal_fields(window);
         }
-        Some(AssetModalState::NewKeychainSshKey { draft, .. }) => {
+        Some(AssetModalState::NewKeychainIdentity { draft, .. }) => {
+            window.set_asset_modal_open(true);
+            window.set_asset_modal_kind("new-keychain-identity".into());
+            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
+            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
+            window.set_asset_modal_validation_message(
+                state.asset_create_modal_validation_message().into(),
+            );
+            window.set_asset_folder_modal_name("".into());
+            clear_asset_snippet_modal_fields(window);
+            clear_asset_ssh_modal_fields(window);
+            window.set_asset_rename_modal_open(false);
+            window.set_asset_rename_modal_name("".into());
+            window.set_asset_rename_modal_validation_message("".into());
+            window.set_asset_rename_modal_can_confirm(false);
+            window.set_asset_delete_confirm_modal_open(false);
+            window.set_asset_delete_confirm_target_label("".into());
+            window.set_asset_delete_confirm_descendant_count(0);
+            window.set_keychain_identity_modal_name(draft.name.clone().into());
+            window.set_keychain_identity_modal_username(draft.username.clone().into());
+            window.set_keychain_identity_modal_auth_kind(draft.auth_kind.clone().into());
+            window.set_keychain_identity_modal_password(draft.password.clone().into());
+            window.set_keychain_identity_modal_ssh_key_label(draft.ssh_key_label.clone().into());
+            window.set_keychain_identity_modal_remark(draft.remark.clone().into());
+        }
+        Some(AssetModalState::NewKeychainSshKey {
+            draft,
+            editing_item_id,
+            ..
+        }) => {
             window.set_asset_modal_open(true);
             window.set_asset_modal_kind("new-keychain-ssh-key".into());
-            window.set_asset_ssh_modal_dialog_title("New SSH Key".into());
+            window.set_asset_ssh_modal_dialog_title(
+                if editing_item_id.is_some() {
+                    "Edit SSH Key".into()
+                } else {
+                    "New SSH Key".into()
+                },
+            );
             window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
             window.set_asset_modal_validation_message(
                 state.asset_create_modal_validation_message().into(),
@@ -1410,11 +1449,25 @@ fn parse_context_target_kind(
         "sftp-file" => ContextTargetKind::SftpFile,
         "sftp-selection" => ContextTargetKind::SftpMultiSelection,
         "ssh" => ContextTargetKind::SshConnection,
+        "folder" if active_sidebar_destination == SidebarDestination::Keychain => {
+            ContextTargetKind::KeychainFolder
+        }
         "folder" => ContextTargetKind::Folder,
+        "identity" if active_sidebar_destination == SidebarDestination::Keychain => {
+            ContextTargetKind::KeychainIdentity
+        }
+        "ssh-key" if active_sidebar_destination == SidebarDestination::Keychain => {
+            ContextTargetKind::KeychainSshKey
+        }
         "snippet-package" => ContextTargetKind::SnippetPackage,
         "snippet" => ContextTargetKind::Snippet,
         "blank" if active_sidebar_destination == SidebarDestination::Snippets => {
             ContextTargetKind::SnippetsBlankArea
+        }
+        "blank" | "keychain-blank"
+            if active_sidebar_destination == SidebarDestination::Keychain =>
+        {
+            ContextTargetKind::KeychainBlankArea
         }
         _ => ContextTargetKind::BlankArea,
     }
@@ -1677,6 +1730,30 @@ fn active_edit_ssh_asset_id(state: &ShellViewModel) -> Option<String> {
     Some(asset_id.clone())
 }
 
+fn active_edit_keychain_identity_id(state: &ShellViewModel) -> Option<String> {
+    let Some(AssetModalState::NewKeychainIdentity {
+        editing_item_id: Some(item_id),
+        ..
+    }) = &state.asset_modal_state
+    else {
+        return None;
+    };
+
+    Some(item_id.clone())
+}
+
+fn active_edit_keychain_ssh_key_id(state: &ShellViewModel) -> Option<String> {
+    let Some(AssetModalState::NewKeychainSshKey {
+        editing_item_id: Some(item_id),
+        ..
+    }) = &state.asset_modal_state
+    else {
+        return None;
+    };
+
+    Some(item_id.clone())
+}
+
 fn resolve_edit_ssh_modal_secret_hydration(
     profile: &ConnectionProfile,
     credential_store: &dyn CredentialStore,
@@ -1796,6 +1873,36 @@ fn hydrate_edit_ssh_modal_secret_from_store(
         hydration.passphrase,
         hydration.inline_error,
     );
+}
+
+fn hydrate_edit_keychain_identity_secret_from_store(
+    state: &mut ShellViewModel,
+    credential_store: &dyn CredentialStore,
+) {
+    let Some(identity_id) = active_edit_keychain_identity_id(state) else {
+        return;
+    };
+
+    let credential_ref = keychain_identity_credential_ref(identity_id.as_str());
+    let password = load_keychain_identity_secret_bundle(credential_store, credential_ref.as_str())
+        .ok()
+        .and_then(|bundle| bundle.password);
+    state.hydrate_edit_keychain_identity_secret(password);
+}
+
+fn hydrate_edit_keychain_ssh_key_secret_from_store(
+    state: &mut ShellViewModel,
+    credential_store: &dyn CredentialStore,
+) {
+    let Some(key_id) = active_edit_keychain_ssh_key_id(state) else {
+        return;
+    };
+
+    let credential_ref = keychain_key_credential_ref(key_id.as_str());
+    let private_key = load_keychain_key_secret_bundle(credential_store, credential_ref.as_str())
+        .ok()
+        .and_then(|bundle| bundle.private_key_content);
+    state.hydrate_edit_keychain_ssh_key_secret(private_key);
 }
 
 fn temporary_session_asset_id_for_profile(profile: &ConnectionProfile) -> String {
@@ -2022,6 +2129,19 @@ fn persist_keychain_ssh_key_secret(
     };
     let credential_ref = format!("keychain/key/{key_id}");
     persist_keychain_key_secret_bundle(credential_store, credential_ref.as_str(), &bundle)
+}
+
+fn persist_keychain_identity_secret(
+    credential_store: &dyn CredentialStore,
+    identity_id: &str,
+    draft: &KeychainIdentityDraft,
+) -> Result<()> {
+    let credential_ref = keychain_identity_credential_ref(identity_id);
+    let bundle = StoredKeychainIdentitySecretBundle {
+        password: (draft.auth_kind.trim() == "password" && !draft.password.trim().is_empty())
+            .then(|| draft.password.clone()),
+    };
+    persist_keychain_identity_secret_bundle(credential_store, credential_ref.as_str(), &bundle)
 }
 
 fn merge_session_handle_into_tabs(state: &mut ShellViewModel, handle: &SessionHandle) {
@@ -6174,6 +6294,20 @@ fn load_asset_catalog(repo: &dyn AssetCatalogRepository) -> PersistedAssetCatalo
     }
 }
 
+fn load_keychain_catalog(repo: &dyn KeychainCatalogRepository) -> KeychainCatalog {
+    match repo.load() {
+        Ok(catalog) => catalog,
+        Err(err) => {
+            tracing::error!(
+                target: "config.keychain_catalog",
+                error = %err,
+                "failed to load keychain catalog"
+            );
+            KeychainCatalog::default()
+        }
+    }
+}
+
 fn combined_asset_tree(state: &ShellViewModel) -> AssetTree {
     catalog_to_asset_tree(&asset_trees_to_catalog(
         state.console_asset_tree(),
@@ -6184,6 +6318,13 @@ fn combined_asset_tree(state: &ShellViewModel) -> AssetTree {
 fn save_asset_catalog(repo: &dyn AssetCatalogRepository, state: &ShellViewModel) -> Result<()> {
     let catalog = asset_trees_to_catalog(state.console_asset_tree(), state.snippet_asset_tree());
     repo.save(&catalog)
+}
+
+fn save_keychain_catalog(
+    repo: &dyn KeychainCatalogRepository,
+    state: &ShellViewModel,
+) -> Result<()> {
+    repo.save(state.keychain_catalog())
 }
 
 fn save_asset_catalog_if_available(
@@ -6197,6 +6338,21 @@ fn save_asset_catalog_if_available(
             target: "config.assets_catalog",
             error = %err,
             "failed to save asset catalog"
+        );
+    }
+}
+
+fn save_keychain_catalog_if_available(
+    repo: &Option<Rc<dyn KeychainCatalogRepository>>,
+    state: &ShellViewModel,
+) {
+    if let Some(repo) = repo
+        && let Err(err) = save_keychain_catalog(repo.as_ref(), state)
+    {
+        tracing::error!(
+            target: "config.keychain_catalog",
+            error = %err,
+            "failed to save keychain catalog"
         );
     }
 }
@@ -6243,6 +6399,11 @@ fn app_root_paths_for_app() -> Result<AppRootPaths> {
 fn asset_catalog_repository_for_app() -> Result<Rc<dyn AssetCatalogRepository>> {
     let app_paths = app_root_paths_for_app()?;
     Ok(Rc::new(RedbAssetCatalogStore::new(app_paths.data_dir)))
+}
+
+fn keychain_catalog_repository_for_app() -> Result<Rc<dyn KeychainCatalogRepository>> {
+    let app_paths = app_root_paths_for_app()?;
+    Ok(Rc::new(RedbKeychainCatalogStore::new(app_paths.data_dir)))
 }
 
 fn quick_launch_preferences_store_for_app() -> Result<QuickLaunchPreferencesStore> {
@@ -6306,6 +6467,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
         AppRuntimeProfile::mainline(),
         effects,
         asset_repo,
+        None,
         session_bridge,
         session_runtime_guard,
         credential_store,
@@ -6330,6 +6492,47 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_an
         launcher,
         credential_store,
         Arc::new(LivePrivateKeyImporter),
+    );
+}
+
+pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_keychain_repo_and_launcher_and_credential_store(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    effects: Rc<dyn PlatformWindowEffects>,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
+    keychain_repo: Option<Rc<dyn KeychainCatalogRepository>>,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+    credential_store: Arc<dyn CredentialStore>,
+) {
+    let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
+        Ok(runtime) => {
+            let session_bridge = Rc::new(ShellSessionBridge {
+                manager: SessionManager::new_with_launcher(runtime.handle(), launcher),
+            });
+            (Some(runtime), Some(session_bridge))
+        }
+        Err(err) => {
+            tracing::error!(
+                target: "app.ssh",
+                error = %err,
+                "failed to create app async runtime for injected shell services"
+            );
+            (None, None)
+        }
+    };
+
+    bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
+        window,
+        store,
+        AppRuntimeProfile::mainline(),
+        effects,
+        asset_repo,
+        keychain_repo,
+        session_bridge,
+        session_runtime_guard,
+        credential_store,
+        Arc::new(LivePrivateKeyImporter),
+        VaultRuntimeOptions::default(),
     );
 }
 
@@ -6388,6 +6591,7 @@ pub fn bind_top_status_bar_with_injected_services_and_vault_runtime(
         AppRuntimeProfile::mainline(),
         effects,
         asset_repo,
+        None,
         session_bridge,
         session_runtime_guard,
         credential_store,
@@ -6414,6 +6618,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
                 _profile,
                 effects,
                 asset_repo,
+                None,
                 Some(session_bridge),
                 Some(runtime),
                 credential_store,
@@ -6435,6 +6640,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
                 asset_repo,
                 None,
                 None,
+                None,
                 shared_app_credential_store(),
                 Arc::new(LivePrivateKeyImporter),
                 VaultRuntimeOptions::default(),
@@ -6450,6 +6656,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     profile: AppRuntimeProfile,
     effects: Rc<dyn PlatformWindowEffects>,
     asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
+    keychain_repo_override: Option<Rc<dyn KeychainCatalogRepository>>,
     session_bridge: Option<Rc<ShellSessionBridge>>,
     session_runtime_guard: Option<AppAsyncRuntime>,
     credential_store: Arc<dyn CredentialStore>,
@@ -6468,6 +6675,23 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             None
         }
     };
+    let keychain_repo = if let Some(repo) = keychain_repo_override {
+        Some(repo)
+    } else if asset_repo.is_some() || std::env::var_os("MICA_TERM_APP_DIR").is_some() {
+        match keychain_catalog_repository_for_app() {
+            Ok(repo) => Some(repo),
+            Err(err) => {
+                tracing::error!(
+                    target: "config.keychain_catalog",
+                    error = %err,
+                    "failed to resolve keychain catalog repository"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
     let prefs = load_ui_preferences(&store);
     let mut initial_view_model = ShellViewModel::default();
     if let Some(repo) = asset_repo.as_ref() {
@@ -6475,6 +6699,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             catalog_to_asset_trees(&load_asset_catalog(repo.as_ref()));
         initial_view_model.replace_console_asset_tree(console_tree);
         initial_view_model.replace_snippet_asset_tree(snippet_tree);
+    }
+    if let Some(repo) = keychain_repo.as_ref() {
+        initial_view_model.replace_keychain_catalog(load_keychain_catalog(repo.as_ref()));
     }
     let quick_launch_preferences = {
         let loaded = load_quick_launch_preferences(&quick_launch_store);
@@ -8178,16 +8405,37 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    let keychain_repo_ref = keychain_repo.clone();
+    let vault_session_ref = Rc::clone(&vault_session);
+    let vault_sync_scheduler_ref = Rc::clone(&vault_sync_scheduler);
+    let vault_auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
+    let run_vault_sync_ref = Rc::clone(&run_vault_sync);
     window.on_assets_create_action_selected(move |action_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let was_modal_open = state.asset_modal_state.is_some();
+        let direct_keychain_create_requested = state.active_sidebar_destination == SidebarDestination::Keychain
+            && action_id.as_str() == "new-folder";
+        let keychain_node_count_before = state.keychain_catalog().nodes.len();
         state.dismiss_empty_asset_search_on_shell_interaction();
         if state.active_sidebar_destination == SidebarDestination::Snippets {
             state.handle_snippet_create_action(action_id.as_str());
             open_pending_snippet_create_modal(&mut state);
         } else {
             state.handle_assets_create_action(action_id.as_str());
+        }
+        let did_direct_keychain_create = direct_keychain_create_requested
+            && state.keychain_catalog().nodes.len() > keychain_node_count_before;
+        if did_direct_keychain_create {
+            save_keychain_catalog_if_available(&keychain_repo_ref, &state);
+            let mut vault = vault_session_ref.borrow_mut();
+            mark_local_vault_dirty_and_arm_sync(
+                &mut state,
+                &mut vault,
+                &vault_sync_scheduler_ref,
+                &vault_auto_sync_timer_ref,
+                Rc::clone(&run_vault_sync_ref),
+            );
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
@@ -8216,6 +8464,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let asset_repo_ref = asset_repo.clone();
+    let keychain_repo_ref = keychain_repo.clone();
     let credential_store_ref = Arc::clone(&credential_store);
     let vault_session_ref = Rc::clone(&vault_session);
     let vault_sync_scheduler_ref = Rc::clone(&vault_sync_scheduler);
@@ -8224,12 +8473,32 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_confirm_asset_modal_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let pending_identity_draft = match state.asset_modal_state.as_ref() {
+            Some(AssetModalState::NewKeychainIdentity { draft, .. }) => Some(draft.clone()),
+            _ => None,
+        };
         let pending_keychain_draft = match state.asset_modal_state.as_ref() {
             Some(AssetModalState::NewKeychainSshKey { draft, .. }) => Some(draft.clone()),
             _ => None,
         };
+        let should_save_keychain_catalog = pending_identity_draft.is_some() || pending_keychain_draft.is_some();
         let did_mutate = state.confirm_asset_modal();
         if did_mutate {
+            if let Some(draft) = pending_identity_draft.as_ref()
+                && let Some(identity_id) = state.focused_keychain_id.clone()
+                && let Err(err) = persist_keychain_identity_secret(
+                    credential_store_ref.as_ref(),
+                    identity_id.as_str(),
+                    draft,
+                )
+            {
+                tracing::error!(
+                    target: "app.keychain",
+                    identity_id,
+                    error = %err,
+                    "failed to persist keychain identity secret bundle"
+                );
+            }
             if let Some(draft) = pending_keychain_draft.as_ref()
                 && let Some(key_id) = state.focused_keychain_id.clone()
                 && let Err(err) = persist_keychain_ssh_key_secret(
@@ -8246,6 +8515,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 );
             }
             save_asset_catalog_if_available(&asset_repo_ref, &state);
+            if should_save_keychain_catalog {
+                save_keychain_catalog_if_available(&keychain_repo_ref, &state);
+            }
             let mut vault = vault_session_ref.borrow_mut();
             mark_local_vault_dirty_and_arm_sync(
                 &mut state,
@@ -8273,6 +8545,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let asset_repo_ref = asset_repo.clone();
+    let keychain_repo_ref = keychain_repo.clone();
     let vault_session_ref = Rc::clone(&vault_session);
     let vault_sync_scheduler_ref = Rc::clone(&vault_sync_scheduler);
     let vault_auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
@@ -8280,9 +8553,18 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_confirm_asset_rename_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let should_save_keychain_catalog = match state.asset_modal_state.as_ref() {
+            Some(AssetModalState::RenameAsset { asset_id, .. }) => {
+                state.keychain_catalog().nodes.contains_key(asset_id)
+            }
+            _ => false,
+        };
         let did_mutate = state.confirm_asset_modal();
         if did_mutate {
             save_asset_catalog_if_available(&asset_repo_ref, &state);
+            if should_save_keychain_catalog {
+                save_keychain_catalog_if_available(&keychain_repo_ref, &state);
+            }
             let mut vault = vault_session_ref.borrow_mut();
             mark_local_vault_dirty_and_arm_sync(
                 &mut state,
@@ -8294,12 +8576,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
+        sync_keychain_assets(&window, &state);
         sync_asset_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let asset_repo_ref = asset_repo.clone();
+    let keychain_repo_ref = keychain_repo.clone();
+    let credential_store_ref = Arc::clone(&credential_store);
     let vault_session_ref = Rc::clone(&vault_session);
     let vault_sync_scheduler_ref = Rc::clone(&vault_sync_scheduler);
     let vault_auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
@@ -8307,9 +8592,35 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_confirm_delete_asset_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let pending_deleted_keychain_node = match state.asset_modal_state.as_ref() {
+            Some(AssetModalState::DeleteAssetConfirm { asset_id, .. }) => {
+                state.keychain_catalog().nodes.get(asset_id).cloned()
+            }
+            _ => None,
+        };
         let did_mutate = state.confirm_delete_asset();
         if did_mutate {
             save_asset_catalog_if_available(&asset_repo_ref, &state);
+            if pending_deleted_keychain_node.is_some() {
+                save_keychain_catalog_if_available(&keychain_repo_ref, &state);
+            }
+            if let Some(node) = pending_deleted_keychain_node {
+                let credential_ref = match node.payload {
+                    KeychainNodePayload::Identity(spec) => spec.credential_ref,
+                    KeychainNodePayload::SshKey(spec) => spec.credential_ref,
+                    KeychainNodePayload::Folder => None,
+                };
+                if let Some(credential_ref) = credential_ref
+                    && let Err(err) = credential_store_ref.delete_secret(credential_ref.as_str())
+                {
+                    tracing::error!(
+                        target: "app.keychain",
+                        credential_ref,
+                        error = %err,
+                        "failed to delete keychain secret bundle"
+                    );
+                }
+            }
             let mut vault = vault_session_ref.borrow_mut();
             mark_local_vault_dirty_and_arm_sync(
                 &mut state,
@@ -8321,6 +8632,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
+        sync_keychain_assets(&window, &state);
         sync_asset_modal_state(&window, &state);
     });
 
@@ -8357,6 +8669,26 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.update_ssh_modal_field(field.as_str(), value.to_string());
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_keychain_identity_modal_draft_changed(move |field, value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.update_keychain_identity_modal_field(field.as_str(), value.to_string());
+        sync_asset_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    window.on_keychain_identity_modal_action_requested(move |action| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if action.as_str() == "use-existing-ssh-key" {
+            state.select_first_keychain_identity_modal_ssh_key();
+        }
         sync_asset_modal_state(&window, &state);
     });
 
@@ -9376,6 +9708,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
+        sync_keychain_assets(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
     });
@@ -9398,11 +9731,22 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let credential_store_ref = Arc::clone(&credential_store);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let keychain_repo_ref = keychain_repo.clone();
+    let vault_session_ref = Rc::clone(&vault_session);
+    let vault_sync_scheduler_ref = Rc::clone(&vault_sync_scheduler);
+    let vault_auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
+    let run_vault_sync_ref = Rc::clone(&run_vault_sync);
     window.on_assets_context_menu_action_invoked(move |action_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let was_modal_open = state.asset_modal_state.is_some();
+        let direct_keychain_create_requested = action_id.as_str() == "new-folder"
+            && matches!(
+                state.context_menu_target_kind,
+                Some(ContextTargetKind::KeychainBlankArea | ContextTargetKind::KeychainFolder)
+            );
+        let keychain_node_count_before = state.keychain_catalog().nodes.len();
 
         if let Some((path, action)) = context_menu_action_entry_for(&state, action_id.as_str()) {
             if !action.children.is_empty() {
@@ -9427,6 +9771,19 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 state.handle_context_menu_leaf_action(action_id.as_str());
             }
         }
+        let did_direct_keychain_create = direct_keychain_create_requested
+            && state.keychain_catalog().nodes.len() > keychain_node_count_before;
+        if did_direct_keychain_create {
+            save_keychain_catalog_if_available(&keychain_repo_ref, &state);
+            let mut vault = vault_session_ref.borrow_mut();
+            mark_local_vault_dirty_and_arm_sync(
+                &mut state,
+                &mut vault,
+                &vault_sync_scheduler_ref,
+                &vault_auto_sync_timer_ref,
+                Rc::clone(&run_vault_sync_ref),
+            );
+        }
 
         apply_pending_snippet_activation(
             &window,
@@ -9435,8 +9792,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut workspace_follow_tracker_ref.borrow_mut(),
         );
         hydrate_edit_ssh_modal_secret_from_store(&mut state, credential_store_ref.as_ref());
+        hydrate_edit_keychain_identity_secret_from_store(&mut state, credential_store_ref.as_ref());
+        hydrate_edit_keychain_ssh_key_secret_from_store(&mut state, credential_store_ref.as_ref());
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
+        sync_keychain_assets(&window, &state);
         sync_workspace_tabs_with_manager(
             &window,
             &state,
@@ -9468,6 +9828,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
+        sync_keychain_assets(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
     });
@@ -9627,6 +9988,7 @@ fn bind_top_status_bar_with_profile_and_async_handle(
                 profile,
                 effects,
                 asset_repo,
+                None,
                 Some(session_bridge),
                 None,
                 credential_store,

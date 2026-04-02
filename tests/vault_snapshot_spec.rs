@@ -401,6 +401,166 @@ fn apply_vault_snapshot_recreates_asset_catalog_secret_store_known_hosts_and_def
 }
 
 #[test]
+fn apply_vault_snapshot_canonicalizes_remapped_keychain_secret_refs_and_preserves_links() {
+    let store = MemoryCredentialStore::default();
+    let known_hosts_path = temp_known_hosts_path("keychain-remap");
+    let identity_id = "identity-ops-remote-merge-1";
+    let key_id = "key-prod-remote-merge-1";
+    let canonical_identity_ref = format!("keychain/identity/{identity_id}");
+    let canonical_key_ref = format!("keychain/key/{key_id}");
+
+    let snapshot = VaultSnapshot {
+        schema_version: 1,
+        asset_catalog: VaultAssetCatalog {
+            root_ids: vec!["asset-remote".into()],
+            nodes: BTreeMap::from([(
+                "asset-remote".into(),
+                VaultAssetNode {
+                    id: "asset-remote".into(),
+                    parent_id: None,
+                    title: "Remote Gateway".into(),
+                    kind: VaultAssetKind::SshConnection,
+                    child_ids: Vec::new(),
+                    payload: VaultAssetPayload::SshConnection(Box::new(
+                        mica_term::app::vault::model::VaultSshConnectionSpec {
+                            host: "remote.example.com".into(),
+                            user: "remote-ops".into(),
+                            port: "22".into(),
+                            auth_method: "private-key".into(),
+                            auth_source: "keychain-identity".into(),
+                            keychain_identity_id: Some(identity_id.into()),
+                            private_key_source: String::new(),
+                            private_key_path: String::new(),
+                            environment: "prod".into(),
+                            proxy: mica_term::app::vault::model::VaultSshProxySpec::None,
+                            remark: "restored from attach merge".into(),
+                            credential_ref: None,
+                        },
+                    )),
+                },
+            )]),
+            merge_metadata: BTreeMap::new(),
+        },
+        ssh_secret_bundles: BTreeMap::new(),
+        keychain_catalog: KeychainCatalog {
+            root_ids: vec![identity_id.into(), key_id.into()],
+            nodes: BTreeMap::from([
+                (
+                    identity_id.into(),
+                    KeychainNode {
+                        id: identity_id.into(),
+                        parent_id: None,
+                        title: "Remote Ops".into(),
+                        kind: KeychainNodeKind::Identity,
+                        child_ids: Vec::new(),
+                        payload: KeychainNodePayload::Identity(KeychainIdentitySpec {
+                            username: "remote-ops".into(),
+                            auth_kind: KeychainIdentityAuthKind::SshKey,
+                            ssh_key_id: Some(key_id.into()),
+                            credential_ref: Some("keychain/identity/identity-ops".into()),
+                            remark: "needs canonical ref after remap".into(),
+                        }),
+                    },
+                ),
+                (
+                    key_id.into(),
+                    KeychainNode {
+                        id: key_id.into(),
+                        parent_id: None,
+                        title: "Remote Key".into(),
+                        kind: KeychainNodeKind::SshKey,
+                        child_ids: Vec::new(),
+                        payload: KeychainNodePayload::SshKey(KeychainSshKeySpec {
+                            algorithm: "ed25519".into(),
+                            fingerprint: "SHA256:remote-key".into(),
+                            public_key: "ssh-ed25519 AAAAREMOTE remote@example".into(),
+                            comment: "remote@example".into(),
+                            credential_ref: Some("keychain/key/key-prod".into()),
+                            remark: "needs canonical ref after remap".into(),
+                        }),
+                    },
+                ),
+            ]),
+            merge_metadata: BTreeMap::new(),
+        },
+        keychain_identity_secret_bundles: BTreeMap::from([(
+            identity_id.into(),
+            StoredSshSecretBundle {
+                password: Some("remote-password".into()),
+                ..StoredSshSecretBundle::default()
+            },
+        )]),
+        keychain_key_secret_bundles: BTreeMap::from([(
+            key_id.into(),
+            StoredSshSecretBundle {
+                private_key_content: Some("-----BEGIN OPENSSH PRIVATE KEY-----".into()),
+                passphrase: Some("remote-passphrase".into()),
+                ..StoredSshSecretBundle::default()
+            },
+        )]),
+        known_hosts: Vec::new(),
+        sync_preferences: SnapshotSyncPreferences::default(),
+        ui_preferences: SnapshotUiPreferences::default(),
+    };
+
+    let applied = apply_vault_snapshot(&snapshot, &store, &known_hosts_path).expect("apply");
+    let restored_host = applied
+        .asset_tree
+        .ssh_connection_spec("asset-remote")
+        .expect("restored host");
+
+    assert_eq!(restored_host.keychain_identity_id.as_deref(), Some(identity_id));
+
+    let identity = applied
+        .keychain_catalog
+        .nodes
+        .get(identity_id)
+        .expect("restored identity node");
+    match &identity.payload {
+        KeychainNodePayload::Identity(spec) => {
+            assert_eq!(spec.ssh_key_id.as_deref(), Some(key_id));
+            assert_eq!(spec.credential_ref.as_deref(), Some(canonical_identity_ref.as_str()));
+        }
+        other => panic!("unexpected identity payload: {other:?}"),
+    }
+
+    let key = applied
+        .keychain_catalog
+        .nodes
+        .get(key_id)
+        .expect("restored key node");
+    match &key.payload {
+        KeychainNodePayload::SshKey(spec) => {
+            assert_eq!(spec.credential_ref.as_deref(), Some(canonical_key_ref.as_str()));
+        }
+        other => panic!("unexpected key payload: {other:?}"),
+    }
+
+    assert!(store
+        .get_secret(canonical_identity_ref.as_str())
+        .expect("load canonical identity ref")
+        .is_some());
+    assert!(store
+        .get_secret(canonical_key_ref.as_str())
+        .expect("load canonical key ref")
+        .is_some());
+    assert_eq!(
+        store
+            .get_secret("keychain/identity/identity-ops")
+            .expect("load stale identity ref"),
+        None
+    );
+    assert_eq!(
+        store
+            .get_secret("keychain/key/key-prod")
+            .expect("load stale key ref"),
+        None
+    );
+
+    let _ = fs::remove_file(known_hosts_path);
+}
+
+#[test]
 fn vault_snapshot_catalog_preserves_snippets_alongside_console_assets() {
     let store = MemoryCredentialStore::default();
     let known_hosts_path = temp_known_hosts_path("snippets");
