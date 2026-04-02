@@ -83,6 +83,7 @@ fn overlay_damage_rect(
     next: &RetainedNativeTerminalSurfaceFrame,
 ) -> Option<NativeTerminalSurfaceRect> {
     let mut damage = None;
+    extend_changed_selection_damage_rect(&mut damage, previous, next);
     extend_overlay_damage_rect(&mut damage, previous);
     extend_overlay_damage_rect(&mut damage, next);
     damage
@@ -94,22 +95,6 @@ fn extend_overlay_damage_rect(
 ) {
     let presentable = &frame.frame.presentable_frame;
     union_rect(damage, cursor_overlay_rect(frame.rect, presentable.cursor_overlay));
-
-    if presentable.selection_overlay.active {
-        for rect in &presentable.selection_overlay.rects {
-            union_rect(
-                damage,
-                cell_span_rect(
-                    frame.rect,
-                    rect.row,
-                    rect.start_col,
-                    rect.end_col,
-                    frame.frame.cell_width_px,
-                    frame.frame.cell_height_px,
-                ),
-            );
-        }
-    }
 
     if presentable.underline_overlay.visible {
         for run in &presentable.underline_overlay.runs {
@@ -158,6 +143,88 @@ fn cursor_overlay_rect(
         cursor.cell_width_px,
         cursor.cell_height_px,
     )
+}
+
+fn extend_changed_selection_damage_rect(
+    damage: &mut Option<NativeTerminalSurfaceRect>,
+    previous: &RetainedNativeTerminalSurfaceFrame,
+    next: &RetainedNativeTerminalSurfaceFrame,
+) {
+    extend_unique_selection_rects(
+        damage,
+        previous.rect,
+        previous.frame.presentable_frame.selection_overlay.rects.as_slice(),
+        next.frame.presentable_frame.selection_overlay.rects.as_slice(),
+        previous.frame.cell_width_px,
+        previous.frame.cell_height_px,
+    );
+    extend_unique_selection_rects(
+        damage,
+        next.rect,
+        next.frame.presentable_frame.selection_overlay.rects.as_slice(),
+        previous.frame.presentable_frame.selection_overlay.rects.as_slice(),
+        next.frame.cell_width_px,
+        next.frame.cell_height_px,
+    );
+}
+
+fn extend_unique_selection_rects(
+    damage: &mut Option<NativeTerminalSurfaceRect>,
+    surface_rect: NativeTerminalSurfaceRect,
+    source: &[crate::app::terminal_presenter::NativeSelectionRect],
+    other: &[crate::app::terminal_presenter::NativeSelectionRect],
+    cell_width_px: u32,
+    cell_height_px: u32,
+) {
+    for rect in source {
+        let mut pending_segments = vec![(rect.start_col, rect.end_col)];
+        for overlap in other.iter().filter(|candidate| {
+            candidate.row == rect.row && candidate.overlay_rgba == rect.overlay_rgba
+        }) {
+            pending_segments = pending_segments
+                .into_iter()
+                .flat_map(|segment| subtract_cell_span(segment, (overlap.start_col, overlap.end_col)))
+                .collect();
+            if pending_segments.is_empty() {
+                break;
+            }
+        }
+
+        for (start_col, end_col) in pending_segments {
+            union_rect(
+                damage,
+                cell_span_rect(
+                    surface_rect,
+                    rect.row,
+                    start_col,
+                    end_col,
+                    cell_width_px,
+                    cell_height_px,
+                ),
+            );
+        }
+    }
+}
+
+fn subtract_cell_span(
+    source: (u32, u32),
+    overlap: (u32, u32),
+) -> Vec<(u32, u32)> {
+    let (source_start, source_end) = source;
+    let (overlap_start, overlap_end) = overlap;
+
+    if overlap_end < source_start || overlap_start > source_end {
+        return vec![source];
+    }
+
+    let mut result = Vec::new();
+    if overlap_start > source_start {
+        result.push((source_start, overlap_start.saturating_sub(1)));
+    }
+    if overlap_end < source_end {
+        result.push((overlap_end.saturating_add(1), source_end));
+    }
+    result
 }
 
 fn cell_span_rect(
