@@ -5999,6 +5999,47 @@ fn workspace_new_tab_request_collapses_native_terminal_surface_rect_immediately(
 }
 
 #[test]
+fn workspace_tab_selection_restores_native_terminal_surface_rect_immediately() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    let session_id = app.get_active_workspace_session_id().to_string();
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "terminal mode should expose a concrete native surface rect before switching away from the active session"
+    );
+
+    app.invoke_workspace_new_tab_requested();
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+
+    app.invoke_workspace_tab_selected(session_id.clone().into());
+
+    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id);
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "reselecting the terminal tab should restore the native surface rect immediately so the retained surface can realign with the terminal host in the same callback turn"
+    );
+    assert!(
+        app.get_workspace_session_surface_seqno() > 0,
+        "reselecting the terminal tab should restore the staged terminal payload together with the host mode so the geometry rebind is not backed by an empty frame"
+    );
+}
+
+#[test]
 fn launcher_recent_connection_replaces_launcher_tab_with_real_session_tab() {
     i_slint_backend_testing::init_no_event_loop();
 
