@@ -4162,6 +4162,7 @@ fn sync_workspace_session_state_with_manager(
         let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
         let mut native_cursor = None;
         let mut next_render_mode = None;
+        let mut next_surface_seqno = None;
         WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
             let mut presenter = presenter.borrow_mut();
             presenter.set_raster_scale(window.window().scale_factor());
@@ -4180,6 +4181,8 @@ fn sync_workspace_session_state_with_manager(
                     window.set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);
                     clear_workspace_retained_native_terminal_surface(window);
                     window.set_workspace_session_surface_image(frame.image);
+                    next_surface_seqno =
+                        Some(i32::try_from(surface.seqno).unwrap_or(i32::MAX));
                     next_render_mode = Some(TerminalRenderMode::Bitmap);
                 }
                 Ok(PresentedTerminalFrame::Native(frame)) => {
@@ -4194,6 +4197,8 @@ fn sync_workspace_session_state_with_manager(
                         .set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);
                     sync_workspace_native_terminal_surface_geometry(window);
                     present_workspace_native_terminal_frame(window, frame);
+                    next_surface_seqno =
+                        Some(i32::try_from(surface.seqno).unwrap_or(i32::MAX));
                     next_render_mode = Some(TerminalRenderMode::Native);
                 }
                 Err(err) => {
@@ -4206,6 +4211,7 @@ fn sync_workspace_session_state_with_manager(
                     window.set_workspace_session_cell_width(default_cell_width_px as f32 / scale_factor);
                     window.set_workspace_session_cell_height(default_cell_height_px as f32 / scale_factor);
                     clear_workspace_native_terminal_frame(window);
+                    next_surface_seqno = Some(0);
                     next_render_mode = Some(TerminalRenderMode::Bitmap);
                 }
             }
@@ -4246,6 +4252,9 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_pending_output_lines(
             i32::try_from(follow_indicator.pending_output_lines).unwrap_or(i32::MAX),
         );
+        if let Some(next_surface_seqno) = next_surface_seqno {
+            window.set_workspace_session_surface_seqno(next_surface_seqno);
+        }
         if let Some(next_render_mode) = next_render_mode {
             window.set_workspace_session_render_mode(next_render_mode.as_str().into());
         }
@@ -4275,6 +4284,7 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_viewport_at_bottom(true);
         window.set_workspace_session_follow_paused(false);
         window.set_workspace_session_pending_output_lines(0);
+        window.set_workspace_session_surface_seqno(0);
         window.set_workspace_session_render_mode(TerminalRenderMode::Bitmap.as_str().into());
     }
 
@@ -4284,16 +4294,12 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_state(active_tab.state.clone().into());
         window.set_workspace_session_error_detail(active_tab.error_detail.clone().into());
         window.set_workspace_session_can_reconnect(active_tab.can_reconnect());
-        window.set_workspace_session_surface_seqno(
-            i32::try_from(state.workspace_terminal_surface_seqno()).unwrap_or(i32::MAX),
-        );
     } else {
         window.set_workspace_session_title("".into());
         window.set_workspace_session_subtitle("".into());
         window.set_workspace_session_state("".into());
         window.set_workspace_session_error_detail("".into());
         window.set_workspace_session_can_reconnect(false);
-        window.set_workspace_session_surface_seqno(0);
     }
 
     sync_workspace_connection_progress_state(window, state, manager);

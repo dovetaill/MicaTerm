@@ -461,11 +461,18 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         workspace_surface_projection_block.contains("let mut next_render_mode = None;"),
         "workspace surface sync should stage the next render mode locally so frame payloads and host overlay state can be projected before the host flips modes"
     );
+    assert!(
+        workspace_surface_projection_block.contains("let mut next_surface_seqno = None;"),
+        "workspace surface sync should stage the next surface seqno locally so host blink/reset state can be updated in lockstep with the frame payload"
+    );
     let bitmap_block = block_between(
         workspace_surface_sync_block,
         "Ok(PresentedTerminalFrame::Bitmap(frame)) => {",
         "Ok(PresentedTerminalFrame::Native(frame)) => {",
     );
+    let workspace_surface_seqno = workspace_surface_projection_block
+        .find("window.set_workspace_session_surface_seqno(")
+        .expect("workspace surface seqno");
     let workspace_render_mode = workspace_surface_projection_block
         .find("window.set_workspace_session_render_mode(")
         .expect("workspace render mode");
@@ -502,6 +509,10 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         bitmap_image < workspace_render_mode,
         "bitmap path should publish the new scene-owned image before switching render_mode so the terminal host does not briefly enter bitmap mode with stale or empty payload"
     );
+    assert!(
+        bitmap_image < workspace_surface_seqno && workspace_surface_seqno < workspace_render_mode,
+        "bitmap path should publish the new frame image before updating surface seqno, and both should settle before render_mode flips so cursor blink reset tracks the same payload"
+    );
 
     let native_block = block_between(
         workspace_surface_sync_block,
@@ -536,6 +547,10 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         native_present < workspace_render_mode,
         "native path should stage the retained native frame before switching render_mode so the UI does not briefly expose native mode without a ready surface payload"
     );
+    assert!(
+        native_present < workspace_surface_seqno && workspace_surface_seqno < workspace_render_mode,
+        "native path should publish the new retained frame before updating surface seqno, and both should settle before render_mode flips so host blink/reset state matches the presented payload"
+    );
 
     let error_start = workspace_surface_sync_block
         .find("Err(err) => {")
@@ -558,7 +573,6 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         default_fg < workspace_render_mode && pending_output < workspace_render_mode,
         "workspace surface sync should project terminal colors and follow/viewport state before flipping render_mode so the host does not briefly combine a new payload mode with stale overlay metadata"
     );
-
     let no_surface_block = block_between(
         &bootstrap_source,
         "\n    } else {\n        let preset = preset_for_theme_mode(state.theme_mode);",
@@ -573,9 +587,17 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     let no_surface_pending_output = no_surface_block
         .find("window.set_workspace_session_pending_output_lines(0);")
         .expect("no surface pending output reset");
+    let no_surface_surface_seqno = no_surface_block
+        .find("window.set_workspace_session_surface_seqno(0);")
+        .expect("no surface surface seqno reset");
     assert!(
         no_surface_clear < no_surface_render_mode && no_surface_pending_output < no_surface_render_mode,
         "when no terminal surface is active the host should clear retained payloads and reset viewport/follow metadata before forcing render_mode back to bitmap"
+    );
+    assert!(
+        no_surface_pending_output < no_surface_surface_seqno
+            && no_surface_surface_seqno < no_surface_render_mode,
+        "when no terminal surface is active the host should reset surface seqno after clearing payload metadata and before forcing render_mode back to bitmap"
     );
 }
 
