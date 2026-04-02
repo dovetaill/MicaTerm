@@ -2,7 +2,10 @@
 
 use std::fs;
 
-use mica_term::app::runtime_profile::{AppBuildFlavor, AppRuntimeProfile, RendererMode};
+use mica_term::app::runtime_profile::{
+    AppBuildFlavor, AppRuntimeProfile, NativePresentPath, RendererMode,
+    TerminalCompositionMode,
+};
 
 #[test]
 fn mainline_profile_describes_windows_skia_package() {
@@ -10,8 +13,10 @@ fn mainline_profile_describes_windows_skia_package() {
 
     assert_eq!(profile.build_flavor, AppBuildFlavor::WindowsMainline);
     assert_eq!(profile.renderer_mode, RendererMode::SkiaSoftware);
+    assert_eq!(profile.native_present_path(), NativePresentPath::RenderingNotifier);
     assert_eq!(profile.forced_backend(), Some("winit"));
     assert_eq!(profile.forced_renderer(), Some("skia-software"));
+    assert_eq!(profile.native_present_path_label(), "rendering-notifier");
 }
 
 #[test]
@@ -20,9 +25,11 @@ fn packaged_profile_defaults_to_development_software_without_build_env() {
 
     assert_eq!(profile.build_flavor, AppBuildFlavor::Development);
     assert_eq!(profile.renderer_mode, RendererMode::Software);
+    assert_eq!(profile.native_present_path(), NativePresentPath::EventLoop);
     assert_eq!(profile.forced_backend(), Some("winit"));
     assert_eq!(profile.forced_renderer(), Some("software"));
     assert_eq!(profile.terminal_render_mode_label(), "native");
+    assert_eq!(profile.native_present_path_label(), "event-loop");
 }
 
 #[test]
@@ -33,38 +40,54 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
     assert!(content.contains("option_env!(\"MICA_TERM_BUILD_FLAVOR\")"));
     assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_RENDERER\")"));
     assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_TERMINAL_RENDERER\")"));
+    assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH\")"));
     assert!(content.contains("WindowsSoftwareCompat"));
     assert!(content.contains("SkiaSoftware"));
     assert!(content.contains("Software"));
+    assert!(content.contains("pub enum NativePresentPath"));
+    assert!(content.contains("pub enum TerminalCompositionMode"));
+    assert!(content.contains("SceneImage"));
+    assert!(content.contains("PostRenderNativeSurface"));
+    assert!(content.contains("RenderingNotifier"));
+    assert!(content.contains("EventLoop"));
+    assert!(content.contains("pub fn native_present_path(self) -> NativePresentPath"));
     assert!(
-        !content.contains("TerminalRenderMode::Bitmap"),
-        "runtime profile should remove the bitmap terminal mode from the native-only contract"
+        content.contains("pub fn terminal_composition_mode(self) -> TerminalCompositionMode")
     );
-    assert!(
-        !content.contains("Some(\"bitmap\")"),
-        "packaged runtime profiles should stop routing packaged builds through bitmap terminal shipping semantics"
-    );
+    assert!(content.contains("pub fn native_present_path_label(self) -> &'static str"));
+    assert!(content.contains("TerminalRenderMode::Bitmap"));
+    assert!(content.contains("TerminalRenderMode::Native"));
+    assert!(content.contains("Some(\"bitmap\")"));
+    assert!(content.contains("Some(\"native\")"));
     assert!(content.contains("Self::mainline_native()"));
     assert!(content.contains("Self::software_compat()"));
     assert!(content.contains("Preferred native-only shipping profile"));
-    assert!(
-        content.contains(
-            "Transitional non-shipping software profile while native Linux terminal surfaces are still landing."
-        )
-    );
-    assert!(!content.contains("fallback-only compatibility profile"));
+    assert!(content.contains("native-first Windows software profile"));
 }
 
 #[test]
-fn software_compat_profile_switches_terminal_mode_to_native() {
+fn software_compat_profile_prefers_native_terminal_renderer() {
     let profile = AppRuntimeProfile::software_compat();
 
     assert_eq!(profile.build_flavor, AppBuildFlavor::WindowsSoftwareCompat);
     assert_eq!(profile.renderer_mode, RendererMode::Software);
+    assert_eq!(profile.native_present_path(), NativePresentPath::RenderingNotifier);
     assert_eq!(profile.terminal_render_mode_label(), "native");
-    assert!(
-        profile.prefers_native_terminal_renderer(),
-        "software wrapper profile should opt into the native terminal presenter path"
+    assert_eq!(profile.native_present_path_label(), "rendering-notifier");
+    assert_eq!(
+        profile.terminal_composition_mode(),
+        TerminalCompositionMode::SceneImage
+    );
+    assert!(profile.prefers_native_terminal_renderer());
+}
+
+#[test]
+fn mainline_profile_keeps_post_render_native_surface_contract() {
+    let profile = AppRuntimeProfile::mainline();
+
+    assert_eq!(
+        profile.terminal_composition_mode(),
+        TerminalCompositionMode::PostRenderNativeSurface
     );
 }
 

@@ -1,7 +1,9 @@
 // Cargo build script that compiles the Slint UI and embeds the Windows application icon.
 
 fn main() {
-    println!("cargo:rerun-if-changed=ui/fonts/SarasaTermSCNerd-Regular.ttf");
+    println!(
+        "cargo:rerun-if-changed=assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"
+    );
 
     std::thread::Builder::new()
         .name("mica-term-build".to_string())

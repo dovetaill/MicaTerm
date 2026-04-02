@@ -4,6 +4,7 @@ use anyhow::Result;
 
 use crate::AppWindow;
 use crate::app::terminal_presenter::NativeTerminalFrame;
+use crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NativeTerminalSurfaceRect {
@@ -24,5 +25,6 @@ pub trait PlatformNativeSurfaceBackend {
     fn update_surface_rect(&mut self, rect: NativeTerminalSurfaceRect);
     fn update_frame(&mut self, frame: Option<RetainedNativeTerminalSurfaceFrame>);
     fn present(&mut self);
+    fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics;
     fn detach(&mut self);
 }

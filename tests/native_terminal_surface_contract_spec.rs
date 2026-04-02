@@ -3,26 +3,93 @@
 use std::fs;
 use std::path::Path;
 
+fn block_between<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
+    let start_index = source.find(start).expect("start marker");
+    let rest = &source[start_index..];
+    let end_index = rest.find(end).expect("end marker");
+    &rest[..end_index]
+}
+
 #[test]
 fn terminal_session_host_source_exposes_native_render_contract() {
     let host_source =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        !host_source.contains("session-render-mode"),
-        "terminal session host should remove the bitmap render mode selector once the UI becomes native-only"
+        host_source.contains("in property <string> session-render-mode: \"bitmap\";"),
+        "terminal session host should keep a bitmap/native render-mode selector so the software wrapper can fall back to the Slint image path"
     );
     assert!(
-        !host_source.contains("session-surface-image"),
-        "terminal session host should remove the bitmap image property once the UI becomes native-only"
+        host_source.contains("in property <image> session-surface-image;"),
+        "terminal session host should keep the bitmap surface image contract for the software wrapper fallback"
+    );
+    assert!(
+        host_source.contains("in property <float> session-device-scale-factor: 1.0;"),
+        "terminal session host should accept the live device scale factor so bitmap-composited terminal content can snap its layout box onto physical pixels on fractional-DPI Windows displays"
     );
     assert!(
         host_source.contains("in property <int> session-native-frame-token: 0;"),
         "terminal session host should expose a native frame token for renderer hook invalidation"
     );
     assert!(
-        !host_source.contains("image-fit:"),
-        "terminal session host should no longer contain bitmap image-fit rules once the surface image path is removed"
+        host_source.contains("image-fit: fill;"),
+        "terminal session host should stretch the scene-owned bitmap exactly onto the terminal grid instead of preserving a contain layout that can introduce secondary scaling"
+    );
+    assert!(
+        host_source.contains("image-rendering: pixelated;"),
+        "terminal session host should request nearest-neighbor bitmap scaling for the scene-owned terminal image so software rendering does not blur glyph edges"
+    );
+    assert!(
+        host_source.contains("function terminal-visible-grid-width() -> length"),
+        "terminal session host should define a visible grid width helper so the displayed terminal box can clamp to the live content viewport during sidebar and window resizes"
+    );
+    assert!(
+        host_source.contains("function terminal-visible-grid-height() -> length"),
+        "terminal session host should define a visible grid height helper so the displayed terminal box can clamp to the live content viewport during window height changes"
+    );
+    assert!(
+        host_source.contains("function snap-length-to-device-pixel(value: length) -> length"),
+        "terminal session host should expose a device-pixel snapping helper so the scene-image terminal box can land on integer physical pixels under fractional DPI"
+    );
+    assert!(
+        host_source.contains("clip: true;"),
+        "terminal session host should clip the terminal surface frame so stale grid geometry cannot momentarily paint over sibling UI during scene-image resize races"
+    );
+    assert!(
+        host_source.contains("width: root.snapped-terminal-visible-grid-width();"),
+        "terminal session host should size the blank terminal surface against a device-pixel-snapped visible grid width instead of the stale session grid width"
+    );
+    assert!(
+        host_source.contains("height: root.snapped-terminal-visible-grid-height();"),
+        "terminal session host should size the blank terminal surface against a device-pixel-snapped visible grid height instead of the stale session grid height"
+    );
+    assert!(
+        host_source.contains("blank-surface := Rectangle {")
+            && host_source.contains("clip: true;"),
+        "terminal session host should make the blank surface itself a clipped viewport so oversized scene-image frames are cropped instead of being rescaled during layout races"
+    );
+    assert!(
+        host_source.contains("x: root.terminal-surface-origin-x();")
+            && host_source.contains("y: root.terminal-surface-origin-y();"),
+        "terminal session host should snap the scene-image terminal origin onto device pixels instead of anchoring the bitmap at unsnapped logical padding offsets"
+    );
+    assert!(
+        host_source.contains("width: root.snapped-terminal-visible-grid-width();")
+            && host_source.contains("height: root.snapped-terminal-visible-grid-height();"),
+        "terminal session host should snap the visible terminal viewport box onto device pixels so Slint does not have to map the bitmap through a half-pixel destination rect"
+    );
+    assert!(
+        host_source.contains("width: root.terminal-grid-width();"),
+        "scene-image bitmap content should keep the frame-owned grid width so sidebar resizes crop stale frames instead of horizontally squeezing glyphs"
+    );
+    assert!(
+        host_source.contains("height: root.terminal-grid-height();"),
+        "scene-image bitmap content should keep the frame-owned grid height so vertical viewport changes crop stale frames instead of vertically squeezing rows"
+    );
+    assert!(
+        host_source.contains("width: parent.width;")
+            && host_source.contains("height: parent.height;"),
+        "input capture inside the clipped viewport should track the visible terminal box, not the stale full-grid extent"
     );
 }
 
@@ -33,20 +100,34 @@ fn workspace_and_window_sources_thread_native_render_contract() {
     let app_window_source = fs::read_to_string("ui/app-window.slint").expect("read app window");
 
     assert!(
-        !workspace_source.contains("workspace-session-render-mode"),
-        "workspace pane should stop carrying a bitmap/native render-mode switch once only the native surface contract remains"
+        workspace_source.contains("in property <string> workspace-session-render-mode: \"bitmap\";"),
+        "workspace pane should keep carrying a bitmap/native render-mode switch so the software wrapper can select the Slint image fallback"
     );
     assert!(
-        !workspace_source.contains("workspace-session-surface-image"),
-        "workspace pane should remove the bitmap surface image binding once only native frames remain"
+        workspace_source.contains("in property <image> workspace-session-surface-image;"),
+        "workspace pane should keep the bitmap surface image binding for the software wrapper fallback"
+    );
+    assert!(
+        workspace_source.contains("in property <float> workspace-session-device-scale-factor: 1.0;"),
+        "workspace pane should carry the workspace terminal device scale factor so the session host can snap scene-image layout onto physical pixels"
     );
     assert!(
         workspace_source.contains("in property <int> workspace-session-native-frame-token: 0;"),
         "workspace pane should accept the workspace session native frame token contract"
     );
     assert!(
-        !workspace_source.contains("session-render-mode:"),
-        "workspace pane should stop forwarding a render mode selector to the terminal session host"
+        workspace_source.contains("session-render-mode: root.workspace-session-render-mode;"),
+        "workspace pane should forward the render mode selector to the terminal session host"
+    );
+    assert!(
+        workspace_source
+            .contains("session-surface-image: root.workspace-session-surface-image;"),
+        "workspace pane should forward the bitmap surface image to the terminal session host"
+    );
+    assert!(
+        workspace_source
+            .contains("session-device-scale-factor: root.workspace-session-device-scale-factor;"),
+        "workspace pane should forward the live device scale factor to the terminal session host so the bitmap layout box can be snapped at the final scene edge"
     );
     assert!(
         workspace_source
@@ -54,12 +135,18 @@ fn workspace_and_window_sources_thread_native_render_contract() {
         "workspace pane should forward the native frame token to the terminal session host"
     );
     assert!(
-        !app_window_source.contains("workspace-session-render-mode"),
-        "app window should stop storing a workspace terminal render mode once bitmap/native switching is removed"
+        app_window_source
+            .contains("in-out property <string> workspace-session-render-mode: \"bitmap\";"),
+        "app window should store the workspace terminal render mode so the software wrapper can select the bitmap fallback"
     );
     assert!(
-        !app_window_source.contains("workspace-session-surface-image"),
-        "app window should remove the bitmap surface image property once the host becomes native-only"
+        app_window_source.contains("in-out property <image> workspace-session-surface-image;"),
+        "app window should keep the bitmap surface image property for the software wrapper fallback"
+    );
+    assert!(
+        app_window_source
+            .contains("in-out property <float> workspace-session-device-scale-factor: 1.0;"),
+        "app window should store the workspace terminal device scale factor so bootstrap can project fractional-DPI information into the Slint scene host"
     );
     assert!(
         app_window_source
@@ -82,8 +169,8 @@ fn runtime_profile_source_exposes_terminal_render_mode_contract() {
         "runtime profile should carry the selected terminal render mode"
     );
     assert!(
-        !runtime_profile_source.contains("TerminalRenderMode::Bitmap"),
-        "runtime profile should remove the bitmap terminal render mode from the native-only contract"
+        runtime_profile_source.contains("TerminalRenderMode::Bitmap"),
+        "runtime profile should keep the bitmap terminal render mode available as an internal fallback"
     );
     assert!(
         runtime_profile_source.contains("TerminalRenderMode::Native"),
@@ -94,13 +181,8 @@ fn runtime_profile_source_exposes_terminal_render_mode_contract() {
         "runtime profile docs should mark the Windows mainline profile as the preferred native-only shipping path"
     );
     assert!(
-        runtime_profile_source
-            .contains("Transitional non-shipping software profile while native Linux terminal surfaces are still landing."),
-        "runtime profile docs should describe the software profile as transitional instead of a bitmap fallback shipping path"
-    );
-    assert!(
-        !runtime_profile_source.contains("fallback-only compatibility profile"),
-        "runtime profile docs should stop documenting the software package as a fallback-only compatibility shipping path"
+        runtime_profile_source.contains("native-first Windows software profile"),
+        "runtime profile docs should describe the software profile as a native-first shipping path"
     );
     assert!(
         runtime_profile_source.contains("pub fn mainline_native() -> Self"),
@@ -114,8 +196,16 @@ fn runtime_profile_source_exposes_terminal_render_mode_contract() {
 
 #[test]
 fn native_surface_source_exposes_present_bridge_contract() {
+    assert!(
+        Path::new("src/app/terminal_renderer/present_driver.rs").exists(),
+        "terminal renderer should add a dedicated present-driver module instead of depending on a single rendering notifier hook"
+    );
+
     let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
         .expect("read native surface");
+    let present_driver_source =
+        fs::read_to_string("src/app/terminal_renderer/present_driver.rs")
+            .expect("read present driver");
     let renderer_mod_source =
         fs::read_to_string("src/app/terminal_renderer/mod.rs").expect("read terminal renderer mod");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
@@ -140,16 +230,64 @@ fn native_surface_source_exposes_present_bridge_contract() {
         "native surface bridge should expose an explicit draw hook for retained native frames"
     );
     assert!(
-        native_surface_source.contains("RenderingState::AfterRendering"),
-        "rendering notifier should reach the retained-frame draw hook after Slint paints the host surface so native terminal pixels are not overdrawn"
+        present_driver_source.contains("pub trait NativeSurfacePresentDriver"),
+        "present driver module should define a scheduling seam for native surface present work"
     );
     assert!(
-        !native_surface_source.contains("RenderingState::BeforeRendering => draw_retained_frame"),
-        "native surface bridge should stop presenting retained frames before Slint paints because the terminal region background would overdraw native text"
+        present_driver_source.contains("pub struct RenderingNotifierPresentDriver"),
+        "present driver module should keep the rendering notifier path as one possible present driver"
+    );
+    assert!(
+        present_driver_source.contains("pub struct EventLoopPresentDriver"),
+        "present driver module should add an event-loop present driver for runtimes where the notifier hook is unavailable"
+    );
+    assert!(
+        present_driver_source.contains("pub fn install_rendering_notifier"),
+        "present driver module should centralize rendering notifier registration instead of hard-coding it inside the native surface"
+    );
+    assert!(
+        present_driver_source.contains("RenderingState::AfterRendering"),
+        "rendering notifier present driver should reach the retained-frame draw hook after Slint paints the host surface so native terminal pixels are not overdrawn"
+    );
+    assert!(
+        !present_driver_source.contains("RenderingState::BeforeRendering => on_after_rendering()"),
+        "present driver registration should stop presenting retained frames before Slint paints because the terminal region background would overdraw native text"
     );
     assert!(
         renderer_mod_source.contains("RetainedNativeTerminalSurfaceFrame"),
         "terminal renderer module should re-export the retained native surface frame contract"
+    );
+    assert!(
+        renderer_mod_source.contains("pub mod present_driver;"),
+        "terminal renderer module should expose the present-driver module"
+    );
+    assert!(
+        renderer_mod_source.contains("NativeSurfacePresentDriver"),
+        "terminal renderer module should re-export the present-driver contract for bootstrap/runtime wiring"
+    );
+    assert!(
+        native_surface_source.contains("present_driver: Box<dyn NativeSurfacePresentDriver>"),
+        "native surface bridge should own a present-driver abstraction instead of hard-coding notifier registration in place"
+    );
+    assert!(
+        native_surface_source.contains("dirty: bool"),
+        "native surface bridge should track dirty state independently of notifier registration success"
+    );
+    assert!(
+        native_surface_source.contains("EventLoopPresentDriver::new(window)"),
+        "native surface bridge should install an event-loop present fallback before attempting notifier-specific registration"
+    );
+    assert!(
+        native_surface_source.contains("RenderingNotifierPresentDriver::new(window)"),
+        "native surface bridge should be able to switch to a rendering-notifier driver when the hook is available"
+    );
+    assert!(
+        native_surface_source.contains("state.dirty = true;"),
+        "native surface bridge should mark itself dirty when retained frame or geometry state changes"
+    );
+    assert!(
+        native_surface_source.contains("state.present_driver.schedule_present("),
+        "native surface bridge should schedule present work through the driver seam instead of calling request_redraw as the only path"
     );
     assert!(
         bootstrap_source.contains("let rect = workspace_native_terminal_rect(window);"),
@@ -160,8 +298,8 @@ fn native_surface_source_exposes_present_bridge_contract() {
         "bootstrap should keep updating the native surface geometry when presenting native frames"
     );
     assert!(
-        bootstrap_source.contains("surface.update_frame_state(frame);"),
-        "bootstrap should update the native surface bridge with retained frame state, not just a token"
+        bootstrap_source.contains("surface.present(frame);"),
+        "bootstrap should route retained native frame updates through the present-driver aware surface entrypoint"
     );
     assert!(
         bootstrap_source.contains("presentable_frame.selection_overlay"),
@@ -170,6 +308,195 @@ fn native_surface_source_exposes_present_bridge_contract() {
     assert!(
         bootstrap_source.contains("presentable_frame.ime_preview_overlay"),
         "native surface host should keep IME preview overlay payloads attached to the retained native frame state"
+    );
+}
+
+#[test]
+fn software_winit_sources_expose_after_draw_present_contract() {
+    let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
+        .expect("read native surface");
+    let present_driver_source =
+        fs::read_to_string("src/app/terminal_renderer/present_driver.rs")
+            .expect("read present driver");
+    let winit_backend_source =
+        fs::read_to_string("vendor/i-slint-backend-winit/lib.rs").expect("read winit backend");
+    let winit_adapter_source = fs::read_to_string("vendor/i-slint-backend-winit/winitwindowadapter.rs")
+        .expect("read winit window adapter");
+
+    assert!(
+        present_driver_source.contains("pub fn install_winit_after_draw_hook"),
+        "present driver module should expose a dedicated winit after-draw hook installer for software runtimes that cannot register a Slint rendering notifier"
+    );
+    assert!(
+        winit_backend_source.contains("pub trait WinitWindowAfterDrawHook"),
+        "vendored winit backend should expose a window-level after-draw hook trait so software renderer users can replay native overlays after each host redraw"
+    );
+    assert!(
+        winit_adapter_source.contains("after_draw_hook: Cell<Option<Box<dyn FnMut(&corelib::api::Window)>>>"),
+        "winit window adapter should store a per-window after-draw hook that survives normal redraw scheduling"
+    );
+    assert!(
+        winit_adapter_source.contains("if let Some(mut callback) = self.after_draw_hook.take()"),
+        "winit window adapter should run the after-draw hook immediately after renderer.render() finishes so same-HWND native surfaces can repaint on top of the host surface"
+    );
+    assert!(
+        native_surface_source.contains("host_surface_invalidated: bool"),
+        "native surface bridge should track when the Slint host surface has just repainted over the retained native plane"
+    );
+    assert!(
+        native_surface_source.contains("state.host_surface_invalidated = true;"),
+        "native surface bridge should mark the host surface invalidated before replaying retained native content from after-draw hooks"
+    );
+    assert!(
+        native_surface_source
+            .contains("if !state.dirty && !state.damage_tracker.has_damage() && !state.host_surface_invalidated"),
+        "native surface draw gate should allow a retained frame replay after host redraw even when no new terminal frame arrived"
+    );
+}
+
+#[test]
+fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
+    let runtime_profile_source =
+        fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
+
+    assert!(
+        runtime_profile_source.contains("pub enum TerminalCompositionMode"),
+        "runtime profile should define an explicit terminal composition mode so Windows software packages can move visible terminal pixels back into the Slint scene"
+    );
+    assert!(
+        runtime_profile_source.contains("SceneImage"),
+        "runtime profile should keep a scene-owned image composition mode for software builds where overlays must stay above terminal content"
+    );
+    assert!(
+        runtime_profile_source.contains("PostRenderNativeSurface"),
+        "runtime profile should preserve an explicit post-render native surface mode for the remaining whole-window overlay path"
+    );
+    assert!(
+        bootstrap_source.contains("profile.terminal_composition_mode()"),
+        "bootstrap should branch on an explicit terminal composition mode instead of routing every native-quality frame through NativeTerminalSurface"
+    );
+    assert!(
+        bootstrap_source.contains("TerminalCompositionMode::SceneImage"),
+        "bootstrap should recognize the scene-image composition mode when selecting the visible Windows software terminal path"
+    );
+    assert!(
+        bootstrap_source.contains("TerminalRenderMode::Bitmap"),
+        "bootstrap should keep using the Slint image composition path when the software runtime selects scene-image terminal composition"
+    );
+    assert!(
+        presenter_source.contains("pub struct WindowsSceneImagePresenter"),
+        "terminal presenter should define a dedicated Windows scene-image presenter instead of forcing software builds through the whole-window native surface path"
+    );
+    assert!(
+        presenter_source.contains("SceneImageTerminalRenderer"),
+        "terminal presenter should use a dedicated scene-image renderer for native-quality glyph output inside the Slint scene"
+    );
+    assert!(
+        bootstrap_source.contains("window.set_workspace_session_surface_image(frame.image);"),
+        "bootstrap should keep projecting terminal frames back into the Slint scene image path once software builds stop using whole-window native post-pass composition"
+    );
+    assert!(
+        bootstrap_source.contains("window.set_workspace_session_native_frame_token(0);"),
+        "bitmap or scene-image composition paths should clear the native frame token so hit-testing and overlay logic do not treat the software scene as a retained native surface"
+    );
+    assert!(
+        bootstrap_source.contains("window.set_workspace_session_cell_width(frame.cell_width_px as f32 / scale_factor);"),
+        "scene-image composition should project the renderer cell width back into Slint logical units from the same frame that produced the visible pixels"
+    );
+    assert!(
+        bootstrap_source.contains("window.set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);"),
+        "scene-image composition should project the renderer cell height back into Slint logical units from the same frame that produced the visible pixels"
+    );
+    assert!(
+        !bootstrap_source.contains("window.set_workspace_session_rows(i32::try_from(surface.rows).unwrap_or(i32::MAX));"),
+        "bootstrap should stop projecting workspace terminal rows from the live surface before presentation because that splits the visible bitmap/native payload from the geometry the host uses to size and hit-test it"
+    );
+    assert!(
+        !bootstrap_source.contains("window.set_workspace_session_cols(i32::try_from(surface.cols).unwrap_or(i32::MAX));"),
+        "bootstrap should stop projecting workspace terminal cols from the live surface before presentation because that lets stale geometry race ahead of the frame that will actually be displayed"
+    );
+    let workspace_surface_sync_block = block_between(
+        &bootstrap_source,
+        "if let Some(surface) = state.active_workspace_terminal_surface() {",
+        "if let Some(cursor) = native_cursor {",
+    );
+    let bitmap_block = block_between(
+        workspace_surface_sync_block,
+        "Ok(PresentedTerminalFrame::Bitmap(frame)) => {",
+        "Ok(PresentedTerminalFrame::Native(frame)) => {",
+    );
+    let bitmap_render_mode = bitmap_block
+        .find("window.set_workspace_session_render_mode(")
+        .expect("bitmap render mode");
+    let bitmap_rows = bitmap_block
+        .find("window.set_workspace_session_rows(i32::try_from(frame.grid_rows).unwrap_or(i32::MAX));")
+        .expect("bitmap rows");
+    let bitmap_cols = bitmap_block
+        .find("window.set_workspace_session_cols(i32::try_from(frame.grid_cols).unwrap_or(i32::MAX));")
+        .expect("bitmap cols");
+    let bitmap_cell_width = bitmap_block
+        .find("window.set_workspace_session_cell_width(frame.cell_width_px as f32 / scale_factor);")
+        .expect("bitmap cell width");
+    let bitmap_cell_height = bitmap_block
+        .find("window.set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);")
+        .expect("bitmap cell height");
+    let bitmap_image = bitmap_block
+        .find("window.set_workspace_session_surface_image(frame.image);")
+        .expect("bitmap image");
+    assert!(
+        bitmap_rows < bitmap_image
+            && bitmap_cols < bitmap_image
+            && bitmap_cell_width < bitmap_image
+            && bitmap_cell_height < bitmap_image,
+        "bitmap path should publish rows/cols and cell metrics from the same bitmap frame before swapping in the new scene-owned image so the host never stretches fresh pixels inside stale grid geometry"
+    );
+    assert!(
+        bitmap_image < bitmap_render_mode,
+        "bitmap path should publish the new scene-owned image before switching render_mode so the terminal host does not briefly enter bitmap mode with stale or empty payload"
+    );
+
+    let native_block = block_between(
+        workspace_surface_sync_block,
+        "Ok(PresentedTerminalFrame::Native(frame)) => {",
+        "Err(err) => {",
+    );
+    let native_render_mode = native_block
+        .find("window.set_workspace_session_render_mode(")
+        .expect("native render mode");
+    let native_rows = native_block
+        .find("window.set_workspace_session_rows(i32::try_from(presentable_frame.grid_rows).unwrap_or(i32::MAX));")
+        .expect("native rows");
+    let native_cols = native_block
+        .find("window.set_workspace_session_cols(i32::try_from(presentable_frame.grid_cols).unwrap_or(i32::MAX));")
+        .expect("native cols");
+    let native_present = native_block
+        .find("present_workspace_native_terminal_frame(window, frame);")
+        .expect("native present");
+    assert!(
+        native_rows < native_present && native_cols < native_present,
+        "native path should project rows/cols from the retained frame payload before presenting it so overlay geometry and host hit-testing stay tied to the exact frame staged for display"
+    );
+    assert!(
+        native_present < native_render_mode,
+        "native path should stage the retained native frame before switching render_mode so the UI does not briefly expose native mode without a ready surface payload"
+    );
+
+    let error_start = workspace_surface_sync_block
+        .find("Err(err) => {")
+        .expect("error block start");
+    let error_block = &workspace_surface_sync_block[error_start..];
+    let error_render_mode = error_block
+        .find("window.set_workspace_session_render_mode(")
+        .expect("error render mode");
+    let error_clear = error_block
+        .find("clear_workspace_native_terminal_frame(window);")
+        .expect("error clear");
+    assert!(
+        error_clear < error_render_mode,
+        "error fallback should clear the native surface/image payload before switching render_mode back to bitmap so the host does not momentarily show a stale native frame"
     );
 }
 
@@ -436,6 +763,80 @@ fn windows_backend_source_exposes_color_glyph_and_overlay_draw_contract() {
 }
 
 #[test]
+fn native_surface_source_exposes_damage_tracker_and_shutdown_guard_contract() {
+    assert!(
+        Path::new("src/app/terminal_renderer/damage.rs").exists(),
+        "terminal renderer should add a dedicated damage tracker module for resize, overlay-only, and shutdown invalidation"
+    );
+
+    let damage_source = fs::read_to_string("src/app/terminal_renderer/damage.rs")
+        .expect("read native surface damage tracker");
+    let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
+        .expect("read native surface");
+    let renderer_mod_source =
+        fs::read_to_string("src/app/terminal_renderer/mod.rs").expect("read terminal renderer mod");
+
+    assert!(
+        renderer_mod_source.contains("pub mod damage;"),
+        "terminal renderer module should expose the damage tracker module"
+    );
+    assert!(
+        renderer_mod_source.contains("NativeFrameDamageTracker"),
+        "terminal renderer module should re-export the native frame damage tracker contract"
+    );
+    assert!(
+        damage_source.contains("pub struct NativeFrameDamageTracker"),
+        "damage module should define a dedicated tracker for retained native frame invalidation"
+    );
+    assert!(
+        damage_source.contains("pub enum NativeSurfaceDamageKind"),
+        "damage module should classify pending invalidation as full-surface or overlay-only damage"
+    );
+    assert!(
+        damage_source.contains("fn mark_full_damage(&mut self, rect: NativeTerminalSurfaceRect)"),
+        "damage tracker should expose a helper that invalidates the full retained surface after resize"
+    );
+    assert!(
+        damage_source.contains("fn track_frame_damage("),
+        "damage tracker should expose a helper that compares retained frames before scheduling present"
+    );
+    assert!(
+        damage_source.contains("previous.frame.frame_token == next.frame.frame_token"),
+        "damage tracker should treat stable prepared-frame tokens as a signal that overlay-only changes can repaint without a text rebuild"
+    );
+    assert!(
+        damage_source.contains("previous.frame.presentable_frame.cursor_overlay")
+            && damage_source.contains("previous.frame.presentable_frame.selection_overlay")
+            && damage_source.contains("previous.frame.presentable_frame.ime_preview_overlay"),
+        "damage tracker should compare cursor, selection, and IME overlay payloads when deciding whether overlay-only damage exists"
+    );
+    assert!(
+        native_surface_source.contains("damage_tracker: NativeFrameDamageTracker"),
+        "native surface bridge should retain a damage tracker alongside the retained frame and diagnostics state"
+    );
+    assert!(
+        native_surface_source.contains("surface_alive: bool"),
+        "native surface bridge should keep an explicit alive/detached lifecycle guard for shutdown sequencing"
+    );
+    assert!(
+        native_surface_source.contains("state.damage_tracker.mark_full_damage(rect);"),
+        "native surface bridge should invalidate the whole retained surface when the terminal rect changes"
+    );
+    assert!(
+        native_surface_source.contains("state.damage_tracker.track_frame_damage("),
+        "native surface bridge should feed retained-frame transitions through the damage tracker before present"
+    );
+    assert!(
+        native_surface_source.contains("if !state.surface_alive {"),
+        "native surface draw callbacks should bail out once the surface has detached"
+    );
+    assert!(
+        native_surface_source.contains("state.surface_alive = false;"),
+        "native surface teardown should flip the alive flag before backend detach completes"
+    );
+}
+
+#[test]
 fn platform_surface_backend_source_exposes_shared_native_surface_abstraction() {
     assert!(
         Path::new("src/app/terminal_renderer/platform/mod.rs").exists(),
@@ -550,6 +951,150 @@ fn windows_platform_backend_source_exposes_backend_selection_contract() {
     assert!(
         renderer_mod_source.contains("WindowsNativeSurfaceBackend"),
         "terminal renderer module should re-export the Windows native surface backend type"
+    );
+}
+
+#[test]
+fn windows_backend_source_exposes_lazy_host_hwnd_reacquire_contract() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+
+    assert!(
+        windows_backend_source.contains("host_window: Option<slint::Weak<AppWindow>>"),
+        "windows backend should retain a weak AppWindow handle so it can retry host HWND resolution after bootstrap finishes and the native winit window actually exists"
+    );
+    assert!(
+        windows_backend_source.contains("self.host_window = Some(window.as_weak());"),
+        "windows backend attach should store the host window handle instead of resolving HWND only once during bootstrap"
+    );
+    assert!(
+        windows_backend_source.contains("fn resolve_host_hwnd_if_needed(&mut self)"),
+        "windows backend should expose a helper that retries host HWND resolution when present happens before the first native window lookup succeeds"
+    );
+    assert!(
+        windows_backend_source.contains("self.resolve_host_hwnd_if_needed();"),
+        "windows backend should retry host HWND resolution during runtime updates instead of permanently staying detached after an early attach"
+    );
+}
+
+#[test]
+fn windows_backend_source_exposes_same_hwnd_present_contract() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+
+    assert!(
+        windows_backend_source.contains("host_hwnd: Option<isize>"),
+        "windows backend should retain the top-level host HWND so Direct2D can bind to the real application window"
+    );
+    assert!(
+        !windows_backend_source.contains("surface_hwnd: Option<isize>"),
+        "windows backend should stop storing a second child surface HWND once the native terminal is painted into the host window itself"
+    );
+    assert!(
+        !windows_backend_source.contains("CreateWindowExW("),
+        "windows backend should stop creating a dedicated child HWND because it visually floats above the Slint shell and causes overlay artifacts"
+    );
+    assert!(
+        !windows_backend_source.contains("SetWindowPos("),
+        "windows backend should stop moving a dedicated child HWND around when the terminal rect changes"
+    );
+    assert!(
+        !windows_backend_source.contains("DestroyWindow("),
+        "windows backend should no longer destroy a dedicated child HWND during detach because the host HWND remains owned by the shell"
+    );
+    assert!(
+        windows_backend_source.contains("let Some(hwnd) = self.host_hwnd else {"),
+        "windows backend render-target creation should bind Direct2D straight to the host HWND"
+    );
+    assert!(
+        windows_backend_source.contains("fn window_bind_rect(&self) -> Option<RECT>"),
+        "windows backend should bind the Direct2D DC render target to the terminal sub-rect of the host window instead of presenting across the full shell HWND"
+    );
+    assert!(
+        windows_backend_source.contains("self.rect = NativeTerminalSurfaceRect {")
+            && windows_backend_source.contains("x: 0,")
+            && windows_backend_source.contains("y: 0,"),
+        "windows backend should keep retained frame drawing in terminal-local coordinates while the bound DC rect anchors presentation inside the host window"
+    );
+}
+
+#[test]
+fn windows_backend_source_exposes_host_window_present_contract() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+
+    assert!(
+        windows_backend_source.contains("pub window_rect: NativeTerminalSurfaceRect"),
+        "windows backend state should retain the Slint-reported terminal rect even when the render target is bound to the host window"
+    );
+    assert!(
+        windows_backend_source.contains("host_hwnd: Option<isize>"),
+        "windows backend should retain the top-level host HWND for same-window Direct2D presentation"
+    );
+    assert!(
+        windows_backend_source.contains("fn sync_host_surface_rect(&mut self)"),
+        "windows backend should expose a helper that keeps the retained terminal rect in host-window coordinates"
+    );
+    assert!(
+        !windows_backend_source.contains("fn ensure_child_surface_window(&mut self)"),
+        "windows backend should stop exposing child-HWND helpers once the native terminal is rendered into the shell window itself"
+    );
+    assert!(
+        !windows_backend_source.contains("fn sync_child_surface_window_rect(&mut self)"),
+        "windows backend should stop maintaining child-window geometry once presentation happens in the host window"
+    );
+    assert!(
+        !windows_backend_source.contains("fn destroy_child_surface_window(&mut self)"),
+        "windows backend should stop carrying child-window teardown helpers in the same-HWND integration path"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.sync_host_surface_rect();"),
+        "windows backend should resync the retained terminal rect whenever layout geometry changes or the host HWND becomes available"
+    );
+    assert!(
+        windows_backend_source.contains("retained_frame.rect = self.state.rect;"),
+        "windows backend should thread the terminal-local rect into retained frames while BindDC anchors output to the host window region"
+    );
+    assert!(
+        !windows_backend_source.contains("self.state.destroy_child_surface_window();"),
+        "windows backend detach path should no longer tear down a synthetic child window because the host HWND belongs to the Slint shell"
+    );
+}
+
+#[test]
+fn bootstrap_source_exposes_native_surface_scale_factor_bridge_contract() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("fn window_scale_factor(window: &AppWindow) -> f32"),
+        "bootstrap should expose a helper that reads the live Slint window scale factor before bridging logical layout lengths into native surface pixels"
+    );
+    assert!(
+        bootstrap_source.contains("let scale_factor = window_scale_factor(window);"),
+        "native surface geometry and cell metrics should be converted with the live window scale factor instead of assuming logical and physical pixels are identical on Windows"
+    );
+    assert!(
+        bootstrap_source.contains("window.get_layout_workspace_session_native_surface_x() * scale_factor"),
+        "workspace native terminal x should be converted from Slint logical length into physical child-HWND coordinates"
+    );
+    assert!(
+        bootstrap_source.contains("window.get_layout_workspace_session_native_surface_width() * scale_factor"),
+        "workspace native terminal width should be converted from Slint logical length into physical child-HWND coordinates"
+    );
+    assert!(
+        bootstrap_source.contains("default_cell_width_px as f32 / scale_factor"),
+        "native terminal cell width should be projected back into Slint logical units so cursor overlays and resize math stay aligned on HiDPI Windows displays"
+    );
+    assert!(
+        bootstrap_source.contains("frame.cell_width_px as f32 / scale_factor"),
+        "prepared native frame cell width should be projected back into Slint logical units instead of being exposed as raw physical pixels"
+    );
+    assert!(
+        bootstrap_source.contains("window.set_workspace_session_device_scale_factor(scale_factor);"),
+        "bootstrap should thread the live window scale factor into the Slint workspace session contract so the scene-image host can snap terminal origin and viewport lengths onto physical pixels"
     );
 }
 

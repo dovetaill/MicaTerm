@@ -1,6 +1,17 @@
 use anyhow::Result;
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_font::{
+    ColorGlyphRaster, DirectWriteFontSystem, FontFaceKey, FontFallbackFace, FontRequest,
+    FontSystem, GlyphRasterRequest, LoadedFont, RasterizedGlyph, TextShapingRequest,
+};
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_font::mock::mock_font_system;
 use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
 use mica_term::app::terminal_atlas::{ClusterSpriteKind, TerminalAtlasRenderer};
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 use mica_term::app::terminal_emoji::{
     ClusterRenderKind, EmojiFallbackReason, EmojiFontRasterizeRequest, EmojiFontResolution,
     EmojiRasterizerBackend, EmojiRenderOutcome, EmojiSprite, ResolvedEmojiFont,
@@ -10,6 +21,8 @@ use mica_term::app::terminal_emoji::{
 use mica_term::app::terminal_presenter::{
     PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter, WindowsNativePresenter,
 };
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 use slint::Rgba8Pixel;
 use std::fs;
 use uuid::Uuid;
@@ -49,7 +62,30 @@ fn present_native_frame(
 ) -> Result<mica_term::app::terminal_presenter::NativeTerminalFrame> {
     match presenter.present(surface, TerminalPresentationOptions::default())? {
         PresentedTerminalFrame::Native(frame) => Ok(*frame),
+        PresentedTerminalFrame::Bitmap(_) => {
+            panic!("WindowsNativePresenter should never emit bitmap frames in native tests")
+        }
     }
+}
+
+#[test]
+fn native_presenter_reloads_font_metrics_when_raster_scale_changes() -> Result<()> {
+    let mut presenter = WindowsNativePresenter::new()?;
+    let (base_cell_width, base_cell_height) = presenter.default_cell_size();
+
+    presenter.set_raster_scale(2.0);
+    let (scaled_cell_width, scaled_cell_height) = presenter.default_cell_size();
+
+    assert!(
+        scaled_cell_width > base_cell_width,
+        "native presenter should reload a larger device-pixel font when raster scale increases"
+    );
+    assert!(
+        scaled_cell_height > base_cell_height,
+        "native presenter should reload a taller device-pixel line box when raster scale increases"
+    );
+
+    Ok(())
 }
 
 #[test]
@@ -358,6 +394,63 @@ fn presentable_native_frame_threads_palette_contract_and_color_destinations() ->
     Ok(())
 }
 
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn dwrite_color_glyph_raster_is_not_a_flat_placeholder_block() -> Result<()> {
+    let mut fonts = DirectWriteFontSystem::new()?;
+    let loaded_font = fonts.load_font(&FontRequest::default())?;
+    let shaped_runs = fonts.shape_text_runs(&loaded_font, &TextShapingRequest::new("🦀"))?;
+    let color_run = shaped_runs
+        .iter()
+        .find(|run| run.has_color_glyphs)
+        .expect("emoji shaping should produce a color glyph run");
+    let glyph_id = color_run
+        .glyphs
+        .first()
+        .map(|glyph| glyph.glyph_id)
+        .expect("color glyph run should expose at least one glyph");
+    let raster = fonts
+        .rasterize_color_glyph(&loaded_font, &color_run.resolved_face, glyph_id)?
+        .expect("emoji glyph should rasterize into RGBA data");
+    let visible_colors = raster
+        .rgba
+        .chunks_exact(4)
+        .filter(|pixel| pixel[3] != 0)
+        .map(|pixel| [pixel[0], pixel[1], pixel[2]])
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert_eq!(
+        raster.rgba.len(),
+        (raster.width_px * raster.height_px * 4) as usize,
+        "color glyph raster should expose tightly packed RGBA bytes"
+    );
+    assert!(
+        visible_colors.len() >= 2,
+        "real color glyph rasters should contain multiple visible colors instead of a flat placeholder fill"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn windows_dwrite_color_glyph_source_prefers_real_emoji_rasterization_over_inline_blocks() {
+    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
+        .expect("read windows dwrite font backend");
+
+    assert!(
+        dwrite_source.contains("TerminalEmojiRenderer"),
+        "windows color glyph path should route through the shared terminal emoji rasterizer instead of an inline placeholder block"
+    );
+    assert!(
+        dwrite_source.contains("rasterize_cluster"),
+        "windows color glyph path should call the emoji cluster rasterizer when preparing color glyph sprites"
+    );
+    assert!(
+        !dwrite_source.contains("glyph_id % 127"),
+        "windows color glyph rasterization should stop synthesizing fake RGBA colors from glyph IDs"
+    );
+}
+
 #[test]
 fn native_renderer_color_glyph_contract_uses_separate_cache_state() {
     let atlas_source =
@@ -516,4 +609,135 @@ fn emoji_rasterizer_returns_visible_fallback_on_backend_failure() {
             reason: EmojiFallbackReason::RasterizationFailed,
         }
     );
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+struct DistinctColorFaceFontSystem;
+
+#[cfg(feature = "terminal-native-renderer")]
+impl FontSystem for DistinctColorFaceFontSystem {
+    fn load_font(&mut self, _request: &FontRequest) -> Result<LoadedFont> {
+        unreachable!("test prepares a loaded font up front")
+    }
+
+    fn shape_text(
+        &mut self,
+        _font: &LoadedFont,
+        _text: &str,
+    ) -> Result<Vec<mica_term::app::terminal_font::ShapedGlyph>> {
+        unreachable!("renderer prepare should not call shape_text in this cache-key test")
+    }
+
+    fn rasterize_glyph(
+        &mut self,
+        _font: &LoadedFont,
+        _request: GlyphRasterRequest,
+    ) -> Result<RasterizedGlyph> {
+        unreachable!("renderer prepare should stay on the color path in this cache-key test")
+    }
+
+    fn rasterize_color_glyph(
+        &mut self,
+        _font: &LoadedFont,
+        _resolved_face: &FontFallbackFace,
+        glyph_id: u32,
+    ) -> Result<Option<ColorGlyphRaster>> {
+        Ok(Some(ColorGlyphRaster {
+            width_px: 4,
+            height_px: 4,
+            rgba: vec![glyph_id as u8; 4 * 4 * 4],
+        }))
+    }
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_keeps_color_cache_entries_distinct_per_fallback_face() -> Result<()> {
+    let mut font_system = mock_font_system();
+    let loaded_font = font_system.load_font(&FontRequest::default())?;
+    let style = TextStyleKey {
+        fg_rgba: 0xffd8_dfe8,
+        bg_rgba: 0xff0c_1014,
+        bold: false,
+        underline: false,
+    };
+    let shaped_frame = ShapedTerminalFrame {
+        seqno: 1,
+        font: loaded_font,
+        rows: vec![ShapedRow {
+            row: 0,
+            runs: vec![
+                GlyphRun {
+                    row: 0,
+                    cell_range: 0..2,
+                    text: "🙂".into(),
+                    clusters: vec![RunCluster {
+                        text: "🙂".into(),
+                        cell_range: 0..2,
+                        byte_range: 0..4,
+                    }],
+                    glyphs: vec![PositionedGlyph {
+                        glyph_id: 77,
+                        cluster: 0,
+                        x_advance: 0,
+                        y_advance: 0,
+                        x_offset: 0,
+                        y_offset: 0,
+                    }],
+                    style,
+                    resolved_face: FontFallbackFace {
+                        face_key: FontFaceKey(100),
+                        family_name: "Segoe UI Emoji".into(),
+                    },
+                    feature_set: Default::default(),
+                    allow_ligatures: true,
+                    has_color_glyphs: true,
+                },
+                GlyphRun {
+                    row: 0,
+                    cell_range: 2..4,
+                    text: "🦀".into(),
+                    clusters: vec![RunCluster {
+                        text: "🦀".into(),
+                        cell_range: 2..4,
+                        byte_range: 0..4,
+                    }],
+                    glyphs: vec![PositionedGlyph {
+                        glyph_id: 77,
+                        cluster: 0,
+                        x_advance: 0,
+                        y_advance: 0,
+                        x_offset: 0,
+                        y_offset: 0,
+                    }],
+                    style,
+                    resolved_face: FontFallbackFace {
+                        face_key: FontFaceKey(200),
+                        family_name: "Noto Color Emoji".into(),
+                    },
+                    feature_set: Default::default(),
+                    allow_ligatures: true,
+                    has_color_glyphs: true,
+                },
+            ],
+        }],
+    };
+    let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+    let mut stub_fonts = DistinctColorFaceFontSystem;
+
+    let prepared = renderer.prepare(&shaped_frame, &mut stub_fonts)?;
+
+    assert_eq!(
+        prepared.color_glyph_cache_entries, 2,
+        "color glyph cache keys should stay distinct when the same glyph id is resolved by different fallback faces"
+    );
+    assert!(
+        prepared
+            .color_glyph_draws
+            .iter()
+            .all(|draw| draw.upload.is_some()),
+        "the first frame should upload separate color bitmap payloads for distinct fallback-face cache keys"
+    );
+
+    Ok(())
 }

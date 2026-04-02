@@ -4,6 +4,10 @@ pub mod backend;
 pub mod mock;
 pub mod wezterm_font;
 #[cfg(feature = "terminal-native-renderer")]
+pub mod windows_fallback;
+#[cfg(feature = "terminal-native-renderer")]
+pub mod windows_locator;
+#[cfg(feature = "terminal-native-renderer")]
 pub mod windows_dwrite;
 
 pub use backend::{
@@ -18,3 +22,7 @@ pub use backend::{
 pub use wezterm_font::WeztermFontSystem;
 #[cfg(feature = "terminal-native-renderer")]
 pub use windows_dwrite::DirectWriteFontSystem;
+#[cfg(feature = "terminal-native-renderer")]
+pub use windows_fallback::WindowsFontFallbackResolver;
+#[cfg(feature = "terminal-native-renderer")]
+pub use windows_locator::WindowsFontLocator;

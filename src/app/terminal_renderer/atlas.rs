@@ -2,13 +2,14 @@
 
 use std::collections::HashMap;
 
-use crate::app::terminal_font::{GlyphRasterRequest, LoadedFontKey, RasterizedGlyph};
+use crate::app::terminal_font::{FontFaceKey, GlyphRasterRequest, LoadedFontKey, RasterizedGlyph};
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct GlyphAtlasKey {
     pub font_key: LoadedFontKey,
     pub glyph_id: u32,
     pub bold: bool,
+    pub fractional_offset_x_bits: u32,
 }
 
 impl From<GlyphRasterRequest> for GlyphAtlasKey {
@@ -17,6 +18,7 @@ impl From<GlyphRasterRequest> for GlyphAtlasKey {
             font_key: request.font_key,
             glyph_id: request.glyph_id,
             bold: request.bold,
+            fractional_offset_x_bits: request.fractional_offset_x_bits,
         }
     }
 }
@@ -37,12 +39,17 @@ pub struct GlyphAtlasEntry {
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct ColorGlyphCacheKey {
     pub font_key: LoadedFontKey,
+    pub face_key: FontFaceKey,
     pub glyph_id: u32,
 }
 
 impl ColorGlyphCacheKey {
-    pub fn new(font_key: LoadedFontKey, glyph_id: u32) -> Self {
-        Self { font_key, glyph_id }
+    pub fn new(font_key: LoadedFontKey, face_key: FontFaceKey, glyph_id: u32) -> Self {
+        Self {
+            font_key,
+            face_key,
+            glyph_id,
+        }
     }
 }
 

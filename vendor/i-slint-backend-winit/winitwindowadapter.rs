@@ -354,6 +354,7 @@ pub struct WinitWindowAdapter {
     pub(crate) window_event_filter: Cell<
         Option<Box<dyn FnMut(&corelib::api::Window, &winit::event::WindowEvent) -> EventResult>>,
     >,
+    pub(crate) after_draw_hook: Cell<Option<Box<dyn FnMut(&corelib::api::Window)>>>,
 
     winit_window_or_none: RefCell<WinitWindowOrNone>,
     window_existence_wakers: RefCell<Vec<core::task::Waker>>,
@@ -412,6 +413,7 @@ impl WinitWindowAdapter {
             #[cfg(any(enable_accesskit, muda))]
             event_loop_proxy: proxy,
             window_event_filter: Cell::new(None),
+            after_draw_hook: Cell::new(None),
             #[cfg(not(use_winit_theme))]
             xdg_settings_watcher: Default::default(),
             #[cfg(muda)]
@@ -665,6 +667,10 @@ impl WinitWindowAdapter {
         renderer.render(self.window())?;
         #[cfg(target_os = "windows")]
         self.note_partial_visibility_after_draw();
+        if let Some(mut callback) = self.after_draw_hook.take() {
+            callback(self.window());
+            self.after_draw_hook.set(Some(callback));
+        }
 
         Ok(())
     }
@@ -893,7 +899,14 @@ impl WinitWindowAdapter {
                 self.request_redraw();
                 Ok(())
             }
-            VisibilityRecoveryAction::PresentExistingBuffer => self.renderer.present_existing_buffer(),
+            VisibilityRecoveryAction::PresentExistingBuffer => {
+                self.renderer.present_existing_buffer()?;
+                if let Some(mut callback) = self.after_draw_hook.take() {
+                    callback(self.window());
+                    self.after_draw_hook.set(Some(callback));
+                }
+                Ok(())
+            }
         }
     }
 

@@ -102,6 +102,7 @@ export component TerminalSessionHost inherits Rectangle {
     in property <string> session-state: "";
     in property <string> session-error-detail: "";
     in property <bool> can-reconnect: false;
+    in property <string> session-render-mode: "bitmap";
     in property <string> connection-progress-headline: "";
     in property <string> connection-progress-current-hop: "";
     in property <string> connection-progress-current-detail: "";
@@ -124,6 +125,7 @@ export component TerminalSessionHost inherits Rectangle {
         recent_label: "",
     };
     in property <string> welcome-quick-launch-search-query: "";
+    in property <image> session-surface-image;
     in property <int> session-native-frame-token: 0;
     in property <int> session-rows: 24;
     in property <int> session-cols: 80;
@@ -146,15 +148,16 @@ export component TerminalSessionHost inherits Rectangle {
     in property <bool> session-viewport-at-bottom: true;
     in property <bool> session-follow-paused: false;
     in property <int> session-pending-output-lines: 0;
+    in property <float> session-device-scale-factor: 1.0;
     in-out property <bool> selection-active: false;
     in-out property <int> selection-start-row: -1;
     in-out property <int> selection-start-col: -1;
     in-out property <int> selection-end-row: -1;
     in-out property <int> selection-end-col: -1;
-    out property <length> native-surface-x: root.terminal-padding-left;
-    out property <length> native-surface-y: root.terminal-padding-top;
-    out property <length> native-surface-width: root.terminal-grid-width();
-    out property <length> native-surface-height: root.terminal-grid-height();
+    out property <length> native-surface-x: root.terminal-surface-origin-x();
+    out property <length> native-surface-y: root.terminal-surface-origin-y();
+    out property <length> native-surface-width: root.snapped-terminal-visible-grid-width();
+    out property <length> native-surface-height: root.snapped-terminal-visible-grid-height();
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
@@ -222,6 +225,35 @@ export component TerminalSessionHost inherits Rectangle {
         return root.session-rows * root.terminal-cell-height;
     }
 
+    function terminal-visible-grid-width() -> length {
+        return min(root.terminal-grid-width(), root.terminal-content-width());
+    }
+
+    function terminal-visible-grid-height() -> length {
+        return min(root.terminal-grid-height(), root.terminal-content-height());
+    }
+
+    function snap-length-to-device-pixel(value: length) -> length {
+        let scale = max(1.0, root.session-device-scale-factor);
+        return (Math.floor(((value / 1px) * scale) + 0.5) / scale) * 1px;
+    }
+
+    function terminal-surface-origin-x() -> length {
+        return root.snap-length-to-device-pixel(root.terminal-padding-left);
+    }
+
+    function terminal-surface-origin-y() -> length {
+        return root.snap-length-to-device-pixel(root.terminal-padding-top);
+    }
+
+    function snapped-terminal-visible-grid-width() -> length {
+        return root.snap-length-to-device-pixel(root.terminal-visible-grid-width());
+    }
+
+    function snapped-terminal-visible-grid-height() -> length {
+        return root.snap-length-to-device-pixel(root.terminal-visible-grid-height());
+    }
+
     function scrollbar-visible() -> bool {
         return !root.session-mouse-grabbed && root.session-viewport-max-offset-lines > 0;
     }
@@ -235,7 +267,7 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function scrollbar-track-height() -> length {
-        return root.terminal-grid-height();
+        return root.terminal-visible-grid-height();
     }
 
     function scrollbar-thumb-height() -> length {
@@ -286,7 +318,7 @@ export component TerminalSessionHost inherits Rectangle {
     function jump-to-latest-y() -> length {
         return root.terminal-padding-top + max(
             0px,
-            root.terminal-grid-height() - root.jump-to-latest-height - 12px,
+            root.terminal-visible-grid-height() - root.jump-to-latest-height - 12px,
         );
     }
 
@@ -301,14 +333,14 @@ export component TerminalSessionHost inherits Rectangle {
     function terminal-hit-row(pointer-y: length) -> int {
         return max(0, min(
             root.session-rows - 1,
-            (((pointer-y - root.terminal-padding-top) / 1px) / (root.terminal-cell-height / 1px)),
+            Math.floor((pointer-y / 1px) / (root.terminal-cell-height / 1px)),
         ));
     }
 
     function terminal-hit-col(pointer-x: length) -> int {
         return max(0, min(
             root.session-cols - 1,
-            (((pointer-x - root.terminal-padding-left) / 1px) / (root.terminal-cell-width / 1px)),
+            Math.floor((pointer-x / 1px) / (root.terminal-cell-width / 1px)),
         ));
     }
 
@@ -801,121 +833,151 @@ export component TerminalSessionHost inherits Rectangle {
         surface-frame := Rectangle {
             width: parent.width;
             height: parent.height;
+            clip: true;
             border-width: 1px;
             border-color: ThemeTokens.divider-subtle;
             background: root.session-default-bg;
 
             blank-surface := Rectangle {
-                x: root.terminal-padding-left;
-                y: root.terminal-padding-top;
-                width: root.terminal-grid-width();
-                height: root.terminal-grid-height();
+                x: root.terminal-surface-origin-x();
+                y: root.terminal-surface-origin-y();
+                width: root.snapped-terminal-visible-grid-width();
+                height: root.snapped-terminal-visible-grid-height();
+                clip: true;
                 background: root.session-default-bg;
-            }
 
-            input-capture := TouchArea {
-                width: parent.width;
-                height: parent.height;
-                mouse-cursor: MouseCursor.text;
-
-                scroll-event(event) => {
-                    if event.delta-y > 0px || event.delta-y < 0px {
-                        let row = root.terminal-hit-row(self.mouse-y);
-                        let col = root.terminal-hit-col(self.mouse-x);
-                        root.wheel-delta-remainder = root.wheel-delta-remainder + (event.delta-y / 1px);
-                        let delta-lines =
-                            root.wheel-delta-remainder >= root.wheel-delta-threshold
-                            ? root.wheel-lines-per-notch
-                            : root.wheel-delta-remainder <= -root.wheel-delta-threshold
-                            ? -root.wheel-lines-per-notch
-                            : 0;
-                        terminal-input.focus();
-                        root.close-context-menu();
-                        if delta-lines != 0 {
-                            if delta-lines > 0 {
-                                root.wheel-delta-remainder = root.wheel-delta-remainder - root.wheel-delta-threshold;
-                            } else {
-                                root.wheel-delta-remainder = root.wheel-delta-remainder + root.wheel-delta-threshold;
-                            }
-                            root.scroll-requested(
-                                delta-lines,
-                                row,
-                                col,
-                                event.modifiers.shift,
-                                event.modifiers.control,
-                                event.modifiers.alt,
-                            );
-                        }
-                        return accept;
-                    }
-                    reject
+                Image {
+                    x: 0px;
+                    y: 0px;
+                    width: root.terminal-grid-width();
+                    height: root.terminal-grid-height();
+                    source: root.session-surface-image;
+                    image-fit: fill;
+                    image-rendering: pixelated;
+                    visible: root.session-render-mode == "bitmap";
                 }
 
-                pointer-event(event) => {
-                    let row = root.terminal-hit-row(self.mouse-y);
-                    let col = root.terminal-hit-col(self.mouse-x);
-                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
-                        terminal-input.focus();
-                        root.close-context-menu();
-                        if root.session-mouse-grabbed {
-                            root.mouse-input(
-                                "down",
-                                "left",
-                                row,
-                                col,
-                                event.modifiers.shift,
-                                event.modifiers.control,
-                                event.modifiers.alt,
-                            );
-                        } else {
-                            root.selection-anchor-row = row;
-                            root.selection-anchor-col = col;
-                            root.selection-focus-row = row;
-                            root.selection-focus-col = col;
-                            root.selection-drag-active = true;
-                            root.sync-selection-state();
-                        }
-                    } else if event.kind == PointerEventKind.move {
-                        if root.session-mouse-grabbed {
-                            root.mouse-input(
-                                "move",
-                                "none",
-                                row,
-                                col,
-                                event.modifiers.shift,
-                                event.modifiers.control,
-                                event.modifiers.alt,
-                            );
-                        } else if root.selection-drag-active {
+                input-capture := TouchArea {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    mouse-cursor: MouseCursor.text;
+
+                    scroll-event(event) => {
+                        if event.delta-y > 0px || event.delta-y < 0px {
+                            let row = root.terminal-hit-row(self.mouse-y);
+                            let col = root.terminal-hit-col(self.mouse-x);
+                            root.wheel-delta-remainder = root.wheel-delta-remainder + (event.delta-y / 1px);
+                            let delta-lines =
+                                root.wheel-delta-remainder >= root.wheel-delta-threshold
+                                ? root.wheel-lines-per-notch
+                                : root.wheel-delta-remainder <= -root.wheel-delta-threshold
+                                ? -root.wheel-lines-per-notch
+                                : 0;
                             terminal-input.focus();
-                            root.selection-focus-row = row;
-                            root.selection-focus-col = col;
-                            root.sync-selection-state();
+                            root.close-context-menu();
+                            if delta-lines != 0 {
+                                if delta-lines > 0 {
+                                    root.wheel-delta-remainder = root.wheel-delta-remainder - root.wheel-delta-threshold;
+                                } else {
+                                    root.wheel-delta-remainder = root.wheel-delta-remainder + root.wheel-delta-threshold;
+                                }
+                                root.scroll-requested(
+                                    delta-lines,
+                                    row,
+                                    col,
+                                    event.modifiers.shift,
+                                    event.modifiers.control,
+                                    event.modifiers.alt,
+                                );
+                            }
+                            return accept;
                         }
-                    } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
-                        terminal-input.focus();
-                        if root.session-mouse-grabbed {
+                        reject
+                    }
+
+                    pointer-event(event) => {
+                        let row = root.terminal-hit-row(self.mouse-y);
+                        let col = root.terminal-hit-col(self.mouse-x);
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                            terminal-input.focus();
+                            root.close-context-menu();
+                            if root.session-mouse-grabbed {
+                                root.mouse-input(
+                                    "down",
+                                    "left",
+                                    row,
+                                    col,
+                                    event.modifiers.shift,
+                                    event.modifiers.control,
+                                    event.modifiers.alt,
+                                );
+                            } else {
+                                root.selection-anchor-row = row;
+                                root.selection-anchor-col = col;
+                                root.selection-focus-row = row;
+                                root.selection-focus-col = col;
+                                root.selection-drag-active = true;
+                                root.sync-selection-state();
+                            }
+                        } else if event.kind == PointerEventKind.move {
+                            if root.session-mouse-grabbed {
+                                root.mouse-input(
+                                    "move",
+                                    "none",
+                                    row,
+                                    col,
+                                    event.modifiers.shift,
+                                    event.modifiers.control,
+                                    event.modifiers.alt,
+                                );
+                            } else if root.selection-drag-active {
+                                terminal-input.focus();
+                                root.selection-focus-row = row;
+                                root.selection-focus-col = col;
+                                root.sync-selection-state();
+                            }
+                        } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
+                            terminal-input.focus();
+                            if root.session-mouse-grabbed {
+                                root.mouse-input(
+                                    "up",
+                                    "left",
+                                    row,
+                                    col,
+                                    event.modifiers.shift,
+                                    event.modifiers.control,
+                                    event.modifiers.alt,
+                                );
+                            } else {
+                                if root.selection-anchor-row == root.selection-focus-row
+                                    && root.selection-anchor-col == root.selection-focus-col {
+                                    root.clear-selection();
+                                }
+                                root.selection-drag-active = false;
+                            }
+                        } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                            terminal-input.focus();
+                            if root.session-mouse-grabbed {
+                                root.mouse-input(
+                                    "down",
+                                    "right",
+                                    row,
+                                    col,
+                                    event.modifiers.shift,
+                                    event.modifiers.control,
+                                    event.modifiers.alt,
+                                );
+                            } else {
+                                root.open-context-menu(
+                                    root.terminal-padding-left + self.mouse-x,
+                                    root.terminal-padding-top + self.mouse-y,
+                                );
+                            }
+                        } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.right && root.session-mouse-grabbed {
                             root.mouse-input(
                                 "up",
-                                "left",
-                                row,
-                                col,
-                                event.modifiers.shift,
-                                event.modifiers.control,
-                                event.modifiers.alt,
-                            );
-                        } else {
-                            if root.selection-anchor-row == root.selection-focus-row
-                                && root.selection-anchor-col == root.selection-focus-col {
-                                root.clear-selection();
-                            }
-                            root.selection-drag-active = false;
-                        }
-                    } else if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
-                        terminal-input.focus();
-                        if root.session-mouse-grabbed {
-                            root.mouse-input(
-                                "down",
                                 "right",
                                 row,
                                 col,
@@ -923,19 +985,7 @@ export component TerminalSessionHost inherits Rectangle {
                                 event.modifiers.control,
                                 event.modifiers.alt,
                             );
-                        } else {
-                            root.open-context-menu(self.mouse-x, self.mouse-y);
                         }
-                    } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.right && root.session-mouse-grabbed {
-                        root.mouse-input(
-                            "up",
-                            "right",
-                            row,
-                            col,
-                            event.modifiers.shift,
-                            event.modifiers.control,
-                            event.modifiers.alt,
-                        );
                     }
                 }
             }

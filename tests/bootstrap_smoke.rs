@@ -112,8 +112,8 @@ fn bootstrap_source_threads_native_terminal_surface_contract() {
         "bootstrap should depend on a native terminal surface hook once native terminal rendering is introduced"
     );
     assert!(
-        !bootstrap_source.contains("set_workspace_session_render_mode"),
-        "bootstrap should stop publishing a bitmap/native render mode selector once only native frames remain"
+        bootstrap_source.contains("set_workspace_session_render_mode"),
+        "bootstrap should publish the active terminal render mode so the software wrapper can select the bitmap fallback"
     );
     assert!(
         bootstrap_source.contains("set_workspace_session_native_frame_token"),
@@ -132,6 +132,10 @@ fn bootstrap_source_uses_windows_native_terminal_presenter_for_native_frames() {
     assert!(
         bootstrap_source.contains("PresentedTerminalFrame::Native(frame)"),
         "bootstrap should consume native terminal frames from the presenter seam"
+    );
+    assert!(
+        bootstrap_source.contains("PresentedTerminalFrame::Bitmap(frame)"),
+        "bootstrap should keep consuming bitmap terminal frames for the software compatibility wrapper"
     );
     assert!(
         !bootstrap_source.contains("frame_token: u64::try_from(surface.seqno)"),
@@ -2434,6 +2438,37 @@ fn select_terminal_welcome_span(app: &AppWindow) {
     });
     app.window().dispatch_event(WindowEvent::PointerReleased {
         position: selection_end,
+        button: PointerEventButton::Left,
+    });
+}
+
+fn drag_terminal_padding_into_grid(app: &AppWindow) {
+    let drag_start = LogicalPosition::new(
+        app.get_layout_workspace_session_native_surface_x() - 4.0,
+        app.get_layout_titlebar_height()
+            + app.get_layout_workspace_session_native_surface_y()
+            + (app.get_workspace_session_cell_height() * 0.5),
+    );
+    let drag_end = LogicalPosition::new(
+        app.get_layout_workspace_session_native_surface_x()
+            + (app.get_workspace_session_cell_width() * 10.5),
+        app.get_layout_titlebar_height()
+            + app.get_layout_workspace_session_native_surface_y()
+            + (app.get_workspace_session_cell_height() * 0.5),
+    );
+
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: drag_start,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: drag_start,
+        button: PointerEventButton::Left,
+    });
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: drag_end,
+    });
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: drag_end,
         button: PointerEventButton::Left,
     });
 }
@@ -6894,6 +6929,53 @@ fn workspace_terminal_selection_keeps_native_frame_contract_active() {
     );
     assert_ne!(before, 0, "native terminal projection should publish a retained frame token before selection");
     assert_ne!(after, 0, "native terminal projection should keep a retained frame token after selection");
+}
+
+#[test]
+fn workspace_terminal_padding_drag_does_not_start_selection_inside_the_grid() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    drag_terminal_padding_into_grid(&app);
+    settle_terminal_projection();
+
+    assert!(
+        !app.get_workspace_session_selection_active(),
+        "pointer drags that start in the terminal padding should not be clamped into column 0 because that makes the selection model feel offset from the rendered grid"
+    );
+}
+
+#[test]
+fn opening_right_panel_clamps_terminal_surface_width_before_pty_resize_roundtrip() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    let before = app.get_layout_workspace_session_native_surface_width();
+
+    app.invoke_open_sftp_panel_requested();
+
+    assert!(
+        app.get_effective_show_right_panel(),
+        "opening the SFTP panel should immediately toggle the right-panel layout state"
+    );
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() < before,
+        "terminal surface width should clamp to the shrunken content viewport immediately instead of waiting for a later PTY resize roundtrip, otherwise the scene-image path flashes and hit-testing drifts under the right panel"
+    );
 }
 
 #[test]

@@ -3,10 +3,14 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
+use slint::ComponentHandle;
 
 use crate::AppWindow;
 #[cfg(target_os = "windows")]
 use crate::app::ssh::runtime::TerminalCursorShape;
+use crate::app::terminal_renderer::{
+    NativeTerminalSurfaceDiagnostics, NativeTerminalSurfaceDrawCounters,
+};
 use crate::app::terminal_renderer::wgpu_renderer::{
     PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw,
 };
@@ -17,7 +21,7 @@ use super::backend::{
 };
 
 #[cfg(target_os = "windows")]
-use windows::Win32::Foundation::{D2DERR_RECREATE_TARGET, HWND};
+use windows::Win32::Foundation::{D2DERR_RECREATE_TARGET, RECT};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
@@ -25,12 +29,18 @@ use windows::Win32::Graphics::Direct2D::Common::{
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-    D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_HWND_RENDER_TARGET_PROPERTIES,
-    D2D1_OPACITY_MASK_CONTENT_GRAPHICS, D2D1_PRESENT_OPTIONS_NONE, D2D1_RENDER_TARGET_PROPERTIES,
-    D2D1CreateFactory, ID2D1Bitmap, ID2D1Factory, ID2D1HwndRenderTarget, ID2D1SolidColorBrush,
+    D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED,
+    D2D1_OPACITY_MASK_CONTENT_GRAPHICS, D2D1_RENDER_TARGET_PROPERTIES, D2D1CreateFactory,
+    ID2D1Bitmap, ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush,
 };
 #[cfg(target_os = "windows")]
+use windows::Win32::Graphics::Gdi::HDC;
+#[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Foundation::HWND as SysHwnd;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
 
 #[derive(Default)]
 pub struct WindowsD2DFactoryState {
@@ -41,11 +51,15 @@ pub struct WindowsD2DFactoryState {
 
 pub struct WindowsHwndRenderTargetState {
     pub hwnd: isize,
-    pub width_px: u32,
-    pub height_px: u32,
     pub generation: u64,
     #[cfg(target_os = "windows")]
-    render_target: ID2D1HwndRenderTarget,
+    render_target: ID2D1DCRenderTarget,
+}
+
+#[derive(Default)]
+pub struct WindowsBoundDcState {
+    pub hwnd: isize,
+    pub hdc: isize,
 }
 
 #[derive(Default)]
@@ -87,9 +101,12 @@ pub struct WindowsColorGlyphBitmapState {
 
 #[derive(Default)]
 pub struct WindowsNativeSurfaceState {
-    pub hwnd: Option<isize>,
+    pub attached: bool,
+    pub host_hwnd: Option<isize>,
+    pub window_rect: NativeTerminalSurfaceRect,
     pub rect: NativeTerminalSurfaceRect,
     pub retained_frame: Option<RetainedNativeTerminalSurfaceFrame>,
+    pub bound_dc: Option<WindowsBoundDcState>,
     pub d2d_factory: Option<WindowsD2DFactoryState>,
     pub hwnd_render_target: Option<WindowsHwndRenderTargetState>,
     pub render_target_generation: u64,
@@ -106,11 +123,24 @@ pub struct WindowsNativeSurfaceState {
     pub last_drawn_underline_runs: usize,
     pub last_drawn_cursor_overlay_visible: bool,
     pub last_drawn_ime_preview_active: bool,
+    pub last_prepared_frame_token: u64,
     pub last_presented_frame_token: u64,
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 impl WindowsNativeSurfaceState {
+    fn draw_counters(&self) -> NativeTerminalSurfaceDrawCounters {
+        NativeTerminalSurfaceDrawCounters {
+            background_runs: self.last_drawn_background_runs,
+            monochrome_glyphs: self.last_drawn_monochrome_glyphs,
+            color_glyphs: self.last_drawn_color_glyphs,
+            selection_rects: self.last_drawn_selection_rects,
+            underline_runs: self.last_drawn_underline_runs,
+            cursor_overlay_visible: self.last_drawn_cursor_overlay_visible,
+            ime_preview_active: self.last_drawn_ime_preview_active,
+        }
+    }
+
     fn mark_render_target_dirty(&mut self) {
         self.render_target_dirty = true;
     }
@@ -155,39 +185,25 @@ impl WindowsNativeSurfaceState {
 
     #[cfg(target_os = "windows")]
     fn try_ensure_hwnd_render_target(&mut self) -> Result<()> {
-        let Some(hwnd) = self.hwnd else {
+        let Some(hwnd) = self.host_hwnd else {
             self.clear_device_resources();
             return Ok(());
         };
-        let Some((width_px, height_px)) = self.render_target_size_px() else {
+        if self.render_target_size_px().is_none() {
             self.clear_device_resources();
             return Ok(());
-        };
+        }
 
         self.ensure_d2d_factory();
         if self.d2d_factory.is_none() {
             return Ok(());
         }
 
-        if let Some(target_state) = self.hwnd_render_target.as_mut() {
-            if target_state.hwnd == hwnd {
-                if target_state.width_px != width_px || target_state.height_px != height_px {
-                    let size = D2D_SIZE_U {
-                        width: width_px,
-                        height: height_px,
-                    };
-                    if let Err(err) = unsafe { target_state.render_target.Resize(&size) } {
-                        if err.code() == D2DERR_RECREATE_TARGET {
-                            self.clear_device_resources();
-                        }
-                        return Err(err.into());
-                    }
-                    target_state.width_px = width_px;
-                    target_state.height_px = height_px;
-                }
-                self.render_target_dirty = false;
-                return Ok(());
-            }
+        if let Some(target_state) = self.hwnd_render_target.as_ref()
+            && target_state.hwnd == hwnd
+            && !self.render_target_dirty
+        {
+            return Ok(());
         }
 
         if self.render_target_dirty || self.hwnd_render_target.is_none() {
@@ -206,25 +222,10 @@ impl WindowsNativeSurfaceState {
                 dpiY: 96.0,
                 ..Default::default()
             };
-            let hwnd_render_target_properties = D2D1_HWND_RENDER_TARGET_PROPERTIES {
-                hwnd: HWND(hwnd as *mut _),
-                pixelSize: D2D_SIZE_U {
-                    width: width_px,
-                    height: height_px,
-                },
-                presentOptions: D2D1_PRESENT_OPTIONS_NONE,
-            };
-            let render_target = unsafe {
-                factory.CreateHwndRenderTarget(
-                    &render_target_properties,
-                    &hwnd_render_target_properties,
-                )
-            }?;
+            let render_target = unsafe { factory.CreateDCRenderTarget(&render_target_properties) }?;
             self.render_target_generation = self.render_target_generation.saturating_add(1);
             self.hwnd_render_target = Some(WindowsHwndRenderTargetState {
                 hwnd,
-                width_px,
-                height_px,
                 generation: self.render_target_generation,
                 render_target,
             });
@@ -235,6 +236,7 @@ impl WindowsNativeSurfaceState {
     }
 
     fn clear_device_resources(&mut self) {
+        self.release_bound_dc();
         self.hwnd_render_target = None;
         self.render_target_dirty = true;
         for brush in self.d2d_brushes.values_mut() {
@@ -267,6 +269,20 @@ impl WindowsNativeSurfaceState {
         self.last_drawn_underline_runs = 0;
         self.last_drawn_cursor_overlay_visible = false;
         self.last_drawn_ime_preview_active = false;
+    }
+
+    fn release_bound_dc(&mut self) {
+        #[cfg(target_os = "windows")]
+        if let Some(bound_dc) = self.bound_dc.take() {
+            unsafe {
+                ReleaseDC(bound_dc.hwnd as SysHwnd, bound_dc.hdc as _);
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            self.bound_dc = None;
+        }
     }
 
     fn render_target_size_px(&self) -> Option<(u32, u32)> {
@@ -801,7 +817,7 @@ impl WindowsNativeSurfaceState {
     }
 
     #[cfg(target_os = "windows")]
-    fn render_target(&self) -> Option<ID2D1HwndRenderTarget> {
+    fn render_target(&self) -> Option<ID2D1DCRenderTarget> {
         self.hwnd_render_target
             .as_ref()
             .map(|state| state.render_target.clone())
@@ -840,6 +856,35 @@ impl WindowsNativeSurfaceState {
         let Some(render_target) = self.render_target() else {
             return false;
         };
+        let Some(host_hwnd) = self.host_hwnd else {
+            return false;
+        };
+        let Some(bind_rect) = self.window_bind_rect() else {
+            return false;
+        };
+        self.release_bound_dc();
+        let hdc = unsafe { GetDC(host_hwnd as SysHwnd) };
+        if hdc.is_null() {
+            return false;
+        }
+        if let Err(err) = unsafe { render_target.BindDC(HDC(hdc.cast()), &bind_rect) } {
+            tracing::warn!(
+                target: "app.terminal",
+                error = %err,
+                "failed to bind Direct2D DC render target to host window DC"
+            );
+            unsafe {
+                ReleaseDC(host_hwnd as SysHwnd, hdc);
+            }
+            if err.code() == D2DERR_RECREATE_TARGET {
+                self.clear_device_resources();
+            }
+            return false;
+        }
+        self.bound_dc = Some(WindowsBoundDcState {
+            hwnd: host_hwnd,
+            hdc: hdc as isize,
+        });
         let clip_rect = terminal_clip_rect(self.rect);
         unsafe {
             render_target.BeginDraw();
@@ -850,14 +895,16 @@ impl WindowsNativeSurfaceState {
     }
 
     #[cfg(target_os = "windows")]
-    fn end_frame(&mut self) {
+    fn end_frame(&mut self) -> bool {
         let Some(render_target) = self.render_target() else {
-            return;
+            self.release_bound_dc();
+            return false;
         };
         unsafe {
             render_target.PopAxisAlignedClip();
         }
         if let Err(err) = unsafe { render_target.EndDraw(None, None) } {
+            self.release_bound_dc();
             if err.code() == D2DERR_RECREATE_TARGET {
                 self.clear_device_resources();
             } else {
@@ -867,6 +914,37 @@ impl WindowsNativeSurfaceState {
                     "failed to finish Direct2D draw pass for native terminal surface"
                 );
             }
+            return false;
+        }
+        self.release_bound_dc();
+        true
+    }
+
+    #[cfg(target_os = "windows")]
+    fn window_bind_rect(&self) -> Option<RECT> {
+        let right = self.window_rect.x.checked_add(self.window_rect.width)?;
+        let bottom = self.window_rect.y.checked_add(self.window_rect.height)?;
+        (self.window_rect.width > 0 && self.window_rect.height > 0).then_some(RECT {
+            left: self.window_rect.x,
+            top: self.window_rect.y,
+            right,
+            bottom,
+        })
+    }
+
+    fn sync_host_surface_rect(&mut self) {
+        if self.host_hwnd.is_none() || self.window_rect.width <= 0 || self.window_rect.height <= 0 {
+            self.rect = NativeTerminalSurfaceRect::default();
+        } else {
+            self.rect = NativeTerminalSurfaceRect {
+                x: 0,
+                y: 0,
+                width: self.window_rect.width,
+                height: self.window_rect.height,
+            };
+        }
+        if let Some(retained_frame) = self.retained_frame.as_mut() {
+            retained_frame.rect = self.rect;
         }
     }
 }
@@ -874,33 +952,75 @@ impl WindowsNativeSurfaceState {
 #[derive(Default)]
 pub struct WindowsNativeSurfaceBackend {
     state: WindowsNativeSurfaceState,
+    host_window: Option<slint::Weak<AppWindow>>,
 }
 
 impl WindowsNativeSurfaceBackend {
     fn resolve_host_hwnd(window: &AppWindow) -> Option<isize> {
         resolve_host_window_hwnd(window)
     }
+
+    fn resolve_host_hwnd_if_needed(&mut self) {
+        let next_host_hwnd = self
+            .host_window
+            .as_ref()
+            .and_then(|window| window.upgrade())
+            .and_then(|window| Self::resolve_host_hwnd(&window));
+
+        if next_host_hwnd != self.state.host_hwnd {
+            self.state.clear_device_resources();
+            self.state.host_hwnd = next_host_hwnd;
+        }
+
+        self.state.sync_host_surface_rect();
+    }
 }
 
 impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
     fn attach(&mut self, window: &AppWindow) -> Result<()> {
-        self.state.hwnd = Self::resolve_host_hwnd(window);
+        self.state.attached = true;
+        self.host_window = Some(window.as_weak());
+        self.resolve_host_hwnd_if_needed();
         self.state.mark_render_target_dirty();
         Ok(())
     }
 
     fn update_surface_rect(&mut self, rect: NativeTerminalSurfaceRect) {
-        if self.state.rect != rect {
-            self.state.rect = rect;
-            self.state.mark_render_target_dirty();
+        if !self.state.attached {
+            return;
+        }
+        if self.state.window_rect != rect {
+            self.state.window_rect = rect;
+            self.resolve_host_hwnd_if_needed();
         }
     }
 
     fn update_frame(&mut self, frame: Option<RetainedNativeTerminalSurfaceFrame>) {
-        self.state.retained_frame = frame;
+        if !self.state.attached {
+            return;
+        }
+        self.resolve_host_hwnd_if_needed();
+        self.state.last_prepared_frame_token = frame
+            .as_ref()
+            .map(|retained_frame| retained_frame.frame.frame_token)
+            .unwrap_or_default();
+        self.state.retained_frame = frame.map(|mut retained_frame| {
+            retained_frame.rect = self.state.rect;
+            retained_frame
+        });
     }
 
     fn present(&mut self) {
+        if !self.state.attached {
+            return;
+        }
+        self.resolve_host_hwnd_if_needed();
+        if self.state.host_hwnd.is_none() {
+            return;
+        }
+        if self.state.rect.width <= 0 || self.state.rect.height <= 0 {
+            return;
+        }
         self.state.ensure_hwnd_render_target();
         let Some(frame) = self.state.retained_frame.clone() else {
             return;
@@ -921,22 +1041,41 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         self.state.draw_ime_preview_overlay(frame);
 
         #[cfg(target_os = "windows")]
-        self.state.end_frame();
+        if self.state.end_frame() {
+            self.state.last_presented_frame_token = frame.frame.frame_token;
+        }
 
-        self.state.last_presented_frame_token = frame.frame.frame_token;
+        #[cfg(not(target_os = "windows"))]
+        {
+            self.state.last_presented_frame_token = frame.frame.frame_token;
+        }
+    }
+
+    fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics {
+        NativeTerminalSurfaceDiagnostics {
+            hwnd: self.state.host_hwnd,
+            render_target_generation: self.state.render_target_generation,
+            last_prepared_frame_token: self.state.last_prepared_frame_token,
+            last_presented_frame_token: self.state.last_presented_frame_token,
+            draw_counters: self.state.draw_counters(),
+        }
     }
 
     fn detach(&mut self) {
+        self.state.attached = false;
         self.state.retained_frame = None;
         self.state.clear_device_resources();
         self.state.d2d_brushes.clear();
         self.state.monochrome_glyph_bitmaps.clear();
         self.state.color_glyph_bitmaps.clear();
         self.state.d2d_factory = None;
-        self.state.hwnd = None;
+        self.state.host_hwnd = None;
+        self.host_window = None;
+        self.state.window_rect = NativeTerminalSurfaceRect::default();
         self.state.rect = NativeTerminalSurfaceRect::default();
         self.state.render_target_generation = 0;
         self.state.render_target_dirty = false;
+        self.state.last_prepared_frame_token = 0;
         self.state.last_presented_frame_token = 0;
     }
 }

@@ -17,6 +17,7 @@ pub mod terminal_font;
 pub mod terminal_layout;
 pub mod terminal_model;
 pub mod terminal_presenter;
+pub mod terminal_scene_image;
 pub mod terminal_renderer;
 pub mod terminal_semantic;
 pub mod terminal_theme;

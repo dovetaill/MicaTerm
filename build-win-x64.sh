@@ -18,6 +18,7 @@ Default target:
   requires a Windows MSVC shell or Git Bash environment
   packaged renderer: winit-skia-software
   packaged terminal renderer: native
+  packaged native present path: rendering-notifier
 
 Linux-host Windows GNU package:
   ./build-win-x64-software.sh
@@ -60,6 +61,7 @@ export CARGO_FEATURES="slint-renderer-skia,terminal-native-renderer"
 export MICA_TERM_BUILD_FLAVOR="windows-mainline"
 export MICA_TERM_PACKAGE_RENDERER="skia-software"
 export MICA_TERM_PACKAGE_TERMINAL_RENDERER="native"
+export MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH="rendering-notifier"
 export MICA_TERM_PACKAGE_PORTABLE=1
 export PACKAGE_FLAVOR_SUFFIX="-skia"
 

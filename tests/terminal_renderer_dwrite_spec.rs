@@ -1,6 +1,7 @@
 //! Source-level contract coverage for the Windows native terminal renderer stack.
 
 use std::fs;
+use std::path::Path;
 
 #[test]
 fn windows_dwrite_font_backend_source_exposes_rasterization_contract() {
@@ -23,6 +24,17 @@ fn windows_dwrite_font_backend_source_exposes_rasterization_contract() {
         source.contains("fn rasterize_glyph("),
         "windows font backend should expose rasterization through the shared backend trait"
     );
+    assert!(
+        (source.contains("Source::ColorOutline(0)")
+            && source.contains("Source::ColorBitmap(StrikeWith::BestFit)"))
+            || (source.contains("TerminalEmojiRenderer")
+                && source.contains("rasterize_cluster")),
+        "windows font backend should use either inline swash color glyph sources or the shared emoji rasterizer for the real emoji path"
+    );
+    assert!(
+        !source.contains("let accent = ((glyph_id % 127) as u8).saturating_add(96);"),
+        "windows font backend should stop synthesizing placeholder accent-colored emoji squares"
+    );
 }
 
 #[test]
@@ -31,6 +43,10 @@ fn windows_text_engine_source_exposes_fallback_and_feature_contracts() {
         fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
     let font_mod_source =
         fs::read_to_string("src/app/terminal_font/mod.rs").expect("read font mod");
+    let locator_source =
+        fs::read_to_string("src/app/terminal_font/windows_locator.rs").expect("read locator");
+    let fallback_source =
+        fs::read_to_string("src/app/terminal_font/windows_fallback.rs").expect("read fallback");
     let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
         .expect("read windows dwrite font backend");
     let shaper_source =
@@ -57,6 +73,14 @@ fn windows_text_engine_source_exposes_fallback_and_feature_contracts() {
         "font backend should expose glyph-run shaping that is richer than a single bundled-font output"
     );
     assert!(
+        font_backend_source.contains("source_byte_range"),
+        "shaped glyph-run contracts should carry source byte ranges so layout can remap fallback subruns onto terminal cells"
+    );
+    assert!(
+        font_backend_source.contains("Feature::from_str"),
+        "font backend should parse OpenType feature tags into rustybuzz features before shaping"
+    );
+    assert!(
         font_backend_source.contains("fn rasterize_color_glyph("),
         "font backend should expose an explicit color glyph raster contract"
     );
@@ -67,12 +91,58 @@ fn windows_text_engine_source_exposes_fallback_and_feature_contracts() {
         "terminal font module should re-export the richer Windows text engine contracts"
     );
     assert!(
+        font_mod_source.contains("pub mod windows_locator;"),
+        "terminal font module should declare the Windows locator module"
+    );
+    assert!(
+        font_mod_source.contains("pub mod windows_fallback;"),
+        "terminal font module should declare the Windows fallback module"
+    );
+    assert!(
+        font_mod_source.contains("WindowsFontLocator")
+            && font_mod_source.contains("WindowsFontFallbackResolver"),
+        "terminal font module should re-export the Windows locator and fallback helpers"
+    );
+    assert!(
+        locator_source.contains("pub struct WindowsFontLocator"),
+        "Windows text stack should define a dedicated font locator"
+    );
+    assert!(
+        locator_source.contains("load_system_fonts"),
+        "Windows font locator should load system fonts instead of relying only on a hard-coded family list"
+    );
+    assert!(
+        fallback_source.contains("pub struct WindowsFontFallbackResolver"),
+        "Windows text stack should define a dedicated fallback resolver"
+    );
+    assert!(
+        fallback_source.contains("discover_fallback_families"),
+        "Windows fallback resolver should expose a helper that returns multiple families for mixed text"
+    );
+    assert!(
         dwrite_source.contains("discover_fallback_chain"),
         "Windows text backend should expose a fallback-chain discovery helper"
     );
     assert!(
+        dwrite_source.contains("WindowsFontLocator"),
+        "Windows text backend should use the locator helper instead of hard-coding fallback families inline"
+    );
+    assert!(
+        dwrite_source.contains("WindowsFontFallbackResolver"),
+        "Windows text backend should use the fallback resolver helper instead of building fallback families inline"
+    );
+    assert!(
         dwrite_source.contains("OpenTypeFeatureSet"),
         "Windows text backend should accept OpenType feature configuration"
+    );
+    assert!(
+        dwrite_source.contains("TerminalEmojiRenderer")
+            && dwrite_source.contains("rasterize_cluster"),
+        "Windows text backend should reuse the shared emoji rasterizer for real color glyph sprites"
+    );
+    assert!(
+        !dwrite_source.contains("let accent = ((glyph_id % 127) as u8).saturating_add(96)"),
+        "Windows color glyph rasterization should stop synthesizing a flat placeholder color block from glyph ids"
     );
     assert!(
         dwrite_source.contains("allow_ligatures"),
@@ -93,6 +163,10 @@ fn windows_text_engine_source_exposes_fallback_and_feature_contracts() {
     assert!(
         shaper_source.contains("resolved_face"),
         "terminal glyph runs should record which fallback face resolved each run"
+    );
+    assert!(
+        shaper_source.contains("source_byte_range") && shaper_source.contains("clusters"),
+        "terminal shaper should remap fallback subrun byte ranges back onto segmented terminal clusters"
     );
 }
 
@@ -160,7 +234,7 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
 
     assert!(
         atlas_source.contains("const TERMINAL_FONT_SIZE_PX: f32 = 18.0;"),
-        "atlas renderer should slightly increase bundled font size so the regular-weight Sarasa strokes do not read too thin"
+        "atlas renderer should keep the bundled Fusion terminal font at the tuned 18px size instead of slipping back to a thinner-looking default"
     );
     assert!(
         atlas_source.contains("const MIN_CELL_WIDTH_PX: u32 = 8;"),
@@ -271,8 +345,8 @@ fn terminal_presenter_threads_presentable_native_frame_state() {
         "bootstrap should thread the presentable native frame state instead of only consuming the frame token"
     );
     assert!(
-        bootstrap_source.contains("surface.update_frame_state(frame);"),
-        "bootstrap should still hand the full native frame state to the retained native surface bridge"
+        bootstrap_source.contains("surface.present(frame);"),
+        "bootstrap should still hand the full native frame state to the present-driver aware native surface bridge"
     );
 }
 
@@ -482,21 +556,20 @@ fn windows_presenter_installation_prefers_native_while_shipping_contract_moves_t
         "runtime profile docs should make the Windows presenter stack target a native-only shipping contract"
     );
     assert!(
-        runtime_profile_source
-            .contains("Transitional non-shipping software profile while native Linux terminal surfaces are still landing."),
-        "runtime profile docs should describe the Linux-host software package as transitional while native Linux surfaces land"
+        runtime_profile_source.contains("native-first Windows software profile"),
+        "runtime profile docs should describe the Linux-host software package as a native-first software path"
     );
     assert!(
         bootstrap_source.contains("build_native_terminal_presenter()"),
-        "workspace terminal presenter installation should construct the native presenter directly in the native-only pipeline"
+        "workspace terminal presenter installation should still construct the native presenter for mainline/native profiles"
     );
     assert!(
-        !bootstrap_source.contains("falling back to bitmap presenter"),
-        "bitmap presenter fallback logging should disappear once the bitmap pipeline is removed"
+        bootstrap_source.contains("falling back to bitmap presenter"),
+        "workspace terminal presenter installation should keep a bitmap presenter fallback log for software compatibility builds"
     );
     assert!(
-        !bootstrap_source.contains("BitmapAtlasPresenter"),
-        "bootstrap should not reference the bitmap presenter once the terminal host becomes native-only"
+        bootstrap_source.contains("BitmapAtlasPresenter"),
+        "bootstrap should keep referencing the bitmap presenter as the internal native-renderer fallback path"
     );
 }
 
@@ -528,6 +601,10 @@ fn windows_platform_surface_backend_source_exposes_hwnd_and_lifecycle_contract()
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows platform backend");
+    let diagnostics_source = fs::read_to_string("src/app/terminal_renderer/diagnostics.rs")
+        .expect("read diagnostics source");
+    let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
+        .expect("read native surface source");
     let windows_frame_source =
         fs::read_to_string("src/app/windows_frame.rs").expect("read windows frame interop");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
@@ -562,9 +639,65 @@ fn windows_platform_surface_backend_source_exposes_hwnd_and_lifecycle_contract()
         "Windows backend should expose a detach hook"
     );
     assert!(
+        diagnostics_source.contains("pub struct NativeTerminalSurfaceDiagnostics"),
+        "terminal renderer should define a diagnostics snapshot contract for native surface runtime state"
+    );
+    assert!(
+        diagnostics_source.contains("pub struct NativeTerminalSurfaceDrawCounters"),
+        "terminal renderer should define explicit draw counters for diagnostics snapshots"
+    );
+    assert!(
+        diagnostics_source.contains("pub hwnd: Option<isize>"),
+        "diagnostics snapshots should record the attached host HWND"
+    );
+    assert!(
+        diagnostics_source.contains("pub render_target_generation: u64"),
+        "diagnostics snapshots should record render-target generation"
+    );
+    assert!(
+        diagnostics_source.contains("pub last_prepared_frame_token: u64"),
+        "diagnostics snapshots should record the latest prepared frame token"
+    );
+    assert!(
+        diagnostics_source.contains("pub last_presented_frame_token: u64"),
+        "diagnostics snapshots should record the latest presented frame token"
+    );
+    assert!(
+        diagnostics_source.contains("pub draw_counters: NativeTerminalSurfaceDrawCounters"),
+        "diagnostics snapshots should group draw counters into a dedicated payload"
+    );
+    assert!(
+        windows_backend_source.contains("fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics"),
+        "Windows backend should expose a diagnostics snapshot helper"
+    );
+    assert!(
+        windows_backend_source.contains("last_prepared_frame_token"),
+        "Windows backend should retain the last prepared frame token for diagnostics"
+    );
+    assert!(
+        windows_backend_source.contains("NativeTerminalSurfaceDrawCounters"),
+        "Windows backend should build diagnostics draw counters from the last draw pass"
+    );
+    assert!(
+        native_surface_source.contains("latest_diagnostics: NativeTerminalSurfaceDiagnostics"),
+        "native surface should retain the latest diagnostics snapshot"
+    );
+    assert!(
+        native_surface_source.contains("pub fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics"),
+        "native surface should expose a diagnostics snapshot getter"
+    );
+    assert!(
+        native_surface_source.contains("state.latest_diagnostics = state.backend.diagnostics_snapshot();"),
+        "native surface should refresh cached diagnostics after backend state transitions"
+    );
+    assert!(
         windows_frame_source
             .contains("pub fn resolve_host_window_hwnd(window: &AppWindow) -> Option<isize>"),
         "windows_frame should expose a reusable HWND resolution helper for the terminal backend"
+    );
+    assert!(
+        windows_frame_source.contains("pub fn native_surface_diagnostics_hwnd("),
+        "windows_frame should expose a helper that reads HWND data from native surface diagnostics snapshots"
     );
     assert!(
         bootstrap_source.contains("NativeTerminalSurface::attach(window)"),
@@ -633,26 +766,50 @@ fn windows_backend_source_consumes_retained_color_glyph_and_overlay_payloads() {
 }
 
 #[test]
-fn native_terminal_pipeline_sources_remove_bitmap_raster_scale_hooks() {
+fn windows_backend_source_hardens_device_loss_and_detach_present_contract() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+
+    assert!(
+        windows_backend_source.contains("if self.state.host_hwnd.is_none() {\n            return;\n        }")
+            && windows_backend_source.contains("factory.CreateDCRenderTarget(&render_target_properties)")
+            && windows_backend_source.contains("render_target.BindDC("),
+        "windows backend present path should bail out once the host HWND disappears and otherwise bind Direct2D to the host window DC instead of depending on a separate child HWND"
+    );
+    assert!(
+        windows_backend_source.contains("fn end_frame(&mut self) -> bool"),
+        "windows backend should report whether the Direct2D draw pass actually completed so lifecycle bookkeeping can ignore device-loss frames"
+    );
+    assert!(
+        windows_backend_source.contains(
+            "if self.state.end_frame() {\n            self.state.last_presented_frame_token = frame.frame.frame_token;\n        }"
+        ),
+        "windows backend should advance last_presented_frame_token only after EndDraw succeeds"
+    );
+}
+
+#[test]
+fn native_terminal_pipeline_sources_keep_bitmap_raster_scale_hooks() {
     let presenter_source =
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
-        !presenter_source.contains("BitmapAtlasPresenter"),
-        "terminal presenter seam should remove the bitmap atlas presenter from the native-only pipeline"
+        presenter_source.contains("BitmapAtlasPresenter"),
+        "terminal presenter seam should keep the bitmap atlas presenter for the software compatibility pipeline"
     );
     assert!(
-        !presenter_source.contains("PresentedTerminalFrame::Bitmap"),
-        "terminal presenter seam should remove the bitmap frame variant once only retained native frames remain"
+        presenter_source.contains("PresentedTerminalFrame::Bitmap"),
+        "terminal presenter seam should keep the bitmap frame variant for the software compatibility pipeline"
     );
     assert!(
-        !presenter_source.contains("fn set_raster_scale"),
-        "terminal presenter seam should remove the bitmap raster scale hook once the atlas image path is deleted"
+        presenter_source.contains("fn set_raster_scale"),
+        "terminal presenter seam should keep the bitmap raster scale hook so the atlas image path can respect HiDPI scale"
     );
     assert!(
-        !bootstrap_source.contains("presenter.set_raster_scale(window.window().scale_factor())"),
-        "workspace terminal sync should stop pushing Slint window scale into the deleted bitmap raster path"
+        bootstrap_source.contains("presenter.set_raster_scale(window.window().scale_factor())"),
+        "workspace terminal sync should keep pushing Slint window scale into the bitmap raster path"
     );
 }
 
@@ -703,6 +860,40 @@ fn atlas_source_keeps_fractional_positioning_without_regular_weight_embolden() {
     assert!(
         atlas_source.contains("split_fractional_offset"),
         "terminal bitmap glyph placement should preserve fractional offsets before sending them into the hinted grayscale rasterizer"
+    );
+}
+
+#[test]
+fn windows_native_renderer_source_threads_fractional_x_phase_into_raster_requests() {
+    let backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let dwrite_source =
+        fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite backend");
+    let atlas_source =
+        fs::read_to_string("src/app/terminal_renderer/atlas.rs").expect("read glyph atlas");
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read native renderer");
+
+    assert!(
+        backend_source.contains("fractional_offset_x_bits"),
+        "glyph raster requests should carry a fractional x phase bucket so hinted glyph rasters stop being incorrectly reused across different subpixel positions"
+    );
+    assert!(
+        backend_source.contains("raster_request_with_fractional_offset_x"),
+        "loaded fonts should expose a dedicated raster request helper for fractional x phases instead of forcing native-quality glyph rendering through whole-pixel origins"
+    );
+    assert!(
+        dwrite_source.contains(".offset(SwashVector::new(request.fractional_offset_x(), 0.0))"),
+        "windows dwrite rasterization should feed the renderer-provided fractional x phase into swash so hinted grayscale glyphs stay sharp on scene-image and native paths"
+    );
+    assert!(
+        renderer_source.contains("split_fractional_offset")
+            && renderer_source.contains("raster_request_with_fractional_offset_x"),
+        "native renderer should preserve fractional x positioning long enough to build phase-aware glyph raster requests"
+    );
+    assert!(
+        atlas_source.contains("fractional_offset_x_bits"),
+        "glyph atlas keys should partition monochrome glyph cache entries by fractional x phase so the renderer does not reuse the wrong hinted bitmap"
     );
 }
 
@@ -887,8 +1078,7 @@ fn terminal_font_backend_owns_rasterization_contract_and_renderer_delegates_to_i
         "native renderer should depend on the font backend trait so the rendering seam can survive further backend extraction work"
     );
     assert!(
-        renderer_source
-            .contains("fonts.rasterize_glyph(&frame.font, glyph.glyph_id, run.style.bold)?"),
+        renderer_source.contains("fonts.rasterize_glyph(&frame.font, request)?"),
         "native renderer should rasterize through the shared font backend contract"
     );
     assert!(
@@ -1067,6 +1257,27 @@ fn font_backend_source_exposes_bitmap_render_profile_defaults() {
 }
 
 #[test]
+fn windows_scene_image_presenter_uses_bitmap_tuned_font_loading_contract() {
+    let dwrite_source =
+        fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite backend");
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
+
+    assert!(
+        dwrite_source.contains("pub fn load_scene_image_font"),
+        "windows dwrite backend should expose a dedicated scene-image font loading entrypoint so bitmap-composited glyph tuning does not get forced through the direct-native profile"
+    );
+    assert!(
+        dwrite_source.contains("FontRenderProfile::bitmap_default()"),
+        "scene-image font loading should reuse the bitmap render profile because the final glyph masks are composited back into the Slint scene instead of being scanned out directly"
+    );
+    assert!(
+        presenter_source.contains("font_system.load_scene_image_font(&request)?"),
+        "Windows scene-image presenter should load fonts through the bitmap-tuned scene-image entrypoint so software builds stop using the direct-native glyph mask profile"
+    );
+}
+
+#[test]
 fn windows_native_font_backend_source_switches_to_hinted_swash_rasterization() {
     let dwrite_source =
         fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite backend");
@@ -1090,5 +1301,76 @@ fn windows_native_font_backend_source_switches_to_hinted_swash_rasterization() {
     assert!(
         dwrite_source.contains("SwashFormat::Alpha"),
         "Windows native font backend should keep the native path on grayscale glyph masks instead of LCD subpixel masks"
+    );
+}
+
+#[test]
+fn native_font_metrics_source_exposes_explicit_baseline_contract() {
+    let backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let dwrite_source =
+        fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite backend");
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read native renderer");
+
+    assert!(
+        backend_source.contains("pub baseline_px: f32"),
+        "font metrics should expose an explicit baseline_px field so native and scene-image presentation stop reverse-engineering row baselines from raw ascent metrics"
+    );
+    assert!(
+        dwrite_source.contains("let baseline_px =") && dwrite_source.contains("baseline_px,"),
+        "windows dwrite font loading should compute and store an explicit row baseline instead of leaving the renderer to infer one from ascent rounding"
+    );
+    assert!(
+        renderer_source.contains("frame.font.metrics().baseline_px.round() as i32"),
+        "native renderer should read the loaded-font baseline contract directly so hinted glyph placement stays stable across native and scene-image composition paths"
+    );
+    assert!(
+        !renderer_source.contains("frame.font.metrics().ascent_px.round() as i32"),
+        "native renderer should stop deriving row baselines from raw ascent rounding once the font backend exposes explicit baseline metrics"
+    );
+}
+
+#[test]
+fn windows_backend_source_hardens_detach_and_device_loss_contracts() {
+    assert!(
+        Path::new("src/app/terminal_renderer/damage.rs").exists(),
+        "Task 7 should add the shared native surface damage tracker module before wiring lifecycle hardening into the Windows backend"
+    );
+
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+    let windows_frame_source =
+        fs::read_to_string("src/app/windows_frame.rs").expect("read windows frame interop");
+
+    assert!(
+        windows_backend_source.contains("pub attached: bool"),
+        "Windows backend state should retain an explicit attachment guard so detach blocks later present work"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.attached = true;"),
+        "Windows backend attach should mark the backend attached before later draw scheduling runs"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.attached = false;"),
+        "Windows backend detach should flip the attachment guard before clearing retained resources"
+    );
+    assert!(
+        windows_backend_source.contains("if !self.state.attached {"),
+        "Windows backend present and update hooks should bail out once detach or shutdown has invalidated the surface"
+    );
+    assert!(
+        windows_backend_source.contains("if err.code() == D2DERR_RECREATE_TARGET {")
+            && windows_backend_source.contains("self.clear_device_resources();"),
+        "Windows backend should clear stale Direct2D resources when target loss forces device recreation"
+    );
+    assert!(
+        windows_frame_source.contains("pub fn native_surface_is_attached("),
+        "windows_frame should expose a helper for reading attachment state from native surface diagnostics during shutdown and recovery diagnostics"
+    );
+    assert!(
+        windows_frame_source.contains("diagnostics.hwnd.is_some()"),
+        "windows_frame attachment helper should derive attachment from the latest native surface diagnostics snapshot"
     );
 }

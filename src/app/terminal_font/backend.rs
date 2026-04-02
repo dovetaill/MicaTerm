@@ -4,7 +4,9 @@ use anyhow::Result;
 #[cfg(feature = "terminal-native-renderer")]
 use anyhow::anyhow;
 #[cfg(feature = "terminal-native-renderer")]
-use rustybuzz::{BufferClusterLevel, Face, UnicodeBuffer, shape};
+use rustybuzz::{BufferClusterLevel, Face, Feature, UnicodeBuffer, shape};
+#[cfg(feature = "terminal-native-renderer")]
+use std::str::FromStr;
 
 pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = "Fusion JetBrains Maple Mono";
 
@@ -65,6 +67,7 @@ pub struct FontMetrics {
     pub ascent_px: f32,
     pub descent_px: f32,
     pub line_gap_px: f32,
+    pub baseline_px: f32,
     pub cell_width_px: f32,
     pub cell_height_px: f32,
 }
@@ -166,6 +169,16 @@ impl LoadedFont {
     }
 
     #[cfg(feature = "terminal-native-renderer")]
+    pub fn raster_request_with_fractional_offset_x(
+        &self,
+        glyph_id: u32,
+        bold: bool,
+        fractional_offset_x: f32,
+    ) -> GlyphRasterRequest {
+        GlyphRasterRequest::with_fractional_offset_x(self, glyph_id, bold, fractional_offset_x)
+    }
+
+    #[cfg(feature = "terminal-native-renderer")]
     pub(crate) fn face_key(&self) -> FontFaceKey {
         self.cache_key.face
     }
@@ -213,16 +226,31 @@ pub struct GlyphRasterRequest {
     pub font_key: LoadedFontKey,
     pub glyph_id: u32,
     pub bold: bool,
+    pub fractional_offset_x_bits: u32,
 }
 
 #[cfg(feature = "terminal-native-renderer")]
 impl GlyphRasterRequest {
     pub fn new(font: &LoadedFont, glyph_id: u32, bold: bool) -> Self {
+        Self::with_fractional_offset_x(font, glyph_id, bold, 0.0)
+    }
+
+    pub fn with_fractional_offset_x(
+        font: &LoadedFont,
+        glyph_id: u32,
+        bold: bool,
+        fractional_offset_x: f32,
+    ) -> Self {
         Self {
             font_key: font.cache_key(),
             glyph_id,
             bold,
+            fractional_offset_x_bits: normalize_fractional_offset_x(fractional_offset_x).to_bits(),
         }
+    }
+
+    pub fn fractional_offset_x(self) -> f32 {
+        f32::from_bits(self.fractional_offset_x_bits)
     }
 }
 
@@ -292,6 +320,7 @@ impl TextShapingRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShapedGlyphRun {
     pub text: String,
+    pub source_byte_range: std::ops::Range<usize>,
     pub glyphs: Vec<ShapedGlyph>,
     pub resolved_face: FontFallbackFace,
     pub feature_set: OpenTypeFeatureSet,
@@ -315,8 +344,7 @@ pub trait FontSystem {
     fn rasterize_glyph(
         &mut self,
         font: &LoadedFont,
-        glyph_id: u32,
-        bold: bool,
+        request: GlyphRasterRequest,
     ) -> Result<RasterizedGlyph>;
 
     #[cfg(feature = "terminal-native-renderer")]
@@ -344,6 +372,7 @@ pub trait FontSystem {
 
         Ok(vec![ShapedGlyphRun {
             text: request.text.clone(),
+            source_byte_range: 0..request.text.len(),
             glyphs,
             resolved_face,
             feature_set: request.feature_set.clone(),
@@ -356,6 +385,7 @@ pub trait FontSystem {
     fn rasterize_color_glyph(
         &mut self,
         _font: &LoadedFont,
+        _resolved_face: &FontFallbackFace,
         _glyph_id: u32,
     ) -> Result<Option<ColorGlyphRaster>> {
         Ok(None)
@@ -368,13 +398,31 @@ pub(crate) fn shape_text_with_rustybuzz(
     face_index: u32,
     text: &str,
 ) -> Result<Vec<ShapedGlyph>> {
+    shape_text_with_rustybuzz_features(
+        face_data,
+        face_index,
+        text,
+        &OpenTypeFeatureSet::default(),
+        true,
+    )
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+pub(crate) fn shape_text_with_rustybuzz_features(
+    face_data: &[u8],
+    face_index: u32,
+    text: &str,
+    feature_set: &OpenTypeFeatureSet,
+    allow_ligatures: bool,
+) -> Result<Vec<ShapedGlyph>> {
     let face = Face::from_slice(face_data, face_index)
         .ok_or_else(|| anyhow!("failed to parse font face index {face_index}"))?;
     let mut buffer = UnicodeBuffer::new();
     buffer.push_str(text);
     buffer.set_cluster_level(BufferClusterLevel::MonotoneGraphemes);
     buffer.guess_segment_properties();
-    let glyph_buffer = shape(&face, &[], buffer);
+    let features = rustybuzz_features(feature_set, allow_ligatures)?;
+    let glyph_buffer = shape(&face, &features, buffer);
 
     Ok(glyph_buffer
         .glyph_infos()
@@ -389,6 +437,32 @@ pub(crate) fn shape_text_with_rustybuzz(
             y_offset: position.y_offset,
         })
         .collect())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+fn rustybuzz_features(
+    feature_set: &OpenTypeFeatureSet,
+    allow_ligatures: bool,
+) -> Result<Vec<Feature>> {
+    let mut features = feature_set
+        .feature_tags
+        .iter()
+        .map(|feature_tag| {
+            Feature::from_str(feature_tag.as_str())
+                .map_err(|error| anyhow!("invalid OpenType feature tag `{feature_tag}`: {error}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    if !allow_ligatures {
+        for feature_tag in ["-liga", "-clig", "-dlig", "-hlig", "-calt"] {
+            features.push(
+                Feature::from_str(feature_tag)
+                    .map_err(|error| anyhow!("invalid OpenType feature tag `{feature_tag}`: {error}"))?,
+            );
+        }
+    }
+
+    Ok(features)
 }
 
 pub(crate) fn map_glyph_coverage_to_alpha(coverage: f32, render_profile: FontRenderProfile) -> u8 {
@@ -425,6 +499,20 @@ pub(crate) fn apply_synthetic_embolden(
             let target = &mut alpha[row_offset + x + 1];
             *target = (*target).max(boosted);
         }
+    }
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+fn normalize_fractional_offset_x(fractional_offset_x: f32) -> f32 {
+    if !fractional_offset_x.is_finite() {
+        return 0.0;
+    }
+
+    let normalized = fractional_offset_x.fract();
+    if normalized < 0.0 {
+        normalized + 1.0
+    } else {
+        normalized
     }
 }
 

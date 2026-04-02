@@ -5454,6 +5454,7 @@ dependencies = [
  "gix-credentials",
  "i-slint-backend-selector",
  "i-slint-backend-testing",
+ "i-slint-backend-winit",
  "keyring",
  "oauth2",
  "rand_core 0.6.4",

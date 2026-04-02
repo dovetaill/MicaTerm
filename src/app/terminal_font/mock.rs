@@ -1,17 +1,20 @@
-//! Test-oriented font system backed by the bundled Sarasa terminal font.
+//! Test-oriented font system backed by the bundled Fusion JetBrains Maple Mono terminal font.
 
 use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
 use anyhow::{Result, anyhow};
 
 use crate::app::terminal_font::backend::{
-    FontFaceKey, FontMetrics, FontRenderProfile, FontRequest, FontSystem, LoadedFont,
+    FontFaceKey, FontMetrics, FontRenderProfile, FontRequest, FontSystem, GlyphRasterRequest,
+    LoadedFont,
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_font::backend::{RasterizedGlyph, ShapedGlyph, shape_text_with_rustybuzz};
 #[cfg(feature = "terminal-native-renderer")]
 use ab_glyph::{Glyph, GlyphId, point};
 
-const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../../ui/fonts/SarasaTermSCNerd-Regular.ttf");
+const FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES: &[u8] = include_bytes!(
+    "../../../assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"
+);
 const DEFAULT_FACE_KEY: FontFaceKey = FontFaceKey(1);
 #[cfg(feature = "terminal-native-renderer")]
 const DEFAULT_FACE_INDEX: u32 = 0;
@@ -23,17 +26,18 @@ pub struct MockFontSystem {
 }
 
 pub fn mock_font_system() -> MockFontSystem {
-    MockFontSystem::new().expect("bundled Sarasa mock font system should initialize")
+    MockFontSystem::new().expect("bundled Fusion JetBrains Maple Mono mock font system should initialize")
 }
 
 impl MockFontSystem {
     pub fn new() -> Result<Self> {
-        let font = FontArc::try_from_slice(SARASA_FONT_BYTES)
-            .map_err(|error| anyhow!("failed to load bundled Sarasa terminal font: {error}"))?;
+        let font = FontArc::try_from_slice(FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES).map_err(
+            |error| anyhow!("failed to load bundled Fusion JetBrains Maple Mono font: {error}"),
+        )?;
         Ok(Self {
             font,
             #[cfg(feature = "terminal-native-renderer")]
-            font_bytes: SARASA_FONT_BYTES,
+            font_bytes: FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES,
         })
     }
 }
@@ -62,6 +66,7 @@ impl FontSystem for MockFontSystem {
                 ascent_px: scaled.ascent(),
                 descent_px: scaled.descent(),
                 line_gap_px: scaled.line_gap(),
+                baseline_px: scaled.ascent().ceil(),
                 cell_width_px: mono_advance.ceil(),
                 cell_height_px: line_height.ceil(),
             },
@@ -81,13 +86,13 @@ impl FontSystem for MockFontSystem {
     fn rasterize_glyph(
         &mut self,
         font: &LoadedFont,
-        glyph_id: u32,
-        _bold: bool,
+        request: GlyphRasterRequest,
     ) -> Result<RasterizedGlyph> {
         if font.face_key() != DEFAULT_FACE_KEY {
             return Err(anyhow!("unknown mock font face key: {}", font.face_key().0));
         }
 
+        let glyph_id = request.glyph_id;
         let glyph_id = u16::try_from(glyph_id)
             .map(GlyphId)
             .map_err(|_| anyhow!("glyph id {} exceeds ab_glyph u16 range", glyph_id))?;
