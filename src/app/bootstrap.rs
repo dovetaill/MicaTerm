@@ -4275,6 +4275,7 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_viewport_at_bottom(true);
         window.set_workspace_session_follow_paused(false);
         window.set_workspace_session_pending_output_lines(0);
+        window.set_workspace_session_render_mode(TerminalRenderMode::Bitmap.as_str().into());
     }
 
     if let Some(active_tab) = state.active_workspace_tab() {

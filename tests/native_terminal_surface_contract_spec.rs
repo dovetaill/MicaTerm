@@ -558,6 +558,25 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         default_fg < workspace_render_mode && pending_output < workspace_render_mode,
         "workspace surface sync should project terminal colors and follow/viewport state before flipping render_mode so the host does not briefly combine a new payload mode with stale overlay metadata"
     );
+
+    let no_surface_block = block_between(
+        &bootstrap_source,
+        "\n    } else {\n        let preset = preset_for_theme_mode(state.theme_mode);",
+        "\n    }\n\n    if let Some(active_tab) = state.active_workspace_tab() {",
+    );
+    let no_surface_clear = no_surface_block
+        .find("clear_workspace_native_terminal_frame(window);")
+        .expect("no surface clear");
+    let no_surface_render_mode = no_surface_block
+        .find("window.set_workspace_session_render_mode(TerminalRenderMode::Bitmap.as_str().into());")
+        .expect("no surface render mode reset");
+    let no_surface_pending_output = no_surface_block
+        .find("window.set_workspace_session_pending_output_lines(0);")
+        .expect("no surface pending output reset");
+    assert!(
+        no_surface_clear < no_surface_render_mode && no_surface_pending_output < no_surface_render_mode,
+        "when no terminal surface is active the host should clear retained payloads and reset viewport/follow metadata before forcing render_mode back to bitmap"
+    );
 }
 
 #[test]
