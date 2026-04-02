@@ -452,14 +452,23 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         "if let Some(surface) = state.active_workspace_terminal_surface() {",
         "if let Some(cursor) = native_cursor {",
     );
+    let workspace_surface_projection_block = block_between(
+        &bootstrap_source,
+        "if let Some(surface) = state.active_workspace_terminal_surface() {",
+        "\n    } else {\n        let preset = preset_for_theme_mode(state.theme_mode);",
+    );
+    assert!(
+        workspace_surface_projection_block.contains("let mut next_render_mode = None;"),
+        "workspace surface sync should stage the next render mode locally so frame payloads and host overlay state can be projected before the host flips modes"
+    );
     let bitmap_block = block_between(
         workspace_surface_sync_block,
         "Ok(PresentedTerminalFrame::Bitmap(frame)) => {",
         "Ok(PresentedTerminalFrame::Native(frame)) => {",
     );
-    let bitmap_render_mode = bitmap_block
+    let workspace_render_mode = workspace_surface_projection_block
         .find("window.set_workspace_session_render_mode(")
-        .expect("bitmap render mode");
+        .expect("workspace render mode");
     let bitmap_rows = bitmap_block
         .find("window.set_workspace_session_rows(i32::try_from(frame.grid_rows).unwrap_or(i32::MAX));")
         .expect("bitmap rows");
@@ -490,7 +499,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         "bitmap path should tear down any retained native surface before publishing the new scene-owned image so renderer switches do not leave a stale native child surface lingering over the host"
     );
     assert!(
-        bitmap_image < bitmap_render_mode,
+        bitmap_image < workspace_render_mode,
         "bitmap path should publish the new scene-owned image before switching render_mode so the terminal host does not briefly enter bitmap mode with stale or empty payload"
     );
 
@@ -499,9 +508,6 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         "Ok(PresentedTerminalFrame::Native(frame)) => {",
         "Err(err) => {",
     );
-    let native_render_mode = native_block
-        .find("window.set_workspace_session_render_mode(")
-        .expect("native render mode");
     let native_rows = native_block
         .find("window.set_workspace_session_rows(i32::try_from(presentable_frame.grid_rows).unwrap_or(i32::MAX));")
         .expect("native rows");
@@ -527,7 +533,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         "native path should stop blanking the scene-image payload before the retained surface is ready so bitmap-to-native switches do not flash an empty frame in the host"
     );
     assert!(
-        native_present < native_render_mode,
+        native_present < workspace_render_mode,
         "native path should stage the retained native frame before switching render_mode so the UI does not briefly expose native mode without a ready surface payload"
     );
 
@@ -535,15 +541,22 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         .find("Err(err) => {")
         .expect("error block start");
     let error_block = &workspace_surface_sync_block[error_start..];
-    let error_render_mode = error_block
-        .find("window.set_workspace_session_render_mode(")
-        .expect("error render mode");
     let error_clear = error_block
         .find("clear_workspace_native_terminal_frame(window);")
         .expect("error clear");
+    let default_fg = workspace_surface_projection_block
+        .find("window.set_workspace_session_default_fg(")
+        .expect("default fg");
+    let pending_output = workspace_surface_projection_block
+        .find("window.set_workspace_session_pending_output_lines(")
+        .expect("pending output");
     assert!(
-        error_clear < error_render_mode,
+        error_clear < workspace_render_mode,
         "error fallback should clear the native surface/image payload before switching render_mode back to bitmap so the host does not momentarily show a stale native frame"
+    );
+    assert!(
+        default_fg < workspace_render_mode && pending_output < workspace_render_mode,
+        "workspace surface sync should project terminal colors and follow/viewport state before flipping render_mode so the host does not briefly combine a new payload mode with stale overlay metadata"
     );
 }
 

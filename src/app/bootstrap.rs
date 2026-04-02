@@ -4161,6 +4161,7 @@ fn sync_workspace_session_state_with_manager(
         let selection = active_workspace_terminal_selection(window);
         let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
         let mut native_cursor = None;
+        let mut next_render_mode = None;
         WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
             let mut presenter = presenter.borrow_mut();
             presenter.set_raster_scale(window.window().scale_factor());
@@ -4179,9 +4180,7 @@ fn sync_workspace_session_state_with_manager(
                     window.set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);
                     clear_workspace_retained_native_terminal_surface(window);
                     window.set_workspace_session_surface_image(frame.image);
-                    window.set_workspace_session_render_mode(
-                        TerminalRenderMode::Bitmap.as_str().into(),
-                    );
+                    next_render_mode = Some(TerminalRenderMode::Bitmap);
                 }
                 Ok(PresentedTerminalFrame::Native(frame)) => {
                     let frame = *frame;
@@ -4195,9 +4194,7 @@ fn sync_workspace_session_state_with_manager(
                         .set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);
                     sync_workspace_native_terminal_surface_geometry(window);
                     present_workspace_native_terminal_frame(window, frame);
-                    window.set_workspace_session_render_mode(
-                        TerminalRenderMode::Native.as_str().into(),
-                    );
+                    next_render_mode = Some(TerminalRenderMode::Native);
                 }
                 Err(err) => {
                     tracing::error!(
@@ -4209,9 +4206,7 @@ fn sync_workspace_session_state_with_manager(
                     window.set_workspace_session_cell_width(default_cell_width_px as f32 / scale_factor);
                     window.set_workspace_session_cell_height(default_cell_height_px as f32 / scale_factor);
                     clear_workspace_native_terminal_frame(window);
-                    window.set_workspace_session_render_mode(
-                        TerminalRenderMode::Bitmap.as_str().into(),
-                    );
+                    next_render_mode = Some(TerminalRenderMode::Bitmap);
                 }
             }
         });
@@ -4251,6 +4246,9 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_pending_output_lines(
             i32::try_from(follow_indicator.pending_output_lines).unwrap_or(i32::MAX),
         );
+        if let Some(next_render_mode) = next_render_mode {
+            window.set_workspace_session_render_mode(next_render_mode.as_str().into());
+        }
     } else {
         let preset = preset_for_theme_mode(state.theme_mode);
         window.set_workspace_session_rows(24);
