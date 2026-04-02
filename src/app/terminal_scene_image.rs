@@ -1,11 +1,15 @@
 //! Scene-owned terminal image renderer for software builds that must stay inside Slint z-order.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::DefaultHasher};
+use std::hash::Hasher;
 
 use anyhow::{Result, anyhow};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 
-use crate::app::terminal_presenter::{BitmapTerminalFrame, NativeTerminalFrame};
+use crate::app::terminal_presenter::{
+    BitmapTerminalFrame, NativeImePreviewOverlay, NativeSelectionOverlay, NativeTerminalFrame,
+    NativeUnderlineOverlay,
+};
 use crate::app::terminal_renderer::wgpu_renderer::{
     PreparedColorGlyphDraw, PreparedColorGlyphUploadPayload, PreparedMonochromeGlyphDraw,
 };
@@ -14,6 +18,9 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 pub struct SceneImageTerminalRenderer {
     monochrome_glyph_cache: HashMap<u32, CachedMonochromeGlyph>,
     color_glyph_cache: HashMap<u32, CachedColorGlyph>,
+    last_bitmap_fingerprint: Option<u64>,
+    last_bitmap_frame: Option<BitmapTerminalFrame>,
+    bitmap_render_count: usize,
 }
 
 #[derive(Clone)]
@@ -48,9 +55,22 @@ impl SceneImageTerminalRenderer {
     pub fn clear(&mut self) {
         self.monochrome_glyph_cache.clear();
         self.color_glyph_cache.clear();
+        self.last_bitmap_fingerprint = None;
+        self.last_bitmap_frame = None;
+    }
+
+    pub fn bitmap_render_count(&self) -> usize {
+        self.bitmap_render_count
     }
 
     pub fn render(&mut self, frame: &NativeTerminalFrame) -> Result<BitmapTerminalFrame> {
+        let bitmap_fingerprint = self.fingerprint_bitmap_frame(frame)?;
+        if self.last_bitmap_fingerprint == Some(bitmap_fingerprint)
+            && let Some(bitmap_frame) = &self.last_bitmap_frame
+        {
+            return Ok(bitmap_frame.clone());
+        }
+
         let width_px = frame
             .presentable_frame
             .grid_cols
@@ -61,13 +81,16 @@ impl SceneImageTerminalRenderer {
             .saturating_mul(frame.cell_height_px);
 
         if width_px == 0 || height_px == 0 {
-            return Ok(BitmapTerminalFrame {
+            let bitmap_frame = BitmapTerminalFrame {
                 image: Image::default(),
                 grid_rows: frame.presentable_frame.grid_rows,
                 grid_cols: frame.presentable_frame.grid_cols,
                 cell_width_px: frame.cell_width_px,
                 cell_height_px: frame.cell_height_px,
-            });
+            };
+            self.last_bitmap_fingerprint = Some(bitmap_fingerprint);
+            self.last_bitmap_frame = Some(bitmap_frame.clone());
+            return Ok(bitmap_frame);
         }
 
         let mut pixels = vec![rgba8(frame.presentable_frame.default_bg_rgba); (width_px * height_px) as usize];
@@ -90,13 +113,55 @@ impl SceneImageTerminalRenderer {
         let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(width_px, height_px);
         buffer.make_mut_slice().copy_from_slice(&pixels);
 
-        Ok(BitmapTerminalFrame {
+        let bitmap_frame = BitmapTerminalFrame {
             image: Image::from_rgba8(buffer),
             grid_rows: frame.presentable_frame.grid_rows,
             grid_cols: frame.presentable_frame.grid_cols,
             cell_width_px: frame.cell_width_px,
             cell_height_px: frame.cell_height_px,
-        })
+        };
+        self.bitmap_render_count = self.bitmap_render_count.saturating_add(1);
+        self.last_bitmap_fingerprint = Some(bitmap_fingerprint);
+        self.last_bitmap_frame = Some(bitmap_frame.clone());
+
+        Ok(bitmap_frame)
+    }
+
+    fn fingerprint_bitmap_frame(&mut self, frame: &NativeTerminalFrame) -> Result<u64> {
+        let mut hasher = DefaultHasher::new();
+        let presentable = &frame.presentable_frame;
+
+        hash_u32(&mut hasher, frame.cell_width_px);
+        hash_u32(&mut hasher, frame.cell_height_px);
+        hash_u32(&mut hasher, presentable.grid_rows);
+        hash_u32(&mut hasher, presentable.grid_cols);
+        hash_u32(&mut hasher, presentable.default_fg_rgba);
+        hash_u32(&mut hasher, presentable.default_bg_rgba);
+        hash_u32(&mut hasher, presentable.row_bg_even_rgba);
+        hash_u32(&mut hasher, presentable.row_bg_odd_rgba);
+
+        hash_usize(&mut hasher, presentable.background_runs.len());
+        for run in &presentable.background_runs {
+            hash_background_run(&mut hasher, run);
+        }
+
+        hash_selection_overlay(&mut hasher, &presentable.selection_overlay);
+        hash_underline_overlay(&mut hasher, &presentable.underline_overlay);
+        hash_ime_preview_overlay(&mut hasher, presentable.ime_preview_overlay);
+
+        hash_usize(&mut hasher, presentable.monochrome_glyph_draws.len());
+        for draw in &presentable.monochrome_glyph_draws {
+            let glyph = self.resolve_monochrome_glyph(draw)?;
+            hash_monochrome_glyph_draw(&mut hasher, draw, &glyph);
+        }
+
+        hash_usize(&mut hasher, presentable.color_glyph_draws.len());
+        for draw in &presentable.color_glyph_draws {
+            let glyph = self.resolve_color_glyph(draw)?;
+            hash_color_glyph_draw(&mut hasher, draw, &glyph);
+        }
+
+        Ok(hasher.finish())
     }
 
     fn draw_row_backgrounds(
@@ -573,4 +638,109 @@ fn ime_cursor_rect(
     let mut rect = cell_span_rect(row, cursor_col, cursor_col, cell_width_px, cell_height_px)?;
     rect.width = (cell_width_px.max(1) / 10).max(1);
     Some(rect)
+}
+
+fn hash_background_run(hasher: &mut impl Hasher, run: &crate::app::terminal_renderer::wgpu_renderer::PreparedBackgroundRun) {
+    hash_u32(hasher, run.row);
+    hash_u32(hasher, run.start_col);
+    hash_u32(hasher, run.end_col);
+    hash_u32(hasher, run.bg_rgba);
+}
+
+fn hash_selection_overlay(hasher: &mut impl Hasher, overlay: &NativeSelectionOverlay) {
+    hash_bool(hasher, overlay.active);
+    if !overlay.active {
+        return;
+    }
+
+    hash_u32(hasher, overlay.start_row);
+    hash_u32(hasher, overlay.start_col);
+    hash_u32(hasher, overlay.end_row);
+    hash_u32(hasher, overlay.end_col);
+    hash_u32(hasher, overlay.overlay_rgba);
+    hash_usize(hasher, overlay.rects.len());
+    for rect in &overlay.rects {
+        hash_u32(hasher, rect.row);
+        hash_u32(hasher, rect.start_col);
+        hash_u32(hasher, rect.end_col);
+        hash_u32(hasher, rect.overlay_rgba);
+    }
+}
+
+fn hash_underline_overlay(hasher: &mut impl Hasher, overlay: &NativeUnderlineOverlay) {
+    hash_bool(hasher, overlay.visible);
+    if !overlay.visible {
+        return;
+    }
+
+    hash_usize(hasher, overlay.runs.len());
+    for run in &overlay.runs {
+        hash_u32(hasher, run.row);
+        hash_u32(hasher, run.start_col);
+        hash_u32(hasher, run.end_col);
+        hash_u32(hasher, run.fg_rgba);
+    }
+}
+
+fn hash_ime_preview_overlay(hasher: &mut impl Hasher, overlay: NativeImePreviewOverlay) {
+    hash_bool(hasher, overlay.active);
+    if !overlay.active {
+        return;
+    }
+
+    hash_u32(hasher, overlay.row);
+    hash_u32(hasher, overlay.start_col);
+    hash_u32(hasher, overlay.end_col);
+    hash_u32(hasher, overlay.cursor_col);
+}
+
+fn hash_monochrome_glyph_draw(
+    hasher: &mut impl Hasher,
+    draw: &PreparedMonochromeGlyphDraw,
+    glyph: &CachedMonochromeGlyph,
+) {
+    hash_u32(hasher, draw.row);
+    hash_u32(hasher, draw.start_col);
+    hash_u32(hasher, draw.end_col);
+    hash_i32(hasher, draw.dest_x_px);
+    hash_i32(hasher, draw.dest_y_px);
+    hash_u32(hasher, draw.fg_rgba);
+    hash_u32(hasher, glyph.width_px);
+    hash_u32(hasher, glyph.height_px);
+    hash_usize(hasher, glyph.coverage.len());
+    hasher.write(&glyph.coverage);
+}
+
+fn hash_color_glyph_draw(
+    hasher: &mut impl Hasher,
+    draw: &PreparedColorGlyphDraw,
+    glyph: &CachedColorGlyph,
+) {
+    hash_u32(hasher, draw.row);
+    hash_u32(hasher, draw.start_col);
+    hash_u32(hasher, draw.end_col);
+    hash_i32(hasher, draw.dest_x_px);
+    hash_i32(hasher, draw.dest_y_px);
+    hash_u32(hasher, glyph.width_px);
+    hash_u32(hasher, glyph.height_px);
+    hash_usize(hasher, glyph.pixels.len());
+    for pixel in &glyph.pixels {
+        hasher.write(&[pixel.r, pixel.g, pixel.b, pixel.a]);
+    }
+}
+
+fn hash_bool(hasher: &mut impl Hasher, value: bool) {
+    hasher.write(&[u8::from(value)]);
+}
+
+fn hash_u32(hasher: &mut impl Hasher, value: u32) {
+    hasher.write(&value.to_le_bytes());
+}
+
+fn hash_i32(hasher: &mut impl Hasher, value: i32) {
+    hasher.write(&value.to_le_bytes());
+}
+
+fn hash_usize(hasher: &mut impl Hasher, value: usize) {
+    hasher.write(&(value as u64).to_le_bytes());
 }

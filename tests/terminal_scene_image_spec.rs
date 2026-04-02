@@ -387,6 +387,34 @@ fn scene_image_renderer_leaves_cursor_blink_to_the_slint_host_overlay() {
 }
 
 #[test]
+fn scene_image_renderer_reuses_bitmap_when_only_cursor_overlay_changes() {
+    let mut renderer = SceneImageTerminalRenderer::default();
+    let first = sample_frame_with_cursor_only();
+    let mut second = first.clone();
+    second.frame_token += 1;
+    second.presentable_frame.seqno += 1;
+    second.presentable_frame.cursor.visible = false;
+    second.presentable_frame.cursor.blinking = false;
+    second.presentable_frame.cursor_overlay.visible = false;
+
+    let first_bitmap = renderer.render(&first).expect("render first frame");
+    let second_bitmap = renderer.render(&second).expect("render second frame");
+    let first_rgba = first_bitmap.image.to_rgba8().expect("first rgba");
+    let second_rgba = second_bitmap.image.to_rgba8().expect("second rgba");
+
+    assert_eq!(
+        renderer.bitmap_render_count(),
+        1,
+        "scene-image renderer should reuse the cached bitmap when only cursor host-overlay state changes"
+    );
+    assert_eq!(
+        first_rgba.as_slice(),
+        second_rgba.as_slice(),
+        "cursor-only changes must not trigger a fresh bitmap with different scene pixels"
+    );
+}
+
+#[test]
 fn scene_image_renderer_clips_vertical_overhang_without_reanchoring_glyph_origin() {
     let mut renderer = SceneImageTerminalRenderer::default();
     let frame = renderer
