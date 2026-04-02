@@ -3914,7 +3914,6 @@ fn clear_workspace_retained_native_terminal_surface(window: &AppWindow) {
 }
 
 fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerminalFrame) {
-    window.set_workspace_session_surface_image(Image::default());
     window.set_workspace_session_native_frame_token(
         i32::try_from(frame.frame_token).unwrap_or(i32::MAX),
     );

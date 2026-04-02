@@ -25,6 +25,8 @@ pub struct SceneImageTerminalRenderer {
     last_bitmap_frame: Option<BitmapTerminalFrame>,
     base_render_count: usize,
     bitmap_render_count: usize,
+    working_resize_count: usize,
+    working_pixels: Vec<Rgba8Pixel>,
 }
 
 #[derive(Clone)]
@@ -74,6 +76,10 @@ impl SceneImageTerminalRenderer {
         self.bitmap_render_count
     }
 
+    pub fn working_resize_count(&self) -> usize {
+        self.working_resize_count
+    }
+
     pub fn render(&mut self, frame: &NativeTerminalFrame) -> Result<BitmapTerminalFrame> {
         let base_fingerprint = self.fingerprint_base_frame(frame)?;
         let overlay_fingerprint = self.fingerprint_overlay_frame(frame);
@@ -108,7 +114,7 @@ impl SceneImageTerminalRenderer {
             return Ok(bitmap_frame);
         }
 
-        let mut pixels = if self.last_base_fingerprint == Some(base_fingerprint) {
+        let pixels = if self.last_base_fingerprint == Some(base_fingerprint) {
             if let Some(pixels) = &self.last_base_pixels {
                 pixels.clone()
             } else {
@@ -141,6 +147,16 @@ impl SceneImageTerminalRenderer {
             return Ok(bitmap_frame);
         }
 
+        let mut pixels = std::mem::take(&mut self.working_pixels);
+        let pixel_count = (width_px * height_px) as usize;
+        if pixels.len() != pixel_count {
+            pixels.resize(pixel_count, rgba8(frame.presentable_frame.default_bg_rgba));
+            self.working_resize_count = self.working_resize_count.saturating_add(1);
+        }
+        if let Some(base_pixels) = &self.last_base_pixels {
+            pixels.copy_from_slice(base_pixels);
+        }
+
         {
             let mut surface = PixelSurface {
                 pixels: &mut pixels,
@@ -154,6 +170,7 @@ impl SceneImageTerminalRenderer {
 
         let bitmap_frame = self.bitmap_frame_from_pixels(frame, &pixels);
         self.bitmap_render_count = self.bitmap_render_count.saturating_add(1);
+        self.working_pixels = pixels;
         self.last_bitmap_fingerprint = Some(bitmap_fingerprint);
         self.last_bitmap_frame = Some(bitmap_frame.clone());
 

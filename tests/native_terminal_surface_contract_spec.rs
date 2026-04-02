@@ -503,6 +503,10 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         "native path should project rows/cols from the retained frame payload before presenting it so overlay geometry and host hit-testing stay tied to the exact frame staged for display"
     );
     assert!(
+        !native_block.contains("window.set_workspace_session_surface_image(Image::default());"),
+        "native path should stop blanking the scene-image payload before the retained surface is ready so bitmap-to-native switches do not flash an empty frame in the host"
+    );
+    assert!(
         native_present < native_render_mode,
         "native path should stage the retained native frame before switching render_mode so the UI does not briefly expose native mode without a ready surface payload"
     );

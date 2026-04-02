@@ -523,6 +523,53 @@ fn scene_image_renderer_reuses_cached_base_bitmap_after_overlays_clear() {
 }
 
 #[test]
+fn scene_image_renderer_reuses_overlay_work_buffer_for_same_sized_frames() {
+    let mut renderer = SceneImageTerminalRenderer::default();
+    let base = sample_frame_with_right_shifted_glyph();
+    let mut first_overlay = base.clone();
+    first_overlay.frame_token += 1;
+    first_overlay.presentable_frame.seqno += 1;
+    first_overlay.presentable_frame.selection_overlay = NativeSelectionOverlay {
+        active: true,
+        rect_count: 1,
+        rects: vec![NativeSelectionRect {
+            row: 0,
+            start_col: 0,
+            end_col: 0,
+            overlay_rgba: 0x6600_ff00,
+        }],
+        start_row: 0,
+        start_col: 0,
+        end_row: 0,
+        end_col: 0,
+        overlay_rgba: 0x6600_ff00,
+    };
+
+    let mut second_overlay = base.clone();
+    second_overlay.frame_token += 2;
+    second_overlay.presentable_frame.seqno += 2;
+    second_overlay.presentable_frame.underline_overlay = NativeUnderlineOverlay {
+        visible: true,
+        run_count: 1,
+        runs: vec![NativeUnderlineRun {
+            row: 0,
+            start_col: 0,
+            end_col: 0,
+            fg_rgba: 0xffff_00ff,
+        }],
+    };
+
+    renderer.render(&first_overlay).expect("render first overlay frame");
+    renderer.render(&second_overlay).expect("render second overlay frame");
+
+    assert_eq!(
+        renderer.working_resize_count(),
+        1,
+        "overlay composition should keep reusing one working pixel buffer while the terminal grid size stays unchanged"
+    );
+}
+
+#[test]
 fn scene_image_renderer_clips_vertical_overhang_without_reanchoring_glyph_origin() {
     let mut renderer = SceneImageTerminalRenderer::default();
     let frame = renderer
