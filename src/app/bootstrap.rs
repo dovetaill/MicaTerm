@@ -3846,10 +3846,7 @@ fn build_scene_image_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> 
     ))
 }
 
-fn install_workspace_terminal_presenter(
-    window: &AppWindow,
-    profile: AppRuntimeProfile,
-) -> TerminalRenderMode {
+fn install_workspace_terminal_presenter(profile: AppRuntimeProfile) -> TerminalRenderMode {
     let (presenter, active_render_mode) = match build_workspace_terminal_presenter(profile) {
         Ok(presenter) => presenter,
         Err(err) => {
@@ -3873,9 +3870,6 @@ fn install_workspace_terminal_presenter(
     WORKSPACE_TERMINAL_PRESENTER.with(|cell| {
         *cell.borrow_mut() = presenter;
     });
-    window.set_workspace_session_render_mode(active_render_mode.as_str().into());
-    window.set_workspace_session_surface_image(Image::default());
-    clear_workspace_retained_native_terminal_surface(window);
     active_render_mode
 }
 
@@ -6634,7 +6628,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         Rc::new(RefCell::new(None::<PendingWorkspacePasteWarning>));
     let asset_click_tracker = Rc::new(RefCell::new(None::<PendingAssetClick>));
     let pending_double_click_activation = Rc::new(RefCell::new(None::<String>));
-    let active_render_mode = install_workspace_terminal_presenter(window, profile);
+    let active_render_mode = install_workspace_terminal_presenter(profile);
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
         *surface.borrow_mut() = match active_render_mode {
             TerminalRenderMode::Native => {

@@ -394,6 +394,19 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         bootstrap_source.contains("profile.terminal_composition_mode()"),
         "bootstrap should branch on an explicit terminal composition mode instead of routing every native-quality frame through NativeTerminalSurface"
     );
+    let install_presenter_block = block_between(
+        &bootstrap_source,
+        "fn install_workspace_terminal_presenter(",
+        "fn window_scale_factor(window: &AppWindow) -> f32 {",
+    );
+    assert!(
+        !install_presenter_block.contains("window.set_workspace_session_render_mode("),
+        "presenter installation should not flip the host render mode before the first real terminal frame is ready because that can expose an empty payload during startup or renderer reconfiguration"
+    );
+    assert!(
+        !install_presenter_block.contains("window.set_workspace_session_surface_image(Image::default());"),
+        "presenter installation should not proactively blank the scene image before sync_workspace_session_state publishes the first frame"
+    );
     assert!(
         bootstrap_source.contains("TerminalCompositionMode::SceneImage"),
         "bootstrap should recognize the scene-image composition mode when selecting the visible Windows software terminal path"
