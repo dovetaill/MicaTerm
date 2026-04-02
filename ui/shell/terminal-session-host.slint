@@ -323,11 +323,11 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function terminal-cell-x(col: int) -> length {
-        return root.terminal-padding-left + (col * root.terminal-cell-width);
+        return root.terminal-surface-origin-x() + (col * root.terminal-cell-width);
     }
 
     function terminal-cell-y(row: int) -> length {
-        return root.terminal-padding-top + (row * root.terminal-cell-height);
+        return root.terminal-surface-origin-y() + (row * root.terminal-cell-height);
     }
 
     function terminal-hit-row(pointer-y: length) -> int {

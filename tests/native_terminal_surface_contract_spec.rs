@@ -74,6 +74,11 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         "terminal session host should snap the scene-image terminal origin onto device pixels instead of anchoring the bitmap at unsnapped logical padding offsets"
     );
     assert!(
+        host_source.contains("return root.terminal-surface-origin-x() + (col * root.terminal-cell-width);")
+            && host_source.contains("return root.terminal-surface-origin-y() + (row * root.terminal-cell-height);"),
+        "terminal session host should anchor cell geometry to the snapped terminal surface origin so the Slint cursor overlay tracks the bitmap on high-DPI software renders"
+    );
+    assert!(
         host_source.contains("width: root.snapped-terminal-visible-grid-width();")
             && host_source.contains("height: root.snapped-terminal-visible-grid-height();"),
         "terminal session host should snap the visible terminal viewport box onto device pixels so Slint does not have to map the bitmap through a half-pixel destination rect"
