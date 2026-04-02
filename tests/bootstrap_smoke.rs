@@ -6061,6 +6061,42 @@ fn launcher_recent_connection_replaces_launcher_tab_with_real_session_tab() {
 }
 
 #[test]
+fn launcher_quick_launch_connect_restores_native_terminal_surface_rect() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_workspace_new_tab_requested();
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+
+    app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
+    settle_terminal_projection();
+
+    let item = app
+        .get_workspace_tab_items()
+        .row_data(0)
+        .expect("workspace tab after launcher quick launch connect");
+    assert_ne!(item.session_id.as_str(), "workspace-launcher");
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "launcher quick launch connect should restore the native terminal rect as soon as the launcher tab is replaced so the retained surface does not stay collapsed under a live terminal host"
+    );
+    assert!(
+        app.get_workspace_session_surface_seqno() > 0,
+        "launcher quick launch connect should stage a terminal payload together with the restored host mode so the revived geometry is backed by a real frame"
+    );
+}
+
+#[test]
 fn launcher_picker_activation_replaces_launcher_tab_and_closes_modal() {
     i_slint_backend_testing::init_no_event_loop();
 
