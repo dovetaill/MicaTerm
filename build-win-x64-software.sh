@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Thin wrapper around the Windows x64 software package used by CI and manual packaging.
-# Transitional Linux-host Windows native-only terminal surface path.
+# Thin wrapper around the Windows x64 software compatibility package used by CI and manual packaging.
 
 set -euo pipefail
 
@@ -10,14 +9,13 @@ usage() {
   cat <<'EOF'
 Usage: ./build-win-x64-software.sh [--help]
 
-Windows software wrapper.
-Transitional Linux-host Windows native-only terminal surface path.
+Windows software compatibility wrapper.
 
 Default target:
   x86_64-pc-windows-gnu
   requires Linux host tools: x86_64-w64-mingw32-gcc and nasm
   packaged renderer: winit-software
-  packaged terminal renderer: native
+  packaged terminal renderer: bitmap
 
 Override example:
   TARGET=x86_64-pc-windows-msvc ./build-win-x64-software.sh
@@ -37,10 +35,10 @@ TARGET="${TARGET:-x86_64-pc-windows-gnu}"
 echo "==> Windows wrapper target: $TARGET"
 export TARGET
 export CARGO_NO_DEFAULT_FEATURES=1
-export CARGO_FEATURES="slint-renderer-software,terminal-native-renderer"
+export CARGO_FEATURES="slint-renderer-software"
 export MICA_TERM_BUILD_FLAVOR="windows-software-compat"
 export MICA_TERM_PACKAGE_RENDERER="software"
-export MICA_TERM_PACKAGE_TERMINAL_RENDERER="native"
+export MICA_TERM_PACKAGE_TERMINAL_RENDERER="bitmap"
 export MICA_TERM_PACKAGE_PORTABLE=1
 export PACKAGE_FLAVOR_SUFFIX="-software"
 

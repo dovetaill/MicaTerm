@@ -260,8 +260,8 @@ fn terminal_host_uses_startup_safe_font_stack_and_stable_clipboard_shortcut_toke
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        !terminal_host.contains("session-surface-image"),
-        "TerminalSessionHost should remove the rendered image surface contract once the terminal host becomes native-only"
+        terminal_host.contains("in property <image> session-surface-image"),
+        "TerminalSessionHost should accept a rendered image surface instead of a font stack contract"
     );
     assert!(
         terminal_host.contains("private property <length> terminal-font-size: 16px;"),

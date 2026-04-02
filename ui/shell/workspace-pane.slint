@@ -14,6 +14,7 @@ export component WorkspacePane inherits Rectangle {
     in property <string> workspace-session-state: "";
     in property <string> workspace-session-error-detail: "";
     in property <bool> workspace-session-can-reconnect: false;
+    in property <string> workspace-session-render-mode: "bitmap";
     in property <string> workspace-session-connection-headline: "";
     in property <string> workspace-session-connection-current-hop: "";
     in property <string> workspace-session-connection-current-detail: "";
@@ -36,6 +37,7 @@ export component WorkspacePane inherits Rectangle {
         recent_label: "",
     };
     in property <string> welcome-quick-launch-search-query: "";
+    in property <image> workspace-session-surface-image;
     in property <int> workspace-session-native-frame-token: 0;
     in property <int> workspace-session-rows: 24;
     in property <int> workspace-session-cols: 80;
@@ -165,6 +167,7 @@ export component WorkspacePane inherits Rectangle {
                 session-default-fg: root.workspace-session-default-fg;
                 session-default-bg: root.workspace-session-default-bg;
                 session-mouse-grabbed: root.workspace-session-mouse-grabbed;
+                session-render-mode: root.workspace-session-render-mode;
                 session-visible-lines: root.workspace-session-visible-lines;
                 session-surface-seqno: root.workspace-session-surface-seqno;
                 session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
@@ -172,6 +175,7 @@ export component WorkspacePane inherits Rectangle {
                 session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
                 session-follow-paused: root.workspace-session-follow-paused;
                 session-pending-output-lines: root.workspace-session-pending-output-lines;
+                session-surface-image: root.workspace-session-surface-image;
                 selection-active <=> root.workspace-session-selection-active;
                 selection-start-row <=> root.workspace-session-selection-start-row;
                 selection-start-col <=> root.workspace-session-selection-start-col;

@@ -102,6 +102,7 @@ export component TerminalSessionHost inherits Rectangle {
     in property <string> session-state: "";
     in property <string> session-error-detail: "";
     in property <bool> can-reconnect: false;
+    in property <string> session-render-mode: "bitmap";
     in property <string> connection-progress-headline: "";
     in property <string> connection-progress-current-hop: "";
     in property <string> connection-progress-current-detail: "";
@@ -124,6 +125,7 @@ export component TerminalSessionHost inherits Rectangle {
         recent_label: "",
     };
     in property <string> welcome-quick-launch-search-query: "";
+    in property <image> session-surface-image;
     in property <int> session-native-frame-token: 0;
     in property <int> session-rows: 24;
     in property <int> session-cols: 80;
@@ -811,6 +813,16 @@ export component TerminalSessionHost inherits Rectangle {
                 width: root.terminal-grid-width();
                 height: root.terminal-grid-height();
                 background: root.session-default-bg;
+            }
+
+            Image {
+                x: blank-surface.x;
+                y: blank-surface.y;
+                width: blank-surface.width;
+                height: blank-surface.height;
+                source: root.session-surface-image;
+                image-fit: contain;
+                visible: root.session-render-mode == "bitmap";
             }
 
             input-capture := TouchArea {

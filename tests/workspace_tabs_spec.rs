@@ -609,8 +609,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        !app_window.contains("workspace-session-surface-image"),
-        "AppWindow should remove the rendered terminal image surface once terminal presentation becomes native-only"
+        app_window.contains("workspace-session-surface-image"),
+        "AppWindow should expose a rendered terminal image surface for atlas-backed terminal output"
     );
     assert!(
         app_window.contains("workspace-session-native-frame-token"),
@@ -691,8 +691,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose terminal selection state for native clipboard shortcut fallbacks"
     );
     assert!(
-        !workspace_pane.contains("workspace-session-surface-image"),
-        "WorkspacePane should remove the rendered terminal image surface binding in the native-only path"
+        workspace_pane.contains("workspace-session-surface-image"),
+        "WorkspacePane should forward the rendered terminal image surface into TerminalSessionHost"
     );
     assert!(
         workspace_pane.contains("workspace-session-native-frame-token"),
@@ -800,8 +800,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should default to a desktop-readable font size"
     );
     assert!(
-        !terminal_host.contains("session-surface-image"),
-        "TerminalSessionHost should remove the rendered terminal surface image contract in the native-only path"
+        terminal_host.contains("in property <image> session-surface-image"),
+        "TerminalSessionHost should accept a rendered terminal surface image as a root-level contract"
     );
     assert!(
         terminal_host.contains("in property <int> session-native-frame-token: 0;"),
@@ -836,8 +836,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should paint the cursor from the runtime-projected cursor background"
     );
     assert!(
-        !terminal_host.contains("Image {"),
-        "TerminalSessionHost should stop displaying the terminal body through a Slint image surface in the native-only path"
+        terminal_host.contains("Image {"),
+        "TerminalSessionHost should display the terminal body through a single image surface"
     );
     assert!(
         !terminal_host.contains("for cell in root.session-cells"),
