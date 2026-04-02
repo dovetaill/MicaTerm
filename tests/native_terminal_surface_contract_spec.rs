@@ -807,8 +807,9 @@ fn native_surface_source_exposes_damage_tracker_and_shutdown_guard_contract() {
     assert!(
         damage_source.contains("previous.frame.presentable_frame.cursor_overlay")
             && damage_source.contains("previous.frame.presentable_frame.selection_overlay")
-            && damage_source.contains("previous.frame.presentable_frame.ime_preview_overlay"),
-        "damage tracker should compare cursor, selection, and IME overlay payloads when deciding whether overlay-only damage exists"
+            && damage_source.contains("previous.frame.presentable_frame.ime_preview_overlay")
+            && damage_source.contains("previous.frame.presentable_frame.underline_overlay"),
+        "damage tracker should compare cursor, selection, underline, and IME overlay payloads when deciding whether overlay-only damage exists"
     );
     assert!(
         native_surface_source.contains("damage_tracker: NativeFrameDamageTracker"),

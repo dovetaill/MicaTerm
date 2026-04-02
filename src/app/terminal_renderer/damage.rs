@@ -45,6 +45,8 @@ impl NativeFrameDamageTracker {
                         != next.frame.presentable_frame.cursor_overlay
                         || previous.frame.presentable_frame.selection_overlay
                             != next.frame.presentable_frame.selection_overlay
+                        || previous.frame.presentable_frame.underline_overlay
+                            != next.frame.presentable_frame.underline_overlay
                         || previous.frame.presentable_frame.ime_preview_overlay
                             != next.frame.presentable_frame.ime_preview_overlay;
                 if overlays_changed {
@@ -102,6 +104,22 @@ fn extend_overlay_damage_rect(
                     rect.row,
                     rect.start_col,
                     rect.end_col,
+                    frame.frame.cell_width_px,
+                    frame.frame.cell_height_px,
+                ),
+            );
+        }
+    }
+
+    if presentable.underline_overlay.visible {
+        for run in &presentable.underline_overlay.runs {
+            union_rect(
+                damage,
+                cell_span_rect(
+                    frame.rect,
+                    run.row,
+                    run.start_col,
+                    run.end_col,
                     frame.frame.cell_width_px,
                     frame.frame.cell_height_px,
                 ),

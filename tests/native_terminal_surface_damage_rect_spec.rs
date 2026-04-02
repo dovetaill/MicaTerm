@@ -1,7 +1,7 @@
 use mica_term::app::terminal_presenter::{
     NativeCursorFrameState, NativeCursorOverlay, NativeImePreviewOverlay, NativeRendererFrameStats,
-    NativeSelectionFrameState, NativeSelectionOverlay, NativeTerminalFrame,
-    NativeUnderlineOverlay, PresentableNativeFrame,
+    NativeSelectionFrameState, NativeSelectionOverlay, NativeTerminalFrame, NativeUnderlineOverlay,
+    NativeUnderlineRun, PresentableNativeFrame,
 };
 use mica_term::app::terminal_renderer::{
     NativeFrameDamageTracker, NativeSurfaceDamageKind, NativeTerminalSurfaceRect,
@@ -92,6 +92,70 @@ fn retained_frame(frame: NativeTerminalFrame) -> RetainedNativeTerminalSurfaceFr
     }
 }
 
+fn frame_with_underline(
+    frame_token: u64,
+    underline_run: Option<NativeUnderlineRun>,
+) -> NativeTerminalFrame {
+    NativeTerminalFrame {
+        frame_token,
+        cell_width_px: 8,
+        cell_height_px: 16,
+        presentable_frame: PresentableNativeFrame {
+            seqno: frame_token,
+            shaped_row_count: 0,
+            glyph_run_count: 0,
+            glyph_count: 0,
+            dirty_row_count: 1,
+            default_fg_rgba: 0xffff_ffff,
+            default_bg_rgba: 0xff11_2233,
+            row_bg_even_rgba: 0xff11_2233,
+            row_bg_odd_rgba: 0xff11_2233,
+            grid_rows: 2,
+            grid_cols: 6,
+            background_runs: vec![],
+            monochrome_glyph_draws: vec![],
+            color_glyph_draws: vec![],
+            underline_run_count: underline_run.iter().count(),
+            cursor: NativeCursorFrameState {
+                row: 0,
+                col: 0,
+                visible: false,
+                blinking: false,
+                shape: TerminalCursorShape::Block,
+                fg_rgba: 0,
+                bg_rgba: 0,
+            },
+            cursor_overlay: NativeCursorOverlay {
+                visible: false,
+                row: 0,
+                col: 0,
+                cell_width_px: 8,
+                cell_height_px: 16,
+                shape: TerminalCursorShape::Block,
+                fg_rgba: 0,
+                bg_rgba: 0,
+            },
+            selection: NativeSelectionFrameState::default(),
+            selection_overlay: NativeSelectionOverlay::default(),
+            underline_overlay: NativeUnderlineOverlay {
+                visible: underline_run.is_some(),
+                run_count: underline_run.iter().count(),
+                runs: underline_run.into_iter().collect(),
+            },
+            semantic_overlays: vec![],
+            semantic_input_overlays: vec![],
+            ime_preview_overlay: NativeImePreviewOverlay::default(),
+            renderer_stats: NativeRendererFrameStats {
+                glyph_cache_entries: 0,
+                mono_glyph_cache_entries: 0,
+                color_glyph_cache_entries: 0,
+                monochrome_glyphs_prepared: 0,
+                color_glyphs_prepared: 0,
+            },
+        },
+    }
+}
+
 #[test]
 fn overlay_only_damage_uses_union_of_previous_and_next_cursor_regions() {
     let previous = retained_frame(frame_with_cursor(7, Some(0)));
@@ -111,5 +175,39 @@ fn overlay_only_damage_uses_union_of_previous_and_next_cursor_regions() {
             height: 16,
         },
         "overlay-only damage should shrink to the union of the old and new cursor cells instead of repainting the entire terminal surface"
+    );
+}
+
+#[test]
+fn underline_overlay_changes_stay_on_overlay_only_damage_path() {
+    let previous = retained_frame(frame_with_underline(11, None));
+    let next = retained_frame(frame_with_underline(
+        11,
+        Some(NativeUnderlineRun {
+            row: 1,
+            start_col: 1,
+            end_col: 3,
+            fg_rgba: 0xff44_ccff,
+        }),
+    ));
+    let mut tracker = NativeFrameDamageTracker::default();
+
+    tracker.track_frame_damage(Some(&previous), Some(&next));
+    let damage = tracker.take_damage().expect("underline overlay damage");
+
+    assert_eq!(
+        damage.kind,
+        NativeSurfaceDamageKind::OverlayOnly,
+        "stable prepared-frame tokens with only underline overlay changes should stay on the overlay-only damage path"
+    );
+    assert_eq!(
+        damage.rect,
+        NativeTerminalSurfaceRect {
+            x: 18,
+            y: 36,
+            width: 24,
+            height: 16,
+        },
+        "underline overlay damage should shrink to the underline run's cell span instead of repainting the entire terminal surface"
     );
 }
