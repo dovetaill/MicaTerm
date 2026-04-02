@@ -875,6 +875,25 @@ fn native_surface_damage_contract_threads_damage_kind_into_backend_present() {
 }
 
 #[test]
+fn windows_backend_source_clips_present_to_damage_rect() {
+    let windows_backend_source = fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+        .expect("read windows native surface backend");
+
+    assert!(
+        windows_backend_source.contains("let present_rect = resolved_present_rect(self.state.rect, damage);"),
+        "windows backend should resolve a present clip rect from the damage payload before starting a draw pass"
+    );
+    assert!(
+        windows_backend_source.contains("if !self.state.begin_frame(present_rect)"),
+        "windows backend should bind Direct2D against the damage-scoped present rect instead of always clipping the full terminal surface"
+    );
+    assert!(
+        windows_backend_source.contains("fn resolved_present_rect("),
+        "windows backend should expose a helper that clamps overlay-only damage to a valid present rect"
+    );
+}
+
+#[test]
 fn platform_surface_backend_source_exposes_shared_native_surface_abstraction() {
     assert!(
         Path::new("src/app/terminal_renderer/platform/mod.rs").exists(),

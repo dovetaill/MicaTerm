@@ -853,7 +853,7 @@ impl WindowsNativeSurfaceState {
     }
 
     #[cfg(target_os = "windows")]
-    fn begin_frame(&mut self) -> bool {
+    fn begin_frame(&mut self, clip_rect: NativeTerminalSurfaceRect) -> bool {
         let Some(render_target) = self.render_target() else {
             return false;
         };
@@ -886,7 +886,7 @@ impl WindowsNativeSurfaceState {
             hwnd: host_hwnd,
             hdc: hdc as isize,
         });
-        let clip_rect = terminal_clip_rect(self.rect);
+        let clip_rect = terminal_clip_rect(clip_rect);
         unsafe {
             render_target.BeginDraw();
             render_target.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
@@ -1027,31 +1027,23 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
             return;
         };
         let frame = &frame;
+        let present_rect = resolved_present_rect(self.state.rect, damage);
 
         #[cfg(target_os = "windows")]
-        if !self.state.begin_frame() {
+        if !self.state.begin_frame(present_rect) {
             return;
         }
 
-        match damage.kind {
-            NativeSurfaceDamageKind::OverlayOnly => {
-                self.state.draw_background_runs(frame);
-                self.state.draw_monochrome_glyphs(frame);
-                self.state.draw_color_glyphs(frame);
-                self.state.draw_selection_overlay(frame);
-                self.state.draw_cursor_overlay(frame);
-                self.state.draw_ime_preview_overlay(frame);
-            }
-            NativeSurfaceDamageKind::Full | NativeSurfaceDamageKind::None => {
-                self.state.draw_background_runs(frame);
-                self.state.draw_selection_overlay(frame);
-                self.state.draw_monochrome_glyphs(frame);
-                self.state.draw_color_glyphs(frame);
-                self.state.draw_underline_overlay(frame);
-                self.state.draw_cursor_overlay(frame);
-                self.state.draw_ime_preview_overlay(frame);
-            }
-        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = present_rect;
+
+        self.state.draw_background_runs(frame);
+        self.state.draw_selection_overlay(frame);
+        self.state.draw_monochrome_glyphs(frame);
+        self.state.draw_color_glyphs(frame);
+        self.state.draw_underline_overlay(frame);
+        self.state.draw_cursor_overlay(frame);
+        self.state.draw_ime_preview_overlay(frame);
 
         #[cfg(target_os = "windows")]
         if self.state.end_frame() {
@@ -1090,6 +1082,51 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         self.state.render_target_dirty = false;
         self.state.last_prepared_frame_token = 0;
         self.state.last_presented_frame_token = 0;
+    }
+}
+
+fn resolved_present_rect(
+    surface_rect: NativeTerminalSurfaceRect,
+    damage: NativeSurfaceDamage,
+) -> NativeTerminalSurfaceRect {
+    match damage.kind {
+        NativeSurfaceDamageKind::OverlayOnly => intersect_present_rect(surface_rect, damage.rect),
+        NativeSurfaceDamageKind::Full | NativeSurfaceDamageKind::None => surface_rect,
+    }
+}
+
+fn intersect_present_rect(
+    surface_rect: NativeTerminalSurfaceRect,
+    damage_rect: NativeTerminalSurfaceRect,
+) -> NativeTerminalSurfaceRect {
+    if surface_rect.width <= 0
+        || surface_rect.height <= 0
+        || damage_rect.width <= 0
+        || damage_rect.height <= 0
+    {
+        return surface_rect;
+    }
+
+    let left = surface_rect.x.max(damage_rect.x);
+    let top = surface_rect.y.max(damage_rect.y);
+    let right = surface_rect
+        .x
+        .saturating_add(surface_rect.width)
+        .min(damage_rect.x.saturating_add(damage_rect.width));
+    let bottom = surface_rect
+        .y
+        .saturating_add(surface_rect.height)
+        .min(damage_rect.y.saturating_add(damage_rect.height));
+
+    if right <= left || bottom <= top {
+        surface_rect
+    } else {
+        NativeTerminalSurfaceRect {
+            x: left,
+            y: top,
+            width: right.saturating_sub(left),
+            height: bottom.saturating_sub(top),
+        }
     }
 }
 
