@@ -6220,6 +6220,40 @@ fn asset_activation_restores_native_terminal_surface_rect_from_welcome() {
 }
 
 #[test]
+fn context_menu_open_connection_restores_native_terminal_surface_rect_from_welcome() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    assert!(app.get_assets_context_menu_open());
+
+    app.invoke_assets_context_menu_action_invoked("open-connection".into());
+    settle_terminal_projection();
+
+    assert!(!app.get_assets_context_menu_open());
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "opening a connection from the assets context menu should restore the native terminal rect immediately so the first live terminal frame is not presented into a still-collapsed retained surface"
+    );
+    assert!(
+        app.get_workspace_session_surface_seqno() > 0,
+        "opening a connection from the assets context menu should stage a terminal payload together with the host mode transition so the revived geometry is backed by a real frame"
+    );
+}
+
+#[test]
 fn save_and_connect_persists_saved_secret_before_probe() {
     i_slint_backend_testing::init_no_event_loop();
 
