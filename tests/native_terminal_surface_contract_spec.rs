@@ -129,8 +129,12 @@ fn native_surface_source_exposes_present_bridge_contract() {
         "native surface bridge should expose an explicit draw hook for retained native frames"
     );
     assert!(
-        native_surface_source.contains("RenderingState::BeforeRendering"),
-        "rendering notifier should reach the retained-frame draw hook during Slint rendering"
+        native_surface_source.contains("RenderingState::AfterRendering"),
+        "rendering notifier should reach the retained-frame draw hook after Slint paints the host surface so native terminal pixels are not overdrawn"
+    );
+    assert!(
+        !native_surface_source.contains("RenderingState::BeforeRendering => draw_retained_frame"),
+        "native surface bridge should stop presenting retained frames before Slint paints because the terminal region background would overdraw native text"
     );
     assert!(
         renderer_mod_source.contains("RetainedNativeTerminalSurfaceFrame"),

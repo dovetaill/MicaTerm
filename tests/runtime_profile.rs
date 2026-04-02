@@ -64,7 +64,7 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
             "Transitional non-shipping software profile while native Linux terminal surfaces are still landing."
         )
     );
-    assert!(!content.contains("fallback-only compatibility profile"));
+    assert!(content.contains("fallback-only compatibility profile"));
 }
 
 #[test]
