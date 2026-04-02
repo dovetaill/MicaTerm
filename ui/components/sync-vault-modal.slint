@@ -99,6 +99,40 @@ component SyncModalTextField inherits Rectangle {
     }
 }
 
+component SyncStatusMetricRow inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "";
+
+    min-width: 0px;
+    preferred-width: 0px;
+    height: 22px;
+    background: transparent;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: min(136px, parent.width * 0.42);
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        opacity: 0.7;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: min(144px, parent.width * 0.44);
+        y: 0px;
+        width: max(0px, parent.width - self.x);
+        height: parent.height;
+        text: root.value;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
 export component SyncVaultModal inherits Rectangle {
     in property <string> mode: "not-configured";
     in property <string> title: "Sync Settings";
@@ -119,6 +153,11 @@ export component SyncVaultModal inherits Rectangle {
     in property <string> git-ssh-private-key: "";
     in property <string> git-ssh-passphrase: "";
     in property <string> master-password: "";
+    in property <string> local-last-sync-text: "Never synced";
+    in property <string> remote-last-update-text: "Unknown";
+    in property <string> primary-revision-text: "Unknown";
+    in property <string> remote-status-text: "";
+    in property <bool> remote-status-loading: false;
     callback close-requested();
     callback primary-action-requested();
     callback secondary-action-requested();
@@ -247,6 +286,69 @@ export component SyncVaultModal inherits Rectangle {
                             color: ThemeTokens.text-primary;
                             vertical-alignment: center;
                             overflow: elide;
+                        }
+                    }
+
+                    sync-status-card := Rectangle {
+                        width: parent.width;
+                        height: max(118px, status-copy.preferred-height + 98px);
+                        border-radius: 0px;
+                        border-width: 1px;
+                        border-color: ThemeTokens.divider-strong;
+                        background: ThemeTokens.workspace-surface;
+
+                        Text {
+                            x: 12px;
+                            y: 10px;
+                            width: parent.width - 24px;
+                            text: "Latest sync status";
+                            color: ThemeTokens.text-primary;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+
+                        if root.remote-status-loading : loading-copy := Text {
+                            x: parent.width - 140px;
+                            y: 10px;
+                            width: 128px;
+                            text: "Refreshing...";
+                            color: ThemeTokens.accent;
+                            horizontal-alignment: right;
+                            overflow: elide;
+                        }
+
+                        SyncStatusMetricRow {
+                            x: 12px;
+                            y: 36px;
+                            width: parent.width - 24px;
+                            label: "Local last sync";
+                            value: root.local-last-sync-text;
+                        }
+
+                        SyncStatusMetricRow {
+                            x: 12px;
+                            y: 58px;
+                            width: parent.width - 24px;
+                            label: "Remote last update";
+                            value: root.remote-last-update-text;
+                        }
+
+                        SyncStatusMetricRow {
+                            x: 12px;
+                            y: 80px;
+                            width: parent.width - 24px;
+                            label: "Primary revision";
+                            value: root.primary-revision-text;
+                        }
+
+                        status-copy := Text {
+                            x: 12px;
+                            y: 106px;
+                            width: parent.width - 24px;
+                            text: root.remote-status-text != "" ? root.remote-status-text : root.status-text;
+                            color: ThemeTokens.text-primary;
+                            opacity: 0.78;
+                            wrap: word-wrap;
                         }
                     }
 

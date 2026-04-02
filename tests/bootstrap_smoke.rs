@@ -18,9 +18,11 @@ use mica_term::app::assets_catalog::{
     PersistedAssetSshProxySpec, PersistedSnippetSpec, PersistedSshConnectionSpec,
     catalog_to_asset_tree,
 };
+use mica_term::app::async_runtime::AppAsyncRuntime;
 use mica_term::app::bootstrap::{
     ImportedPrivateKey, PrivateKeyImporter, VaultProviderFactory, VaultRuntimeOptions, app_title,
     bind_top_status_bar_with_injected_services_and_vault_runtime, bind_top_status_bar_with_store,
+    bind_top_status_bar_with_injected_services_and_vault_runtime_and_async_handle,
     bind_top_status_bar_with_store_and_effects_and_asset_repo,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_keychain_repo_and_launcher_and_credential_store,
@@ -140,6 +142,38 @@ fn bootstrap_source_uses_windows_native_terminal_presenter_for_native_frames() {
     assert!(
         !bootstrap_source.contains("frame_token: u64::try_from(surface.seqno)"),
         "bootstrap should stop synthesizing native frame tokens directly from surface seqno once the native renderer owns frame preparation"
+    );
+}
+
+#[test]
+fn bootstrap_routes_vault_sync_scheduling_through_vault_sync_service() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("VaultSyncService::new"),
+        "bootstrap should construct VaultSyncService as the single vault sync orchestration entry"
+    );
+    assert!(
+        bootstrap_source.contains("or_else(|| session_runtime_guard.as_ref().map(AppAsyncRuntime::handle))"),
+        "bootstrap should prefer the explicit async runtime handle before falling back to session_runtime_guard"
+    );
+    assert!(
+        !bootstrap_source.contains("struct VaultSyncSchedulerState"),
+        "bootstrap should stop defining VaultSyncSchedulerState locally once orchestration moves into VaultSyncService"
+    );
+}
+
+#[test]
+fn bootstrap_routes_asset_mutations_through_vault_sync_service_dirty_api() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("request(VaultSyncIntent::LocalMutation)"),
+        "asset mutations should call VaultSyncService's LocalMutation dirty API directly"
+    );
+    assert!(
+        !bootstrap_source.contains("fn mark_local_vault_dirty_and_arm_sync("),
+        "bootstrap should remove the legacy local dirty helper once mutation entry points call the service directly"
     );
 }
 
@@ -1864,6 +1898,26 @@ fn bind_with_vault_runtime(
     );
 }
 
+fn bind_with_vault_runtime_and_async_handle(
+    app: &AppWindow,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+    credential_store: Arc<dyn CredentialStore>,
+    async_runtime_handle: tokio::runtime::Handle,
+    vault_runtime: VaultRuntimeOptions,
+) {
+    bind_top_status_bar_with_injected_services_and_vault_runtime_and_async_handle(
+        app,
+        None,
+        default_platform_window_effects(),
+        None,
+        launcher,
+        credential_store,
+        Arc::new(CancelledPrivateKeyImporter),
+        Some(async_runtime_handle),
+        vault_runtime,
+    );
+}
+
 fn find_keychain_row_id(app: &AppWindow, kind: &str, label: &str) -> String {
     let rows = app.get_keychain_asset_items();
     (0..rows.row_count())
@@ -3244,6 +3298,69 @@ fn manual_sync_modal_returns_before_slow_primary_write_completes() {
     assert!(
         started.elapsed() < Duration::from_millis(120),
         "manual sync should return quickly while the provider runs in the background"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if primary_inner.recorded_writes().len() == 1 {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "background sync never completed within the deadline"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        slint::platform::update_timers_and_animations();
+    }
+}
+
+#[test]
+fn manual_sync_uses_explicit_runtime_handle_when_session_runtime_guard_is_absent() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_root = sample_vault_runtime_root("manual-sync-explicit-runtime-handle");
+    let primary_inner = Arc::new(MockVaultProvider::new(
+        "remote-primary",
+        ProviderCapabilities::bundled_files_like(),
+    ));
+    let primary = Arc::new(DelayedVaultProvider::new(
+        Arc::clone(&primary_inner),
+        Duration::ZERO,
+        Duration::from_millis(250),
+    ));
+    let provider_factory = AnyVaultProviderFactory::default();
+    provider_factory.insert(primary as Arc<dyn VaultProvider>);
+
+    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
+    bundle
+        .remotes
+        .retain(|remote| remote.role == RemoteRole::Primary);
+
+    let app = AppWindow::new().unwrap();
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    let async_runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    bind_with_vault_runtime_and_async_handle(
+        &app,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+        async_runtime.handle(),
+        VaultRuntimeOptions {
+            root_dir: Some(temp_root),
+            provider_factory: Arc::new(provider_factory),
+            bootstrap_template: Some(bundle),
+        },
+    );
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_open_sync_modal_requested();
+    app.invoke_sync_modal_submit_master_password("vault-pass".into());
+
+    let started = Instant::now();
+    app.invoke_sync_modal_sync_now_requested();
+
+    assert!(
+        started.elapsed() < Duration::from_millis(120),
+        "manual sync should prefer the supplied async runtime handle when no session runtime guard exists"
     );
 
     let deadline = Instant::now() + Duration::from_secs(2);

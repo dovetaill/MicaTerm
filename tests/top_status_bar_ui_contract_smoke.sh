@@ -57,6 +57,11 @@ grep -F 'show-right-panel: root.effective-show-right-panel;' "$APP_WINDOW" >/dev
 grep -F 'callback sync-now-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback open-sync-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> sync-modal-open: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-local-last-sync-text: "Never synced";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-remote-last-update-text: "Unknown";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-primary-revision-text: "Unknown";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> sync-modal-remote-status-text: "";' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <bool> sync-modal-remote-status-loading: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> sync-feedback-running: false;' "$APP_WINDOW" >/dev/null
 grep -F 'sync-now-requested => {' "$APP_WINDOW" >/dev/null
 grep -F 'root.sync-now-requested();' "$APP_WINDOW" >/dev/null
@@ -132,6 +137,19 @@ grep -F 'border-color: ThemeTokens.divider-strong;' "$ROOT_DIR/ui/components/tit
 grep -F 'callback sync-settings-selected;' "$TITLEBAR" >/dev/null || true
 grep -F 'callback sync-settings-selected;' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
 grep -F 'label: "Sync Settings";' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
+grep -F 'local-last-sync-text: root.sync-modal-local-last-sync-text;' "$APP_WINDOW" >/dev/null
+grep -F 'remote-last-update-text: root.sync-modal-remote-last-update-text;' "$APP_WINDOW" >/dev/null
+grep -F 'primary-revision-text: root.sync-modal-primary-revision-text;' "$APP_WINDOW" >/dev/null
+grep -F 'remote-status-text: root.sync-modal-remote-status-text;' "$APP_WINDOW" >/dev/null
+grep -F 'remote-status-loading: root.sync-modal-remote-status-loading;' "$APP_WINDOW" >/dev/null
+grep -F 'in property <string> local-last-sync-text: "Never synced";' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <string> remote-last-update-text: "Unknown";' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <string> primary-revision-text: "Unknown";' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <string> remote-status-text: "";' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <bool> remote-status-loading: false;' "$SYNC_MODAL" >/dev/null
+grep -F 'label: "Local last sync";' "$SYNC_MODAL" >/dev/null
+grep -F 'label: "Remote last update";' "$SYNC_MODAL" >/dev/null
+grep -F 'label: "Primary revision";' "$SYNC_MODAL" >/dev/null
 ! grep -F 'label: "Appearance";' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
 ! grep -F 'callback sync-modal-lock-requested();' "$APP_WINDOW" >/dev/null
 ! grep -F 'in-out property <bool> sync-modal-auto-sync-enabled: false;' "$APP_WINDOW" >/dev/null

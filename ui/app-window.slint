@@ -52,6 +52,11 @@ export component AppWindow inherits Window {
     in-out property <string> sync-modal-git-ssh-private-key: "";
     in-out property <string> sync-modal-git-ssh-passphrase: "";
     in-out property <string> sync-modal-master-password: "";
+    in-out property <string> sync-modal-local-last-sync-text: "Never synced";
+    in-out property <string> sync-modal-remote-last-update-text: "Unknown";
+    in-out property <string> sync-modal-primary-revision-text: "Unknown";
+    in-out property <string> sync-modal-remote-status-text: "";
+    in-out property <bool> sync-modal-remote-status-loading: false;
     in-out property <string> sync-feedback-text: "";
     in-out property <int> sync-feedback-sequence: 0;
     in-out property <bool> sync-feedback-running: false;
@@ -1180,6 +1185,11 @@ export component AppWindow inherits Window {
             git-ssh-private-key: root.sync-modal-git-ssh-private-key;
             git-ssh-passphrase: root.sync-modal-git-ssh-passphrase;
             master-password: root.sync-modal-master-password;
+            local-last-sync-text: root.sync-modal-local-last-sync-text;
+            remote-last-update-text: root.sync-modal-remote-last-update-text;
+            primary-revision-text: root.sync-modal-primary-revision-text;
+            remote-status-text: root.sync-modal-remote-status-text;
+            remote-status-loading: root.sync-modal-remote-status-loading;
 
             close-requested => {
                 root.sync-modal-close-requested();
