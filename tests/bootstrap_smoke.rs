@@ -6122,6 +6122,45 @@ fn launcher_picker_activation_replaces_launcher_tab_and_closes_modal() {
 }
 
 #[test]
+fn launcher_picker_activation_restores_native_terminal_surface_rect() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+
+    app.invoke_workspace_new_tab_requested();
+    app.invoke_welcome_open_saved_ssh_requested();
+
+    assert!(app.get_open_saved_ssh_modal_open());
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+
+    app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    assert!(!app.get_open_saved_ssh_modal_open());
+    let item = app
+        .get_workspace_tab_items()
+        .row_data(0)
+        .expect("workspace tab after picker activation");
+    assert_ne!(item.session_id.as_str(), "workspace-launcher");
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "saved ssh picker activation should restore the native terminal rect as soon as the launcher tab is replaced so the retained surface does not remain collapsed under a live terminal host"
+    );
+    assert!(
+        app.get_workspace_session_surface_seqno() > 0,
+        "saved ssh picker activation should stage a terminal payload together with the restored host mode so the revived geometry is backed by a real frame"
+    );
+}
+
+#[test]
 fn launcher_picker_folder_activation_does_not_attempt_to_open_session() {
     i_slint_backend_testing::init_no_event_loop();
 
