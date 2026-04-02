@@ -84,6 +84,7 @@ fn overlay_damage_rect(
 ) -> Option<NativeTerminalSurfaceRect> {
     let mut damage = None;
     extend_changed_selection_damage_rect(&mut damage, previous, next);
+    extend_changed_ime_preview_damage_rect(&mut damage, previous, next);
     extend_overlay_damage_rect(&mut damage, previous);
     extend_overlay_damage_rect(&mut damage, next);
     damage
@@ -112,19 +113,6 @@ fn extend_overlay_damage_rect(
         }
     }
 
-    if presentable.ime_preview_overlay.active {
-        union_rect(
-            damage,
-            cell_span_rect(
-                frame.rect,
-                presentable.ime_preview_overlay.row,
-                presentable.ime_preview_overlay.start_col,
-                presentable.ime_preview_overlay.end_col,
-                frame.frame.cell_width_px,
-                frame.frame.cell_height_px,
-            ),
-        );
-    }
 }
 
 fn cursor_overlay_rect(
@@ -204,6 +192,106 @@ fn extend_unique_selection_rects(
             );
         }
     }
+}
+
+fn extend_changed_ime_preview_damage_rect(
+    damage: &mut Option<NativeTerminalSurfaceRect>,
+    previous: &RetainedNativeTerminalSurfaceFrame,
+    next: &RetainedNativeTerminalSurfaceFrame,
+) {
+    let previous_ime = previous.frame.presentable_frame.ime_preview_overlay;
+    let next_ime = next.frame.presentable_frame.ime_preview_overlay;
+
+    extend_unique_ime_preview_spans(
+        damage,
+        previous.rect,
+        previous_ime,
+        next_ime,
+        previous.frame.cell_width_px,
+        previous.frame.cell_height_px,
+    );
+    extend_unique_ime_preview_spans(
+        damage,
+        next.rect,
+        next_ime,
+        previous_ime,
+        next.frame.cell_width_px,
+        next.frame.cell_height_px,
+    );
+
+    union_rect(
+        damage,
+        ime_preview_cursor_rect(
+            previous.rect,
+            previous_ime,
+            previous.frame.cell_width_px,
+            previous.frame.cell_height_px,
+        ),
+    );
+    union_rect(
+        damage,
+        ime_preview_cursor_rect(
+            next.rect,
+            next_ime,
+            next.frame.cell_width_px,
+            next.frame.cell_height_px,
+        ),
+    );
+}
+
+fn extend_unique_ime_preview_spans(
+    damage: &mut Option<NativeTerminalSurfaceRect>,
+    surface_rect: NativeTerminalSurfaceRect,
+    source: crate::app::terminal_presenter::NativeImePreviewOverlay,
+    other: crate::app::terminal_presenter::NativeImePreviewOverlay,
+    cell_width_px: u32,
+    cell_height_px: u32,
+) {
+    if !source.active {
+        return;
+    }
+
+    let mut pending_segments = vec![(source.start_col, source.end_col)];
+    if other.active && other.row == source.row {
+        pending_segments = pending_segments
+            .into_iter()
+            .flat_map(|segment| subtract_cell_span(segment, (other.start_col, other.end_col)))
+            .collect();
+    }
+
+    for (start_col, end_col) in pending_segments {
+        union_rect(
+            damage,
+            cell_span_rect(
+                surface_rect,
+                source.row,
+                start_col,
+                end_col,
+                cell_width_px,
+                cell_height_px,
+            ),
+        );
+    }
+}
+
+fn ime_preview_cursor_rect(
+    surface_rect: NativeTerminalSurfaceRect,
+    ime_preview: crate::app::terminal_presenter::NativeImePreviewOverlay,
+    cell_width_px: u32,
+    cell_height_px: u32,
+) -> Option<NativeTerminalSurfaceRect> {
+    if !ime_preview.active {
+        return None;
+    }
+
+    cell_span_rect(
+        surface_rect,
+        ime_preview.row,
+        ime_preview.cursor_col,
+        ime_preview.cursor_col,
+        cell_width_px,
+        cell_height_px,
+    )
 }
 
 fn subtract_cell_span(

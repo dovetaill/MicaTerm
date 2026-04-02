@@ -226,6 +226,66 @@ fn frame_with_selection(
     }
 }
 
+fn frame_with_ime_preview(
+    frame_token: u64,
+    ime_preview_overlay: NativeImePreviewOverlay,
+) -> NativeTerminalFrame {
+    NativeTerminalFrame {
+        frame_token,
+        cell_width_px: 8,
+        cell_height_px: 16,
+        presentable_frame: PresentableNativeFrame {
+            seqno: frame_token,
+            shaped_row_count: 0,
+            glyph_run_count: 0,
+            glyph_count: 0,
+            dirty_row_count: 1,
+            default_fg_rgba: 0xffff_ffff,
+            default_bg_rgba: 0xff11_2233,
+            row_bg_even_rgba: 0xff11_2233,
+            row_bg_odd_rgba: 0xff11_2233,
+            grid_rows: 2,
+            grid_cols: 6,
+            background_runs: vec![],
+            monochrome_glyph_draws: vec![],
+            color_glyph_draws: vec![],
+            underline_run_count: 0,
+            cursor: NativeCursorFrameState {
+                row: 0,
+                col: 0,
+                visible: false,
+                blinking: false,
+                shape: TerminalCursorShape::Block,
+                fg_rgba: 0,
+                bg_rgba: 0,
+            },
+            cursor_overlay: NativeCursorOverlay {
+                visible: false,
+                row: 0,
+                col: 0,
+                cell_width_px: 8,
+                cell_height_px: 16,
+                shape: TerminalCursorShape::Block,
+                fg_rgba: 0,
+                bg_rgba: 0,
+            },
+            selection: NativeSelectionFrameState::default(),
+            selection_overlay: NativeSelectionOverlay::default(),
+            underline_overlay: NativeUnderlineOverlay::default(),
+            semantic_overlays: vec![],
+            semantic_input_overlays: vec![],
+            ime_preview_overlay,
+            renderer_stats: NativeRendererFrameStats {
+                glyph_cache_entries: 0,
+                mono_glyph_cache_entries: 0,
+                color_glyph_cache_entries: 0,
+                monochrome_glyphs_prepared: 0,
+                color_glyphs_prepared: 0,
+            },
+        },
+    }
+}
+
 #[test]
 fn overlay_only_damage_uses_union_of_previous_and_next_cursor_regions() {
     let previous = retained_frame(frame_with_cursor(7, Some(0)));
@@ -317,5 +377,45 @@ fn selection_overlay_damage_shrinks_to_changed_cells_only() {
             height: 16,
         },
         "selection overlay damage should collapse to only the newly changed cell instead of repainting the full previous-plus-next selection union"
+    );
+}
+
+#[test]
+fn ime_preview_damage_shrinks_to_changed_cells_only() {
+    let previous = retained_frame(frame_with_ime_preview(
+        21,
+        NativeImePreviewOverlay {
+            active: true,
+            row: 1,
+            start_col: 1,
+            end_col: 3,
+            cursor_col: 2,
+        },
+    ));
+    let next = retained_frame(frame_with_ime_preview(
+        21,
+        NativeImePreviewOverlay {
+            active: true,
+            row: 1,
+            start_col: 1,
+            end_col: 4,
+            cursor_col: 3,
+        },
+    ));
+    let mut tracker = NativeFrameDamageTracker::default();
+
+    tracker.track_frame_damage(Some(&previous), Some(&next));
+    let damage = tracker.take_damage().expect("ime preview damage");
+
+    assert_eq!(damage.kind, NativeSurfaceDamageKind::OverlayOnly);
+    assert_eq!(
+        damage.rect,
+        NativeTerminalSurfaceRect {
+            x: 26,
+            y: 36,
+            width: 24,
+            height: 16,
+        },
+        "IME preview damage should collapse to the old cursor cell, new cursor cell, and newly changed tail cell instead of repainting the full previous-plus-next preview span"
     );
 }
