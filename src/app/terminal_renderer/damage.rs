@@ -67,6 +67,10 @@ impl NativeFrameDamageTracker {
         self.pending.is_some()
     }
 
+    pub fn take_damage(&mut self) -> Option<NativeSurfaceDamage> {
+        self.pending.take()
+    }
+
     pub fn clear(&mut self) {
         self.pending = None;
     }

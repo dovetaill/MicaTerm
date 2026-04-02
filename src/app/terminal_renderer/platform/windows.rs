@@ -9,7 +9,8 @@ use crate::AppWindow;
 #[cfg(target_os = "windows")]
 use crate::app::ssh::runtime::TerminalCursorShape;
 use crate::app::terminal_renderer::{
-    NativeTerminalSurfaceDiagnostics, NativeTerminalSurfaceDrawCounters,
+    NativeSurfaceDamage, NativeSurfaceDamageKind, NativeTerminalSurfaceDiagnostics,
+    NativeTerminalSurfaceDrawCounters,
 };
 use crate::app::terminal_renderer::wgpu_renderer::{
     PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw,
@@ -1010,7 +1011,7 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         });
     }
 
-    fn present(&mut self) {
+    fn present(&mut self, damage: NativeSurfaceDamage) {
         if !self.state.attached {
             return;
         }
@@ -1032,13 +1033,25 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
             return;
         }
 
-        self.state.draw_background_runs(frame);
-        self.state.draw_selection_overlay(frame);
-        self.state.draw_monochrome_glyphs(frame);
-        self.state.draw_color_glyphs(frame);
-        self.state.draw_underline_overlay(frame);
-        self.state.draw_cursor_overlay(frame);
-        self.state.draw_ime_preview_overlay(frame);
+        match damage.kind {
+            NativeSurfaceDamageKind::OverlayOnly => {
+                self.state.draw_background_runs(frame);
+                self.state.draw_monochrome_glyphs(frame);
+                self.state.draw_color_glyphs(frame);
+                self.state.draw_selection_overlay(frame);
+                self.state.draw_cursor_overlay(frame);
+                self.state.draw_ime_preview_overlay(frame);
+            }
+            NativeSurfaceDamageKind::Full | NativeSurfaceDamageKind::None => {
+                self.state.draw_background_runs(frame);
+                self.state.draw_selection_overlay(frame);
+                self.state.draw_monochrome_glyphs(frame);
+                self.state.draw_color_glyphs(frame);
+                self.state.draw_underline_overlay(frame);
+                self.state.draw_cursor_overlay(frame);
+                self.state.draw_ime_preview_overlay(frame);
+            }
+        }
 
         #[cfg(target_os = "windows")]
         if self.state.end_frame() {

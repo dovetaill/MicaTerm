@@ -631,8 +631,8 @@ fn windows_platform_surface_backend_source_exposes_hwnd_and_lifecycle_contract()
         "Windows backend should expose an attach hook"
     );
     assert!(
-        windows_backend_source.contains("fn present(&mut self)"),
-        "Windows backend should expose a present hook"
+        windows_backend_source.contains("fn present(&mut self, damage: NativeSurfaceDamage)"),
+        "Windows backend should expose a damage-aware present hook"
     );
     assert!(
         windows_backend_source.contains("fn detach(&mut self)"),

@@ -837,6 +837,44 @@ fn native_surface_source_exposes_damage_tracker_and_shutdown_guard_contract() {
 }
 
 #[test]
+fn native_surface_damage_contract_threads_damage_kind_into_backend_present() {
+    let damage_source = fs::read_to_string("src/app/terminal_renderer/damage.rs")
+        .expect("read native surface damage tracker");
+    let backend_source = fs::read_to_string("src/app/terminal_renderer/platform/backend.rs")
+        .expect("read platform backend contract");
+    let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
+        .expect("read native surface");
+    let windows_backend_source = fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+        .expect("read windows native surface backend");
+
+    assert!(
+        damage_source.contains("fn take_damage(&mut self) -> Option<NativeSurfaceDamage>"),
+        "damage tracker should expose a take_damage helper so native surface present can consume the pending invalidation kind instead of flattening everything into a boolean"
+    );
+    assert!(
+        backend_source.contains("fn present(&mut self, damage: NativeSurfaceDamage)"),
+        "platform backend contract should accept the concrete native-surface damage payload during present so overlay-only invalidation can avoid the same path as a full repaint"
+    );
+    assert!(
+        native_surface_source.contains("let damage = state.damage_tracker.take_damage().unwrap_or_default();"),
+        "native surface draw hook should consume the pending damage payload before dispatching present"
+    );
+    assert!(
+        native_surface_source.contains("state.backend.present(damage);"),
+        "native surface draw hook should forward the concrete damage payload into the backend present call"
+    );
+    assert!(
+        windows_backend_source.contains("fn present(&mut self, damage: NativeSurfaceDamage)"),
+        "windows native surface backend should accept the damage payload in its present entrypoint"
+    );
+    assert!(
+        windows_backend_source.contains("match damage.kind")
+            || windows_backend_source.contains("if matches!(damage.kind"),
+        "windows native surface backend should branch on damage kind so overlay-only invalidation can stop sharing the exact same redraw path as a full repaint"
+    );
+}
+
+#[test]
 fn platform_surface_backend_source_exposes_shared_native_surface_abstraction() {
     assert!(
         Path::new("src/app/terminal_renderer/platform/mod.rs").exists(),
@@ -877,8 +915,8 @@ fn platform_surface_backend_source_exposes_shared_native_surface_abstraction() {
         "shared platform backend contract should expose a retained-frame update hook"
     );
     assert!(
-        backend_source.contains("fn present(&mut self)"),
-        "shared platform backend contract should expose a present hook"
+        backend_source.contains("fn present(&mut self, damage: NativeSurfaceDamage)"),
+        "shared platform backend contract should expose a damage-aware present hook"
     );
     assert!(
         backend_source.contains("fn detach(&mut self)"),
@@ -907,8 +945,8 @@ fn platform_surface_backend_source_exposes_shared_native_surface_abstraction() {
         "native surface bridge should forward retained frame updates through the shared backend abstraction"
     );
     assert!(
-        native_surface_source.contains("state.backend.present();"),
-        "native surface bridge should ask the shared backend to present during retained-frame draw"
+        native_surface_source.contains("state.backend.present(damage);"),
+        "native surface bridge should ask the shared backend to present with the concrete damage payload during retained-frame draw"
     );
     assert!(
         native_surface_source.contains("state.backend.detach();"),
