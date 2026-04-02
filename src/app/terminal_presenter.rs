@@ -6,7 +6,7 @@ use slint::Image;
 use crate::app::ssh::runtime::{TerminalCursorShape, TerminalSurfaceState};
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_font::{DirectWriteFontSystem, FontRequest, LoadedFont};
+use crate::app::terminal_font::{DirectWriteFontSystem, FontRequest, FontSystem, LoadedFont};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_layout::{TerminalTextShaper, TextShaper};
 use crate::app::terminal_model::TerminalModelFrame;
@@ -247,7 +247,7 @@ impl WindowsNativePresenter {
     pub fn new() -> Result<Self> {
         let request = FontRequest::default();
         let mut font_system = DirectWriteFontSystem::new()?;
-        let loaded_font = font_system.load_native_font(&request)?;
+        let loaded_font = font_system.load_font(&request)?;
 
         Ok(Self {
             font_system,
@@ -268,7 +268,7 @@ impl WindowsNativePresenter {
 
     fn reload_loaded_font_for_scale(&mut self, scale_factor: f32) -> Result<()> {
         let request = self.scaled_font_request(scale_factor);
-        self.loaded_font = self.font_system.load_native_font(&request)?;
+        self.loaded_font = self.font_system.load_font(&request)?;
         self.previous_frame = None;
         Ok(())
     }
