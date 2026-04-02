@@ -2,8 +2,8 @@
 
 use mica_term::app::terminal_presenter::{
     NativeCursorFrameState, NativeCursorOverlay, NativeImePreviewOverlay, NativeRendererFrameStats,
-    NativeSelectionFrameState, NativeSelectionOverlay, NativeTerminalFrame,
-    NativeUnderlineOverlay, PresentableNativeFrame,
+    NativeSelectionFrameState, NativeSelectionOverlay, NativeSelectionRect, NativeTerminalFrame,
+    NativeUnderlineOverlay, NativeUnderlineRun, PresentableNativeFrame,
 };
 use mica_term::app::terminal_renderer::atlas::{GlyphAtlasEntry, GlyphCacheKind};
 use mica_term::app::terminal_renderer::wgpu_renderer::{
@@ -411,6 +411,71 @@ fn scene_image_renderer_reuses_bitmap_when_only_cursor_overlay_changes() {
         first_rgba.as_slice(),
         second_rgba.as_slice(),
         "cursor-only changes must not trigger a fresh bitmap with different scene pixels"
+    );
+}
+
+#[test]
+fn scene_image_renderer_reuses_base_bitmap_across_overlay_only_updates() {
+    let mut renderer = SceneImageTerminalRenderer::default();
+    let first = sample_frame_with_right_shifted_glyph();
+    let mut second = first.clone();
+    second.frame_token += 1;
+    second.presentable_frame.seqno += 1;
+    second.presentable_frame.selection_overlay = NativeSelectionOverlay {
+        active: true,
+        rect_count: 1,
+        rects: vec![NativeSelectionRect {
+            row: 0,
+            start_col: 0,
+            end_col: 0,
+            overlay_rgba: 0x6600_ff00,
+        }],
+        start_row: 0,
+        start_col: 0,
+        end_row: 0,
+        end_col: 0,
+        overlay_rgba: 0x6600_ff00,
+    };
+
+    let mut third = first.clone();
+    third.frame_token += 2;
+    third.presentable_frame.seqno += 2;
+    third.presentable_frame.underline_overlay = NativeUnderlineOverlay {
+        visible: true,
+        run_count: 1,
+        runs: vec![NativeUnderlineRun {
+            row: 0,
+            start_col: 0,
+            end_col: 0,
+            fg_rgba: 0xff00_ffff,
+        }],
+    };
+
+    let mut fourth = first.clone();
+    fourth.frame_token += 3;
+    fourth.presentable_frame.seqno += 3;
+    fourth.presentable_frame.ime_preview_overlay = NativeImePreviewOverlay {
+        active: true,
+        row: 0,
+        start_col: 0,
+        end_col: 0,
+        cursor_col: 0,
+    };
+
+    renderer.render(&first).expect("render base frame");
+    renderer.render(&second).expect("render selection overlay frame");
+    renderer.render(&third).expect("render underline overlay frame");
+    renderer.render(&fourth).expect("render ime overlay frame");
+
+    assert_eq!(
+        renderer.base_render_count(),
+        1,
+        "scene-image renderer should reuse the cached base bitmap when only overlays change on top of the same glyph/background content"
+    );
+    assert_eq!(
+        renderer.bitmap_render_count(),
+        4,
+        "overlay-only updates should still produce fresh composed bitmap frames while avoiding a second base raster pass"
     );
 }
 

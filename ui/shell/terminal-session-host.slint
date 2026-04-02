@@ -263,7 +263,7 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function scrollbar-track-y() -> length {
-        return root.terminal-padding-top;
+        return root.terminal-surface-origin-y();
     }
 
     function scrollbar-track-height() -> length {
@@ -308,7 +308,7 @@ export component TerminalSessionHost inherits Rectangle {
 
     function jump-to-latest-x() -> length {
         return max(
-            root.terminal-padding-left,
+            root.terminal-surface-origin-x(),
             root.width - root.terminal-padding-right
                 - (root.scrollbar-visible() ? root.scrollbar-reserved-width : 0px)
                 - root.jump-to-latest-width(),
@@ -316,7 +316,7 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function jump-to-latest-y() -> length {
-        return root.terminal-padding-top + max(
+        return root.terminal-surface-origin-y() + max(
             0px,
             root.terminal-visible-grid-height() - root.jump-to-latest-height - 12px,
         );
@@ -971,8 +971,8 @@ export component TerminalSessionHost inherits Rectangle {
                                 );
                             } else {
                                 root.open-context-menu(
-                                    root.terminal-padding-left + self.mouse-x,
-                                    root.terminal-padding-top + self.mouse-y,
+                                    root.terminal-surface-origin-x() + self.mouse-x,
+                                    root.terminal-surface-origin-y() + self.mouse-y,
                                 );
                             }
                         } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.right && root.session-mouse-grabbed {

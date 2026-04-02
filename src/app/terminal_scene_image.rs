@@ -18,8 +18,11 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 pub struct SceneImageTerminalRenderer {
     monochrome_glyph_cache: HashMap<u32, CachedMonochromeGlyph>,
     color_glyph_cache: HashMap<u32, CachedColorGlyph>,
+    last_base_fingerprint: Option<u64>,
+    last_base_pixels: Option<Vec<Rgba8Pixel>>,
     last_bitmap_fingerprint: Option<u64>,
     last_bitmap_frame: Option<BitmapTerminalFrame>,
+    base_render_count: usize,
     bitmap_render_count: usize,
 }
 
@@ -55,8 +58,14 @@ impl SceneImageTerminalRenderer {
     pub fn clear(&mut self) {
         self.monochrome_glyph_cache.clear();
         self.color_glyph_cache.clear();
+        self.last_base_fingerprint = None;
+        self.last_base_pixels = None;
         self.last_bitmap_fingerprint = None;
         self.last_bitmap_frame = None;
+    }
+
+    pub fn base_render_count(&self) -> usize {
+        self.base_render_count
     }
 
     pub fn bitmap_render_count(&self) -> usize {
@@ -64,7 +73,9 @@ impl SceneImageTerminalRenderer {
     }
 
     pub fn render(&mut self, frame: &NativeTerminalFrame) -> Result<BitmapTerminalFrame> {
-        let bitmap_fingerprint = self.fingerprint_bitmap_frame(frame)?;
+        let base_fingerprint = self.fingerprint_base_frame(frame)?;
+        let overlay_fingerprint = self.fingerprint_overlay_frame(frame);
+        let bitmap_fingerprint = combine_fingerprints(base_fingerprint, overlay_fingerprint);
         if self.last_bitmap_fingerprint == Some(bitmap_fingerprint)
             && let Some(bitmap_frame) = &self.last_bitmap_frame
         {
@@ -93,7 +104,22 @@ impl SceneImageTerminalRenderer {
             return Ok(bitmap_frame);
         }
 
-        let mut pixels = vec![rgba8(frame.presentable_frame.default_bg_rgba); (width_px * height_px) as usize];
+        let mut pixels = if self.last_base_fingerprint == Some(base_fingerprint) {
+            if let Some(pixels) = &self.last_base_pixels {
+                pixels.clone()
+            } else {
+                let pixels = self.render_base_pixels(frame)?;
+                self.base_render_count = self.base_render_count.saturating_add(1);
+                self.last_base_pixels = Some(pixels.clone());
+                pixels
+            }
+        } else {
+            let pixels = self.render_base_pixels(frame)?;
+            self.base_render_count = self.base_render_count.saturating_add(1);
+            self.last_base_fingerprint = Some(base_fingerprint);
+            self.last_base_pixels = Some(pixels.clone());
+            pixels
+        };
 
         {
             let mut surface = PixelSurface {
@@ -101,11 +127,7 @@ impl SceneImageTerminalRenderer {
                 width_px,
                 height_px,
             };
-            self.draw_row_backgrounds(&mut surface, frame);
-            self.draw_background_runs(&mut surface, frame);
             self.draw_selection_overlay(&mut surface, frame);
-            self.draw_monochrome_glyphs(&mut surface, frame)?;
-            self.draw_color_glyphs(&mut surface, frame)?;
             self.draw_underline_overlay(&mut surface, frame);
             self.draw_ime_preview_overlay(&mut surface, frame);
         }
@@ -127,7 +149,7 @@ impl SceneImageTerminalRenderer {
         Ok(bitmap_frame)
     }
 
-    fn fingerprint_bitmap_frame(&mut self, frame: &NativeTerminalFrame) -> Result<u64> {
+    fn fingerprint_base_frame(&mut self, frame: &NativeTerminalFrame) -> Result<u64> {
         let mut hasher = DefaultHasher::new();
         let presentable = &frame.presentable_frame;
 
@@ -145,10 +167,6 @@ impl SceneImageTerminalRenderer {
             hash_background_run(&mut hasher, run);
         }
 
-        hash_selection_overlay(&mut hasher, &presentable.selection_overlay);
-        hash_underline_overlay(&mut hasher, &presentable.underline_overlay);
-        hash_ime_preview_overlay(&mut hasher, presentable.ime_preview_overlay);
-
         hash_usize(&mut hasher, presentable.monochrome_glyph_draws.len());
         for draw in &presentable.monochrome_glyph_draws {
             let glyph = self.resolve_monochrome_glyph(draw)?;
@@ -162,6 +180,45 @@ impl SceneImageTerminalRenderer {
         }
 
         Ok(hasher.finish())
+    }
+
+    fn fingerprint_overlay_frame(&self, frame: &NativeTerminalFrame) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        let presentable = &frame.presentable_frame;
+
+        hash_u32(&mut hasher, presentable.default_fg_rgba);
+        hash_selection_overlay(&mut hasher, &presentable.selection_overlay);
+        hash_underline_overlay(&mut hasher, &presentable.underline_overlay);
+        hash_ime_preview_overlay(&mut hasher, presentable.ime_preview_overlay);
+
+        hasher.finish()
+    }
+
+    fn render_base_pixels(&mut self, frame: &NativeTerminalFrame) -> Result<Vec<Rgba8Pixel>> {
+        let width_px = frame
+            .presentable_frame
+            .grid_cols
+            .saturating_mul(frame.cell_width_px);
+        let height_px = frame
+            .presentable_frame
+            .grid_rows
+            .saturating_mul(frame.cell_height_px);
+        let mut pixels =
+            vec![rgba8(frame.presentable_frame.default_bg_rgba); (width_px * height_px) as usize];
+
+        {
+            let mut surface = PixelSurface {
+                pixels: &mut pixels,
+                width_px,
+                height_px,
+            };
+            self.draw_row_backgrounds(&mut surface, frame);
+            self.draw_background_runs(&mut surface, frame);
+            self.draw_monochrome_glyphs(&mut surface, frame)?;
+            self.draw_color_glyphs(&mut surface, frame)?;
+        }
+
+        Ok(pixels)
     }
 
     fn draw_row_backgrounds(
@@ -743,4 +800,15 @@ fn hash_i32(hasher: &mut impl Hasher, value: i32) {
 
 fn hash_usize(hasher: &mut impl Hasher, value: usize) {
     hasher.write(&(value as u64).to_le_bytes());
+}
+
+fn hash_u64(hasher: &mut impl Hasher, value: u64) {
+    hasher.write(&value.to_le_bytes());
+}
+
+fn combine_fingerprints(base_fingerprint: u64, overlay_fingerprint: u64) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hash_u64(&mut hasher, base_fingerprint);
+    hash_u64(&mut hasher, overlay_fingerprint);
+    hasher.finish()
 }
