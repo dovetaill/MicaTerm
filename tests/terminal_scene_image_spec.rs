@@ -480,6 +480,49 @@ fn scene_image_renderer_reuses_base_bitmap_across_overlay_only_updates() {
 }
 
 #[test]
+fn scene_image_renderer_reuses_cached_base_bitmap_after_overlays_clear() {
+    let mut renderer = SceneImageTerminalRenderer::default();
+    let base = sample_frame_with_right_shifted_glyph();
+    let mut overlay = base.clone();
+    overlay.frame_token += 1;
+    overlay.presentable_frame.seqno += 1;
+    overlay.presentable_frame.selection_overlay = NativeSelectionOverlay {
+        active: true,
+        rect_count: 1,
+        rects: vec![NativeSelectionRect {
+            row: 0,
+            start_col: 0,
+            end_col: 0,
+            overlay_rgba: 0x6600_ff00,
+        }],
+        start_row: 0,
+        start_col: 0,
+        end_row: 0,
+        end_col: 0,
+        overlay_rgba: 0x6600_ff00,
+    };
+
+    let mut cleared = base.clone();
+    cleared.frame_token += 2;
+    cleared.presentable_frame.seqno += 2;
+
+    renderer.render(&base).expect("render base frame");
+    renderer.render(&overlay).expect("render overlay frame");
+    renderer.render(&cleared).expect("render cleared frame");
+
+    assert_eq!(
+        renderer.base_render_count(),
+        1,
+        "clearing overlays should keep reusing the same base glyph/background raster"
+    );
+    assert_eq!(
+        renderer.bitmap_render_count(),
+        2,
+        "when overlays clear back to an unchanged base frame the renderer should reuse the cached base image instead of creating a third Image::from_rgba8 payload"
+    );
+}
+
+#[test]
 fn scene_image_renderer_clips_vertical_overhang_without_reanchoring_glyph_origin() {
     let mut renderer = SceneImageTerminalRenderer::default();
     let frame = renderer

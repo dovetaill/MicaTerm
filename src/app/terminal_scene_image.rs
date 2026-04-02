@@ -20,6 +20,7 @@ pub struct SceneImageTerminalRenderer {
     color_glyph_cache: HashMap<u32, CachedColorGlyph>,
     last_base_fingerprint: Option<u64>,
     last_base_pixels: Option<Vec<Rgba8Pixel>>,
+    last_base_bitmap_frame: Option<BitmapTerminalFrame>,
     last_bitmap_fingerprint: Option<u64>,
     last_bitmap_frame: Option<BitmapTerminalFrame>,
     base_render_count: usize,
@@ -60,6 +61,7 @@ impl SceneImageTerminalRenderer {
         self.color_glyph_cache.clear();
         self.last_base_fingerprint = None;
         self.last_base_pixels = None;
+        self.last_base_bitmap_frame = None;
         self.last_bitmap_fingerprint = None;
         self.last_bitmap_frame = None;
     }
@@ -76,6 +78,7 @@ impl SceneImageTerminalRenderer {
         let base_fingerprint = self.fingerprint_base_frame(frame)?;
         let overlay_fingerprint = self.fingerprint_overlay_frame(frame);
         let bitmap_fingerprint = combine_fingerprints(base_fingerprint, overlay_fingerprint);
+        let overlay_is_noop = overlay_composition_is_noop(frame);
         if self.last_bitmap_fingerprint == Some(bitmap_fingerprint)
             && let Some(bitmap_frame) = &self.last_bitmap_frame
         {
@@ -99,6 +102,7 @@ impl SceneImageTerminalRenderer {
                 cell_width_px: frame.cell_width_px,
                 cell_height_px: frame.cell_height_px,
             };
+            self.last_base_bitmap_frame = Some(bitmap_frame.clone());
             self.last_bitmap_fingerprint = Some(bitmap_fingerprint);
             self.last_bitmap_frame = Some(bitmap_frame.clone());
             return Ok(bitmap_frame);
@@ -118,8 +122,24 @@ impl SceneImageTerminalRenderer {
             self.base_render_count = self.base_render_count.saturating_add(1);
             self.last_base_fingerprint = Some(base_fingerprint);
             self.last_base_pixels = Some(pixels.clone());
+            self.last_base_bitmap_frame = None;
             pixels
         };
+
+        if overlay_is_noop {
+            if let Some(base_frame) = &self.last_base_bitmap_frame {
+                self.last_bitmap_fingerprint = Some(bitmap_fingerprint);
+                self.last_bitmap_frame = Some(base_frame.clone());
+                return Ok(base_frame.clone());
+            }
+
+            let bitmap_frame = self.bitmap_frame_from_pixels(frame, &pixels);
+            self.bitmap_render_count = self.bitmap_render_count.saturating_add(1);
+            self.last_base_bitmap_frame = Some(bitmap_frame.clone());
+            self.last_bitmap_fingerprint = Some(bitmap_fingerprint);
+            self.last_bitmap_frame = Some(bitmap_frame.clone());
+            return Ok(bitmap_frame);
+        }
 
         {
             let mut surface = PixelSurface {
@@ -132,16 +152,7 @@ impl SceneImageTerminalRenderer {
             self.draw_ime_preview_overlay(&mut surface, frame);
         }
 
-        let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(width_px, height_px);
-        buffer.make_mut_slice().copy_from_slice(&pixels);
-
-        let bitmap_frame = BitmapTerminalFrame {
-            image: Image::from_rgba8(buffer),
-            grid_rows: frame.presentable_frame.grid_rows,
-            grid_cols: frame.presentable_frame.grid_cols,
-            cell_width_px: frame.cell_width_px,
-            cell_height_px: frame.cell_height_px,
-        };
+        let bitmap_frame = self.bitmap_frame_from_pixels(frame, &pixels);
         self.bitmap_render_count = self.bitmap_render_count.saturating_add(1);
         self.last_bitmap_fingerprint = Some(bitmap_fingerprint);
         self.last_bitmap_frame = Some(bitmap_frame.clone());
@@ -219,6 +230,31 @@ impl SceneImageTerminalRenderer {
         }
 
         Ok(pixels)
+    }
+
+    fn bitmap_frame_from_pixels(
+        &self,
+        frame: &NativeTerminalFrame,
+        pixels: &[Rgba8Pixel],
+    ) -> BitmapTerminalFrame {
+        let width_px = frame
+            .presentable_frame
+            .grid_cols
+            .saturating_mul(frame.cell_width_px);
+        let height_px = frame
+            .presentable_frame
+            .grid_rows
+            .saturating_mul(frame.cell_height_px);
+        let mut buffer = SharedPixelBuffer::<Rgba8Pixel>::new(width_px, height_px);
+        buffer.make_mut_slice().copy_from_slice(pixels);
+
+        BitmapTerminalFrame {
+            image: Image::from_rgba8(buffer),
+            grid_rows: frame.presentable_frame.grid_rows,
+            grid_cols: frame.presentable_frame.grid_cols,
+            cell_width_px: frame.cell_width_px,
+            cell_height_px: frame.cell_height_px,
+        }
     }
 
     fn draw_row_backgrounds(
@@ -811,4 +847,11 @@ fn combine_fingerprints(base_fingerprint: u64, overlay_fingerprint: u64) -> u64 
     hash_u64(&mut hasher, base_fingerprint);
     hash_u64(&mut hasher, overlay_fingerprint);
     hasher.finish()
+}
+
+fn overlay_composition_is_noop(frame: &NativeTerminalFrame) -> bool {
+    let presentable = &frame.presentable_frame;
+    !presentable.selection_overlay.active
+        && !presentable.underline_overlay.visible
+        && !presentable.ime_preview_overlay.active
 }

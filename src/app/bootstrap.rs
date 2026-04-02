@@ -3875,7 +3875,7 @@ fn install_workspace_terminal_presenter(
     });
     window.set_workspace_session_render_mode(active_render_mode.as_str().into());
     window.set_workspace_session_surface_image(Image::default());
-    window.set_workspace_session_native_frame_token(0);
+    clear_workspace_retained_native_terminal_surface(window);
     active_render_mode
 }
 
@@ -3900,6 +3900,15 @@ fn sync_workspace_native_terminal_surface_geometry(window: &AppWindow) {
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
         if let Some(surface) = surface.borrow().as_ref() {
             surface.update_terminal_rect(rect);
+        }
+    });
+}
+
+fn clear_workspace_retained_native_terminal_surface(window: &AppWindow) {
+    window.set_workspace_session_native_frame_token(0);
+    WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
+        if let Some(surface) = surface.borrow().as_ref() {
+            surface.clear_frame();
         }
     });
 }
@@ -3957,12 +3966,7 @@ fn sync_workspace_session_cursor_from_native_frame(
 
 fn clear_workspace_native_terminal_frame(window: &AppWindow) {
     window.set_workspace_session_surface_image(Image::default());
-    window.set_workspace_session_native_frame_token(0);
-    WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
-        if let Some(surface) = surface.borrow().as_ref() {
-            surface.clear_frame();
-        }
-    });
+    clear_workspace_retained_native_terminal_surface(window);
 }
 
 #[cfg(test)]
@@ -4180,7 +4184,7 @@ fn sync_workspace_session_state_with_manager(
                     window.set_workspace_session_cols(i32::try_from(frame.grid_cols).unwrap_or(i32::MAX));
                     window.set_workspace_session_cell_width(frame.cell_width_px as f32 / scale_factor);
                     window.set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);
-                    window.set_workspace_session_native_frame_token(0);
+                    clear_workspace_retained_native_terminal_surface(window);
                     window.set_workspace_session_surface_image(frame.image);
                     window.set_workspace_session_render_mode(
                         TerminalRenderMode::Bitmap.as_str().into(),

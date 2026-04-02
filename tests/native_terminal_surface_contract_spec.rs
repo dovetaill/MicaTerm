@@ -462,12 +462,19 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     let bitmap_image = bitmap_block
         .find("window.set_workspace_session_surface_image(frame.image);")
         .expect("bitmap image");
+    let bitmap_native_clear = bitmap_block
+        .find("clear_workspace_retained_native_terminal_surface(window);")
+        .expect("bitmap native clear");
     assert!(
         bitmap_rows < bitmap_image
             && bitmap_cols < bitmap_image
             && bitmap_cell_width < bitmap_image
             && bitmap_cell_height < bitmap_image,
         "bitmap path should publish rows/cols and cell metrics from the same bitmap frame before swapping in the new scene-owned image so the host never stretches fresh pixels inside stale grid geometry"
+    );
+    assert!(
+        bitmap_native_clear < bitmap_image,
+        "bitmap path should tear down any retained native surface before publishing the new scene-owned image so renderer switches do not leave a stale native child surface lingering over the host"
     );
     assert!(
         bitmap_image < bitmap_render_mode,
