@@ -589,3 +589,110 @@ fn native_renderer_partitions_monochrome_glyph_cache_by_fractional_x_phase() -> 
 
     Ok(())
 }
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_preserves_fractional_x_phase_when_color_run_falls_back_to_monochrome() -> Result<()>
+{
+    let style = TextStyleKey {
+        fg_rgba: 0xffd8_dfe8,
+        bg_rgba: 0xff0c_1014,
+        bold: false,
+        underline: false,
+    };
+    let shaped_frame = ShapedTerminalFrame {
+        seqno: 1,
+        font: LoadedFont::new(
+            FontFaceKey(1),
+            FontRequest {
+                family_name: Some("Fractional Test".into()),
+                px_size: 4.0,
+            },
+            FontMetrics {
+                units_per_em: 10,
+                ascent_px: 3.0,
+                descent_px: -1.0,
+                line_gap_px: 0.0,
+                baseline_px: 3.0,
+                cell_width_px: 4.0,
+                cell_height_px: 4.0,
+            },
+            FontRenderProfile::default(),
+        ),
+        rows: vec![ShapedRow {
+            row: 0,
+            runs: vec![GlyphRun {
+                row: 0,
+                cell_range: 0..2,
+                text: "🙂🙂".into(),
+                clusters: vec![
+                    RunCluster {
+                        text: "🙂".into(),
+                        cell_range: 0..1,
+                        byte_range: 0..4,
+                    },
+                    RunCluster {
+                        text: "🙂".into(),
+                        cell_range: 1..2,
+                        byte_range: 4..8,
+                    },
+                ],
+                glyphs: vec![
+                    PositionedGlyph {
+                        glyph_id: 7,
+                        cluster: 0,
+                        x_advance: 11,
+                        y_advance: 0,
+                        x_offset: 0,
+                        y_offset: 0,
+                    },
+                    PositionedGlyph {
+                        glyph_id: 7,
+                        cluster: 1,
+                        x_advance: 11,
+                        y_advance: 0,
+                        x_offset: 0,
+                        y_offset: 0,
+                    },
+                ],
+                style,
+                resolved_face: FontFallbackFace {
+                    face_key: FontFaceKey(2),
+                    family_name: "Color Fallback".into(),
+                },
+                feature_set: Default::default(),
+                allow_ligatures: true,
+                has_color_glyphs: true,
+            }],
+        }],
+    };
+    let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+    let mut fonts = FractionalPhaseFontSystem::default();
+
+    let prepared = renderer.prepare(&shaped_frame, &mut fonts)?;
+    assert!(
+        prepared.color_glyph_draws.is_empty(),
+        "when the color glyph rasterizer declines a run, prepare should fall back to monochrome glyph draws instead of leaving a phantom color layer behind"
+    );
+    assert_eq!(
+        prepared.monochrome_glyph_draws.len(),
+        2,
+        "color-run monochrome fallback should still emit both glyph draws"
+    );
+    assert_eq!(
+        fonts.requests.len(),
+        2,
+        "fallback rasterization should still thread explicit glyph requests through the font backend"
+    );
+    assert_eq!(
+        fonts.requests[0].fractional_offset_x(),
+        0.0,
+        "the first fallback glyph should keep its whole-pixel phase"
+    );
+    assert!(
+        (fonts.requests[1].fractional_offset_x() - 0.4).abs() < 0.001,
+        "the second fallback glyph should keep the shaped 0.4px subpixel phase instead of collapsing to an integer origin"
+    );
+
+    Ok(())
+}
