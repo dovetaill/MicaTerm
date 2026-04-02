@@ -452,6 +452,17 @@ export component AssetsSidebar inherits Rectangle {
                     clicked => {
                         root.shell-interaction-requested();
                     }
+
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                            root.asset-context-menu-requested(
+                                "",
+                                "keychain-blank",
+                                self.mouse-x + self.absolute-position.x,
+                                self.mouse-y + self.absolute-position.y,
+                            );
+                        }
+                    }
                 }
 
                 VerticalLayout {
@@ -519,6 +530,28 @@ export component AssetsSidebar inherits Rectangle {
 
                         pointer-activity-requested => {
                             root.shell-interaction-requested();
+                        }
+                    }
+                }
+
+                keychain-list-blank-fill-context-touch := TouchArea {
+                    x: 12px;
+                    y: 12px + keychain-list-host.height;
+                    width: parent.width - 24px;
+                    height: max(0px, parent.height - 24px - keychain-list-host.height);
+
+                    clicked => {
+                        root.shell-interaction-requested();
+                    }
+
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                            root.asset-context-menu-requested(
+                                "",
+                                "keychain-blank",
+                                self.mouse-x + self.absolute-position.x,
+                                self.mouse-y + self.absolute-position.y,
+                            );
                         }
                     }
                 }

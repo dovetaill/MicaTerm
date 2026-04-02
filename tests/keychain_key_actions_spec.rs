@@ -9,7 +9,10 @@ use mica_term::app::bootstrap::{
     ImportedPrivateKey, PrivateKeyImporter,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer,
 };
-use mica_term::app::ssh::credentials::{CredentialStore, MemoryCredentialStore};
+use mica_term::app::ssh::credentials::{
+    CredentialStore, MemoryCredentialStore, keychain_key_credential_ref,
+    load_keychain_key_secret_bundle,
+};
 use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
@@ -98,6 +101,14 @@ impl PrivateKeyImporter for StaticPrivateKeyImporter {
 
 fn bind_with_importer(app: &AppWindow, importer: Arc<dyn PrivateKeyImporter>) {
     let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_importer_and_store(app, importer, credential_store);
+}
+
+fn bind_with_importer_and_store(
+    app: &AppWindow,
+    importer: Arc<dyn PrivateKeyImporter>,
+    credential_store: Arc<dyn CredentialStore>,
+) {
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer(
         app,
         None,
@@ -112,6 +123,30 @@ fn bind_with_importer(app: &AppWindow, importer: Arc<dyn PrivateKeyImporter>) {
 fn open_keychain_ssh_key_modal(app: &AppWindow) {
     app.invoke_sidebar_destination_selected("keychain".into());
     app.invoke_assets_create_action_selected("new-ssh-key".into());
+}
+
+fn sample_key_material() -> (String, String, String) {
+    let private_key =
+        PrivateKey::random(&mut OsRng, Algorithm::Ed25519).expect("generate sample private key");
+    let private_key_text = private_key
+        .to_openssh(LineEnding::LF)
+        .expect("encode private key")
+        .to_string();
+    let public_key_text = private_key
+        .public_key()
+        .to_openssh()
+        .expect("encode public key");
+    let fingerprint = private_key.fingerprint(HashAlg::Sha256).to_string();
+    (private_key_text, public_key_text, fingerprint)
+}
+
+fn find_keychain_row_id(app: &AppWindow, kind: &str, label: &str) -> String {
+    let rows = app.get_keychain_asset_items();
+    (0..rows.row_count())
+        .filter_map(|index| rows.row_data(index))
+        .find(|row| row.kind.as_str() == kind && row.label.as_str() == label)
+        .map(|row| row.id.to_string())
+        .expect("matching keychain row")
 }
 
 #[test]
@@ -251,4 +286,79 @@ fn generating_key_pair_can_copy_public_key_to_system_clipboard() {
     .expect("clipboard text");
 
     assert_eq!(clipboard, generated_public_key);
+}
+
+#[test]
+fn editing_saved_key_rehydrates_private_public_and_fingerprint() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let (private_key, public_key, fingerprint) = sample_key_material();
+    let app = AppWindow::new().expect("create app window");
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_importer_and_store(
+        &app,
+        Arc::new(StaticPrivateKeyImporter::cancelled()),
+        Arc::clone(&credential_store),
+    );
+
+    open_keychain_ssh_key_modal(&app);
+    app.invoke_keychain_ssh_key_modal_draft_changed("name".into(), "Prod Key".into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("private_key".into(), private_key.clone().into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("public_key".into(), public_key.clone().into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("fingerprint".into(), fingerprint.clone().into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let key_id = find_keychain_row_id(&app, "ssh-key", "Prod Key");
+    let stored = load_keychain_key_secret_bundle(
+        credential_store.as_ref(),
+        keychain_key_credential_ref(key_id.as_str()).as_str(),
+    )
+    .expect("load saved key secret bundle");
+    assert_eq!(stored.private_key_content.as_deref(), Some(private_key.as_str()));
+
+    app.invoke_asset_context_menu_requested(key_id.into(), "ssh-key".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-keychain-ssh-key".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-keychain-ssh-key");
+    assert_eq!(app.get_keychain_ssh_key_modal_name().as_str(), "Prod Key");
+    assert_eq!(app.get_keychain_ssh_key_modal_private_key().as_str(), private_key);
+    assert_eq!(app.get_keychain_ssh_key_modal_public_key().as_str(), public_key);
+    assert_eq!(app.get_keychain_ssh_key_modal_fingerprint().as_str(), fingerprint);
+}
+
+#[test]
+fn public_only_key_cannot_be_selected_for_identity_auth() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let (_private_key, public_key, fingerprint) = sample_key_material();
+    let app = AppWindow::new().expect("create app window");
+    bind_with_importer(&app, Arc::new(StaticPrivateKeyImporter::cancelled()));
+
+    open_keychain_ssh_key_modal(&app);
+    app.invoke_keychain_ssh_key_modal_draft_changed("name".into(), "Public Only Key".into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("public_key".into(), public_key.into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("fingerprint".into(), fingerprint.into());
+    app.invoke_confirm_asset_modal_requested();
+
+    assert_eq!(app.get_keychain_asset_items().row_count(), 1);
+
+    app.invoke_assets_create_action_selected("new-identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("name".into(), "Prod Identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("username".into(), "ops".into());
+    app.invoke_keychain_identity_modal_draft_changed("auth_kind".into(), "ssh-key".into());
+    app.invoke_keychain_identity_modal_action_requested("use-existing-ssh-key".into());
+
+    assert_eq!(
+        app.get_keychain_identity_modal_ssh_key_label().as_str(),
+        "Public Only Key"
+    );
+    assert!(!app.get_asset_modal_can_confirm());
+    assert_eq!(
+        app.get_asset_modal_validation_message().as_str(),
+        "Selected SSH key must include private key material."
+    );
+
+    app.invoke_confirm_asset_modal_requested();
+    assert_eq!(app.get_keychain_asset_items().row_count(), 1);
 }

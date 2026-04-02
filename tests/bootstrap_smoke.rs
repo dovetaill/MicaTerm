@@ -23,10 +23,11 @@ use mica_term::app::bootstrap::{
     bind_top_status_bar_with_injected_services_and_vault_runtime, bind_top_status_bar_with_store,
     bind_top_status_bar_with_store_and_effects_and_asset_repo,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store,
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_keychain_repo_and_launcher_and_credential_store,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer,
     build_shared_app_credential_store_for_paths, default_window_size,
 };
-use mica_term::app::keychain::KeychainCatalog;
+use mica_term::app::keychain::{KeychainCatalog, KeychainCatalogRepository};
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::build_test_logging_runtime;
@@ -38,7 +39,9 @@ use mica_term::app::ssh::connection_progress::{
 };
 use mica_term::app::ssh::credentials::{
     CredentialStore, MemoryCredentialStore, SshCredentialKind, StoredSshSecretBundle,
-    load_secret_bundle, persist_secret_bundle, ssh_credential_ref,
+    keychain_identity_credential_ref, keychain_key_credential_ref,
+    load_keychain_identity_secret_bundle, load_keychain_key_secret_bundle, load_secret_bundle,
+    persist_secret_bundle, ssh_credential_ref,
 };
 use mica_term::app::ssh::known_hosts::{
     KnownHostCheck, KnownHostsService, default_known_hosts_path,
@@ -76,7 +79,8 @@ use mica_term::shell::assets::{
 };
 use mica_term::shell::metrics::ShellMetrics;
 use mica_term::theme::ThemeMode;
-use russh::keys::{HashAlg, PublicKey};
+use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
+use russh::keys::{Algorithm, HashAlg, PrivateKey, PublicKey};
 use secrecy::SecretString;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, Model};
@@ -192,6 +196,12 @@ struct AssetRepoState {
     save_attempts: Vec<PersistedAssetCatalog>,
 }
 
+#[derive(Default)]
+struct KeychainRepoState {
+    load_calls: usize,
+    save_attempts: Vec<KeychainCatalog>,
+}
+
 struct RecordingAssetRepo {
     loaded_catalog: PersistedAssetCatalog,
     state: Rc<RefCell<AssetRepoState>>,
@@ -224,6 +234,32 @@ impl AssetCatalogRepository for RecordingAssetRepo {
             return Err(anyhow!(message));
         }
 
+        Ok(())
+    }
+}
+
+struct RecordingKeychainRepo {
+    loaded_catalog: KeychainCatalog,
+    state: Rc<RefCell<KeychainRepoState>>,
+}
+
+impl RecordingKeychainRepo {
+    fn new(loaded_catalog: KeychainCatalog, state: Rc<RefCell<KeychainRepoState>>) -> Self {
+        Self {
+            loaded_catalog,
+            state,
+        }
+    }
+}
+
+impl KeychainCatalogRepository for RecordingKeychainRepo {
+    fn load(&self) -> Result<KeychainCatalog> {
+        self.state.borrow_mut().load_calls += 1;
+        Ok(self.loaded_catalog.clone())
+    }
+
+    fn save(&self, catalog: &KeychainCatalog) -> Result<()> {
+        self.state.borrow_mut().save_attempts.push(catalog.clone());
         Ok(())
     }
 }
@@ -1774,6 +1810,24 @@ fn bind_with_launcher_and_credential_store(
     );
 }
 
+fn bind_with_launcher_and_credential_store_and_keychain_repo(
+    app: &AppWindow,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
+    keychain_repo: Option<Rc<dyn KeychainCatalogRepository>>,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+    credential_store: Arc<dyn CredentialStore>,
+) {
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_keychain_repo_and_launcher_and_credential_store(
+        app,
+        None,
+        default_platform_window_effects(),
+        asset_repo,
+        keychain_repo,
+        launcher,
+        credential_store,
+    );
+}
+
 fn bind_with_launcher_and_credential_store_and_private_key_importer(
     app: &AppWindow,
     asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
@@ -1808,6 +1862,15 @@ fn bind_with_vault_runtime(
         Arc::new(CancelledPrivateKeyImporter),
         vault_runtime,
     );
+}
+
+fn find_keychain_row_id(app: &AppWindow, kind: &str, label: &str) -> String {
+    let rows = app.get_keychain_asset_items();
+    (0..rows.row_count())
+        .filter_map(|index| rows.row_data(index))
+        .find(|row| row.kind.as_str() == kind && row.label.as_str() == label)
+        .map(|row| row.id.to_string())
+        .expect("matching keychain row")
 }
 
 #[test]
@@ -4792,6 +4855,255 @@ fn editing_saved_password_modal_hydrates_real_secret_masked() {
     );
     assert_eq!(app.get_asset_ssh_modal_password().as_str(), "secret");
     assert!(!app.get_asset_ssh_modal_password_visible());
+}
+
+#[test]
+fn editing_saved_keychain_ssh_key_modal_hydrates_saved_private_key_material() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let private_key =
+        PrivateKey::random(&mut OsRng, Algorithm::Ed25519).expect("generate sample private key");
+    let private_key_text = private_key
+        .to_openssh(LineEnding::LF)
+        .expect("encode private key")
+        .to_string();
+    let public_key_text = private_key
+        .public_key()
+        .to_openssh()
+        .expect("encode public key");
+    let fingerprint = private_key.fingerprint(HashAlg::Sha256).to_string();
+
+    let app = AppWindow::new().unwrap();
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_launcher_and_credential_store(
+        &app,
+        None,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+    );
+
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_assets_create_action_selected("new-ssh-key".into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("name".into(), "Prod Key".into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("private_key".into(), private_key_text.clone().into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("public_key".into(), public_key_text.clone().into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("fingerprint".into(), fingerprint.clone().into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let key_id = app
+        .get_keychain_asset_items()
+        .row_data(0)
+        .expect("saved keychain ssh key")
+        .id
+        .to_string();
+
+    app.invoke_asset_context_menu_requested(key_id.into(), "ssh-key".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-keychain-ssh-key".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-keychain-ssh-key");
+    assert_eq!(app.get_keychain_ssh_key_modal_name().as_str(), "Prod Key");
+    assert_eq!(app.get_keychain_ssh_key_modal_private_key().as_str(), private_key_text);
+    assert_eq!(app.get_keychain_ssh_key_modal_public_key().as_str(), public_key_text);
+    assert_eq!(app.get_keychain_ssh_key_modal_fingerprint().as_str(), fingerprint);
+}
+
+#[test]
+fn editing_keychain_identity_modal_hydrates_saved_password_secret() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_launcher_and_credential_store(
+        &app,
+        None,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+    );
+
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_assets_create_action_selected("new-identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("name".into(), "Prod Identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("username".into(), "ops".into());
+    app.invoke_keychain_identity_modal_draft_changed("password".into(), "secret".into());
+    app.invoke_keychain_identity_modal_draft_changed("remark".into(), "primary".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let identity_id = app
+        .get_keychain_asset_items()
+        .row_data(0)
+        .expect("saved keychain identity")
+        .id
+        .to_string();
+    let credential_ref = keychain_identity_credential_ref(identity_id.as_str());
+    assert_eq!(
+        load_keychain_identity_secret_bundle(credential_store.as_ref(), credential_ref.as_str())
+            .expect("load persisted identity bundle")
+            .password
+            .as_deref(),
+        Some("secret")
+    );
+
+    app.invoke_asset_context_menu_requested(identity_id.into(), "identity".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-keychain-identity".into());
+
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_modal_kind().as_str(), "new-keychain-identity");
+    assert_eq!(app.get_keychain_identity_modal_name().as_str(), "Prod Identity");
+    assert_eq!(app.get_keychain_identity_modal_username().as_str(), "ops");
+    assert_eq!(app.get_keychain_identity_modal_password().as_str(), "secret");
+    assert_eq!(app.get_keychain_identity_modal_remark().as_str(), "primary");
+}
+
+#[test]
+fn keychain_identity_mutations_persist_into_local_catalog_repo_and_clear_secret_on_delete() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    let keychain_repo_state = Rc::new(RefCell::new(KeychainRepoState::default()));
+    let keychain_repo: Rc<dyn KeychainCatalogRepository> = Rc::new(RecordingKeychainRepo::new(
+        KeychainCatalog::default(),
+        Rc::clone(&keychain_repo_state),
+    ));
+    bind_with_launcher_and_credential_store_and_keychain_repo(
+        &app,
+        None,
+        Some(keychain_repo),
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+    );
+
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_assets_create_action_selected("new-identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("name".into(), "Prod Identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("username".into(), "ops".into());
+    app.invoke_keychain_identity_modal_draft_changed("password".into(), "secret".into());
+    app.invoke_keychain_identity_modal_draft_changed("remark".into(), "primary".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let identity_id = find_keychain_row_id(&app, "identity", "Prod Identity");
+    let identity_credential_ref = keychain_identity_credential_ref(identity_id.as_str());
+    let persisted_after_create = keychain_repo_state
+        .borrow()
+        .save_attempts
+        .last()
+        .expect("persisted keychain catalog after create")
+        .clone();
+    let created_node = persisted_after_create
+        .nodes
+        .get(&identity_id)
+        .expect("persisted identity node");
+    match &created_node.payload {
+        mica_term::app::keychain::KeychainNodePayload::Identity(spec) => {
+            assert_eq!(created_node.title, "Prod Identity");
+            assert_eq!(spec.username, "ops");
+            assert_eq!(spec.remark, "primary");
+        }
+        other => panic!("expected identity payload, got {other:?}"),
+    }
+
+    app.invoke_asset_context_menu_requested(identity_id.clone().into(), "identity".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("edit-keychain-identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("username".into(), "root".into());
+    app.invoke_keychain_identity_modal_draft_changed("remark".into(), "rotated".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let persisted_after_edit = keychain_repo_state
+        .borrow()
+        .save_attempts
+        .last()
+        .expect("persisted keychain catalog after edit")
+        .clone();
+    match &persisted_after_edit.nodes[&identity_id].payload {
+        mica_term::app::keychain::KeychainNodePayload::Identity(spec) => {
+            assert_eq!(spec.username, "root");
+            assert_eq!(spec.remark, "rotated");
+        }
+        other => panic!("expected identity payload, got {other:?}"),
+    }
+
+    app.invoke_asset_context_menu_requested(identity_id.clone().into(), "identity".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("delete-asset".into());
+    assert!(app.get_asset_delete_confirm_modal_open());
+
+    app.invoke_confirm_delete_asset_requested();
+
+    assert_eq!(app.get_keychain_asset_items().row_count(), 0);
+    assert_eq!(
+        load_keychain_identity_secret_bundle(
+            credential_store.as_ref(),
+            identity_credential_ref.as_str(),
+        )
+        .expect("load deleted identity secret")
+        .password,
+        None
+    );
+
+    let persisted_after_delete = keychain_repo_state
+        .borrow()
+        .save_attempts
+        .last()
+        .expect("persisted keychain catalog after delete")
+        .clone();
+    assert!(persisted_after_delete.root_ids.is_empty());
+    assert!(persisted_after_delete.nodes.is_empty());
+}
+
+#[test]
+fn deleting_referenced_keychain_ssh_key_keeps_secret_bundle_intact() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
+    bind_with_launcher_and_credential_store(
+        &app,
+        None,
+        Arc::new(FakeLauncher),
+        Arc::clone(&credential_store),
+    );
+
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_assets_create_action_selected("new-ssh-key".into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("name".into(), "Prod Key".into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("private_key".into(), "PRIVATE".into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("public_key".into(), "ssh-ed25519 AAAATEST prod@example".into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("fingerprint".into(), "SHA256:prod".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let key_id = find_keychain_row_id(&app, "ssh-key", "Prod Key");
+    let key_credential_ref = keychain_key_credential_ref(key_id.as_str());
+
+    app.invoke_assets_create_action_selected("new-identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("name".into(), "Prod Identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("username".into(), "ops".into());
+    app.invoke_keychain_identity_modal_draft_changed("auth_kind".into(), "ssh-key".into());
+    app.invoke_keychain_identity_modal_action_requested("use-existing-ssh-key".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    assert_eq!(
+        load_keychain_key_secret_bundle(credential_store.as_ref(), key_credential_ref.as_str())
+            .expect("load referenced key secret")
+            .private_key_content
+            .as_deref(),
+        Some("PRIVATE")
+    );
+
+    app.invoke_asset_context_menu_requested(key_id.clone().into(), "ssh-key".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("delete-asset".into());
+    assert!(app.get_asset_delete_confirm_modal_open());
+
+    app.invoke_confirm_delete_asset_requested();
+
+    assert_eq!(app.get_keychain_asset_items().row_count(), 2);
+    assert_eq!(find_keychain_row_id(&app, "ssh-key", "Prod Key"), key_id);
+    assert_eq!(
+        load_keychain_key_secret_bundle(credential_store.as_ref(), key_credential_ref.as_str())
+            .expect("load preserved key secret")
+            .private_key_content
+            .as_deref(),
+        Some("PRIVATE")
+    );
 }
 
 #[test]

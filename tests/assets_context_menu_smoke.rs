@@ -158,6 +158,15 @@ impl SessionRuntimeControl for PasteProjectionRuntimeControl {
     }
 }
 
+fn find_keychain_row_id(app: &AppWindow, kind: &str, label: &str) -> String {
+    let rows = app.get_keychain_asset_items();
+    (0..rows.row_count())
+        .filter_map(|index| rows.row_data(index))
+        .find(|row| row.kind.as_str() == kind && row.label.as_str() == label)
+        .map(|row| row.id.to_string())
+        .expect("matching keychain row")
+}
+
 fn bind_with_fake_sessions(app: &AppWindow) {
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
         app,
@@ -350,6 +359,123 @@ fn blank_area_right_click_opens_minimal_primary_menu() {
 
     assert_eq!(ids, vec!["new-folder", "new-ssh-connection"]);
     assert_eq!(app.get_assets_context_menu_secondary_items().row_count(), 0);
+}
+
+#[test]
+fn keychain_blank_area_right_click_uses_keychain_create_actions_only() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_asset_context_menu_requested("".into(), "blank".into(), 96.0, 160.0);
+
+    let primary = app.get_assets_context_menu_primary_items();
+    let ids: Vec<String> = (0..primary.row_count())
+        .filter_map(|index| primary.row_data(index))
+        .map(|item| item.id.to_string())
+        .collect();
+
+    assert_eq!(ids, vec!["new-folder", "new-identity", "new-ssh-key"]);
+    assert_eq!(app.get_assets_context_menu_secondary_items().row_count(), 0);
+}
+
+#[test]
+fn keychain_identity_and_ssh_key_rows_expose_edit_rename_and_delete_actions() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_sidebar_destination_selected("keychain".into());
+
+    for target_kind in ["identity", "ssh-key"] {
+        app.invoke_asset_context_menu_requested(
+            format!("{target_kind}-ops").into(),
+            target_kind.into(),
+            96.0,
+            160.0,
+        );
+
+        let primary = app.get_assets_context_menu_primary_items();
+        let labels: Vec<String> = (0..primary.row_count())
+            .filter_map(|index| primary.row_data(index))
+            .map(|item| item.label.to_string())
+            .collect();
+
+        assert!(
+            labels.contains(&"Edit".to_string()),
+            "{target_kind} rows should expose Edit"
+        );
+        assert!(
+            labels.contains(&"Rename".to_string()),
+            "{target_kind} rows should expose Rename"
+        );
+        assert!(
+            labels.contains(&"Delete".to_string()),
+            "{target_kind} rows should expose Delete"
+        );
+        assert!(
+            !labels.contains(&"New SSH Connection".to_string()),
+            "{target_kind} rows should no longer expose console create actions"
+        );
+    }
+}
+
+#[test]
+fn keychain_folder_rename_action_opens_rename_modal_with_existing_name() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_assets_create_action_selected("new-folder".into());
+    let folder_label = app
+        .get_keychain_asset_items()
+        .row_data(0)
+        .expect("keychain folder row")
+        .label
+        .to_string();
+    let folder_id = find_keychain_row_id(&app, "folder", folder_label.as_str());
+
+    app.invoke_asset_context_menu_requested(folder_id.into(), "folder".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("rename-asset".into());
+
+    assert!(app.get_asset_rename_modal_open());
+    assert_eq!(app.get_asset_rename_modal_name().as_str(), folder_label);
+}
+
+#[test]
+fn keychain_identity_delete_confirm_round_trips_and_removes_window_rows() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_assets_create_action_selected("new-identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("name".into(), "Prod Identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("username".into(), "ops".into());
+    app.invoke_keychain_identity_modal_draft_changed("password".into(), "secret".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    let identity_id = find_keychain_row_id(&app, "identity", "Prod Identity");
+
+    app.invoke_asset_context_menu_requested(identity_id.into(), "identity".into(), 96.0, 160.0);
+    app.invoke_assets_context_menu_action_invoked("delete-asset".into());
+
+    assert!(app.get_asset_delete_confirm_modal_open());
+    assert_eq!(
+        app.get_asset_delete_confirm_target_label().as_str(),
+        "Prod Identity"
+    );
+
+    app.invoke_confirm_delete_asset_requested();
+
+    assert!(!app.get_asset_delete_confirm_modal_open());
+    assert_eq!(app.get_keychain_asset_items().row_count(), 0);
 }
 
 #[test]

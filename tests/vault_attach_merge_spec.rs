@@ -10,7 +10,10 @@ use mica_term::app::bootstrap::{
     ImportedPrivateKey, PrivateKeyImporter, VaultProviderFactory, VaultRuntimeOptions,
     bind_top_status_bar_with_injected_services_and_vault_runtime,
 };
-use mica_term::app::keychain::KeychainCatalog;
+use mica_term::app::keychain::{
+    KeychainCatalog, KeychainIdentityAuthKind, KeychainIdentitySpec, KeychainNode,
+    KeychainNodeKind, KeychainNodePayload, KeychainSshKeySpec,
+};
 use mica_term::app::ssh::credentials::{
     CredentialStore, MemoryCredentialStore, StoredSshSecretBundle, persist_secret_bundle,
 };
@@ -233,15 +236,16 @@ fn hex(bytes: &[u8]) -> String {
     output
 }
 
-fn sample_remote_revision_for_tree(
+fn sample_remote_revision(
     password: &SecretString,
     asset_tree: &AssetTree,
+    keychain_catalog: &KeychainCatalog,
     credential_store: &dyn CredentialStore,
     revision: &str,
 ) -> ProviderRevision {
     let snapshot = export_vault_snapshot(
         asset_tree,
-        &KeychainCatalog::default(),
+        keychain_catalog,
         credential_store,
         &sample_known_hosts_path("remote-revision"),
         SnapshotSyncPreferences::default(),
@@ -305,6 +309,89 @@ fn sample_remote_revision_for_tree(
     }
 }
 
+fn sample_remote_revision_for_tree(
+    password: &SecretString,
+    asset_tree: &AssetTree,
+    credential_store: &dyn CredentialStore,
+    revision: &str,
+) -> ProviderRevision {
+    sample_remote_revision(
+        password,
+        asset_tree,
+        &KeychainCatalog::default(),
+        credential_store,
+        revision,
+    )
+}
+
+fn sample_keychain_backed_remote_tree(host: &str, identity_id: &str) -> AssetTree {
+    let mut tree = AssetTree::new();
+    tree.insert_root_with_payload(
+        ConsoleAssetKind::SshConnection,
+        "Remote Keychain Host",
+        AssetNodePayload::SshConnection(AssetSshConnectionSpec {
+            host: host.into(),
+            user: "remote-ops".into(),
+            port: "22".into(),
+            auth_method: "private-key".into(),
+            auth_source: "keychain-identity".into(),
+            keychain_identity_id: Some(identity_id.into()),
+            private_key_source: "content".into(),
+            private_key_path: String::new(),
+            environment: "prod".into(),
+            proxy: AssetSshProxySpec::None,
+            proxy_method: String::new(),
+            remark: "remote merge test".into(),
+            credential_ref: None,
+        }),
+    );
+    tree
+}
+
+fn sample_remote_keychain_catalog(identity_id: &str, key_id: &str) -> KeychainCatalog {
+    KeychainCatalog {
+        root_ids: vec![identity_id.into(), key_id.into()],
+        nodes: BTreeMap::from([
+            (
+                identity_id.into(),
+                KeychainNode {
+                    id: identity_id.into(),
+                    parent_id: None,
+                    title: "Remote Identity".into(),
+                    kind: KeychainNodeKind::Identity,
+                    child_ids: Vec::new(),
+                    payload: KeychainNodePayload::Identity(KeychainIdentitySpec {
+                        username: "remote-ops".into(),
+                        auth_kind: KeychainIdentityAuthKind::SshKey,
+                        ssh_key_id: Some(key_id.into()),
+                        credential_ref: Some(format!("keychain/identity/{identity_id}")),
+                        remark: "remote".into(),
+                    }),
+                },
+            ),
+            (
+                key_id.into(),
+                KeychainNode {
+                    id: key_id.into(),
+                    parent_id: None,
+                    title: "Remote Key".into(),
+                    kind: KeychainNodeKind::SshKey,
+                    child_ids: Vec::new(),
+                    payload: KeychainNodePayload::SshKey(KeychainSshKeySpec {
+                        algorithm: "ed25519".into(),
+                        fingerprint: "SHA256:remote-key".into(),
+                        public_key: "ssh-ed25519 AAAAREMOTE remote@example".into(),
+                        comment: "remote@example".into(),
+                        credential_ref: Some(format!("keychain/key/{key_id}")),
+                        remark: "remote".into(),
+                    }),
+                },
+            ),
+        ]),
+        merge_metadata: BTreeMap::new(),
+    }
+}
+
 fn create_root_ssh(app: &AppWindow, name: &str, host: &str) {
     app.invoke_assets_create_action_selected("new-ssh-connection".into());
     app.invoke_asset_ssh_modal_draft_changed("name".into(), name.into());
@@ -312,6 +399,46 @@ fn create_root_ssh(app: &AppWindow, name: &str, host: &str) {
     app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
     app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     app.invoke_asset_ssh_modal_action_requested("save".into());
+}
+
+fn find_keychain_row_id(app: &AppWindow, kind: &str, label: &str) -> String {
+    let rows = app.get_keychain_asset_items();
+    (0..rows.row_count())
+        .filter_map(|index| rows.row_data(index))
+        .find(|row| row.kind.as_str() == kind && row.label.as_str() == label)
+        .map(|row| row.id.to_string())
+        .expect("matching keychain row")
+}
+
+fn create_local_keychain_ssh_key(app: &AppWindow, name: &str) -> String {
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_assets_create_action_selected("new-ssh-key".into());
+    app.invoke_keychain_ssh_key_modal_draft_changed("name".into(), name.into());
+    app.invoke_keychain_ssh_key_modal_draft_changed(
+        "private_key".into(),
+        "-----BEGIN OPENSSH PRIVATE KEY-----".into(),
+    );
+    app.invoke_keychain_ssh_key_modal_draft_changed(
+        "public_key".into(),
+        "ssh-ed25519 AAAALOCAL local@example".into(),
+    );
+    app.invoke_keychain_ssh_key_modal_draft_changed(
+        "fingerprint".into(),
+        "SHA256:local-key".into(),
+    );
+    app.invoke_confirm_asset_modal_requested();
+    find_keychain_row_id(app, "ssh-key", name)
+}
+
+fn create_local_keychain_identity(app: &AppWindow, name: &str) -> String {
+    app.invoke_sidebar_destination_selected("keychain".into());
+    app.invoke_assets_create_action_selected("new-identity".into());
+    app.invoke_keychain_identity_modal_draft_changed("name".into(), name.into());
+    app.invoke_keychain_identity_modal_draft_changed("username".into(), "local-ops".into());
+    app.invoke_keychain_identity_modal_draft_changed("auth_kind".into(), "ssh-key".into());
+    app.invoke_keychain_identity_modal_action_requested("use-existing-ssh-key".into());
+    app.invoke_confirm_asset_modal_requested();
+    find_keychain_row_id(app, "identity", name)
 }
 
 struct AttachMergeCase {
@@ -456,4 +583,107 @@ fn attach_time_merge_pushes_a_new_merged_revision_back_to_primary() {
     assert_eq!(writes[0].head.vault_revision, "rev-0005");
     let local_state = case.local_state();
     assert_eq!(local_state.current_revision.as_deref(), Some("rev-0005"));
+}
+
+#[test]
+fn attach_time_merge_remaps_remote_keychain_ids_and_keeps_secret_ownership() {
+    let case = setup_attach_merge_case();
+    let password = SecretString::new("vault-pass".into());
+    let local_key_id = create_local_keychain_ssh_key(&case.app, "Local Key");
+    let local_identity_id = create_local_keychain_identity(&case.app, "Local Identity");
+
+    assert_eq!(local_key_id, "key-1");
+    assert_eq!(local_identity_id, "identity-1");
+
+    let remote_store = Arc::new(MemoryCredentialStore::default());
+    let remote_tree = sample_keychain_backed_remote_tree("10.0.0.99", "identity-1");
+    let remote_catalog = sample_remote_keychain_catalog("identity-1", "key-1");
+
+    persist_secret_bundle(
+        remote_store.as_ref(),
+        "keychain/identity/identity-1",
+        &StoredSshSecretBundle {
+            password: Some("remote-password".into()),
+            ..StoredSshSecretBundle::default()
+        },
+    )
+    .expect("persist remote identity secret");
+    persist_secret_bundle(
+        remote_store.as_ref(),
+        "keychain/key/key-1",
+        &StoredSshSecretBundle {
+            private_key_content: Some("-----BEGIN OPENSSH PRIVATE KEY-----".into()),
+            passphrase: Some("remote-passphrase".into()),
+            ..StoredSshSecretBundle::default()
+        },
+    )
+    .expect("persist remote key secret");
+
+    let remote_revision = sample_remote_revision(
+        &password,
+        &remote_tree,
+        &remote_catalog,
+        remote_store.as_ref(),
+        "rev-0004",
+    );
+    case.primary.set_remote_head(Some(remote_revision.head.clone()));
+    case.primary.set_remote_revision(Some(remote_revision));
+
+    case.complete_attach();
+
+    let snapshot = case.cached_snapshot();
+    let remote_identity_id = "identity-1-remote-merge-1";
+    let remote_key_id = "key-1-remote-merge-1";
+    let remote_identity_ref = format!("keychain/identity/{remote_identity_id}");
+    let remote_key_ref = format!("keychain/key/{remote_key_id}");
+
+    let remote_host = snapshot
+        .asset_catalog
+        .nodes
+        .values()
+        .find(|node| {
+            matches!(
+                &node.payload,
+                VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.99"
+            )
+        })
+        .expect("remote host should be present after merge");
+    match &remote_host.payload {
+        VaultAssetPayload::SshConnection(spec) => {
+            assert_eq!(spec.keychain_identity_id.as_deref(), Some(remote_identity_id));
+        }
+        other => panic!("unexpected remote host payload: {other:?}"),
+    }
+
+    let remote_identity = snapshot
+        .keychain_catalog
+        .nodes
+        .get(remote_identity_id)
+        .expect("remapped remote identity");
+    match &remote_identity.payload {
+        KeychainNodePayload::Identity(spec) => {
+            assert_eq!(spec.ssh_key_id.as_deref(), Some(remote_key_id));
+            assert_eq!(spec.credential_ref.as_deref(), Some(remote_identity_ref.as_str()));
+        }
+        other => panic!("unexpected remote identity payload: {other:?}"),
+    }
+
+    let remote_key = snapshot
+        .keychain_catalog
+        .nodes
+        .get(remote_key_id)
+        .expect("remapped remote key");
+    match &remote_key.payload {
+        KeychainNodePayload::SshKey(spec) => {
+            assert_eq!(spec.credential_ref.as_deref(), Some(remote_key_ref.as_str()));
+        }
+        other => panic!("unexpected remote key payload: {other:?}"),
+    }
+
+    assert!(snapshot.keychain_catalog.nodes.contains_key("identity-1"));
+    assert!(snapshot.keychain_catalog.nodes.contains_key("key-1"));
+    assert!(snapshot
+        .keychain_identity_secret_bundles
+        .contains_key(remote_identity_id));
+    assert!(snapshot.keychain_key_secret_bundles.contains_key(remote_key_id));
 }

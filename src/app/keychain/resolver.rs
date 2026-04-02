@@ -2,7 +2,7 @@ use anyhow::{Context, bail};
 use russh::keys::{HashAlg, PrivateKey, PublicKey};
 
 use crate::app::keychain::model::{KeychainCatalog, KeychainIdentityAuthKind, KeychainNodePayload};
-use crate::app::ssh::credentials::{keychain_identity_credential_ref, keychain_key_credential_ref};
+use crate::app::ssh::credentials::keychain_identity_credential_ref;
 use crate::app::ssh::profile::ConnectionProfile;
 use crate::shell::assets::{
     AssetSshConnectionSpec, SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY, SSH_AUTH_SOURCE_MANUAL,
@@ -115,7 +115,11 @@ fn resolve_identity_backed_spec(
                     .credential_ref
                     .clone()
                     .filter(|value| !value.trim().is_empty())
-                    .unwrap_or_else(|| keychain_key_credential_ref(ssh_key_id)),
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "keychain SSH key `{ssh_key_id}` referenced by identity `{identity_id}` is missing private key material"
+                        )
+                    })?,
             );
         }
     }

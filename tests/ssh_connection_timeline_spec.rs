@@ -173,6 +173,40 @@ fn sample_profile(asset_id: &str) -> ConnectionProfile {
     }
 }
 
+fn wait_for_host_key_prompt(
+    runtime: &AppAsyncRuntime,
+    manager: &SessionManager,
+    session_id: Uuid,
+) {
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let attempt_ready = manager
+                    .connection_attempt(session_id)
+                    .is_some_and(|attempt| {
+                        attempt.headline == ConnectionHeadlineState::WaitingUser
+                            && attempt.prompt.is_some()
+                            && attempt.steps.iter().any(|step| {
+                                step.step_kind == "verify-host-key"
+                                    && step.state == ConnectionStepState::Blocked
+                                    && step.detail
+                                        == "Host key verification required for example.com:22 (SHA256:blocked-host-key)"
+                            })
+                    });
+                let session_ready = manager
+                    .session(session_id)
+                    .is_some_and(|session| session.state == SessionState::WaitingUser);
+                if attempt_ready && session_ready {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("wait for host-key prompt");
+    });
+}
+
 fn running_step(
     step_id: &str,
     step_kind: &str,
@@ -382,10 +416,13 @@ fn host_key_block_keeps_connection_timeline_waiting_for_user() {
                 "02-verify-host-key",
                 "verify-host-key",
                 "Target",
-                "Host key verification required for example.com",
+                "Host key verification required for example.com:22 (SHA256:blocked-host-key)",
             )),
             ScriptedEvent::Headline(ConnectionHeadlineState::WaitingUser),
-            ScriptedEvent::Diagnostic("Host key verification required for example.com".into()),
+            ScriptedEvent::Diagnostic(
+                "Host key verification required for example.com:22 (SHA256:blocked-host-key)"
+                    .into(),
+            ),
         ],
         LaunchOutcome::UnknownHostKey,
     );
@@ -394,9 +431,7 @@ fn host_key_block_keeps_connection_timeline_waiting_for_user() {
     let handle = manager
         .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
         .expect("open scripted session");
-    runtime.block_on(async {
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    });
+    wait_for_host_key_prompt(&runtime, &manager, handle.session_id);
 
     let attempt = manager
         .connection_attempt(handle.session_id)
@@ -416,7 +451,7 @@ fn host_key_block_keeps_connection_timeline_waiting_for_user() {
             "02-verify-host-key",
             "verify-host-key",
             "Target",
-            "Host key verification required for example.com",
+            "Host key verification required for example.com:22 (SHA256:blocked-host-key)",
         )]
     );
     assert_eq!(
