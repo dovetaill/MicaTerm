@@ -136,8 +136,7 @@ fn workspace_and_window_sources_thread_native_render_contract() {
         "workspace pane should forward the render mode selector to the terminal session host"
     );
     assert!(
-        workspace_source
-            .contains("session-surface-image: root.workspace-session-surface-image;"),
+        workspace_source.contains("session-surface-image: root.workspace-session-surface-image;"),
         "workspace pane should forward the bitmap surface image to the terminal session host"
     );
     assert!(
@@ -219,9 +218,8 @@ fn native_surface_source_exposes_present_bridge_contract() {
 
     let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
         .expect("read native surface");
-    let present_driver_source =
-        fs::read_to_string("src/app/terminal_renderer/present_driver.rs")
-            .expect("read present driver");
+    let present_driver_source = fs::read_to_string("src/app/terminal_renderer/present_driver.rs")
+        .expect("read present driver");
     let renderer_mod_source =
         fs::read_to_string("src/app/terminal_renderer/mod.rs").expect("read terminal renderer mod");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
@@ -290,6 +288,10 @@ fn native_surface_source_exposes_present_bridge_contract() {
         "native surface bridge should track dirty state independently of notifier registration success"
     );
     assert!(
+        native_surface_source.contains("pending_present: PendingPresentGate"),
+        "native surface bridge should keep an explicit present gate so repeated rect/frame churn before the next draw pass coalesces into one host redraw request instead of spamming request_redraw"
+    );
+    assert!(
         native_surface_source.contains("EventLoopPresentDriver::new(window)"),
         "native surface bridge should install an event-loop present fallback before attempting notifier-specific registration"
     );
@@ -304,6 +306,10 @@ fn native_surface_source_exposes_present_bridge_contract() {
     assert!(
         native_surface_source.contains("state.present_driver.schedule_present("),
         "native surface bridge should schedule present work through the driver seam instead of calling request_redraw as the only path"
+    );
+    assert!(
+        native_surface_source.contains("if !state.pending_present.mark_scheduled()"),
+        "native surface bridge should skip redundant schedule_present calls while one redraw is already pending so geometry+frame updates in the same turn do not multiply host redraw requests"
     );
     assert!(
         bootstrap_source.contains("let rect = workspace_native_terminal_rect(window);"),
@@ -331,13 +337,13 @@ fn native_surface_source_exposes_present_bridge_contract() {
 fn software_winit_sources_expose_after_draw_present_contract() {
     let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
         .expect("read native surface");
-    let present_driver_source =
-        fs::read_to_string("src/app/terminal_renderer/present_driver.rs")
-            .expect("read present driver");
+    let present_driver_source = fs::read_to_string("src/app/terminal_renderer/present_driver.rs")
+        .expect("read present driver");
     let winit_backend_source =
         fs::read_to_string("vendor/i-slint-backend-winit/lib.rs").expect("read winit backend");
-    let winit_adapter_source = fs::read_to_string("vendor/i-slint-backend-winit/winitwindowadapter.rs")
-        .expect("read winit window adapter");
+    let winit_adapter_source =
+        fs::read_to_string("vendor/i-slint-backend-winit/winitwindowadapter.rs")
+            .expect("read winit window adapter");
 
     assert!(
         present_driver_source.contains("pub fn install_winit_after_draw_hook"),
@@ -367,6 +373,29 @@ fn software_winit_sources_expose_after_draw_present_contract() {
         native_surface_source
             .contains("if !state.dirty && !state.damage_tracker.has_damage() && !state.host_surface_invalidated"),
         "native surface draw gate should allow a retained frame replay after host redraw even when no new terminal frame arrived"
+    );
+}
+
+#[test]
+fn bootstrap_source_exposes_scroll_projection_debounce_contract() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS"),
+        "bootstrap should declare an explicit debounce budget for workspace terminal scroll projection refreshes so scrollbar drag does not synchronously rerender the full terminal stack on every pointer move"
+    );
+    assert!(
+        bootstrap_source.contains("DeferredWorkspaceProjectionRefreshGate"),
+        "bootstrap should keep a dedicated scroll projection refresh gate so repeated wheel and scrollbar drag callbacks can collapse into one scheduled projection refresh"
+    );
+    assert!(
+        bootstrap_source.contains("fn schedule_workspace_scroll_projection_refresh("),
+        "bootstrap should centralize workspace terminal scroll projection refresh scheduling instead of inlining immediate refresh calls in every scroll callback"
+    );
+    assert!(
+        bootstrap_source.contains("Duration::from_millis(WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS)")
+            && bootstrap_source.contains("TimerMode::SingleShot"),
+        "bootstrap should drive scroll projection refresh through a single-shot debounce timer so high-frequency scrollbar drag updates do not run the full projection pipeline synchronously for every move event"
     );
 }
 
@@ -486,7 +515,9 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         .find("window.set_workspace_session_cell_width(frame.cell_width_px as f32 / scale_factor);")
         .expect("bitmap cell width");
     let bitmap_cell_height = bitmap_block
-        .find("window.set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);")
+        .find(
+            "window.set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);",
+        )
         .expect("bitmap cell height");
     let bitmap_image = bitmap_block
         .find("window.set_workspace_session_surface_image(frame.image);")
@@ -582,7 +613,9 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         .find("clear_workspace_native_terminal_frame(window);")
         .expect("no surface clear");
     let no_surface_render_mode = no_surface_block
-        .find("window.set_workspace_session_render_mode(TerminalRenderMode::Bitmap.as_str().into());")
+        .find(
+            "window.set_workspace_session_render_mode(TerminalRenderMode::Bitmap.as_str().into());",
+        )
         .expect("no surface render mode reset");
     let no_surface_pending_output = no_surface_block
         .find("window.set_workspace_session_pending_output_lines(0);")
@@ -946,8 +979,9 @@ fn native_surface_damage_contract_threads_damage_kind_into_backend_present() {
         .expect("read platform backend contract");
     let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
         .expect("read native surface");
-    let windows_backend_source = fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
-        .expect("read windows native surface backend");
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows native surface backend");
 
     assert!(
         damage_source.contains("fn take_damage(&mut self) -> Option<NativeSurfaceDamage>"),
@@ -978,8 +1012,9 @@ fn native_surface_damage_contract_threads_damage_kind_into_backend_present() {
 
 #[test]
 fn windows_backend_source_clips_present_to_damage_rect() {
-    let windows_backend_source = fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
-        .expect("read windows native surface backend");
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows native surface backend");
 
     assert!(
         windows_backend_source.contains("let present_rect = resolved_present_rect(self.state.rect, damage);"),

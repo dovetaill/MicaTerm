@@ -168,6 +168,7 @@ struct ShellSessionBridge {
 
 const MAX_SSH_PROXY_CHAIN_DEPTH: usize = 8;
 const WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD: usize = 4;
+const WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS: u64 = 16;
 
 thread_local! {
     static WORKSPACE_TERMINAL_PRESENTER: RefCell<Box<dyn TerminalPresenter>> = RefCell::new(
@@ -2059,6 +2060,49 @@ impl WorkspaceProjectionDelta {
     }
 }
 
+#[derive(Debug, Default)]
+struct DeferredWorkspaceProjectionRefreshGate {
+    scheduled: bool,
+}
+
+impl DeferredWorkspaceProjectionRefreshGate {
+    fn mark_scheduled(&mut self) -> bool {
+        if self.scheduled {
+            false
+        } else {
+            self.scheduled = true;
+            true
+        }
+    }
+
+    fn clear(&mut self) {
+        self.scheduled = false;
+    }
+}
+
+#[derive(Debug, Default)]
+struct DeferredWorkspaceScrollThumbDrag {
+    scheduled: bool,
+    latest_ratio: Option<f32>,
+}
+
+impl DeferredWorkspaceScrollThumbDrag {
+    fn queue_ratio(&mut self, ratio: f32) -> bool {
+        self.latest_ratio = Some(ratio.clamp(0.0, 1.0));
+        if self.scheduled {
+            false
+        } else {
+            self.scheduled = true;
+            true
+        }
+    }
+
+    fn take_latest_ratio(&mut self) -> Option<f32> {
+        self.scheduled = false;
+        self.latest_ratio.take()
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct WorkspaceFollowIndicator {
     paused: bool,
@@ -2511,6 +2555,87 @@ fn refresh_active_workspace_projection(
             sync_right_panel_state(window, state);
         }
     }
+}
+
+fn schedule_workspace_scroll_projection_refresh(
+    window: &AppWindow,
+    state: Rc<RefCell<ShellViewModel>>,
+    bridge: Option<Rc<ShellSessionBridge>>,
+    follow_tracker: Rc<RefCell<WorkspaceFollowTracker>>,
+    timer: Rc<Timer>,
+    gate: Rc<RefCell<DeferredWorkspaceProjectionRefreshGate>>,
+) {
+    {
+        let mut gate = gate.borrow_mut();
+        if !gate.mark_scheduled() {
+            return;
+        }
+    }
+
+    let window_handle = window.as_weak();
+    timer.start(
+        TimerMode::SingleShot,
+        Duration::from_millis(WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS),
+        move || {
+            gate.borrow_mut().clear();
+            let Some(window) = window_handle.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            refresh_active_workspace_projection(
+                &window,
+                &mut state,
+                bridge.as_deref(),
+                &mut follow_tracker.borrow_mut(),
+            );
+        },
+    );
+}
+
+fn schedule_workspace_scroll_thumb_drag_update(
+    window: &AppWindow,
+    ratio: f32,
+    state: Rc<RefCell<ShellViewModel>>,
+    bridge: Option<Rc<ShellSessionBridge>>,
+    follow_tracker: Rc<RefCell<WorkspaceFollowTracker>>,
+    timer: Rc<Timer>,
+    deferred_drag: Rc<RefCell<DeferredWorkspaceScrollThumbDrag>>,
+) {
+    {
+        let mut deferred_drag = deferred_drag.borrow_mut();
+        if !deferred_drag.queue_ratio(ratio) {
+            return;
+        }
+    }
+
+    let window_handle = window.as_weak();
+    timer.start(
+        TimerMode::SingleShot,
+        Duration::from_millis(WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS),
+        move || {
+            let ratio = {
+                let mut deferred_drag = deferred_drag.borrow_mut();
+                let Some(ratio) = deferred_drag.take_latest_ratio() else {
+                    return;
+                };
+                ratio
+            };
+            let Some(window) = window_handle.upgrade() else {
+                return;
+            };
+            {
+                let state = state.borrow();
+                forward_active_workspace_scroll_ratio(&state, bridge.as_deref(), ratio);
+            }
+            let mut state = state.borrow_mut();
+            refresh_active_workspace_projection(
+                &window,
+                &mut state,
+                bridge.as_deref(),
+                &mut follow_tracker.borrow_mut(),
+            );
+        },
+    );
 }
 
 fn forward_active_workspace_text_input(
@@ -6672,6 +6797,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     }
     install_windows_frame_adapter(window);
     let session_projection_timer = Rc::new(Timer::default());
+    let scroll_projection_refresh_timer = Rc::new(Timer::default());
+    let scroll_projection_refresh_gate = Rc::new(RefCell::new(
+        DeferredWorkspaceProjectionRefreshGate::default(),
+    ));
+    let scroll_thumb_drag_timer = Rc::new(Timer::default());
+    let deferred_scroll_thumb_drag = Rc::new(RefCell::new(
+        DeferredWorkspaceScrollThumbDrag::default(),
+    ));
     if let Some(session_bridge_ref) = session_bridge.as_ref() {
         let state = Rc::clone(&view_model);
         let handle = window.as_weak();
@@ -9255,65 +9388,80 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
     });
 
-    let state = Rc::clone(&view_model);
+    let view_model_ref = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let scroll_projection_refresh_timer_ref = Rc::clone(&scroll_projection_refresh_timer);
+    let scroll_projection_refresh_gate_ref = Rc::clone(&scroll_projection_refresh_gate);
     window.on_workspace_session_scroll_requested(move |delta_lines, row, col, shift, ctrl, alt| {
-        let mut state = state.borrow_mut();
-        forward_active_workspace_scroll(
-            &state,
-            session_bridge_ref.as_deref(),
-            WorkspaceScrollInput {
-                delta_lines,
-                row,
-                col,
-                shift,
-                ctrl,
-                alt,
-            },
-        );
+        {
+            let state = view_model_ref.borrow();
+            forward_active_workspace_scroll(
+                &state,
+                session_bridge_ref.as_deref(),
+                WorkspaceScrollInput {
+                    delta_lines,
+                    row,
+                    col,
+                    shift,
+                    ctrl,
+                    alt,
+                },
+            );
+        }
 
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(
+            schedule_workspace_scroll_projection_refresh(
                 &window,
-                &mut state,
-                session_bridge_ref.as_deref(),
-                &mut workspace_follow_tracker_ref.borrow_mut(),
+                Rc::clone(&view_model_ref),
+                session_bridge_ref.clone(),
+                Rc::clone(&workspace_follow_tracker_ref),
+                Rc::clone(&scroll_projection_refresh_timer_ref),
+                Rc::clone(&scroll_projection_refresh_gate_ref),
             );
         }
     });
 
-    let state = Rc::clone(&view_model);
+    let view_model_ref = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let scroll_thumb_drag_timer_ref = Rc::clone(&scroll_thumb_drag_timer);
+    let deferred_scroll_thumb_drag_ref = Rc::clone(&deferred_scroll_thumb_drag);
     window.on_workspace_session_scroll_thumb_drag_requested(move |ratio| {
-        let mut state = state.borrow_mut();
-        forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), ratio);
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(
+            schedule_workspace_scroll_thumb_drag_update(
                 &window,
-                &mut state,
-                session_bridge_ref.as_deref(),
-                &mut workspace_follow_tracker_ref.borrow_mut(),
+                ratio,
+                Rc::clone(&view_model_ref),
+                session_bridge_ref.clone(),
+                Rc::clone(&workspace_follow_tracker_ref),
+                Rc::clone(&scroll_thumb_drag_timer_ref),
+                Rc::clone(&deferred_scroll_thumb_drag_ref),
             );
         }
     });
 
-    let state = Rc::clone(&view_model);
+    let view_model_ref = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let scroll_projection_refresh_timer_ref = Rc::clone(&scroll_projection_refresh_timer);
+    let scroll_projection_refresh_gate_ref = Rc::clone(&scroll_projection_refresh_gate);
     window.on_workspace_session_scroll_jump_requested(move |ratio| {
-        let mut state = state.borrow_mut();
-        forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), ratio);
+        {
+            let state = view_model_ref.borrow();
+            forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), ratio);
+        }
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(
+            schedule_workspace_scroll_projection_refresh(
                 &window,
-                &mut state,
-                session_bridge_ref.as_deref(),
-                &mut workspace_follow_tracker_ref.borrow_mut(),
+                Rc::clone(&view_model_ref),
+                session_bridge_ref.clone(),
+                Rc::clone(&workspace_follow_tracker_ref),
+                Rc::clone(&scroll_projection_refresh_timer_ref),
+                Rc::clone(&scroll_projection_refresh_gate_ref),
             );
         }
     });
@@ -9775,6 +9923,29 @@ mod tests {
     struct SequencedSurfaceLauncher;
 
     struct NoopRuntimeControl;
+
+    #[test]
+    fn deferred_workspace_projection_refresh_gate_coalesces_redundant_requests() {
+        let mut gate = DeferredWorkspaceProjectionRefreshGate::default();
+
+        assert!(gate.mark_scheduled());
+        assert!(
+            !gate.mark_scheduled(),
+            "repeated scroll refresh requests before the debounce timer fires should collapse into a single scheduled workspace projection refresh"
+        );
+    }
+
+    #[test]
+    fn deferred_workspace_projection_refresh_gate_reopens_after_clear() {
+        let mut gate = DeferredWorkspaceProjectionRefreshGate::default();
+
+        assert!(gate.mark_scheduled());
+        gate.clear();
+        assert!(
+            gate.mark_scheduled(),
+            "after a debounced scroll refresh runs, the next scroll interaction should be able to schedule a fresh workspace projection refresh"
+        );
+    }
 
     impl SessionRuntimeControl for NoopRuntimeControl {
         fn disconnect(&self) -> Result<()> {

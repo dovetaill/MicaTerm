@@ -261,6 +261,11 @@ struct PasteWarningProjectionLauncher {
 struct ScrollProjectionLauncher;
 
 #[derive(Clone)]
+struct CountingScrollProjectionLauncher {
+    state: ScrollProjectionState,
+}
+
+#[derive(Clone)]
 struct FollowProjectionLauncher {
     state: FollowProjectionState,
 }
@@ -548,6 +553,7 @@ struct PasteProjectionRuntimeControl {
 #[derive(Clone, Default)]
 struct ScrollProjectionState {
     surface: Arc<Mutex<Option<TerminalSurfaceState>>>,
+    scroll_call_count: Arc<Mutex<usize>>,
 }
 
 #[derive(Clone, Default)]
@@ -611,6 +617,23 @@ impl FollowProjectionState {
         {
             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(next_surface));
         }
+    }
+}
+
+impl ScrollProjectionState {
+    fn record_scroll_call(&self) {
+        let mut count = self
+            .scroll_call_count
+            .lock()
+            .expect("lock scroll projection call count");
+        *count = count.saturating_add(1);
+    }
+
+    fn scroll_call_count(&self) -> usize {
+        *self
+            .scroll_call_count
+            .lock()
+            .expect("lock scroll projection call count")
     }
 }
 
@@ -1264,6 +1287,43 @@ impl SessionRuntimeLauncher for ScrollProjectionLauncher {
     }
 }
 
+impl CountingScrollProjectionLauncher {
+    fn new(state: ScrollProjectionState) -> Self {
+        Self { state }
+    }
+}
+
+impl SessionRuntimeLauncher for CountingScrollProjectionLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        Box::pin(async move {
+            let surface = bootstrap_surface_with_viewport(session_id, 1, 3, 8);
+            *state
+                .surface
+                .lock()
+                .expect("lock scroll projection surface") = Some(surface.clone());
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+            Ok(Box::new(ScrollProjectionRuntimeControl { state })
+                as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeLauncher for FollowProjectionLauncher {
     fn launch(
         &self,
@@ -1502,6 +1562,7 @@ impl SessionRuntimeControl for ScrollProjectionRuntimeControl {
     }
 
     fn scroll_viewport_lines(&self, delta: i32) -> Result<TerminalSurfaceState> {
+        self.state.record_scroll_call();
         let mut surface = self
             .state
             .surface
@@ -8027,10 +8088,57 @@ fn workspace_terminal_scroll_callbacks_update_active_session_surface() {
     slint::platform::update_timers_and_animations();
 
     app.invoke_workspace_session_scroll_jump_requested(1.0);
+    settle_terminal_projection();
     assert_eq!(app.get_workspace_session_viewport_offset_lines(), 8);
     assert!(!app.get_workspace_session_viewport_at_bottom());
 
     app.invoke_workspace_session_scroll_thumb_drag_requested(0.0);
+    settle_terminal_projection();
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
+    assert!(app.get_workspace_session_viewport_at_bottom());
+}
+
+#[test]
+fn workspace_terminal_scroll_thumb_drag_coalesces_runtime_scroll_updates() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let state = ScrollProjectionState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(CountingScrollProjectionLauncher::new(state.clone())),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    app.invoke_workspace_session_scroll_thumb_drag_requested(1.0);
+    app.invoke_workspace_session_scroll_thumb_drag_requested(0.0);
+
+    assert_eq!(
+        state.scroll_call_count(),
+        0,
+        "continuous thumb drag should defer runtime scroll projection until the debounce window elapses"
+    );
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        3,
+        "the visible viewport should remain stable until the coalesced thumb-drag refresh executes"
+    );
+
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
+    slint::platform::update_timers_and_animations();
+
+    assert_eq!(
+        state.scroll_call_count(),
+        1,
+        "continuous thumb drag should collapse to one runtime scroll update that applies the latest ratio"
+    );
     assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
     assert!(app.get_workspace_session_viewport_at_bottom());
 }
@@ -8095,6 +8203,7 @@ fn workspace_terminal_paused_follow_tracks_pending_output_until_jump_to_latest()
     settle_terminal_projection();
 
     app.invoke_workspace_session_scroll_jump_requested(1.0);
+    settle_terminal_projection();
     assert!(app.get_workspace_session_follow_paused());
     assert_eq!(app.get_workspace_session_pending_output_lines(), 0);
 
@@ -8131,6 +8240,7 @@ fn workspace_terminal_live_input_resumes_follow_and_clears_pending_output() {
     settle_terminal_projection();
 
     app.invoke_workspace_session_scroll_jump_requested(1.0);
+    settle_terminal_projection();
     follow_state.emit_remote_output(2);
     settle_terminal_projection();
 

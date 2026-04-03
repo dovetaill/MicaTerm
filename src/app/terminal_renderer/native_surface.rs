@@ -3,20 +3,20 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::AppWindow;
-use crate::app::terminal_presenter::NativeTerminalFrame;
 use crate::app::runtime_profile::NativePresentPath;
+use crate::app::terminal_presenter::NativeTerminalFrame;
+use crate::AppWindow;
 
 use super::damage::{NativeFrameDamageTracker, NativeSurfaceDamage, NativeSurfaceDamageKind};
 use super::diagnostics::NativeTerminalSurfaceDiagnostics;
 use super::platform::{
-    NativeTerminalSurfaceRect, PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
-    create_platform_native_surface_backend,
+    create_platform_native_surface_backend, NativeTerminalSurfaceRect,
+    PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
 };
 use super::present_driver::{
+    create_present_driver, install_rendering_notifier, install_winit_after_draw_hook,
     EventLoopPresentDriver, NativeSurfacePresentCallback, NativeSurfacePresentDriver,
-    RenderingNotifierPresentDriver, create_present_driver, install_rendering_notifier,
-    install_winit_after_draw_hook,
+    RenderingNotifierPresentDriver,
 };
 
 #[derive(Clone)]
@@ -35,6 +35,27 @@ struct NativeTerminalSurfaceState {
     surface_alive: bool,
     host_surface_invalidated: bool,
     dirty: bool,
+    pending_present: PendingPresentGate,
+}
+
+#[derive(Default)]
+struct PendingPresentGate {
+    scheduled: bool,
+}
+
+impl PendingPresentGate {
+    fn mark_scheduled(&mut self) -> bool {
+        if self.scheduled {
+            false
+        } else {
+            self.scheduled = true;
+            true
+        }
+    }
+
+    fn clear(&mut self) {
+        self.scheduled = false;
+    }
 }
 
 impl NativeTerminalSurfaceState {
@@ -50,6 +71,7 @@ impl NativeTerminalSurfaceState {
             surface_alive: true,
             host_surface_invalidated: false,
             dirty: false,
+            pending_present: PendingPresentGate::default(),
         }
     }
 }
@@ -74,7 +96,11 @@ impl NativeTerminalSurface {
         surface
     }
 
-    pub fn configure_present_path(&self, window: &AppWindow, native_present_path: NativePresentPath) {
+    pub fn configure_present_path(
+        &self,
+        window: &AppWindow,
+        native_present_path: NativePresentPath,
+    ) {
         self.install_present_driver(window, native_present_path);
     }
 
@@ -117,7 +143,9 @@ impl NativeTerminalSurface {
                 if previous_frame.as_ref() == Some(&next_frame) {
                     false
                 } else {
-                    state.damage_tracker.track_frame_damage(previous_frame.as_ref(), Some(&next_frame));
+                    state
+                        .damage_tracker
+                        .track_frame_damage(previous_frame.as_ref(), Some(&next_frame));
                     state.retained_frame = Some(next_frame);
                     let retained_frame = state.retained_frame.clone();
                     state.backend.update_frame(retained_frame);
@@ -227,12 +255,21 @@ impl NativeTerminalSurface {
                 draw_retained_frame(&mut state.borrow_mut());
             }
         });
+
+        {
+            let mut state = self.state.borrow_mut();
+            if !state.pending_present.mark_scheduled() {
+                return;
+            }
+        }
+
         let state = self.state.borrow();
         state.present_driver.schedule_present(callback);
     }
 }
 
 fn draw_retained_frame(state: &mut NativeTerminalSurfaceState) {
+    state.pending_present.clear();
     if !state.surface_alive {
         return;
     }
@@ -279,10 +316,39 @@ fn teardown_native_surface(state: &mut NativeTerminalSurfaceState) {
     clear_retained_frame(state);
     state.dirty = false;
     state.host_surface_invalidated = false;
+    state.pending_present.clear();
     state.backend.detach();
     refresh_diagnostics(state);
 }
 
 fn refresh_diagnostics(state: &mut NativeTerminalSurfaceState) {
     state.latest_diagnostics = state.backend.diagnostics_snapshot();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PendingPresentGate;
+
+    #[test]
+    fn pending_present_gate_coalesces_redundant_schedule_requests() {
+        let mut gate = PendingPresentGate::default();
+
+        assert!(gate.mark_scheduled());
+        assert!(
+            !gate.mark_scheduled(),
+            "repeated schedule requests before the next draw should collapse into a single host redraw"
+        );
+    }
+
+    #[test]
+    fn pending_present_gate_reopens_after_clear() {
+        let mut gate = PendingPresentGate::default();
+
+        assert!(gate.mark_scheduled());
+        gate.clear();
+        assert!(
+            gate.mark_scheduled(),
+            "after a draw pass consumes the pending redraw, the next frame update should be able to schedule another present"
+        );
+    }
 }

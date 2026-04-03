@@ -219,11 +219,11 @@ fn renderer_migration_docs_describe_windows_native_status_and_native_only_shippi
         "the primary Windows build wrapper should package the native terminal renderer"
     );
     assert!(
-        software_build.contains("Stable bitmap fallback for Linux-host Windows software builds."),
-        "the software compatibility wrapper should describe itself as the stable bitmap fallback path"
+        software_build.contains("Native-first Windows software compatibility wrapper."),
+        "the software compatibility wrapper should describe itself as the native-first compatibility path"
     );
     assert!(
-        software_build.contains("MICA_TERM_PACKAGE_TERMINAL_RENDERER=\"bitmap\""),
-        "the software compatibility wrapper should package the bitmap terminal renderer"
+        software_build.contains("MICA_TERM_PACKAGE_TERMINAL_RENDERER=\"native\""),
+        "the software compatibility wrapper should package the native terminal renderer"
     );
 }

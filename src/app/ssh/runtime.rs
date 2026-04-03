@@ -2280,16 +2280,12 @@ impl TerminalSession {
         let size = self.terminal.get_size();
         let (visible_start, visible_end) = self.visible_phys_row_bounds();
         let mut rows = Vec::with_capacity(size.rows.max(1));
-        self.terminal.screen().for_each_phys_line(|phys_idx, line| {
-            if phys_idx < visible_start || phys_idx >= visible_end {
-                return;
-            }
-
-            rows.push(project_terminal_row(
-                line,
-                (phys_idx - visible_start) as u32,
-                size.cols.max(1),
-            ));
+        self.terminal
+            .screen()
+            .with_phys_lines(visible_start..visible_end, |lines| {
+                for (visible_row, line) in lines.iter().enumerate() {
+                    rows.push(project_terminal_row(line, visible_row as u32, size.cols.max(1)));
+                }
         });
 
         while rows.len() < size.rows.max(1) {
@@ -2471,31 +2467,30 @@ impl TerminalSession {
         let size = self.terminal.get_size();
         let (visible_start, visible_end) = self.visible_phys_row_bounds();
         let mut cells = Vec::new();
+        self.terminal
+            .screen()
+            .with_phys_lines(visible_start..visible_end, |lines| {
+                for (visible_row, line) in lines.iter().enumerate() {
+                    let row = visible_row as u32;
+                    for cell in line.visible_cells() {
+                        if cell.cell_index() >= size.cols {
+                            continue;
+                        }
 
-        self.terminal.screen().for_each_phys_line(|phys_idx, line| {
-            if phys_idx < visible_start || phys_idx >= visible_end {
-                return;
-            }
-
-            let row = (phys_idx - visible_start) as u32;
-            for cell in line.visible_cells() {
-                if cell.cell_index() >= size.cols {
-                    continue;
+                        let attrs = cell.attrs();
+                        let (fg_rgba, bg_rgba) = resolve_cell_colors(palette, attrs);
+                        cells.push(TerminalCellState {
+                            row,
+                            col: cell.cell_index() as u32,
+                            width: cell.width() as u32,
+                            text: cell.str().to_string(),
+                            bold: matches!(attrs.intensity(), Intensity::Bold),
+                            underline: attrs.underline() != Underline::None,
+                            fg_rgba,
+                            bg_rgba,
+                        });
+                    }
                 }
-
-                let attrs = cell.attrs();
-                let (fg_rgba, bg_rgba) = resolve_cell_colors(palette, attrs);
-                cells.push(TerminalCellState {
-                    row,
-                    col: cell.cell_index() as u32,
-                    width: cell.width() as u32,
-                    text: cell.str().to_string(),
-                    bold: matches!(attrs.intensity(), Intensity::Bold),
-                    underline: attrs.underline() != Underline::None,
-                    fg_rgba,
-                    bg_rgba,
-                });
-            }
         });
 
         cells
