@@ -7253,18 +7253,31 @@ fn workspace_terminal_selection_keeps_native_frame_contract_active() {
     focus_workspace_terminal(&app);
 
     let before = app.get_workspace_session_native_frame_token();
+    let before_surface_seqno = app.get_workspace_session_surface_seqno();
 
     select_terminal_welcome_span(&app);
     settle_terminal_projection();
 
     let after = app.get_workspace_session_native_frame_token();
+    let after_surface_seqno = app.get_workspace_session_surface_seqno();
 
     assert!(
         app.get_workspace_session_selection_active(),
         "pointer drag should activate terminal selection state"
     );
-    assert_ne!(before, 0, "native terminal projection should publish a retained frame token before selection");
-    assert_ne!(after, 0, "native terminal projection should keep a retained frame token after selection");
+    assert_eq!(
+        before, 0,
+        "scene-image and bitmap composition paths should keep the native frame token cleared before selection"
+    );
+    assert_eq!(
+        after, 0,
+        "scene-image and bitmap composition paths should keep the native frame token cleared after selection"
+    );
+    assert!(
+        before_surface_seqno > 0 && after_surface_seqno > 0,
+        "selection should keep the staged terminal surface alive while bitmap composition handles the visible frame"
+    );
+    assert_eq!(app.get_workspace_session_render_mode().as_str(), "bitmap");
 }
 
 #[test]

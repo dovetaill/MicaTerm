@@ -10219,7 +10219,15 @@ mod tests {
 
         sync_workspace_session_state(&window, &state, &mut follow_tracker);
         let initial_lines_model = window.get_workspace_session_visible_lines();
-        let initial_frame_token = window.get_workspace_session_native_frame_token();
+        let initial_surface_seqno = window.get_workspace_session_surface_seqno();
+
+        assert_eq!(
+            window.get_workspace_session_native_frame_token(),
+            0,
+            "scene-image and bitmap composition paths should keep the native frame token cleared"
+        );
+        assert_eq!(initial_surface_seqno, 1);
+        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
 
         let mut updated_surface = TerminalSurfaceState::from_visible_lines(
             session_id,
@@ -10247,11 +10255,14 @@ mod tests {
             initial_lines_model,
             "terminal visible line projection should reuse the same VecModel instance"
         );
-        assert_ne!(
+        assert_eq!(
             window.get_workspace_session_native_frame_token(),
-            initial_frame_token,
-            "native frame token should refresh when the active surface changes"
+            0,
+            "scene-image and bitmap composition paths should keep the native frame token cleared while surface seqno tracks the visible frame"
         );
+        assert_ne!(window.get_workspace_session_surface_seqno(), initial_surface_seqno);
+        assert_eq!(window.get_workspace_session_surface_seqno(), 2);
+        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
     }
 
     #[test]
@@ -10289,11 +10300,13 @@ mod tests {
 
         sync_workspace_session_state(&window, &state, &mut follow_tracker);
         let initial_lines_model = window.get_workspace_session_visible_lines();
-        assert_ne!(
+        assert_eq!(
             window.get_workspace_session_native_frame_token(),
             0,
-            "rendered terminal surfaces should publish a non-zero native frame token"
+            "scene-image and bitmap composition paths should keep the native frame token cleared even after publishing a visible terminal frame"
         );
+        assert_eq!(window.get_workspace_session_surface_seqno(), 1);
+        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
 
         state.set_active_workspace_terminal_surface(None);
         sync_workspace_session_state(&window, &state, &mut follow_tracker);
@@ -10308,6 +10321,8 @@ mod tests {
             0,
             "clearing the surface should reset the retained native frame token"
         );
+        assert_eq!(window.get_workspace_session_surface_seqno(), 0);
+        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
         assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
     }
 
