@@ -1,7 +1,13 @@
+#[path = "build_support/xwin_link.rs"]
+mod xwin_link;
+
 // Cargo build script that compiles the Slint UI and embeds the Windows application icon.
 
 fn main() {
     println!("cargo:rerun-if-changed=ui/fonts/SarasaTermSCNerd-Regular.ttf");
+    println!("cargo:rerun-if-env-changed=HOME");
+    println!("cargo:rerun-if-env-changed=LIB");
+    println!("cargo:rerun-if-env-changed=XWIN_CACHE_DIR");
 
     std::thread::Builder::new()
         .name("mica-term-build".to_string())
@@ -16,6 +22,13 @@ fn main() {
 }
 
 fn run_build() -> Result<(), String> {
+    let shim_config = xwin_link::ShimConfig::from_env()?;
+    if let Some(shim_dir) = xwin_link::maybe_prepare_advapi32_shim(&shim_config)
+        .map_err(|err| format!("failed to prepare xwin Advapi32 shim: {err}"))?
+    {
+        println!("cargo:rustc-link-search=native={}", shim_dir.display());
+    }
+
     let enable_debug_info = std::env::var("PROFILE")
         .map(|profile| profile != "release")
         .unwrap_or(true);
