@@ -90,3 +90,6 @@ i-slint-backend-testing = "1.15.1"
 
 [patch.crates-io]
 i-slint-backend-winit = { path = "vendor/i-slint-backend-winit" }
+dirs-sys = { path = "vendor/dirs-sys" }
+muda = { path = "vendor/muda" }
+winit = { path = "vendor/winit" }
