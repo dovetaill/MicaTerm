@@ -2280,13 +2280,13 @@ impl TerminalSession {
         let size = self.terminal.get_size();
         let (visible_start, visible_end) = self.visible_phys_row_bounds();
         let mut rows = Vec::with_capacity(size.rows.max(1));
-        self.terminal
+        let lines = self
+            .terminal
             .screen()
-            .with_phys_lines(visible_start..visible_end, |lines| {
-                for (visible_row, line) in lines.iter().enumerate() {
-                    rows.push(project_terminal_row(line, visible_row as u32, size.cols.max(1)));
-                }
-        });
+            .lines_in_phys_range(visible_start..visible_end);
+        for (visible_row, line) in lines.iter().enumerate() {
+            rows.push(project_terminal_row(line, visible_row as u32, size.cols.max(1)));
+        }
 
         while rows.len() < size.rows.max(1) {
             rows.push(TerminalRowState {
@@ -2467,31 +2467,31 @@ impl TerminalSession {
         let size = self.terminal.get_size();
         let (visible_start, visible_end) = self.visible_phys_row_bounds();
         let mut cells = Vec::new();
-        self.terminal
+        let lines = self
+            .terminal
             .screen()
-            .with_phys_lines(visible_start..visible_end, |lines| {
-                for (visible_row, line) in lines.iter().enumerate() {
-                    let row = visible_row as u32;
-                    for cell in line.visible_cells() {
-                        if cell.cell_index() >= size.cols {
-                            continue;
-                        }
-
-                        let attrs = cell.attrs();
-                        let (fg_rgba, bg_rgba) = resolve_cell_colors(palette, attrs);
-                        cells.push(TerminalCellState {
-                            row,
-                            col: cell.cell_index() as u32,
-                            width: cell.width() as u32,
-                            text: cell.str().to_string(),
-                            bold: matches!(attrs.intensity(), Intensity::Bold),
-                            underline: attrs.underline() != Underline::None,
-                            fg_rgba,
-                            bg_rgba,
-                        });
-                    }
+            .lines_in_phys_range(visible_start..visible_end);
+        for (visible_row, line) in lines.iter().enumerate() {
+            let row = visible_row as u32;
+            for cell in line.visible_cells() {
+                if cell.cell_index() >= size.cols {
+                    continue;
                 }
-        });
+
+                let attrs = cell.attrs();
+                let (fg_rgba, bg_rgba) = resolve_cell_colors(palette, attrs);
+                cells.push(TerminalCellState {
+                    row,
+                    col: cell.cell_index() as u32,
+                    width: cell.width() as u32,
+                    text: cell.str().to_string(),
+                    bold: matches!(attrs.intensity(), Intensity::Bold),
+                    underline: attrs.underline() != Underline::None,
+                    fg_rgba,
+                    bg_rgba,
+                });
+            }
+        }
 
         cells
     }
@@ -2549,13 +2549,20 @@ impl TerminalSession {
     }
 
     fn visible_phys_row_bounds(&self) -> (usize, usize) {
+        let total_rows = self.terminal.screen().scrollback_rows();
+        if total_rows == 0 {
+            return (0, 0);
+        }
+
         let size = self.terminal.get_size();
-        let visible_rows = size.rows.max(1);
+        let visible_rows = size.rows.max(1).min(total_rows);
         let visible_start = self
             .terminal
             .screen()
-            .scrollback_or_visible_row(-(self.viewport_offset_lines as i32));
-        let visible_end = visible_start.saturating_add(visible_rows);
+            .scrollback_or_visible_row(-(self.viewport_offset_lines as i32))
+            .min(total_rows);
+        let visible_end = visible_start.saturating_add(visible_rows).min(total_rows);
+        let visible_start = visible_end.saturating_sub(visible_rows);
         (visible_start, visible_end)
     }
 
