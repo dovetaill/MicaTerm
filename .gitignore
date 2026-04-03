@@ -2,7 +2,6 @@
 /.idea
 /.vscode
 /.DS_Store
-/.worktree
 /.worktrees
 /dist
 vendor/*

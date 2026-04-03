@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust 2024, Slint 1.15.1, `russh`, `russh-sftp`, `tokio`, current shell view-model/bootstrap pipeline, `cargo test`, `cargo check`
 
-**Status (2026-03-31):** Implemented in worktree `/.worktree/sftp-right-panel-20260330` and verified by focused tests, smoke tests, `cargo check --workspace`, and `cargo clippy --workspace -- -D warnings`.
+**Status (2026-03-31):** Implemented in worktree `/.worktrees/sftp-right-panel-20260330` and verified by focused tests, smoke tests, `cargo check --workspace`, and `cargo clippy --workspace -- -D warnings`.
 
 ---
 
