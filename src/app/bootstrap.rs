@@ -1,5 +1,12 @@
 //! Wires the Slint window to runtime state, persisted preferences, and native window hooks during startup.
 
+mod assets_keychain;
+mod sftp;
+mod shell_chrome;
+mod vault_sync;
+mod windowing;
+mod workspace_terminal;
+
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -136,8 +143,8 @@ use crate::app::window_effects::{
 };
 use crate::app::window_state::WindowPlacementKind;
 use crate::app::windowing::{
-    ModalDragState, ModalOffset, WindowController, apply_restored_window_size, begin_modal_drag,
-    parse_resize_direction, update_modal_drag, window_appearance,
+    ModalDragState, WindowController, apply_restored_window_size, parse_resize_direction,
+    window_appearance,
 };
 #[cfg(target_os = "windows")]
 use crate::app::windows_frame::{
@@ -159,8 +166,8 @@ use crate::shell::sidebar::{SidebarDestination, sidebar_items_for, toolbar_descr
 use crate::shell::tabs::WorkspaceTab;
 use crate::shell::view_model::{
     AssetModalState, AssetSshConnectionDraft, KeychainIdentityDraft, KeychainSshKeyDraft,
-    RightPanelView, ShellViewModel, SnippetActivation, SnippetCreateAction, SshModalAction,
-    SyncModalMode, SyncModalViewState, VaultPanelViewState,
+    RightPanelView, ShellViewModel, SnippetActivation, SshModalAction, SyncModalMode,
+    SyncModalViewState, VaultPanelViewState,
 };
 use crate::theme::ThemeMode;
 use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
@@ -253,34 +260,6 @@ struct VaultProjectionUpdate {
     console_tree: AssetTree,
     snippet_tree: AssetTree,
     keychain_catalog: KeychainCatalog,
-}
-
-#[derive(Clone)]
-struct VaultSyncBackgroundSuccess {
-    projection: Option<VaultProjectionUpdate>,
-    sync_modal_state: SyncModalViewState,
-    vault_panel_state: VaultPanelViewState,
-    local_state: Option<LocalVaultBootstrapState>,
-    decrypted_snapshot: Option<VaultSnapshot>,
-    should_clear_dirty: bool,
-}
-
-#[derive(Clone)]
-struct VaultSyncBackgroundFailure {
-    sync_modal_state: SyncModalViewState,
-    vault_panel_state: VaultPanelViewState,
-    local_state: Option<LocalVaultBootstrapState>,
-    should_clear_dirty: bool,
-}
-
-enum VaultSyncBackgroundMessage {
-    Completed {
-        trigger: VaultSyncTrigger,
-        result: std::result::Result<VaultSyncBackgroundSuccess, VaultSyncBackgroundFailure>,
-    },
-    RemoteHeadRefreshed {
-        snapshot: RemoteHeadSnapshot,
-    },
 }
 
 impl VaultSessionState {
@@ -555,874 +534,6 @@ pub fn default_window_size() -> (u32, u32) {
     )
 }
 
-#[cfg(target_os = "windows")]
-fn sync_windows_true_window_placement(
-    window: &AppWindow,
-    state: &Rc<RefCell<ShellViewModel>>,
-    effects: &dyn PlatformWindowEffects,
-    winit_window: &slint::winit_030::winit::window::Window,
-) {
-    let Some(next) = query_true_window_placement(winit_window) else {
-        return;
-    };
-
-    let mut state = state.borrow_mut();
-    if state.window_placement() == next {
-        return;
-    }
-
-    state.set_window_placement(next);
-    sync_top_status_bar_state(window, &state, effects);
-}
-
-fn bind_windows_window_state_tracking(
-    window: &AppWindow,
-    state: Rc<RefCell<ShellViewModel>>,
-    _effects: Rc<dyn PlatformWindowEffects>,
-    session_bridge: Option<Rc<ShellSessionBridge>>,
-    pending_workspace_paste_warning: Rc<RefCell<Option<PendingWorkspacePasteWarning>>>,
-) {
-    use slint::ComponentHandle;
-    use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
-
-    let handle = window.as_weak();
-    let modifiers = Rc::new(RefCell::new(NativeTerminalModifierState::default()));
-    window
-        .window()
-        .on_winit_window_event(move |_slint_window, event| {
-            if matches!(event, winit::event::WindowEvent::Focused(false)) {
-                *modifiers.borrow_mut() = NativeTerminalModifierState::default();
-            }
-
-            if let winit::event::WindowEvent::KeyboardInput {
-                event: key_event,
-                is_synthetic,
-                ..
-            } = event
-            {
-                let mut modifier_state = modifiers.borrow_mut();
-                update_native_terminal_modifier_state(&mut modifier_state, key_event);
-
-                if key_event.state == winit::event::ElementState::Pressed
-                    && !key_event.repeat
-                    && !is_synthetic
-                    && let Some(shortcut) =
-                        native_terminal_clipboard_shortcut(&key_event.logical_key, *modifier_state)
-                {
-                    drop(modifier_state);
-                    let window = handle.unwrap();
-                    if window.get_workspace_session_host_mode() == "terminal"
-                        && !window.get_active_workspace_session_id().is_empty()
-                    {
-                        match shortcut {
-                            NativeTerminalClipboardShortcut::Copy
-                                if window.get_workspace_session_selection_active() =>
-                            {
-                                let state = state.borrow();
-                                forward_active_workspace_copy_selection(
-                                    &state,
-                                    window.get_workspace_session_selection_start_row(),
-                                    window.get_workspace_session_selection_start_col(),
-                                    window.get_workspace_session_selection_end_row(),
-                                    window.get_workspace_session_selection_end_col(),
-                                );
-                                return EventResult::PreventDefault;
-                            }
-                            NativeTerminalClipboardShortcut::Paste => {
-                                let state = state.borrow();
-                                let _ = forward_active_workspace_paste(
-                                    &state,
-                                    session_bridge.as_deref(),
-                                    pending_workspace_paste_warning.as_ref(),
-                                );
-                                return EventResult::PreventDefault;
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
-            // Win32 snap/maximize state can drift from declarative UI state, so re-sample it when
-            // the platform reports geometry-affecting events.
-            if matches!(
-                event,
-                winit::event::WindowEvent::Moved(_)
-                    | winit::event::WindowEvent::Resized(_)
-                    | winit::event::WindowEvent::ScaleFactorChanged { .. }
-            ) {
-                #[cfg(target_os = "windows")]
-                {
-                    use slint::winit_030::WinitWindowAccessor;
-
-                    let window = handle.unwrap();
-                    let _ = window.window().with_winit_window(|winit_window| {
-                        sync_windows_true_window_placement(
-                            &window,
-                            &state,
-                            _effects.as_ref(),
-                            winit_window,
-                        );
-                    });
-                }
-            }
-
-            EventResult::Propagate
-        });
-}
-
-fn sync_theme_and_window_effects(
-    window: &AppWindow,
-    state: &ShellViewModel,
-    effects: &dyn PlatformWindowEffects,
-) {
-    window.set_dark_mode(state.theme_mode == ThemeMode::Dark);
-    window.window().request_redraw();
-
-    let request = build_native_window_appearance_request(state.theme_mode, window_appearance());
-    let report = effects.apply_to_app_window(window, &request);
-
-    if matches!(
-        report.backdrop_status,
-        crate::app::window_effects::BackdropApplyStatus::Failed
-    ) {
-        tracing::error!(
-            target: "app.window",
-            theme = ?request.theme,
-            backdrop = ?request.backdrop,
-            backdrop_error = %report.backdrop_error.as_deref().unwrap_or("unknown"),
-            "failed to apply native window appearance"
-        );
-    }
-}
-
-fn sync_top_status_bar_state(
-    window: &AppWindow,
-    state: &ShellViewModel,
-    effects: &dyn PlatformWindowEffects,
-) {
-    sync_theme_and_window_effects(window, state, effects);
-    window.set_show_right_panel(state.show_right_panel);
-    window.set_transfer_center_open(state.transfer_center_open());
-    window.set_transfer_queue_total(
-        i32::try_from(state.sftp_queue_summary.total_count).unwrap_or(i32::MAX),
-    );
-    window.set_show_global_menu(state.show_global_menu);
-    window.set_is_window_maximized(state.is_window_maximized());
-    window.set_is_window_active(state.is_window_active);
-    window.set_is_window_always_on_top(state.is_always_on_top);
-    window.set_sync_feedback_text(state.sync_feedback_state().text.clone().into());
-    window.set_sync_feedback_sequence(state.sync_feedback_state().sequence);
-    window.set_sync_feedback_running(state.sync_feedback_state().running);
-}
-
-fn sync_sync_modal_state(window: &AppWindow, state: &ShellViewModel) {
-    let modal = state.sync_modal_state();
-
-    window.set_sync_modal_open(modal.open);
-    window.set_sync_modal_mode(modal.mode.id().into());
-    window.set_sync_modal_title(modal.title.clone().into());
-    window.set_sync_modal_headline(modal.headline.clone().into());
-    window.set_sync_modal_status_text(modal.status_text.clone().into());
-    window.set_sync_modal_error_text(modal.error_text.clone().into());
-    window.set_sync_modal_provider_label(modal.provider_label.clone().into());
-    window.set_sync_modal_target_label(modal.target_label.clone().into());
-    window.set_sync_modal_conflict_count(modal.conflict_count);
-    window.set_sync_modal_conflict_summary(modal.conflict_summary.clone().into());
-    window.set_sync_modal_primary_action_label(modal.primary_action_label.clone().into());
-    window.set_sync_modal_secondary_action_label(modal.secondary_action_label.clone().into());
-    window.set_sync_modal_git_remote_url(modal.git_remote_url.clone().into());
-    window.set_sync_modal_git_branch(modal.git_branch.clone().into());
-    window.set_sync_modal_git_auth_mode(modal.git_auth_mode.clone().into());
-    window.set_sync_modal_git_https_username(modal.git_https_username.clone().into());
-    window.set_sync_modal_git_https_secret(modal.git_https_secret.clone().into());
-    window.set_sync_modal_git_ssh_private_key(modal.git_ssh_private_key.clone().into());
-    window.set_sync_modal_git_ssh_passphrase(modal.git_ssh_passphrase.clone().into());
-    window.set_sync_modal_master_password(modal.master_password.clone().into());
-    window.set_sync_modal_local_last_sync_text(modal.local_last_sync_text.clone().into());
-    window.set_sync_modal_remote_last_update_text(modal.remote_last_update_text.clone().into());
-    window.set_sync_modal_primary_revision_text(modal.primary_revision_text.clone().into());
-    window.set_sync_modal_remote_status_text(modal.remote_status_text.clone().into());
-    window.set_sync_modal_remote_status_loading(modal.remote_status_loading);
-}
-
-fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) {
-    window.set_sftp_panel_mode(state.sftp_panel_mode_id().into());
-    window.set_sftp_panel_host_label(state.sftp_panel_host_label().into());
-    window.set_sftp_panel_path(state.sftp_panel_path().into());
-    window.set_sftp_panel_follow_mode(state.sftp_panel_follow_mode_id().into());
-    window.set_sftp_panel_can_go_back(state.sftp_panel_can_go_back());
-    window.set_sftp_panel_can_go_forward(state.sftp_panel_can_go_forward());
-    window.set_sftp_panel_can_go_up(state.sftp_panel_can_go_up());
-    window.set_sftp_panel_actions_enabled(state.sftp_panel_actions_enabled());
-    window.set_sftp_panel_sort_column(state.sftp_panel_sort_column_id().into());
-    window.set_sftp_panel_sort_direction(state.sftp_panel_sort_direction_id().into());
-    window.set_sftp_panel_name_column_width(state.sftp_panel_name_column_width_px());
-    window.set_sftp_panel_type_column_width(state.sftp_panel_type_column_width_px());
-    window.set_sftp_panel_modified_column_width(state.sftp_panel_modified_column_width_px());
-    window.set_sftp_panel_size_column_width(state.sftp_panel_size_column_width_px());
-    window.set_sftp_queue_drawer_open(state.sftp_queue_drawer_open());
-
-    let items = state
-        .project_sftp_panel_entries(state.sftp_panel_entries())
-        .iter()
-        .map(|entry| SftpPanelItem {
-            id: entry.id.as_str().into(),
-            name: entry.name.as_str().into(),
-            type_label: sftp_panel_entry_type_label(entry.kind).into(),
-            modified_label: sftp_panel_entry_modified_label(entry).into(),
-            size_label: sftp_panel_entry_size_label(entry).into(),
-            kind: sftp_panel_entry_kind(entry.kind).into(),
-            selected: state
-                .sftp_panel_selected_entry_ids()
-                .iter()
-                .any(|selected_id| selected_id == &entry.id),
-        })
-        .collect::<Vec<_>>();
-    sync_vec_model(window.get_sftp_panel_items(), items, |model| {
-        window.set_sftp_panel_items(model)
-    });
-
-    let selected_ids = state
-        .sftp_panel_selected_entry_ids()
-        .iter()
-        .map(|entry_id| SharedString::from(entry_id.as_str()))
-        .collect::<Vec<_>>();
-    sync_vec_model(
-        window.get_sftp_panel_selected_entry_ids(),
-        selected_ids,
-        |model| window.set_sftp_panel_selected_entry_ids(model),
-    );
-
-    let queue = &state.sftp_queue_summary;
-    window.set_sftp_panel_queue_active(i32::try_from(queue.active_count).unwrap_or(i32::MAX));
-    window.set_sftp_panel_queue_failed(i32::try_from(queue.failed_count).unwrap_or(i32::MAX));
-    window.set_sftp_panel_queue_current_session(
-        i32::try_from(queue.current_session_count).unwrap_or(i32::MAX),
-    );
-}
-
-fn sync_right_panel_state(window: &AppWindow, state: &ShellViewModel) {
-    window.set_right_panel_view(state.right_panel_view_id().into());
-    sync_sftp_panel_state(window, state);
-}
-
-fn sync_sftp_remote_file_modal_state(window: &AppWindow, state: &ShellViewModel) {
-    let editor = state.sftp_remote_file_editor_state();
-    window.set_sftp_remote_file_modal_open(editor.open);
-    window.set_sftp_remote_file_modal_title(editor.title.clone().into());
-    window.set_sftp_remote_file_modal_path(editor.remote_path.clone().into());
-    window.set_sftp_remote_file_modal_content(editor.content.clone().into());
-    window.set_sftp_remote_file_modal_status_text(editor.status_text.clone().into());
-    window.set_sftp_remote_file_modal_error_text(editor.error_text.clone().into());
-    window.set_sftp_remote_file_modal_can_save(state.sftp_remote_file_editor_can_save());
-}
-
-fn sftp_panel_entry_type_label(kind: SftpDirectoryEntryKind) -> &'static str {
-    match kind {
-        SftpDirectoryEntryKind::Directory => "Folder",
-        SftpDirectoryEntryKind::Symlink => "Link",
-        SftpDirectoryEntryKind::Unknown => "Unknown",
-        SftpDirectoryEntryKind::File => "File",
-    }
-}
-
-fn sftp_panel_entry_modified_label(entry: &crate::app::sftp::SftpDirectoryEntry) -> String {
-    let Some(unix_seconds) = entry.modified_unix_seconds else {
-        return String::new();
-    };
-    let Some(timestamp) = DateTime::<Utc>::from_timestamp(unix_seconds as i64, 0) else {
-        return String::new();
-    };
-    timestamp.format("%Y-%m-%d %H:%M").to_string()
-}
-
-fn sftp_panel_entry_size_label(entry: &crate::app::sftp::SftpDirectoryEntry) -> String {
-    entry.size_bytes.map(format_binary_size).unwrap_or_default()
-}
-
-fn sftp_panel_entry_kind(kind: SftpDirectoryEntryKind) -> &'static str {
-    match kind {
-        SftpDirectoryEntryKind::Directory => "directory",
-        SftpDirectoryEntryKind::File => "file",
-        SftpDirectoryEntryKind::Symlink => "symlink",
-        SftpDirectoryEntryKind::Unknown => "unknown",
-    }
-}
-
-fn format_binary_size(bytes: u64) -> String {
-    const KIB: f64 = 1024.0;
-    const MIB: f64 = KIB * 1024.0;
-    const GIB: f64 = MIB * 1024.0;
-
-    let bytes = bytes as f64;
-    if bytes >= GIB {
-        format!("{:.1} GB", bytes / GIB)
-    } else if bytes >= MIB {
-        format!("{:.1} MB", bytes / MIB)
-    } else if bytes >= KIB {
-        format!("{:.0} KB", bytes / KIB)
-    } else {
-        format!("{bytes:.0} B")
-    }
-}
-
-fn sync_sidebar_state(window: &AppWindow, state: &ShellViewModel) {
-    window.set_show_assets_sidebar(state.show_assets_sidebar);
-    window.set_active_sidebar_destination(state.active_sidebar_destination.id().into());
-    window.set_sidebar_items(ModelRc::new(VecModel::from(sidebar_items_for(state))));
-    sync_assets_toolbar_state(window, state);
-    sync_console_assets(window, state);
-    sync_keychain_assets(window, state);
-}
-
-fn sync_assets_toolbar_state(window: &AppWindow, state: &ShellViewModel) {
-    let descriptor = toolbar_descriptor_for(state.active_sidebar_destination, state);
-    window.set_asset_view_mode(state.asset_view_mode.id().into());
-    window.set_asset_search_expanded(state.asset_search_expanded);
-    let active_query = if state.active_sidebar_destination == SidebarDestination::Keychain {
-        state.keychain_search_query.clone()
-    } else {
-        state.asset_search_query.clone()
-    };
-    window.set_assets_search_query(active_query.into());
-    window.set_asset_create_menu_open(state.asset_create_menu_open);
-    window.set_asset_uses_create_popover(descriptor.uses_create_popover);
-    window.set_asset_tree_fully_expanded(state.asset_tree_fully_expanded);
-    window.set_asset_primary_create_action_id(
-        descriptor.primary_create_action_id.unwrap_or("").into(),
-    );
-    window.set_asset_primary_create_tooltip(descriptor.primary_create_tooltip.into());
-    window.set_asset_search_tooltip(descriptor.search_tooltip.into());
-    window.set_asset_view_mode_tooltip(descriptor.view_mode_tooltip.into());
-    window.set_asset_tree_expansion_tooltip(descriptor.tree_expansion_tooltip.into());
-    window.set_asset_show_tree_controls(descriptor.show_tree_controls);
-    window.set_asset_tree_controls_enabled(descriptor.tree_controls_enabled);
-}
-
-fn sync_assets_context_menu_state(window: &AppWindow, state: &ShellViewModel) {
-    window.set_assets_context_menu_open(state.context_menu_open);
-    window.set_assets_context_menu_anchor_x(state.context_menu_anchor_x);
-    window.set_assets_context_menu_anchor_y(state.context_menu_anchor_y);
-    window.set_assets_context_menu_origin_x(state.context_menu_origin_x);
-    window.set_assets_context_menu_origin_y(state.context_menu_origin_y);
-    window.set_assets_context_menu_child_flows_left(state.context_menu_child_flows_left);
-    window.set_assets_context_menu_primary_items(ModelRc::new(VecModel::from(
-        context_menu_primary_items_for(state),
-    )));
-    window.set_assets_context_menu_secondary_items(ModelRc::new(VecModel::from(
-        context_menu_secondary_items_for(state),
-    )));
-    window.set_assets_context_menu_tertiary_items(ModelRc::new(VecModel::from(
-        context_menu_tertiary_items_for(state),
-    )));
-    window.set_context_menu_feedback_text(state.context_menu_feedback_text.clone().into());
-}
-
-fn clear_asset_snippet_modal_fields(window: &AppWindow) {
-    window.set_asset_snippet_modal_name("".into());
-    window.set_asset_snippet_modal_script("".into());
-    window.set_asset_snippet_modal_package("".into());
-    sync_snippet_package_options(window, Vec::new());
-    window.set_asset_snippet_modal_package_selected_label("".into());
-    window.set_asset_snippet_package_modal_name("".into());
-}
-
-fn clear_asset_ssh_modal_fields(window: &AppWindow) {
-    window.set_asset_ssh_modal_name("".into());
-    window.set_asset_ssh_modal_host("".into());
-    window.set_asset_ssh_modal_user("".into());
-    window.set_asset_ssh_modal_port("22".into());
-    window.set_asset_ssh_modal_auth_source("manual".into());
-    window.set_asset_ssh_modal_auth_method("password".into());
-    sync_ssh_keychain_identity_options(window, Vec::new());
-    window.set_asset_ssh_modal_keychain_identity_selected_label("".into());
-    window.set_asset_ssh_modal_keychain_identity_username("".into());
-    window.set_asset_ssh_modal_keychain_identity_auth_summary("".into());
-    window.set_asset_ssh_modal_private_key_source("content".into());
-    window.set_asset_ssh_modal_password("".into());
-    window.set_asset_ssh_modal_private_key_content("".into());
-    window.set_asset_ssh_modal_private_key_path("".into());
-    window.set_asset_ssh_modal_passphrase("".into());
-    window.set_asset_ssh_modal_password_visible(false);
-    window.set_asset_ssh_modal_remark("".into());
-    window.set_asset_ssh_modal_environment("".into());
-    window.set_asset_ssh_modal_proxy_type("none".into());
-    window.set_asset_ssh_modal_proxy_socks5_host("".into());
-    window.set_asset_ssh_modal_proxy_socks5_port("".into());
-    window.set_asset_ssh_modal_proxy_socks5_username("".into());
-    window.set_asset_ssh_modal_proxy_socks5_password("".into());
-    window.set_asset_ssh_modal_proxy_socks5_password_visible(false);
-    window.set_asset_ssh_modal_proxy_ssh_asset_id("".into());
-    sync_ssh_proxy_target_options(window, Vec::new());
-    window.set_asset_ssh_modal_proxy_ssh_selected_label("".into());
-    window.set_asset_ssh_modal_proxy_method("".into());
-}
-
-fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel) {
-    sync_keychain_modal_defaults(window);
-    match &state.asset_modal_state {
-        Some(AssetModalState::NewFolder { draft_name, .. }) => {
-            window.set_asset_modal_open(true);
-            window.set_asset_modal_kind("new-folder".into());
-            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
-            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
-            window.set_asset_modal_validation_message(
-                state.asset_create_modal_validation_message().into(),
-            );
-            window.set_asset_ssh_modal_connect_family_enabled(false);
-            window.set_asset_ssh_modal_feedback_state("idle".into());
-            window.set_asset_ssh_modal_feedback_message("".into());
-            window.set_asset_folder_modal_name(draft_name.clone().into());
-            clear_asset_snippet_modal_fields(window);
-            window.set_asset_rename_modal_open(false);
-            window.set_asset_rename_modal_name("".into());
-            window.set_asset_rename_modal_validation_message("".into());
-            window.set_asset_rename_modal_can_confirm(false);
-            window.set_asset_delete_confirm_modal_open(false);
-            window.set_asset_delete_confirm_target_label("".into());
-            window.set_asset_delete_confirm_descendant_count(0);
-            clear_asset_ssh_modal_fields(window);
-        }
-        Some(AssetModalState::SftpNewFolder { draft_name }) => {
-            window.set_asset_modal_open(true);
-            window.set_asset_modal_kind("new-folder".into());
-            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
-            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
-            window.set_asset_modal_validation_message(
-                state.asset_create_modal_validation_message().into(),
-            );
-            window.set_asset_ssh_modal_connect_family_enabled(false);
-            window.set_asset_ssh_modal_feedback_state("idle".into());
-            window.set_asset_ssh_modal_feedback_message("".into());
-            window.set_asset_folder_modal_name(draft_name.clone().into());
-            clear_asset_snippet_modal_fields(window);
-            window.set_asset_rename_modal_open(false);
-            window.set_asset_rename_modal_name("".into());
-            window.set_asset_rename_modal_validation_message("".into());
-            window.set_asset_rename_modal_can_confirm(false);
-            window.set_asset_delete_confirm_modal_open(false);
-            window.set_asset_delete_confirm_target_label("".into());
-            window.set_asset_delete_confirm_descendant_count(0);
-            clear_asset_ssh_modal_fields(window);
-        }
-        Some(AssetModalState::NewSnippet { draft, .. }) => {
-            window.set_asset_modal_open(true);
-            window.set_asset_modal_kind("new-snippet".into());
-            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
-            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
-            window.set_asset_modal_validation_message(
-                state.asset_create_modal_validation_message().into(),
-            );
-            window.set_asset_ssh_modal_connect_family_enabled(false);
-            window.set_asset_ssh_modal_feedback_state("idle".into());
-            window.set_asset_ssh_modal_feedback_message("".into());
-            window.set_asset_folder_modal_name("".into());
-            window.set_asset_snippet_modal_name(draft.name.clone().into());
-            window.set_asset_snippet_modal_script(draft.script.clone().into());
-            window.set_asset_snippet_modal_package(draft.package.clone().into());
-            let mut package_options = vec!["No Package".to_string()];
-            package_options.extend(state.snippet_package_option_labels());
-            sync_snippet_package_options(window, package_options);
-            window.set_asset_snippet_modal_package_selected_label(
-                if draft.package.trim().is_empty() {
-                    "No Package"
-                } else {
-                    draft.package.as_str()
-                }
-                .into(),
-            );
-            window.set_asset_snippet_package_modal_name("".into());
-            window.set_asset_rename_modal_open(false);
-            window.set_asset_rename_modal_name("".into());
-            window.set_asset_rename_modal_validation_message("".into());
-            window.set_asset_rename_modal_can_confirm(false);
-            window.set_asset_delete_confirm_modal_open(false);
-            window.set_asset_delete_confirm_target_label("".into());
-            window.set_asset_delete_confirm_descendant_count(0);
-            clear_asset_ssh_modal_fields(window);
-        }
-        Some(AssetModalState::NewSnippetPackage { draft_name, .. }) => {
-            window.set_asset_modal_open(true);
-            window.set_asset_modal_kind("new-snippet-package".into());
-            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
-            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
-            window.set_asset_modal_validation_message(
-                state.asset_create_modal_validation_message().into(),
-            );
-            window.set_asset_ssh_modal_connect_family_enabled(false);
-            window.set_asset_ssh_modal_feedback_state("idle".into());
-            window.set_asset_ssh_modal_feedback_message("".into());
-            window.set_asset_folder_modal_name("".into());
-            window.set_asset_snippet_modal_name("".into());
-            window.set_asset_snippet_modal_script("".into());
-            window.set_asset_snippet_modal_package("".into());
-            sync_snippet_package_options(window, Vec::new());
-            window.set_asset_snippet_modal_package_selected_label("".into());
-            window.set_asset_snippet_package_modal_name(draft_name.clone().into());
-            window.set_asset_rename_modal_open(false);
-            window.set_asset_rename_modal_name("".into());
-            window.set_asset_rename_modal_validation_message("".into());
-            window.set_asset_rename_modal_can_confirm(false);
-            window.set_asset_delete_confirm_modal_open(false);
-            window.set_asset_delete_confirm_target_label("".into());
-            window.set_asset_delete_confirm_descendant_count(0);
-            clear_asset_ssh_modal_fields(window);
-        }
-        Some(AssetModalState::NewKeychainIdentity { draft, .. }) => {
-            window.set_asset_modal_open(true);
-            window.set_asset_modal_kind("new-keychain-identity".into());
-            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
-            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
-            window.set_asset_modal_validation_message(
-                state.asset_create_modal_validation_message().into(),
-            );
-            window.set_asset_folder_modal_name("".into());
-            clear_asset_snippet_modal_fields(window);
-            clear_asset_ssh_modal_fields(window);
-            window.set_asset_rename_modal_open(false);
-            window.set_asset_rename_modal_name("".into());
-            window.set_asset_rename_modal_validation_message("".into());
-            window.set_asset_rename_modal_can_confirm(false);
-            window.set_asset_delete_confirm_modal_open(false);
-            window.set_asset_delete_confirm_target_label("".into());
-            window.set_asset_delete_confirm_descendant_count(0);
-            window.set_keychain_identity_modal_name(draft.name.clone().into());
-            window.set_keychain_identity_modal_username(draft.username.clone().into());
-            window.set_keychain_identity_modal_auth_kind(draft.auth_kind.clone().into());
-            window.set_keychain_identity_modal_password(draft.password.clone().into());
-            window.set_keychain_identity_modal_ssh_key_label(draft.ssh_key_label.clone().into());
-            window.set_keychain_identity_modal_remark(draft.remark.clone().into());
-        }
-        Some(AssetModalState::NewKeychainSshKey {
-            draft,
-            editing_item_id,
-            ..
-        }) => {
-            window.set_asset_modal_open(true);
-            window.set_asset_modal_kind("new-keychain-ssh-key".into());
-            window.set_asset_ssh_modal_dialog_title(
-                if editing_item_id.is_some() {
-                    "Edit SSH Key".into()
-                } else {
-                    "New SSH Key".into()
-                },
-            );
-            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
-            window.set_asset_modal_validation_message(
-                state.asset_create_modal_validation_message().into(),
-            );
-            window.set_asset_folder_modal_name("".into());
-            window.set_asset_rename_modal_open(false);
-            window.set_asset_rename_modal_name("".into());
-            window.set_asset_rename_modal_validation_message("".into());
-            window.set_asset_rename_modal_can_confirm(false);
-            window.set_asset_delete_confirm_modal_open(false);
-            window.set_asset_delete_confirm_target_label("".into());
-            window.set_asset_delete_confirm_descendant_count(0);
-            window.set_asset_ssh_modal_connect_family_enabled(false);
-            window.set_asset_ssh_modal_feedback_state("idle".into());
-            window.set_asset_ssh_modal_feedback_message("".into());
-            window.set_keychain_ssh_key_modal_name(draft.name.clone().into());
-            window.set_keychain_ssh_key_modal_private_key(draft.private_key.clone().into());
-            window.set_keychain_ssh_key_modal_public_key(draft.public_key.clone().into());
-            window.set_keychain_ssh_key_modal_fingerprint(draft.fingerprint.clone().into());
-        }
-        Some(AssetModalState::NewSshConnection {
-            draft,
-            editing_asset_id,
-            ..
-        }) => {
-            window.set_asset_modal_open(true);
-            window.set_asset_modal_kind("new-ssh-connection".into());
-            window.set_asset_ssh_modal_dialog_title(
-                if editing_asset_id.is_some() {
-                    "Edit SSH Connection"
-                } else {
-                    "New SSH Connection"
-                }
-                .into(),
-            );
-            window.set_asset_modal_can_confirm(state.ssh_modal_save_enabled());
-            window.set_asset_modal_validation_message(
-                state.asset_create_modal_validation_message().into(),
-            );
-            window.set_asset_folder_modal_name("".into());
-            clear_asset_snippet_modal_fields(window);
-            window.set_asset_rename_modal_open(false);
-            window.set_asset_rename_modal_name("".into());
-            window.set_asset_rename_modal_validation_message("".into());
-            window.set_asset_rename_modal_can_confirm(false);
-            window.set_asset_delete_confirm_modal_open(false);
-            window.set_asset_delete_confirm_target_label("".into());
-            window.set_asset_delete_confirm_descendant_count(0);
-            window.set_asset_ssh_modal_name(draft.name.clone().into());
-            window.set_asset_ssh_modal_host(draft.host.clone().into());
-            window.set_asset_ssh_modal_user(draft.user.clone().into());
-            window.set_asset_ssh_modal_port(draft.port.clone().into());
-            window.set_asset_ssh_modal_auth_source(draft.auth_source.clone().into());
-            window.set_asset_ssh_modal_auth_method(draft.auth_method.clone().into());
-            sync_ssh_keychain_identity_options(window, state.ssh_keychain_identity_option_labels());
-            window.set_asset_ssh_modal_keychain_identity_selected_label(
-                state.ssh_keychain_identity_selected_label().into(),
-            );
-            window.set_asset_ssh_modal_keychain_identity_username(
-                state.ssh_keychain_identity_selected_username().into(),
-            );
-            window.set_asset_ssh_modal_keychain_identity_auth_summary(
-                state.ssh_keychain_identity_selected_auth_summary().into(),
-            );
-            window.set_asset_ssh_modal_private_key_source(draft.private_key_source.clone().into());
-            window.set_asset_ssh_modal_password(draft.password.clone().into());
-            window
-                .set_asset_ssh_modal_private_key_content(draft.private_key_content.clone().into());
-            window.set_asset_ssh_modal_private_key_path(draft.private_key_path.clone().into());
-            window.set_asset_ssh_modal_passphrase(draft.passphrase.clone().into());
-            window.set_asset_ssh_modal_password_visible(draft.password_visible);
-            window.set_asset_ssh_modal_remark(draft.remark.clone().into());
-            window.set_asset_ssh_modal_environment(draft.environment.clone().into());
-            window.set_asset_ssh_modal_proxy_type(draft.proxy_type.clone().into());
-            window.set_asset_ssh_modal_proxy_socks5_host(draft.proxy_socks5_host.clone().into());
-            window.set_asset_ssh_modal_proxy_socks5_port(draft.proxy_socks5_port.clone().into());
-            window.set_asset_ssh_modal_proxy_socks5_username(
-                draft.proxy_socks5_username.clone().into(),
-            );
-            window.set_asset_ssh_modal_proxy_socks5_password(
-                draft.proxy_socks5_password.clone().into(),
-            );
-            window.set_asset_ssh_modal_proxy_socks5_password_visible(
-                draft.proxy_socks5_password_visible,
-            );
-            window.set_asset_ssh_modal_proxy_ssh_asset_id(draft.proxy_ssh_asset_id.clone().into());
-            sync_ssh_proxy_target_options(window, state.ssh_proxy_target_option_labels());
-            window.set_asset_ssh_modal_proxy_ssh_selected_label(
-                state.ssh_proxy_target_selected_label().into(),
-            );
-            window.set_asset_ssh_modal_proxy_method(draft.proxy_method.clone().into());
-            window.set_asset_ssh_modal_connect_family_enabled(
-                state.ssh_modal_connect_family_enabled(),
-            );
-            window.set_asset_ssh_modal_feedback_state(state.ssh_modal_feedback_state_id().into());
-            window.set_asset_ssh_modal_feedback_message(state.ssh_modal_feedback_message().into());
-        }
-        Some(AssetModalState::RenameAsset { draft_name, .. }) => {
-            window.set_asset_modal_open(false);
-            window.set_asset_modal_kind("".into());
-            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
-            window.set_asset_modal_can_confirm(false);
-            window.set_asset_modal_validation_message("".into());
-            window.set_asset_ssh_modal_connect_family_enabled(false);
-            window.set_asset_ssh_modal_feedback_state("idle".into());
-            window.set_asset_ssh_modal_feedback_message("".into());
-            window.set_asset_folder_modal_name("".into());
-            clear_asset_snippet_modal_fields(window);
-            window.set_asset_rename_modal_open(true);
-            window.set_asset_rename_modal_name(draft_name.clone().into());
-            window.set_asset_rename_modal_validation_message(
-                state.asset_rename_modal_validation_message().into(),
-            );
-            window.set_asset_rename_modal_can_confirm(state.can_confirm_asset_modal());
-            window.set_asset_delete_confirm_modal_open(false);
-            window.set_asset_delete_confirm_target_label("".into());
-            window.set_asset_delete_confirm_descendant_count(0);
-            clear_asset_ssh_modal_fields(window);
-        }
-        Some(AssetModalState::SftpRenameEntry { draft_name, .. }) => {
-            window.set_asset_modal_open(false);
-            window.set_asset_modal_kind("".into());
-            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
-            window.set_asset_modal_can_confirm(false);
-            window.set_asset_modal_validation_message("".into());
-            window.set_asset_ssh_modal_connect_family_enabled(false);
-            window.set_asset_ssh_modal_feedback_state("idle".into());
-            window.set_asset_ssh_modal_feedback_message("".into());
-            window.set_asset_folder_modal_name("".into());
-            clear_asset_snippet_modal_fields(window);
-            window.set_asset_rename_modal_open(true);
-            window.set_asset_rename_modal_name(draft_name.clone().into());
-            window.set_asset_rename_modal_validation_message(
-                state.asset_rename_modal_validation_message().into(),
-            );
-            window.set_asset_rename_modal_can_confirm(state.can_confirm_asset_modal());
-            window.set_asset_delete_confirm_modal_open(false);
-            window.set_asset_delete_confirm_target_label("".into());
-            window.set_asset_delete_confirm_descendant_count(0);
-            clear_asset_ssh_modal_fields(window);
-        }
-        Some(AssetModalState::DeleteAssetConfirm {
-            label,
-            descendant_count,
-            ..
-        }) => {
-            window.set_asset_modal_open(false);
-            window.set_asset_modal_kind("".into());
-            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
-            window.set_asset_modal_can_confirm(false);
-            window.set_asset_modal_validation_message("".into());
-            window.set_asset_ssh_modal_connect_family_enabled(false);
-            window.set_asset_ssh_modal_feedback_state("idle".into());
-            window.set_asset_ssh_modal_feedback_message("".into());
-            window.set_asset_folder_modal_name("".into());
-            clear_asset_snippet_modal_fields(window);
-            window.set_asset_rename_modal_open(false);
-            window.set_asset_rename_modal_name("".into());
-            window.set_asset_rename_modal_validation_message("".into());
-            window.set_asset_rename_modal_can_confirm(false);
-            window.set_asset_delete_confirm_modal_open(true);
-            window.set_asset_delete_confirm_target_label(label.clone().into());
-            window.set_asset_delete_confirm_descendant_count(*descendant_count as i32);
-            clear_asset_ssh_modal_fields(window);
-        }
-        Some(AssetModalState::SftpDeleteEntriesConfirm {
-            label,
-            descendant_count,
-            ..
-        }) => {
-            window.set_asset_modal_open(false);
-            window.set_asset_modal_kind("".into());
-            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
-            window.set_asset_modal_can_confirm(false);
-            window.set_asset_modal_validation_message("".into());
-            window.set_asset_ssh_modal_connect_family_enabled(false);
-            window.set_asset_ssh_modal_feedback_state("idle".into());
-            window.set_asset_ssh_modal_feedback_message("".into());
-            window.set_asset_folder_modal_name("".into());
-            clear_asset_snippet_modal_fields(window);
-            window.set_asset_rename_modal_open(false);
-            window.set_asset_rename_modal_name("".into());
-            window.set_asset_rename_modal_validation_message("".into());
-            window.set_asset_rename_modal_can_confirm(false);
-            window.set_asset_delete_confirm_modal_open(true);
-            window.set_asset_delete_confirm_target_label(label.clone().into());
-            window.set_asset_delete_confirm_descendant_count(*descendant_count as i32);
-            clear_asset_ssh_modal_fields(window);
-        }
-        None => {
-            window.set_asset_modal_open(false);
-            window.set_asset_modal_kind("".into());
-            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
-            window.set_asset_modal_can_confirm(false);
-            window.set_asset_modal_validation_message("".into());
-            window.set_asset_ssh_modal_connect_family_enabled(false);
-            window.set_asset_ssh_modal_feedback_state("idle".into());
-            window.set_asset_ssh_modal_feedback_message("".into());
-            window.set_asset_folder_modal_name("".into());
-            clear_asset_snippet_modal_fields(window);
-            window.set_asset_rename_modal_open(false);
-            window.set_asset_rename_modal_name("".into());
-            window.set_asset_rename_modal_validation_message("".into());
-            window.set_asset_rename_modal_can_confirm(false);
-            window.set_asset_delete_confirm_modal_open(false);
-            window.set_asset_delete_confirm_target_label("".into());
-            window.set_asset_delete_confirm_descendant_count(0);
-            clear_asset_ssh_modal_fields(window);
-        }
-    }
-}
-
-fn sync_ssh_proxy_target_options(window: &AppWindow, labels: Vec<String>) {
-    let rows = labels
-        .into_iter()
-        .map(SharedString::from)
-        .collect::<Vec<_>>();
-    sync_vec_model(
-        window.get_asset_ssh_modal_proxy_ssh_options(),
-        rows,
-        |model| window.set_asset_ssh_modal_proxy_ssh_options(model),
-    );
-}
-
-fn sync_ssh_keychain_identity_options(window: &AppWindow, labels: Vec<String>) {
-    let rows = labels
-        .into_iter()
-        .map(SharedString::from)
-        .collect::<Vec<_>>();
-    sync_vec_model(
-        window.get_asset_ssh_modal_keychain_identity_options(),
-        rows,
-        |model| window.set_asset_ssh_modal_keychain_identity_options(model),
-    );
-}
-
-fn sync_snippet_package_options(window: &AppWindow, labels: Vec<String>) {
-    let rows = labels
-        .into_iter()
-        .map(SharedString::from)
-        .collect::<Vec<_>>();
-    sync_vec_model(
-        window.get_asset_snippet_modal_package_options(),
-        rows,
-        |model| window.set_asset_snippet_modal_package_options(model),
-    );
-}
-
-fn sync_ssh_host_key_modal_state(window: &AppWindow, state: &ShellViewModel) {
-    match &state.ssh_host_key_prompt_state {
-        Some(prompt) => {
-            window.set_ssh_host_key_modal_open(true);
-            window.set_ssh_host_key_modal_host(prompt.host.clone().into());
-            window.set_ssh_host_key_modal_fingerprint(prompt.fingerprint.clone().into());
-        }
-        None => {
-            window.set_ssh_host_key_modal_open(false);
-            window.set_ssh_host_key_modal_host("".into());
-            window.set_ssh_host_key_modal_fingerprint("".into());
-        }
-    }
-}
-
-fn sync_workspace_paste_warning_modal_state(
-    window: &AppWindow,
-    pending: Option<&PendingWorkspacePasteWarning>,
-) {
-    match pending {
-        Some(pending) => {
-            window.set_workspace_paste_warning_line_count(
-                i32::try_from(pending.logical_line_count).unwrap_or(i32::MAX),
-            );
-            window.set_workspace_paste_warning_editor_mode(matches!(
-                pending.prompt_mode,
-                WorkspacePastePromptMode::Editor
-            ));
-            window.set_workspace_paste_warning_text(pending.text.clone().into());
-            window.set_workspace_paste_warning_modal_open(true);
-        }
-        None => {
-            window.set_workspace_paste_warning_modal_open(false);
-            window.set_workspace_paste_warning_line_count(0);
-            window.set_workspace_paste_warning_editor_mode(false);
-            window.set_workspace_paste_warning_text("".into());
-        }
-    }
-}
-
-fn schedule_asset_modal_focus(window: &AppWindow) {
-    let handle = window.as_weak();
-    let _ = slint::invoke_from_event_loop(move || {
-        let window = handle.unwrap();
-        if window.get_asset_modal_open()
-            || window.get_asset_rename_modal_open()
-            || window.get_asset_delete_confirm_modal_open()
-            || window.get_workspace_paste_warning_modal_open()
-        {
-            window.set_asset_modal_focus_sequence(window.get_asset_modal_focus_sequence() + 1);
-        }
-        if window.get_sftp_remote_file_modal_open() {
-            window.set_sftp_remote_file_modal_focus_sequence(
-                window.get_sftp_remote_file_modal_focus_sequence() + 1,
-            );
-        }
-    });
-}
-
-fn open_pending_snippet_create_modal(state: &mut ShellViewModel) {
-    match state.take_pending_snippet_create_action() {
-        Some(SnippetCreateAction::NewSnippet) => state.open_new_snippet_modal(None),
-        Some(SnippetCreateAction::NewPackage) => state.open_new_snippet_package_modal(),
-        None => {}
-    }
-}
-
 fn apply_pending_snippet_activation(
     window: &AppWindow,
     state: &mut ShellViewModel,
@@ -1441,7 +552,7 @@ fn apply_pending_snippet_activation(
             let Some(session_id) = active_workspace_session_uuid(state) else {
                 return;
             };
-            forward_workspace_session_paste(state, bridge, session_id, &script);
+            workspace_terminal::forward_workspace_session_paste(state, bridge, session_id, &script);
         }
         SnippetActivation::Run => {
             let runnable_script = if script.ends_with('\n') {
@@ -1449,11 +560,11 @@ fn apply_pending_snippet_activation(
             } else {
                 format!("{script}\n")
             };
-            forward_active_workspace_text_input(state, bridge, &runnable_script);
+            workspace_terminal::forward_active_workspace_text_input(state, bridge, &runnable_script);
         }
     }
 
-    refresh_active_workspace_projection(window, state, bridge, follow_tracker);
+    workspace_terminal::refresh_active_workspace_projection(window, state, bridge, follow_tracker);
 }
 
 fn parse_context_target_kind(
@@ -2096,14 +1207,14 @@ fn import_public_key_into_keychain_modal(
 }
 
 fn paste_private_key_into_keychain_modal(state: &mut ShellViewModel) {
-    let Some(text) = system_clipboard_text() else {
+    let Some(text) = workspace_terminal::system_clipboard_text() else {
         return;
     };
     apply_keychain_private_key_material(state, text);
 }
 
 fn paste_public_key_into_keychain_modal(state: &mut ShellViewModel) {
-    let Some(text) = system_clipboard_text() else {
+    let Some(text) = workspace_terminal::system_clipboard_text() else {
         return;
     };
     apply_keychain_public_key_material(state, text);
@@ -2131,7 +1242,7 @@ fn copy_public_key_from_keychain_modal(state: &ShellViewModel) -> Result<()> {
     if draft.public_key.trim().is_empty() {
         return Ok(());
     }
-    set_system_clipboard_text(draft.public_key.trim())
+    workspace_terminal::set_system_clipboard_text(draft.public_key.trim())
 }
 
 fn persist_keychain_ssh_key_secret(
@@ -2282,731 +1393,10 @@ impl WorkspaceFollowTracker {
     }
 }
 
-fn projected_active_workspace_session_id(
-    state: &ShellViewModel,
-    next_tabs: &[WorkspaceTab],
-) -> Option<String> {
-    state
-        .active_workspace_session_id()
-        .filter(|candidate| next_tabs.iter().any(|tab| tab.session_id == *candidate))
-        .map(str::to_string)
-        .or_else(|| {
-            state
-                .workspace_tabs()
-                .iter()
-                .find(|tab| {
-                    tab.active
-                        && next_tabs
-                            .iter()
-                            .any(|candidate| candidate.session_id == tab.session_id)
-                })
-                .map(|tab| tab.session_id.clone())
-        })
-        .or_else(|| next_tabs.first().map(|tab| tab.session_id.clone()))
-}
-
-fn sync_workspace_projection_from_manager(
-    state: &mut ShellViewModel,
-    manager: &SessionManager,
-) -> WorkspaceProjectionDelta {
-    let mut next_tabs = manager
-        .ordered_sessions()
-        .into_iter()
-        .map(|handle| WorkspaceTab::from_session(&handle))
-        .collect::<Vec<_>>();
-    let manager_session_ids = next_tabs
-        .iter()
-        .map(|tab| tab.session_id.clone())
-        .collect::<HashSet<_>>();
-    let manager_asset_ids = next_tabs
-        .iter()
-        .map(|tab| tab.asset_id.clone())
-        .collect::<HashSet<_>>();
-    let preserved_error_tabs = state
-        .workspace_tabs()
-        .iter()
-        .filter(|tab| {
-            tab.state == "error"
-                && !manager_session_ids.contains(&tab.session_id)
-                && !manager_asset_ids.contains(&tab.asset_id)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    let preserved_launcher_tabs = state
-        .workspace_tabs()
-        .iter()
-        .filter(|tab| tab.is_launcher())
-        .cloned()
-        .collect::<Vec<_>>();
-    next_tabs.extend(preserved_error_tabs);
-    next_tabs.extend(preserved_launcher_tabs);
-    let active_id = projected_active_workspace_session_id(state, &next_tabs);
-    for tab in &mut next_tabs {
-        tab.active = active_id.as_deref() == Some(tab.session_id.as_str());
-    }
-    let next_session_id = state
-        .active_workspace_session_id()
-        .and_then(|session_id| Uuid::parse_str(session_id).ok());
-    let current_surface_signature = state
-        .active_workspace_terminal_surface()
-        .map(TerminalSurfaceState::signature);
-    let next_surface_signature =
-        next_session_id.and_then(|session_id| manager.terminal_surface_signature(session_id));
-
-    let tabs_changed = state.workspace_tabs() != next_tabs.as_slice();
-    if tabs_changed {
-        state.set_workspace_tabs(next_tabs);
-    }
-
-    let surface_changed = current_surface_signature != next_surface_signature;
-    if surface_changed {
-        let next_surface =
-            next_session_id.and_then(|session_id| manager.terminal_surface(session_id));
-        state.set_active_workspace_terminal_surface(next_surface);
-    }
-
-    let sftp_changed = sync_active_sftp_projection_from_manager(state, manager);
-
-    WorkspaceProjectionDelta {
-        tabs_changed,
-        surface_changed,
-        sftp_changed,
-    }
-}
-
-fn sync_active_sftp_projection_from_manager(
-    state: &mut ShellViewModel,
-    manager: &SessionManager,
-) -> bool {
-    let Some(session_id_text) = state.active_workspace_session_id().map(str::to_string) else {
-        return false;
-    };
-    let Some(session_id) = Uuid::parse_str(&session_id_text).ok() else {
-        return false;
-    };
-
-    let binding = manager.sftp_binding(session_id);
-    let cwd = manager.current_working_directory(session_id);
-    let Some(binding) = binding else {
-        return false;
-    };
-
-    let session_state = state.sftp_sessions.entry(session_id_text).or_default();
-    let before = session_state.clone();
-
-    match binding.mode() {
-        SftpPanelMode::Disconnected => session_state.mark_disconnected(),
-        _ if matches!(
-            session_state.mode,
-            SftpPanelMode::Empty | SftpPanelMode::Disconnected
-        ) =>
-        {
-            session_state.mark_connecting()
-        }
-        _ => {}
-    }
-
-    if let Some(cwd) = cwd {
-        if session_state.current_path.is_empty() {
-            session_state.reenable_follow(cwd);
-        } else if session_state.follow_mode == SftpFollowMode::FollowCwd {
-            session_state.follow_terminal_path(cwd);
-        }
-    }
-
-    before != *session_state
-}
-
-fn project_sftp_browser_state_into_view_model(
-    state: &mut ShellViewModel,
-    session_id: Uuid,
-    browser_state: &SftpBrowserSessionState,
-) -> bool {
-    let next = SftpSessionBindingState {
-        mode: browser_state.mode,
-        follow_mode: browser_state.follow_mode,
-        current_path: browser_state.current_path.clone(),
-        history: browser_state.history.clone(),
-        entries: browser_state.entries.clone(),
-        selected_entry_ids: browser_state.selected_entry_ids.clone(),
-        last_error: browser_state.last_error.clone(),
-    };
-    let session_id_text = session_id.to_string();
-    if state.sftp_sessions.get(&session_id_text) == Some(&next) {
-        return false;
-    }
-    state.set_sftp_session_state(session_id_text, next);
-    true
-}
-
-fn execute_sftp_browser_request(
-    state: &mut ShellViewModel,
-    controller: &mut SftpBrowserController,
-    manager: &SessionManager,
-    request: SftpBrowserLoadRequest,
-) -> bool {
-    match manager.sftp_read_dir(request.session_id, request.path.as_str()) {
-        Ok(entries) => controller.apply_loaded_directory(
-            request.session_id,
-            request.request_id,
-            request.path.as_str(),
-            entries,
-        ),
-        Err(err) => {
-            if manager
-                .sftp_binding(request.session_id)
-                .is_some_and(|binding| binding.mode() == SftpPanelMode::Disconnected)
-            {
-                controller.mark_disconnected(request.session_id);
-            } else {
-                controller.apply_load_error(
-                    request.session_id,
-                    request.request_id,
-                    request.path.as_str(),
-                    err.to_string(),
-                );
-            }
-        }
-    }
-
-    controller
-        .session_state(request.session_id)
-        .is_some_and(|browser_state| {
-            project_sftp_browser_state_into_view_model(state, request.session_id, browser_state)
-        })
-}
-
-fn sftp_remote_file_title(remote_path: &str) -> String {
-    remote_path
-        .rsplit('/')
-        .next()
-        .filter(|name| !name.is_empty())
-        .unwrap_or("Remote File")
-        .to_string()
-}
-
-fn open_sftp_remote_file_editor_for_entry(
-    state: &mut ShellViewModel,
-    manager: &SessionManager,
-    session_id: Uuid,
-    remote_path: &str,
-) {
-    match manager.sftp_download_file(session_id, remote_path) {
-        Ok(bytes) => match String::from_utf8(bytes) {
-            Ok(text) => state.open_sftp_remote_file_editor(
-                session_id.to_string(),
-                remote_path.to_string(),
-                sftp_remote_file_title(remote_path),
-                text,
-                "Editing remote text file".to_string(),
-                String::new(),
-            ),
-            Err(err) => state.open_sftp_remote_file_editor(
-                session_id.to_string(),
-                remote_path.to_string(),
-                sftp_remote_file_title(remote_path),
-                String::from_utf8_lossy(err.as_bytes()).into_owned(),
-                "View only".to_string(),
-                "Only UTF-8 text files can be edited online right now.".to_string(),
-            ),
-        },
-        Err(err) => state.open_sftp_remote_file_editor(
-            session_id.to_string(),
-            remote_path.to_string(),
-            sftp_remote_file_title(remote_path),
-            String::new(),
-            "Open failed".to_string(),
-            format!("Failed to open remote file: {err}"),
-        ),
-    }
-}
-
-fn initial_sftp_browser_path(manager: &SessionManager, session_id: Uuid) -> Option<String> {
-    if let Some(cwd) = manager.current_working_directory(session_id) {
-        return Some(cwd);
-    }
-
-    manager
-        .sftp_binding(session_id)
-        .filter(|binding| binding.mode() != SftpPanelMode::Disconnected)
-        .map(|_| "/".to_string())
-}
-
-fn ensure_active_sftp_browser_started(
-    state: &mut ShellViewModel,
-    controller: &mut SftpBrowserController,
-    manager: &SessionManager,
-) -> bool {
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return false;
-    };
-    if controller.session_state(session_id).is_some() {
-        return false;
-    }
-
-    initial_sftp_browser_path(manager, session_id).is_some_and(|path| {
-        let request = controller.open(session_id, path.as_str());
-        execute_sftp_browser_request(state, controller, manager, request)
-    })
-}
-
-fn open_active_sftp_browser_for_current_session(
-    state: &mut ShellViewModel,
-    controller: &mut SftpBrowserController,
-    manager: &SessionManager,
-) -> bool {
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return false;
-    };
-    if controller.session_state(session_id).is_none() {
-        return ensure_active_sftp_browser_started(state, controller, manager);
-    }
-
-    let request = if controller.session_state(session_id).is_some() {
-        controller.session_activated(session_id)
-    } else {
-        None
-    };
-    request.is_some_and(|request| execute_sftp_browser_request(state, controller, manager, request))
-}
-
-fn sync_active_sftp_browser_follow_request(
-    state: &mut ShellViewModel,
-    controller: &mut SftpBrowserController,
-    manager: &SessionManager,
-) -> bool {
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return false;
-    };
-
-    if manager
-        .sftp_binding(session_id)
-        .is_some_and(|binding| binding.mode() == SftpPanelMode::Disconnected)
-    {
-        controller.mark_disconnected(session_id);
-        return controller
-            .session_state(session_id)
-            .is_some_and(|browser_state| {
-                project_sftp_browser_state_into_view_model(state, session_id, browser_state)
-            });
-    }
-
-    let Some(browser_state) = controller.session_state(session_id) else {
-        return false;
-    };
-    if browser_state.follow_mode != SftpFollowMode::FollowCwd {
-        return false;
-    }
-
-    let Some(cwd) = manager.current_working_directory(session_id) else {
-        return false;
-    };
-    if browser_state.current_path == cwd {
-        return false;
-    }
-
-    controller
-        .follow_cwd(session_id, cwd.as_str())
-        .is_some_and(|request| execute_sftp_browser_request(state, controller, manager, request))
-}
-
-fn sync_active_sftp_browser_pending_request(
-    state: &mut ShellViewModel,
-    controller: &mut SftpBrowserController,
-    manager: &SessionManager,
-) -> bool {
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return false;
-    };
-    let Some(browser_state) = controller.session_state(session_id) else {
-        return false;
-    };
-    if browser_state.mode != SftpPanelMode::Connecting {
-        return false;
-    }
-    if manager
-        .sftp_binding(session_id)
-        .is_some_and(|binding| binding.mode() == SftpPanelMode::Disconnected)
-    {
-        return false;
-    }
-
-    controller
-        .pending_request(session_id)
-        .is_some_and(|request| execute_sftp_browser_request(state, controller, manager, request))
-}
-
 fn active_workspace_session_uuid(state: &ShellViewModel) -> Option<Uuid> {
     state
         .active_workspace_session_id()
         .and_then(|session_id| Uuid::parse_str(session_id).ok())
-}
-
-fn snap_active_workspace_viewport_to_bottom_if_needed(
-    state: &ShellViewModel,
-    bridge: Option<&ShellSessionBridge>,
-) {
-    let Some(bridge) = bridge else {
-        return;
-    };
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return;
-    };
-    let needs_snap = state
-        .active_workspace_terminal_surface()
-        .is_some_and(|surface| !surface.viewport_at_bottom);
-    if !needs_snap {
-        return;
-    }
-
-    if let Err(err) = bridge.manager.scroll_session_to_bottom(session_id) {
-        tracing::error!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            error = %err,
-            "failed to snap workspace terminal viewport to bottom"
-        );
-    }
-}
-
-fn refresh_active_workspace_projection(
-    window: &AppWindow,
-    state: &mut ShellViewModel,
-    bridge: Option<&ShellSessionBridge>,
-    follow_tracker: &mut WorkspaceFollowTracker,
-) {
-    let Some(bridge) = bridge else {
-        return;
-    };
-
-    let projection = sync_workspace_projection_from_manager(state, &bridge.manager);
-    if projection.any_changed() {
-        sync_workspace_tabs_with_manager(window, state, follow_tracker, Some(&bridge.manager));
-        if projection.sftp_changed {
-            sync_right_panel_state(window, state);
-        }
-    }
-}
-
-fn schedule_workspace_scroll_projection_refresh(
-    window: &AppWindow,
-    state: Rc<RefCell<ShellViewModel>>,
-    bridge: Option<Rc<ShellSessionBridge>>,
-    follow_tracker: Rc<RefCell<WorkspaceFollowTracker>>,
-    timer: Rc<Timer>,
-    gate: Rc<RefCell<DeferredWorkspaceProjectionRefreshGate>>,
-) {
-    {
-        let mut gate = gate.borrow_mut();
-        if !gate.mark_scheduled() {
-            return;
-        }
-    }
-
-    let window_handle = window.as_weak();
-    timer.start(
-        TimerMode::SingleShot,
-        Duration::from_millis(WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS),
-        move || {
-            gate.borrow_mut().clear();
-            let Some(window) = window_handle.upgrade() else {
-                return;
-            };
-            let mut state = state.borrow_mut();
-            refresh_active_workspace_projection(
-                &window,
-                &mut state,
-                bridge.as_deref(),
-                &mut follow_tracker.borrow_mut(),
-            );
-        },
-    );
-}
-
-fn schedule_workspace_scroll_thumb_drag_update(
-    window: &AppWindow,
-    ratio: f32,
-    state: Rc<RefCell<ShellViewModel>>,
-    bridge: Option<Rc<ShellSessionBridge>>,
-    follow_tracker: Rc<RefCell<WorkspaceFollowTracker>>,
-    timer: Rc<Timer>,
-    deferred_drag: Rc<RefCell<DeferredWorkspaceScrollThumbDrag>>,
-) {
-    {
-        let mut deferred_drag = deferred_drag.borrow_mut();
-        if !deferred_drag.queue_ratio(ratio) {
-            return;
-        }
-    }
-
-    let window_handle = window.as_weak();
-    timer.start(
-        TimerMode::SingleShot,
-        Duration::from_millis(WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS),
-        move || {
-            let ratio = {
-                let mut deferred_drag = deferred_drag.borrow_mut();
-                let Some(ratio) = deferred_drag.take_latest_ratio() else {
-                    return;
-                };
-                ratio
-            };
-            let Some(window) = window_handle.upgrade() else {
-                return;
-            };
-            {
-                let state = state.borrow();
-                forward_active_workspace_scroll_ratio(&state, bridge.as_deref(), ratio);
-            }
-            let mut state = state.borrow_mut();
-            refresh_active_workspace_projection(
-                &window,
-                &mut state,
-                bridge.as_deref(),
-                &mut follow_tracker.borrow_mut(),
-            );
-        },
-    );
-}
-
-fn forward_active_workspace_text_input(
-    state: &ShellViewModel,
-    bridge: Option<&ShellSessionBridge>,
-    text: &str,
-) {
-    let Some(bridge) = bridge else {
-        return;
-    };
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return;
-    };
-    if text.is_empty() {
-        return;
-    }
-
-    snap_active_workspace_viewport_to_bottom_if_needed(state, Some(bridge));
-
-    if let Err(err) = bridge
-        .manager
-        .send_session_text_input(session_id, text.to_string())
-    {
-        tracing::error!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            error = %err,
-            "failed to forward workspace terminal text input"
-        );
-    }
-}
-
-fn forward_active_workspace_key_input(
-    state: &ShellViewModel,
-    bridge: Option<&ShellSessionBridge>,
-    key_name: &str,
-    alt: bool,
-    ctrl: bool,
-    shift: bool,
-) {
-    let Some(bridge) = bridge else {
-        return;
-    };
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return;
-    };
-
-    let Some(event) = terminal_key_event(key_name, alt, ctrl, shift) else {
-        return;
-    };
-
-    snap_active_workspace_viewport_to_bottom_if_needed(state, Some(bridge));
-
-    if let Err(err) = bridge.manager.send_session_key_input(session_id, event) {
-        tracing::error!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            key = key_name,
-            error = %err,
-            "failed to forward workspace terminal key input"
-        );
-    }
-}
-
-fn terminal_key_event(
-    key_name: &str,
-    alt: bool,
-    ctrl: bool,
-    shift: bool,
-) -> Option<TerminalKeyEvent> {
-    if let Some(number) = key_name
-        .strip_prefix('f')
-        .and_then(|suffix| suffix.parse::<u8>().ok())
-        .filter(|number| (1..=24).contains(number))
-    {
-        return Some(TerminalKeyEvent::function(number, alt, ctrl, shift));
-    }
-
-    if key_name.chars().count() == 1 {
-        return key_name
-            .chars()
-            .next()
-            .map(|ch| TerminalKeyEvent::character(ch, alt, ctrl, shift));
-    }
-
-    match key_name {
-        "enter" => Some(TerminalKeyEvent::named("enter", alt, ctrl, shift)),
-        "tab" => Some(TerminalKeyEvent::named("tab", alt, ctrl, shift)),
-        "escape" => Some(TerminalKeyEvent::named("escape", alt, ctrl, shift)),
-        "backspace" => Some(TerminalKeyEvent::named("backspace", alt, ctrl, shift)),
-        "insert" => Some(TerminalKeyEvent::named("insert", alt, ctrl, shift)),
-        "delete" => Some(TerminalKeyEvent::named("delete", alt, ctrl, shift)),
-        "up" => Some(TerminalKeyEvent::named("up", alt, ctrl, shift)),
-        "down" => Some(TerminalKeyEvent::named("down", alt, ctrl, shift)),
-        "left" => Some(TerminalKeyEvent::named("left", alt, ctrl, shift)),
-        "right" => Some(TerminalKeyEvent::named("right", alt, ctrl, shift)),
-        "home" => Some(TerminalKeyEvent::named("home", alt, ctrl, shift)),
-        "end" => Some(TerminalKeyEvent::named("end", alt, ctrl, shift)),
-        "page-up" => Some(TerminalKeyEvent::named("page-up", alt, ctrl, shift)),
-        "page-down" => Some(TerminalKeyEvent::named("page-down", alt, ctrl, shift)),
-        _ => None,
-    }
-}
-
-fn forward_active_workspace_resize(
-    state: &ShellViewModel,
-    bridge: Option<&ShellSessionBridge>,
-    rows: i32,
-    cols: i32,
-) {
-    let Some(bridge) = bridge else {
-        return;
-    };
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return;
-    };
-
-    let rows = rows.max(1) as u32;
-    let cols = cols.max(1) as u32;
-    if let Err(err) = bridge.manager.resize_session(session_id, rows, cols) {
-        tracing::error!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            rows,
-            cols,
-            error = %err,
-            "failed to forward workspace terminal resize"
-        );
-    }
-}
-
-fn set_system_clipboard_text(text: &str) -> Result<()> {
-    i_slint_backend_selector::with_platform(|platform| {
-        platform.set_clipboard_text(text, slint::platform::Clipboard::DefaultClipboard);
-        Ok(())
-    })
-    .map_err(anyhow::Error::from)
-}
-
-fn system_clipboard_text() -> Option<String> {
-    i_slint_backend_selector::with_platform(|platform| {
-        Ok(platform.clipboard_text(slint::platform::Clipboard::DefaultClipboard))
-    })
-    .ok()
-    .flatten()
-}
-
-fn forward_active_workspace_copy_selection(
-    state: &ShellViewModel,
-    start_row: i32,
-    start_col: i32,
-    end_row: i32,
-    end_col: i32,
-) {
-    let Some(surface) = state.active_workspace_terminal_surface() else {
-        return;
-    };
-
-    let text = surface.selection_text(
-        start_row.max(0) as u32,
-        start_col.max(0) as u32,
-        end_row.max(0) as u32,
-        end_col.max(0) as u32,
-    );
-    if text.is_empty() {
-        return;
-    }
-
-    if let Err(err) = set_system_clipboard_text(&text) {
-        tracing::error!(
-            target: "app.ssh",
-            error = %err,
-            "failed to copy workspace terminal selection to clipboard"
-        );
-    }
-}
-
-fn normalized_paste_newlines(text: &str) -> String {
-    text.replace("\r\n", "\n").replace('\r', "\n")
-}
-
-fn workspace_paste_logical_line_count(text: &str) -> usize {
-    let normalized = normalized_paste_newlines(text);
-    let trimmed = normalized.trim_end_matches('\n');
-    if trimmed.is_empty() {
-        return usize::from(!text.is_empty());
-    }
-
-    trimmed.split('\n').count()
-}
-
-fn workspace_paste_prompt_mode(
-    state: &ShellViewModel,
-    text: &str,
-) -> Option<WorkspacePastePromptMode> {
-    let logical_line_count = workspace_paste_logical_line_count(text);
-    if logical_line_count < 2 {
-        return None;
-    }
-
-    if logical_line_count >= WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD {
-        return Some(WorkspacePastePromptMode::Editor);
-    }
-
-    if state
-        .active_workspace_terminal_surface()
-        .is_some_and(|surface| surface.bracketed_paste_enabled)
-    {
-        None
-    } else {
-        Some(WorkspacePastePromptMode::Confirm)
-    }
-}
-
-fn forward_workspace_session_paste(
-    state: &ShellViewModel,
-    bridge: Option<&ShellSessionBridge>,
-    session_id: Uuid,
-    text: &str,
-) {
-    let Some(bridge) = bridge else {
-        return;
-    };
-    if text.is_empty() {
-        return;
-    }
-
-    snap_active_workspace_viewport_to_bottom_if_needed(state, Some(bridge));
-
-    if let Err(err) = bridge
-        .manager
-        .send_session_paste(session_id, text.to_string())
-    {
-        tracing::error!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            error = %err,
-            "failed to forward workspace terminal paste"
-        );
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3014,82 +1404,6 @@ enum WorkspacePasteRequestOutcome {
     Ignored,
     Prompted,
     Sent,
-}
-
-fn forward_active_workspace_paste(
-    state: &ShellViewModel,
-    bridge: Option<&ShellSessionBridge>,
-    pending_warning: &RefCell<Option<PendingWorkspacePasteWarning>>,
-) -> WorkspacePasteRequestOutcome {
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return WorkspacePasteRequestOutcome::Ignored;
-    };
-    let Some(text) = system_clipboard_text() else {
-        return WorkspacePasteRequestOutcome::Ignored;
-    };
-
-    if let Some(prompt_mode) = workspace_paste_prompt_mode(state, &text) {
-        *pending_warning.borrow_mut() = Some(PendingWorkspacePasteWarning {
-            session_id,
-            logical_line_count: workspace_paste_logical_line_count(&text),
-            text,
-            prompt_mode,
-        });
-        return WorkspacePasteRequestOutcome::Prompted;
-    }
-
-    pending_warning.borrow_mut().take();
-    forward_workspace_session_paste(state, bridge, session_id, &text);
-    WorkspacePasteRequestOutcome::Sent
-}
-
-fn forward_active_workspace_scroll_ratio(
-    state: &ShellViewModel,
-    bridge: Option<&ShellSessionBridge>,
-    ratio: f32,
-) {
-    let Some(bridge) = bridge else {
-        return;
-    };
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return;
-    };
-
-    if let Err(err) = bridge.manager.scroll_session_to_ratio(session_id, ratio) {
-        tracing::error!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            ratio,
-            error = %err,
-            "failed to update workspace terminal scrollback ratio"
-        );
-    }
-}
-
-fn forward_active_workspace_mouse_input(
-    state: &ShellViewModel,
-    bridge: Option<&ShellSessionBridge>,
-    event: TerminalMouseInput,
-) {
-    let Some(bridge) = bridge else {
-        return;
-    };
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return;
-    };
-
-    snap_active_workspace_viewport_to_bottom_if_needed(state, Some(bridge));
-
-    if let Err(err) = bridge.manager.send_session_mouse_input(session_id, event) {
-        tracing::error!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            row = event.row,
-            col = event.col,
-            error = %err,
-            "failed to forward workspace terminal mouse input"
-        );
-    }
 }
 
 struct WorkspaceScrollInput {
@@ -3101,89 +1415,6 @@ struct WorkspaceScrollInput {
     alt: bool,
 }
 
-fn forward_active_workspace_scroll(
-    state: &ShellViewModel,
-    bridge: Option<&ShellSessionBridge>,
-    input: WorkspaceScrollInput,
-) {
-    if input.delta_lines == 0 {
-        return;
-    }
-
-    let Some(bridge) = bridge else {
-        return;
-    };
-    let Some(session_id) = active_workspace_session_uuid(state) else {
-        return;
-    };
-
-    let mouse_grabbed = state
-        .active_workspace_terminal_surface()
-        .map(|surface| surface.mouse_grabbed)
-        .unwrap_or(false);
-
-    if mouse_grabbed {
-        let button = if input.delta_lines > 0 {
-            TerminalMouseButton::WheelUp
-        } else {
-            TerminalMouseButton::WheelDown
-        };
-        let event = TerminalMouseInput {
-            kind: TerminalMouseEventKind::Scroll,
-            button,
-            row: input.row.max(0) as u32,
-            col: input.col.max(0) as u32,
-            shift: input.shift,
-            ctrl: input.ctrl,
-            alt: input.alt,
-        };
-        if let Err(err) = bridge.manager.send_session_mouse_input(session_id, event) {
-            tracing::error!(
-                target: "app.ssh",
-                session_id = session_id.to_string(),
-                delta_lines = input.delta_lines,
-                row = input.row,
-                col = input.col,
-                error = %err,
-                "failed to forward workspace terminal wheel input"
-            );
-        }
-        return;
-    }
-
-    if let Err(err) = bridge
-        .manager
-        .scroll_session_viewport(session_id, input.delta_lines)
-    {
-        tracing::error!(
-            target: "app.ssh",
-            session_id = session_id.to_string(),
-            delta_lines = input.delta_lines,
-            error = %err,
-            "failed to update workspace terminal local scrollback"
-        );
-    }
-}
-
-fn parse_terminal_mouse_kind(value: &str) -> Option<TerminalMouseEventKind> {
-    match value {
-        "down" => Some(TerminalMouseEventKind::Down),
-        "up" => Some(TerminalMouseEventKind::Up),
-        "move" => Some(TerminalMouseEventKind::Move),
-        _ => None,
-    }
-}
-
-fn parse_terminal_mouse_button(value: &str) -> Option<TerminalMouseButton> {
-    match value {
-        "left" => Some(TerminalMouseButton::Left),
-        "middle" => Some(TerminalMouseButton::Middle),
-        "right" => Some(TerminalMouseButton::Right),
-        "none" => Some(TerminalMouseButton::None),
-        _ => None,
-    }
-}
-
 fn open_session_with_profile(
     state: &mut ShellViewModel,
     bridge: &ShellSessionBridge,
@@ -3193,7 +1424,7 @@ fn open_session_with_profile(
     let handle = bridge.manager.open_session(profile, mode)?;
     let resolved = bridge.manager.session(handle.session_id).unwrap_or(handle);
     merge_session_handle_into_tabs(state, &resolved);
-    let _ = sync_workspace_projection_from_manager(state, &bridge.manager);
+    let _ = workspace_terminal::sync_workspace_projection_from_manager(state, &bridge.manager);
     Ok(())
 }
 
@@ -3590,277 +1821,6 @@ fn close_session_by_id(
         let _ = bridge.manager.close_session(session_uuid);
     }
     state.close_workspace_session_with_fallback(session_id)
-}
-
-fn context_menu_roots_for(state: &ShellViewModel) -> Vec<ContextMenuActionNode> {
-    let Some(target_kind) = state.context_menu_target_kind else {
-        return Vec::new();
-    };
-
-    if !state.context_menu_open {
-        return Vec::new();
-    }
-
-    resolve_action_tree(target_kind, &selection_context_for(state))
-}
-
-fn context_menu_columns_for(state: &ShellViewModel) -> [Vec<ContextMenuActionNode>; 3] {
-    let roots = context_menu_roots_for(state);
-    visible_columns_for_path(&roots, &state.context_menu_open_path)
-}
-
-fn context_menu_items_to_model(
-    items: Vec<ContextMenuActionNode>,
-    open_index: Option<usize>,
-) -> Vec<AssetsContextMenuItem> {
-    items
-        .into_iter()
-        .enumerate()
-        .map(|(index, item)| AssetsContextMenuItem {
-            id: item.id.into(),
-            label: item.label.into(),
-            icon_id: item.icon_id.into(),
-            enabled: item.state != ContextMenuActionState::Disabled,
-            planned: item.state == ContextMenuActionState::Planned,
-            has_children: !item.children.is_empty(),
-            open: open_index == Some(index),
-            divider_before: item.divider_before,
-        })
-        .collect()
-}
-
-fn context_menu_primary_items_for(state: &ShellViewModel) -> Vec<AssetsContextMenuItem> {
-    let columns = context_menu_columns_for(state);
-    context_menu_items_to_model(
-        columns[0].clone(),
-        state.context_menu_open_path.first().copied(),
-    )
-}
-
-fn context_menu_secondary_items_for(state: &ShellViewModel) -> Vec<AssetsContextMenuItem> {
-    let columns = context_menu_columns_for(state);
-    context_menu_items_to_model(
-        columns[1].clone(),
-        state.context_menu_open_path.get(1).copied(),
-    )
-}
-
-fn context_menu_tertiary_items_for(state: &ShellViewModel) -> Vec<AssetsContextMenuItem> {
-    let columns = context_menu_columns_for(state);
-    context_menu_items_to_model(columns[2].clone(), None)
-}
-
-fn context_menu_hover_path_for(
-    state: &ShellViewModel,
-    column_index: usize,
-    row_index: usize,
-) -> Vec<usize> {
-    let columns = context_menu_columns_for(state);
-
-    match column_index {
-        0 => columns[0]
-            .get(row_index)
-            .map(|node| {
-                if node.children.is_empty() {
-                    Vec::new()
-                } else {
-                    vec![row_index]
-                }
-            })
-            .unwrap_or_default(),
-        1 => {
-            let Some(first_index) = state.context_menu_open_path.first().copied() else {
-                return Vec::new();
-            };
-
-            columns[1]
-                .get(row_index)
-                .map(|node| {
-                    if node.children.is_empty() {
-                        vec![first_index]
-                    } else {
-                        vec![first_index, row_index]
-                    }
-                })
-                .unwrap_or_else(|| vec![first_index])
-        }
-        _ => state.context_menu_open_path.clone(),
-    }
-}
-
-fn context_menu_action_entry_for(
-    state: &ShellViewModel,
-    action_id: &str,
-) -> Option<(Vec<usize>, ContextMenuActionNode)> {
-    find_context_menu_action_entry(&context_menu_roots_for(state), action_id, Vec::new())
-}
-
-fn find_context_menu_action_entry(
-    nodes: &[ContextMenuActionNode],
-    action_id: &str,
-    prefix: Vec<usize>,
-) -> Option<(Vec<usize>, ContextMenuActionNode)> {
-    for (index, node) in nodes.iter().enumerate() {
-        let mut path = prefix.clone();
-        path.push(index);
-
-        if node.id == action_id {
-            return Some((path, node.clone()));
-        }
-
-        if let Some(found) = find_context_menu_action_entry(&node.children, action_id, path) {
-            return Some(found);
-        }
-    }
-
-    None
-}
-
-fn context_menu_visible_column_count(state: &ShellViewModel) -> usize {
-    context_menu_columns_for(state)
-        .into_iter()
-        .take_while(|column| !column.is_empty())
-        .count()
-}
-
-fn context_menu_overlay_height_for(state: &ShellViewModel) -> f32 {
-    context_menu_columns_for(state)
-        .into_iter()
-        .filter(|column| !column.is_empty())
-        .map(|column| context_menu_column_height(column.as_slice()))
-        .fold(0.0, f32::max)
-}
-
-fn context_menu_child_width_for(state: &ShellViewModel) -> f32 {
-    let child_count = context_menu_visible_column_count(state).saturating_sub(1) as f32;
-    if child_count <= 0.0 {
-        0.0
-    } else {
-        child_count * (CONTEXT_MENU_COLUMN_WIDTH + CONTEXT_MENU_COLUMN_GAP)
-    }
-}
-
-fn context_menu_column_rects_for(state: &ShellViewModel) -> [Option<Rect>; 3] {
-    let columns = context_menu_columns_for(state);
-    let visible_column_count = columns
-        .iter()
-        .take_while(|column| !column.is_empty())
-        .count();
-    let mut rects = [None, None, None];
-
-    for column_index in 0..visible_column_count {
-        let height = context_menu_column_height(columns[column_index].as_slice());
-        rects[column_index] = Some(Rect {
-            x: state.context_menu_origin_x
-                + context_menu_column_offset(
-                    column_index,
-                    visible_column_count,
-                    state.context_menu_child_flows_left,
-                ),
-            y: state.context_menu_origin_y,
-            width: CONTEXT_MENU_COLUMN_WIDTH,
-            height,
-        });
-    }
-
-    rects
-}
-
-fn update_context_menu_placement(window: &AppWindow, state: &mut ShellViewModel) {
-    if !state.context_menu_open {
-        state.set_context_menu_placement(0.0, 0.0, false);
-        return;
-    }
-
-    let (host_width, host_height) = current_window_size(window);
-    let (origin_x, origin_y, child_flows_left) = resolve_root_menu_origin(MenuPlacementInput {
-        host_width: host_width as f32,
-        host_height: host_height as f32,
-        anchor_x: state.context_menu_anchor_x,
-        anchor_y: state.context_menu_anchor_y,
-        root_width: CONTEXT_MENU_COLUMN_WIDTH,
-        root_height: context_menu_overlay_height_for(state),
-        child_width: context_menu_child_width_for(state),
-    });
-
-    state.set_context_menu_placement(origin_x, origin_y, child_flows_left);
-}
-
-fn sync_console_assets(window: &AppWindow, state: &ShellViewModel) {
-    let project_rows = |rows: Vec<crate::shell::assets::VisibleAssetRow>| {
-        rows.into_iter()
-            .map(|row| ConsoleAssetItem {
-                id: row.id.clone().into(),
-                kind: row.kind.id().into(),
-                label: row.label.clone().into(),
-                depth: row.depth as i32,
-                has_children: row.has_children,
-                expanded: row.expanded,
-                selected: state.selected_asset_ids.iter().any(|id| id == &row.id),
-                focused: state.focused_asset_id.as_deref() == Some(row.id.as_str()),
-                disclosure_state: match row.disclosure_state {
-                    AssetDisclosureState::None => "none",
-                    AssetDisclosureState::Collapsed => "collapsed",
-                    AssetDisclosureState::Expanded => "expanded",
-                }
-                .into(),
-                path_hint: row.path_hint.clone().unwrap_or_default().into(),
-                compact_flat_mode: state.asset_view_mode.id() == "flat",
-            })
-            .collect::<Vec<_>>()
-    };
-
-    window.set_console_asset_items(ModelRc::new(VecModel::from(project_rows(
-        state.visible_console_asset_rows(),
-    ))));
-    window.set_snippet_asset_items(ModelRc::new(VecModel::from(project_rows(
-        state.visible_snippet_rows(),
-    ))));
-    sync_welcome_quick_launch_state(window, state);
-    sync_saved_ssh_picker_state(window, state);
-}
-
-fn sync_keychain_assets(window: &AppWindow, state: &ShellViewModel) {
-    let rows = state
-        .visible_keychain_rows()
-        .into_iter()
-        .map(|row| ConsoleAssetItem {
-            id: row.id.clone().into(),
-            kind: row.kind.id().into(),
-            label: row.label.clone().into(),
-            depth: row.depth as i32,
-            has_children: row.has_children,
-            expanded: row.expanded,
-            selected: state
-                .selected_keychain_ids
-                .iter()
-                .any(|selected_id| selected_id == &row.id),
-            focused: state.focused_keychain_id.as_deref() == Some(row.id.as_str()),
-            disclosure_state: match row.disclosure_state {
-                AssetDisclosureState::None => "none",
-                AssetDisclosureState::Collapsed => "collapsed",
-                AssetDisclosureState::Expanded => "expanded",
-            }
-            .into(),
-            path_hint: row.path_hint.unwrap_or_default().into(),
-            compact_flat_mode: false,
-        })
-        .collect::<Vec<_>>();
-
-    window.set_keychain_asset_items(ModelRc::new(VecModel::from(rows)));
-}
-
-fn sync_keychain_modal_defaults(window: &AppWindow) {
-    window.set_keychain_identity_modal_name("".into());
-    window.set_keychain_identity_modal_username("".into());
-    window.set_keychain_identity_modal_auth_kind("password".into());
-    window.set_keychain_identity_modal_password("".into());
-    window.set_keychain_identity_modal_ssh_key_label("".into());
-    window.set_keychain_identity_modal_remark("".into());
-    window.set_keychain_ssh_key_modal_name("".into());
-    window.set_keychain_ssh_key_modal_private_key("".into());
-    window.set_keychain_ssh_key_modal_public_key("".into());
-    window.set_keychain_ssh_key_modal_fingerprint("".into());
 }
 
 fn sync_workspace_tab_items(window: &AppWindow, state: &ShellViewModel) {
@@ -4669,15 +2629,15 @@ fn sync_shell_state(
     effects: &dyn PlatformWindowEffects,
     follow_tracker: &mut WorkspaceFollowTracker,
 ) {
-    sync_top_status_bar_state(window, state, effects);
-    sync_sync_modal_state(window, state);
-    sync_right_panel_state(window, state);
-    sync_sidebar_state(window, state);
+    shell_chrome::sync_top_status_bar_state(window, state, effects);
+    windowing::sync_sync_modal_state(window, state);
+    sftp::sync_right_panel_state(window, state);
+    assets_keychain::sync_sidebar_state(window, state);
     sync_workspace_tabs(window, state, follow_tracker);
-    sync_assets_context_menu_state(window, state);
-    sync_asset_modal_state(window, state);
-    sync_sftp_remote_file_modal_state(window, state);
-    sync_ssh_host_key_modal_state(window, state);
+    assets_keychain::sync_assets_context_menu_state(window, state);
+    assets_keychain::sync_asset_modal_state(window, state);
+    sftp::sync_sftp_remote_file_modal_state(window, state);
+    windowing::sync_ssh_host_key_modal_state(window, state);
 }
 
 fn sync_shell_layout(
@@ -4700,8 +2660,8 @@ fn sync_shell_layout(
         logical_height.saturating_sub(ShellMetrics::TITLEBAR_HEIGHT) as f32,
     );
     sync_workspace_native_terminal_surface_geometry(window);
-    update_context_menu_placement(window, state);
-    sync_assets_context_menu_state(window, state);
+    assets_keychain::update_context_menu_placement(window, state);
+    assets_keychain::sync_assets_context_menu_state(window, state);
 }
 
 fn current_window_size(window: &AppWindow) -> (u32, u32) {
@@ -5120,1517 +3080,6 @@ fn build_sync_bundle_from_modal(
     }];
 
     Ok(bundle)
-}
-
-fn persist_sync_modal_settings(
-    state: &mut ShellViewModel,
-    vault: &mut VaultSessionState,
-    credential_store: &dyn CredentialStore,
-) -> Result<()> {
-    let existing_bundle = configured_sync_bundle(vault);
-    let bundle = build_sync_bundle_from_modal(state, existing_bundle)?;
-    let modal = state.sync_modal_state();
-    let credential_material = build_git_repo_credential_material(modal)?;
-
-    persist_provider_credential(
-        credential_store,
-        bootstrap_provider_credential_ref(sync_settings_remote_id(RemoteRole::Primary)).as_str(),
-        Some(credential_material.as_str()),
-    )?;
-
-    let bootstrap_state_path = vault.bootstrap_state_path();
-    if let Some(local_state) = vault.local_state.as_mut() {
-        local_state.bundle = bundle;
-        save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
-    } else {
-        vault.bootstrap_template = Some(bundle);
-    }
-
-    update_sync_modal_for_local_state(state, vault);
-    Ok(())
-}
-
-fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vault: &VaultSessionState) {
-    let has_primary_remote = vault_primary_remote(vault).is_some();
-    let git_repo_setup = GitRepoRemoteDraft::default();
-    let (conflict_count, conflict_summary, conflict_review_available) =
-        sync_modal_conflict_projection(vault);
-    let modal = state.sync_modal_state_mut();
-
-    modal.title = "Sync Settings".into();
-    modal.provider_label = first_release_formal_provider_label().into();
-    modal.target_label = if has_primary_remote {
-        "1 Git primary configured".into()
-    } else {
-        String::new()
-    };
-    modal.conflict_count = conflict_count;
-    modal.conflict_summary = conflict_summary;
-    modal.conflict_review_available = conflict_review_available;
-    modal.error_text.clear();
-    let local_last_sync = latest_local_sync_timestamp(vault);
-    modal.local_last_sync_text = local_last_sync
-        .as_deref()
-        .map(|raw| format_sync_timestamp_for_ui(Some(raw)))
-        .unwrap_or_else(|| "Never synced".into());
-    modal.remote_last_update_text = "Unknown".into();
-    modal.primary_revision_text = vault
-        .local_state
-        .as_ref()
-        .and_then(|local_state| local_state.current_revision.clone())
-        .unwrap_or_else(|| "Unknown".into());
-    modal.remote_status_text.clear();
-    modal.remote_status_loading = false;
-
-    if vault.local_state.is_none() && vault.unlocked_vault_key.is_some() {
-        modal.mode = SyncModalMode::SyncError;
-        modal.headline = "Sync state is inconsistent".into();
-        modal.status_text = "The local vault state could not be resolved.".into();
-        modal.error_text = "Missing local bootstrap state".into();
-        modal.primary_action_label = "Close".into();
-        modal.secondary_action_label.clear();
-        return;
-    }
-
-    match (&vault.local_state, has_primary_remote) {
-        (None, false) => {
-            modal.mode = SyncModalMode::NotConfigured;
-            modal.headline = "Configure sync".into();
-            modal.status_text = git_repo_setup.setup_summary();
-            modal.primary_action_label = "Save and enable".into();
-            modal.secondary_action_label = "Close".into();
-        }
-        (None, true) => {
-            modal.mode = SyncModalMode::NotConfigured;
-            modal.headline = "Enable or recover sync".into();
-            modal.status_text = "The Git primary is configured. Enter a master password to recover from the remote if it already has data, or create a new local vault if it is still empty.".into();
-            modal.primary_action_label = "Save and enable".into();
-            modal.secondary_action_label = "Close".into();
-        }
-        (Some(_), false) => {
-            modal.mode = SyncModalMode::NotConfigured;
-            modal.headline = "Finish sync settings".into();
-            modal.status_text =
-                "Add a Gitee Git remote plus HTTPS credentials or SSH key before sync can run."
-                    .into();
-            modal.primary_action_label = "Save settings".into();
-            modal.secondary_action_label = "Close".into();
-        }
-        (Some(_), true) => {
-            modal.mode = SyncModalMode::Ready;
-            modal.headline = "Sync ready".into();
-            modal.status_text = if vault.unlocked_vault_key.is_some() {
-                "Sync is configured. Use the titlebar Sync button to run an immediate check."
-                    .into()
-            } else {
-                "Sync is configured. Use the titlebar Sync button to run an immediate check. Diagnostics appear here if sync needs attention."
-                    .into()
-            };
-            modal.primary_action_label = "Sync now".into();
-            modal.secondary_action_label = "Close".into();
-        }
-    }
-}
-
-fn vault_primary_remote(vault: &VaultSessionState) -> Option<&BootstrapRemoteConfig> {
-    vault
-        .local_state
-        .as_ref()
-        .and_then(|local_state| local_state.bundle.primary_remote())
-        .or_else(|| {
-            vault
-                .bootstrap_template
-                .as_ref()
-                .and_then(BootstrapBundle::primary_remote)
-        })
-}
-
-fn read_primary_remote_head_snapshot(
-    vault: &VaultSessionState,
-    credential_store: &dyn CredentialStore,
-) -> RemoteHeadSnapshot {
-    let Some(primary_remote) = vault_primary_remote(vault).cloned() else {
-        return RemoteHeadSnapshot::default();
-    };
-    let resolved = match resolve_remote_for_sync(&primary_remote, credential_store) {
-        Ok(resolved) => resolved,
-        Err(err) => {
-            return RemoteHeadSnapshot {
-                error: Some(err.to_string()),
-                loading: false,
-                ..RemoteHeadSnapshot::default()
-            };
-        }
-    };
-    let provider = match vault
-        .provider_factory
-        .build_provider_for_vault(&resolved, vault.root_dir.as_path())
-    {
-        Ok(provider) => provider,
-        Err(err) => {
-            return RemoteHeadSnapshot {
-                error: Some(err.to_string()),
-                loading: false,
-                ..RemoteHeadSnapshot::default()
-            };
-        }
-    };
-    match provider.read_head() {
-        Ok(result) => {
-            if let Some(head) = result.head {
-                RemoteHeadSnapshot {
-                    revision: Some(head.vault_revision),
-                    committed_at: Some(head.committed_at),
-                    loading: false,
-                    ..RemoteHeadSnapshot::default()
-                }
-            } else {
-                RemoteHeadSnapshot {
-                    loading: false,
-                    ..RemoteHeadSnapshot::default()
-                }
-            }
-        }
-        Err(err) => RemoteHeadSnapshot {
-            error: Some(format!(
-                "failed to inspect primary remote `{}`: {err}",
-                primary_remote.remote_id
-            )),
-            loading: false,
-            ..RemoteHeadSnapshot::default()
-        },
-    }
-}
-
-fn apply_remote_head_snapshot_to_sync_modal(
-    state: &mut ShellViewModel,
-    snapshot: RemoteHeadSnapshot,
-) {
-    let modal = state.sync_modal_state_mut();
-    modal.remote_status_loading = false;
-    modal.primary_revision_text = snapshot
-        .revision
-        .clone()
-        .unwrap_or_else(|| "Unknown".into());
-    modal.remote_last_update_text = format_sync_timestamp_for_ui(snapshot.committed_at.as_deref());
-
-    if let Some(error) = snapshot.error {
-        modal.remote_status_text = "Failed to refresh remote status.".into();
-        modal.status_text = modal.remote_status_text.clone();
-        modal.error_text = error;
-        return;
-    }
-
-    modal.error_text.clear();
-    modal.remote_status_text = if let Some(revision) = snapshot.revision.clone() {
-        format!("Primary remote is currently at {revision}.")
-    } else {
-        "Primary remote is empty.".into()
-    };
-    modal.status_text = modal.remote_status_text.clone();
-}
-
-fn request_sync_modal_remote_head_refresh(
-    state: &mut ShellViewModel,
-    vault: &VaultSessionState,
-    credential_store: Arc<dyn CredentialStore>,
-    vault_sync_result_tx: &std::sync::mpsc::Sender<VaultSyncBackgroundMessage>,
-) {
-    if vault_primary_remote(vault).is_none() || state.sync_modal_state().remote_status_loading {
-        return;
-    }
-
-    {
-        let modal = state.sync_modal_state_mut();
-        modal.remote_status_loading = true;
-        modal.remote_status_text = "Refreshing remote status...".into();
-    }
-
-    let worker_vault = vault.clone();
-    let completion_tx = vault_sync_result_tx.clone();
-    std::thread::spawn(move || {
-        let snapshot = read_primary_remote_head_snapshot(&worker_vault, credential_store.as_ref());
-        let _ = completion_tx.send(VaultSyncBackgroundMessage::RemoteHeadRefreshed { snapshot });
-    });
-}
-
-fn set_sync_modal_error(
-    state: &mut ShellViewModel,
-    vault: &VaultSessionState,
-    error: impl Into<String>,
-) {
-    update_sync_modal_for_local_state(state, vault);
-    state.set_sync_modal_error(error);
-}
-
-fn set_sync_modal_error_without_opening(
-    state: &mut ShellViewModel,
-    vault: &VaultSessionState,
-    error: impl Into<String>,
-) {
-    update_sync_modal_for_local_state(state, vault);
-    state.sync_modal_state_mut().error_text = error.into();
-}
-
-fn submit_sync_modal_master_password(
-    state: &mut ShellViewModel,
-    vault: &mut VaultSessionState,
-    credential_store: &dyn CredentialStore,
-    password: &secrecy::SecretString,
-) -> Result<()> {
-    if vault.local_state.is_some() {
-        unlock_local_vault_into_shell(state, vault, credential_store, password)
-    } else {
-        if recover_local_vault_from_primary_remote(state, vault, credential_store, password)? {
-            return Ok(());
-        }
-        create_local_vault_from_shell_state(state, vault, credential_store, password)
-    }
-}
-
-fn silently_restore_vault_session_from_runtime_key(
-    state: &mut ShellViewModel,
-    vault: &mut VaultSessionState,
-    credential_store: &dyn CredentialStore,
-) -> Option<String> {
-    let vault_id = vault
-        .local_state
-        .as_ref()
-        .map(|local_state| local_state.bundle.vault_id.clone())?;
-
-    let runtime_vault_key = match load_runtime_vault_key(credential_store, &vault_id) {
-        Ok(Some(key)) => key,
-        Ok(None) => return None,
-        Err(err) => {
-            let credential_ref = vault_runtime_key_credential_ref(&vault_id);
-            if let Err(delete_err) = credential_store.delete_secret(credential_ref.as_str()) {
-                tracing::error!(
-                    target: "app.vault",
-                    vault_id,
-                    credential_ref,
-                    error = %delete_err,
-                    "failed to clear unreadable runtime vault key material"
-                );
-            }
-            return Some(format!(
-                "Automatic vault recovery is unavailable until you re-enter the master password: {err}"
-            ));
-        }
-    };
-
-    let recovery_attempt = (|| -> Result<VaultSnapshot> {
-        let encrypted_snapshot = load_encrypted_cache(vault.cache_root().as_path(), &vault_id)?
-            .ok_or_else(|| anyhow!("encrypted cache is unavailable"))?;
-        let snapshot =
-            normalize_snapshot_secret_refs(decrypt_snapshot(&encrypted_snapshot, &runtime_vault_key)?);
-        apply_vault_snapshot_to_shell(
-            state,
-            &snapshot,
-            credential_store,
-            vault.known_hosts_path().as_path(),
-        )?;
-        Ok(snapshot)
-    })();
-
-    match recovery_attempt {
-        Ok(snapshot) => {
-            vault.unlocked_vault_key = Some(runtime_vault_key);
-            vault.decrypted_snapshot = Some(snapshot);
-            None
-        }
-        Err(err) => {
-            let credential_ref = vault_runtime_key_credential_ref(&vault_id);
-            if let Err(delete_err) = credential_store.delete_secret(credential_ref.as_str()) {
-                tracing::error!(
-                    target: "app.vault",
-                    vault_id,
-                    credential_ref,
-                    error = %delete_err,
-                    "failed to clear invalid runtime vault key material"
-                );
-            }
-            Some(format!(
-                "Automatic vault recovery failed. Re-enter the master password to restore sync: {err}"
-            ))
-        }
-    }
-}
-
-fn sync_preferences_for_bundle(
-    bundle: &BootstrapBundle,
-    last_sync_result: Option<String>,
-) -> SnapshotSyncPreferences {
-    SnapshotSyncPreferences {
-        auto_sync_enabled: bundle.primary_remote().is_some(),
-        selected_primary_remote_id: bundle
-            .primary_remote()
-            .map(|remote| remote.remote_id.clone()),
-        selected_mirror_remote_ids: bundle
-            .remotes
-            .iter()
-            .filter(|remote| remote.role == RemoteRole::Mirror)
-            .map(|remote| remote.remote_id.clone())
-            .collect(),
-        last_sync_result,
-    }
-}
-
-fn shell_has_materialized_local_data(state: &ShellViewModel) -> bool {
-    !state.console_asset_tree().root_ids().is_empty()
-        || !state.snippet_asset_tree().root_ids().is_empty()
-        || !state.keychain_catalog().nodes.is_empty()
-}
-
-fn apply_vault_snapshot_to_shell(
-    state: &mut ShellViewModel,
-    snapshot: &VaultSnapshot,
-    credential_store: &dyn CredentialStore,
-    known_hosts_path: &std::path::Path,
-) -> Result<()> {
-    let applied = apply_vault_snapshot(snapshot, credential_store, known_hosts_path)?;
-    let (console_tree, snippet_tree) =
-        catalog_to_asset_trees(&asset_tree_to_catalog(&applied.asset_tree));
-    state.replace_vault_projection(console_tree, snippet_tree, applied.keychain_catalog);
-    Ok(())
-}
-
-fn clear_vault_decrypted_state(
-    state: &mut ShellViewModel,
-    snapshot: Option<&VaultSnapshot>,
-    credential_store: &dyn CredentialStore,
-) -> Result<()> {
-    if let Some(snapshot) = snapshot {
-        for node in snapshot.asset_catalog.nodes.values() {
-            let VaultAssetPayload::SshConnection(spec) = &node.payload else {
-                continue;
-            };
-            restore_snapshot_secret_bundle(credential_store, spec.credential_ref.as_deref(), None)?;
-        }
-
-        for node in snapshot.keychain_catalog.nodes.values() {
-            match &node.payload {
-                KeychainNodePayload::Folder => {}
-                KeychainNodePayload::Identity(spec) => restore_snapshot_secret_bundle(
-                    credential_store,
-                    spec.credential_ref.as_deref(),
-                    None,
-                )?,
-                KeychainNodePayload::SshKey(spec) => restore_snapshot_secret_bundle(
-                    credential_store,
-                    spec.credential_ref.as_deref(),
-                    None,
-                )?,
-            }
-        }
-    }
-    state.clear_vault_projection();
-    Ok(())
-}
-
-fn create_local_vault_from_shell_state(
-    state: &mut ShellViewModel,
-    vault: &mut VaultSessionState,
-    credential_store: &dyn CredentialStore,
-    password: &secrecy::SecretString,
-) -> Result<()> {
-    let mut bundle = vault
-        .bootstrap_template
-        .clone()
-        .ok_or_else(|| anyhow!("Configure a Gitee Git remote first"))?;
-    if bundle.primary_remote().is_none() {
-        return Err(anyhow!("Configure a Gitee Git remote first"));
-    }
-    if bundle.vault_id.trim().is_empty() {
-        bundle.vault_id = format!("vault-{}", Uuid::new_v4().simple());
-    }
-    ensure_primary_remote_is_empty_before_first_local_bootstrap(vault, &bundle, credential_store)?;
-    let kdf = default_vault_kdf();
-    let vault_key = generate_vault_key();
-    let wrapped_vault_key = serde_json::to_string(&wrap_vault_key(password, &kdf, &vault_key)?)
-        .context("failed to encode wrapped vault key")?;
-    let snapshot = export_vault_snapshot(
-        &combined_asset_tree(state),
-        state.keychain_catalog(),
-        credential_store,
-        vault.known_hosts_path().as_path(),
-        sync_preferences_for_bundle(&bundle, None),
-        &UiPreferences::from(&*state),
-    )?;
-    let encrypted_snapshot = encrypt_snapshot(&snapshot, &vault_key)?;
-    let bootstrap_created_at = current_sync_timestamp();
-    let device_id = load_or_create_device_id(vault.root_dir.as_path())?;
-    store_encrypted_cache(
-        vault.cache_root().as_path(),
-        &bundle.vault_id,
-        &encrypted_snapshot,
-    )?;
-    let local_state = LocalVaultBootstrapState {
-        bundle,
-        wrapped_vault_key,
-        kdf: kdf.clone(),
-        device_id,
-        logical_revision: None,
-        transport_revision_hint: None,
-        current_revision: None,
-        local_snapshot_hash: Some(payload_hash_from_encrypted_snapshot_sha(
-            &encrypted_snapshot.payload_sha256,
-        )),
-        last_local_change_at: Some(bootstrap_created_at),
-        last_successful_push_at: None,
-        last_successful_pull_at: None,
-        last_sync_error: None,
-    };
-    save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
-    persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
-    vault.local_state = Some(local_state);
-    vault.unlocked_vault_key = Some(vault_key);
-    vault.decrypted_snapshot = Some(snapshot);
-    update_vault_panel_for_local_state(state, vault);
-    update_sync_modal_for_local_state(state, vault);
-
-    Ok(())
-}
-
-fn recover_local_vault_from_primary_remote(
-    state: &mut ShellViewModel,
-    vault: &mut VaultSessionState,
-    credential_store: &dyn CredentialStore,
-    password: &secrecy::SecretString,
-) -> Result<bool> {
-    let Some(mut bundle) = vault.bootstrap_template.clone() else {
-        return Ok(false);
-    };
-    let Some(primary_remote) = bundle.primary_remote().cloned() else {
-        return Ok(false);
-    };
-    let primary_remote = resolve_remote_for_sync(&primary_remote, credential_store)?;
-    let provider = vault
-        .provider_factory
-        .build_provider_for_vault(&primary_remote, vault.root_dir.as_path())?;
-    let Some(remote_head) = provider
-        .read_head()
-        .with_context(|| {
-            format!(
-                "failed to inspect primary remote `{}` before enabling sync",
-                primary_remote.remote_id
-            )
-        })?
-        .head
-    else {
-        return Ok(false);
-    };
-    let remote_revision = provider.read_revision(&remote_head).map_err(|err| {
-        anyhow!(
-            "failed to read recoverable revision `{}` from primary remote `{}`: {err}",
-            remote_head.vault_revision,
-            primary_remote.remote_id
-        )
-    })?;
-    let wrapped: WrappedVaultKey = serde_json::from_str(&remote_head.wrapped_vault_key)
-        .context("failed to decode wrapped vault key from remote head")?;
-    let vault_key = unwrap_vault_key(password, &wrapped)?;
-    let device_id = load_or_create_device_id(vault.root_dir.as_path())?;
-    let remote_snapshot = normalize_snapshot_secret_refs(decrypt_snapshot(
-        &remote_revision.encrypted_snapshot,
-        &vault_key,
-    )?);
-    let local_snapshot = export_vault_snapshot(
-        &combined_asset_tree(state),
-        state.keychain_catalog(),
-        credential_store,
-        vault.known_hosts_path().as_path(),
-        sync_preferences_for_bundle(&bundle, None),
-        &UiPreferences::from(&*state),
-    )?;
-    if shell_has_materialized_local_data(state) {
-        let merge_remote_snapshot =
-            prepare_remote_snapshot_for_merge(&VaultSnapshot::default(), &local_snapshot, &remote_snapshot);
-        let merge_result = merge_snapshots(MergeInput {
-            base: VaultSnapshot::default(),
-            local: local_snapshot.clone(),
-            remote: merge_remote_snapshot.clone(),
-            device_id: device_id.clone(),
-        });
-        if !merge_result.conflicts.is_empty() {
-            let captured_at = current_sync_timestamp();
-            persist_merge_conflict_recovery_snapshots(
-                vault.root_dir.join("recovery").as_path(),
-                &remote_head.vault_id,
-                None,
-                &local_snapshot,
-                &remote_head,
-                &merge_remote_snapshot,
-            )?;
-            persist_merge_conflict_inbox_entries(
-                vault.root_dir.join("conflicts").as_path(),
-                &remote_head.vault_id,
-                merge_result.conflicts.as_slice(),
-                device_id.as_str(),
-                remote_head.device_id.as_str(),
-                captured_at.as_str(),
-            )?;
-        }
-        let merged_snapshot = normalize_snapshot_secret_refs(merge_result.merged);
-        let next_revision = next_vault_revision(Some(remote_head.vault_revision.as_str()));
-        let committed_at = current_sync_timestamp();
-        let request = SyncRequest {
-            vault_id: remote_head.vault_id.clone(),
-            snapshot: merged_snapshot.clone(),
-            next_revision: next_revision.clone(),
-            parent_revision: Some(remote_head.vault_revision.clone()),
-            device_id: device_id.clone(),
-            committed_at: committed_at.clone(),
-            committed_by_device: device_id.clone(),
-            wrapped_vault_key: remote_head.wrapped_vault_key.clone(),
-            kdf: remote_head.kdf.clone(),
-            provider_kind: primary_remote.provider,
-            vault_key,
-        };
-        let mirror_providers = build_mirror_providers(&bundle, vault, credential_store)?;
-        let engine = SyncEngine::new(provider, mirror_providers);
-        let report = engine.sync(request).map_err(|err| anyhow!(err.to_string()))?;
-
-        bundle.vault_id = remote_head.vault_id.clone();
-        store_encrypted_cache(
-            vault.cache_root().as_path(),
-            &bundle.vault_id,
-            &report.encrypted_snapshot,
-        )?;
-        let local_state = LocalVaultBootstrapState {
-            bundle,
-            wrapped_vault_key: remote_head.wrapped_vault_key.clone(),
-            kdf: remote_head.kdf.clone(),
-            device_id,
-            logical_revision: Some(report.primary_revision.clone()),
-            transport_revision_hint: None,
-            current_revision: Some(report.primary_revision.clone()),
-            local_snapshot_hash: Some(report.head.payload_hash.clone()),
-            last_local_change_at: Some(committed_at.clone()),
-            last_successful_push_at: Some(committed_at),
-            last_successful_pull_at: None,
-            last_sync_error: None,
-        };
-        save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
-        persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
-        apply_vault_snapshot_to_shell(
-            state,
-            &merged_snapshot,
-            credential_store,
-            vault.known_hosts_path().as_path(),
-        )?;
-        vault.local_state = Some(local_state);
-        vault.unlocked_vault_key = Some(vault_key);
-        vault.decrypted_snapshot = Some(merged_snapshot);
-        update_vault_panel_for_local_state(state, vault);
-        update_sync_modal_for_local_state(state, vault);
-        state.vault_panel_state_mut().primary_status_label =
-            format!("Attached and merged {}", report.primary_revision);
-        state.sync_modal_state_mut().status_text = format!(
-            "Attached local assets to primary remote and pushed merged revision {}.",
-            report.primary_revision
-        );
-
-        return Ok(true);
-    }
-
-    let recovery_pulled_at = current_sync_timestamp();
-    bundle.vault_id = remote_head.vault_id.clone();
-    store_encrypted_cache(
-        vault.cache_root().as_path(),
-        &bundle.vault_id,
-        &remote_revision.encrypted_snapshot,
-    )?;
-    let local_state = LocalVaultBootstrapState {
-        bundle,
-        wrapped_vault_key: remote_head.wrapped_vault_key.clone(),
-        kdf: remote_head.kdf.clone(),
-        device_id,
-        logical_revision: Some(remote_head.vault_revision.clone()),
-        transport_revision_hint: None,
-        current_revision: Some(remote_head.vault_revision.clone()),
-        local_snapshot_hash: Some(remote_head.payload_hash.clone()),
-        last_local_change_at: None,
-        last_successful_push_at: None,
-        last_successful_pull_at: Some(recovery_pulled_at),
-        last_sync_error: None,
-    };
-    save_local_vault_bootstrap_state(vault.bootstrap_state_path().as_path(), &local_state)?;
-    persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
-    apply_vault_snapshot_to_shell(
-        state,
-        &remote_snapshot,
-        credential_store,
-        vault.known_hosts_path().as_path(),
-    )?;
-    vault.local_state = Some(local_state);
-    vault.unlocked_vault_key = Some(vault_key);
-    vault.decrypted_snapshot = Some(remote_snapshot);
-    update_vault_panel_for_local_state(state, vault);
-    update_sync_modal_for_local_state(state, vault);
-    state.vault_panel_state_mut().primary_status_label =
-        format!("Recovered from primary {}", remote_head.vault_revision);
-    state.sync_modal_state_mut().status_text = format!(
-        "Recovered local vault from primary remote at {}.",
-        remote_head.vault_revision
-    );
-
-    Ok(true)
-}
-
-fn ensure_primary_remote_is_empty_before_first_local_bootstrap(
-    vault: &VaultSessionState,
-    bundle: &BootstrapBundle,
-    credential_store: &dyn CredentialStore,
-) -> Result<()> {
-    let primary_remote = bundle
-        .primary_remote()
-        .cloned()
-        .ok_or_else(|| anyhow!("primary remote is not configured"))?;
-    let resolved = resolve_remote_for_sync(&primary_remote, credential_store)?;
-    let provider = vault
-        .provider_factory
-        .build_provider_for_vault(&resolved, vault.root_dir.as_path())?;
-    let remote_head = provider
-        .read_head()
-        .with_context(|| {
-            format!(
-                "failed to inspect primary remote `{}` before enabling sync",
-                primary_remote.remote_id
-            )
-        })?
-        .head;
-
-    if let Some(head) = remote_head {
-        return Err(anyhow!(
-            "primary remote `{}` already contains revision `{}`. Local recovery from remote is not implemented yet, so refusing to initialize a new empty local vault over existing remote data.",
-            primary_remote.remote_id,
-            head.vault_revision
-        ));
-    }
-
-    Ok(())
-}
-
-fn unlock_local_vault_into_shell(
-    state: &mut ShellViewModel,
-    vault: &mut VaultSessionState,
-    credential_store: &dyn CredentialStore,
-    password: &secrecy::SecretString,
-) -> Result<()> {
-    let local_state = vault
-        .local_state
-        .as_ref()
-        .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
-    let wrapped: WrappedVaultKey = serde_json::from_str(&local_state.wrapped_vault_key)
-        .context("failed to decode wrapped vault key")?;
-    let vault_key = unwrap_vault_key(password, &wrapped)?;
-    let encrypted_snapshot =
-        load_encrypted_cache(vault.cache_root().as_path(), &local_state.bundle.vault_id)?
-            .ok_or_else(|| anyhow!("encrypted cache is unavailable"))?;
-    let snapshot =
-        normalize_snapshot_secret_refs(decrypt_snapshot(&encrypted_snapshot, &vault_key)?);
-    apply_vault_snapshot_to_shell(
-        state,
-        &snapshot,
-        credential_store,
-        vault.known_hosts_path().as_path(),
-    )?;
-    persist_runtime_vault_key(credential_store, &local_state.bundle.vault_id, &vault_key)?;
-    let cached_snapshot_hash =
-        payload_hash_from_encrypted_snapshot_sha(&encrypted_snapshot.payload_sha256);
-    let bootstrap_state_path = vault.bootstrap_state_path();
-    vault.unlocked_vault_key = Some(vault_key);
-    vault.decrypted_snapshot = Some(snapshot);
-    if let Some(local_state) = vault.local_state.as_mut() {
-        let needs_save = local_state.local_snapshot_hash.as_deref()
-            != Some(cached_snapshot_hash.as_str())
-            || local_state.last_sync_error.is_some();
-        if needs_save {
-            local_state.local_snapshot_hash = Some(cached_snapshot_hash);
-        }
-        local_state.last_sync_error = None;
-        if needs_save {
-            save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
-        }
-    }
-    update_vault_panel_for_local_state(state, vault);
-    update_sync_modal_for_local_state(state, vault);
-    Ok(())
-}
-
-fn resolve_remote_for_sync(
-    remote: &BootstrapRemoteConfig,
-    credential_store: &dyn CredentialStore,
-) -> Result<BootstrapRemoteConfig> {
-    let mut resolved = remote.clone();
-
-    if remote.provider == ProviderKind::GiteeGist && remote.auth_kind == ProviderAuthKind::Pat {
-        let inline_secret =
-            load_provider_credential(credential_store, remote.credential_ref.as_deref())?;
-        let inline_secret = inline_secret.ok_or_else(|| {
-            anyhow!(
-                "missing saved provider credential for remote `{}`",
-                remote.remote_id
-            )
-        })?;
-        resolved.credential_ref = Some(inline_secret);
-    }
-
-    if remote.provider == ProviderKind::GitRepo
-        && matches!(
-            remote.auth_kind,
-            ProviderAuthKind::HttpsCredentials | ProviderAuthKind::SshKey
-        )
-    {
-        let inline_secret =
-            load_provider_credential(credential_store, remote.credential_ref.as_deref())?;
-        let inline_secret = inline_secret.ok_or_else(|| {
-            anyhow!(
-                "missing saved provider credential for remote `{}`",
-                remote.remote_id
-            )
-        })?;
-        resolved.credential_ref = Some(inline_secret);
-    }
-
-    Ok(resolved)
-}
-
-fn build_mirror_providers(
-    bundle: &BootstrapBundle,
-    vault: &VaultSessionState,
-    credential_store: &dyn CredentialStore,
-) -> Result<Vec<Arc<dyn VaultProvider>>> {
-    bundle
-        .remotes
-        .iter()
-        .filter(|remote| remote.role == RemoteRole::Mirror)
-        .map(|remote| {
-            let resolved = resolve_remote_for_sync(remote, credential_store)?;
-            vault
-                .provider_factory
-                .build_provider_for_vault(&resolved, vault.root_dir.as_path())
-        })
-        .collect()
-}
-
-fn prepare_remote_snapshot_for_merge(
-    base: &VaultSnapshot,
-    local: &VaultSnapshot,
-    remote: &VaultSnapshot,
-) -> VaultSnapshot {
-    let mut remote = remote.clone();
-    let asset_id_remap =
-        concurrent_addition_asset_id_remap(&base.asset_catalog, &local.asset_catalog, &remote.asset_catalog);
-    if !asset_id_remap.is_empty() {
-        apply_remote_asset_id_remap(&mut remote, &asset_id_remap);
-    }
-    let keychain_id_remap = concurrent_addition_keychain_id_remap(
-        &base.keychain_catalog,
-        &local.keychain_catalog,
-        &remote.keychain_catalog,
-    );
-    if !keychain_id_remap.is_empty() {
-        apply_remote_keychain_id_remap(&mut remote, &keychain_id_remap);
-    }
-    remote
-}
-
-fn concurrent_addition_asset_id_remap(
-    base: &crate::app::vault::model::VaultAssetCatalog,
-    local: &crate::app::vault::model::VaultAssetCatalog,
-    remote: &crate::app::vault::model::VaultAssetCatalog,
-) -> BTreeMap<String, String> {
-    let mut occupied = base
-        .nodes
-        .keys()
-        .chain(local.nodes.keys())
-        .chain(remote.nodes.keys())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let mut remap = BTreeMap::new();
-    for (node_id, remote_node) in &remote.nodes {
-        let Some(local_node) = local.nodes.get(node_id) else {
-            continue;
-        };
-        if base.nodes.contains_key(node_id) || local_node == remote_node {
-            continue;
-        }
-        let next_id = next_merge_collision_id(&occupied, node_id);
-        occupied.insert(next_id.clone());
-        remap.insert(node_id.clone(), next_id);
-    }
-    remap
-}
-
-fn concurrent_addition_keychain_id_remap(
-    base: &crate::app::keychain::model::KeychainCatalog,
-    local: &crate::app::keychain::model::KeychainCatalog,
-    remote: &crate::app::keychain::model::KeychainCatalog,
-) -> BTreeMap<String, String> {
-    let mut occupied = base
-        .nodes
-        .keys()
-        .chain(local.nodes.keys())
-        .chain(remote.nodes.keys())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let mut remap = BTreeMap::new();
-    for (node_id, remote_node) in &remote.nodes {
-        let Some(local_node) = local.nodes.get(node_id) else {
-            continue;
-        };
-        if base.nodes.contains_key(node_id) || local_node == remote_node {
-            continue;
-        }
-        let next_id = next_merge_collision_id(&occupied, node_id);
-        occupied.insert(next_id.clone());
-        remap.insert(node_id.clone(), next_id);
-    }
-    remap
-}
-
-fn next_merge_collision_id(occupied: &BTreeSet<String>, original: &str) -> String {
-    let mut suffix = 1_u64;
-    loop {
-        let candidate = format!("{original}-remote-merge-{suffix}");
-        if !occupied.contains(&candidate) {
-            return candidate;
-        }
-        suffix += 1;
-    }
-}
-
-fn apply_remote_asset_id_remap(snapshot: &mut VaultSnapshot, remap: &BTreeMap<String, String>) {
-    snapshot.asset_catalog.root_ids = snapshot
-        .asset_catalog
-        .root_ids
-        .iter()
-        .map(|node_id| remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()))
-        .collect();
-    snapshot.asset_catalog.nodes = snapshot
-        .asset_catalog
-        .nodes
-        .iter()
-        .map(|(node_id, node)| {
-            let mut node = node.clone();
-            node.id = remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone());
-            node.parent_id = node
-                .parent_id
-                .and_then(|parent_id| remap.get(&parent_id).cloned().or(Some(parent_id)));
-            node.child_ids = node
-                .child_ids
-                .iter()
-                .map(|child_id| remap.get(child_id).cloned().unwrap_or_else(|| child_id.clone()))
-                .collect();
-            match &mut node.payload {
-                VaultAssetPayload::Folder | VaultAssetPayload::SnippetPackage => {}
-                VaultAssetPayload::SshConnection(spec) => {
-                    if let VaultSshProxySpec::SshAsset { asset_id } = &mut spec.proxy
-                        && let Some(next_id) = remap.get(asset_id)
-                    {
-                        *asset_id = next_id.clone();
-                    }
-                }
-                VaultAssetPayload::Snippet(spec) => {
-                    if let Some(package_id) = &mut spec.package_id
-                        && let Some(next_id) = remap.get(package_id)
-                    {
-                        *package_id = next_id.clone();
-                    }
-                }
-            }
-            (node.id.clone(), node)
-        })
-        .collect();
-    snapshot.ssh_secret_bundles = snapshot
-        .ssh_secret_bundles
-        .iter()
-        .map(|(node_id, bundle)| {
-            (
-                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
-                bundle.clone(),
-            )
-        })
-        .collect();
-    snapshot.asset_catalog.merge_metadata = snapshot
-        .asset_catalog
-        .merge_metadata
-        .iter()
-        .map(|(node_id, metadata)| {
-            (
-                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
-                metadata.clone(),
-            )
-        })
-        .collect();
-}
-
-fn apply_remote_keychain_id_remap(snapshot: &mut VaultSnapshot, remap: &BTreeMap<String, String>) {
-    snapshot.keychain_catalog.root_ids = snapshot
-        .keychain_catalog
-        .root_ids
-        .iter()
-        .map(|node_id| remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()))
-        .collect();
-    snapshot.keychain_catalog.nodes = snapshot
-        .keychain_catalog
-        .nodes
-        .iter()
-        .map(|(node_id, node)| {
-            let mut node = node.clone();
-            node.id = remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone());
-            node.parent_id = node
-                .parent_id
-                .and_then(|parent_id| remap.get(&parent_id).cloned().or(Some(parent_id)));
-            node.child_ids = node
-                .child_ids
-                .iter()
-                .map(|child_id| remap.get(child_id).cloned().unwrap_or_else(|| child_id.clone()))
-                .collect();
-            match &mut node.payload {
-                KeychainNodePayload::Folder => {}
-                KeychainNodePayload::Identity(spec) => {
-                    if let Some(ssh_key_id) = &mut spec.ssh_key_id
-                        && let Some(next_id) = remap.get(ssh_key_id)
-                    {
-                        *ssh_key_id = next_id.clone();
-                    }
-                }
-                KeychainNodePayload::SshKey(_) => {}
-            }
-            (node.id.clone(), node)
-        })
-        .collect();
-    snapshot.keychain_identity_secret_bundles = snapshot
-        .keychain_identity_secret_bundles
-        .iter()
-        .map(|(node_id, bundle)| {
-            (
-                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
-                bundle.clone(),
-            )
-        })
-        .collect();
-    snapshot.keychain_key_secret_bundles = snapshot
-        .keychain_key_secret_bundles
-        .iter()
-        .map(|(node_id, bundle)| {
-            (
-                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
-                bundle.clone(),
-            )
-        })
-        .collect();
-    snapshot.keychain_catalog.merge_metadata = snapshot
-        .keychain_catalog
-        .merge_metadata
-        .iter()
-        .map(|(node_id, metadata)| {
-            (
-                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
-                metadata.clone(),
-            )
-        })
-        .collect();
-
-    for node in snapshot.asset_catalog.nodes.values_mut() {
-        let VaultAssetPayload::SshConnection(spec) = &mut node.payload else {
-            continue;
-        };
-        if let Some(identity_id) = &mut spec.keychain_identity_id
-            && let Some(next_id) = remap.get(identity_id)
-        {
-            *identity_id = next_id.clone();
-        }
-    }
-}
-
-fn sync_local_vault(
-    state: &mut ShellViewModel,
-    vault: &mut VaultSessionState,
-    credential_store: &dyn CredentialStore,
-) -> Result<()> {
-    let known_hosts_path = vault.known_hosts_path();
-    let bootstrap_state_path = vault.bootstrap_state_path();
-    let cache_root = vault.cache_root();
-    let local_state = vault
-        .local_state
-        .as_ref()
-        .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
-    let local_bundle = local_state.bundle.clone();
-    let current_revision = local_state.current_revision.clone();
-    let local_device_id = local_state.device_id.clone();
-    let wrapped_vault_key = local_state.wrapped_vault_key.clone();
-    let kdf = local_state.kdf.clone();
-    let vault_key = vault
-        .unlocked_vault_key
-        .ok_or_else(|| anyhow!("vault is locked"))?;
-    let snapshot = export_vault_snapshot(
-        &combined_asset_tree(state),
-        state.keychain_catalog(),
-        credential_store,
-        known_hosts_path.as_path(),
-        sync_preferences_for_bundle(&local_bundle, None),
-        &UiPreferences::from(&*state),
-    )?;
-    let current_encrypted_snapshot = encrypt_snapshot(&snapshot, &vault_key)?;
-    let local_snapshot_hash =
-        payload_hash_from_encrypted_snapshot_sha(&current_encrypted_snapshot.payload_sha256);
-    let local_sync_state = local_sync_state_for_snapshot(local_state, local_snapshot_hash.clone());
-
-    let primary_remote = local_bundle
-        .primary_remote()
-        .cloned()
-        .ok_or_else(|| anyhow!("primary remote is not configured"))?;
-    let primary_remote = resolve_remote_for_sync(&primary_remote, credential_store)?;
-    let primary_provider = vault
-        .provider_factory
-        .build_provider_for_vault(&primary_remote, vault.root_dir.as_path())?;
-    let primary_head = primary_provider
-        .read_head()
-        .map_err(|err| anyhow!("failed to inspect primary remote `{}`: {err}", primary_remote.remote_id))?
-        .head;
-    let base_snapshot = vault
-        .decrypted_snapshot
-        .clone()
-        .map(normalize_snapshot_secret_refs)
-        .unwrap_or_default();
-    let decision = decide_sync_action(&local_sync_state, primary_head.as_ref());
-    match decision.action {
-        SyncAction::Noop => {
-            store_encrypted_cache(
-                cache_root.as_path(),
-                &local_bundle.vault_id,
-                &current_encrypted_snapshot,
-            )?;
-            if let Some(remote_head) = primary_head.as_ref() {
-                let local_state = vault
-                    .local_state
-                    .as_mut()
-                    .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
-                local_state.current_revision = Some(remote_head.vault_revision.clone());
-                local_state.local_snapshot_hash = Some(local_snapshot_hash);
-                if current_revision.as_deref() != Some(remote_head.vault_revision.as_str()) {
-                    local_state.last_successful_pull_at = Some(remote_head.committed_at.clone());
-                }
-                local_state.last_sync_error = None;
-                save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
-                vault.decrypted_snapshot = Some(snapshot);
-                update_vault_panel_for_local_state(state, vault);
-                update_sync_modal_for_local_state(state, vault);
-                state.vault_panel_state_mut().primary_status_label =
-                    format!("Already synced {}", remote_head.vault_revision);
-                state.sync_modal_state_mut().status_text = format!(
-                    "Local and remote snapshots already match at {}.",
-                    remote_head.vault_revision
-                );
-            } else {
-                update_vault_panel_for_local_state(state, vault);
-                update_sync_modal_for_local_state(state, vault);
-                state.vault_panel_state_mut().primary_status_label = "Primary empty".into();
-                state.sync_modal_state_mut().status_text =
-                    "No remote revision exists yet. Run sync after the next local change.".into();
-            }
-            return Ok(());
-        }
-        SyncAction::PullOnly => {
-            let remote_head = primary_head.ok_or_else(|| {
-                anyhow!("primary remote `{}` is missing a readable head", primary_remote.remote_id)
-            })?;
-            let remote_revision = primary_provider.read_revision(&remote_head).map_err(|err| {
-                anyhow!(
-                    "failed to read primary revision `{}` from remote `{}`: {err}",
-                    remote_head.vault_revision,
-                    primary_remote.remote_id
-                )
-            })?;
-            let remote_snapshot = normalize_snapshot_secret_refs(decrypt_snapshot(
-                &remote_revision.encrypted_snapshot,
-                &vault_key,
-            )?);
-            clear_vault_decrypted_state(state, vault.decrypted_snapshot.as_ref(), credential_store)?;
-            apply_vault_snapshot_to_shell(
-                state,
-                &remote_snapshot,
-                credential_store,
-                vault.known_hosts_path().as_path(),
-            )?;
-            let pulled_at = current_sync_timestamp();
-            let local_state = vault
-                .local_state
-                .as_mut()
-                .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
-            local_state.wrapped_vault_key = remote_head.wrapped_vault_key.clone();
-            local_state.kdf = remote_head.kdf.clone();
-            local_state.current_revision = Some(remote_head.vault_revision.clone());
-            local_state.local_snapshot_hash = Some(remote_head.payload_hash.clone());
-            local_state.last_successful_pull_at = Some(pulled_at);
-            local_state.last_sync_error = None;
-            save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
-            store_encrypted_cache(
-                cache_root.as_path(),
-                &local_bundle.vault_id,
-                &remote_revision.encrypted_snapshot,
-            )?;
-            vault.decrypted_snapshot = Some(remote_snapshot);
-            update_vault_panel_for_local_state(state, vault);
-            update_sync_modal_for_local_state(state, vault);
-            state.vault_panel_state_mut().primary_status_label =
-                format!("Pulled primary {}", remote_head.vault_revision);
-            state.sync_modal_state_mut().status_text = format!(
-                "Pulled remote changes from primary {}.",
-                remote_head.vault_revision
-            );
-            return Ok(());
-        }
-        SyncAction::PushOnly | SyncAction::MergeThenPush => {}
-    }
-
-    let mirror_providers = build_mirror_providers(&local_bundle, vault, credential_store)?;
-    let mut snapshot_to_commit = snapshot.clone();
-    let mut snapshot_to_display = snapshot.clone();
-    let mut parent_revision = primary_head
-        .as_ref()
-        .map(|head| head.vault_revision.clone())
-        .or(current_revision.clone());
-    let mut merge_conflicts_present = false;
-
-    if matches!(decision.action, SyncAction::MergeThenPush) {
-        let remote_head = primary_head.clone().ok_or_else(|| {
-            anyhow!("primary remote `{}` is missing a readable head", primary_remote.remote_id)
-        })?;
-        let remote_revision = primary_provider.read_revision(&remote_head).map_err(|err| {
-            anyhow!(
-                "failed to read primary revision `{}` from remote `{}`: {err}",
-                remote_head.vault_revision,
-                primary_remote.remote_id
-            )
-        })?;
-        let remote_snapshot = normalize_snapshot_secret_refs(decrypt_snapshot(
-            &remote_revision.encrypted_snapshot,
-            &vault_key,
-        )?);
-        let merge_remote_snapshot =
-            prepare_remote_snapshot_for_merge(&base_snapshot, &snapshot, &remote_snapshot);
-        let merge_result = merge_snapshots(MergeInput {
-            base: base_snapshot,
-            local: snapshot.clone(),
-            remote: merge_remote_snapshot.clone(),
-            device_id: local_device_id.clone(),
-        });
-        if !merge_result.conflicts.is_empty() {
-            let captured_at = current_sync_timestamp();
-            persist_merge_conflict_recovery_snapshots(
-                vault.root_dir.join("recovery").as_path(),
-                &local_bundle.vault_id,
-                current_revision.clone(),
-                &snapshot,
-                &remote_head,
-                &merge_remote_snapshot,
-            )?;
-            persist_merge_conflict_inbox_entries(
-                vault.root_dir.join("conflicts").as_path(),
-                &local_bundle.vault_id,
-                merge_result.conflicts.as_slice(),
-                local_device_id.as_str(),
-                remote_head.device_id.as_str(),
-                captured_at.as_str(),
-            )?;
-            merge_conflicts_present = true;
-        }
-        parent_revision = Some(remote_head.vault_revision.clone());
-        snapshot_to_display = normalize_snapshot_secret_refs(merge_result.merged.clone());
-        snapshot_to_commit = snapshot_to_display.clone();
-    }
-
-    let request = SyncRequest {
-        vault_id: local_bundle.vault_id.clone(),
-        snapshot: snapshot_to_commit.clone(),
-        next_revision: next_vault_revision(parent_revision.as_deref()),
-        parent_revision,
-        device_id: local_device_id.clone(),
-        committed_at: current_sync_timestamp(),
-        committed_by_device: local_device_id,
-        wrapped_vault_key,
-        kdf,
-        provider_kind: primary_remote.provider,
-        vault_key,
-    };
-    let engine = SyncEngine::new(primary_provider, mirror_providers);
-
-    match engine.sync(request) {
-        Ok(report) => {
-            let local_state = vault
-                .local_state
-                .as_mut()
-                .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
-            store_encrypted_cache(
-                cache_root.as_path(),
-                &local_bundle.vault_id,
-                &report.encrypted_snapshot,
-            )?;
-            local_state.current_revision = Some(report.primary_revision.clone());
-            local_state.local_snapshot_hash = Some(report.head.payload_hash.clone());
-            local_state.last_successful_push_at = Some(report.head.committed_at.clone());
-            local_state.last_sync_error = None;
-            save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
-            if matches!(decision.action, SyncAction::MergeThenPush) {
-                clear_vault_decrypted_state(state, Some(&snapshot), credential_store)?;
-                apply_vault_snapshot_to_shell(
-                    state,
-                    &snapshot_to_display,
-                    credential_store,
-                    vault.known_hosts_path().as_path(),
-                )?;
-            }
-            vault.decrypted_snapshot = Some(snapshot_to_display.clone());
-            update_vault_panel_for_local_state(state, vault);
-            update_sync_modal_for_local_state(state, vault);
-            let primary_status = if matches!(decision.action, SyncAction::MergeThenPush) {
-                if merge_conflicts_present {
-                    format!("Merged with conflicts {}", report.primary_revision)
-                } else {
-                    format!("Merged and synced {}", report.primary_revision)
-                }
-            } else {
-                format!("Primary synced {}", report.primary_revision)
-            };
-            let sync_status = if matches!(decision.action, SyncAction::MergeThenPush) {
-                if merge_conflicts_present {
-                    format!(
-                        "Merged local and remote changes with conflict copies saved locally. Primary is now at {}.",
-                        report.primary_revision
-                    )
-                } else {
-                    format!(
-                        "Merged local and remote changes. Primary is now at {}.",
-                        report.primary_revision
-                    )
-                }
-            } else {
-                format!("Sync completed. Primary is now at {}.", report.primary_revision)
-            };
-            if report.is_mirror_degraded() {
-                let mirror_degraded_message = format!(
-                    "Mirror degraded: {}",
-                    report
-                        .mirror_failures
-                        .first()
-                        .map(|failure| failure.message.as_str())
-                        .unwrap_or("unknown mirror failure")
-                );
-                state.vault_panel_state_mut().primary_status_label = primary_status.clone();
-                state.sync_modal_state_mut().status_text = format!(
-                    "{} {}",
-                    sync_status, mirror_degraded_message
-                );
-            } else {
-                state.vault_panel_state_mut().primary_status_label = primary_status;
-                state.sync_modal_state_mut().status_text = sync_status;
-            }
-            Ok(())
-        }
-        Err(err) => {
-            let bootstrap_state_path = vault.bootstrap_state_path();
-            if let Some(local_state) = vault.local_state.as_mut() {
-                local_state.last_sync_error = Some(err.to_string());
-                save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
-            }
-            update_vault_panel_for_local_state(state, vault);
-            update_sync_modal_for_local_state(state, vault);
-            state.vault_panel_state_mut().primary_status_label = match &err {
-                SyncError::PrimaryReadFailed { message, .. }
-                | SyncError::PrimaryWriteFailed { message, .. } => {
-                    format!("Provider auth error: {message}")
-                }
-                SyncError::Conflict { .. } => "Remote conflict".into(),
-                SyncError::PayloadAssemblyFailed { message } => {
-                    format!("Vault decrypt error: {message}")
-                }
-            };
-            state.sync_modal_state_mut().error_text = err.to_string();
-            Err(anyhow!(err.to_string()))
-        }
-    }
-}
-
-fn refresh_local_vault_from_primary_remote_if_changed(
-    state: &mut ShellViewModel,
-    vault: &mut VaultSessionState,
-    credential_store: &dyn CredentialStore,
-) -> Result<bool> {
-    let local_state = vault
-        .local_state
-        .as_ref()
-        .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
-    let current_revision = local_state.current_revision.clone();
-    let primary_remote = local_state
-        .bundle
-        .primary_remote()
-        .cloned()
-        .ok_or_else(|| anyhow!("primary remote is not configured"))?;
-    let primary_remote = resolve_remote_for_sync(&primary_remote, credential_store)?;
-    let provider = vault
-        .provider_factory
-        .build_provider_for_vault(&primary_remote, vault.root_dir.as_path())?;
-    let Some(remote_head) = provider
-        .read_head()
-        .map_err(|err| {
-            anyhow!(
-                "failed to inspect primary remote `{}`: {err}",
-                primary_remote.remote_id
-            )
-        })?
-        .head
-    else {
-        return Ok(false);
-    };
-    if current_revision.as_deref() == Some(remote_head.vault_revision.as_str()) {
-        update_vault_panel_for_local_state(state, vault);
-        update_sync_modal_for_local_state(state, vault);
-        state.vault_panel_state_mut().primary_status_label =
-            format!("Already synced {}", remote_head.vault_revision);
-        state.sync_modal_state_mut().status_text = format!(
-            "No remote changes found. Primary stays at {}.",
-            remote_head.vault_revision
-        );
-        return Ok(false);
-    }
-
-    let remote_revision = provider.read_revision(&remote_head).map_err(|err| {
-        anyhow!(
-            "failed to read primary revision `{}` from remote `{}`: {err}",
-            remote_head.vault_revision,
-            primary_remote.remote_id
-        )
-    })?;
-    let vault_key = vault
-        .unlocked_vault_key
-        .ok_or_else(|| anyhow!("vault is locked"))?;
-    let snapshot = normalize_snapshot_secret_refs(decrypt_snapshot(
-        &remote_revision.encrypted_snapshot,
-        &vault_key,
-    )?);
-    clear_vault_decrypted_state(state, vault.decrypted_snapshot.as_ref(), credential_store)?;
-    apply_vault_snapshot_to_shell(
-        state,
-        &snapshot,
-        credential_store,
-        vault.known_hosts_path().as_path(),
-    )?;
-
-    let bootstrap_state_path = vault.bootstrap_state_path();
-    let cache_root = vault.cache_root();
-    let pulled_at = current_sync_timestamp();
-    let local_state = vault
-        .local_state
-        .as_mut()
-        .ok_or_else(|| anyhow!("vault bootstrap is not initialized"))?;
-    local_state.wrapped_vault_key = remote_head.wrapped_vault_key.clone();
-    local_state.kdf = remote_head.kdf.clone();
-    local_state.current_revision = Some(remote_head.vault_revision.clone());
-    local_state.local_snapshot_hash = Some(remote_head.payload_hash.clone());
-    local_state.last_successful_pull_at = Some(pulled_at);
-    local_state.last_sync_error = None;
-    save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)?;
-    store_encrypted_cache(
-        cache_root.as_path(),
-        &local_state.bundle.vault_id,
-        &remote_revision.encrypted_snapshot,
-    )?;
-    vault.decrypted_snapshot = Some(snapshot);
-    update_vault_panel_for_local_state(state, vault);
-    update_sync_modal_for_local_state(state, vault);
-    state.vault_panel_state_mut().primary_status_label =
-        format!("Pulled primary {}", remote_head.vault_revision);
-    state.sync_modal_state_mut().status_text = format!(
-        "Pulled remote changes from primary {}.",
-        remote_head.vault_revision
-    );
-
-    Ok(true)
-}
-
-fn vault_sync_background_success(
-    initial_state: &ShellViewModel,
-    worker_state: ShellViewModel,
-    worker_vault: VaultSessionState,
-    should_clear_dirty: bool,
-) -> VaultSyncBackgroundSuccess {
-    let projection = (initial_state.console_asset_tree() != worker_state.console_asset_tree()
-        || initial_state.snippet_asset_tree() != worker_state.snippet_asset_tree()
-        || initial_state.keychain_catalog() != worker_state.keychain_catalog())
-    .then(|| VaultProjectionUpdate {
-        console_tree: worker_state.console_asset_tree().clone(),
-        snippet_tree: worker_state.snippet_asset_tree().clone(),
-        keychain_catalog: worker_state.keychain_catalog().clone(),
-    });
-
-    VaultSyncBackgroundSuccess {
-        projection,
-        sync_modal_state: worker_state.sync_modal_state().clone(),
-        vault_panel_state: worker_state.vault_panel_state().clone(),
-        local_state: worker_vault.local_state.clone(),
-        decrypted_snapshot: worker_vault.decrypted_snapshot.clone(),
-        should_clear_dirty,
-    }
-}
-
-fn vault_sync_background_failure(
-    worker_state: ShellViewModel,
-    worker_vault: VaultSessionState,
-    should_clear_dirty: bool,
-) -> VaultSyncBackgroundFailure {
-    VaultSyncBackgroundFailure {
-        sync_modal_state: worker_state.sync_modal_state().clone(),
-        vault_panel_state: worker_state.vault_panel_state().clone(),
-        local_state: worker_vault.local_state.clone(),
-        should_clear_dirty,
-    }
-}
-
-fn vault_background_sync_ready(vault: &VaultSessionState) -> bool {
-    vault.local_state.is_some() && vault.unlocked_vault_key.is_some()
-}
-
-fn vault_requires_initial_remote_sync(vault: &VaultSessionState) -> bool {
-    vault.local_state.as_ref().is_some_and(|local_state| {
-        local_state.current_revision.is_none() && local_state.local_snapshot_hash.is_some()
-    })
-}
-
-fn mark_local_vault_dirty_and_arm_sync(
-    state: &mut ShellViewModel,
-    vault: &mut VaultSessionState,
-    scheduler: &Rc<RefCell<VaultSyncSchedulerState>>,
-    sync_debounce_timer: &Rc<Timer>,
-    run_sync: Rc<dyn Fn(VaultSyncTrigger)>,
-) {
-    scheduler.borrow_mut().dirty = true;
-    let bootstrap_state_path = vault.bootstrap_state_path();
-    if let Some(local_state) = vault.local_state.as_mut() {
-        local_state.last_local_change_at = Some(next_local_change_timestamp(local_state));
-        if let Err(err) = save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state) {
-            tracing::error!(
-                target: "app.vault",
-                error = %err,
-                "failed to persist local vault sync metadata after local mutation"
-            );
-        }
-    }
-    state.sync_modal_state_mut().status_text =
-        "Local changes queued for background sync.".into();
-
-    if vault_background_sync_ready(vault) {
-        sync_debounce_timer.start(
-            TimerMode::SingleShot,
-            Duration::from_millis(VAULT_AUTO_SYNC_DEBOUNCE_MS),
-            move || {
-                run_sync(VaultSyncTrigger::DebouncedAuto);
-            },
-        );
-    }
 }
 
 #[cfg(target_os = "windows")]
@@ -7160,15 +3609,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         vault_runtime.bootstrap_template.clone(),
         initial_local_vault_state,
     );
-    let initial_runtime_recovery_error = silently_restore_vault_session_from_runtime_key(
+    let initial_runtime_recovery_error = vault_sync::silently_restore_vault_session_from_runtime_key(
         &mut initial_view_model,
         &mut initial_vault_session,
         credential_store.as_ref(),
     );
     update_vault_panel_for_local_state(&mut initial_view_model, &initial_vault_session);
-    update_sync_modal_for_local_state(&mut initial_view_model, &initial_vault_session);
+    vault_sync::update_sync_modal_for_local_state(&mut initial_view_model, &initial_vault_session);
     if let Some(error) = initial_runtime_recovery_error {
-        set_sync_modal_error_without_opening(&mut initial_view_model, &initial_vault_session, error);
+        vault_sync::set_sync_modal_error_without_opening(&mut initial_view_model, &initial_vault_session, error);
     }
     let view_model = Rc::new(RefCell::new(initial_view_model));
     let workspace_follow_tracker = Rc::new(RefCell::new(WorkspaceFollowTracker::default()));
@@ -7203,7 +3652,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     apply_restored_window_size(window, default_window_size());
-    bind_windows_window_state_tracking(
+    windowing::bind_windows_window_state_tracking(
         window,
         Rc::clone(&view_model),
         Rc::clone(&effects),
@@ -7216,7 +3665,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         effects.as_ref(),
         &mut workspace_follow_tracker.borrow_mut(),
     );
-    sync_workspace_paste_warning_modal_state(window, None);
+    windowing::sync_workspace_paste_warning_modal_state(window, None);
     {
         let mut state = view_model.borrow_mut();
         sync_shell_layout(
@@ -7248,7 +3697,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 return;
             };
             let mut state = state.borrow_mut();
-            let projection_delta = sync_workspace_projection_from_manager(&mut state, &manager);
+            let projection_delta = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
             let should_clear_pending_paste = pending_workspace_paste_warning_ref
                 .borrow()
                 .as_ref()
@@ -7257,11 +3706,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 });
             if should_clear_pending_paste {
                 pending_workspace_paste_warning_ref.borrow_mut().take();
-                sync_workspace_paste_warning_modal_state(&window, None);
+                windowing::sync_workspace_paste_warning_modal_state(&window, None);
             }
             if projection_delta.tabs_changed {
                 sync_workspace_tab_items(&window, &state);
-                sync_assets_context_menu_state(&window, &state);
+                assets_keychain::sync_assets_context_menu_state(&window, &state);
             }
             if projection_delta.any_changed() {
                 sync_workspace_session_state_with_manager(
@@ -7275,13 +3724,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     let open_changed =
-                        ensure_active_sftp_browser_started(&mut state, &mut controller, &manager);
-                    let retry_changed = sync_active_sftp_browser_pending_request(
+                        sftp::ensure_active_sftp_browser_started(&mut state, &mut controller, &manager);
+                    let retry_changed = sftp::sync_active_sftp_browser_pending_request(
                         &mut state,
                         &mut controller,
                         &manager,
                     );
-                    let follow_changed = sync_active_sftp_browser_follow_request(
+                    let follow_changed = sftp::sync_active_sftp_browser_follow_request(
                         &mut state,
                         &mut controller,
                         &manager,
@@ -7295,7 +3744,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     || sftp_retry_changed
                     || sftp_follow_changed
                 {
-                    sync_right_panel_state(&window, &state);
+                    sftp::sync_right_panel_state(&window, &state);
                 }
             }
         });
@@ -7307,7 +3756,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let vault_sync_completion_timer = Rc::new(Timer::default());
     let async_runtime_handle = session_runtime_guard.as_ref().map(AppAsyncRuntime::handle);
     let (vault_sync_result_tx, vault_sync_result_rx) =
-        std::sync::mpsc::channel::<VaultSyncBackgroundMessage>();
+        std::sync::mpsc::channel::<vault_sync::VaultSyncBackgroundMessage>();
     let vault_sync_result_rx = Rc::new(RefCell::new(vault_sync_result_rx));
     let run_vault_sync: Rc<dyn Fn(VaultSyncTrigger)> = {
         let state = Rc::clone(&view_model);
@@ -7337,11 +3786,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 }
                 let should_attempt_push = scheduler.dirty
                     || (matches!(trigger, VaultSyncTrigger::Manual)
-                        && vault_requires_initial_remote_sync(&vault));
+                        && vault_sync::vault_requires_initial_remote_sync(&vault));
                 let should_attempt_refresh = !should_attempt_push
                     && matches!(trigger, VaultSyncTrigger::Manual | VaultSyncTrigger::Periodic);
                 if matches!(trigger, VaultSyncTrigger::DebouncedAuto | VaultSyncTrigger::Periodic)
-                    && !vault_background_sync_ready(&vault)
+                    && !vault_sync::vault_background_sync_ready(&vault)
                 {
                     return;
                 }
@@ -7384,12 +3833,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         let mut worker_state = worker_state;
                         let mut worker_vault = worker_vault;
                         let result = if should_attempt_push {
-                            match sync_local_vault(
+                            match vault_sync::sync_local_vault(
                                 &mut worker_state,
                                 &mut worker_vault,
                                 credential_store.as_ref(),
                             ) {
-                                Ok(()) => Ok(vault_sync_background_success(
+                                Ok(()) => Ok(vault_sync::vault_sync_background_success(
                                     &initial_state,
                                     worker_state,
                                     worker_vault,
@@ -7402,12 +3851,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                         vault_sync_trigger = ?trigger,
                                         "vault sync failed in background worker"
                                     );
-                                    set_sync_modal_error_without_opening(
+                                    vault_sync::set_sync_modal_error_without_opening(
                                         &mut worker_state,
                                         &worker_vault,
                                         err.to_string(),
                                     );
-                                    Err(vault_sync_background_failure(
+                                    Err(vault_sync::vault_sync_background_failure(
                                         worker_state,
                                         worker_vault,
                                         false,
@@ -7415,12 +3864,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                 }
                             }
                         } else if should_attempt_refresh {
-                            match refresh_local_vault_from_primary_remote_if_changed(
+                            match vault_sync::refresh_local_vault_from_primary_remote_if_changed(
                                 &mut worker_state,
                                 &mut worker_vault,
                                 credential_store.as_ref(),
                             ) {
-                                Ok(_) => Ok(vault_sync_background_success(
+                                Ok(_) => Ok(vault_sync::vault_sync_background_success(
                                     &initial_state,
                                     worker_state,
                                     worker_vault,
@@ -7433,12 +3882,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                         vault_sync_trigger = ?trigger,
                                         "vault refresh failed in background worker"
                                     );
-                                    set_sync_modal_error_without_opening(
+                                    vault_sync::set_sync_modal_error_without_opening(
                                         &mut worker_state,
                                         &worker_vault,
                                         err.to_string(),
                                     );
-                                    Err(vault_sync_background_failure(
+                                    Err(vault_sync::vault_sync_background_failure(
                                         worker_state,
                                         worker_vault,
                                         false,
@@ -7446,7 +3895,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                 }
                             }
                         } else {
-                            Ok(vault_sync_background_success(
+                            Ok(vault_sync::vault_sync_background_success(
                                 &initial_state,
                                 worker_state,
                                 worker_vault,
@@ -7454,7 +3903,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                             ))
                         };
 
-                        VaultSyncBackgroundMessage::Completed { trigger, result }
+                        vault_sync::VaultSyncBackgroundMessage::Completed { trigger, result }
                     })
                     .await;
 
@@ -7469,9 +3918,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                 vault_sync_trigger = ?trigger,
                                 "vault background sync task join failed"
                             );
-                            let _ = completion_tx.send(VaultSyncBackgroundMessage::Completed {
+                            let _ = completion_tx.send(vault_sync::VaultSyncBackgroundMessage::Completed {
                                 trigger,
-                                result: Err(VaultSyncBackgroundFailure {
+                                result: Err(vault_sync::VaultSyncBackgroundFailure {
                                     sync_modal_state: SyncModalViewState::default(),
                                     vault_panel_state: VaultPanelViewState::default(),
                                     local_state: None,
@@ -7485,10 +3934,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             }
 
             let result = if should_attempt_push {
-                sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref())
+                vault_sync::sync_local_vault(&mut state, &mut vault, credential_store_ref.as_ref())
                     .map(|_| true)
             } else if should_attempt_refresh {
-                refresh_local_vault_from_primary_remote_if_changed(
+                vault_sync::refresh_local_vault_from_primary_remote_if_changed(
                     &mut state,
                     &mut vault,
                     credential_store_ref.as_ref(),
@@ -7532,7 +3981,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         vault_sync_trigger = ?trigger,
                         "failed to run scheduled vault sync"
                     );
-                    set_sync_modal_error_without_opening(&mut state, &vault, err.to_string());
+                    vault_sync::set_sync_modal_error_without_opening(&mut state, &vault, err.to_string());
                     if matches!(trigger, VaultSyncTrigger::Manual) {
                         state.show_sync_feedback("Sync failed");
                     } else {
@@ -7582,7 +4031,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     let (width, height) = current_window_size(&window);
 
                     match message {
-                        VaultSyncBackgroundMessage::Completed { trigger, result } => match result {
+                        vault_sync::VaultSyncBackgroundMessage::Completed { trigger, result } => match result {
                             Ok(success) => {
                                 if let Some(projection) = success.projection {
                                     state.replace_vault_projection(
@@ -7594,7 +4043,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                 vault.local_state = success.local_state;
                                 vault.decrypted_snapshot = success.decrypted_snapshot;
                                 update_vault_panel_for_local_state(&mut state, &vault);
-                                update_sync_modal_for_local_state(&mut state, &vault);
+                                vault_sync::update_sync_modal_for_local_state(&mut state, &vault);
                                 state.vault_panel_state_mut().primary_status_label =
                                     success.vault_panel_state.primary_status_label.clone();
                                 state.sync_modal_state_mut().status_text =
@@ -7631,7 +4080,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                     vault.local_state = Some(local_state);
                                 }
                                 update_vault_panel_for_local_state(&mut state, &vault);
-                                update_sync_modal_for_local_state(&mut state, &vault);
+                                vault_sync::update_sync_modal_for_local_state(&mut state, &vault);
                                 state.vault_panel_state_mut().primary_status_label =
                                     failure.vault_panel_state.primary_status_label.clone();
                                 state.sync_modal_state_mut().status_text =
@@ -7654,8 +4103,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                 }
                             }
                         },
-                        VaultSyncBackgroundMessage::RemoteHeadRefreshed { snapshot } => {
-                            apply_remote_head_snapshot_to_sync_modal(&mut state, snapshot);
+                        vault_sync::VaultSyncBackgroundMessage::RemoteHeadRefreshed { snapshot } => {
+                            vault_sync::apply_remote_head_snapshot_to_sync_modal(&mut state, snapshot);
                         }
                     }
 
@@ -7694,8 +4143,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let mut state = state.borrow_mut();
         let (width, height) = current_window_size(&window);
         state.toggle_right_panel();
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sync_right_panel_state(&window, &state);
+        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        sftp::sync_right_panel_state(&window, &state);
         sync_shell_layout(&window, &mut state, width, height);
         sync_workspace_session_state_with_manager(
             &window,
@@ -7712,7 +4161,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.toggle_transfer_center();
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
     });
 
     let state = Rc::clone(&view_model);
@@ -7743,7 +4192,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             run_vault_sync_ref(VaultSyncTrigger::Manual);
             return;
         }
-        update_sync_modal_for_local_state(&mut state, &vault);
+        vault_sync::update_sync_modal_for_local_state(&mut state, &vault);
         hydrate_sync_modal_draft(&mut state, &vault, credential_store_ref.as_ref());
         state.open_sync_modal();
 
@@ -7769,16 +4218,16 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let mut state = state.borrow_mut();
         let vault = vault_session_ref.borrow();
         hydrate_sync_modal_draft(&mut state, &vault, credential_store_ref.as_ref());
-        update_sync_modal_for_local_state(&mut state, &vault);
+        vault_sync::update_sync_modal_for_local_state(&mut state, &vault);
         state.open_sync_modal();
-        request_sync_modal_remote_head_refresh(
+        vault_sync::request_sync_modal_remote_head_refresh(
             &mut state,
             &vault,
             Arc::clone(&credential_store_ref),
             &vault_sync_result_tx_ref,
         );
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sync_sync_modal_state(&window, &state);
+        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        windowing::sync_sync_modal_state(&window, &state);
         save_ui_preferences(&store_ref, &state);
     });
 
@@ -7789,8 +4238,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.update_sync_modal_field(field.as_str(), value.to_string());
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sync_sync_modal_state(&window, &state);
+        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        windowing::sync_sync_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -7800,8 +4249,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.update_sync_modal_toggle(field.as_str(), value);
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sync_sync_modal_state(&window, &state);
+        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        windowing::sync_sync_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -7811,8 +4260,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.close_sync_modal();
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sync_sync_modal_state(&window, &state);
+        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        windowing::sync_sync_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -7828,14 +4277,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let mut vault = vault_session_ref.borrow_mut();
         let (width, height) = current_window_size(&window);
         let secret = secrecy::SecretString::new(password.to_string().into());
-        if let Err(err) = submit_sync_modal_master_password(
+        if let Err(err) = vault_sync::submit_sync_modal_master_password(
             &mut state,
             &mut vault,
             credential_store_ref.as_ref(),
             &secret,
         ) {
             tracing::error!(target: "app.vault", error = %err, "failed to submit sync modal password");
-            set_sync_modal_error(&mut state, &vault, err.to_string());
+            vault_sync::set_sync_modal_error(&mut state, &vault, err.to_string());
         }
         sync_shell_state(
             &window,
@@ -7869,29 +4318,29 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         match state.sync_modal_state().mode {
             SyncModalMode::NotConfigured => {
                 if let Err(err) =
-                    persist_sync_modal_settings(&mut state, &mut vault, credential_store_ref.as_ref())
+                    vault_sync::persist_sync_modal_settings(&mut state, &mut vault, credential_store_ref.as_ref())
                 {
-                    set_sync_modal_error(&mut state, &vault, err.to_string());
+                    vault_sync::set_sync_modal_error(&mut state, &vault, err.to_string());
                 } else if master_password.trim().is_empty() {
                     state.set_sync_modal_error("Enter a master password to enable sync.");
                 } else {
                     let secret = secrecy::SecretString::new(master_password.into());
-                    if let Err(err) = submit_sync_modal_master_password(
+                    if let Err(err) = vault_sync::submit_sync_modal_master_password(
                         &mut state,
                         &mut vault,
                         credential_store_ref.as_ref(),
                         &secret,
                     ) {
                         tracing::error!(target: "app.vault", error = %err, "failed to enable sync from sync settings");
-                        set_sync_modal_error(&mut state, &vault, err.to_string());
+                        vault_sync::set_sync_modal_error(&mut state, &vault, err.to_string());
                     }
                 }
             }
             SyncModalMode::Ready => {
                 if let Err(err) =
-                    persist_sync_modal_settings(&mut state, &mut vault, credential_store_ref.as_ref())
+                    vault_sync::persist_sync_modal_settings(&mut state, &mut vault, credential_store_ref.as_ref())
                 {
-                    set_sync_modal_error(&mut state, &vault, err.to_string());
+                    vault_sync::set_sync_modal_error(&mut state, &vault, err.to_string());
                 } else {
                     drop(vault);
                     drop(state);
@@ -7931,603 +4380,44 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         save_ui_preferences(&store_ref, &state);
     });
 
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let store_ref = store.clone();
-    let effects_ref = Rc::clone(&effects);
-    window.on_open_settings_panel_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let (width, height) = current_window_size(&window);
-        state.open_settings_panel();
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sync_right_panel_state(&window, &state);
-        sync_shell_layout(&window, &mut state, width, height);
-        save_ui_preferences(&store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let store_ref = store.clone();
-    let effects_ref = Rc::clone(&effects);
-    window.on_open_appearance_panel_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let (width, height) = current_window_size(&window);
-        state.open_appearance_panel();
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sync_right_panel_state(&window, &state);
-        sync_shell_layout(&window, &mut state, width, height);
-        save_ui_preferences(&store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let store_ref = store.clone();
-    let effects_ref = Rc::clone(&effects);
-    let session_bridge_ref = session_bridge.clone();
-    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
-    window.on_open_sftp_panel_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let (width, height) = current_window_size(&window);
-        state.open_sftp_panel();
-        if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            let mut controller = sftp_browser_controller_ref.borrow_mut();
-            let _ = open_active_sftp_browser_for_current_session(
-                &mut state,
-                &mut controller,
-                &session_bridge.manager,
-            );
-        }
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sync_right_panel_state(&window, &state);
-        sync_shell_layout(&window, &mut state, width, height);
-        save_ui_preferences(&store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_sftp_panel_context_menu_requested(
-        move |target_id, target_kind, anchor_x, anchor_y| {
-            let window = handle.unwrap();
-            let mut state = state.borrow_mut();
-            state.open_context_menu_for_target(
-                parse_context_target_kind(target_kind.as_str(), SidebarDestination::Console),
-                if target_id.is_empty() {
-                    None
-                } else {
-                    Some(target_id.to_string())
-                },
-                anchor_x,
-                anchor_y,
-            );
-            update_context_menu_placement(&window, &mut state);
-            sync_assets_context_menu_state(&window, &state);
-        },
+    sftp::bind_sftp_callbacks(
+        window,
+        &view_model,
+        &store,
+        &effects,
+        &session_bridge,
+        &sftp_browser_controller,
     );
 
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_sftp_panel_item_selected(move |entry_id| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if state.select_sftp_panel_entry(entry_id.as_str()) {
-            sync_right_panel_state(&window, &state);
-        }
-    });
+    shell_chrome::bind_shell_chrome_callbacks(
+        window,
+        &view_model,
+        &store,
+        &effects,
+        &session_bridge,
+        &workspace_follow_tracker,
+        &controller,
+    );
 
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
-    window.on_sftp_panel_item_activated(move |entry_id, item_kind| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let selection_changed = state.select_sftp_panel_entry(entry_id.as_str());
-        let entry = state.active_sftp_entry(entry_id.as_str()).cloned();
-        let mut panel_changed = selection_changed;
-        let was_modal_open = state.sftp_remote_file_editor_state().open;
-
-        if let Some(entry) = entry {
-            if item_kind.as_str() == "directory" || entry.kind == SftpDirectoryEntryKind::Directory
-            {
-                if let Some(session_bridge) = session_bridge_ref.as_ref()
-                    && let Some(session_id) = active_workspace_session_uuid(&state)
-                {
-                    let request = {
-                        let mut controller = sftp_browser_controller_ref.borrow_mut();
-                        controller.navigate(session_id, entry.path.as_str())
-                    };
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    panel_changed |= execute_sftp_browser_request(
-                        &mut state,
-                        &mut controller,
-                        &session_bridge.manager,
-                        request,
-                    );
-                }
-            } else if let Some(session_bridge) = session_bridge_ref.as_ref()
-                && let Some(session_id) = active_workspace_session_uuid(&state)
-            {
-                open_sftp_remote_file_editor_for_entry(
-                    &mut state,
-                    &session_bridge.manager,
-                    session_id,
-                    entry.path.as_str(),
-                );
-            }
-        }
-
-        if panel_changed {
-            sync_right_panel_state(&window, &state);
-        }
-        sync_sftp_remote_file_modal_state(&window, &state);
-        if !was_modal_open && state.sftp_remote_file_editor_state().open {
-            schedule_asset_modal_focus(&window);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_sftp_panel_open_queue_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.toggle_sftp_queue_drawer();
-        sync_right_panel_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
-    window.on_sftp_panel_path_submitted(move |path| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
-                let trimmed = path.trim();
-                if trimmed.is_empty() {
-                    false
-                } else {
-                    let request = {
-                        let mut controller = sftp_browser_controller_ref.borrow_mut();
-                        controller.navigate(session_id, trimmed)
-                    };
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
-                        &mut state,
-                        &mut controller,
-                        &session_bridge.manager,
-                        request,
-                    )
-                }
-            } else {
-                false
-            }
-        } else {
-            state.submit_sftp_panel_path(path.to_string())
-        };
-        if changed {
-            sync_right_panel_state(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
-    window.on_sftp_panel_back_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
-                let request = {
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    controller.navigate_back(session_id)
-                };
-                if let Some(request) = request {
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
-                        &mut state,
-                        &mut controller,
-                        &session_bridge.manager,
-                        request,
-                    )
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            state.navigate_sftp_panel_back()
-        };
-        if changed {
-            sync_right_panel_state(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
-    window.on_sftp_panel_forward_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
-                let request = {
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    controller.navigate_forward(session_id)
-                };
-                if let Some(request) = request {
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
-                        &mut state,
-                        &mut controller,
-                        &session_bridge.manager,
-                        request,
-                    )
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            state.navigate_sftp_panel_forward()
-        };
-        if changed {
-            sync_right_panel_state(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
-    window.on_sftp_panel_up_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
-                let request = {
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    controller.navigate_up(session_id)
-                };
-                if let Some(request) = request {
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
-                        &mut state,
-                        &mut controller,
-                        &session_bridge.manager,
-                        request,
-                    )
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            state.navigate_sftp_panel_up()
-        };
-        if changed {
-            sync_right_panel_state(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
-    window.on_sftp_panel_refresh_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
-                let request = {
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    controller.refresh(session_id)
-                };
-                if let Some(request) = request {
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
-                        &mut state,
-                        &mut controller,
-                        &session_bridge.manager,
-                        request,
-                    )
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            state.refresh_sftp_panel()
-        };
-        if changed {
-            sync_right_panel_state(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
-    window.on_sftp_panel_retry_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let retried = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
-                if let Err(err) = session_bridge.manager.retry_session(session_id) {
-                    tracing::error!(
-                        target: "app.ssh",
-                        session_id = session_id.to_string(),
-                        error = %err,
-                        "failed to retry active SSH session from SFTP panel"
-                    );
-                    false
-                } else {
-                    let projection =
-                        sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
-                    let browser_changed = {
-                        let mut controller = sftp_browser_controller_ref.borrow_mut();
-                        if let Some(request) = controller.retry(session_id) {
-                            if session_bridge.manager.sftp_binding(session_id).is_some_and(
-                                |binding| binding.mode() != SftpPanelMode::Disconnected,
-                            ) {
-                                execute_sftp_browser_request(
-                                    &mut state,
-                                    &mut controller,
-                                    &session_bridge.manager,
-                                    request,
-                                )
-                            } else {
-                                controller
-                                    .session_state(session_id)
-                                    .is_some_and(|browser_state| {
-                                        project_sftp_browser_state_into_view_model(
-                                            &mut state,
-                                            session_id,
-                                            browser_state,
-                                        )
-                                    })
-                            }
-                        } else {
-                            false
-                        }
-                    };
-                    browser_changed
-                        || projection.sftp_changed
-                        || projection.tabs_changed
-                        || projection.surface_changed
-                }
-            } else {
-                false
-            }
-        } else {
-            state.retry_sftp_panel()
-        };
-        if retried {
-            sync_right_panel_state(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
-    window.on_sftp_panel_reenable_follow_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
-                if let Some(cwd) = session_bridge.manager.current_working_directory(session_id) {
-                    let request = {
-                        let mut controller = sftp_browser_controller_ref.borrow_mut();
-                        controller.open(session_id, cwd.as_str())
-                    };
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
-                        &mut state,
-                        &mut controller,
-                        &session_bridge.manager,
-                        request,
-                    )
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            state.reenable_sftp_follow()
-        };
-        if changed {
-            sync_right_panel_state(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_sftp_panel_sort_requested(move |column_id| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if state.cycle_sftp_panel_sort(column_id.as_str()) {
-            sync_right_panel_state(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_sftp_panel_column_width_change_requested(move |column_id, width| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if state.set_sftp_panel_column_width(column_id.as_str(), width) {
-            sync_right_panel_state(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_sftp_remote_file_modal_close_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.close_sftp_remote_file_editor();
-        window.set_blocking_modal_offset_x(0.0);
-        window.set_blocking_modal_offset_y(0.0);
-        sync_sftp_remote_file_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_sftp_remote_file_modal_content_changed(move |value| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.update_sftp_remote_file_editor_content(value.to_string());
-        sync_sftp_remote_file_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    window.on_sftp_remote_file_modal_save_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if let Some((session_id, remote_path, content)) =
-            state.sftp_remote_file_editor_save_payload()
-            && let Some(session_bridge) = session_bridge_ref.as_ref()
-        {
-            match Uuid::parse_str(session_id.as_str())
-                .map_err(anyhow::Error::from)
-                .and_then(|session_id| {
-                    session_bridge.manager.sftp_upload_file(
-                        session_id,
-                        remote_path.as_str(),
-                        content.into_bytes(),
-                    )
-                }) {
-                Ok(_) => state.mark_sftp_remote_file_editor_saved(),
-                Err(err) => state.set_sftp_remote_file_editor_error(format!(
-                    "Failed to save remote file: {err}"
-                )),
-            }
-        }
-        sync_sftp_remote_file_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_toggle_global_menu_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.toggle_global_menu();
-        window.set_show_global_menu(state.show_global_menu);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_close_global_menu_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.close_global_menu();
-        window.set_show_global_menu(state.show_global_menu);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let store_ref = store.clone();
-    let effects_ref = Rc::clone(&effects);
-    let session_bridge_ref = session_bridge.clone();
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    window.on_toggle_theme_mode_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.toggle_theme_mode();
-        if let Some(session_bridge) = session_bridge_ref.as_deref() {
-            if let Err(err) = session_bridge.manager.set_theme_mode(state.theme_mode) {
-                tracing::error!(
-                    target: "app.ssh",
-                    error = %err,
-                    theme_mode = ?state.theme_mode,
-                    "failed to synchronize theme mode into SSH sessions"
-                );
-            }
-            let projection =
-                sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
-            if projection.tabs_changed || projection.surface_changed {
-                sync_workspace_tabs_with_manager(
-                    &window,
-                    &state,
-                    &mut workspace_follow_tracker_ref.borrow_mut(),
-                    Some(&session_bridge.manager),
-                );
-            }
-        }
-        sync_theme_and_window_effects(&window, &state, effects_ref.as_ref());
-        save_ui_preferences(&store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let store_ref = store.clone();
-    window.on_toggle_window_always_on_top_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.toggle_always_on_top();
-        window.set_is_window_always_on_top(state.is_always_on_top);
-        save_ui_preferences(&store_ref, &state);
-    });
-
-    let controller_ref = Rc::clone(&controller);
-    window.on_minimize_requested(move || {
-        controller_ref.minimize();
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let controller_ref = Rc::clone(&controller);
-    let effects_ref = Rc::clone(&effects);
-    window.on_maximize_toggle_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let next = controller_ref.toggle_maximize(state.is_window_maximized());
-        let next = if next {
-            WindowPlacementKind::Maximized
-        } else {
-            WindowPlacementKind::Restored
-        };
-        state.set_window_placement(next);
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_toggle_assets_sidebar_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.toggle_assets_sidebar();
-        sync_sidebar_state(&window, &state);
-        let (width, height) = current_window_size(&window);
-        sync_shell_layout(&window, &mut state, width, height);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_sidebar_destination_selected(move |destination_id| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.dismiss_empty_asset_search_on_shell_interaction();
-        let destination = SidebarDestination::from_id(destination_id.as_str())
-            .unwrap_or(SidebarDestination::Console);
-        state.select_sidebar_destination(destination);
-        sync_sidebar_state(&window, &state);
-        let (width, height) = current_window_size(&window);
-        sync_shell_layout(&window, &mut state, width, height);
-    });
+    assets_keychain::bind_assets_keychain_callbacks(
+        window,
+        &view_model,
+        &asset_repo,
+        &session_bridge,
+        &session_runtime_guard,
+        &credential_store,
+        &private_key_importer,
+        &keychain_repo,
+        &vault_session,
+        &workspace_follow_tracker,
+        &pending_host_key_approval,
+        &modal_drag_state,
+        &vault_sync_scheduler,
+        &vault_auto_sync_timer,
+        &run_vault_sync,
+        &asset_click_tracker,
+        &pending_double_click_activation,
+    );
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
@@ -8611,7 +4501,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
         sync_saved_ssh_picker_state(&window, &state);
-        sync_ssh_host_key_modal_state(&window, &state);
+        windowing::sync_ssh_host_key_modal_state(&window, &state);
         save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
     });
 
@@ -8647,7 +4537,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
         sync_saved_ssh_picker_state(&window, &state);
-        sync_ssh_host_key_modal_state(&window, &state);
+        windowing::sync_ssh_host_key_modal_state(&window, &state);
         save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
     });
 
@@ -8738,7 +4628,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
         sync_saved_ssh_picker_state(&window, &state);
-        sync_ssh_host_key_modal_state(&window, &state);
+        windowing::sync_ssh_host_key_modal_state(&window, &state);
         save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
     });
 
@@ -8751,611 +4641,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         state.select_quick_launch_asset(asset_id.to_string());
         state.select_sidebar_destination(SidebarDestination::Console);
         state.select_asset(asset_id.as_str());
-        sync_sidebar_state(&window, &state);
+        assets_keychain::sync_sidebar_state(&window, &state);
         let (width, height) = current_window_size(&window);
         sync_shell_layout(&window, &mut state, width, height);
         save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_toggle_assets_search_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.activate_asset_search();
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_assets_search_query_changed(move |query| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if state.active_sidebar_destination == SidebarDestination::Keychain {
-            state.set_keychain_search_query(query.to_string());
-        } else {
-            state.set_asset_search_query(query.to_string());
-        }
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_close_assets_search_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.close_asset_search();
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_collapse_assets_search_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.collapse_asset_search_if_empty();
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_toggle_assets_view_mode_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.dismiss_empty_asset_search_on_shell_interaction();
-        state.toggle_asset_view_mode();
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_toggle_assets_tree_expansion_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.dismiss_empty_asset_search_on_shell_interaction();
-        state.toggle_asset_tree_expansion();
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_toggle_assets_create_menu_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.toggle_asset_create_menu();
-        sync_assets_toolbar_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_close_assets_create_menu_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.close_asset_create_menu();
-        sync_assets_toolbar_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let keychain_repo_ref = keychain_repo.clone();
-    let vault_session_ref = Rc::clone(&vault_session);
-    let vault_sync_scheduler_ref = Rc::clone(&vault_sync_scheduler);
-    let vault_auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
-    let run_vault_sync_ref = Rc::clone(&run_vault_sync);
-    window.on_assets_create_action_selected(move |action_id| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let was_modal_open = state.asset_modal_state.is_some();
-        let keychain_node_count_before = state.keychain_catalog().nodes.len();
-        state.dismiss_empty_asset_search_on_shell_interaction();
-        if state.active_sidebar_destination == SidebarDestination::Snippets {
-            state.handle_snippet_create_action(action_id.as_str());
-            open_pending_snippet_create_modal(&mut state);
-        } else {
-            state.handle_assets_create_action(action_id.as_str());
-        }
-        if state.keychain_catalog().nodes.len() > keychain_node_count_before {
-            save_keychain_catalog_if_available(&keychain_repo_ref, &state);
-            let mut vault = vault_session_ref.borrow_mut();
-            mark_local_vault_dirty_and_arm_sync(
-                &mut state,
-                &mut vault,
-                &vault_sync_scheduler_ref,
-                &vault_auto_sync_timer_ref,
-                Rc::clone(&run_vault_sync_ref),
-            );
-        }
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-        sync_asset_modal_state(&window, &state);
-        if !was_modal_open && state.asset_modal_state.is_some() {
-            schedule_asset_modal_focus(&window);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let modal_drag_state_ref = Rc::clone(&modal_drag_state);
-    window.on_close_asset_modal_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        modal_drag_state_ref.borrow_mut().take();
-        state.cancel_asset_modal();
-        window.set_blocking_modal_offset_x(0.0);
-        window.set_blocking_modal_offset_y(0.0);
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let asset_repo_ref = asset_repo.clone();
-    let keychain_repo_ref = keychain_repo.clone();
-    let credential_store_ref = Arc::clone(&credential_store);
-    let vault_session_ref = Rc::clone(&vault_session);
-    let vault_sync_scheduler_ref = Rc::clone(&vault_sync_scheduler);
-    let vault_auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
-    let run_vault_sync_ref = Rc::clone(&run_vault_sync);
-    window.on_confirm_asset_modal_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let pending_identity_draft = match state.asset_modal_state.as_ref() {
-            Some(AssetModalState::NewKeychainIdentity { draft, .. }) => Some(draft.clone()),
-            _ => None,
-        };
-        let pending_keychain_draft = match state.asset_modal_state.as_ref() {
-            Some(AssetModalState::NewKeychainSshKey { draft, .. }) => Some(draft.clone()),
-            _ => None,
-        };
-        let should_save_keychain_catalog =
-            pending_identity_draft.is_some() || pending_keychain_draft.is_some();
-        let did_mutate = state.confirm_asset_modal();
-        if did_mutate {
-            if let Some(draft) = pending_identity_draft.as_ref()
-                && let Some(identity_id) = state.focused_keychain_id.clone()
-                && let Err(err) = persist_keychain_identity_secret(
-                    credential_store_ref.as_ref(),
-                    identity_id.as_str(),
-                    draft,
-                )
-            {
-                tracing::error!(
-                    target: "app.keychain",
-                    identity_id,
-                    error = %err,
-                    "failed to persist keychain identity secret bundle"
-                );
-            }
-            if let Some(draft) = pending_keychain_draft.as_ref()
-                && let Some(key_id) = state.focused_keychain_id.clone()
-                && let Err(err) = persist_keychain_ssh_key_secret(
-                    credential_store_ref.as_ref(),
-                    key_id.as_str(),
-                    draft,
-                )
-            {
-                tracing::error!(
-                    target: "app.keychain",
-                    key_id,
-                    error = %err,
-                    "failed to persist keychain SSH key secret bundle"
-                );
-            }
-            save_asset_catalog_if_available(&asset_repo_ref, &state);
-            if should_save_keychain_catalog {
-                save_keychain_catalog_if_available(&keychain_repo_ref, &state);
-            }
-            let mut vault = vault_session_ref.borrow_mut();
-            mark_local_vault_dirty_and_arm_sync(
-                &mut state,
-                &mut vault,
-                &vault_sync_scheduler_ref,
-                &vault_auto_sync_timer_ref,
-                Rc::clone(&run_vault_sync_ref),
-            );
-        }
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_asset_rename_modal_name_changed(move |value| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.update_rename_asset_modal_name(value.to_string());
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let asset_repo_ref = asset_repo.clone();
-    let keychain_repo_ref = keychain_repo.clone();
-    let vault_session_ref = Rc::clone(&vault_session);
-    let vault_sync_scheduler_ref = Rc::clone(&vault_sync_scheduler);
-    let vault_auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
-    let run_vault_sync_ref = Rc::clone(&run_vault_sync);
-    window.on_confirm_asset_rename_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let should_save_keychain_catalog = matches!(
-            state.asset_modal_state.as_ref(),
-            Some(AssetModalState::RenameAsset { asset_id, .. })
-                if state.keychain_catalog().nodes.contains_key(asset_id)
-        );
-        let did_mutate = state.confirm_asset_modal();
-        if did_mutate {
-            save_asset_catalog_if_available(&asset_repo_ref, &state);
-            if should_save_keychain_catalog {
-                save_keychain_catalog_if_available(&keychain_repo_ref, &state);
-            }
-            let mut vault = vault_session_ref.borrow_mut();
-            mark_local_vault_dirty_and_arm_sync(
-                &mut state,
-                &mut vault,
-                &vault_sync_scheduler_ref,
-                &vault_auto_sync_timer_ref,
-                Rc::clone(&run_vault_sync_ref),
-            );
-        }
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let asset_repo_ref = asset_repo.clone();
-    let keychain_repo_ref = keychain_repo.clone();
-    let vault_session_ref = Rc::clone(&vault_session);
-    let vault_sync_scheduler_ref = Rc::clone(&vault_sync_scheduler);
-    let vault_auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
-    let run_vault_sync_ref = Rc::clone(&run_vault_sync);
-    window.on_confirm_delete_asset_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let should_save_keychain_catalog = matches!(
-            state.asset_modal_state.as_ref(),
-            Some(AssetModalState::DeleteAssetConfirm { asset_id, .. })
-                if state.keychain_catalog().nodes.contains_key(asset_id)
-        );
-        let did_mutate = state.confirm_delete_asset();
-        if did_mutate {
-            save_asset_catalog_if_available(&asset_repo_ref, &state);
-            if should_save_keychain_catalog {
-                save_keychain_catalog_if_available(&keychain_repo_ref, &state);
-            }
-            let mut vault = vault_session_ref.borrow_mut();
-            mark_local_vault_dirty_and_arm_sync(
-                &mut state,
-                &mut vault,
-                &vault_sync_scheduler_ref,
-                &vault_auto_sync_timer_ref,
-                Rc::clone(&run_vault_sync_ref),
-            );
-        }
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_asset_folder_modal_name_changed(move |value| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.update_new_folder_modal_name(value.to_string());
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_asset_snippet_modal_draft_changed(move |field, value| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.update_snippet_modal_field(field.as_str(), value.to_string());
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_asset_snippet_package_modal_name_changed(move |value| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.update_snippet_package_modal_name(value.to_string());
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_asset_ssh_modal_draft_changed(move |field, value| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.update_ssh_modal_field(field.as_str(), value.to_string());
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_keychain_identity_modal_draft_changed(move |field, value| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.update_keychain_identity_modal_field(field.as_str(), value.to_string());
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_keychain_identity_modal_action_requested(move |action| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if action.as_str() == "use-existing-ssh-key" {
-            state.select_first_keychain_identity_modal_ssh_key();
-        }
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_keychain_ssh_key_modal_draft_changed(move |field, value| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.update_keychain_ssh_key_modal_field(field.as_str(), value.to_string());
-        sync_asset_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let asset_repo_ref = asset_repo.clone();
-    let session_bridge_ref = session_bridge.clone();
-    let session_runtime_guard_ref = session_runtime_guard.clone();
-    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
-    let credential_store_ref = Arc::clone(&credential_store);
-    let private_key_importer_ref = Arc::clone(&private_key_importer);
-    let vault_session_ref = Rc::clone(&vault_session);
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    let vault_sync_scheduler_ref = Rc::clone(&vault_sync_scheduler);
-    let vault_auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
-    let run_vault_sync_ref = Rc::clone(&run_vault_sync);
-    window.on_asset_ssh_modal_action_requested(move |action| {
-        let _keep_runtime_alive = &session_runtime_guard_ref;
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if action.as_str() == "import-private-key" {
-            if let Err(err) =
-                import_private_key_into_ssh_modal(&mut state, private_key_importer_ref.as_ref())
-            {
-                state.finish_ssh_modal_action_error(err.to_string());
-            }
-            sync_asset_modal_state(&window, &state);
-            return;
-        }
-        let accepted = state.begin_ssh_modal_action(action.as_str());
-        let pending_action = state.take_pending_ssh_modal_action();
-        let mut did_mutate = false;
-        let mut catalog_persisted_in_action = false;
-
-        if let Some(request) = pending_action {
-            match request.action {
-                SshModalAction::Save => {
-                    let previous_state = (*state).clone();
-                    let existing_saved_spec = match &state.asset_modal_state {
-                        Some(AssetModalState::NewSshConnection {
-                            editing_asset_id: Some(asset_id),
-                            ..
-                        }) => state
-                            .console_asset_tree()
-                            .ssh_connection_spec(asset_id)
-                            .cloned(),
-                        _ => None,
-                    };
-                    did_mutate = state.confirm_asset_modal();
-                    if !did_mutate {
-                        state.finish_ssh_modal_action_error("Failed to save connection.");
-                    } else if let Some(asset_id) = state.focused_asset_id.clone() {
-                        if let Err(err) = validate_saved_modal_profile(&state, &asset_id) {
-                            *state = previous_state;
-                            did_mutate = false;
-                            state.finish_ssh_modal_action_error(err.to_string());
-                        } else if let Some(saved_spec) =
-                            state
-                                .console_asset_tree()
-                                .ssh_connection_spec(&asset_id)
-                                .cloned()
-                            && let Err(err) = sync_saved_ssh_secrets(
-                                credential_store_ref.as_ref(),
-                                &request.draft,
-                                existing_saved_spec.as_ref(),
-                                &saved_spec,
-                            )
-                        {
-                            *state = previous_state;
-                            did_mutate = false;
-                            state.finish_ssh_modal_action_error(err.to_string());
-                        }
-                    }
-                }
-                SshModalAction::TestConnection => {
-                    match runtime_profile_for_modal_action(&state, &request.draft) {
-                        Ok(profile) => {
-                            if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                                attempt_test_connection(
-                                    &mut state,
-                                    session_bridge.as_ref(),
-                                    &pending_host_key_approval_ref,
-                                    profile,
-                                );
-                            } else {
-                                state.finish_ssh_modal_action_error(
-                                    "SSH session bridge is unavailable.",
-                                );
-                            }
-                        }
-                        Err(err) => state.finish_ssh_modal_action_error(err.to_string()),
-                    }
-                }
-                SshModalAction::Connect => match runtime_profile_for_modal_action(&state, &request.draft) {
-                    Ok(mut profile) => {
-                        profile.asset_id = Some(temporary_session_asset_id_for_profile(&profile));
-                        if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                            if let Err(err) = attempt_open_session_with_profile(
-                                &mut state,
-                                session_bridge.as_ref(),
-                                &pending_host_key_approval_ref,
-                                profile,
-                                OpenSessionMode::ActivateExisting,
-                            ) {
-                                tracing::error!(
-                                    target: "app.ssh",
-                                    error = %err,
-                                    "failed to open temporary ssh session from modal action"
-                                );
-                                state.finish_ssh_modal_action_error(err.to_string());
-                            } else {
-                                state.cancel_asset_modal();
-                            }
-                        } else {
-                            state.finish_ssh_modal_action_error(
-                                "SSH session bridge is unavailable.",
-                            );
-                        }
-                    }
-                    Err(err) => state.finish_ssh_modal_action_error(err.to_string()),
-                },
-                SshModalAction::SaveAndConnect => {
-                    let previous_state = (*state).clone();
-                    let existing_saved_spec = match &state.asset_modal_state {
-                        Some(AssetModalState::NewSshConnection {
-                            editing_asset_id: Some(asset_id),
-                            ..
-                        }) => state
-                            .console_asset_tree()
-                            .ssh_connection_spec(asset_id)
-                            .cloned(),
-                        _ => None,
-                    };
-                    did_mutate = state.confirm_asset_modal();
-                    if did_mutate {
-                        if let Some(asset_id) = state.focused_asset_id.clone() {
-                            if let Err(err) = validate_saved_modal_profile(&state, &asset_id) {
-                                *state = previous_state;
-                                did_mutate = false;
-                                state.finish_ssh_modal_action_error(err.to_string());
-                            } else if let Some(saved_spec) = state
-                                .console_asset_tree()
-                                .ssh_connection_spec(&asset_id)
-                                .cloned()
-                            {
-                                if let Err(err) = sync_saved_ssh_secrets(
-                                    credential_store_ref.as_ref(),
-                                    &request.draft,
-                                    existing_saved_spec.as_ref(),
-                                    &saved_spec,
-                                ) {
-                                    *state = previous_state;
-                                    did_mutate = false;
-                                    state.finish_ssh_modal_action_error(err.to_string());
-                                } else {
-                                    if let Some(repo) = asset_repo_ref.as_ref()
-                                        && let Err(err) = save_asset_catalog(repo.as_ref(), &state)
-                                    {
-                                        *state = previous_state;
-                                        did_mutate = false;
-                                        state.finish_ssh_modal_action_error(err.to_string());
-                                    } else {
-                                        catalog_persisted_in_action = asset_repo_ref.is_some();
-                                        match runtime_profile_for_saved_asset(&state, &asset_id) {
-                                            Ok(profile) => {
-                                                if let Some(session_bridge) = session_bridge_ref.as_ref()
-                                                    && let Err(err) = attempt_open_session_with_profile(
-                                                        &mut state,
-                                                        session_bridge.as_ref(),
-                                                        &pending_host_key_approval_ref,
-                                                        profile,
-                                                        OpenSessionMode::ActivateExisting,
-                                                    )
-                                                {
-                                                    tracing::error!(
-                                                        target: "app.ssh",
-                                                        error = %err,
-                                                        "failed to open ssh session from modal action"
-                                                    );
-                                                    state.finish_ssh_modal_action_error(err.to_string());
-                                                } else {
-                                                    state.cancel_asset_modal();
-                                                }
-                                            }
-                                            Err(err) => {
-                                                state.finish_ssh_modal_action_error(err.to_string());
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                *state = previous_state;
-                                did_mutate = false;
-                                state.finish_ssh_modal_action_error(
-                                    "Failed to resolve saved secret target after saving connection.",
-                                );
-                            }
-                        } else {
-                            state.finish_ssh_modal_action_error(
-                                "Failed to resolve saved connection profile.",
-                            );
-                        }
-                    } else {
-                        state.finish_ssh_modal_action_error(
-                            "Failed to save connection before opening session.",
-                        );
-                    }
-                }
-            }
-        } else if accepted {
-            state.finish_ssh_modal_action_error("SSH modal action did not produce a request.");
-        }
-
-        if did_mutate && !catalog_persisted_in_action {
-            save_asset_catalog_if_available(&asset_repo_ref, &state);
-        }
-        if did_mutate {
-            let mut vault = vault_session_ref.borrow_mut();
-            mark_local_vault_dirty_and_arm_sync(
-                &mut state,
-                &mut vault,
-                &vault_sync_scheduler_ref,
-                &vault_auto_sync_timer_ref,
-                Rc::clone(&run_vault_sync_ref),
-            );
-        }
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_workspace_tabs_with_manager(
-            &window,
-            &state,
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
-        );
-        sync_assets_context_menu_state(&window, &state);
-        sync_asset_modal_state(&window, &state);
-        sync_ssh_host_key_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -9383,8 +4672,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
-        sync_ssh_host_key_modal_state(&window, &state);
-        sync_asset_modal_state(&window, &state);
+        windowing::sync_ssh_host_key_modal_state(&window, &state);
+        assets_keychain::sync_asset_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -9421,7 +4710,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 "failed to handle keychain SSH key modal action"
             );
         }
-        sync_asset_modal_state(&window, &state);
+        assets_keychain::sync_asset_modal_state(&window, &state);
     });
 
     let state = Rc::clone(&view_model);
@@ -9443,50 +4732,24 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             None,
         );
-        sync_ssh_host_key_modal_state(&window, &state);
-        sync_asset_modal_state(&window, &state);
+        windowing::sync_ssh_host_key_modal_state(&window, &state);
+        assets_keychain::sync_asset_modal_state(&window, &state);
     });
 
-    let handle = window.as_weak();
-    let modal_drag_state_ref = Rc::clone(&modal_drag_state);
-    window.on_blocking_modal_drag_requested(move |pointer_x, pointer_y| {
-        let window = handle.unwrap();
-        let current_offset = ModalOffset {
-            x: window.get_blocking_modal_offset_x(),
-            y: window.get_blocking_modal_offset_y(),
-        };
-        *modal_drag_state_ref.borrow_mut() =
-            Some(begin_modal_drag(pointer_x, pointer_y, current_offset));
-    });
-
-    let handle = window.as_weak();
-    let modal_drag_state_ref = Rc::clone(&modal_drag_state);
-    window.on_blocking_modal_drag_moved(move |pointer_x, pointer_y| {
-        let Some(drag_state) = *modal_drag_state_ref.borrow() else {
-            return;
-        };
-        let window = handle.unwrap();
-        let next_offset = update_modal_drag(drag_state, pointer_x, pointer_y);
-        window.set_blocking_modal_offset_x(next_offset.x);
-        window.set_blocking_modal_offset_y(next_offset.y);
-    });
-
-    let modal_drag_state_ref = Rc::clone(&modal_drag_state);
-    window.on_blocking_modal_drag_ended(move || {
-        modal_drag_state_ref.borrow_mut().take();
-    });
-
-    let modal_drag_state_ref = Rc::clone(&modal_drag_state);
-    window.on_blocking_modal_focus_restore_requested(move || {
-        modal_drag_state_ref.borrow_mut().take();
-    });
+    windowing::bind_windowing_callbacks(
+        window,
+        &view_model,
+        &effects,
+        &modal_drag_state,
+        &controller,
+    );
 
     let handle = window.as_weak();
     let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
     window.on_workspace_paste_warning_cancel_requested(move || {
         let window = handle.unwrap();
         pending_workspace_paste_warning_ref.borrow_mut().take();
-        sync_workspace_paste_warning_modal_state(&window, None);
+        windowing::sync_workspace_paste_warning_modal_state(&window, None);
     });
 
     let state = Rc::clone(&view_model);
@@ -9499,7 +4762,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let mut state = state.borrow_mut();
         let pending = pending_workspace_paste_warning_ref.borrow_mut().take();
         let draft_text = window.get_workspace_paste_warning_text().to_string();
-        sync_workspace_paste_warning_modal_state(&window, None);
+        windowing::sync_workspace_paste_warning_modal_state(&window, None);
         let Some(pending) = pending else {
             return;
         };
@@ -9512,13 +4775,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             pending.text.clone()
         };
 
-        forward_workspace_session_paste(
+        workspace_terminal::forward_workspace_session_paste(
             &state,
             session_bridge_ref.as_deref(),
             pending.session_id,
             &text,
         );
-        refresh_active_workspace_projection(
+        workspace_terminal::refresh_active_workspace_projection(
             &window,
             &mut state,
             session_bridge_ref.as_deref(),
@@ -9536,12 +4799,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let mut state = state.borrow_mut();
         if state.activate_workspace_session(session_id.as_str()) {
             if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
                 let (rows, cols) = state
                     .active_workspace_terminal_surface()
                     .map(|surface| (surface.rows as i32, surface.cols as i32))
                     .unwrap_or((24, 80));
-                forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
+                workspace_terminal::forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
             }
             sync_workspace_tabs_with_manager(
                 &window,
@@ -9553,14 +4816,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 && let Some(session_bridge) = session_bridge_ref.as_ref()
             {
                 let mut controller = sftp_browser_controller_ref.borrow_mut();
-                let _ = open_active_sftp_browser_for_current_session(
+                let _ = sftp::open_active_sftp_browser_for_current_session(
                     &mut state,
                     &mut controller,
                     &session_bridge.manager,
                 );
             }
-            sync_right_panel_state(&window, &state);
-            sync_assets_context_menu_state(&window, &state);
+            sftp::sync_right_panel_state(&window, &state);
+            assets_keychain::sync_assets_context_menu_state(&window, &state);
         }
     });
 
@@ -9579,12 +4842,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             session_id.as_str(),
         ) {
             if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
                 let (rows, cols) = state
                     .active_workspace_terminal_surface()
                     .map(|surface| (surface.rows as i32, surface.cols as i32))
                     .unwrap_or((24, 80));
-                forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
+                workspace_terminal::forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
             }
             sync_workspace_tabs_with_manager(
                 &window,
@@ -9592,7 +4855,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 &mut workspace_follow_tracker_ref.borrow_mut(),
                 session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
             );
-            sync_assets_context_menu_state(&window, &state);
+            assets_keychain::sync_assets_context_menu_state(&window, &state);
         }
     });
 
@@ -9625,8 +4888,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                 );
-                sync_assets_context_menu_state(&window, &state);
-                sync_ssh_host_key_modal_state(&window, &state);
+                assets_keychain::sync_assets_context_menu_state(&window, &state);
+                windowing::sync_ssh_host_key_modal_state(&window, &state);
             }
             "close-tab" => {
                 let Some(session_id) = state.active_workspace_session_id().map(str::to_owned)
@@ -9639,7 +4902,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     session_id.as_str(),
                 ) {
                     if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                        let _ = sync_workspace_projection_from_manager(
+                        let _ = workspace_terminal::sync_workspace_projection_from_manager(
                             &mut state,
                             &session_bridge.manager,
                         );
@@ -9647,7 +4910,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                             .active_workspace_terminal_surface()
                             .map(|surface| (surface.rows as i32, surface.cols as i32))
                             .unwrap_or((24, 80));
-                        forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
+                        workspace_terminal::forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
                     }
                     sync_workspace_tabs_with_manager(
                         &window,
@@ -9655,14 +4918,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         &mut workspace_follow_tracker_ref.borrow_mut(),
                         session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
                     );
-                    sync_assets_context_menu_state(&window, &state);
+                    assets_keychain::sync_assets_context_menu_state(&window, &state);
                 }
             }
             "toggle-asset-search" => {
                 state.activate_asset_search();
-                sync_assets_toolbar_state(&window, &state);
-                sync_console_assets(&window, &state);
-                sync_keychain_assets(&window, &state);
+                assets_keychain::sync_assets_toolbar_state(&window, &state);
+                assets_keychain::sync_console_assets(&window, &state);
+                assets_keychain::sync_keychain_assets(&window, &state);
             }
             "toggle-global-menu" => {
                 state.toggle_global_menu();
@@ -9676,7 +4939,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     return;
                 };
                 let _ = session_bridge.manager.cancel_connection_attempt(session_id);
-                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
                 sync_workspace_tabs_with_manager(
                     &window,
                     &state,
@@ -9700,7 +4963,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     );
                     return;
                 }
-                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
                 sync_workspace_tabs_with_manager(
                     &window,
                     &state,
@@ -9739,7 +5002,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     );
                     return;
                 }
-                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
                 sync_workspace_tabs_with_manager(
                     &window,
                     &state,
@@ -9755,7 +5018,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     return;
                 };
                 let _ = session_bridge.manager.reject_host_key_prompt(session_id);
-                let _ = sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
                 sync_workspace_tabs_with_manager(
                     &window,
                     &state,
@@ -9773,9 +5036,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_text_input(move |text| {
         let mut state = state.borrow_mut();
-        forward_active_workspace_text_input(&state, session_bridge_ref.as_deref(), text.as_str());
+        workspace_terminal::forward_active_workspace_text_input(&state, session_bridge_ref.as_deref(), text.as_str());
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(
+            workspace_terminal::refresh_active_workspace_projection(
                 &window,
                 &mut state,
                 session_bridge_ref.as_deref(),
@@ -9790,7 +5053,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_key_input(move |key, alt, ctrl, shift| {
         let mut state = state.borrow_mut();
-        forward_active_workspace_key_input(
+        workspace_terminal::forward_active_workspace_key_input(
             &state,
             session_bridge_ref.as_deref(),
             key.as_str(),
@@ -9799,7 +5062,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             shift,
         );
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(
+            workspace_terminal::refresh_active_workspace_projection(
                 &window,
                 &mut state,
                 session_bridge_ref.as_deref(),
@@ -9812,7 +5075,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_bridge_ref = session_bridge.clone();
     window.on_workspace_session_resize_requested(move |rows, cols| {
         let state = state.borrow();
-        forward_active_workspace_resize(&state, session_bridge_ref.as_deref(), rows, cols);
+        workspace_terminal::forward_active_workspace_resize(&state, session_bridge_ref.as_deref(), rows, cols);
     });
 
     let state = Rc::clone(&view_model);
@@ -9836,7 +5099,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_workspace_session_copy_selection_requested(
         move |start_row, start_col, end_row, end_col| {
             let state = state.borrow();
-            forward_active_workspace_copy_selection(&state, start_row, start_col, end_row, end_col);
+            workspace_terminal::forward_active_workspace_copy_selection(&state, start_row, start_col, end_row, end_col);
         },
     );
 
@@ -9847,16 +5110,16 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_paste_requested(move || {
         let mut state = state.borrow_mut();
-        let outcome = forward_active_workspace_paste(
+        let outcome = workspace_terminal::forward_active_workspace_paste(
             &state,
             session_bridge_ref.as_deref(),
             pending_workspace_paste_warning_ref.as_ref(),
         );
         if let Some(window) = window_handle.upgrade() {
             let pending = pending_workspace_paste_warning_ref.borrow();
-            sync_workspace_paste_warning_modal_state(&window, pending.as_ref());
+            windowing::sync_workspace_paste_warning_modal_state(&window, pending.as_ref());
             if matches!(outcome, WorkspacePasteRequestOutcome::Sent) {
-                refresh_active_workspace_projection(
+                workspace_terminal::refresh_active_workspace_projection(
                     &window,
                     &mut state,
                     session_bridge_ref.as_deref(),
@@ -9872,7 +5135,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_mouse_input(move |kind, button, row, col, shift, ctrl, alt| {
         let mut state = state.borrow_mut();
-        let Some(kind) = parse_terminal_mouse_kind(kind.as_str()) else {
+        let Some(kind) = workspace_terminal::parse_terminal_mouse_kind(kind.as_str()) else {
             tracing::warn!(
                 target: "app.ssh",
                 kind = %kind,
@@ -9880,7 +5143,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             );
             return;
         };
-        let Some(button) = parse_terminal_mouse_button(button.as_str()) else {
+        let Some(button) = workspace_terminal::parse_terminal_mouse_button(button.as_str()) else {
             tracing::warn!(
                 target: "app.ssh",
                 button = %button,
@@ -9888,7 +5151,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             );
             return;
         };
-        forward_active_workspace_mouse_input(
+        workspace_terminal::forward_active_workspace_mouse_input(
             &state,
             session_bridge_ref.as_deref(),
             TerminalMouseInput {
@@ -9902,7 +5165,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             },
         );
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(
+            workspace_terminal::refresh_active_workspace_projection(
                 &window,
                 &mut state,
                 session_bridge_ref.as_deref(),
@@ -9920,7 +5183,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_workspace_session_scroll_requested(move |delta_lines, row, col, shift, ctrl, alt| {
         {
             let state = view_model_ref.borrow();
-            forward_active_workspace_scroll(
+            workspace_terminal::forward_active_workspace_scroll(
                 &state,
                 session_bridge_ref.as_deref(),
                 WorkspaceScrollInput {
@@ -9935,7 +5198,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
 
         if let Some(window) = window_handle.upgrade() {
-            schedule_workspace_scroll_projection_refresh(
+            workspace_terminal::schedule_workspace_scroll_projection_refresh(
                 &window,
                 Rc::clone(&view_model_ref),
                 session_bridge_ref.clone(),
@@ -9954,7 +5217,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let deferred_scroll_thumb_drag_ref = Rc::clone(&deferred_scroll_thumb_drag);
     window.on_workspace_session_scroll_thumb_drag_requested(move |ratio| {
         if let Some(window) = window_handle.upgrade() {
-            schedule_workspace_scroll_thumb_drag_update(
+            workspace_terminal::schedule_workspace_scroll_thumb_drag_update(
                 &window,
                 ratio,
                 Rc::clone(&view_model_ref),
@@ -9975,10 +5238,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_workspace_session_scroll_jump_requested(move |ratio| {
         {
             let state = view_model_ref.borrow();
-            forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), ratio);
+            workspace_terminal::forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), ratio);
         }
         if let Some(window) = window_handle.upgrade() {
-            schedule_workspace_scroll_projection_refresh(
+            workspace_terminal::schedule_workspace_scroll_projection_refresh(
                 &window,
                 Rc::clone(&view_model_ref),
                 session_bridge_ref.clone(),
@@ -9995,9 +5258,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     window.on_workspace_session_jump_to_latest_requested(move || {
         let mut state = state.borrow_mut();
-        forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), 0.0);
+        workspace_terminal::forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), 0.0);
         if let Some(window) = window_handle.upgrade() {
-            refresh_active_workspace_projection(
+            workspace_terminal::refresh_active_workspace_projection(
                 &window,
                 &mut state,
                 session_bridge_ref.as_deref(),
@@ -10006,359 +5269,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
     });
 
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let session_runtime_guard_ref = session_runtime_guard.clone();
-    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
-    let asset_click_tracker_ref = Rc::clone(&asset_click_tracker);
-    let pending_double_click_activation_ref = Rc::clone(&pending_double_click_activation);
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    window.on_asset_selected(move |item_id| {
-        let _keep_runtime_alive = &session_runtime_guard_ref;
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if state.active_sidebar_destination == SidebarDestination::Keychain {
-            state.select_keychain_item(item_id.as_str());
-            asset_click_tracker_ref.borrow_mut().take();
-            pending_double_click_activation_ref.borrow_mut().take();
-        } else {
-            state.select_asset(item_id.as_str());
-            let should_activate =
-                register_asset_click(&asset_click_tracker_ref, item_id.as_str(), Instant::now());
-            if should_activate {
-                pending_double_click_activation_ref
-                    .borrow_mut()
-                    .replace(item_id.to_string());
-                activate_asset(
-                    &mut state,
-                    session_bridge_ref.as_deref(),
-                    &pending_host_key_approval_ref,
-                    item_id.as_str(),
-                );
-                apply_pending_snippet_activation(
-                    &window,
-                    &mut state,
-                    session_bridge_ref.as_deref(),
-                    &mut workspace_follow_tracker_ref.borrow_mut(),
-                );
-            }
-        }
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-        sync_workspace_tabs_with_manager(
-            &window,
-            &state,
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
-        );
-        sync_assets_context_menu_state(&window, &state);
-        sync_ssh_host_key_modal_state(&window, &state);
-    });
 
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let session_runtime_guard_ref = session_runtime_guard.clone();
-    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
-    let asset_click_tracker_ref = Rc::clone(&asset_click_tracker);
-    let pending_double_click_activation_ref = Rc::clone(&pending_double_click_activation);
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    window.on_asset_activated(move |item_id| {
-        let _keep_runtime_alive = &session_runtime_guard_ref;
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if state.active_sidebar_destination == SidebarDestination::Keychain {
-            asset_click_tracker_ref.borrow_mut().take();
-            pending_double_click_activation_ref.borrow_mut().take();
-            state.select_keychain_item(item_id.as_str());
-        } else {
-            asset_click_tracker_ref.borrow_mut().take();
-            state.select_asset(item_id.as_str());
-            let skip_duplicate = pending_double_click_activation_ref
-                .borrow()
-                .as_ref()
-                .map(|asset_id| asset_id == item_id.as_str())
-                .unwrap_or(false);
-            pending_double_click_activation_ref.borrow_mut().take();
-            if !skip_duplicate {
-                activate_asset(
-                    &mut state,
-                    session_bridge_ref.as_deref(),
-                    &pending_host_key_approval_ref,
-                    item_id.as_str(),
-                );
-                apply_pending_snippet_activation(
-                    &window,
-                    &mut state,
-                    session_bridge_ref.as_deref(),
-                    &mut workspace_follow_tracker_ref.borrow_mut(),
-                );
-            }
-        }
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-        sync_workspace_tabs_with_manager(
-            &window,
-            &state,
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
-        );
-        sync_assets_context_menu_state(&window, &state);
-        sync_ssh_host_key_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_toggle_expanded_requested(move |item_id| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if state.active_sidebar_destination == SidebarDestination::Keychain {
-            state.toggle_keychain_folder_expanded(item_id.as_str());
-        } else {
-            state.toggle_folder_expanded(item_id.as_str());
-        }
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_asset_context_menu_requested(move |target_id, target_kind, anchor_x, anchor_y| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let active_sidebar_destination = state.active_sidebar_destination;
-        state.dismiss_empty_asset_search_on_shell_interaction();
-        state.open_context_menu_for_target(
-            parse_context_target_kind(target_kind.as_str(), active_sidebar_destination),
-            if target_id.is_empty() {
-                None
-            } else {
-                Some(target_id.to_string())
-            },
-            anchor_x,
-            anchor_y,
-        );
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        update_context_menu_placement(&window, &mut state);
-        sync_assets_context_menu_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_shell_interaction_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if state.dismiss_empty_asset_search_on_shell_interaction() {
-            sync_assets_toolbar_state(&window, &state);
-            sync_console_assets(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let session_bridge_ref = session_bridge.clone();
-    let session_runtime_guard_ref = session_runtime_guard.clone();
-    let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
-    let credential_store_ref = Arc::clone(&credential_store);
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    let keychain_repo_ref = keychain_repo.clone();
-    let vault_session_ref = Rc::clone(&vault_session);
-    let vault_sync_scheduler_ref = Rc::clone(&vault_sync_scheduler);
-    let vault_auto_sync_timer_ref = Rc::clone(&vault_auto_sync_timer);
-    let run_vault_sync_ref = Rc::clone(&run_vault_sync);
-    window.on_assets_context_menu_action_invoked(move |action_id| {
-        let _keep_runtime_alive = &session_runtime_guard_ref;
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let was_modal_open = state.asset_modal_state.is_some();
-        let keychain_node_count_before = state.keychain_catalog().nodes.len();
-
-        if let Some((path, action)) = context_menu_action_entry_for(&state, action_id.as_str()) {
-            if !action.children.is_empty() {
-                state.set_context_menu_open_path(path);
-            } else if action.state == ContextMenuActionState::Enabled {
-                match action_id.as_str() {
-                    "open-connection" => {
-                        let target_asset_id = state.context_target_asset_id.clone();
-                        state.close_context_menu();
-                        if let Some(asset_id) = target_asset_id {
-                            activate_asset(
-                                &mut state,
-                                session_bridge_ref.as_deref(),
-                                &pending_host_key_approval_ref,
-                                &asset_id,
-                            );
-                        }
-                    }
-                    _ => state.handle_context_menu_leaf_action(action_id.as_str()),
-                }
-            } else {
-                state.handle_context_menu_leaf_action(action_id.as_str());
-            }
-        }
-        if state.keychain_catalog().nodes.len() > keychain_node_count_before {
-            save_keychain_catalog_if_available(&keychain_repo_ref, &state);
-            let mut vault = vault_session_ref.borrow_mut();
-            mark_local_vault_dirty_and_arm_sync(
-                &mut state,
-                &mut vault,
-                &vault_sync_scheduler_ref,
-                &vault_auto_sync_timer_ref,
-                Rc::clone(&run_vault_sync_ref),
-            );
-        }
-
-        apply_pending_snippet_activation(
-            &window,
-            &mut state,
-            session_bridge_ref.as_deref(),
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-        );
-        hydrate_edit_ssh_modal_secret_from_store(&mut state, credential_store_ref.as_ref());
-        hydrate_edit_keychain_identity_secret_from_store(&mut state, credential_store_ref.as_ref());
-        hydrate_edit_keychain_ssh_key_secret_from_store(&mut state, credential_store_ref.as_ref());
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        sync_keychain_assets(&window, &state);
-        sync_workspace_tabs_with_manager(
-            &window,
-            &state,
-            &mut workspace_follow_tracker_ref.borrow_mut(),
-            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
-        );
-        sync_asset_modal_state(&window, &state);
-        update_context_menu_placement(&window, &mut state);
-        sync_assets_context_menu_state(&window, &state);
-        sync_ssh_host_key_modal_state(&window, &state);
-        if !was_modal_open && state.asset_modal_state.is_some() {
-            schedule_asset_modal_focus(&window);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_assets_context_menu_key_pressed(move |command| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-
-        match command.as_str() {
-            "escape" => state.handle_context_menu_escape(),
-            "left" => state.navigate_context_menu_left(),
-            "right" => state.navigate_context_menu_right(),
-            "enter" => state.invoke_current_context_menu_item(),
-            _ => {}
-        }
-
-        sync_assets_toolbar_state(&window, &state);
-        sync_console_assets(&window, &state);
-        update_context_menu_placement(&window, &mut state);
-        sync_assets_context_menu_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_assets_context_menu_row_hovered(move |column_index, row_index| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let next_path =
-            context_menu_hover_path_for(&state, column_index as usize, row_index as usize);
-        state.hover_context_menu_path(next_path);
-        update_context_menu_placement(&window, &mut state);
-        sync_assets_context_menu_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_assets_context_menu_pointer_moved(move |pointer_x, pointer_y| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        if !state.context_menu_open {
-            return;
-        }
-
-        let pointer = (pointer_x, pointer_y);
-        let rects = context_menu_column_rects_for(&state);
-        let original_path = state.context_menu_open_path.clone();
-
-        if state.context_menu_open_path.len() >= 2
-            && let (Some(parent_rect), Some(child_rect)) = (rects[1], rects[2])
-            && !should_keep_corridor_open(pointer, parent_rect, child_rect)
-        {
-            state.truncate_context_menu_open_path(1);
-        }
-
-        if !state.context_menu_open_path.is_empty()
-            && let (Some(parent_rect), Some(child_rect)) = (rects[0], rects[1])
-        {
-            let keep_open = should_keep_corridor_open(pointer, parent_rect, child_rect);
-            if !keep_open {
-                state.truncate_context_menu_open_path(0);
-            }
-        }
-
-        if state.context_menu_open_path != original_path {
-            update_context_menu_placement(&window, &mut state);
-            sync_assets_context_menu_state(&window, &state);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_close_assets_context_menu_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        state.close_context_menu();
-        update_context_menu_placement(&window, &mut state);
-        sync_assets_context_menu_state(&window, &state);
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    window.on_shell_layout_invalidated(move |width, height| {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        sync_shell_layout(&window, &mut state, width as u32, height as u32);
-        install_windows_frame_adapter(&window);
-    });
-
-    let controller_ref = Rc::clone(&controller);
-    window.on_close_requested(move || {
-        let _ = controller_ref.close();
-    });
-
-    let controller_ref = Rc::clone(&controller);
-    window.on_drag_requested(move || {
-        let _ = controller_ref.drag();
-    });
-
-    let controller_ref = Rc::clone(&controller);
-    window.on_drag_resize_requested(move |direction| {
-        if let Some(direction) = parse_resize_direction(direction.as_str()) {
-            let _ = controller_ref.drag_resize(direction);
-        }
-    });
-
-    let state = Rc::clone(&view_model);
-    let handle = window.as_weak();
-    let controller_ref = Rc::clone(&controller);
-    let effects_ref = Rc::clone(&effects);
-    window.on_drag_double_clicked(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let next = controller_ref.toggle_maximize(state.is_window_maximized());
-        let next = if next {
-            WindowPlacementKind::Maximized
-        } else {
-            WindowPlacementKind::Restored
-        };
-        state.set_window_placement(next);
-        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-    });
 }
 
 pub fn bind_top_status_bar_with_store(window: &AppWindow, store: Option<UiPreferencesStore>) {
@@ -10669,7 +5580,7 @@ mod tests {
             .expect("open session");
         let mut state = ShellViewModel::default();
 
-        let delta = sync_workspace_projection_from_manager(&mut state, &manager);
+        let delta = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
         assert!(delta.tabs_changed);
         assert!(!delta.surface_changed);
         assert_eq!(
@@ -10677,7 +5588,7 @@ mod tests {
             Some(handle.session_id.to_string().as_str())
         );
 
-        let delta = sync_workspace_projection_from_manager(&mut state, &manager);
+        let delta = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
         assert!(
             !delta.tabs_changed && !delta.surface_changed,
             "re-running projection without manager changes should not churn tab chrome"
@@ -10699,7 +5610,7 @@ mod tests {
         });
 
         let mut state = ShellViewModel::default();
-        let delta = sync_workspace_projection_from_manager(&mut state, &manager);
+        let delta = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
         assert!(delta.tabs_changed);
         assert!(
             !delta.surface_changed,
@@ -10710,7 +5621,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         });
 
-        let delta = sync_workspace_projection_from_manager(&mut state, &manager);
+        let delta = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
         assert!(
             delta.surface_changed,
             "terminal surface refresh should still update the active workspace surface"
@@ -10936,27 +5847,27 @@ mod tests {
     #[test]
     fn workspace_multiline_paste_detection_normalizes_platform_line_endings() {
         assert_eq!(
-            workspace_paste_prompt_mode(&ShellViewModel::default(), ""),
+            workspace_terminal::workspace_paste_prompt_mode(&ShellViewModel::default(), ""),
             None
         );
         assert_eq!(
-            workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\n"),
+            workspace_terminal::workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\n"),
             None
         );
         assert_eq!(
-            workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\r\n"),
+            workspace_terminal::workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\r\n"),
             None
         );
         assert_eq!(
-            workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\nwhoami"),
+            workspace_terminal::workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\nwhoami"),
             Some(WorkspacePastePromptMode::Confirm)
         );
         assert_eq!(
-            workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\r\nwhoami"),
+            workspace_terminal::workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\r\nwhoami"),
             Some(WorkspacePastePromptMode::Confirm)
         );
         assert_eq!(
-            workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\rwhoami"),
+            workspace_terminal::workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\rwhoami"),
             Some(WorkspacePastePromptMode::Confirm)
         );
     }
@@ -10982,7 +5893,7 @@ mod tests {
         state.set_active_workspace_terminal_surface(Some(surface));
 
         assert_eq!(
-            workspace_paste_prompt_mode(&state, "echo hello\nwhoami"),
+            workspace_terminal::workspace_paste_prompt_mode(&state, "echo hello\nwhoami"),
             None
         );
     }
@@ -11008,7 +5919,7 @@ mod tests {
         state.set_active_workspace_terminal_surface(Some(surface));
 
         assert_eq!(
-            workspace_paste_prompt_mode(&state, "one\ntwo\nthree\nfour"),
+            workspace_terminal::workspace_paste_prompt_mode(&state, "one\ntwo\nthree\nfour"),
             Some(WorkspacePastePromptMode::Editor)
         );
     }
@@ -11016,15 +5927,15 @@ mod tests {
     #[test]
     fn terminal_key_event_parses_function_key_names() {
         assert_eq!(
-            terminal_key_event("f1", false, false, false),
+            workspace_terminal::terminal_key_event("f1", false, false, false),
             Some(TerminalKeyEvent::function(1, false, false, false))
         );
         assert_eq!(
-            terminal_key_event("f12", true, false, true),
+            workspace_terminal::terminal_key_event("f12", true, false, true),
             Some(TerminalKeyEvent::function(12, true, false, true))
         );
         assert_eq!(
-            terminal_key_event("f24", false, true, false),
+            workspace_terminal::terminal_key_event("f24", false, true, false),
             Some(TerminalKeyEvent::function(24, false, true, false))
         );
     }
@@ -11032,7 +5943,7 @@ mod tests {
     #[test]
     fn terminal_key_event_preserves_plain_insert_key() {
         assert_eq!(
-            terminal_key_event("insert", false, false, false),
+            workspace_terminal::terminal_key_event("insert", false, false, false),
             Some(TerminalKeyEvent::named("insert", false, false, false))
         );
     }

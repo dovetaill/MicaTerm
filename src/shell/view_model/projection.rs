@@ -1,0 +1,233 @@
+//! ShellViewModel projection domain impls.
+
+use super::*;
+
+impl ShellViewModel {
+    pub fn visible_console_asset_rows(&self) -> Vec<VisibleAssetRow> {
+        self.console_asset_tree
+            .project_visible_rows(self.asset_view_mode, &self.asset_search_query)
+    }
+
+    pub fn visible_snippet_rows(&self) -> Vec<VisibleAssetRow> {
+        self.snippet_asset_tree
+            .project_visible_rows(self.asset_view_mode, &self.asset_search_query)
+    }
+
+    pub fn visible_keychain_rows(&self) -> Vec<crate::shell::keychain::VisibleKeychainRow> {
+        project_keychain_rows(
+            &self.keychain_catalog,
+            &self.keychain_expanded_ids,
+            &self.keychain_search_query,
+        )
+    }
+
+    pub fn seed_test_asset(&mut self, kind: ConsoleAssetKind, label: impl Into<String>) {
+        self.console_asset_tree.insert_root(kind, label);
+    }
+
+    pub fn replace_console_asset_tree(&mut self, tree: AssetTree) {
+        self.console_asset_tree = tree;
+        self.asset_tree_fully_expanded = false;
+        self.selected_asset_ids.clear();
+        self.focused_asset_id = None;
+        if self
+            .quick_launch_selected_asset_id
+            .as_deref()
+            .is_some_and(|asset_id| !self.console_asset_tree.contains(asset_id))
+        {
+            self.quick_launch_selected_asset_id = None;
+        }
+        if self
+            .quick_launch_active_group_id
+            .as_deref()
+            .is_some_and(|group_id| !self.console_asset_tree.contains(group_id))
+        {
+            self.quick_launch_active_group_id = None;
+        }
+        if self
+            .saved_ssh_picker_selected_asset_id
+            .as_deref()
+            .is_some_and(|asset_id| !self.console_asset_tree.contains(asset_id))
+        {
+            self.saved_ssh_picker_selected_asset_id = None;
+        }
+        self.clear_active_asset_rename_session();
+        self.context_target_asset_id = None;
+        self.close_context_menu();
+        self.ensure_quick_launch_selection();
+    }
+
+    pub fn console_asset_tree(&self) -> &AssetTree {
+        &self.console_asset_tree
+    }
+
+    pub fn snippet_asset_tree(&self) -> &AssetTree {
+        &self.snippet_asset_tree
+    }
+
+    pub fn asset_kind(&self, asset_id: &str) -> Option<ConsoleAssetKind> {
+        match self.active_sidebar_destination {
+            SidebarDestination::Snippets => self
+                .snippet_asset_tree
+                .kind(asset_id)
+                .or_else(|| self.console_asset_tree.kind(asset_id)),
+            SidebarDestination::Console | SidebarDestination::Keychain => self
+                .console_asset_tree
+                .kind(asset_id)
+                .or_else(|| self.snippet_asset_tree.kind(asset_id)),
+        }
+    }
+
+    pub fn replace_snippet_asset_tree(&mut self, tree: AssetTree) {
+        self.snippet_asset_tree = tree;
+        self.pending_snippet_create_action = None;
+        self.pending_snippet_activation = None;
+    }
+
+    pub fn replace_vault_projection(
+        &mut self,
+        console_tree: AssetTree,
+        snippet_tree: AssetTree,
+        keychain_catalog: KeychainCatalog,
+    ) {
+        self.replace_console_asset_tree(console_tree);
+        self.replace_snippet_asset_tree(snippet_tree);
+        self.replace_keychain_catalog(keychain_catalog);
+    }
+
+    pub fn clear_vault_projection(&mut self) {
+        self.replace_vault_projection(
+            AssetTree::new(),
+            AssetTree::new(),
+            KeychainCatalog::default(),
+        );
+    }
+
+    pub fn requested_assets_sidebar(&self) -> bool {
+        self.show_assets_sidebar
+    }
+
+    pub fn requested_right_panel(&self) -> bool {
+        self.show_right_panel
+    }
+
+    pub fn sync_modal_open(&self) -> bool {
+        self.sync_modal_state.open
+    }
+
+    pub fn sync_modal_state(&self) -> &SyncModalViewState {
+        &self.sync_modal_state
+    }
+
+    pub fn sync_modal_state_mut(&mut self) -> &mut SyncModalViewState {
+        &mut self.sync_modal_state
+    }
+
+    pub fn sync_feedback_state(&self) -> &SyncFeedbackViewState {
+        &self.sync_feedback_state
+    }
+
+    pub fn start_sync_feedback(&mut self, text: impl Into<String>) {
+        self.sync_feedback_state.text = text.into();
+        self.sync_feedback_state.running = true;
+        self.sync_feedback_state.sequence = self.sync_feedback_state.sequence.saturating_add(1);
+    }
+
+    pub fn show_sync_feedback(&mut self, text: impl Into<String>) {
+        self.sync_feedback_state.text = text.into();
+        self.sync_feedback_state.running = false;
+        self.sync_feedback_state.sequence = self.sync_feedback_state.sequence.saturating_add(1);
+    }
+
+    pub fn clear_sync_feedback(&mut self) {
+        self.sync_feedback_state.running = false;
+    }
+
+    pub fn right_panel_view_id(&self) -> &'static str {
+        self.right_panel_view.id()
+    }
+
+    pub fn set_right_panel_view(&mut self, value: RightPanelView) {
+        self.right_panel_view = value;
+    }
+
+    pub fn open_settings_panel(&mut self) {
+        self.open_sftp_panel();
+    }
+
+    pub fn open_sync_modal(&mut self) {
+        self.sync_modal_state.open = true;
+        self.show_global_menu = false;
+    }
+
+    pub fn set_sync_modal_error(&mut self, error: impl Into<String>) {
+        self.sync_modal_state.open = true;
+        self.sync_modal_state.error_text = error.into();
+    }
+
+    pub fn clear_sync_modal_error(&mut self) {
+        self.sync_modal_state.error_text.clear();
+    }
+
+    pub fn close_sync_modal(&mut self) {
+        self.sync_modal_state.open = false;
+        self.show_global_menu = false;
+    }
+
+    pub fn update_sync_modal_field(&mut self, field: &str, value: String) {
+        let modal = self.sync_modal_state_mut();
+        match field {
+            "git-remote-url" => modal.git_remote_url = value,
+            "git-branch" => modal.git_branch = value,
+            "git-auth-mode" => modal.git_auth_mode = value,
+            "git-https-username" => modal.git_https_username = value,
+            "git-https-secret" => modal.git_https_secret = value,
+            "git-ssh-private-key" => modal.git_ssh_private_key = value,
+            "git-ssh-passphrase" => modal.git_ssh_passphrase = value,
+            "master-password" => modal.master_password = value,
+            _ => return,
+        }
+        modal.error_text.clear();
+    }
+
+    pub fn update_sync_modal_toggle(&mut self, _field: &str, _value: bool) {
+        self.sync_modal_state_mut().error_text.clear();
+    }
+
+    pub fn toggle_right_panel(&mut self) {
+        self.show_right_panel = !self.show_right_panel;
+        self.right_panel_view = RightPanelView::Sftp;
+    }
+
+    pub fn transfer_center_open(&self) -> bool {
+        self.transfer_center_open
+    }
+
+    pub fn toggle_transfer_center(&mut self) {
+        self.transfer_center_open = !self.transfer_center_open;
+    }
+
+    pub fn window_placement(&self) -> WindowPlacementKind {
+        self.window_placement
+    }
+
+    pub fn set_window_placement(&mut self, value: WindowPlacementKind) {
+        self.window_placement = value;
+    }
+
+    pub fn is_window_maximized(&self) -> bool {
+        self.window_placement.is_maximized()
+    }
+
+    pub fn set_window_active(&mut self, value: bool) {
+        self.is_window_active = value;
+    }
+
+    pub fn toggle_theme_mode(&mut self) {
+        self.theme_mode = self.theme_mode.toggled();
+    }
+
+    pub fn toggle_always_on_top(&mut self) {
+        self.is_always_on_top = !self.is_always_on_top;
+    }
+}

@@ -1,0 +1,325 @@
+//! SSH runtime channel pump and output coalescing helpers.
+
+use std::sync::{Arc, Mutex};
+
+use russh::client;
+use russh::{Channel, ChannelMsg, Disconnect};
+use tokio::sync::mpsc;
+use tokio::time::{Sleep, sleep};
+use uuid::Uuid;
+
+use crate::app::ssh::shell_integration::runtime_shell_events;
+
+use super::auth::RuntimeClientHandler;
+use super::terminal::{TerminalSession, apply_remote_output, snapshot_terminal_surface};
+use super::transport::TransportChainGuard;
+use super::{
+    RuntimeCommand, SURFACE_DIRTY_NOTIFICATION_INTERVAL, SessionRuntimeEvent,
+    WORKING_SET_TRIM_IDLE_INTERVAL, WORKING_SET_TRIM_MIN_OUTPUT_BYTES,
+};
+
+pub(super) async fn run_channel_pump(
+    session_id: Uuid,
+    handle: Arc<client::Handle<RuntimeClientHandler>>,
+    mut channel: Channel<client::Msg>,
+    terminal: Arc<Mutex<TerminalSession>>,
+    event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    mut command_rx: mpsc::UnboundedReceiver<RuntimeCommand>,
+    _transport_chain_guard: TransportChainGuard,
+) {
+    let mut command_channel_open = true;
+    let mut dirty_notifier = SurfaceDirtyNotifier::default();
+    let mut dirty_timer: Option<std::pin::Pin<Box<Sleep>>> = None;
+    let mut working_set_trim_scheduler = WorkingSetTrimScheduler::default();
+    let mut working_set_trim_timer: Option<std::pin::Pin<Box<Sleep>>> = None;
+
+    loop {
+        tokio::select! {
+            maybe_command = command_rx.recv(), if command_channel_open => {
+                match maybe_command {
+                    Some(RuntimeCommand::TextInput(text)) => {
+                        let bytes = text.into_bytes();
+                        if let Err(bytes) = handle.data(channel.id(), bytes).await {
+                            let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                "failed to write {} bytes to SSH channel",
+                                bytes.len()
+                            )));
+                            break;
+                        }
+                    }
+                    Some(RuntimeCommand::KeyInput(event)) => {
+                        let bytes = match terminal.lock() {
+                            Ok(mut terminal) => match terminal.send_key_event(event) {
+                                Ok(bytes) => bytes,
+                                Err(err) => {
+                                    let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                        "failed to encode key input for SSH channel: {err}"
+                                    )));
+                                    break;
+                                }
+                            },
+                            Err(_) => {
+                                let _ = event_tx.send(SessionRuntimeEvent::Error(
+                                    "failed to lock terminal for key input".into()
+                                ));
+                                break;
+                            }
+                        };
+                        if bytes.is_empty() {
+                            continue;
+                        }
+                        if let Err(bytes) = handle.data(channel.id(), bytes).await {
+                            let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                "failed to write {} key bytes to SSH channel",
+                                bytes.len()
+                            )));
+                            break;
+                        }
+                    }
+                    Some(RuntimeCommand::MouseInput(event)) => {
+                        let bytes = match terminal.lock() {
+                            Ok(mut terminal) => match terminal.send_mouse_input(event) {
+                                Ok(bytes) => bytes,
+                                Err(err) => {
+                                    let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                        "failed to encode mouse input for SSH channel: {err}"
+                                    )));
+                                    break;
+                                }
+                            },
+                            Err(_) => {
+                                let _ = event_tx.send(SessionRuntimeEvent::Error(
+                                    "failed to lock terminal for mouse input".into()
+                                ));
+                                break;
+                            }
+                        };
+                        if bytes.is_empty() {
+                            continue;
+                        }
+                        if let Err(bytes) = handle.data(channel.id(), bytes).await {
+                            let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                "failed to write {} mouse bytes to SSH channel",
+                                bytes.len()
+                            )));
+                            break;
+                        }
+                    }
+                    Some(RuntimeCommand::Paste(text)) => {
+                        let bytes = match terminal.lock() {
+                            Ok(mut terminal) => match terminal.encode_paste(&text) {
+                                Ok(bytes) => bytes,
+                                Err(err) => {
+                                    let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                        "failed to encode paste for SSH channel: {err}"
+                                    )));
+                                    break;
+                                }
+                            },
+                            Err(_) => {
+                                let _ = event_tx.send(SessionRuntimeEvent::Error(
+                                    "failed to lock terminal for paste".into()
+                                ));
+                                break;
+                            }
+                        };
+                        if bytes.is_empty() {
+                            continue;
+                        }
+                        if let Err(bytes) = handle.data(channel.id(), bytes).await {
+                            let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                "failed to write {} paste bytes to SSH channel",
+                                bytes.len()
+                            )));
+                            break;
+                        }
+                    }
+                    Some(RuntimeCommand::Resize { rows, cols }) => {
+                        if let Ok(mut terminal) = terminal.lock() {
+                            terminal.resize(rows as usize, cols as usize);
+                        }
+                        if let Some(surface) = snapshot_terminal_surface(&terminal, session_id) {
+                            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+                        }
+                        if let Err(err) = channel
+                            .window_change(cols, rows, cols.saturating_mul(8), rows.saturating_mul(16))
+                            .await
+                        {
+                            let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
+                                "failed to resize SSH PTY: {err}"
+                            )));
+                            break;
+                        }
+                    }
+                    Some(RuntimeCommand::Disconnect) => {
+                        if dirty_notifier.take_pending() {
+                            let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
+                        }
+                        let _ = channel.eof().await;
+                        let _ = channel.close().await;
+                        let _ = handle
+                            .disconnect(Disconnect::ByApplication, "session closed", "en-US")
+                            .await;
+                        let _ = event_tx.send(SessionRuntimeEvent::Disconnected);
+                        break;
+                    }
+                    None => {
+                        command_channel_open = false;
+                    }
+                }
+            }
+            maybe_message = channel.wait() => {
+                match maybe_message {
+                    Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => {
+                        let parsed = runtime_shell_events(data.as_ref());
+                        if let Some(cwd) = parsed.cwd {
+                            let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd));
+                        }
+                        if !parsed.sanitized_bytes.is_empty() {
+                            apply_remote_output(&terminal, &parsed.sanitized_bytes);
+                            working_set_trim_scheduler.record_output(parsed.sanitized_bytes.len());
+                            working_set_trim_timer =
+                                Some(Box::pin(sleep(WORKING_SET_TRIM_IDLE_INTERVAL)));
+                            if dirty_notifier.record_output() {
+                                dirty_timer = Some(Box::pin(sleep(SURFACE_DIRTY_NOTIFICATION_INTERVAL)));
+                            }
+                        }
+                    }
+                    Some(ChannelMsg::Close) | Some(ChannelMsg::Eof) | None => {
+                        if dirty_notifier.take_pending() {
+                            let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
+                        }
+                        let _ = event_tx.send(SessionRuntimeEvent::Disconnected);
+                        break;
+                    }
+                    Some(ChannelMsg::Failure) => {
+                        if dirty_notifier.take_pending() {
+                            let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
+                        }
+                        let _ = event_tx.send(SessionRuntimeEvent::Error(
+                            "remote SSH channel reported failure".into()
+                        ));
+                        break;
+                    }
+                    Some(_) => {}
+                }
+            }
+            () = async { if let Some(timer) = dirty_timer.as_mut() { timer.await } }, if dirty_timer.is_some() => {
+                dirty_timer = None;
+                if dirty_notifier.flush_due() {
+                    let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
+                }
+            }
+            () = async { if let Some(timer) = working_set_trim_timer.as_mut() { timer.await } }, if working_set_trim_timer.is_some() => {
+                working_set_trim_timer = None;
+                if working_set_trim_scheduler.trim_due() {
+                    crate::app::memory::trim_process_working_set();
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct SurfaceDirtyNotifier {
+    dirty: bool,
+    notification_armed: bool,
+}
+
+impl SurfaceDirtyNotifier {
+    fn record_output(&mut self) -> bool {
+        self.dirty = true;
+        if self.notification_armed {
+            false
+        } else {
+            self.notification_armed = true;
+            true
+        }
+    }
+
+    fn flush_due(&mut self) -> bool {
+        self.notification_armed = false;
+        if self.dirty {
+            self.dirty = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn take_pending(&mut self) -> bool {
+        self.notification_armed = false;
+        if self.dirty {
+            self.dirty = false;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct WorkingSetTrimScheduler {
+    pending_output_bytes: usize,
+}
+
+impl WorkingSetTrimScheduler {
+    fn record_output(&mut self, bytes: usize) {
+        self.pending_output_bytes = self.pending_output_bytes.saturating_add(bytes);
+    }
+
+    fn trim_due(&mut self) -> bool {
+        let should_trim = self.pending_output_bytes >= WORKING_SET_TRIM_MIN_OUTPUT_BYTES;
+        self.pending_output_bytes = 0;
+        should_trim
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn surface_dirty_notifier_coalesces_repeated_output_until_flush() {
+        let mut notifier = SurfaceDirtyNotifier::default();
+
+        assert!(notifier.record_output());
+        assert!(!notifier.record_output());
+        assert!(!notifier.record_output());
+        assert!(notifier.flush_due());
+        assert!(!notifier.flush_due());
+    }
+
+    #[test]
+    fn surface_dirty_notifier_rearms_after_flush() {
+        let mut notifier = SurfaceDirtyNotifier::default();
+
+        assert!(notifier.record_output());
+        assert!(notifier.flush_due());
+        assert!(notifier.record_output());
+        assert!(notifier.take_pending());
+        assert!(!notifier.take_pending());
+    }
+
+    #[test]
+    fn working_set_trim_scheduler_ignores_small_idle_output() {
+        let mut scheduler = WorkingSetTrimScheduler::default();
+
+        scheduler.record_output(WORKING_SET_TRIM_MIN_OUTPUT_BYTES / 4);
+
+        assert!(!scheduler.trim_due());
+        assert!(!scheduler.trim_due());
+    }
+
+    #[test]
+    fn working_set_trim_scheduler_requests_trim_after_large_idle_output() {
+        let mut scheduler = WorkingSetTrimScheduler::default();
+
+        scheduler.record_output(WORKING_SET_TRIM_MIN_OUTPUT_BYTES / 2);
+        scheduler.record_output(WORKING_SET_TRIM_MIN_OUTPUT_BYTES / 2);
+        scheduler.record_output(1);
+
+        assert!(scheduler.trim_due());
+        assert!(!scheduler.trim_due());
+    }
+}
