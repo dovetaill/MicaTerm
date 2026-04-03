@@ -487,8 +487,16 @@ fn windows_presenter_installation_prefers_native_while_shipping_contract_moves_t
         "runtime profile docs should describe the Linux-host software package as transitional while native Linux surfaces land"
     );
     assert!(
-        bootstrap_source.contains("build_native_terminal_presenter()"),
-        "workspace terminal presenter installation should construct the native presenter directly in the native-only pipeline"
+        bootstrap_source.contains("RefCell<Option<Box<dyn TerminalPresenter>>>"),
+        "workspace terminal presenter storage should stay empty until the lazy init helper installs a presenter"
+    );
+    assert!(
+        bootstrap_source.contains("ensure_workspace_terminal_presenter"),
+        "workspace terminal presenter installation should route through a lazy init helper"
+    );
+    assert!(
+        bootstrap_source.contains("profile.prefers_native_terminal_renderer()"),
+        "workspace terminal presenter initialization should honor the runtime profile before constructing a native presenter"
     );
     assert!(
         !bootstrap_source.contains("falling back to bitmap presenter"),

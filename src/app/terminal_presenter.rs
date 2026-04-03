@@ -8,6 +8,7 @@ use crate::app::terminal_atlas::TerminalAtlasSelection;
 use crate::app::terminal_font::{DirectWriteFontSystem, FontRequest, FontSystem, LoadedFont};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_layout::{TerminalTextShaper, TextShaper};
+#[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_model::TerminalModelFrame;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::wgpu_renderer::{
@@ -16,10 +17,21 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
-use crate::app::terminal_semantic::{
-    SemanticInputOverlay, SemanticOutputOverlay, detect_input_line_overlays,
-    detect_output_block_overlays,
-};
+#[cfg(feature = "terminal-native-renderer")]
+use crate::app::terminal_semantic::{detect_input_line_overlays, detect_output_block_overlays};
+use crate::app::terminal_semantic::{SemanticInputOverlay, SemanticOutputOverlay};
+
+#[cfg(not(feature = "terminal-native-renderer"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PreparedBackgroundRun;
+
+#[cfg(not(feature = "terminal-native-renderer"))]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PreparedMonochromeGlyphDraw;
+
+#[cfg(not(feature = "terminal-native-renderer"))]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PreparedColorGlyphDraw;
 
 #[derive(Clone, Debug)]
 pub enum PresentedTerminalFrame {
@@ -340,6 +352,7 @@ impl From<PreparedUnderlineRun> for NativeUnderlineRun {
     }
 }
 
+#[cfg(feature = "terminal-native-renderer")]
 fn selection_overlay_rects(
     selection: TerminalAtlasSelection,
     cols: u32,

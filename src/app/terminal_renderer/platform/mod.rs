@@ -2,23 +2,34 @@
 
 pub mod backend;
 pub mod wayland;
+#[cfg(feature = "terminal-native-renderer")]
 pub mod windows;
+#[cfg(not(feature = "terminal-native-renderer"))]
+pub mod windows_stub;
 pub mod x11;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(any(not(target_os = "windows"), not(feature = "terminal-native-renderer")))]
 use crate::AppWindow;
 
 pub use backend::{
     NativeTerminalSurfaceRect, PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
 };
 pub use wayland::WaylandNativeSurfaceBackend;
+#[cfg(feature = "terminal-native-renderer")]
 pub use windows::WindowsNativeSurfaceBackend;
+#[cfg(not(feature = "terminal-native-renderer"))]
+pub use windows_stub::WindowsNativeSurfaceBackend;
 pub use x11::X11NativeSurfaceBackend;
 
 pub fn create_platform_native_surface_backend() -> Box<dyn PlatformNativeSurfaceBackend> {
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", feature = "terminal-native-renderer"))]
     {
         Box::new(WindowsNativeSurfaceBackend::default())
+    }
+
+    #[cfg(all(target_os = "windows", not(feature = "terminal-native-renderer")))]
+    {
+        Box::new(DetachedPlatformSurfaceBackend::default())
     }
 
     #[cfg(target_os = "linux")]
@@ -54,14 +65,14 @@ fn host_prefers_x11_backend() -> bool {
             .unwrap_or(false)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(any(not(target_os = "windows"), not(feature = "terminal-native-renderer")))]
 #[derive(Default)]
 struct DetachedPlatformSurfaceBackend {
     rect: NativeTerminalSurfaceRect,
     frame: Option<RetainedNativeTerminalSurfaceFrame>,
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(any(not(target_os = "windows"), not(feature = "terminal-native-renderer")))]
 impl PlatformNativeSurfaceBackend for DetachedPlatformSurfaceBackend {
     fn attach(&mut self, _window: &AppWindow) -> anyhow::Result<()> {
         Ok(())

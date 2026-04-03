@@ -140,6 +140,14 @@ fn bootstrap_source_uses_windows_native_terminal_presenter_for_native_frames() {
         "bootstrap should consume native terminal frames from the presenter seam"
     );
     assert!(
+        bootstrap_source.contains("ensure_workspace_terminal_presenter"),
+        "bootstrap should lazily initialize the workspace terminal presenter through an on-demand helper"
+    );
+    assert!(
+        !bootstrap_source.contains("install_workspace_terminal_presenter(window, profile);"),
+        "bootstrap should stop eagerly installing the workspace terminal presenter during startup"
+    );
+    assert!(
         !bootstrap_source.contains("frame_token: u64::try_from(surface.seqno)"),
         "bootstrap should stop synthesizing native frame tokens directly from surface seqno once the native renderer owns frame preparation"
     );

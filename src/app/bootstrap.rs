@@ -174,11 +174,13 @@ struct ShellSessionBridge {
 
 const MAX_SSH_PROXY_CHAIN_DEPTH: usize = 8;
 const WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD: usize = 4;
+const FALLBACK_WORKSPACE_TERMINAL_CELL_WIDTH_PX: u32 = 10;
+const FALLBACK_WORKSPACE_TERMINAL_CELL_HEIGHT_PX: u32 = 22;
 
 thread_local! {
-    static WORKSPACE_TERMINAL_PRESENTER: RefCell<Box<dyn TerminalPresenter>> = RefCell::new(
-        build_native_terminal_presenter().expect("native terminal presenter should initialize")
-    );
+    static WORKSPACE_TERMINAL_PRESENTER: RefCell<Option<Box<dyn TerminalPresenter>>> = const {
+        RefCell::new(None)
+    };
     static WORKSPACE_NATIVE_TERMINAL_SURFACE: RefCell<Option<NativeTerminalSurface>> = const {
         RefCell::new(None)
     };
@@ -3935,14 +3937,43 @@ fn build_native_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
     ))
 }
 
-fn install_workspace_terminal_presenter(window: &AppWindow, profile: AppRuntimeProfile) {
-    let presenter = build_workspace_terminal_presenter(profile)
-        .expect("native terminal presenter should initialize during bootstrap");
+fn ensure_workspace_terminal_presenter(
+    window: &AppWindow,
+    profile: AppRuntimeProfile,
+) -> Result<bool> {
+    if !profile.prefers_native_terminal_renderer() {
+        return Ok(false);
+    }
 
-    WORKSPACE_TERMINAL_PRESENTER.with(|cell| {
-        *cell.borrow_mut() = presenter;
-    });
-    window.set_workspace_session_native_frame_token(0);
+    let mut initialized = false;
+    WORKSPACE_TERMINAL_PRESENTER.with(|cell| -> Result<()> {
+        let needs_init = cell.borrow().is_none();
+        if needs_init {
+            let presenter = build_workspace_terminal_presenter(profile)?;
+            *cell.borrow_mut() = Some(presenter);
+            initialized = true;
+        }
+        Ok(())
+    })?;
+
+    if initialized {
+        window.set_workspace_session_native_frame_token(0);
+    }
+
+    Ok(true)
+}
+
+fn workspace_terminal_default_cell_size() -> (u32, u32) {
+    WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
+        presenter
+            .borrow()
+            .as_ref()
+            .map(|presenter| presenter.default_cell_size())
+            .unwrap_or((
+                FALLBACK_WORKSPACE_TERMINAL_CELL_WIDTH_PX,
+                FALLBACK_WORKSPACE_TERMINAL_CELL_HEIGHT_PX,
+            ))
+    })
 }
 
 fn workspace_native_terminal_rect(window: &AppWindow) -> NativeTerminalSurfaceRect {
@@ -4189,6 +4220,7 @@ fn sync_workspace_session_state_with_manager(
     follow_tracker: &mut WorkspaceFollowTracker,
     manager: Option<&SessionManager>,
 ) {
+    let profile = AppRuntimeProfile::packaged();
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
     window.set_workspace_session_host_mode(state.workspace_session_host_mode().into());
@@ -4203,8 +4235,7 @@ fn sync_workspace_session_state_with_manager(
         |model| window.set_workspace_session_visible_lines(model),
     );
 
-    let (default_cell_width_px, default_cell_height_px) =
-        WORKSPACE_TERMINAL_PRESENTER.with(|presenter| presenter.borrow().default_cell_size());
+    let (default_cell_width_px, default_cell_height_px) = workspace_terminal_default_cell_size();
     window.set_workspace_session_cell_width(default_cell_width_px as f32);
     window.set_workspace_session_cell_height(default_cell_height_px as f32);
     sync_workspace_native_terminal_surface_geometry(window);
@@ -4216,8 +4247,19 @@ fn sync_workspace_session_state_with_manager(
         let selection = active_workspace_terminal_selection(window);
         let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
         let mut native_cursor = None;
+        if let Err(err) = ensure_workspace_terminal_presenter(window, profile) {
+            tracing::error!(
+                target: "app.terminal",
+                error = %err,
+                "failed to initialize workspace terminal presenter"
+            );
+        }
         WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
             let mut presenter = presenter.borrow_mut();
+            let Some(presenter) = presenter.as_mut() else {
+                clear_workspace_native_terminal_frame(window);
+                return;
+            };
             match presenter.present(
                 surface,
                 TerminalPresentationOptions {
@@ -6835,7 +6877,7 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
 fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window: &AppWindow,
     store: Option<UiPreferencesStore>,
-    profile: AppRuntimeProfile,
+    _profile: AppRuntimeProfile,
     effects: Rc<dyn PlatformWindowEffects>,
     asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
     keychain_repo_override: Option<Rc<dyn KeychainCatalogRepository>>,
@@ -6957,7 +6999,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
         *surface.borrow_mut() = Some(NativeTerminalSurface::attach(window));
     });
-    install_workspace_terminal_presenter(window, profile);
 
     apply_restored_window_size(window, default_window_size());
     bind_windows_window_state_tracking(
