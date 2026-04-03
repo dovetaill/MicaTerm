@@ -1,4 +1,4 @@
-//! Renders the active terminal grid into a single image surface using a Sarasa-backed sprite atlas.
+//! Renders the active terminal grid into a single image surface using the bundled Fusion JetBrains Maple Mono atlas font.
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -19,7 +19,8 @@ use crate::app::terminal_emoji::{
     classify_cluster_render_kind,
 };
 
-const SARASA_FONT_BYTES: &[u8] = include_bytes!("../../ui/fonts/SarasaTermSCNerd-Regular.ttf");
+const FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES: &[u8] =
+    include_bytes!("../../assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf");
 const TERMINAL_FONT_SIZE_PX: f32 = 18.0;
 const MIN_CELL_WIDTH_PX: u32 = 8;
 const MIN_CELL_HEIGHT_PX: u32 = 20;
@@ -97,6 +98,7 @@ impl TerminalAtlasSelection {
 pub struct TerminalSurfaceFrame {
     pub image: Image,
     pub metrics: TerminalAtlasMetrics,
+    pub raster_metrics: TerminalAtlasMetrics,
     pub cache_entries: usize,
     pub rerendered_rows: Vec<u32>,
     pub rendered_clusters: Vec<RenderedCluster>,
@@ -205,10 +207,13 @@ impl TerminalAtlasRenderer {
     }
 
     fn with_emoji_renderer(emoji_renderer: TerminalEmojiRenderer) -> Result<Self> {
-        let font = FontArc::try_from_slice(SARASA_FONT_BYTES)
-            .map_err(|error| anyhow!("failed to load bundled Sarasa terminal font: {error}"))?;
-        let swash_font = SwashFontRef::from_index(SARASA_FONT_BYTES, 0)
-            .ok_or_else(|| anyhow!("failed to load bundled Sarasa terminal font into swash"))?;
+        let font = FontArc::try_from_slice(FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES).map_err(
+            |error| anyhow!("failed to load bundled Fusion JetBrains Maple Mono font: {error}"),
+        )?;
+        let swash_font = SwashFontRef::from_index(FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES, 0)
+            .ok_or_else(|| {
+                anyhow!("failed to load bundled Fusion JetBrains Maple Mono font into swash")
+            })?;
         let logical_metrics = compute_terminal_metrics(&font, TERMINAL_FONT_SIZE_PX);
         Ok(Self {
             font,
@@ -229,6 +234,10 @@ impl TerminalAtlasRenderer {
 
     pub fn metrics(&self) -> TerminalAtlasMetrics {
         self.logical_metrics
+    }
+
+    pub fn raster_metrics(&self) -> TerminalAtlasMetrics {
+        self.raster_metrics
     }
 
     pub fn set_raster_scale(&mut self, scale: f32) {
@@ -327,6 +336,7 @@ impl TerminalAtlasRenderer {
         Ok(TerminalSurfaceFrame {
             image: Image::from_rgba8(buffer),
             metrics: self.logical_metrics,
+            raster_metrics: self.raster_metrics,
             cache_entries: self.sprite_cache.len(),
             rerendered_rows,
             rendered_clusters,

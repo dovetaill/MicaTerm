@@ -12,37 +12,26 @@ fn startup_path_drops_legacy_terminal_font_imports() {
         !content.contains("SarasaTermSCNerd-Unhinted.ttf"),
         "the terminal font should still be owned by the Rust atlas renderer instead of a Slint import path"
     );
-    assert!(
-        !content.contains("MapleMonoNormalNL-NF-CN-Regular.ttf"),
-        "Maple should be gone from the terminal startup path"
-    );
 }
 
 #[test]
-fn bundled_terminal_font_contract_switches_to_sarasa_unhinted_only() {
+fn bundled_terminal_font_contract_uses_fusion_jetbrains_maple_mono_bundle() {
     assert!(
-        Path::new("ui/fonts/SarasaTermSCNerd-Regular.ttf").exists(),
-        "the bundled terminal font should switch to the regular Sarasa atlas face"
+        Path::new("assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf")
+            .exists(),
+        "the bundled terminal font should ship the Fusion JetBrains Maple Mono regular face shared by the bitmap and native renderers"
     );
     assert!(
         !Path::new("ui/fonts/IosevkaTerm-Regular.ttf").exists(),
         "the old Iosevka terminal font should be removed from the bundled assets"
     );
-    assert!(
-        !Path::new("ui/fonts/MapleMonoNormalNL-NF-CN-Regular.ttf").exists(),
-        "Maple should be removed from the bundled terminal font assets"
-    );
 }
 
 #[test]
-fn terminal_host_drops_maple_and_legacy_font_stack_strings() {
+fn terminal_host_drops_legacy_font_stack_strings() {
     let content =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
-    assert!(
-        !content.contains("Maple"),
-        "terminal host should stop advertising Maple now that Sarasa is back"
-    );
     assert!(
         !content.contains("Iosevka Term"),
         "terminal host should stop advertising the Iosevka fallback stack"

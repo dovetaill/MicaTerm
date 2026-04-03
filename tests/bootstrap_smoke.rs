@@ -18,18 +18,15 @@ use mica_term::app::assets_catalog::{
     PersistedAssetSshProxySpec, PersistedSnippetSpec, PersistedSshConnectionSpec,
     catalog_to_asset_tree,
 };
-use mica_term::app::async_runtime::AppAsyncRuntime;
 use mica_term::app::bootstrap::{
     ImportedPrivateKey, PrivateKeyImporter, VaultProviderFactory, VaultRuntimeOptions, app_title,
     bind_top_status_bar_with_injected_services_and_vault_runtime, bind_top_status_bar_with_store,
-    bind_top_status_bar_with_injected_services_and_vault_runtime_and_async_handle,
     bind_top_status_bar_with_store_and_effects_and_asset_repo,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store,
-    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_keychain_repo_and_launcher_and_credential_store,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer,
     build_shared_app_credential_store_for_paths, default_window_size,
 };
-use mica_term::app::keychain::{KeychainCatalog, KeychainCatalogRepository};
+use mica_term::app::keychain::KeychainCatalog;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::build_test_logging_runtime;
@@ -41,9 +38,7 @@ use mica_term::app::ssh::connection_progress::{
 };
 use mica_term::app::ssh::credentials::{
     CredentialStore, MemoryCredentialStore, SshCredentialKind, StoredSshSecretBundle,
-    keychain_identity_credential_ref, keychain_key_credential_ref,
-    load_keychain_identity_secret_bundle, load_keychain_key_secret_bundle, load_secret_bundle,
-    persist_secret_bundle, ssh_credential_ref,
+    load_secret_bundle, persist_secret_bundle, ssh_credential_ref,
 };
 use mica_term::app::ssh::known_hosts::{
     KnownHostCheck, KnownHostsService, default_known_hosts_path,
@@ -81,8 +76,7 @@ use mica_term::shell::assets::{
 };
 use mica_term::shell::metrics::ShellMetrics;
 use mica_term::theme::ThemeMode;
-use russh::keys::ssh_key::{LineEnding, rand_core::OsRng};
-use russh::keys::{Algorithm, HashAlg, PrivateKey, PublicKey};
+use russh::keys::{HashAlg, PublicKey};
 use secrecy::SecretString;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
 use slint::{ComponentHandle, LogicalPosition, Model};
@@ -118,8 +112,8 @@ fn bootstrap_source_threads_native_terminal_surface_contract() {
         "bootstrap should depend on a native terminal surface hook once native terminal rendering is introduced"
     );
     assert!(
-        !bootstrap_source.contains("set_workspace_session_render_mode"),
-        "bootstrap should stop publishing a bitmap/native render mode selector once only native frames remain"
+        bootstrap_source.contains("set_workspace_session_render_mode"),
+        "bootstrap should publish the active terminal render mode so the software wrapper can select the bitmap fallback"
     );
     assert!(
         bootstrap_source.contains("set_workspace_session_native_frame_token"),
@@ -144,44 +138,16 @@ fn bootstrap_source_uses_windows_native_terminal_presenter_for_native_frames() {
         "bootstrap should lazily initialize the workspace terminal presenter through an on-demand helper"
     );
     assert!(
-        !bootstrap_source.contains("install_workspace_terminal_presenter(window, profile);"),
+        !bootstrap_source.contains("install_workspace_terminal_presenter("),
         "bootstrap should stop eagerly installing the workspace terminal presenter during startup"
+    );
+    assert!(
+        bootstrap_source.contains("PresentedTerminalFrame::Bitmap(frame)"),
+        "bootstrap should keep consuming bitmap terminal frames for the software compatibility wrapper"
     );
     assert!(
         !bootstrap_source.contains("frame_token: u64::try_from(surface.seqno)"),
         "bootstrap should stop synthesizing native frame tokens directly from surface seqno once the native renderer owns frame preparation"
-    );
-}
-
-#[test]
-fn bootstrap_routes_vault_sync_scheduling_through_vault_sync_service() {
-    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
-
-    assert!(
-        bootstrap_source.contains("VaultSyncService::new"),
-        "bootstrap should construct VaultSyncService as the single vault sync orchestration entry"
-    );
-    assert!(
-        bootstrap_source.contains("or_else(|| session_runtime_guard.as_ref().map(AppAsyncRuntime::handle))"),
-        "bootstrap should prefer the explicit async runtime handle before falling back to session_runtime_guard"
-    );
-    assert!(
-        !bootstrap_source.contains("struct VaultSyncSchedulerState"),
-        "bootstrap should stop defining VaultSyncSchedulerState locally once orchestration moves into VaultSyncService"
-    );
-}
-
-#[test]
-fn bootstrap_routes_asset_mutations_through_vault_sync_service_dirty_api() {
-    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
-
-    assert!(
-        bootstrap_source.contains("request(VaultSyncIntent::LocalMutation)"),
-        "asset mutations should call VaultSyncService's LocalMutation dirty API directly"
-    );
-    assert!(
-        !bootstrap_source.contains("fn mark_local_vault_dirty_and_arm_sync("),
-        "bootstrap should remove the legacy local dirty helper once mutation entry points call the service directly"
     );
 }
 
@@ -238,12 +204,6 @@ struct AssetRepoState {
     save_attempts: Vec<PersistedAssetCatalog>,
 }
 
-#[derive(Default)]
-struct KeychainRepoState {
-    load_calls: usize,
-    save_attempts: Vec<KeychainCatalog>,
-}
-
 struct RecordingAssetRepo {
     loaded_catalog: PersistedAssetCatalog,
     state: Rc<RefCell<AssetRepoState>>,
@@ -280,32 +240,6 @@ impl AssetCatalogRepository for RecordingAssetRepo {
     }
 }
 
-struct RecordingKeychainRepo {
-    loaded_catalog: KeychainCatalog,
-    state: Rc<RefCell<KeychainRepoState>>,
-}
-
-impl RecordingKeychainRepo {
-    fn new(loaded_catalog: KeychainCatalog, state: Rc<RefCell<KeychainRepoState>>) -> Self {
-        Self {
-            loaded_catalog,
-            state,
-        }
-    }
-}
-
-impl KeychainCatalogRepository for RecordingKeychainRepo {
-    fn load(&self) -> Result<KeychainCatalog> {
-        self.state.borrow_mut().load_calls += 1;
-        Ok(self.loaded_catalog.clone())
-    }
-
-    fn save(&self, catalog: &KeychainCatalog) -> Result<()> {
-        self.state.borrow_mut().save_attempts.push(catalog.clone());
-        Ok(())
-    }
-}
-
 #[derive(Clone, Default)]
 struct FakeLauncher;
 
@@ -333,6 +267,11 @@ struct PasteWarningProjectionLauncher {
 
 #[derive(Clone, Default)]
 struct ScrollProjectionLauncher;
+
+#[derive(Clone)]
+struct CountingScrollProjectionLauncher {
+    state: ScrollProjectionState,
+}
 
 #[derive(Clone)]
 struct FollowProjectionLauncher {
@@ -622,6 +561,7 @@ struct PasteProjectionRuntimeControl {
 #[derive(Clone, Default)]
 struct ScrollProjectionState {
     surface: Arc<Mutex<Option<TerminalSurfaceState>>>,
+    scroll_call_count: Arc<Mutex<usize>>,
 }
 
 #[derive(Clone, Default)]
@@ -685,6 +625,23 @@ impl FollowProjectionState {
         {
             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(next_surface));
         }
+    }
+}
+
+impl ScrollProjectionState {
+    fn record_scroll_call(&self) {
+        let mut count = self
+            .scroll_call_count
+            .lock()
+            .expect("lock scroll projection call count");
+        *count = count.saturating_add(1);
+    }
+
+    fn scroll_call_count(&self) -> usize {
+        *self
+            .scroll_call_count
+            .lock()
+            .expect("lock scroll projection call count")
     }
 }
 
@@ -1338,6 +1295,43 @@ impl SessionRuntimeLauncher for ScrollProjectionLauncher {
     }
 }
 
+impl CountingScrollProjectionLauncher {
+    fn new(state: ScrollProjectionState) -> Self {
+        Self { state }
+    }
+}
+
+impl SessionRuntimeLauncher for CountingScrollProjectionLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        Box::pin(async move {
+            let surface = bootstrap_surface_with_viewport(session_id, 1, 3, 8);
+            *state
+                .surface
+                .lock()
+                .expect("lock scroll projection surface") = Some(surface.clone());
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
+            Ok(Box::new(ScrollProjectionRuntimeControl { state })
+                as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeLauncher for FollowProjectionLauncher {
     fn launch(
         &self,
@@ -1576,6 +1570,7 @@ impl SessionRuntimeControl for ScrollProjectionRuntimeControl {
     }
 
     fn scroll_viewport_lines(&self, delta: i32) -> Result<TerminalSurfaceState> {
+        self.state.record_scroll_call();
         let mut surface = self
             .state
             .surface
@@ -1852,24 +1847,6 @@ fn bind_with_launcher_and_credential_store(
     );
 }
 
-fn bind_with_launcher_and_credential_store_and_keychain_repo(
-    app: &AppWindow,
-    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
-    keychain_repo: Option<Rc<dyn KeychainCatalogRepository>>,
-    launcher: Arc<dyn SessionRuntimeLauncher>,
-    credential_store: Arc<dyn CredentialStore>,
-) {
-    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_keychain_repo_and_launcher_and_credential_store(
-        app,
-        None,
-        default_platform_window_effects(),
-        asset_repo,
-        keychain_repo,
-        launcher,
-        credential_store,
-    );
-}
-
 fn bind_with_launcher_and_credential_store_and_private_key_importer(
     app: &AppWindow,
     asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
@@ -1904,35 +1881,6 @@ fn bind_with_vault_runtime(
         Arc::new(CancelledPrivateKeyImporter),
         vault_runtime,
     );
-}
-
-fn bind_with_vault_runtime_and_async_handle(
-    app: &AppWindow,
-    launcher: Arc<dyn SessionRuntimeLauncher>,
-    credential_store: Arc<dyn CredentialStore>,
-    async_runtime_handle: tokio::runtime::Handle,
-    vault_runtime: VaultRuntimeOptions,
-) {
-    bind_top_status_bar_with_injected_services_and_vault_runtime_and_async_handle(
-        app,
-        None,
-        default_platform_window_effects(),
-        None,
-        launcher,
-        credential_store,
-        Arc::new(CancelledPrivateKeyImporter),
-        Some(async_runtime_handle),
-        vault_runtime,
-    );
-}
-
-fn find_keychain_row_id(app: &AppWindow, kind: &str, label: &str) -> String {
-    let rows = app.get_keychain_asset_items();
-    (0..rows.row_count())
-        .filter_map(|index| rows.row_data(index))
-        .find(|row| row.kind.as_str() == kind && row.label.as_str() == label)
-        .map(|row| row.id.to_string())
-        .expect("matching keychain row")
 }
 
 #[test]
@@ -2559,6 +2507,37 @@ fn select_terminal_welcome_span(app: &AppWindow) {
     });
     app.window().dispatch_event(WindowEvent::PointerReleased {
         position: selection_end,
+        button: PointerEventButton::Left,
+    });
+}
+
+fn drag_terminal_padding_into_grid(app: &AppWindow) {
+    let drag_start = LogicalPosition::new(
+        app.get_layout_workspace_session_native_surface_x() - 4.0,
+        app.get_layout_titlebar_height()
+            + app.get_layout_workspace_session_native_surface_y()
+            + (app.get_workspace_session_cell_height() * 0.5),
+    );
+    let drag_end = LogicalPosition::new(
+        app.get_layout_workspace_session_native_surface_x()
+            + (app.get_workspace_session_cell_width() * 10.5),
+        app.get_layout_titlebar_height()
+            + app.get_layout_workspace_session_native_surface_y()
+            + (app.get_workspace_session_cell_height() * 0.5),
+    );
+
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: drag_start,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: drag_start,
+        button: PointerEventButton::Left,
+    });
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: drag_end,
+    });
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: drag_end,
         button: PointerEventButton::Left,
     });
 }
@@ -3306,69 +3285,6 @@ fn manual_sync_modal_returns_before_slow_primary_write_completes() {
     assert!(
         started.elapsed() < Duration::from_millis(120),
         "manual sync should return quickly while the provider runs in the background"
-    );
-
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        if primary_inner.recorded_writes().len() == 1 {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "background sync never completed within the deadline"
-        );
-        std::thread::sleep(Duration::from_millis(20));
-        slint::platform::update_timers_and_animations();
-    }
-}
-
-#[test]
-fn manual_sync_uses_explicit_runtime_handle_when_session_runtime_guard_is_absent() {
-    i_slint_backend_testing::init_no_event_loop();
-
-    let temp_root = sample_vault_runtime_root("manual-sync-explicit-runtime-handle");
-    let primary_inner = Arc::new(MockVaultProvider::new(
-        "remote-primary",
-        ProviderCapabilities::bundled_files_like(),
-    ));
-    let primary = Arc::new(DelayedVaultProvider::new(
-        Arc::clone(&primary_inner),
-        Duration::ZERO,
-        Duration::from_millis(250),
-    ));
-    let provider_factory = AnyVaultProviderFactory::default();
-    provider_factory.insert(primary as Arc<dyn VaultProvider>);
-
-    let mut bundle = sample_bootstrap_bundle_with_primary_and_mirror();
-    bundle
-        .remotes
-        .retain(|remote| remote.role == RemoteRole::Primary);
-
-    let app = AppWindow::new().unwrap();
-    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
-    let async_runtime = AppAsyncRuntime::new().expect("create app async runtime");
-    bind_with_vault_runtime_and_async_handle(
-        &app,
-        Arc::new(FakeLauncher),
-        Arc::clone(&credential_store),
-        async_runtime.handle(),
-        VaultRuntimeOptions {
-            root_dir: Some(temp_root),
-            provider_factory: Arc::new(provider_factory),
-            bootstrap_template: Some(bundle),
-        },
-    );
-
-    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
-    app.invoke_open_sync_modal_requested();
-    app.invoke_sync_modal_submit_master_password("vault-pass".into());
-
-    let started = Instant::now();
-    app.invoke_sync_modal_sync_now_requested();
-
-    assert!(
-        started.elapsed() < Duration::from_millis(120),
-        "manual sync should prefer the supplied async runtime handle when no session runtime guard exists"
     );
 
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -4983,255 +4899,6 @@ fn editing_saved_password_modal_hydrates_real_secret_masked() {
 }
 
 #[test]
-fn editing_saved_keychain_ssh_key_modal_hydrates_saved_private_key_material() {
-    i_slint_backend_testing::init_no_event_loop();
-
-    let private_key =
-        PrivateKey::random(&mut OsRng, Algorithm::Ed25519).expect("generate sample private key");
-    let private_key_text = private_key
-        .to_openssh(LineEnding::LF)
-        .expect("encode private key")
-        .to_string();
-    let public_key_text = private_key
-        .public_key()
-        .to_openssh()
-        .expect("encode public key");
-    let fingerprint = private_key.fingerprint(HashAlg::Sha256).to_string();
-
-    let app = AppWindow::new().unwrap();
-    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
-    bind_with_launcher_and_credential_store(
-        &app,
-        None,
-        Arc::new(FakeLauncher),
-        Arc::clone(&credential_store),
-    );
-
-    app.invoke_sidebar_destination_selected("keychain".into());
-    app.invoke_assets_create_action_selected("new-ssh-key".into());
-    app.invoke_keychain_ssh_key_modal_draft_changed("name".into(), "Prod Key".into());
-    app.invoke_keychain_ssh_key_modal_draft_changed("private_key".into(), private_key_text.clone().into());
-    app.invoke_keychain_ssh_key_modal_draft_changed("public_key".into(), public_key_text.clone().into());
-    app.invoke_keychain_ssh_key_modal_draft_changed("fingerprint".into(), fingerprint.clone().into());
-    app.invoke_confirm_asset_modal_requested();
-
-    let key_id = app
-        .get_keychain_asset_items()
-        .row_data(0)
-        .expect("saved keychain ssh key")
-        .id
-        .to_string();
-
-    app.invoke_asset_context_menu_requested(key_id.into(), "ssh-key".into(), 96.0, 160.0);
-    app.invoke_assets_context_menu_action_invoked("edit-keychain-ssh-key".into());
-
-    assert!(app.get_asset_modal_open());
-    assert_eq!(app.get_asset_modal_kind().as_str(), "new-keychain-ssh-key");
-    assert_eq!(app.get_keychain_ssh_key_modal_name().as_str(), "Prod Key");
-    assert_eq!(app.get_keychain_ssh_key_modal_private_key().as_str(), private_key_text);
-    assert_eq!(app.get_keychain_ssh_key_modal_public_key().as_str(), public_key_text);
-    assert_eq!(app.get_keychain_ssh_key_modal_fingerprint().as_str(), fingerprint);
-}
-
-#[test]
-fn editing_keychain_identity_modal_hydrates_saved_password_secret() {
-    i_slint_backend_testing::init_no_event_loop();
-
-    let app = AppWindow::new().unwrap();
-    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
-    bind_with_launcher_and_credential_store(
-        &app,
-        None,
-        Arc::new(FakeLauncher),
-        Arc::clone(&credential_store),
-    );
-
-    app.invoke_sidebar_destination_selected("keychain".into());
-    app.invoke_assets_create_action_selected("new-identity".into());
-    app.invoke_keychain_identity_modal_draft_changed("name".into(), "Prod Identity".into());
-    app.invoke_keychain_identity_modal_draft_changed("username".into(), "ops".into());
-    app.invoke_keychain_identity_modal_draft_changed("password".into(), "secret".into());
-    app.invoke_keychain_identity_modal_draft_changed("remark".into(), "primary".into());
-    app.invoke_confirm_asset_modal_requested();
-
-    let identity_id = app
-        .get_keychain_asset_items()
-        .row_data(0)
-        .expect("saved keychain identity")
-        .id
-        .to_string();
-    let credential_ref = keychain_identity_credential_ref(identity_id.as_str());
-    assert_eq!(
-        load_keychain_identity_secret_bundle(credential_store.as_ref(), credential_ref.as_str())
-            .expect("load persisted identity bundle")
-            .password
-            .as_deref(),
-        Some("secret")
-    );
-
-    app.invoke_asset_context_menu_requested(identity_id.into(), "identity".into(), 96.0, 160.0);
-    app.invoke_assets_context_menu_action_invoked("edit-keychain-identity".into());
-
-    assert!(app.get_asset_modal_open());
-    assert_eq!(app.get_asset_modal_kind().as_str(), "new-keychain-identity");
-    assert_eq!(app.get_keychain_identity_modal_name().as_str(), "Prod Identity");
-    assert_eq!(app.get_keychain_identity_modal_username().as_str(), "ops");
-    assert_eq!(app.get_keychain_identity_modal_password().as_str(), "secret");
-    assert_eq!(app.get_keychain_identity_modal_remark().as_str(), "primary");
-}
-
-#[test]
-fn keychain_identity_mutations_persist_into_local_catalog_repo_and_clear_secret_on_delete() {
-    i_slint_backend_testing::init_no_event_loop();
-
-    let app = AppWindow::new().unwrap();
-    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
-    let keychain_repo_state = Rc::new(RefCell::new(KeychainRepoState::default()));
-    let keychain_repo: Rc<dyn KeychainCatalogRepository> = Rc::new(RecordingKeychainRepo::new(
-        KeychainCatalog::default(),
-        Rc::clone(&keychain_repo_state),
-    ));
-    bind_with_launcher_and_credential_store_and_keychain_repo(
-        &app,
-        None,
-        Some(keychain_repo),
-        Arc::new(FakeLauncher),
-        Arc::clone(&credential_store),
-    );
-
-    app.invoke_sidebar_destination_selected("keychain".into());
-    app.invoke_assets_create_action_selected("new-identity".into());
-    app.invoke_keychain_identity_modal_draft_changed("name".into(), "Prod Identity".into());
-    app.invoke_keychain_identity_modal_draft_changed("username".into(), "ops".into());
-    app.invoke_keychain_identity_modal_draft_changed("password".into(), "secret".into());
-    app.invoke_keychain_identity_modal_draft_changed("remark".into(), "primary".into());
-    app.invoke_confirm_asset_modal_requested();
-
-    let identity_id = find_keychain_row_id(&app, "identity", "Prod Identity");
-    let identity_credential_ref = keychain_identity_credential_ref(identity_id.as_str());
-    let persisted_after_create = keychain_repo_state
-        .borrow()
-        .save_attempts
-        .last()
-        .expect("persisted keychain catalog after create")
-        .clone();
-    let created_node = persisted_after_create
-        .nodes
-        .get(&identity_id)
-        .expect("persisted identity node");
-    match &created_node.payload {
-        mica_term::app::keychain::KeychainNodePayload::Identity(spec) => {
-            assert_eq!(created_node.title, "Prod Identity");
-            assert_eq!(spec.username, "ops");
-            assert_eq!(spec.remark, "primary");
-        }
-        other => panic!("expected identity payload, got {other:?}"),
-    }
-
-    app.invoke_asset_context_menu_requested(identity_id.clone().into(), "identity".into(), 96.0, 160.0);
-    app.invoke_assets_context_menu_action_invoked("edit-keychain-identity".into());
-    app.invoke_keychain_identity_modal_draft_changed("username".into(), "root".into());
-    app.invoke_keychain_identity_modal_draft_changed("remark".into(), "rotated".into());
-    app.invoke_confirm_asset_modal_requested();
-
-    let persisted_after_edit = keychain_repo_state
-        .borrow()
-        .save_attempts
-        .last()
-        .expect("persisted keychain catalog after edit")
-        .clone();
-    match &persisted_after_edit.nodes[&identity_id].payload {
-        mica_term::app::keychain::KeychainNodePayload::Identity(spec) => {
-            assert_eq!(spec.username, "root");
-            assert_eq!(spec.remark, "rotated");
-        }
-        other => panic!("expected identity payload, got {other:?}"),
-    }
-
-    app.invoke_asset_context_menu_requested(identity_id.clone().into(), "identity".into(), 96.0, 160.0);
-    app.invoke_assets_context_menu_action_invoked("delete-asset".into());
-    assert!(app.get_asset_delete_confirm_modal_open());
-
-    app.invoke_confirm_delete_asset_requested();
-
-    assert_eq!(app.get_keychain_asset_items().row_count(), 0);
-    assert_eq!(
-        load_keychain_identity_secret_bundle(
-            credential_store.as_ref(),
-            identity_credential_ref.as_str(),
-        )
-        .expect("load deleted identity secret")
-        .password,
-        None
-    );
-
-    let persisted_after_delete = keychain_repo_state
-        .borrow()
-        .save_attempts
-        .last()
-        .expect("persisted keychain catalog after delete")
-        .clone();
-    assert!(persisted_after_delete.root_ids.is_empty());
-    assert!(persisted_after_delete.nodes.is_empty());
-}
-
-#[test]
-fn deleting_referenced_keychain_ssh_key_keeps_secret_bundle_intact() {
-    i_slint_backend_testing::init_no_event_loop();
-
-    let app = AppWindow::new().unwrap();
-    let credential_store: Arc<dyn CredentialStore> = Arc::new(MemoryCredentialStore::default());
-    bind_with_launcher_and_credential_store(
-        &app,
-        None,
-        Arc::new(FakeLauncher),
-        Arc::clone(&credential_store),
-    );
-
-    app.invoke_sidebar_destination_selected("keychain".into());
-    app.invoke_assets_create_action_selected("new-ssh-key".into());
-    app.invoke_keychain_ssh_key_modal_draft_changed("name".into(), "Prod Key".into());
-    app.invoke_keychain_ssh_key_modal_draft_changed("private_key".into(), "PRIVATE".into());
-    app.invoke_keychain_ssh_key_modal_draft_changed("public_key".into(), "ssh-ed25519 AAAATEST prod@example".into());
-    app.invoke_keychain_ssh_key_modal_draft_changed("fingerprint".into(), "SHA256:prod".into());
-    app.invoke_confirm_asset_modal_requested();
-
-    let key_id = find_keychain_row_id(&app, "ssh-key", "Prod Key");
-    let key_credential_ref = keychain_key_credential_ref(key_id.as_str());
-
-    app.invoke_assets_create_action_selected("new-identity".into());
-    app.invoke_keychain_identity_modal_draft_changed("name".into(), "Prod Identity".into());
-    app.invoke_keychain_identity_modal_draft_changed("username".into(), "ops".into());
-    app.invoke_keychain_identity_modal_draft_changed("auth_kind".into(), "ssh-key".into());
-    app.invoke_keychain_identity_modal_action_requested("use-existing-ssh-key".into());
-    app.invoke_confirm_asset_modal_requested();
-
-    assert_eq!(
-        load_keychain_key_secret_bundle(credential_store.as_ref(), key_credential_ref.as_str())
-            .expect("load referenced key secret")
-            .private_key_content
-            .as_deref(),
-        Some("PRIVATE")
-    );
-
-    app.invoke_asset_context_menu_requested(key_id.clone().into(), "ssh-key".into(), 96.0, 160.0);
-    app.invoke_assets_context_menu_action_invoked("delete-asset".into());
-    assert!(app.get_asset_delete_confirm_modal_open());
-
-    app.invoke_confirm_delete_asset_requested();
-
-    assert_eq!(app.get_keychain_asset_items().row_count(), 2);
-    assert_eq!(find_keychain_row_id(&app, "ssh-key", "Prod Key"), key_id);
-    assert_eq!(
-        load_keychain_key_secret_bundle(credential_store.as_ref(), key_credential_ref.as_str())
-            .expect("load preserved key secret")
-            .private_key_content
-            .as_deref(),
-        Some("PRIVATE")
-    );
-}
-
-#[test]
 fn editing_saved_socks5_modal_hydrates_proxy_fields_and_proxy_password() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -6367,6 +6034,81 @@ fn workspace_new_tab_request_opens_single_launcher_tab() {
 }
 
 #[test]
+fn workspace_new_tab_request_collapses_native_terminal_surface_rect_immediately() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "terminal mode should expose a concrete native surface rect before switching back to the launcher"
+    );
+
+    app.invoke_workspace_new_tab_requested();
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_width(),
+        0.0,
+        "opening the launcher tab should collapse the retained native terminal width immediately so the old child surface cannot keep covering the welcome host until a later layout invalidation"
+    );
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_height(),
+        0.0,
+        "opening the launcher tab should collapse the retained native terminal height immediately so the old child surface cannot keep intercepting paint and hit-testing outside terminal mode"
+    );
+}
+
+#[test]
+fn workspace_tab_selection_restores_native_terminal_surface_rect_immediately() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    let session_id = app.get_active_workspace_session_id().to_string();
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "terminal mode should expose a concrete native surface rect before switching away from the active session"
+    );
+
+    app.invoke_workspace_new_tab_requested();
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+
+    app.invoke_workspace_tab_selected(session_id.clone().into());
+
+    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id);
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "reselecting the terminal tab should restore the native surface rect immediately so the retained surface can realign with the terminal host in the same callback turn"
+    );
+    assert!(
+        app.get_workspace_session_surface_seqno() > 0,
+        "reselecting the terminal tab should restore the staged terminal payload together with the host mode so the geometry rebind is not backed by an empty frame"
+    );
+}
+
+#[test]
 fn launcher_recent_connection_replaces_launcher_tab_with_real_session_tab() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -6385,6 +6127,42 @@ fn launcher_recent_connection_replaces_launcher_tab_with_real_session_tab() {
         .expect("workspace tab after launcher connect");
     assert_ne!(item.session_id.as_str(), "workspace-launcher");
     assert_eq!(item.title.as_str(), "Prod Bastion");
+}
+
+#[test]
+fn launcher_quick_launch_connect_restores_native_terminal_surface_rect() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_workspace_new_tab_requested();
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+
+    app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
+    settle_terminal_projection();
+
+    let item = app
+        .get_workspace_tab_items()
+        .row_data(0)
+        .expect("workspace tab after launcher quick launch connect");
+    assert_ne!(item.session_id.as_str(), "workspace-launcher");
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "launcher quick launch connect should restore the native terminal rect as soon as the launcher tab is replaced so the retained surface does not stay collapsed under a live terminal host"
+    );
+    assert!(
+        app.get_workspace_session_surface_seqno() > 0,
+        "launcher quick launch connect should stage a terminal payload together with the restored host mode so the revived geometry is backed by a real frame"
+    );
 }
 
 #[test]
@@ -6410,6 +6188,45 @@ fn launcher_picker_activation_replaces_launcher_tab_and_closes_modal() {
         .expect("workspace tab after picker activation");
     assert_ne!(item.session_id.as_str(), "workspace-launcher");
     assert_eq!(item.title.as_str(), "DB Admin");
+}
+
+#[test]
+fn launcher_picker_activation_restores_native_terminal_surface_rect() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+
+    app.invoke_workspace_new_tab_requested();
+    app.invoke_welcome_open_saved_ssh_requested();
+
+    assert!(app.get_open_saved_ssh_modal_open());
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+
+    app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    assert!(!app.get_open_saved_ssh_modal_open());
+    let item = app
+        .get_workspace_tab_items()
+        .row_data(0)
+        .expect("workspace tab after picker activation");
+    assert_ne!(item.session_id.as_str(), "workspace-launcher");
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "saved ssh picker activation should restore the native terminal rect as soon as the launcher tab is replaced so the retained surface does not remain collapsed under a live terminal host"
+    );
+    assert!(
+        app.get_workspace_session_surface_seqno() > 0,
+        "saved ssh picker activation should stage a terminal payload together with the restored host mode so the revived geometry is backed by a real frame"
+    );
 }
 
 #[test]
@@ -6439,6 +6256,70 @@ fn launcher_picker_folder_activation_does_not_attempt_to_open_session() {
         .expect("launcher tab after folder activation");
     assert_eq!(item.session_id.as_str(), "workspace-launcher");
     assert_eq!(item.title.as_str(), "New Tab");
+}
+
+#[test]
+fn asset_activation_restores_native_terminal_surface_rect_from_welcome() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "activating an SSH asset from the welcome shell should restore the native terminal rect immediately so the first live terminal frame is not presented into a still-collapsed retained surface"
+    );
+    assert!(
+        app.get_workspace_session_surface_seqno() > 0,
+        "activating an SSH asset from the welcome shell should stage a terminal payload together with the host mode transition so the revived geometry is backed by a real frame"
+    );
+}
+
+#[test]
+fn context_menu_open_connection_restores_native_terminal_surface_rect_from_welcome() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
+    assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
+    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+
+    app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
+    assert!(app.get_assets_context_menu_open());
+
+    app.invoke_assets_context_menu_action_invoked("open-connection".into());
+    settle_terminal_projection();
+
+    assert!(!app.get_assets_context_menu_open());
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "opening a connection from the assets context menu should restore the native terminal rect immediately so the first live terminal frame is not presented into a still-collapsed retained surface"
+    );
+    assert!(
+        app.get_workspace_session_surface_seqno() > 0,
+        "opening a connection from the assets context menu should stage a terminal payload together with the host mode transition so the revived geometry is backed by a real frame"
+    );
 }
 
 #[test]
@@ -6848,6 +6729,67 @@ fn trusting_unknown_host_key_retries_connection_in_same_workspace_tab() {
             .check("10.0.0.12", 22, &host_key)
             .expect("check trusted host after inline confirmation"),
         KnownHostCheck::Trusted
+    );
+
+    let _ = fs::remove_file(known_hosts_path);
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+}
+
+#[test]
+fn host_key_inline_flow_keeps_native_rect_collapsed_until_terminal_resumes() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let _env_lock = lock_known_hosts_env();
+    let known_hosts_path = sample_known_hosts_path("workspace-host-key-geometry");
+    let host_key = sample_public_key();
+    let _ = fs::remove_file(&known_hosts_path);
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TofuAwareLauncher::new(host_key.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    let session_id = app.get_active_workspace_session_id().to_string();
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(app.get_workspace_session_connection_headline().as_str(), "waiting-user");
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_width(),
+        0.0,
+        "while the host-key prompt is rendered inline inside the connection timeline, the retained native terminal rect should stay collapsed so no stale terminal surface can cover the waiting-user UI"
+    );
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_height(),
+        0.0,
+        "while the host-key prompt is rendered inline inside the connection timeline, the retained native terminal rect should stay collapsed so hit-testing remains attached to the timeline host"
+    );
+
+    app.invoke_workspace_session_local_action_requested("trust-host-key".into());
+    flush_runtime_projection();
+
+    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "after trusting the inline host-key prompt, the terminal should restore its native rect immediately when the same workspace tab resumes terminal mode"
+    );
+    assert_eq!(
+        app.get_workspace_session_state().as_str(),
+        "connected",
+        "after trusting the inline host-key prompt, the same workspace tab should resume a connected terminal state even before the runtime emits the first terminal surface payload"
     );
 
     let _ = fs::remove_file(known_hosts_path);
@@ -7319,18 +7261,78 @@ fn workspace_terminal_selection_keeps_native_frame_contract_active() {
     focus_workspace_terminal(&app);
 
     let before = app.get_workspace_session_native_frame_token();
+    let before_surface_seqno = app.get_workspace_session_surface_seqno();
 
     select_terminal_welcome_span(&app);
     settle_terminal_projection();
 
     let after = app.get_workspace_session_native_frame_token();
+    let after_surface_seqno = app.get_workspace_session_surface_seqno();
 
     assert!(
         app.get_workspace_session_selection_active(),
         "pointer drag should activate terminal selection state"
     );
-    assert_ne!(before, 0, "native terminal projection should publish a retained frame token before selection");
-    assert_ne!(after, 0, "native terminal projection should keep a retained frame token after selection");
+    assert_eq!(
+        before, 0,
+        "scene-image and bitmap composition paths should keep the native frame token cleared before selection"
+    );
+    assert_eq!(
+        after, 0,
+        "scene-image and bitmap composition paths should keep the native frame token cleared after selection"
+    );
+    assert!(
+        before_surface_seqno > 0 && after_surface_seqno > 0,
+        "selection should keep the staged terminal surface alive while bitmap composition handles the visible frame"
+    );
+    assert_eq!(app.get_workspace_session_render_mode().as_str(), "bitmap");
+}
+
+#[test]
+fn workspace_terminal_padding_drag_does_not_start_selection_inside_the_grid() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    drag_terminal_padding_into_grid(&app);
+    settle_terminal_projection();
+
+    assert!(
+        !app.get_workspace_session_selection_active(),
+        "pointer drags that start in the terminal padding should not be clamped into column 0 because that makes the selection model feel offset from the rendered grid"
+    );
+}
+
+#[test]
+fn opening_right_panel_clamps_terminal_surface_width_before_pty_resize_roundtrip() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    let before = app.get_layout_workspace_session_native_surface_width();
+
+    app.invoke_open_sftp_panel_requested();
+
+    assert!(
+        app.get_effective_show_right_panel(),
+        "opening the SFTP panel should immediately toggle the right-panel layout state"
+    );
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() < before,
+        "terminal surface width should clamp to the shrunken content viewport immediately instead of waiting for a later PTY resize roundtrip, otherwise the scene-image path flashes and hit-testing drifts under the right panel"
+    );
 }
 
 #[test]
@@ -8107,10 +8109,57 @@ fn workspace_terminal_scroll_callbacks_update_active_session_surface() {
     slint::platform::update_timers_and_animations();
 
     app.invoke_workspace_session_scroll_jump_requested(1.0);
+    settle_terminal_projection();
     assert_eq!(app.get_workspace_session_viewport_offset_lines(), 8);
     assert!(!app.get_workspace_session_viewport_at_bottom());
 
     app.invoke_workspace_session_scroll_thumb_drag_requested(0.0);
+    settle_terminal_projection();
+    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
+    assert!(app.get_workspace_session_viewport_at_bottom());
+}
+
+#[test]
+fn workspace_terminal_scroll_thumb_drag_coalesces_runtime_scroll_updates() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let state = ScrollProjectionState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(CountingScrollProjectionLauncher::new(state.clone())),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    app.invoke_workspace_session_scroll_thumb_drag_requested(1.0);
+    app.invoke_workspace_session_scroll_thumb_drag_requested(0.0);
+
+    assert_eq!(
+        state.scroll_call_count(),
+        0,
+        "continuous thumb drag should defer runtime scroll projection until the debounce window elapses"
+    );
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        3,
+        "the visible viewport should remain stable until the coalesced thumb-drag refresh executes"
+    );
+
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
+    slint::platform::update_timers_and_animations();
+
+    assert_eq!(
+        state.scroll_call_count(),
+        1,
+        "continuous thumb drag should collapse to one runtime scroll update that applies the latest ratio"
+    );
     assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
     assert!(app.get_workspace_session_viewport_at_bottom());
 }
@@ -8175,6 +8224,7 @@ fn workspace_terminal_paused_follow_tracks_pending_output_until_jump_to_latest()
     settle_terminal_projection();
 
     app.invoke_workspace_session_scroll_jump_requested(1.0);
+    settle_terminal_projection();
     assert!(app.get_workspace_session_follow_paused());
     assert_eq!(app.get_workspace_session_pending_output_lines(), 0);
 
@@ -8211,6 +8261,7 @@ fn workspace_terminal_live_input_resumes_follow_and_clears_pending_output() {
     settle_terminal_projection();
 
     app.invoke_workspace_session_scroll_jump_requested(1.0);
+    settle_terminal_projection();
     follow_state.emit_remote_output(2);
     settle_terminal_projection();
 

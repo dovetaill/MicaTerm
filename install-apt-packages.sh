@@ -145,9 +145,11 @@ print_follow_up_notes() {
   cat <<'EOF'
 
 Follow-up reminders:
+  - cargo install cargo-xwin
   - rustup target add x86_64-pc-windows-gnu
   - rustup target add x86_64-pc-windows-msvc
   - verify cargo and rustup are available in PATH
+  - run ./scripts/bootstrap-win-msvc-build.sh before ./build-win-x64.sh on Linux hosts
   - see ./apt-packages.md for the current dependency inventory
 EOF
 }

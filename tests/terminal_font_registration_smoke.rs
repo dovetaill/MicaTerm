@@ -12,10 +12,6 @@ fn app_window_has_no_legacy_terminal_font_imports() {
         !content.contains("IosevkaTerm-Regular.ttf"),
         "Iosevka should be gone from the startup path"
     );
-    assert!(
-        !content.contains("MapleMonoNormalNL-NF-CN-Regular.ttf"),
-        "Maple should be gone from the startup path"
-    );
 }
 
 #[test]
@@ -30,21 +26,52 @@ fn terminal_font_assets_switch_to_fusion_jetbrains_maple_mono_bundle() {
         "the default terminal font bundle should ship the upstream OFL license text"
     );
     assert!(!Path::new("ui/fonts/IosevkaTerm-Regular.ttf").exists());
-    assert!(!Path::new("ui/fonts/MapleMonoNormalNL-NF-CN-Regular.ttf").exists());
 }
 
 #[test]
-fn terminal_host_font_contract_drops_maple_and_legacy_faces() {
+fn terminal_host_font_contract_drops_legacy_faces() {
     let content =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
 
     assert!(
-        !content.contains("Maple"),
-        "terminal host should stop exposing Maple after the Sarasa follow-up"
-    );
-    assert!(
         !content.contains("Iosevka Term"),
         "terminal host should stop exposing the retired Iosevka face"
+    );
+}
+
+#[test]
+fn bitmap_atlas_and_mock_font_contracts_switch_to_fusion_bundle() {
+    let atlas_source =
+        fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");
+    let mock_source =
+        fs::read_to_string("src/app/terminal_font/mock.rs").expect("read mock font system");
+    let build_source = fs::read_to_string("build.rs").expect("read build script");
+
+    assert!(
+        atlas_source.contains(
+            "assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"
+        ),
+        "bitmap atlas should load the bundled Fusion JetBrains Maple Mono face instead of the old ui/fonts Sarasa path"
+    );
+    assert!(
+        !atlas_source.contains("ui/fonts/SarasaTermSCNerd-Regular.ttf"),
+        "bitmap atlas should stop embedding the old Sarasa regular face"
+    );
+    assert!(
+        mock_source.contains(
+            "assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"
+        ),
+        "font-system mocks should share the bundled Fusion JetBrains Maple Mono face with the bitmap atlas"
+    );
+    assert!(
+        !mock_source.contains("ui/fonts/SarasaTermSCNerd-Regular.ttf"),
+        "font-system mocks should stop embedding the old Sarasa regular face"
+    );
+    assert!(
+        build_source.contains(
+            "assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"
+        ),
+        "build script should watch the bundled Fusion JetBrains Maple Mono asset for atlas rebuilds"
     );
 }
 

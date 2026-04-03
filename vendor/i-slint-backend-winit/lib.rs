@@ -969,6 +969,20 @@ pub trait WinitWindowAccessor: private::WinitWindowAccessorSealed {
     ) -> impl std::future::Future<Output = Result<Arc<winit::window::Window>, PlatformError>>;
 }
 
+/// This helper trait can be used to register a callback that's invoked after the winit backend
+/// finishes drawing a frame for a given [`slint::Window`](slint:rust:slint/struct.window).
+///
+/// This is primarily intended for integrations that need to replay native same-HWND overlays after
+/// the software renderer presents the host surface.
+pub trait WinitWindowAfterDrawHook: private::WinitWindowAccessorSealed {
+    /// Registers a callback that runs immediately after the winit backend finishes drawing the
+    /// window. If this window is not backed by winit, this function is a no-op.
+    fn on_winit_after_draw(
+        &self,
+        callback: impl FnMut(&i_slint_core::api::Window) + 'static,
+    );
+}
+
 impl WinitWindowAccessor for i_slint_core::api::Window {
     fn has_winit_window(&self) -> bool {
         i_slint_core::window::WindowInner::from_pub(self)
@@ -1025,6 +1039,21 @@ impl WinitWindowAccessor for i_slint_core::api::Window {
 }
 
 impl private::WinitWindowAccessorSealed for i_slint_core::api::Window {}
+
+impl WinitWindowAfterDrawHook for i_slint_core::api::Window {
+    fn on_winit_after_draw(
+        &self,
+        callback: impl FnMut(&i_slint_core::api::Window) + 'static,
+    ) {
+        if let Some(adapter) = i_slint_core::window::WindowInner::from_pub(self)
+            .window_adapter()
+            .internal(i_slint_core::InternalToken)
+            .and_then(|wa| (wa as &dyn core::any::Any).downcast_ref::<WinitWindowAdapter>())
+        {
+            adapter.after_draw_hook.set(Some(Box::new(callback)));
+        }
+    }
+}
 
 #[cfg(test)]
 mod testui {

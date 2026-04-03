@@ -5,6 +5,9 @@ mod xwin_link;
 
 fn main() {
     println!("cargo:rerun-if-changed=ui/fonts/SarasaTermSCNerd-Regular.ttf");
+    println!(
+        "cargo:rerun-if-changed=assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"
+    );
     println!("cargo:rerun-if-env-changed=HOME");
     println!("cargo:rerun-if-env-changed=LIB");
     println!("cargo:rerun-if-env-changed=XWIN_CACHE_DIR");

@@ -1,6 +1,7 @@
 //! Windows-specific non-client frame interop for hit-testing, snap layouts, and placement queries.
 
 use crate::AppWindow;
+use crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics;
 #[cfg(target_os = "windows")]
 use slint::ComponentHandle;
 use crate::app::window_state::WindowPlacementKind;
@@ -54,6 +55,16 @@ pub fn resolve_host_window_hwnd(window: &AppWindow) -> Option<isize> {
         let _ = window;
         None
     }
+}
+
+pub fn native_surface_diagnostics_hwnd(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<isize> {
+    diagnostics.hwnd
+}
+
+pub fn native_surface_is_attached(diagnostics: &NativeTerminalSurfaceDiagnostics) -> bool {
+    diagnostics.hwnd.is_some()
 }
 
 pub fn point_hits_outer_resize_band(

@@ -6,7 +6,9 @@ use crate::app::terminal_font::{
     FontFallbackFace, FontSystem, LoadedFont, OpenTypeFeatureSet, ShapedGlyph,
     TextShapingRequest,
 };
-use crate::app::terminal_layout::run_segmentation::{SegmentedRun, TextStyleKey, segment_row};
+use crate::app::terminal_layout::run_segmentation::{
+    RunCluster, SegmentedRun, TextStyleKey, segment_row,
+};
 use crate::app::terminal_model::TerminalModelRow;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,6 +26,7 @@ pub struct GlyphRun {
     pub row: u32,
     pub cell_range: std::ops::Range<u32>,
     pub text: String,
+    pub clusters: Vec<RunCluster>,
     pub glyphs: Vec<PositionedGlyph>,
     pub style: TextStyleKey,
     pub resolved_face: FontFallbackFace,
@@ -100,8 +103,16 @@ impl TerminalTextShaper {
             .into_iter()
             .map(|shaped_run| GlyphRun {
                 row,
-                cell_range: cell_range.clone(),
+                cell_range: source_byte_range_to_cell_range(
+                    &run.clusters,
+                    &shaped_run.source_byte_range,
+                    &cell_range,
+                ),
                 text: shaped_run.text,
+                clusters: source_byte_range_to_clusters(
+                    &run.clusters,
+                    &shaped_run.source_byte_range,
+                ),
                 glyphs: shaped_run
                     .glyphs
                     .into_iter()
@@ -136,4 +147,50 @@ pub fn shape_row(
     fonts: &mut dyn FontSystem,
 ) -> Result<ShapedRow> {
     TerminalTextShaper.shape_row(row, font, fonts)
+}
+
+fn source_byte_range_to_cell_range(
+    clusters: &[RunCluster],
+    source_byte_range: &std::ops::Range<usize>,
+    fallback: &std::ops::Range<u32>,
+) -> std::ops::Range<u32> {
+    let mut start = None;
+    let mut end = None;
+
+    for cluster in clusters {
+        if cluster.byte_range.start < source_byte_range.end
+            && source_byte_range.start < cluster.byte_range.end
+        {
+            start.get_or_insert(cluster.cell_range.start);
+            end = Some(cluster.cell_range.end);
+        }
+    }
+
+    match (start, end) {
+        (Some(start), Some(end)) => start..end,
+        _ => fallback.clone(),
+    }
+}
+
+fn source_byte_range_to_clusters(
+    clusters: &[RunCluster],
+    source_byte_range: &std::ops::Range<usize>,
+) -> Vec<RunCluster> {
+    clusters
+        .iter()
+        .filter_map(|cluster| {
+            if cluster.byte_range.start < source_byte_range.end
+                && source_byte_range.start < cluster.byte_range.end
+            {
+                Some(RunCluster {
+                    text: cluster.text.clone(),
+                    cell_range: cluster.cell_range.clone(),
+                    byte_range: cluster.byte_range.start.saturating_sub(source_byte_range.start)
+                        ..cluster.byte_range.end.saturating_sub(source_byte_range.start),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
 }

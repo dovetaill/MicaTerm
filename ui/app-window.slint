@@ -227,6 +227,7 @@ export component AppWindow inherits Window {
     in-out property <int> workspace-session-cols: 80;
     in-out property <length> workspace-session-cell-width: 10px;
     in-out property <length> workspace-session-cell-height: 22px;
+    in-out property <float> workspace-session-device-scale-factor: 1.0;
     in-out property <int> workspace-session-cursor-row: 0;
     in-out property <int> workspace-session-cursor-col: 0;
     in-out property <bool> workspace-session-cursor-visible: false;
@@ -709,6 +710,7 @@ export component AppWindow inherits Window {
                         workspace-session-state: root.workspace-session-state;
                         workspace-session-error-detail: root.workspace-session-error-detail;
                         workspace-session-can-reconnect: root.workspace-session-can-reconnect;
+                        workspace-session-render-mode: root.workspace-session-render-mode;
                         workspace-session-connection-headline: root.workspace-session-connection-headline;
                         workspace-session-connection-current-hop: root.workspace-session-connection-current-hop;
                         workspace-session-connection-current-detail: root.workspace-session-connection-current-detail;
@@ -722,11 +724,13 @@ export component AppWindow inherits Window {
                         welcome-quick-launch-visible-group-items: root.welcome-quick-launch-visible-group-items;
                         welcome-quick-launch-selected-detail: root.welcome-quick-launch-selected-detail;
                         welcome-quick-launch-search-query: root.welcome-quick-launch-search-query;
+                        workspace-session-surface-image: root.workspace-session-surface-image;
                         workspace-session-native-frame-token: root.workspace-session-native-frame-token;
                         workspace-session-rows: root.workspace-session-rows;
                         workspace-session-cols: root.workspace-session-cols;
                         workspace-session-cell-width: root.workspace-session-cell-width;
                         workspace-session-cell-height: root.workspace-session-cell-height;
+                        workspace-session-device-scale-factor: root.workspace-session-device-scale-factor;
                         workspace-session-cursor-row: root.workspace-session-cursor-row;
                         workspace-session-cursor-col: root.workspace-session-cursor-col;
                         workspace-session-cursor-visible: root.workspace-session-cursor-visible;

@@ -100,9 +100,13 @@ fn debug_logging_can_emit_windows_mainline_runtime_profile_metadata() {
     let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
     assert!(content.contains("initialized runtime profile"));
     assert!(content.contains("WindowsMainline"));
-    assert!(content.contains("SkiaSoftware"));
+    assert!(content.contains("Skia"));
+    assert!(content.contains("winit-skia"));
+    assert!(content.contains("prefers_direct3d=true"));
+    assert!(content.contains("requested_graphics_api=Some(Direct3D)"));
+    assert!(content.contains("renderer_fallback_chain=[Skia, SkiaSoftware, Software]"));
     assert!(content.contains("Some(\"winit\")"));
-    assert!(content.contains("Some(\"skia-software\")"));
+    assert!(content.contains("Some(\"skia\")"));
 }
 
 #[test]

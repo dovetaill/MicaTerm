@@ -38,6 +38,7 @@ These are part of the current build flow, but they are not installed by `apt-get
 
 - `rustup target add x86_64-pc-windows-gnu`
 - `rustup target add x86_64-pc-windows-msvc`
+- `cargo-xwin`
 - `cargo`
 - `rustup`
 

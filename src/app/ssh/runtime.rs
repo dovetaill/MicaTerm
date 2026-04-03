@@ -2280,17 +2280,13 @@ impl TerminalSession {
         let size = self.terminal.get_size();
         let (visible_start, visible_end) = self.visible_phys_row_bounds();
         let mut rows = Vec::with_capacity(size.rows.max(1));
-        self.terminal.screen().for_each_phys_line(|phys_idx, line| {
-            if phys_idx < visible_start || phys_idx >= visible_end {
-                return;
-            }
-
-            rows.push(project_terminal_row(
-                line,
-                (phys_idx - visible_start) as u32,
-                size.cols.max(1),
-            ));
-        });
+        let lines = self
+            .terminal
+            .screen()
+            .lines_in_phys_range(visible_start..visible_end);
+        for (visible_row, line) in lines.iter().enumerate() {
+            rows.push(project_terminal_row(line, visible_row as u32, size.cols.max(1)));
+        }
 
         while rows.len() < size.rows.max(1) {
             rows.push(TerminalRowState {
@@ -2471,13 +2467,12 @@ impl TerminalSession {
         let size = self.terminal.get_size();
         let (visible_start, visible_end) = self.visible_phys_row_bounds();
         let mut cells = Vec::new();
-
-        self.terminal.screen().for_each_phys_line(|phys_idx, line| {
-            if phys_idx < visible_start || phys_idx >= visible_end {
-                return;
-            }
-
-            let row = (phys_idx - visible_start) as u32;
+        let lines = self
+            .terminal
+            .screen()
+            .lines_in_phys_range(visible_start..visible_end);
+        for (visible_row, line) in lines.iter().enumerate() {
+            let row = visible_row as u32;
             for cell in line.visible_cells() {
                 if cell.cell_index() >= size.cols {
                     continue;
@@ -2496,7 +2491,7 @@ impl TerminalSession {
                     bg_rgba,
                 });
             }
-        });
+        }
 
         cells
     }
@@ -2554,13 +2549,20 @@ impl TerminalSession {
     }
 
     fn visible_phys_row_bounds(&self) -> (usize, usize) {
+        let total_rows = self.terminal.screen().scrollback_rows();
+        if total_rows == 0 {
+            return (0, 0);
+        }
+
         let size = self.terminal.get_size();
-        let visible_rows = size.rows.max(1);
+        let visible_rows = size.rows.max(1).min(total_rows);
         let visible_start = self
             .terminal
             .screen()
-            .scrollback_or_visible_row(-(self.viewport_offset_lines as i32));
-        let visible_end = visible_start.saturating_add(visible_rows);
+            .scrollback_or_visible_row(-(self.viewport_offset_lines as i32))
+            .min(total_rows);
+        let visible_end = visible_start.saturating_add(visible_rows).min(total_rows);
+        let visible_start = visible_end.saturating_sub(visible_rows);
         (visible_start, visible_end)
     }
 

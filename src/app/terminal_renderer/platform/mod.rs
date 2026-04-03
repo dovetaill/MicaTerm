@@ -86,7 +86,11 @@ impl PlatformNativeSurfaceBackend for DetachedPlatformSurfaceBackend {
         self.frame = frame;
     }
 
-    fn present(&mut self) {}
+    fn present(&mut self, _damage: crate::app::terminal_renderer::NativeSurfaceDamage) {}
+
+    fn diagnostics_snapshot(&self) -> crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics {
+        crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics::default()
+    }
 
     fn detach(&mut self) {
         self.frame = None;

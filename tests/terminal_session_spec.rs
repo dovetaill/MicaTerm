@@ -156,6 +156,26 @@ fn terminal_session_preserves_deeper_scrollback_history_for_large_bursts() {
 }
 
 #[test]
+fn terminal_session_surface_projection_survives_large_burst_near_live_tail() {
+    let mut session = TerminalSession::new(24, 80);
+    let transcript = (0..9000)
+        .map(|line| format!("{line:04}\r\n"))
+        .collect::<String>();
+
+    session.apply_remote_bytes(transcript.as_bytes());
+    session.scroll_viewport_lines(8);
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+
+    assert_eq!(snapshot.rows, 24);
+    assert_eq!(snapshot.viewport_offset_lines, 8);
+    assert!(
+        snapshot.visible_lines.iter().any(|line| !line.is_empty()),
+        "surface projection should still yield visible terminal content after a large scrollback burst near the live tail"
+    );
+}
+
+#[test]
 fn dark_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let mut session = TerminalSession::new(24, 80);
 

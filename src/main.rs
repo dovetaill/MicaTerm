@@ -1,29 +1,101 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // Binary entrypoint that selects the runtime profile, initializes logging, and launches the UI.
 
-use mica_term::app::{async_runtime::AppAsyncRuntime, runtime_profile::AppRuntimeProfile};
+use mica_term::app::{
+    async_runtime::AppAsyncRuntime,
+    runtime_profile::{AppRuntimeProfile, GraphicsApiRequirement, RendererMode},
+};
+
+#[derive(Clone, Copy, Debug)]
+struct RendererSelectionAttempt {
+    renderer_mode: RendererMode,
+    graphics_api: Option<GraphicsApiRequirement>,
+}
 
 fn select_runtime_profile() -> AppRuntimeProfile {
     // Packaged wrappers now carry the native-only terminal contract through AppRuntimeProfile.
     AppRuntimeProfile::packaged()
 }
 
+fn renderer_selection_attempts(profile: AppRuntimeProfile) -> Vec<RendererSelectionAttempt> {
+    profile
+        .renderer_fallback_chain()
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, renderer_mode)| RendererSelectionAttempt {
+            renderer_mode,
+            graphics_api: if index == 0 {
+                profile.preferred_graphics_api()
+            } else {
+                None
+            },
+        })
+        .collect()
+}
+
 fn apply_renderer_selector(profile: AppRuntimeProfile) -> anyhow::Result<()> {
-    use anyhow::Context;
+    use anyhow::{Context, anyhow};
     use slint::BackendSelector;
 
-    BackendSelector::new()
-        .backend_name(profile.forced_backend().unwrap().into())
-        .renderer_name(profile.forced_renderer().unwrap().into())
-        .select()
-        .map_err(anyhow::Error::from)
-        .with_context(|| {
-            format!(
-                "failed to select {} backend for packaged runtime with {} terminal rendering",
-                profile.selector_label(),
-                profile.terminal_render_mode_label(),
-            )
-        })
+    let backend_name = profile.forced_backend().unwrap_or("winit");
+    let mut failures = Vec::new();
+
+    for (fallback_level, attempt) in renderer_selection_attempts(profile).into_iter().enumerate() {
+        let mut selector = BackendSelector::new()
+            .backend_name(backend_name.into())
+            .renderer_name(attempt.renderer_mode.renderer_name().into());
+        if matches!(attempt.graphics_api, Some(GraphicsApiRequirement::Direct3D)) {
+            selector = selector.require_d3d();
+        }
+
+        match selector.select() {
+            Ok(()) => {
+                tracing::info!(
+                    target: "app.renderer",
+                    selected_backend = backend_name,
+                    selected_renderer = attempt.renderer_mode.renderer_name(),
+                    selected_graphics_api = ?attempt.graphics_api.map(GraphicsApiRequirement::as_str),
+                    fallback_level,
+                    profile_selector = profile.selector_label(),
+                    "selected renderer backend"
+                );
+                return Ok(());
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target: "app.renderer",
+                    attempted_backend = backend_name,
+                    attempted_renderer = attempt.renderer_mode.renderer_name(),
+                    attempted_graphics_api = ?attempt.graphics_api.map(GraphicsApiRequirement::as_str),
+                    fallback_level,
+                    error = %err,
+                    "renderer selection attempt failed"
+                );
+                failures.push(format!(
+                    "{}{}: {err}",
+                    attempt.renderer_mode.renderer_name(),
+                    if matches!(attempt.graphics_api, Some(GraphicsApiRequirement::Direct3D)) {
+                        "+direct3d"
+                    } else {
+                        ""
+                    }
+                ));
+            }
+        }
+    }
+
+    Err(anyhow!(
+        "renderer selection attempts exhausted: {}",
+        failures.join(" | ")
+    ))
+    .with_context(|| {
+        format!(
+            "failed to select {} backend for packaged runtime with {} terminal rendering",
+            profile.selector_label(),
+            profile.terminal_render_mode_label(),
+        )
+    })
 }
 
 fn main() -> anyhow::Result<()> {

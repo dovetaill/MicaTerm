@@ -3,6 +3,7 @@
 use anyhow::Result;
 
 use crate::AppWindow;
+use crate::app::terminal_renderer::{NativeSurfaceDamage, NativeTerminalSurfaceDiagnostics};
 
 use super::backend::{
     NativeTerminalSurfaceRect, PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
@@ -33,9 +34,22 @@ impl PlatformNativeSurfaceBackend for X11NativeSurfaceBackend {
         self.state.retained_frame = frame;
     }
 
-    fn present(&mut self) {
+    fn present(&mut self, _damage: NativeSurfaceDamage) {
         if let Some(frame) = self.state.retained_frame.as_ref() {
             self.state.last_presented_frame_token = frame.frame.frame_token;
+        }
+    }
+
+    fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics {
+        NativeTerminalSurfaceDiagnostics {
+            last_prepared_frame_token: self
+                .state
+                .retained_frame
+                .as_ref()
+                .map(|frame| frame.frame.frame_token)
+                .unwrap_or_default(),
+            last_presented_frame_token: self.state.last_presented_frame_token,
+            ..NativeTerminalSurfaceDiagnostics::default()
         }
     }
 
