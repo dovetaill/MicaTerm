@@ -222,6 +222,9 @@ impl AppRuntimeProfile {
     pub fn terminal_composition_mode(self) -> TerminalCompositionMode {
         match self.build_flavor {
             AppBuildFlavor::WindowsSoftwareCompat => TerminalCompositionMode::SceneImage,
+            AppBuildFlavor::WindowsMainline if self.prefers_direct3d() => {
+                TerminalCompositionMode::SceneImage
+            }
             AppBuildFlavor::Development | AppBuildFlavor::WindowsMainline => {
                 TerminalCompositionMode::PostRenderNativeSurface
             }

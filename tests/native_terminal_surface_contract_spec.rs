@@ -958,7 +958,7 @@ fn native_surface_source_exposes_damage_tracker_and_shutdown_guard_contract() {
         "native surface bridge should invalidate the whole retained surface when the terminal rect changes"
     );
     assert!(
-        native_surface_source.contains("state.damage_tracker.track_frame_damage("),
+        native_surface_source.contains(".track_frame_damage(previous_frame.as_ref(), Some(&next_frame));"),
         "native surface bridge should feed retained-frame transitions through the damage tracker before present"
     );
     assert!(
