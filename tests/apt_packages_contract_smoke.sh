@@ -27,6 +27,7 @@ grep -F 'clang-19' <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'zip' <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'libwayland-dev' <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'pkg-config' <<<"$HELP_OUTPUT" >/dev/null
+grep -F 'cargo install cargo-xwin' "$SCRIPT_PATH" >/dev/null
 
 RUN_OUTPUT="$(printf 'n\n' | "$SCRIPT_PATH")"
 grep -F 'Packages that will be installed:' <<<"$RUN_OUTPUT" >/dev/null
@@ -42,6 +43,7 @@ grep -F '`clang-19`' "$INVENTORY_PATH" >/dev/null
 grep -F '`zip`' "$INVENTORY_PATH" >/dev/null
 grep -F '`libwayland-dev`' "$INVENTORY_PATH" >/dev/null
 grep -F '`pkg-config`' "$INVENTORY_PATH" >/dev/null
+grep -F '`cargo-xwin`' "$INVENTORY_PATH" >/dev/null
 grep -F '`slint`' "$INVENTORY_PATH" >/dev/null
 if grep -F '`i-slint-renderer-femtovg`' "$INVENTORY_PATH" >/dev/null; then
   echo "apt inventory should no longer describe vendored femtovg renderer patches as current dependencies" >&2

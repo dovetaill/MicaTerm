@@ -77,6 +77,18 @@ require_cargo_xwin() {
     fail "Linux-host Windows MSVC packaging requires cargo-xwin. Install it with: cargo install cargo-xwin"
 }
 
+choose_clang_command() {
+  local candidate
+  for candidate in clang-19 clang; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  fail "Linux-host Windows MSVC packaging requires clang or clang-19. Install it via ./install-apt-packages.sh"
+}
+
 require_uname() {
   local expected="$1"
   local actual
@@ -190,7 +202,7 @@ case "$TARGET" in
         ;;
       Linux)
         require_cargo_xwin
-        require_cmd clang
+        export CC="$(choose_clang_command)"
         CARGO_BUILD_CMD=(cargo xwin build)
         ;;
       *)

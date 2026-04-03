@@ -28,7 +28,8 @@ grep -F "dist/<app>-<target>-<profile><package flavor suffix>.zip" <<<"$HELP_OUT
 grep -F "MICA_TERM_PACKAGE_PORTABLE=1" <<<"$HELP_OUTPUT" >/dev/null
 
 grep -F 'require_cmd nasm' "$SCRIPT_PATH" >/dev/null
-grep -F 'require_cmd clang' "$SCRIPT_PATH" >/dev/null
+grep -F 'choose_clang_command' "$SCRIPT_PATH" >/dev/null
+grep -F 'clang-19 clang' "$SCRIPT_PATH" >/dev/null
 grep -F 'cargo xwin build' "$SCRIPT_PATH" >/dev/null
 grep -F 'MICA_TERM_PACKAGE_PORTABLE' "$SCRIPT_PATH" >/dev/null
 grep -F '.mica-term-portable' "$SCRIPT_PATH" >/dev/null
