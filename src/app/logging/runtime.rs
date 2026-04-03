@@ -26,6 +26,10 @@ pub fn emit_runtime_profile_metadata(profile: AppRuntimeProfile) {
         build_flavor = ?profile.build_flavor,
         renderer_mode = ?profile.renderer_mode,
         terminal_render_mode = ?profile.terminal_render_mode(),
+        selector_label = profile.selector_label(),
+        prefers_direct3d = profile.prefers_direct3d(),
+        requested_graphics_api = ?profile.preferred_graphics_api(),
+        renderer_fallback_chain = ?profile.renderer_fallback_chain(),
         forced_backend = ?profile.forced_backend(),
         forced_renderer = ?profile.forced_renderer(),
         "initialized runtime profile"

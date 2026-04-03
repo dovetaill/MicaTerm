@@ -23,6 +23,9 @@ Default target:
 Override example:
   TARGET=x86_64-pc-windows-msvc ./build-win-x64-software.sh
 
+Windows MSVC GPU mainline package:
+  ./build-win-x64.sh
+
 Outputs:
   dist/mica-term-x86_64-pc-windows-gnu-release-software.zip
   dist/mica-term-x86_64-pc-windows-msvc-release-software.zip

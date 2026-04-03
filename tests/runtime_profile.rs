@@ -3,7 +3,7 @@
 use std::fs;
 
 use mica_term::app::runtime_profile::{
-    AppBuildFlavor, AppRuntimeProfile, NativePresentPath, RendererMode,
+    AppBuildFlavor, AppRuntimeProfile, GraphicsApiRequirement, NativePresentPath, RendererMode,
     TerminalCompositionMode,
 };
 
@@ -12,10 +12,26 @@ fn mainline_profile_describes_windows_skia_package() {
     let profile = AppRuntimeProfile::mainline();
 
     assert_eq!(profile.build_flavor, AppBuildFlavor::WindowsMainline);
-    assert_eq!(profile.renderer_mode, RendererMode::SkiaSoftware);
-    assert_eq!(profile.native_present_path(), NativePresentPath::RenderingNotifier);
+    assert_eq!(profile.renderer_mode, RendererMode::Skia);
+    assert_eq!(
+        profile.native_present_path(),
+        NativePresentPath::RenderingNotifier
+    );
     assert_eq!(profile.forced_backend(), Some("winit"));
-    assert_eq!(profile.forced_renderer(), Some("skia-software"));
+    assert_eq!(profile.forced_renderer(), Some("skia"));
+    assert!(profile.prefers_direct3d());
+    assert_eq!(
+        profile.preferred_graphics_api(),
+        Some(GraphicsApiRequirement::Direct3D)
+    );
+    assert_eq!(
+        profile.renderer_fallback_chain(),
+        &[
+            RendererMode::Skia,
+            RendererMode::SkiaSoftware,
+            RendererMode::Software,
+        ]
+    );
     assert_eq!(profile.native_present_path_label(), "rendering-notifier");
 }
 
@@ -42,8 +58,10 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
     assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_TERMINAL_RENDERER\")"));
     assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH\")"));
     assert!(content.contains("WindowsSoftwareCompat"));
+    assert!(content.contains("Skia"));
     assert!(content.contains("SkiaSoftware"));
     assert!(content.contains("Software"));
+    assert!(content.contains("Some(\"skia\")"));
     assert!(content.contains("pub enum NativePresentPath"));
     assert!(content.contains("pub enum TerminalCompositionMode"));
     assert!(content.contains("SceneImage"));
@@ -51,16 +69,20 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
     assert!(content.contains("RenderingNotifier"));
     assert!(content.contains("EventLoop"));
     assert!(content.contains("pub fn native_present_path(self) -> NativePresentPath"));
-    assert!(
-        content.contains("pub fn terminal_composition_mode(self) -> TerminalCompositionMode")
-    );
+    assert!(content.contains("pub fn terminal_composition_mode(self) -> TerminalCompositionMode"));
     assert!(content.contains("pub fn native_present_path_label(self) -> &'static str"));
+    assert!(content.contains("pub enum GraphicsApiRequirement"));
+    assert!(
+        content.contains("pub fn preferred_graphics_api(self) -> Option<GraphicsApiRequirement>")
+    );
+    assert!(content.contains("pub fn renderer_fallback_chain(self) -> &'static [RendererMode]"));
     assert!(content.contains("TerminalRenderMode::Bitmap"));
     assert!(content.contains("TerminalRenderMode::Native"));
     assert!(content.contains("Some(\"bitmap\")"));
     assert!(content.contains("Some(\"native\")"));
     assert!(content.contains("Self::mainline_native()"));
     assert!(content.contains("Self::software_compat()"));
+    assert!(content.contains("pub fn prefers_direct3d(self) -> bool"));
     assert!(content.contains("Preferred native-only shipping profile"));
     assert!(content.contains("native-first Windows software profile"));
 }
@@ -71,7 +93,10 @@ fn software_compat_profile_prefers_native_terminal_renderer() {
 
     assert_eq!(profile.build_flavor, AppBuildFlavor::WindowsSoftwareCompat);
     assert_eq!(profile.renderer_mode, RendererMode::Software);
-    assert_eq!(profile.native_present_path(), NativePresentPath::RenderingNotifier);
+    assert_eq!(
+        profile.native_present_path(),
+        NativePresentPath::RenderingNotifier
+    );
     assert_eq!(profile.terminal_render_mode_label(), "native");
     assert_eq!(profile.native_present_path_label(), "rendering-notifier");
     assert_eq!(
@@ -79,6 +104,8 @@ fn software_compat_profile_prefers_native_terminal_renderer() {
         TerminalCompositionMode::SceneImage
     );
     assert!(profile.prefers_native_terminal_renderer());
+    assert_eq!(profile.preferred_graphics_api(), None);
+    assert_eq!(profile.renderer_fallback_chain(), &[RendererMode::Software]);
 }
 
 #[test]

@@ -51,6 +51,6 @@ fn startup_failure_message_uses_selected_renderer_label() {
         .expect("mainline profile should expose a startup message");
 
     assert!(message.contains("Mica Term"));
-    assert!(message.contains("winit-skia-software"));
+    assert!(message.contains("winit-skia"));
     assert!(message.contains("mock init failure"));
 }

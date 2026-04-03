@@ -32,8 +32,8 @@ Supported targets:
   x86_64-apple-darwin        macOS Intel build on macOS hosts
   aarch64-apple-darwin       macOS Apple Silicon build on macOS hosts
   x86_64-pc-windows-gnu      Windows x64 GNU build with MinGW-w64 and nasm
-  x86_64-pc-windows-msvc     Windows x64 MSVC build on Windows MSVC hosts
-  aarch64-pc-windows-msvc    Windows ARM64 MSVC build on Windows MSVC hosts
+  x86_64-pc-windows-msvc     Windows x64 MSVC build on Windows MSVC hosts or Linux hosts with cargo-xwin
+  aarch64-pc-windows-msvc    Windows ARM64 MSVC build on Windows MSVC hosts or Linux hosts with cargo-xwin
 
 Environment overrides:
   TARGET=<target triple>
@@ -51,6 +51,12 @@ Windows GNU prerequisites on Linux hosts:
   x86_64-w64-mingw32-gcc
   nasm
 
+Windows MSVC prerequisites on Linux hosts:
+  cargo-xwin
+  clang
+  rustup target add x86_64-pc-windows-msvc
+  rustup target add aarch64-pc-windows-msvc
+
 Output:
   dist/<app>-<target>-<profile><package flavor suffix>.tar.gz
   dist/<app>-<target>-<profile><package flavor suffix>.zip
@@ -64,6 +70,11 @@ fail() {
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
+}
+
+require_cargo_xwin() {
+  cargo xwin --version >/dev/null 2>&1 || \
+    fail "Linux-host Windows MSVC packaging requires cargo-xwin. Install it with: cargo install cargo-xwin"
 }
 
 require_uname() {
@@ -106,8 +117,10 @@ fi
 require_cmd cargo
 require_cmd rustup
 
+CARGO_BUILD_CMD=(cargo build)
+
 USES_WINDOWS_SKIA=0
-if [[ "${MICA_TERM_PACKAGE_RENDERER:-}" == "skia-software" ]]; then
+if [[ "${MICA_TERM_PACKAGE_RENDERER:-}" == "skia" || "${MICA_TERM_PACKAGE_RENDERER:-}" == "skia-software" ]]; then
   USES_WINDOWS_SKIA=1
 fi
 if [[ "${CARGO_FEATURES:-}" == *"slint-renderer-skia"* ]]; then
@@ -115,7 +128,7 @@ if [[ "${CARGO_FEATURES:-}" == *"slint-renderer-skia"* ]]; then
 fi
 
 if [[ "$TARGET" == "x86_64-pc-windows-gnu" && "$USES_WINDOWS_SKIA" -eq 1 ]]; then
-  fail "Skia Windows GNU packaging is unsupported by rust-skia upstream. Use ./build-win-x64-software.sh for Linux-host Windows packages, or switch to x86_64-pc-windows-msvc from a Windows MSVC shell."
+  fail "Skia Windows GNU packaging is unsupported by rust-skia upstream. Use ./build-win-x64-software.sh for Linux-host Windows packages, or switch to x86_64-pc-windows-msvc via cargo-xwin on Linux or a Windows MSVC shell."
 fi
 
 case "$PROFILE" in
@@ -171,8 +184,19 @@ case "$TARGET" in
     ARCHIVE_SUFFIX=".zip"
     ;;
   x86_64-pc-windows-msvc|aarch64-pc-windows-msvc)
-    require_uname windows-msvc
     require_cmd zip
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*)
+        ;;
+      Linux)
+        require_cargo_xwin
+        require_cmd clang
+        CARGO_BUILD_CMD=(cargo xwin build)
+        ;;
+      *)
+        fail "target '$TARGET' must be built from a Windows MSVC shell/Git Bash environment or from a Linux host with cargo-xwin + clang."
+        ;;
+    esac
     BIN_SUFFIX=".exe"
     ARCHIVE_SUFFIX=".zip"
     ;;
@@ -196,7 +220,7 @@ if [[ -n "${CARGO_FEATURES:-}" ]]; then
   CARGO_BUILD_ARGS+=(--features "$CARGO_FEATURES")
 fi
 
-cargo build "${CARGO_BUILD_ARGS[@]}"
+"${CARGO_BUILD_CMD[@]}" "${CARGO_BUILD_ARGS[@]}"
 
 [[ -f "$BIN_PATH" ]] || fail "expected binary not found: $BIN_PATH"
 

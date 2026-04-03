@@ -23,6 +23,7 @@ grep -F "packaged terminal renderer: native" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "packaged native present path: rendering-notifier" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "x86_64-pc-windows-gnu" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "TARGET=x86_64-pc-windows-msvc ./build-win-x64-software.sh" <<<"$HELP_OUTPUT" >/dev/null
+grep -F "./build-win-x64.sh" <<<"$HELP_OUTPUT" >/dev/null
 grep -F ".zip" <<<"$HELP_OUTPUT" >/dev/null
 
 grep -F 'export CARGO_NO_DEFAULT_FEATURES=1' "$SCRIPT_PATH" >/dev/null

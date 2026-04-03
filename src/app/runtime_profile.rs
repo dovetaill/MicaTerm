@@ -10,6 +10,7 @@ pub enum AppBuildFlavor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RendererMode {
     Software,
+    Skia,
     SkiaSoftware,
 }
 
@@ -23,6 +24,11 @@ pub enum TerminalRenderMode {
 pub enum NativePresentPath {
     EventLoop,
     RenderingNotifier,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphicsApiRequirement {
+    Direct3D,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +55,39 @@ impl NativePresentPath {
     }
 }
 
+impl GraphicsApiRequirement {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct3D => "direct3d",
+        }
+    }
+}
+
+impl RendererMode {
+    pub fn renderer_name(self) -> &'static str {
+        match self {
+            Self::Software => "software",
+            Self::Skia => "skia",
+            Self::SkiaSoftware => "skia-software",
+        }
+    }
+
+    pub fn selector_label(self) -> &'static str {
+        match self {
+            Self::Software => "winit-software",
+            Self::Skia => "winit-skia",
+            Self::SkiaSoftware => "winit-skia-software",
+        }
+    }
+}
+
+const WINDOWS_MAINLINE_RENDERER_FALLBACK_CHAIN: &[RendererMode] = &[
+    RendererMode::Skia,
+    RendererMode::SkiaSoftware,
+    RendererMode::Software,
+];
+const SOFTWARE_RENDERER_FALLBACK_CHAIN: &[RendererMode] = &[RendererMode::Software];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppRuntimeProfile {
     pub build_flavor: AppBuildFlavor,
@@ -70,7 +109,7 @@ impl AppRuntimeProfile {
     pub fn mainline() -> Self {
         Self {
             build_flavor: AppBuildFlavor::WindowsMainline,
-            renderer_mode: RendererMode::SkiaSoftware,
+            renderer_mode: RendererMode::Skia,
             terminal_render_mode: TerminalRenderMode::Native,
             native_present_path: NativePresentPath::RenderingNotifier,
         }
@@ -79,6 +118,15 @@ impl AppRuntimeProfile {
     /// Preferred native-only shipping profile for packaged mainline builds.
     pub fn mainline_native() -> Self {
         Self::mainline()
+    }
+
+    fn mainline_software_fallback() -> Self {
+        Self {
+            build_flavor: AppBuildFlavor::WindowsMainline,
+            renderer_mode: RendererMode::SkiaSoftware,
+            terminal_render_mode: TerminalRenderMode::Native,
+            native_present_path: NativePresentPath::RenderingNotifier,
+        }
     }
 
     /// native-first Windows software profile for GNU/software packages while bitmap remains an internal fallback.
@@ -97,7 +145,10 @@ impl AppRuntimeProfile {
             option_env!("MICA_TERM_PACKAGE_RENDERER"),
             option_env!("MICA_TERM_PACKAGE_TERMINAL_RENDERER"),
         ) {
-            (Some("windows-mainline"), Some("skia-software"), _) => Self::mainline_native(),
+            (Some("windows-mainline"), Some("skia"), _) => Self::mainline_native(),
+            (Some("windows-mainline"), Some("skia-software"), _) => {
+                Self::mainline_software_fallback()
+            }
             (Some("windows-software-compat"), Some("software"), _) => Self::software_compat(),
             _ => Self::development(),
         };
@@ -127,16 +178,36 @@ impl AppRuntimeProfile {
     }
 
     pub fn forced_renderer(self) -> Option<&'static str> {
-        Some(match self.renderer_mode {
-            RendererMode::Software => "software",
-            RendererMode::SkiaSoftware => "skia-software",
-        })
+        Some(self.renderer_mode.renderer_name())
     }
 
     pub fn selector_label(self) -> &'static str {
-        match self.renderer_mode {
-            RendererMode::Software => "winit-software",
-            RendererMode::SkiaSoftware => "winit-skia-software",
+        self.renderer_mode.selector_label()
+    }
+
+    pub fn preferred_graphics_api(self) -> Option<GraphicsApiRequirement> {
+        match self.build_flavor {
+            AppBuildFlavor::WindowsMainline => Some(GraphicsApiRequirement::Direct3D),
+            AppBuildFlavor::Development | AppBuildFlavor::WindowsSoftwareCompat => None,
+        }
+    }
+
+    pub fn prefers_direct3d(self) -> bool {
+        self.preferred_graphics_api() == Some(GraphicsApiRequirement::Direct3D)
+            && matches!(self.renderer_mode, RendererMode::Skia)
+    }
+
+    pub fn preferred_graphics_api_label(self) -> Option<&'static str> {
+        self.preferred_graphics_api()
+            .map(GraphicsApiRequirement::as_str)
+    }
+
+    pub fn renderer_fallback_chain(self) -> &'static [RendererMode] {
+        match self.build_flavor {
+            AppBuildFlavor::WindowsMainline => WINDOWS_MAINLINE_RENDERER_FALLBACK_CHAIN,
+            AppBuildFlavor::Development | AppBuildFlavor::WindowsSoftwareCompat => {
+                SOFTWARE_RENDERER_FALLBACK_CHAIN
+            }
         }
     }
 
