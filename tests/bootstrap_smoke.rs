@@ -6669,6 +6669,67 @@ fn trusting_unknown_host_key_retries_connection_in_same_workspace_tab() {
 }
 
 #[test]
+fn host_key_inline_flow_keeps_native_rect_collapsed_until_terminal_resumes() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let _env_lock = lock_known_hosts_env();
+    let known_hosts_path = sample_known_hosts_path("workspace-host-key-geometry");
+    let host_key = sample_public_key();
+    let _ = fs::remove_file(&known_hosts_path);
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(TofuAwareLauncher::new(host_key.clone())),
+    );
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    let session_id = app.get_active_workspace_session_id().to_string();
+
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
+    assert_eq!(app.get_workspace_session_connection_headline().as_str(), "waiting-user");
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_width(),
+        0.0,
+        "while the host-key prompt is rendered inline inside the connection timeline, the retained native terminal rect should stay collapsed so no stale terminal surface can cover the waiting-user UI"
+    );
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_height(),
+        0.0,
+        "while the host-key prompt is rendered inline inside the connection timeline, the retained native terminal rect should stay collapsed so hit-testing remains attached to the timeline host"
+    );
+
+    app.invoke_workspace_session_local_action_requested("trust-host-key".into());
+    flush_runtime_projection();
+
+    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+    assert!(
+        app.get_layout_workspace_session_native_surface_width() > 0.0
+            && app.get_layout_workspace_session_native_surface_height() > 0.0,
+        "after trusting the inline host-key prompt, the terminal should restore its native rect immediately when the same workspace tab resumes terminal mode"
+    );
+    assert_eq!(
+        app.get_workspace_session_state().as_str(),
+        "connected",
+        "after trusting the inline host-key prompt, the same workspace tab should resume a connected terminal state even before the runtime emits the first terminal surface payload"
+    );
+
+    let _ = fs::remove_file(known_hosts_path);
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+}
+
+#[test]
 fn rejecting_unknown_host_key_keeps_connection_timeline_in_same_tab() {
     i_slint_backend_testing::init_no_event_loop();
 
