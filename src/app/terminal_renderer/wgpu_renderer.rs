@@ -767,7 +767,11 @@ fn compute_cluster_offset_x(
     let width = width_px as f32;
     match layout {
         ClusterLayout::Ascii => 0.0,
-        ClusterLayout::Wide | ClusterLayout::Mixed => ((width - content_advance).max(0.0) / 2.0).floor(),
+        // Terminal cursor and selection geometry are cell-based, so wide clusters
+        // need to stay anchored to the first column in their span instead of being
+        // optically centered inside the two-cell box.
+        ClusterLayout::Wide => 0.0,
+        ClusterLayout::Mixed => ((width - content_advance).max(0.0) / 2.0).floor(),
     }
 }
 

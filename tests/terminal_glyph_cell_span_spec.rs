@@ -24,6 +24,9 @@ use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRendere
 struct OverhangCellSpanFontSystem;
 
 #[cfg(feature = "terminal-native-renderer")]
+struct WideClusterAnchorFontSystem;
+
+#[cfg(feature = "terminal-native-renderer")]
 impl FontSystem for OverhangCellSpanFontSystem {
     fn load_font(&mut self, _request: &FontRequest) -> Result<LoadedFont> {
         bail!("load_font is not used in this test")
@@ -53,6 +56,40 @@ impl FontSystem for OverhangCellSpanFontSystem {
             visible_height_px: 2,
             advance_px: 3,
             coverage: vec![255; 8],
+        })
+    }
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+impl FontSystem for WideClusterAnchorFontSystem {
+    fn load_font(&mut self, _request: &FontRequest) -> Result<LoadedFont> {
+        bail!("load_font is not used in this test")
+    }
+
+    fn shape_text(
+        &mut self,
+        _font: &LoadedFont,
+        _text: &str,
+    ) -> Result<Vec<mica_term::app::terminal_font::ShapedGlyph>> {
+        bail!("shape_text is not used in this test")
+    }
+
+    fn rasterize_glyph(
+        &mut self,
+        _font: &LoadedFont,
+        _request: GlyphRasterRequest,
+    ) -> Result<RasterizedGlyph> {
+        Ok(RasterizedGlyph {
+            width_px: 8,
+            height_px: 8,
+            bearing_x_px: 0,
+            bearing_y_px: 0,
+            visible_left_px: 0,
+            visible_top_px: 0,
+            visible_width_px: 8,
+            visible_height_px: 8,
+            advance_px: 8,
+            coverage: vec![255; 64],
         })
     }
 }
@@ -183,6 +220,84 @@ fn native_renderer_keeps_logical_cell_span_even_when_visible_bounds_extend_past_
     assert!(
         draw.dest_x_px + draw.atlas_entry.padding_left_px as i32 > 0,
         "renderer should keep the logical cell ownership for hit-testing while allowing visible bounds to extend beyond the cell span"
+    );
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn wide_cluster_stays_anchored_to_span_start_instead_of_centering() -> Result<()> {
+    let style = TextStyleKey {
+        fg_rgba: 0xffd8_dfe8,
+        bg_rgba: 0xff0c_1014,
+        bold: false,
+        underline: false,
+    };
+    let shaped_frame = ShapedTerminalFrame {
+        seqno: 1,
+        font: LoadedFont::new(
+            FontFaceKey(2),
+            FontRequest {
+                family_name: Some("Wide Terminal".into()),
+                px_size: 8.0,
+            },
+            FontMetrics {
+                units_per_em: 8,
+                ascent_px: 6.0,
+                descent_px: -2.0,
+                line_gap_px: 0.0,
+                baseline_px: 6.0,
+                cell_width_px: 8.0,
+                cell_height_px: 8.0,
+            },
+            FontRenderProfile::default(),
+        ),
+        rows: vec![ShapedRow {
+            row: 0,
+            runs: vec![GlyphRun {
+                row: 0,
+                cell_range: 0..2,
+                text: "条".into(),
+                clusters: vec![RunCluster {
+                    text: "条".into(),
+                    cell_range: 0..2,
+                    byte_range: 0..3,
+                }],
+                glyphs: vec![PositionedGlyph {
+                    glyph_id: 1,
+                    cluster: 0,
+                    x_advance: 8,
+                    y_advance: 0,
+                    x_offset: 0,
+                    y_offset: 0,
+                }],
+                style,
+                resolved_face: FontFallbackFace {
+                    face_key: FontFaceKey(2),
+                    family_name: "Wide Terminal".into(),
+                },
+                feature_set: Default::default(),
+                allow_ligatures: true,
+                has_color_glyphs: false,
+            }],
+        }],
+    };
+    let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+    let mut fonts = WideClusterAnchorFontSystem;
+
+    let prepared = renderer.prepare(&shaped_frame, &mut fonts)?;
+    let draw = prepared
+        .monochrome_glyph_draws
+        .first()
+        .expect("wide monochrome draw");
+
+    assert_eq!(draw.start_col, 0);
+    assert_eq!(draw.end_col, 1);
+    assert_eq!(
+        draw.dest_x_px + draw.atlas_entry.padding_left_px as i32,
+        0,
+        "wide terminal glyphs should stay anchored to the first cell in their logical span so cursor and selection geometry align with the rendered text instead of leaving a centered gutter"
     );
 
     Ok(())
