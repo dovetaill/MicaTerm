@@ -28,8 +28,6 @@ const MIN_CELL_WIDTH_PX: u32 = 8;
 const MIN_CELL_HEIGHT_PX: u32 = 20;
 const CELL_HORIZONTAL_PADDING_PX: u32 = 0;
 const CELL_VERTICAL_PADDING_PX: u32 = 0;
-const ASCII_LEFT_INSET_PX: f32 = 0.0;
-const MIXED_LEFT_INSET_PX: f32 = 0.0;
 const REGULAR_MONO_EMBOLDEN_STRENGTH: f32 = 0.0;
 const BOLD_MONO_EMBOLDEN_STRENGTH: f32 = 0.52;
 
@@ -661,14 +659,7 @@ fn rasterize_mono_cluster_sprite(request: MonoRasterRequest<'_>) -> CachedCluste
         };
     }
 
-    let content_advance = pen_x.ceil().max(0.0);
-    let offset_x = compute_cluster_offset_x(
-        classify_cluster_layout(text, span),
-        width as u32,
-        min_x,
-        max_x,
-        content_advance,
-    );
+    let offset_x = compute_cluster_offset_x(min_x);
 
     for glyph in rendered_glyphs {
         blit_alpha_mask(
@@ -931,46 +922,15 @@ fn relative_luminance(color: Rgba8Pixel) -> f32 {
     0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ClusterLayout {
-    Ascii,
-    Wide,
-    Mixed,
-}
+fn compute_cluster_offset_x(min_x: f32) -> f32 {
+    if !min_x.is_finite() {
+        return 0.0;
+    }
 
-fn classify_cluster_layout(text: &str, span: u32) -> ClusterLayout {
-    if span > 1 {
-        ClusterLayout::Wide
-    } else if text.is_ascii() {
-        ClusterLayout::Ascii
-    } else {
-        ClusterLayout::Mixed
-    }
-}
-
-fn compute_cluster_offset_x(
-    layout: ClusterLayout,
-    width_px: u32,
-    min_x: f32,
-    max_x: f32,
-    content_advance: f32,
-) -> f32 {
-    let width = width_px as f32;
-    let left_padding = match layout {
-        ClusterLayout::Ascii => ASCII_LEFT_INSET_PX,
-        ClusterLayout::Wide => ((width - content_advance).max(0.0) / 2.0).floor(),
-        ClusterLayout::Mixed => ((width - content_advance).max(0.0) / 2.0).floor() + MIXED_LEFT_INSET_PX,
-    };
-    let mut offset_x = left_padding + (-min_x).max(0.0);
-    let right_overflow = max_x + offset_x - width;
-    if right_overflow > 0.0 {
-        offset_x -= right_overflow;
-    }
-    let left_overflow = min_x + offset_x;
-    if left_overflow < 0.0 {
-        offset_x -= left_overflow;
-    }
-    offset_x
+    // The terminal grid owns horizontal placement. Keep compatibility sprites
+    // anchored to their first cell and only shift right when glyph ink would
+    // otherwise start left of that cell origin.
+    (-min_x).max(0.0)
 }
 
 fn blit_cached_sprite(
@@ -1069,30 +1029,35 @@ fn rgba_pixels_from_bytes(bytes: &[u8]) -> Vec<Rgba8Pixel> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClusterLayout, compute_cluster_offset_x};
+    use super::compute_cluster_offset_x;
 
     #[test]
-    fn ascii_cluster_offset_clamps_right_overhang_back_inside_the_cell() {
-        let offset = compute_cluster_offset_x(ClusterLayout::Ascii, 8, 1.0, 8.4, 7.0);
+    fn ascii_cluster_offset_keeps_the_cluster_anchored_to_the_cell_origin() {
+        let offset = compute_cluster_offset_x(1.0);
 
-        assert!(
-            1.0 + offset >= -0.001,
-            "placement should keep the left edge inside the cell after clamping the glyph bounds"
-        );
-        assert!(
-            8.4 + offset <= 8.001,
-            "placement should pull right-overhanging glyph ink back inside the fixed terminal cell instead of letting the right edge get clipped"
-        );
-        assert!(
-            offset < 0.0,
-            "a right-overhanging ASCII glyph should shift slightly left when the raw placement would clip the right edge"
+        assert_eq!(
+            offset, 0.0,
+            "bitmap compatibility sprites should stay anchored to the owning cell instead of shifting left to hide right-edge overhang, otherwise cursor and selection geometry drift away from the text grid"
         );
     }
 
     #[test]
-    fn wide_cluster_offset_keeps_center_alignment_when_no_clamp_is_needed() {
-        let offset = compute_cluster_offset_x(ClusterLayout::Wide, 16, 0.0, 8.0, 8.0);
+    fn wide_cluster_offset_stays_on_the_first_cell_in_the_span() {
+        let offset = compute_cluster_offset_x(0.0);
 
-        assert_eq!(offset, 4.0);
+        assert_eq!(
+            offset, 0.0,
+            "double-width clusters in the bitmap atlas path should stay anchored to the first cell in their logical span instead of being visually centered"
+        );
+    }
+
+    #[test]
+    fn mixed_cluster_offset_does_not_center_single_cell_punctuation() {
+        let offset = compute_cluster_offset_x(0.0);
+
+        assert_eq!(
+            offset, 0.0,
+            "single-cell mixed clusters should not be optically centered because the terminal grid, not glyph advance, owns horizontal placement"
+        );
     }
 }
