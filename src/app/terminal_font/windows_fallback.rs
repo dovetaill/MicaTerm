@@ -120,7 +120,7 @@ fn contains_cjk_text(text: &str) -> bool {
     text.chars().any(|ch| {
         matches!(
             ch,
-            '\u{2e80}'..='\u{9fff}' | '\u{f900}'..='\u{faff}'
+            '\u{2e80}'..='\u{9fff}' | '\u{f900}'..='\u{faff}' | '\u{ff00}'..='\u{ffef}'
         )
     })
 }

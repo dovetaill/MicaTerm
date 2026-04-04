@@ -8,6 +8,8 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
         fs::read_to_string("src/app/terminal_font/mod.rs").expect("read font mod");
     let fallback_source =
         fs::read_to_string("src/app/terminal_font/windows_fallback.rs").expect("read fallback");
+    let dwrite_source =
+        fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite");
 
     assert!(
         backend_source.contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Cascadia Mono\";"),
@@ -54,5 +56,14 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
             && (fallback_source.contains("\"Segoe UI Emoji\"")
                 || fallback_source.contains("DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY")),
         "Windows fallback source should align with the Cascadia -> Sarasa -> Segoe UI Emoji chain"
+    );
+    assert!(
+        fallback_source.contains("'\\u{ff00}'..='\\u{ffef}'"),
+        "Windows fallback source should treat fullwidth punctuation as part of the CJK fallback range so Chinese punctuation does not fall back to tofu squares"
+    );
+    assert!(
+        dwrite_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf")
+            && dwrite_source.contains("DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY"),
+        "DirectWrite fallback should keep a bundled Sarasa Term SC face available when packaged Windows builds cannot resolve the system CJK family"
     );
 }

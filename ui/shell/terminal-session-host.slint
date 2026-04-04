@@ -335,11 +335,40 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function terminal-cell-x(col: int) -> length {
-        return root.terminal-surface-origin-x() + (col * root.terminal-cell-width);
+        return root.snap-length-to-device-pixel(root.terminal-surface-origin-x() + (col * root.terminal-cell-width));
     }
 
     function terminal-cell-y(row: int) -> length {
-        return root.terminal-surface-origin-y() + (row * root.terminal-cell-height);
+        return root.snap-length-to-device-pixel(root.terminal-surface-origin-y() + (row * root.terminal-cell-height));
+    }
+
+    function selection-overlay-active() -> bool {
+        return root.session-render-mode == "bitmap" && root.selection-active
+            && root.selection-start-row >= 0 && root.selection-start-col >= 0
+            && root.selection-end-row >= root.selection-start-row
+            && root.selection-end-col >= 0;
+    }
+
+    function selection-span-x(start-col: int) -> length {
+        return root.terminal-cell-x(max(0, min(root.session-cols, start-col)));
+    }
+
+    function selection-span-width(start-col: int, end-col: int) -> length {
+        let clamped-start-col = max(0, min(root.session-cols, start-col));
+        let clamped-end-col = max(clamped-start-col, min(root.session-cols, end-col + 1));
+        return max(
+            0px,
+            root.terminal-cell-x(clamped-end-col) - root.terminal-cell-x(clamped-start-col),
+        );
+    }
+
+    function selection-span-height(start-row: int, end-row: int) -> length {
+        let clamped-start-row = max(0, min(root.session-rows, start-row));
+        let clamped-end-row = max(clamped-start-row, min(root.session-rows, end-row + 1));
+        return max(
+            0px,
+            root.terminal-cell-y(clamped-end-row) - root.terminal-cell-y(clamped-start-row),
+        );
     }
 
     function terminal-hit-row(pointer-y: length) -> int {
@@ -867,6 +896,41 @@ export component TerminalSessionHost inherits Rectangle {
                     image-fit: fill;
                     image-rendering: pixelated;
                     visible: root.session-render-mode == "bitmap";
+                }
+
+                if root.selection-overlay-active() && root.selection-start-row == root.selection-end-row : selection-overlay-single-row := Rectangle {
+                    x: root.selection-span-x(root.selection-start-col);
+                    y: root.terminal-cell-y(root.selection-start-row);
+                    width: root.selection-span-width(root.selection-start-col, root.selection-end-col);
+                    height: root.selection-span-height(root.selection-start-row, root.selection-start-row);
+                    background: ThemeTokens.dark-mode ? #5d738b5c : #c6d8f570;
+                }
+
+                if root.selection-overlay-active() && root.selection-start-row < root.selection-end-row : selection-overlay-first-row := Rectangle {
+                    x: root.selection-span-x(root.selection-start-col);
+                    y: root.terminal-cell-y(root.selection-start-row);
+                    width: root.selection-span-width(root.selection-start-col, root.session-cols - 1);
+                    height: root.selection-span-height(root.selection-start-row, root.selection-start-row);
+                    background: ThemeTokens.dark-mode ? #5d738b5c : #c6d8f570;
+                }
+
+                if root.selection-overlay-active() && root.selection-start-row + 1 < root.selection-end-row : selection-overlay-middle-rows := Rectangle {
+                    x: root.selection-span-x(0);
+                    y: root.terminal-cell-y(root.selection-start-row + 1);
+                    width: root.selection-span-width(0, root.session-cols - 1);
+                    height: root.selection-span-height(
+                        root.selection-start-row + 1,
+                        root.selection-end-row - 1,
+                    );
+                    background: ThemeTokens.dark-mode ? #5d738b5c : #c6d8f570;
+                }
+
+                if root.selection-overlay-active() && root.selection-start-row < root.selection-end-row : selection-overlay-last-row := Rectangle {
+                    x: root.selection-span-x(0);
+                    y: root.terminal-cell-y(root.selection-end-row);
+                    width: root.selection-span-width(0, root.selection-end-col);
+                    height: root.selection-span-height(root.selection-end-row, root.selection-end-row);
+                    background: ThemeTokens.dark-mode ? #5d738b5c : #c6d8f570;
                 }
 
                 input-capture := TouchArea {

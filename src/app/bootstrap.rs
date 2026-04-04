@@ -1973,6 +1973,11 @@ fn terminal_selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
     selection_overlay_rgba(theme_mode)
 }
 
+fn workspace_session_uses_host_selection_overlay(window: &AppWindow) -> bool {
+    window.get_workspace_session_render_mode()
+        == SharedString::from(TerminalRenderMode::Bitmap.as_str())
+}
+
 fn active_workspace_terminal_selection(window: &AppWindow) -> Option<TerminalAtlasSelection> {
     if !window.get_workspace_session_selection_active() {
         return None;
@@ -2512,7 +2517,11 @@ fn sync_workspace_session_state_with_manager(
         follow_tracker.indicator_for_surface(state.active_workspace_terminal_surface());
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
-        let selection = active_workspace_terminal_selection(window);
+        let selection = if workspace_session_uses_host_selection_overlay(window) {
+            None
+        } else {
+            active_workspace_terminal_selection(window)
+        };
         let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
         let mut native_frame_presented = false;
         let mut next_render_mode = None;
@@ -5146,6 +5155,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let Some(window) = window_handle.upgrade() else {
             return;
         };
+        if workspace_session_uses_host_selection_overlay(&window) {
+            return;
+        }
         let state = state.borrow();
         sync_workspace_session_state_with_manager(
             &window,

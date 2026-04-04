@@ -49,7 +49,7 @@ pub fn mica_code_dark() -> TerminalThemePreset {
         row_band_odd: 0x13_18_1e,
         cursor_bg: 0xe6_ed_f5,
         cursor_fg: 0x0c_10_14,
-        selection_bg: (0x5d, 0x73, 0x8b, 1.0),
+        selection_bg: (0x5d, 0x73, 0x8b, 0.36),
         ansi: [
             (0x1f, 0x24, 0x2b),
             (0xe8, 0x7f, 0x86),
@@ -82,7 +82,7 @@ pub fn mica_code_light() -> TerminalThemePreset {
         row_band_odd: 0xf4_f8_ff,
         cursor_bg: 0x4c_55_61,
         cursor_fg: 0xfc_fd_ff,
-        selection_bg: (0xc6, 0xd8, 0xf5, 1.0),
+        selection_bg: (0xc6, 0xd8, 0xf5, 0.44),
         ansi: [
             (0x24, 0x29, 0x2f),
             (0xc7, 0x4e, 0x39),

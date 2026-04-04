@@ -74,9 +74,12 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         "terminal session host should snap the scene-image terminal origin onto device pixels instead of anchoring the bitmap at unsnapped logical padding offsets"
     );
     assert!(
-        host_source.contains("return root.terminal-surface-origin-x() + (col * root.terminal-cell-width);")
-            && host_source.contains("return root.terminal-surface-origin-y() + (row * root.terminal-cell-height);"),
-        "terminal session host should anchor cell geometry to the snapped terminal surface origin so the Slint cursor overlay tracks the bitmap on high-DPI software renders"
+        host_source.contains(
+            "return root.snap-length-to-device-pixel(root.terminal-surface-origin-x() + (col * root.terminal-cell-width));"
+        ) && host_source.contains(
+            "return root.snap-length-to-device-pixel(root.terminal-surface-origin-y() + (row * root.terminal-cell-height));"
+        ),
+        "terminal session host should snap per-cell geometry onto device pixels so cursor and selection overlays stay aligned with bitmap glyphs on high-DPI renders"
     );
     assert!(
         host_source.contains("return root.terminal-surface-origin-y();")
@@ -106,6 +109,43 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         host_source.contains("width: parent.width;")
             && host_source.contains("height: parent.height;"),
         "input capture inside the clipped viewport should track the visible terminal box, not the stale full-grid extent"
+    );
+}
+
+#[test]
+fn bitmap_host_selection_source_exposes_local_overlay_contract() {
+    let host_source =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        host_source.contains("function selection-overlay-active() -> bool")
+            && host_source.contains("root.session-render-mode == \"bitmap\" && root.selection-active"),
+        "terminal session host should expose a bitmap-only local selection overlay gate so drag selection can repaint immediately without waiting for a Rust-side scene-image redraw"
+    );
+    assert!(
+        host_source.contains("selection-overlay-single-row := Rectangle {")
+            && host_source.contains("selection-overlay-first-row := Rectangle {")
+            && host_source.contains("selection-overlay-middle-rows := Rectangle {")
+            && host_source.contains("selection-overlay-last-row := Rectangle {"),
+        "terminal session host should render local single-row, first-row, middle-row, and last-row selection rectangles for the bitmap path"
+    );
+    assert!(
+        host_source.contains("background: ThemeTokens.dark-mode ? #5d738b")
+            && host_source.contains(": #c6d8f5"),
+        "terminal session host should keep distinct dark and light selection overlay colors for the bitmap host path"
+    );
+    assert!(
+        bootstrap_source.contains("fn workspace_session_uses_host_selection_overlay(window: &AppWindow) -> bool"),
+        "bootstrap should centralize the bitmap host-selection decision so the presenter and selection callback stay in sync"
+    );
+    assert!(
+        bootstrap_source.contains("if workspace_session_uses_host_selection_overlay(&window) {"),
+        "selection-changed callback should skip Rust-side scene-image syncs when the Slint host owns the live bitmap selection overlay"
+    );
+    assert!(
+        bootstrap_source.contains("let selection = if workspace_session_uses_host_selection_overlay(window) {"),
+        "workspace terminal sync should stop baking selection overlays into bitmap presenter frames when the host draws selection locally"
     );
 }
 
