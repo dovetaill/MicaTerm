@@ -109,14 +109,14 @@ fn software_compat_profile_prefers_native_terminal_renderer() {
 }
 
 #[test]
-fn mainline_profile_uses_post_render_native_surface_when_skia_prefers_direct3d() {
+fn mainline_profile_keeps_scene_image_until_skia_native_surface_is_windows_verified() {
     let profile = AppRuntimeProfile::mainline();
 
     assert!(profile.prefers_direct3d());
     assert_eq!(
         profile.terminal_composition_mode(),
-        TerminalCompositionMode::PostRenderNativeSurface,
-        "Direct3D-backed Skia mainline builds should hand terminal text ownership to the retained same-HWND native surface path instead of keeping Windows mainline on the scene-image fallback"
+        TerminalCompositionMode::SceneImage,
+        "Direct3D-backed Skia mainline builds should stay on the scene-owned image path until the same-HWND native surface path is Windows-verified; otherwise packaged builds can flip into native mode and show a blank terminal region"
     );
 }
 

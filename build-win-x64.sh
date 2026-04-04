@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Thin wrapper around the Windows x64 Skia GPU mainline package used by CI and manual packaging.
 # Preferred native-only terminal surface path for Windows mainline shipping with Direct3D-first selection.
+# Keep packaged Skia builds on the event-loop present trigger until the rendering-notifier
+# path is Windows-verified; otherwise the host can flip into native mode before any first paint.
 
 set -euo pipefail
 
@@ -18,7 +20,7 @@ Default target:
   supported hosts: Windows MSVC shell/Git Bash or Linux + cargo-xwin + clang
   packaged renderer: winit-skia
   packaged terminal renderer: native
-  packaged native present path: rendering-notifier
+  packaged native present path: event-loop
   expected primary text path: directwrite-d2d
   compatibility text fallback path: bitmap-mask-compat
   verification matrix: DPI 100% | 125% | 150%; font sizes 12px | 13px | 14px | 15px
@@ -54,7 +56,7 @@ export CARGO_FEATURES="slint-renderer-skia,terminal-native-renderer"
 export MICA_TERM_BUILD_FLAVOR="windows-mainline"
 export MICA_TERM_PACKAGE_RENDERER="skia"
 export MICA_TERM_PACKAGE_TERMINAL_RENDERER="native"
-export MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH="rendering-notifier"
+export MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH="event-loop"
 export MICA_TERM_EXPECTED_TEXT_RENDERER_PATH="directwrite-d2d"
 export MICA_TERM_TEXT_RENDERER_FALLBACK_PATH="bitmap-mask-compat"
 export MICA_TERM_VERIFICATION_DPI_SCALE_MATRIX="100,125,150"

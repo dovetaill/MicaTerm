@@ -62,10 +62,10 @@ Notes:
 ## Terminal Renderer Migration Status
 
 - Windows-first native renderer:
-  - packaged `windows-mainline` builds now opt into the staged native presenter path
+  - packaged `windows-mainline` builds currently keep the staged Windows presenter on the scene-owned image path while the same-HWND native surface stays under Windows verification
   - if native presenter setup fails, runtime falls back to the bitmap presenter instead of leaving the terminal blank
 - Platform support matrix:
-  - Windows mainline: staged native renderer with bitmap fallback
+  - Windows mainline: staged presenter on the scene-image path while same-HWND native surface verification continues
   - Windows software compatibility: bitmap presenter
   - Linux/macOS: bitmap presenter today; Linux/macOS native renderer follow-up work is still pending
 - Migration scope today:

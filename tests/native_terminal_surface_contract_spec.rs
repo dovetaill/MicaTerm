@@ -639,7 +639,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
 }
 
 #[test]
-fn windows_mainline_direct3d_source_prefers_post_render_native_surface() {
+fn windows_mainline_direct3d_source_keeps_scene_image_until_native_surface_is_verified() {
     let runtime_profile_source =
         fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
     let composition_block = block_between(
@@ -650,9 +650,9 @@ fn windows_mainline_direct3d_source_prefers_post_render_native_surface() {
 
     assert!(
         composition_block.contains(
-            "AppBuildFlavor::WindowsMainline if self.prefers_direct3d() => {\n                TerminalCompositionMode::PostRenderNativeSurface"
+            "AppBuildFlavor::WindowsMainline if self.prefers_direct3d() => {\n                TerminalCompositionMode::SceneImage"
         ),
-        "Windows mainline should promote Direct3D-backed Skia builds onto the retained post-render native surface path instead of routing the primary terminal text through SceneImage"
+        "Windows mainline should keep Direct3D-backed Skia packages on the scene-image path until the retained same-HWND native surface is Windows-verified, otherwise packaged builds can expose a blank native terminal region"
     );
 }
 

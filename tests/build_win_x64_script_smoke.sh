@@ -22,7 +22,7 @@ grep -F "Direct3D-first native-only terminal surface path." <<<"$HELP_OUTPUT" >/
 grep -F "x86_64-pc-windows-msvc" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "Linux + cargo-xwin + clang" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "winit-skia" <<<"$HELP_OUTPUT" >/dev/null
-grep -F "packaged native present path: rendering-notifier" <<<"$HELP_OUTPUT" >/dev/null
+grep -F "packaged native present path: event-loop" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "runtime fallback chain: winit-skia+d3d -> winit-skia-software -> winit-software" <<<"$HELP_OUTPUT" >/dev/null
 grep -F "./build-win-x64-software.sh" <<<"$HELP_OUTPUT" >/dev/null
 grep -F ".zip" <<<"$HELP_OUTPUT" >/dev/null
@@ -35,7 +35,7 @@ grep -F 'export MICA_TERM_BUILD_FLAVOR="windows-mainline"' "$SCRIPT_PATH" >/dev/
 grep -F 'export MICA_TERM_PACKAGE_RENDERER="skia"' "$SCRIPT_PATH" >/dev/null
 grep -F 'packaged terminal renderer: native' <<<"$HELP_OUTPUT" >/dev/null
 grep -F 'export MICA_TERM_PACKAGE_TERMINAL_RENDERER="native"' "$SCRIPT_PATH" >/dev/null
-grep -F 'export MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH="rendering-notifier"' "$SCRIPT_PATH" >/dev/null
+grep -F 'export MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH="event-loop"' "$SCRIPT_PATH" >/dev/null
 grep -F 'export MICA_TERM_PACKAGE_PORTABLE=1' "$SCRIPT_PATH" >/dev/null
 grep -F 'export PACKAGE_FLAVOR_SUFFIX="-skia"' "$SCRIPT_PATH" >/dev/null
 grep -F 'rust-skia does not ship Windows GNU Skia binaries' "$SCRIPT_PATH" >/dev/null
