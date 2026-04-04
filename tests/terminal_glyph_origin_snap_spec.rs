@@ -425,7 +425,7 @@ fn native_renderer_keeps_shared_row_baseline_when_a_glyph_overhangs_vertically()
 
 #[cfg(feature = "terminal-native-renderer")]
 #[test]
-fn native_renderer_preserves_fractional_x_phase_for_hinted_monochrome_glyphs() -> Result<()> {
+fn native_renderer_resets_fractional_x_phase_at_each_terminal_cell_start() -> Result<()> {
     let style = TextStyleKey {
         fg_rgba: 0xffd8_dfe8,
         bg_rgba: 0xff0c_1014,
@@ -496,9 +496,85 @@ fn native_renderer_preserves_fractional_x_phase_for_hinted_monochrome_glyphs() -
         fonts.requests[0].fractional_offset_x().abs() < 0.001,
         "the first glyph in the row should stay on the integer phase"
     );
+    assert_eq!(
+        fonts.requests[1].fractional_offset_x(),
+        0.0,
+        "renderer should restart monochrome raster positioning from the next cell boundary instead of carrying shaped drift across terminal cells"
+    );
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_preserves_fractional_x_phase_inside_a_single_cluster() -> Result<()> {
+    let style = TextStyleKey {
+        fg_rgba: 0xffd8_dfe8,
+        bg_rgba: 0xff0c_1014,
+        bold: false,
+        underline: false,
+    };
+    let shaped_frame = ShapedTerminalFrame {
+        seqno: 2,
+        font: fractional_phase_test_font(),
+        rows: vec![ShapedRow {
+            row: 0,
+            runs: vec![GlyphRun {
+                row: 0,
+                cell_range: 0..1,
+                text: "ab".into(),
+                clusters: vec![RunCluster {
+                    text: "ab".into(),
+                    cell_range: 0..1,
+                    byte_range: 0..2,
+                }],
+                glyphs: vec![
+                    PositionedGlyph {
+                        glyph_id: 1,
+                        cluster: 0,
+                        x_advance: 3,
+                        y_advance: 0,
+                        x_offset: 0,
+                        y_offset: 0,
+                    },
+                    PositionedGlyph {
+                        glyph_id: 2,
+                        cluster: 0,
+                        x_advance: 3,
+                        y_advance: 0,
+                        x_offset: 0,
+                        y_offset: 0,
+                    },
+                ],
+                style,
+                resolved_face: FontFallbackFace {
+                    face_key: FontFaceKey(1),
+                    family_name: "Fractional Terminal".into(),
+                },
+                feature_set: Default::default(),
+                allow_ligatures: true,
+                has_color_glyphs: false,
+            }],
+        }],
+    };
+    let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+    let mut fonts = FractionalPhaseFontSystem::default();
+
+    let _prepared = renderer.prepare(&shaped_frame, &mut fonts)?;
+
+    assert_eq!(
+        fonts.requests.len(),
+        2,
+        "renderer should rasterize both monochrome glyphs through the font backend"
+    );
+    assert_eq!(
+        fonts.requests[0].fractional_offset_x(),
+        0.0,
+        "the first glyph in the cluster should stay on the integer phase"
+    );
     assert!(
         (fonts.requests[1].fractional_offset_x() - 0.5).abs() < 0.001,
-        "renderer should preserve the second glyph's 0.5px fractional phase instead of snapping every hinted glyph raster request to 0.0"
+        "renderer should still preserve intra-cluster subpixel positioning for ligature-like glyph groups"
     );
 
     Ok(())
@@ -536,20 +612,13 @@ fn native_renderer_partitions_monochrome_glyph_cache_by_fractional_x_phase() -> 
             row: 0,
             runs: vec![GlyphRun {
                 row: 0,
-                cell_range: 0..2,
+                cell_range: 0..1,
                 text: "aa".into(),
-                clusters: vec![
-                    RunCluster {
-                        text: "a".into(),
-                        cell_range: 0..1,
-                        byte_range: 0..1,
-                    },
-                    RunCluster {
-                        text: "a".into(),
-                        cell_range: 1..2,
-                        byte_range: 1..2,
-                    },
-                ],
+                clusters: vec![RunCluster {
+                    text: "aa".into(),
+                    cell_range: 0..1,
+                    byte_range: 0..2,
+                }],
                 glyphs: vec![
                     PositionedGlyph {
                         glyph_id: 7,
@@ -561,7 +630,7 @@ fn native_renderer_partitions_monochrome_glyph_cache_by_fractional_x_phase() -> 
                     },
                     PositionedGlyph {
                         glyph_id: 7,
-                        cluster: 1,
+                        cluster: 0,
                         x_advance: 11,
                         y_advance: 0,
                         x_offset: 0,
@@ -596,16 +665,16 @@ fn native_renderer_partitions_monochrome_glyph_cache_by_fractional_x_phase() -> 
     assert_eq!(
         fonts.requests[0].fractional_offset_x(),
         0.0,
-        "the first glyph should stay on a whole-pixel phase at the row origin"
+        "the first glyph should stay on a whole-pixel phase at the cluster origin"
     );
     assert!(
         (fonts.requests[1].fractional_offset_x() - 0.4).abs() < 0.001,
-        "the second glyph should keep the 0.4px subpixel phase produced by the shaped advance instead of collapsing to a whole-pixel origin"
+        "the second glyph should keep the 0.4px intra-cluster subpixel phase produced by the shaped advance"
     );
     assert_ne!(
         prepared.monochrome_glyph_draws[0].atlas_entry.slot,
         prepared.monochrome_glyph_draws[1].atlas_entry.slot,
-        "glyph atlas entries should stay distinct when the same glyph is rasterized at different fractional x phases"
+        "glyph atlas entries should stay distinct when the same glyph is rasterized at different intra-cluster fractional x phases"
     );
 
     Ok(())
@@ -710,9 +779,10 @@ fn native_renderer_preserves_fractional_x_phase_when_color_run_falls_back_to_mon
         0.0,
         "the first fallback glyph should keep its whole-pixel phase"
     );
-    assert!(
-        (fonts.requests[1].fractional_offset_x() - 0.4).abs() < 0.001,
-        "the second fallback glyph should keep the shaped 0.4px subpixel phase instead of collapsing to an integer origin"
+    assert_eq!(
+        fonts.requests[1].fractional_offset_x(),
+        0.0,
+        "color-run monochrome fallback should also restart from each terminal cell boundary instead of carrying spacing drift into the next cell"
     );
 
     Ok(())

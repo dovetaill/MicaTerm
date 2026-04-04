@@ -137,13 +137,6 @@ struct GlyphCellSpanRect {
     height_px: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ClusterLayout {
-    Ascii,
-    Wide,
-    Mixed,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum PreparedClusterGlyphKind {
     Monochrome {
@@ -223,9 +216,6 @@ impl WgpuTerminalRenderer {
         for row in &frame.rows {
             let row_top_px = (row.row as i32).saturating_mul(cell_height_px as i32);
             for run in &row.runs {
-                let mut pen_x_subpx =
-                    (run.start_col() as i32).saturating_mul(cell_width_px as i32) as f32;
-                let mut pen_x_px = pen_x_subpx.floor() as i32;
                 background_runs.push(PreparedBackgroundRun {
                     row: row.row,
                     start_col: run.start_col(),
@@ -254,7 +244,10 @@ impl WgpuTerminalRenderer {
                         cell_width_px,
                         cell_height_px,
                     );
-                    let cluster_origin_x_px = pen_x_subpx.floor() as i32;
+                    let cluster_origin_x_subpx =
+                        (glyph_start_col as i32).saturating_mul(cell_width_px as i32) as f32;
+                    let cluster_origin_x_px = cluster_origin_x_subpx.floor() as i32;
+                    let mut cluster_pen_x_subpx = cluster_origin_x_subpx;
                     let mut cluster_glyphs = Vec::new();
 
                     while glyph_index < run.glyphs.len() && run.glyphs[glyph_index].cluster == cluster_start
@@ -277,15 +270,19 @@ impl WgpuTerminalRenderer {
                                     );
                                     let x_offset_px =
                                         font_design_units_to_px(&frame.font, glyph.x_offset);
+                                    let x_offset_subpx =
+                                        font_design_units_to_px_f32(&frame.font, glyph.x_offset);
                                     let y_offset_px =
                                         font_design_units_to_px(&frame.font, glyph.y_offset);
+                                    let glyph_origin_x_px =
+                                        (cluster_pen_x_subpx + x_offset_subpx).floor() as i32;
                                     cluster_glyphs.push(PreparedClusterGlyph {
                                         glyph_id: glyph.glyph_id,
                                         start_col: glyph_start_col,
                                         end_col: glyph_end_col,
                                         x_offset_px,
                                         y_offset_px,
-                                        raw_dest_x_px: pen_x_px.saturating_add(x_offset_px),
+                                        raw_dest_x_px: glyph_origin_x_px,
                                         raw_dest_y_px: row_top_px
                                             .saturating_add(center_color_glyph_in_cell(
                                                 cell_height_px,
@@ -299,13 +296,12 @@ impl WgpuTerminalRenderer {
                                             upload,
                                         },
                                     });
-                                    pen_x_subpx += color_glyph_advance_px_f32(
+                                    cluster_pen_x_subpx += color_glyph_advance_px_f32(
                                         &frame.font,
                                         glyph.x_advance,
                                         cell_width_px,
                                         rasterized.width_px,
                                     );
-                                    pen_x_px = pen_x_subpx.floor() as i32;
                                     color_glyphs_prepared = color_glyphs_prepared.saturating_add(1);
                                 }
                                 None => {
@@ -315,7 +311,7 @@ impl WgpuTerminalRenderer {
                                         font_design_units_to_px_f32(&frame.font, glyph.x_offset);
                                     let y_offset_px =
                                         font_design_units_to_px(&frame.font, glyph.y_offset);
-                                    let glyph_origin_x = pen_x_subpx + x_offset_subpx;
+                                    let glyph_origin_x = cluster_pen_x_subpx + x_offset_subpx;
                                     let (glyph_origin_x_px, fractional_offset_x) =
                                         split_fractional_offset(glyph_origin_x);
                                     let request = frame
@@ -384,13 +380,12 @@ impl WgpuTerminalRenderer {
                                             visible_height_px: rasterized.visible_height_px,
                                         },
                                     });
-                                    pen_x_subpx += monochrome_glyph_advance_px_f32(
+                                    cluster_pen_x_subpx += monochrome_glyph_advance_px_f32(
                                         &frame.font,
                                         glyph.x_advance,
                                         rasterized.advance_px,
                                         cell_width_px,
                                     );
-                                    pen_x_px = pen_x_subpx.floor() as i32;
                                     monochrome_glyphs_prepared =
                                         monochrome_glyphs_prepared.saturating_add(1);
                                 }
@@ -399,7 +394,7 @@ impl WgpuTerminalRenderer {
                             let x_offset_px = font_design_units_to_px(&frame.font, glyph.x_offset);
                             let x_offset_subpx =
                                 font_design_units_to_px_f32(&frame.font, glyph.x_offset);
-                            let glyph_origin_x = pen_x_subpx + x_offset_subpx;
+                            let glyph_origin_x = cluster_pen_x_subpx + x_offset_subpx;
                             let (glyph_origin_x_px, fractional_offset_x) =
                                 split_fractional_offset(glyph_origin_x);
                             let request = frame
@@ -467,13 +462,12 @@ impl WgpuTerminalRenderer {
                                     visible_height_px: rasterized.visible_height_px,
                                 },
                             });
-                            pen_x_subpx += monochrome_glyph_advance_px_f32(
+                            cluster_pen_x_subpx += monochrome_glyph_advance_px_f32(
                                 &frame.font,
                                 glyph.x_advance,
                                 rasterized.advance_px,
                                 cell_width_px,
                             );
-                            pen_x_px = pen_x_subpx.floor() as i32;
                             monochrome_glyphs_prepared =
                                 monochrome_glyphs_prepared.saturating_add(1);
                         }
@@ -481,11 +475,8 @@ impl WgpuTerminalRenderer {
                     }
 
                     let cluster_offset_x_px = compute_cluster_offset_x_px(
-                        run,
-                        cluster_start,
-                        glyph_span_rect,
                         cluster_origin_x_px,
-                        pen_x_px,
+                        glyph_span_rect.start_x_px,
                         &cluster_glyphs,
                     );
 
@@ -718,61 +709,11 @@ fn clusters_to_cell_span(
 }
 
 fn compute_cluster_offset_x_px(
-    run: &GlyphRun,
-    cluster_start: u32,
-    span_rect: GlyphCellSpanRect,
     cluster_origin_x_px: i32,
-    cluster_end_x_px: i32,
-    glyphs: &[PreparedClusterGlyph],
+    span_start_x_px: i32,
+    _glyphs: &[PreparedClusterGlyph],
 ) -> i32 {
-    if glyphs.is_empty() || span_rect.width_px == 0 {
-        return 0;
-    }
-
-    let cluster = glyph_cluster(run, cluster_start);
-    let span_cells = glyphs[0]
-        .end_col
-        .saturating_sub(glyphs[0].start_col)
-        .saturating_add(1);
-    compute_cluster_offset_x(
-        classify_cluster_layout(cluster.map(|value| value.text.as_str()), span_cells),
-        span_rect.width_px,
-        cluster_end_x_px.saturating_sub(cluster_origin_x_px) as f32,
-    )
-    .round() as i32
-}
-
-fn glyph_cluster(run: &GlyphRun, cluster_start: u32) -> Option<&RunCluster> {
-    let cluster_start = (cluster_start as usize).min(run.text.len());
-    run.clusters
-        .iter()
-        .find(|cluster| cluster.byte_range.start <= cluster_start && cluster_start < cluster.byte_range.end)
-}
-
-fn classify_cluster_layout(text: Option<&str>, span: u32) -> ClusterLayout {
-    if span > 1 {
-        ClusterLayout::Wide
-    } else if text.is_some_and(str::is_ascii) {
-        ClusterLayout::Ascii
-    } else {
-        ClusterLayout::Mixed
-    }
-}
-
-fn compute_cluster_offset_x(
-    layout: ClusterLayout,
-    width_px: u32,
-    content_advance: f32,
-) -> f32 {
-    let width = width_px as f32;
-    match layout {
-        ClusterLayout::Ascii => 0.0,
-        // Terminal cursor and selection geometry are cell-based, so wide clusters
-        // need to stay anchored to the first column in their span instead of being
-        // optically centered inside the two-cell box.
-        ClusterLayout::Wide => 0.0,
-        ClusterLayout::Mixed => ((width - content_advance).max(0.0) / 2.0).floor(),
-    }
+    span_start_x_px.saturating_sub(cluster_origin_x_px)
 }
 
 fn glyph_cell_span_rect(
