@@ -5106,8 +5106,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_workspace_session_text_input(move |text| {
         let mut state = state.borrow_mut();
         workspace_terminal::forward_active_workspace_text_input(&state, session_bridge_ref.as_deref(), text.as_str());
-        if let Some(window) = window_handle.upgrade() {
-            workspace_terminal::refresh_active_workspace_projection(
+        if workspace_terminal::apply_local_input_projection_hint(&mut state)
+            && let Some(window) = window_handle.upgrade()
+        {
+            workspace_terminal::refresh_projection_after_local_input_hint(
                 &window,
                 &mut state,
                 session_bridge_ref.as_deref(),
@@ -5130,8 +5132,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             ctrl,
             shift,
         );
-        if let Some(window) = window_handle.upgrade() {
-            workspace_terminal::refresh_active_workspace_projection(
+        if workspace_terminal::apply_local_input_projection_hint(&mut state)
+            && let Some(window) = window_handle.upgrade()
+        {
+            workspace_terminal::refresh_projection_after_local_input_hint(
                 &window,
                 &mut state,
                 session_bridge_ref.as_deref(),
@@ -5995,6 +5999,77 @@ mod tests {
             workspace_terminal::workspace_paste_prompt_mode(&state, "one\ntwo\nthree\nfour"),
             Some(WorkspacePastePromptMode::Editor)
         );
+    }
+
+    #[test]
+    fn local_input_projection_hint_snaps_scrollback_surface_to_bottom() {
+        let session_id = Uuid::new_v4();
+        let mut state = ShellViewModel::default();
+        let mut tab = WorkspaceTab::from_session(&SessionHandle {
+            session_id,
+            asset_id: "asset-prod".into(),
+            title: "Prod Bastion".into(),
+            subtitle: "ops@10.0.0.12:22".into(),
+            state: SessionState::Connected,
+            can_reconnect: false,
+            enhanced_session_state: EnhancedSessionState::Plain,
+        });
+        tab.active = true;
+        state.set_workspace_tabs(vec![tab]);
+        let mut surface = TerminalSurfaceState::from_visible_lines(
+            session_id,
+            7,
+            24,
+            80,
+            vec!["offset 3".into()],
+        );
+        surface.viewport_offset_lines = 3;
+        surface.viewport_max_offset_lines = 8;
+        surface.viewport_at_bottom = false;
+        state.set_active_workspace_terminal_surface(Some(surface));
+
+        assert!(
+            workspace_terminal::apply_local_input_projection_hint(&mut state),
+            "local input should immediately collapse the projected scrollback gap so the terminal stops looking stuck above the latest output"
+        );
+
+        let surface = state
+            .active_workspace_terminal_surface()
+            .expect("updated surface");
+        assert_eq!(surface.viewport_offset_lines, 0);
+        assert!(surface.viewport_at_bottom);
+        assert_eq!(surface.viewport_max_offset_lines, 8);
+    }
+
+    #[test]
+    fn local_input_projection_hint_leaves_bottom_aligned_surface_unchanged() {
+        let session_id = Uuid::new_v4();
+        let mut state = ShellViewModel::default();
+        let mut tab = WorkspaceTab::from_session(&SessionHandle {
+            session_id,
+            asset_id: "asset-prod".into(),
+            title: "Prod Bastion".into(),
+            subtitle: "ops@10.0.0.12:22".into(),
+            state: SessionState::Connected,
+            can_reconnect: false,
+            enhanced_session_state: EnhancedSessionState::Plain,
+        });
+        tab.active = true;
+        state.set_workspace_tabs(vec![tab]);
+        let surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 3, 24, 80, vec!["$ ".into()]);
+        state.set_active_workspace_terminal_surface(Some(surface));
+
+        assert!(
+            !workspace_terminal::apply_local_input_projection_hint(&mut state),
+            "already-bottom surfaces should not trigger extra local projection work for every repeated key event"
+        );
+        let surface = state
+            .active_workspace_terminal_surface()
+            .expect("unchanged surface");
+        assert_eq!(surface.seqno, 3);
+        assert_eq!(surface.viewport_offset_lines, 0);
+        assert!(surface.viewport_at_bottom);
     }
 
     #[test]

@@ -121,6 +121,29 @@ pub(super) fn snap_active_workspace_viewport_to_bottom_if_needed(
     }
 }
 
+pub(super) fn apply_local_input_projection_hint(state: &mut ShellViewModel) -> bool {
+    let Some(mut surface) = state.active_workspace_terminal_surface().cloned() else {
+        return false;
+    };
+    if surface.viewport_at_bottom && surface.viewport_offset_lines == 0 {
+        return false;
+    }
+
+    surface.viewport_offset_lines = 0;
+    surface.viewport_at_bottom = true;
+    state.set_active_workspace_terminal_surface(Some(surface));
+    true
+}
+
+pub(super) fn refresh_projection_after_local_input_hint(
+    window: &AppWindow,
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    follow_tracker: &mut WorkspaceFollowTracker,
+) {
+    refresh_active_workspace_projection(window, state, bridge, follow_tracker);
+}
+
 pub(super) fn refresh_active_workspace_projection(
     window: &AppWindow,
     state: &mut ShellViewModel,

@@ -255,6 +255,69 @@ fn terminal_host_declares_accumulated_multi_line_wheel_scrollback_contract() {
 }
 
 #[test]
+fn terminal_host_bitmap_selection_overlay_stays_in_blank_surface_local_coordinates() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+    let blank_surface_start = terminal_host
+        .find("blank-surface := Rectangle {")
+        .expect("blank surface block");
+    let input_capture_start = terminal_host[blank_surface_start..]
+        .find("input-capture := TouchArea {")
+        .map(|offset| blank_surface_start + offset)
+        .expect("input capture block");
+    let blank_surface_block = &terminal_host[blank_surface_start..input_capture_start];
+
+    assert!(
+        terminal_host.contains("function terminal-local-cell-x(col: int) -> length {")
+            && terminal_host.contains("function terminal-local-cell-y(row: int) -> length {"),
+        "bitmap selection overlay should have dedicated local cell helpers so blank-surface overlays stay in the same coordinate space as the bitmap grid"
+    );
+    assert!(
+        blank_surface_block.contains("x: root.selection-local-span-x(root.selection-start-col);")
+            && blank_surface_block
+                .contains("y: root.terminal-local-cell-y(root.selection-start-row);"),
+        "bitmap selection rectangles should be positioned from blank-surface local cell helpers instead of the root terminal origin"
+    );
+    assert!(
+        !blank_surface_block.contains("x: root.selection-span-x(")
+            && !blank_surface_block.contains("y: root.terminal-cell-y("),
+        "blank-surface selection rectangles should not add terminal-surface-origin twice through the global cell helpers"
+    );
+}
+
+#[test]
+fn workspace_terminal_input_handlers_avoid_per_keystroke_full_projection_refresh() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    let text_input_start = bootstrap_source
+        .find("window.on_workspace_session_text_input(move |text| {")
+        .expect("text input handler");
+    let key_input_start = bootstrap_source
+        .find("window.on_workspace_session_key_input(move |key, alt, ctrl, shift| {")
+        .expect("key input handler");
+    let resize_handler_start = bootstrap_source[key_input_start..]
+        .find("window.on_workspace_session_resize_requested(move |rows, cols| {")
+        .map(|offset| key_input_start + offset)
+        .expect("resize handler");
+    let text_input_block = &bootstrap_source[text_input_start..key_input_start];
+    let key_input_block = &bootstrap_source[key_input_start..resize_handler_start];
+
+    assert!(
+        text_input_block
+            .contains("workspace_terminal::apply_local_input_projection_hint(&mut state)")
+            && key_input_block
+                .contains("workspace_terminal::apply_local_input_projection_hint(&mut state)"),
+        "local terminal input handlers should apply the lightweight viewport snap hint instead of forcing a manager projection poll on every repeated key event"
+    );
+    assert!(
+        !text_input_block.contains("workspace_terminal::refresh_active_workspace_projection(")
+            && !key_input_block
+                .contains("workspace_terminal::refresh_active_workspace_projection("),
+        "per-keystroke full projection refreshes block the UI thread during key repeat and should stay out of the local input handlers"
+    );
+}
+
+#[test]
 fn terminal_host_uses_startup_safe_font_stack_and_stable_clipboard_shortcut_tokens() {
     let terminal_host =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
