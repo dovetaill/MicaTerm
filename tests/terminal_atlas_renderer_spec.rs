@@ -85,16 +85,16 @@ impl EmojiRasterizerBackend for FakeAtlasEmojiBackend {
 }
 
 #[test]
-fn atlas_renderer_loads_fusion_jetbrains_maple_mono_metrics_and_emits_a_surface_image() -> Result<()> {
-    let surface = render_surface(4, 12, "hello maple\r\n");
+fn atlas_renderer_loads_cascadia_mono_metrics_and_emits_a_surface_image() -> Result<()> {
+    let surface = render_surface(4, 12, "hello cascadia\r\n");
     let mut renderer = TerminalAtlasRenderer::new()?;
 
     let metrics = renderer.metrics();
     let frame = renderer.render(&surface)?;
 
     assert_eq!(
-        metrics.cell_width, 9,
-        "software atlas should expose the bundled Fusion terminal font on its measured 9px logical cell instead of silently reusing the old Sarasa-era 8px contract"
+        metrics.cell_width, 8,
+        "software atlas should expose the bundled Cascadia Mono atlas font on its measured 8px logical cell"
     );
     assert_eq!(
         metrics.cell_height, 20,

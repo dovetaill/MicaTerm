@@ -7,7 +7,12 @@ use slint::ComponentHandle;
 
 use crate::AppWindow;
 #[cfg(target_os = "windows")]
+use crate::app::terminal_font::FontFaceKey;
+#[cfg(target_os = "windows")]
 use crate::app::ssh::runtime::TerminalCursorShape;
+use crate::app::terminal_renderer::diagnostics::{
+    NativeTerminalSurfaceGlyphBoundsTrace, NativeTerminalSurfaceWindowsTextDiagnostics,
+};
 use crate::app::terminal_renderer::{
     NativeSurfaceDamage, NativeSurfaceDamageKind, NativeTerminalSurfaceDiagnostics,
     NativeTerminalSurfaceDrawCounters,
@@ -22,26 +27,35 @@ use super::backend::{
 };
 
 #[cfg(target_os = "windows")]
-use windows::Win32::Foundation::{D2DERR_RECREATE_TARGET, RECT};
+use windows::Win32::Foundation::{BOOL, D2DERR_RECREATE_TARGET, HWND, RECT};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
+    D2D_POINT_2F, D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE,
+    D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
     D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED,
+    D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE,
     D2D1_OPACITY_MASK_CONTENT_GRAPHICS, D2D1_RENDER_TARGET_PROPERTIES, D2D1CreateFactory,
     ID2D1Bitmap, ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush,
 };
 #[cfg(target_os = "windows")]
-use windows::Win32::Graphics::Gdi::HDC;
+use windows::Win32::Graphics::DirectWrite::{
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+    DWRITE_FONT_WEIGHT_REGULAR, DWRITE_GLYPH_OFFSET, DWRITE_GLYPH_RUN,
+    DWRITE_MEASURING_MODE_NATURAL, DWriteCreateFactory, IDWriteFactory,
+    IDWriteFontCollection, IDWriteFontFace,
+};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM};
 #[cfg(target_os = "windows")]
-use windows_sys::Win32::Foundation::HWND as SysHwnd;
+use windows::Win32::Graphics::Gdi::{GetDC, HDC, MONITOR_DEFAULTTONEAREST, MonitorFromWindow, ReleaseDC};
 #[cfg(target_os = "windows")]
-use windows_sys::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
+use windows::core::PCWSTR;
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::HiDpi::GetDpiForWindow;
 
 #[derive(Default)]
 pub struct WindowsD2DFactoryState {
@@ -55,6 +69,33 @@ pub struct WindowsHwndRenderTargetState {
     pub generation: u64,
     #[cfg(target_os = "windows")]
     render_target: ID2D1DCRenderTarget,
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub struct WindowsDirectWriteTextRendererState {
+    pub ready: bool,
+    pub active_path: &'static str,
+    #[cfg(target_os = "windows")]
+    factory: Option<IDWriteFactory>,
+    #[cfg(target_os = "windows")]
+    font_collection: Option<IDWriteFontCollection>,
+    #[cfg(target_os = "windows")]
+    font_faces: HashMap<FontFaceKey, IDWriteFontFace>,
+}
+
+impl Default for WindowsDirectWriteTextRendererState {
+    fn default() -> Self {
+        Self {
+            ready: false,
+            active_path: "bitmap-mask-compat",
+            #[cfg(target_os = "windows")]
+            factory: None,
+            #[cfg(target_os = "windows")]
+            font_collection: None,
+            #[cfg(target_os = "windows")]
+            font_faces: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -109,6 +150,7 @@ pub struct WindowsNativeSurfaceState {
     pub retained_frame: Option<RetainedNativeTerminalSurfaceFrame>,
     pub bound_dc: Option<WindowsBoundDcState>,
     pub d2d_factory: Option<WindowsD2DFactoryState>,
+    pub directwrite_text_renderer: Option<WindowsDirectWriteTextRendererState>,
     pub hwnd_render_target: Option<WindowsHwndRenderTargetState>,
     pub render_target_generation: u64,
     pub render_target_dirty: bool,
@@ -124,6 +166,7 @@ pub struct WindowsNativeSurfaceState {
     pub last_drawn_underline_runs: usize,
     pub last_drawn_cursor_overlay_visible: bool,
     pub last_drawn_ime_preview_active: bool,
+    pub last_directwrite_text_drawn: bool,
     pub last_prepared_frame_token: u64,
     pub last_presented_frame_token: u64,
 }
@@ -184,6 +227,52 @@ impl WindowsNativeSurfaceState {
         }
     }
 
+    fn ensure_directwrite_text_renderer(&mut self) {
+        #[cfg(target_os = "windows")]
+        if let Err(err) = self.try_ensure_directwrite_text_renderer() {
+            tracing::warn!(
+                target: "app.terminal",
+                error = %err,
+                "failed to create DirectWrite text renderer for native terminal surface"
+            );
+            if let Some(renderer) = self.directwrite_text_renderer.as_mut() {
+                renderer.ready = false;
+                renderer.active_path = "bitmap-mask-compat";
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn try_ensure_directwrite_text_renderer(&mut self) -> Result<()> {
+        if self
+            .directwrite_text_renderer
+            .as_ref()
+            .map(|renderer| renderer.ready)
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+
+        let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }?;
+        let mut font_collection = None;
+        unsafe {
+            factory.GetSystemFontCollection(&mut font_collection, false)?;
+        }
+        let Some(font_collection) = font_collection else {
+            anyhow::bail!("DirectWrite returned no system font collection");
+        };
+
+        self.directwrite_text_renderer = Some(WindowsDirectWriteTextRendererState {
+            ready: true,
+            active_path: "directwrite-d2d",
+            factory: Some(factory),
+            font_collection: Some(font_collection),
+            font_faces: HashMap::new(),
+        });
+
+        Ok(())
+    }
+
     #[cfg(target_os = "windows")]
     fn try_ensure_hwnd_render_target(&mut self) -> Result<()> {
         let Some(hwnd) = self.host_hwnd else {
@@ -217,7 +306,7 @@ impl WindowsNativeSurfaceState {
             let render_target_properties = D2D1_RENDER_TARGET_PROPERTIES {
                 pixelFormat: D2D1_PIXEL_FORMAT {
                     format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                    alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                    alphaMode: D2D1_ALPHA_MODE_IGNORE,
                 },
                 dpiX: 96.0,
                 dpiY: 96.0,
@@ -240,12 +329,20 @@ impl WindowsNativeSurfaceState {
         self.release_bound_dc();
         self.hwnd_render_target = None;
         self.render_target_dirty = true;
+        self.last_directwrite_text_drawn = false;
         for brush in self.d2d_brushes.values_mut() {
             brush.generation = 0;
             #[cfg(target_os = "windows")]
             {
                 brush.brush = None;
             }
+        }
+        if let Some(renderer) = self.directwrite_text_renderer.as_mut() {
+            renderer.active_path = if renderer.ready {
+                "directwrite-d2d"
+            } else {
+                "bitmap-mask-compat"
+            };
         }
         for bitmap in self.monochrome_glyph_bitmaps.values_mut() {
             bitmap.generation = 0;
@@ -276,7 +373,7 @@ impl WindowsNativeSurfaceState {
         #[cfg(target_os = "windows")]
         if let Some(bound_dc) = self.bound_dc.take() {
             unsafe {
-                ReleaseDC(bound_dc.hwnd as SysHwnd, bound_dc.hdc as _);
+                ReleaseDC(HWND(bound_dc.hwnd as _), HDC(bound_dc.hdc as _));
             }
         }
 
@@ -571,7 +668,159 @@ impl WindowsNativeSurfaceState {
         }
     }
 
+    #[cfg(target_os = "windows")]
+    fn resolve_directwrite_font_face(
+        &mut self,
+        draw: &PreparedMonochromeGlyphDraw,
+    ) -> Option<IDWriteFontFace> {
+        self.ensure_directwrite_text_renderer();
+        let renderer = self.directwrite_text_renderer.as_mut()?;
+        if let Some(font_face) = renderer.font_faces.get(&draw.face_key) {
+            return Some(font_face.clone());
+        }
+
+        let font_collection = renderer.font_collection.as_ref()?;
+        let family_name_utf16 = draw
+            .font_family_name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect::<Vec<u16>>();
+        let mut family_index = 0u32;
+        let mut exists = BOOL(0);
+        unsafe {
+            font_collection
+                .FindFamilyName(PCWSTR(family_name_utf16.as_ptr()), &mut family_index, &mut exists)
+                .ok()?;
+        }
+        if !exists.as_bool() {
+            return None;
+        }
+
+        let family = unsafe { font_collection.GetFontFamily(family_index).ok()? };
+        let font = unsafe {
+            family
+                .GetFirstMatchingFont(
+                    DWRITE_FONT_WEIGHT_REGULAR,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    DWRITE_FONT_STYLE_NORMAL,
+                )
+                .ok()?
+        };
+        let font_face = unsafe { font.CreateFontFace().ok()? };
+        renderer.font_faces.insert(draw.face_key, font_face.clone());
+        Some(font_face)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn resolve_directwrite_font_face(
+        &mut self,
+        draw: &PreparedMonochromeGlyphDraw,
+    ) -> Option<()> {
+        let _ = draw;
+        None
+    }
+
+    fn draw_directwrite_text(&mut self, frame: &RetainedNativeTerminalSurfaceFrame) {
+        self.last_directwrite_text_drawn = false;
+        self.last_drawn_monochrome_glyphs = 0;
+
+        #[cfg(not(target_os = "windows"))]
+        let _ = frame;
+
+        #[cfg(target_os = "windows")]
+        {
+            self.ensure_directwrite_text_renderer();
+            let Some(render_target) = self.render_target() else {
+                return;
+            };
+            let Some(host_hwnd) = self.host_hwnd else {
+                return;
+            };
+
+            let mut drawable_glyphs =
+                Vec::with_capacity(frame.frame.presentable_frame.monochrome_glyph_draws.len());
+            for draw in &frame.frame.presentable_frame.monochrome_glyph_draws {
+                if draw.glyph_id > u16::MAX as u32 {
+                    return;
+                }
+                let Some(font_face) = self.resolve_directwrite_font_face(draw) else {
+                    return;
+                };
+                drawable_glyphs.push((draw, font_face, draw.glyph_id as u16));
+            }
+            if drawable_glyphs.is_empty() {
+                return;
+            }
+
+            let text_rendering_params = self
+                .directwrite_text_renderer
+                .as_ref()
+                .and_then(|renderer| renderer.factory.as_ref())
+                .and_then(|factory| {
+                    let monitor =
+                        unsafe { MonitorFromWindow(HWND(host_hwnd as _), MONITOR_DEFAULTTONEAREST) };
+                    if monitor.0.is_null() {
+                        unsafe { factory.CreateRenderingParams().ok() }
+                    } else {
+                        unsafe { factory.CreateMonitorRenderingParams(monitor).ok() }
+                    }
+                });
+
+            unsafe {
+                render_target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+                render_target.SetTextRenderingParams(text_rendering_params.as_ref());
+            }
+
+            for (draw, font_face, glyph_index) in drawable_glyphs {
+                self.ensure_brush(draw.fg_rgba);
+                let Some(brush) = self.brush_for(draw.fg_rgba) else {
+                    return;
+                };
+
+                let glyph_indices = [glyph_index];
+                let glyph_advances = [draw.advance_px.max(0) as f32];
+                let glyph_offsets = [DWRITE_GLYPH_OFFSET {
+                    advanceOffset: 0.0,
+                    ascenderOffset: 0.0,
+                }];
+                let baseline_origin = D2D_POINT_2F {
+                    x: (frame.rect.x + draw.dest_x_px - draw.visible_left_px) as f32,
+                    y: (frame.rect.y + draw.dest_y_px - draw.visible_top_px) as f32,
+                };
+                let glyph_run = DWRITE_GLYPH_RUN {
+                    fontFace: core::mem::ManuallyDrop::new(Some(font_face.clone())),
+                    fontEmSize: draw.font_em_size_px.max(1) as f32,
+                    glyphCount: glyph_indices.len() as u32,
+                    glyphIndices: glyph_indices.as_ptr(),
+                    glyphAdvances: glyph_advances.as_ptr(),
+                    glyphOffsets: glyph_offsets.as_ptr(),
+                    isSideways: BOOL(0),
+                    bidiLevel: 0,
+                };
+
+                unsafe {
+                    render_target.DrawGlyphRun(
+                        baseline_origin,
+                        &glyph_run,
+                        &brush,
+                        DWRITE_MEASURING_MODE_NATURAL,
+                    );
+                }
+                self.last_drawn_monochrome_glyphs =
+                    self.last_drawn_monochrome_glyphs.saturating_add(1);
+            }
+
+            self.last_directwrite_text_drawn = true;
+            if let Some(renderer) = self.directwrite_text_renderer.as_mut() {
+                renderer.active_path = "directwrite-d2d";
+            }
+        }
+    }
+
     fn draw_monochrome_glyphs(&mut self, frame: &RetainedNativeTerminalSurfaceFrame) {
+        if self.last_directwrite_text_drawn {
+            return;
+        }
         self.last_drawn_monochrome_glyphs = 0;
 
         #[cfg(not(target_os = "windows"))]
@@ -852,6 +1101,114 @@ impl WindowsNativeSurfaceState {
             .and_then(|bitmap| bitmap.bitmap.clone())
     }
 
+    fn active_text_renderer_path(&self) -> Option<&'static str> {
+        self.directwrite_text_renderer
+            .as_ref()
+            .map(|renderer| renderer.active_path)
+            .or(Some("bitmap-mask-compat"))
+    }
+
+    fn windows_text_diagnostics(&self) -> NativeTerminalSurfaceWindowsTextDiagnostics {
+        NativeTerminalSurfaceWindowsTextDiagnostics {
+            text_antialias_mode: Some(self.active_text_antialias_mode()),
+            render_target_alpha_mode: Some(self.active_render_target_alpha_mode()),
+            font_chain: self.active_font_chain(),
+            baseline_px: self.active_baseline_px(),
+            pixel_alignment: Some(self.active_pixel_alignment()),
+            dpi_x: self.window_dpi().map(|(dpi_x, _)| dpi_x),
+            dpi_y: self.window_dpi().map(|(_, dpi_y)| dpi_y),
+            scale_factor_percent: self.active_scale_factor_percent(),
+            glyph_bounds: self.active_glyph_bounds_trace(),
+        }
+    }
+
+    fn active_text_antialias_mode(&self) -> &'static str {
+        if self.active_text_renderer_path() == Some("directwrite-d2d") {
+            "cleartype"
+        } else {
+            "bitmap-mask-compat"
+        }
+    }
+
+    fn active_render_target_alpha_mode(&self) -> &'static str {
+        "ignore"
+    }
+
+    fn active_font_chain(&self) -> Vec<String> {
+        let Some(frame) = self.retained_frame.as_ref() else {
+            return Vec::new();
+        };
+
+        let mut font_chain = Vec::new();
+        for draw in &frame.frame.presentable_frame.monochrome_glyph_draws {
+            if !font_chain.contains(&draw.font_family_name) {
+                font_chain.push(draw.font_family_name.clone());
+            }
+        }
+        font_chain
+    }
+
+    fn active_baseline_px(&self) -> Option<i32> {
+        let frame = self.retained_frame.as_ref()?;
+        let draw = frame.frame.presentable_frame.monochrome_glyph_draws.first()?;
+        let row_top_px = (draw.row as i32).saturating_mul(frame.frame.cell_height_px as i32);
+        Some(
+            draw.dest_y_px
+                .saturating_sub(draw.visible_top_px)
+                .saturating_sub(row_top_px),
+        )
+    }
+
+    fn active_pixel_alignment(&self) -> &'static str {
+        "pixel-snapped"
+    }
+
+    fn active_scale_factor_percent(&self) -> Option<u32> {
+        let (dpi_x, _) = self.window_dpi()?;
+        Some(dpi_x.saturating_mul(100) / 96)
+    }
+
+    fn active_glyph_bounds_trace(&self) -> Vec<NativeTerminalSurfaceGlyphBoundsTrace> {
+        let Some(frame) = self.retained_frame.as_ref() else {
+            return Vec::new();
+        };
+
+        frame
+            .frame
+            .presentable_frame
+            .monochrome_glyph_draws
+            .iter()
+            .take(6)
+            .map(|draw| NativeTerminalSurfaceGlyphBoundsTrace {
+                glyph_id: draw.glyph_id,
+                row: draw.row,
+                start_col: draw.start_col,
+                end_col: draw.end_col,
+                atlas_slot: draw.atlas_entry.slot,
+                screen_left_px: frame.rect.x.saturating_add(draw.dest_x_px),
+                screen_top_px: frame.rect.y.saturating_add(draw.dest_y_px),
+                screen_width_px: draw.visible_width_px,
+                screen_height_px: draw.visible_height_px,
+                visible_left_px: draw.visible_left_px,
+                visible_top_px: draw.visible_top_px,
+                visible_width_px: draw.visible_width_px,
+                visible_height_px: draw.visible_height_px,
+            })
+            .collect()
+    }
+
+    #[cfg(target_os = "windows")]
+    fn window_dpi(&self) -> Option<(u32, u32)> {
+        let hwnd = self.host_hwnd?;
+        let dpi = unsafe { GetDpiForWindow(HWND(hwnd as _)) };
+        (dpi != 0).then_some((dpi, dpi))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn window_dpi(&self) -> Option<(u32, u32)> {
+        None
+    }
+
     #[cfg(target_os = "windows")]
     fn begin_frame(&mut self, clip_rect: NativeTerminalSurfaceRect) -> bool {
         let Some(render_target) = self.render_target() else {
@@ -864,18 +1221,18 @@ impl WindowsNativeSurfaceState {
             return false;
         };
         self.release_bound_dc();
-        let hdc = unsafe { GetDC(host_hwnd as SysHwnd) };
-        if hdc.is_null() {
+        let hdc = unsafe { GetDC(HWND(host_hwnd as _)) };
+        if hdc.0.is_null() {
             return false;
         }
-        if let Err(err) = unsafe { render_target.BindDC(HDC(hdc.cast()), &bind_rect) } {
+        if let Err(err) = unsafe { render_target.BindDC(hdc, &bind_rect) } {
             tracing::warn!(
                 target: "app.terminal",
                 error = %err,
                 "failed to bind Direct2D DC render target to host window DC"
             );
             unsafe {
-                ReleaseDC(host_hwnd as SysHwnd, hdc);
+                ReleaseDC(HWND(host_hwnd as _), hdc);
             }
             if err.code() == D2DERR_RECREATE_TARGET {
                 self.clear_device_resources();
@@ -884,7 +1241,7 @@ impl WindowsNativeSurfaceState {
         }
         self.bound_dc = Some(WindowsBoundDcState {
             hwnd: host_hwnd,
-            hdc: hdc as isize,
+            hdc: hdc.0 as isize,
         });
         let clip_rect = terminal_clip_rect(clip_rect);
         unsafe {
@@ -1039,6 +1396,7 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
 
         self.state.draw_background_runs(frame);
         self.state.draw_selection_overlay(frame);
+        self.state.draw_directwrite_text(frame);
         self.state.draw_monochrome_glyphs(frame);
         self.state.draw_color_glyphs(frame);
         self.state.draw_underline_overlay(frame);
@@ -1059,6 +1417,12 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
     fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics {
         NativeTerminalSurfaceDiagnostics {
             hwnd: self.state.host_hwnd,
+            text_renderer_path: Some(
+                self.state
+                    .active_text_renderer_path()
+                    .unwrap_or("bitmap-mask-compat"),
+            ),
+            windows_text: Some(self.state.windows_text_diagnostics()),
             render_target_generation: self.state.render_target_generation,
             last_prepared_frame_token: self.state.last_prepared_frame_token,
             last_presented_frame_token: self.state.last_presented_frame_token,
@@ -1074,6 +1438,7 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         self.state.monochrome_glyph_bitmaps.clear();
         self.state.color_glyph_bitmaps.clear();
         self.state.d2d_factory = None;
+        self.state.directwrite_text_renderer = None;
         self.state.host_hwnd = None;
         self.host_window = None;
         self.state.window_rect = NativeTerminalSurfaceRect::default();

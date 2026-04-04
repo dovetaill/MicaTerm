@@ -1,9 +1,12 @@
 //! Windows text fallback helper that discovers installed system families for mixed text.
 
+use crate::app::terminal_font::backend::{
+    DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY, DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY,
+};
 use crate::app::terminal_font::windows_locator::WindowsFontLocator;
 
 const EMOJI_FALLBACK_CANDIDATES: &[&str] = &[
-    "Segoe UI Emoji",
+    DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY,
     "Noto Color Emoji",
     "Noto Emoji",
     "Apple Color Emoji",
@@ -16,9 +19,9 @@ const SYMBOL_FALLBACK_CANDIDATES: &[&str] = &[
     "DejaVu Sans",
 ];
 const CJK_FALLBACK_CANDIDATES: &[&str] = &[
+    DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY,
     "Microsoft YaHei UI",
     "Microsoft JhengHei UI",
-    "Sarasa Term SC Nerd",
     "Noto Sans CJK SC",
     "WenQuanYi Zen Hei",
     "DejaVu Sans",

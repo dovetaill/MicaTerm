@@ -233,8 +233,12 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         .expect("read dwrite font backend");
 
     assert!(
-        atlas_source.contains("const TERMINAL_FONT_SIZE_PX: f32 = 18.0;"),
-        "atlas renderer should keep the bundled Fusion terminal font at the tuned 18px size instead of slipping back to a thinner-looking default"
+        atlas_source.contains("assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf"),
+        "atlas renderer should point at the bundled Cascadia Mono default face"
+    );
+    assert!(
+        atlas_source.contains("const TERMINAL_FONT_SIZE_PX: f32 = DEFAULT_TERMINAL_FONT_SIZE_PX;"),
+        "atlas renderer should derive its default font size from the shared typography contract"
     );
     assert!(
         atlas_source.contains("const MIN_CELL_WIDTH_PX: u32 = 8;"),
@@ -290,6 +294,22 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         "native font rasterization should only apply synthetic embolden when the shaped run requests bold text"
     );
     assert!(
+        font_backend_source.contains("pub const DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 14.0;"),
+        "shared typography defaults should move the terminal font size into the 14px Windows Terminal target range"
+    );
+    assert!(
+        font_backend_source.contains("pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.4;"),
+        "shared typography defaults should expose a compact 1.4 line-height contract"
+    );
+    assert!(
+        font_backend_source.contains("pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 0.0;"),
+        "shared typography defaults should keep terminal letter spacing at zero"
+    );
+    assert!(
+        font_backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Regular\";"),
+        "shared typography defaults should keep the default terminal weight on Regular"
+    );
+    assert!(
         font_backend_source.contains("const GLYPH_ALPHA_GAIN: f32 = 1.0;"),
         "shared glyph coverage gain should stay neutral for regular text so grayscale edges remain crisp"
     );
@@ -297,7 +317,7 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         font_backend_source.contains("const SYNTHETIC_EMBOLDEN_STRENGTH: f32 = 0.46;"),
         "shared glyph raster settings should include a light synthetic embolden pass to thicken regular-weight strokes"
     );
-    assert!(font_backend_source.contains("px_size: 18.0,"));
+    assert!(font_backend_source.contains("px_size: DEFAULT_TERMINAL_FONT_SIZE_PX,"));
 }
 
 #[test]
@@ -899,7 +919,10 @@ fn windows_native_renderer_source_threads_fractional_x_phase_into_raster_request
 
 #[test]
 fn terminal_style_contract_threads_bold_and_underline_across_runtime_model_and_layout() {
-    let runtime_source = fs::read_to_string("src/app/ssh/runtime.rs").expect("read runtime");
+    let runtime_contracts_source =
+        fs::read_to_string("src/app/ssh/runtime/contracts.rs").expect("read runtime contracts");
+    let runtime_terminal_source =
+        fs::read_to_string("src/app/ssh/runtime/terminal.rs").expect("read runtime terminal");
     let model_source =
         fs::read_to_string("src/app/terminal_model.rs").expect("read terminal model");
     let segmentation_source = fs::read_to_string("src/app/terminal_layout/run_segmentation.rs")
@@ -908,19 +931,19 @@ fn terminal_style_contract_threads_bold_and_underline_across_runtime_model_and_l
         .expect("read native renderer");
 
     assert!(
-        runtime_source.contains("pub bold: bool"),
+        runtime_contracts_source.contains("pub bold: bool"),
         "runtime terminal cells should expose the bold SGR state"
     );
     assert!(
-        runtime_source.contains("pub underline: bool"),
+        runtime_contracts_source.contains("pub underline: bool"),
         "runtime terminal cells should expose the underline SGR state"
     );
     assert!(
-        runtime_source.contains("attrs.intensity()"),
+        runtime_terminal_source.contains("attrs.intensity()"),
         "surface projection should derive bold state from wezterm cell intensity"
     );
     assert!(
-        runtime_source.contains("attrs.underline()"),
+        runtime_terminal_source.contains("attrs.underline()"),
         "surface projection should derive underline state from wezterm cell underline metadata"
     );
     assert!(
@@ -1084,6 +1107,21 @@ fn terminal_font_backend_owns_rasterization_contract_and_renderer_delegates_to_i
     assert!(
         !renderer_source.contains("DirectWriteFontSystem"),
         "native renderer should stop naming DirectWriteFontSystem directly once rasterization moves behind the backend contract"
+    );
+    assert!(
+        backend_source.contains("pub face_key: FontFaceKey"),
+        "glyph raster requests should carry the resolved fallback face key so monochrome fallback runs stop rasterizing through the primary face by accident"
+    );
+    assert!(
+        renderer_source.contains("run.resolved_face.face_key"),
+        "native renderer should pass the resolved fallback face key into glyph raster requests so fallback glyphs can be rasterized from their actual face data"
+    );
+    assert!(
+        backend_source.contains("pub visible_left_px: i32")
+            && backend_source.contains("pub visible_top_px: i32")
+            && backend_source.contains("pub visible_width_px: u32")
+            && backend_source.contains("pub visible_height_px: u32"),
+        "rasterized glyph contracts should carry visible bounds metadata so later Windows native drawing stages can consume overhang data without reverse-engineering it from coverage buffers"
     );
 }
 
@@ -1278,29 +1316,49 @@ fn windows_scene_image_presenter_uses_bitmap_tuned_font_loading_contract() {
 }
 
 #[test]
-fn windows_native_font_backend_source_switches_to_hinted_swash_rasterization() {
+fn windows_native_font_backend_source_switches_to_directwrite_face_resolution_and_metrics() {
     let dwrite_source =
         fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite backend");
 
     assert!(
-        dwrite_source.contains("SwashFontRef"),
-        "Windows native font backend should keep a swash font handle so it can reuse the hinted grayscale rasterizer instead of the softer ab_glyph outline draw path"
+        dwrite_source.contains("DWriteCreateFactory"),
+        "Windows native font backend should create a real DirectWrite factory instead of resolving every face from bundled font bytes"
     );
     assert!(
-        dwrite_source.contains("ScaleContext"),
-        "Windows native font backend should keep a swash scale context for hinted glyph rasterization"
+        dwrite_source.contains("IDWriteFactory"),
+        "Windows native font backend should keep a DirectWrite factory handle for system face lookup"
     );
     assert!(
-        dwrite_source.contains(".hint(true)"),
-        "Windows native font backend should enable swash hinting so mono terminal glyphs stop looking soft on Windows"
+        dwrite_source.contains("GetSystemFontCollection"),
+        "Windows native font backend should read from the Windows system font collection when resolving terminal fallback faces"
     );
     assert!(
-        dwrite_source.contains("Render::new(&[Source::Outline])"),
-        "Windows native font backend should rasterize through swash outline rendering instead of ab_glyph outline drawing"
+        dwrite_source.contains("FindFamilyName"),
+        "Windows native font backend should resolve requested font families through the DirectWrite font collection instead of only matching metadata tags"
     );
     assert!(
-        dwrite_source.contains("SwashFormat::Alpha"),
-        "Windows native font backend should keep the native path on grayscale glyph masks instead of LCD subpixel masks"
+        dwrite_source.contains("GetFirstMatchingFont"),
+        "Windows native font backend should ask DirectWrite for the actual matching face inside each family"
+    );
+    assert!(
+        dwrite_source.contains("CreateFontFace"),
+        "Windows native font backend should materialize DirectWrite font faces instead of keeping fallback families as metadata-only labels"
+    );
+    assert!(
+        dwrite_source.contains("GetMetrics"),
+        "Windows native font backend should pull ascent, descent, and line metrics from DirectWrite instead of only relying on ab_glyph heuristics"
+    );
+    assert!(
+        dwrite_source.contains("GetFiles"),
+        "Windows native font backend should enumerate DirectWrite font files so fallback runs can bind to actual per-face font data"
+    );
+    assert!(
+        dwrite_source.contains("MapCharacters"),
+        "Windows native font backend should use DirectWrite fallback mapping so mixed-script text no longer collapses to a single fake face"
+    );
+    assert!(
+        !dwrite_source.contains("self.font_bytes"),
+        "Windows native font backend should stop hard-binding every fallback run to one bundled font byte slice"
     );
 }
 

@@ -1,4 +1,4 @@
-//! Renders the active terminal grid into a single image surface using the bundled Fusion JetBrains Maple Mono atlas font.
+//! Renders the active terminal grid into a single image surface using the bundled Cascadia Mono atlas font.
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -13,15 +13,17 @@ use swash::scale::{Render, ScaleContext, Scaler, Source};
 use swash::zeno::{Format as SwashFormat, Vector as SwashVector};
 
 use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
-use crate::app::terminal_font::backend::{FontRenderProfile, map_glyph_coverage_to_alpha};
+use crate::app::terminal_font::backend::{
+    DEFAULT_TERMINAL_FONT_SIZE_PX, FontRenderProfile, map_glyph_coverage_to_alpha,
+};
 use crate::app::terminal_emoji::{
     ClusterRenderKind as EmojiClusterRenderKind, EmojiRenderOutcome, TerminalEmojiRenderer,
     classify_cluster_render_kind,
 };
 
-const FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES: &[u8] =
-    include_bytes!("../../assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf");
-const TERMINAL_FONT_SIZE_PX: f32 = 18.0;
+const CASCADIA_MONO_FONT_BYTES: &[u8] =
+    include_bytes!("../../assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf");
+const TERMINAL_FONT_SIZE_PX: f32 = DEFAULT_TERMINAL_FONT_SIZE_PX;
 const MIN_CELL_WIDTH_PX: u32 = 8;
 const MIN_CELL_HEIGHT_PX: u32 = 20;
 const CELL_HORIZONTAL_PADDING_PX: u32 = 0;
@@ -207,13 +209,11 @@ impl TerminalAtlasRenderer {
     }
 
     fn with_emoji_renderer(emoji_renderer: TerminalEmojiRenderer) -> Result<Self> {
-        let font = FontArc::try_from_slice(FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES).map_err(
-            |error| anyhow!("failed to load bundled Fusion JetBrains Maple Mono font: {error}"),
+        let font = FontArc::try_from_slice(CASCADIA_MONO_FONT_BYTES).map_err(
+            |error| anyhow!("failed to load bundled Cascadia Mono font: {error}"),
         )?;
-        let swash_font = SwashFontRef::from_index(FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES, 0)
-            .ok_or_else(|| {
-                anyhow!("failed to load bundled Fusion JetBrains Maple Mono font into swash")
-            })?;
+        let swash_font = SwashFontRef::from_index(CASCADIA_MONO_FONT_BYTES, 0)
+            .ok_or_else(|| anyhow!("failed to load bundled Cascadia Mono font into swash"))?;
         let logical_metrics = compute_terminal_metrics(&font, TERMINAL_FONT_SIZE_PX);
         Ok(Self {
             font,

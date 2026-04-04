@@ -6,6 +6,22 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_SOURCE="$ROOT_DIR/build-desktop.sh"
+WINDOWS_WRAPPER="$ROOT_DIR/build-win-x64.sh"
+DESIGN_DOC="$ROOT_DIR/docs/plans/2026-04-04-windows-terminal-text-rendering-design.md"
+PLAN_DOC="$ROOT_DIR/docs/plans/2026-04-04-windows-terminal-text-rendering-implementation-plan.md"
+
+grep -F 'export MICA_TERM_PACKAGE_TERMINAL_RENDERER="native"' "$WINDOWS_WRAPPER" >/dev/null
+grep -F 'export MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH="rendering-notifier"' "$WINDOWS_WRAPPER" >/dev/null
+grep -F 'export MICA_TERM_EXPECTED_TEXT_RENDERER_PATH="directwrite-d2d"' "$WINDOWS_WRAPPER" >/dev/null
+grep -F 'export MICA_TERM_TEXT_RENDERER_FALLBACK_PATH="bitmap-mask-compat"' "$WINDOWS_WRAPPER" >/dev/null
+grep -F 'expected primary text path: directwrite-d2d' "$WINDOWS_WRAPPER" >/dev/null
+grep -F 'export MICA_TERM_VERIFICATION_DPI_SCALE_MATRIX="100,125,150"' "$WINDOWS_WRAPPER" >/dev/null
+grep -F 'export MICA_TERM_VERIFICATION_FONT_PX_MATRIX="12,13,14,15"' "$WINDOWS_WRAPPER" >/dev/null
+grep -F 'Implementation closure note' "$DESIGN_DOC" >/dev/null
+grep -F 'Diagnostics ship as trace/log hooks only' "$DESIGN_DOC" >/dev/null
+grep -F 'Verification hooks:' "$PLAN_DOC" >/dev/null
+grep -F 'directwrite-d2d' "$PLAN_DOC" >/dev/null
+grep -F '`build-win-x64.sh` exports the authoritative Windows validation matrix' "$PLAN_DOC" >/dev/null
 
 TMP_ROOT="$(mktemp -d)"
 cleanup() {

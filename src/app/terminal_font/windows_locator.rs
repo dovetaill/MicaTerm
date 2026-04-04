@@ -2,9 +2,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fontdb::Database;
+use fontdb::{Database, Family, Query, Stretch, Style, Weight};
+
+#[derive(Clone, Debug)]
+pub struct ResolvedFontFaceData {
+    pub family_name: String,
+    pub post_script_name: String,
+    pub face_index: u32,
+    pub font_data: Vec<u8>,
+}
 
 pub struct WindowsFontLocator {
+    database: Database,
     families_by_lowercase: BTreeMap<String, String>,
     family_scan_order: Vec<String>,
 }
@@ -30,6 +39,7 @@ impl WindowsFontLocator {
         }
 
         Self {
+            database,
             families_by_lowercase,
             family_scan_order,
         }
@@ -51,6 +61,31 @@ impl WindowsFontLocator {
             .iter()
             .find(|family_name| !excluded.contains(&family_name.to_ascii_lowercase()))
             .cloned()
+    }
+
+    pub fn resolve_face_data(&self, family_name: &str) -> Option<ResolvedFontFaceData> {
+        let family_name = self.resolve_installed_family(family_name)?;
+        let families = [Family::Name(family_name.as_str())];
+        let face_id = self.database.query(&Query {
+            families: &families,
+            weight: Weight::NORMAL,
+            stretch: Stretch::Normal,
+            style: Style::Normal,
+        })?;
+        let face = self.database.face(face_id)?;
+        let resolved_family = face
+            .families
+            .first()
+            .map(|(name, _)| name.clone())
+            .unwrap_or_else(|| family_name.clone());
+        let post_script_name = face.post_script_name.clone();
+
+        self.database.with_face_data(face_id, |font_data, face_index| ResolvedFontFaceData {
+            family_name: resolved_family,
+            post_script_name,
+            face_index,
+            font_data: font_data.to_vec(),
+        })
     }
 
     fn resolve_installed_family(&self, family_name: &str) -> Option<String> {

@@ -287,6 +287,10 @@ fn dwrite_font_system_discovers_distinct_fallback_faces_for_mixed_text() -> anyh
         .iter()
         .map(|face| face.family_name.clone())
         .collect::<std::collections::BTreeSet<_>>();
+    let distinct_face_keys = fallback_faces
+        .iter()
+        .map(|face| face.face_key.0)
+        .collect::<std::collections::BTreeSet<_>>();
 
     assert!(
         !fallback_faces.is_empty(),
@@ -307,6 +311,11 @@ fn dwrite_font_system_discovers_distinct_fallback_faces_for_mixed_text() -> anyh
         distinct_families.len(),
         fallback_faces.len(),
         "fallback discovery should not emit duplicate families"
+    );
+    assert_eq!(
+        distinct_face_keys.len(),
+        fallback_faces.len(),
+        "fallback discovery should assign a stable face key to each resolved fallback face instead of reusing one synthetic key across the whole chain"
     );
     assert!(
         fallback_faces.len() >= 2,
@@ -358,6 +367,15 @@ fn dwrite_shape_text_runs_split_mixed_text_and_preserve_feature_request() -> any
             .iter()
             .any(|run| run.resolved_face.family_name != primary_family),
         "mixed text should resolve at least one subrun through a non-primary fallback face"
+    );
+    assert!(
+        shaped_runs
+            .iter()
+            .map(|run| run.resolved_face.face_key.0)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            >= 2,
+        "mixed text should keep distinct fallback face keys once the backend resolves real per-face data"
     );
     Ok(())
 }

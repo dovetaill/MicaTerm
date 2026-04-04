@@ -11,8 +11,11 @@ pub mod windows_locator;
 pub mod windows_dwrite;
 
 pub use backend::{
-    FontFaceKey, FontMetrics, FontRenderProfile, FontRequest, FontSystem, LoadedFont,
-    LoadedFontKey,
+    DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY, DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY,
+    DEFAULT_TERMINAL_FONT_FAMILY, DEFAULT_TERMINAL_FONT_SIZE_PX, DEFAULT_TERMINAL_FONT_WEIGHT,
+    DEFAULT_TERMINAL_LETTER_SPACING_PX, DEFAULT_TERMINAL_LINE_HEIGHT, FontFaceKey, FontMetrics,
+    FontRenderProfile, FontRequest, FontSystem, LoadedFont, LoadedFontKey,
+    WINDOWS_DEFAULT_TERMINAL_FONT_CHAIN,
 };
 #[cfg(feature = "terminal-native-renderer")]
 pub use backend::{

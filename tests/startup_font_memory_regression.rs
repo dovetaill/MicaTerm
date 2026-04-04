@@ -10,20 +10,23 @@ fn startup_path_drops_legacy_terminal_font_imports() {
     );
     assert!(
         !content.contains("SarasaTermSCNerd-Unhinted.ttf"),
-        "the terminal font should still be owned by the Rust atlas renderer instead of a Slint import path"
+        "the terminal font should stay owned by the Rust renderer instead of a Slint import path"
     );
 }
 
 #[test]
-fn bundled_terminal_font_contract_uses_fusion_jetbrains_maple_mono_bundle() {
+fn bundled_terminal_font_contract_uses_cascadia_and_sarasa_assets() {
     assert!(
-        Path::new("assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf")
-            .exists(),
-        "the bundled terminal font should ship the Fusion JetBrains Maple Mono regular face shared by the bitmap and native renderers"
+        Path::new("assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf").exists(),
+        "the bundled terminal font contract should ship Cascadia Mono for the default Latin path"
+    );
+    assert!(
+        Path::new("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf").exists(),
+        "the bundled terminal font contract should ship Sarasa Term SC for the default CJK path"
     );
     assert!(
         !Path::new("ui/fonts/IosevkaTerm-Regular.ttf").exists(),
-        "the old Iosevka terminal font should be removed from the bundled assets"
+        "the old Iosevka terminal font should stay removed from bundled assets"
     );
 }
 
@@ -46,11 +49,11 @@ fn atlas_renderer_dependency_contract_uses_ab_glyph_instead_of_fontdue() {
 
     assert!(
         cargo_toml.contains("ab_glyph"),
-        "atlas renderer should depend on ab_glyph for lazy glyph loading instead of fontdue's heavier pre-expanded font model"
+        "atlas renderer should depend on ab_glyph for lazy glyph loading"
     );
     assert!(
         !cargo_toml.contains("fontdue"),
-        "fontdue should be removed once the atlas renderer migrates to the lighter ab_glyph path"
+        "fontdue should stay removed from the atlas renderer path"
     );
     assert!(
         atlas_source.contains("ab_glyph"),

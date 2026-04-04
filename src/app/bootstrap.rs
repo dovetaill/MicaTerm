@@ -88,10 +88,12 @@ use crate::app::terminal_atlas::TerminalAtlasSelection;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_presenter::{
-    BitmapAtlasPresenter, NativeCursorFrameState, NativeImePreviewOverlay, NativeTerminalFrame,
-    PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter,
+    BitmapAtlasPresenter, NativeImePreviewOverlay, NativeTerminalFrame, PresentedTerminalFrame,
+    TerminalPresentationOptions, TerminalPresenter,
 };
-use crate::app::terminal_renderer::{NativeTerminalSurface, NativeTerminalSurfaceRect};
+use crate::app::terminal_renderer::{
+    NativeTerminalSurface, NativeTerminalSurfaceDiagnostics, NativeTerminalSurfaceRect,
+};
 use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
@@ -145,6 +147,13 @@ use crate::app::window_state::WindowPlacementKind;
 use crate::app::windowing::{
     ModalDragState, WindowController, apply_restored_window_size, parse_resize_direction,
     window_appearance,
+};
+use crate::app::windows_frame::{
+    native_surface_baseline_px, native_surface_dpi_x, native_surface_dpi_y,
+    native_surface_font_chain, native_surface_glyph_bounds_trace,
+    native_surface_pixel_alignment, native_surface_render_target_alpha_mode,
+    native_surface_scale_factor_percent, native_surface_text_antialias_mode,
+    native_surface_text_renderer_path,
 };
 #[cfg(target_os = "windows")]
 use crate::app::windows_frame::{
@@ -2220,26 +2229,77 @@ fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerm
             surface.present(frame);
         }
     });
+    trace_workspace_native_terminal_diagnostics(window);
 }
 
-fn sync_workspace_session_cursor_from_native_frame(
-    window: &AppWindow,
-    cursor: NativeCursorFrameState,
-) {
-    window.set_workspace_session_cursor_row(i32::try_from(cursor.row).unwrap_or(i32::MAX));
-    window.set_workspace_session_cursor_col(i32::try_from(cursor.col).unwrap_or(i32::MAX));
-    window.set_workspace_session_cursor_visible(cursor.visible);
-    window.set_workspace_session_cursor_blinking(cursor.blinking);
-    window.set_workspace_session_cursor_shape(
-        match cursor.shape {
-            crate::app::ssh::runtime::TerminalCursorShape::Block => "block",
-            crate::app::ssh::runtime::TerminalCursorShape::Underline => "underline",
-            crate::app::ssh::runtime::TerminalCursorShape::Bar => "bar",
-        }
-        .into(),
+fn workspace_native_terminal_diagnostics_snapshot() -> Option<NativeTerminalSurfaceDiagnostics> {
+    WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
+        surface
+            .borrow()
+            .as_ref()
+            .map(NativeTerminalSurface::diagnostics_snapshot)
+    })
+}
+
+fn trace_workspace_native_terminal_diagnostics(window: &AppWindow) {
+    let Some(diagnostics) = workspace_native_terminal_diagnostics_snapshot() else {
+        return;
+    };
+
+    let font_chain = native_surface_font_chain(&diagnostics)
+        .map(|chain| chain.join(" -> "))
+        .unwrap_or_default();
+    let glyph_bounds = native_surface_glyph_bounds_trace(&diagnostics)
+        .map(|trace| {
+            trace
+                .iter()
+                .map(|glyph| {
+                    format!(
+                        "#{}@r{}c{}-{} screen=({},{} {}x{}) visible=({},{} {}x{})",
+                        glyph.glyph_id,
+                        glyph.row,
+                        glyph.start_col,
+                        glyph.end_col,
+                        glyph.screen_left_px,
+                        glyph.screen_top_px,
+                        glyph.screen_width_px,
+                        glyph.screen_height_px,
+                        glyph.visible_left_px,
+                        glyph.visible_top_px,
+                        glyph.visible_width_px,
+                        glyph.visible_height_px
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" | ")
+        })
+        .unwrap_or_default();
+
+    tracing::trace!(
+        target: "app.terminal",
+        text_renderer_path = native_surface_text_renderer_path(&diagnostics).unwrap_or("unknown"),
+        text_antialias_mode = native_surface_text_antialias_mode(&diagnostics).unwrap_or("unknown"),
+        render_target_alpha_mode = native_surface_render_target_alpha_mode(&diagnostics)
+            .unwrap_or("unknown"),
+        baseline_px = native_surface_baseline_px(&diagnostics).unwrap_or_default(),
+        pixel_alignment = native_surface_pixel_alignment(&diagnostics).unwrap_or("unknown"),
+        dpi_x = native_surface_dpi_x(&diagnostics).unwrap_or_default(),
+        dpi_y = native_surface_dpi_y(&diagnostics).unwrap_or_default(),
+        diagnostics_scale_factor_percent = native_surface_scale_factor_percent(&diagnostics)
+            .unwrap_or_default(),
+        host_scale_factor = window_scale_factor(window),
+        font_chain = %font_chain,
+        glyph_bounds = %glyph_bounds,
+        "workspace native terminal diagnostics snapshot"
     );
-    window.set_workspace_session_cursor_fg(slint_color_from_rgba(cursor.fg_rgba));
-    window.set_workspace_session_cursor_bg(slint_color_from_rgba(cursor.bg_rgba));
+}
+
+fn clear_workspace_session_cursor_overlay(window: &AppWindow) {
+    window.set_workspace_session_cursor_row(0);
+    window.set_workspace_session_cursor_col(0);
+    window.set_workspace_session_cursor_visible(false);
+    window.set_workspace_session_cursor_blinking(false);
+    window.set_workspace_session_cursor_shape("block".into());
 }
 
 fn clear_workspace_native_terminal_frame(window: &AppWindow) {
@@ -2454,7 +2514,7 @@ fn sync_workspace_session_state_with_manager(
     if let Some(surface) = state.active_workspace_terminal_surface() {
         let selection = active_workspace_terminal_selection(window);
         let selection_overlay_rgba = terminal_selection_overlay_rgba(state.theme_mode);
-        let mut native_cursor = None;
+        let mut native_frame_presented = false;
         let mut next_render_mode = None;
         let mut next_surface_seqno = None;
         WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
@@ -2488,7 +2548,7 @@ fn sync_workspace_session_state_with_manager(
                 Ok(PresentedTerminalFrame::Native(frame)) => {
                     let frame = *frame;
                     let presentable_frame = frame.presentable_frame.clone();
-                    native_cursor = Some(presentable_frame.cursor);
+                    native_frame_presented = true;
                     let scale_factor = window_scale_factor(window);
                     window.set_workspace_session_rows(i32::try_from(presentable_frame.grid_rows).unwrap_or(i32::MAX));
                     window.set_workspace_session_cols(i32::try_from(presentable_frame.grid_cols).unwrap_or(i32::MAX));
@@ -2516,8 +2576,8 @@ fn sync_workspace_session_state_with_manager(
                 }
             }
         });
-        if let Some(cursor) = native_cursor {
-            sync_workspace_session_cursor_from_native_frame(window, cursor);
+        if native_frame_presented {
+            clear_workspace_session_cursor_overlay(window);
         } else {
             window.set_workspace_session_cursor_row(
                 i32::try_from(surface.cursor.row).unwrap_or(i32::MAX),
@@ -2535,9 +2595,9 @@ fn sync_workspace_session_state_with_manager(
                 }
                 .into(),
             );
-            window.set_workspace_session_cursor_fg(slint_color_from_rgba(surface.cursor.fg_rgba));
-            window.set_workspace_session_cursor_bg(slint_color_from_rgba(surface.cursor.bg_rgba));
         }
+        window.set_workspace_session_cursor_fg(slint_color_from_rgba(surface.cursor.fg_rgba));
+        window.set_workspace_session_cursor_bg(slint_color_from_rgba(surface.cursor.bg_rgba));
         window.set_workspace_session_default_fg(slint_color_from_rgba(surface.default_fg_rgba));
         window.set_workspace_session_default_bg(slint_color_from_rgba(surface.default_bg_rgba));
         window.set_workspace_session_mouse_grabbed(surface.mouse_grabbed);
@@ -5364,6 +5424,7 @@ pub fn run_with_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::bootstrap::vault_sync::resolve_remote_for_sync;
     use crate::app::ssh::credentials::MemoryCredentialStore;
     use crate::app::ssh::profile::SshAuthMethod;
     use crate::app::ssh::runtime::{TerminalCellState, TerminalKeyEvent, TerminalSurfaceState};

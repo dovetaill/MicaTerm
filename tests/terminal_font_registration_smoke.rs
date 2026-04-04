@@ -6,26 +6,32 @@ fn app_window_has_no_legacy_terminal_font_imports() {
 
     assert!(
         !content.contains("SarasaTermSCNerd-Unhinted.ttf"),
-        "Sarasa should stay owned by the Rust atlas renderer instead of a Slint startup import"
+        "Sarasa should stay owned by the Rust terminal renderer instead of a Slint startup import"
     );
     assert!(
         !content.contains("IosevkaTerm-Regular.ttf"),
-        "Iosevka should be gone from the startup path"
+        "Iosevka should stay out of the startup path"
     );
 }
 
 #[test]
-fn terminal_font_assets_switch_to_fusion_jetbrains_maple_mono_bundle() {
+fn terminal_font_assets_switch_to_windows_terminal_bundle() {
     assert!(
-        Path::new("assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf")
-            .exists(),
-        "the default terminal font bundle should ship a Fusion-JetBrainsMapleMono regular face"
+        Path::new("assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf").exists(),
+        "the Windows terminal default bundle should ship a Cascadia Mono regular face"
     );
     assert!(
-        Path::new("assets/fonts/Fusion-JetBrainsMapleMono/OFL.txt").exists(),
-        "the default terminal font bundle should ship the upstream OFL license text"
+        Path::new("assets/fonts/CascadiaMono/LICENSE.txt").exists(),
+        "the Cascadia Mono bundle should ship the upstream license text"
     );
-    assert!(!Path::new("ui/fonts/IosevkaTerm-Regular.ttf").exists());
+    assert!(
+        Path::new("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf").exists(),
+        "the Windows terminal default bundle should ship a Sarasa Term SC regular face"
+    );
+    assert!(
+        Path::new("assets/fonts/SarasaTermSC/LICENSE.txt").exists(),
+        "the Sarasa Term SC bundle should ship the upstream license text"
+    );
 }
 
 #[test]
@@ -35,78 +41,43 @@ fn terminal_host_font_contract_drops_legacy_faces() {
 
     assert!(
         !content.contains("Iosevka Term"),
-        "terminal host should stop exposing the retired Iosevka face"
+        "terminal host should not expose the retired Iosevka face"
     );
 }
 
 #[test]
-fn bitmap_atlas_and_mock_font_contracts_switch_to_fusion_bundle() {
+fn bitmap_and_native_font_sources_point_at_windows_terminal_defaults() {
     let atlas_source =
         fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");
-    let mock_source =
-        fs::read_to_string("src/app/terminal_font/mock.rs").expect("read mock font system");
-    let build_source = fs::read_to_string("build.rs").expect("read build script");
-
-    assert!(
-        atlas_source.contains(
-            "assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"
-        ),
-        "bitmap atlas should load the bundled Fusion JetBrains Maple Mono face instead of the old ui/fonts Sarasa path"
-    );
-    assert!(
-        !atlas_source.contains("ui/fonts/SarasaTermSCNerd-Regular.ttf"),
-        "bitmap atlas should stop embedding the old Sarasa regular face"
-    );
-    assert!(
-        mock_source.contains(
-            "assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"
-        ),
-        "font-system mocks should share the bundled Fusion JetBrains Maple Mono face with the bitmap atlas"
-    );
-    assert!(
-        !mock_source.contains("ui/fonts/SarasaTermSCNerd-Regular.ttf"),
-        "font-system mocks should stop embedding the old Sarasa regular face"
-    );
-    assert!(
-        build_source.contains(
-            "assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"
-        ),
-        "build script should watch the bundled Fusion JetBrains Maple Mono asset for atlas rebuilds"
-    );
-}
-
-#[test]
-fn native_terminal_font_default_switches_to_fusion_jetbrains_maple_mono() {
     let backend_source =
         fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
-    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
-        .expect("read windows dwrite font backend");
-    let wezterm_source = fs::read_to_string("src/app/terminal_font/wezterm_font.rs")
-        .expect("read wezterm font adapter");
+    let fallback_source =
+        fs::read_to_string("src/app/terminal_font/windows_fallback.rs").expect("read fallback");
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read presenter");
 
     assert!(
-        backend_source.contains("DEFAULT_TERMINAL_FONT_FAMILY"),
-        "font backend should expose a shared default terminal font family contract"
+        atlas_source.contains("assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf"),
+        "bitmap atlas should load the bundled Cascadia Mono face as the default Latin terminal font"
     );
     assert!(
-        backend_source.contains("Fusion JetBrains Maple Mono"),
-        "font backend should set Fusion JetBrains Maple Mono as the default terminal font family"
+        backend_source.contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Cascadia Mono\";"),
+        "font backend should move the default terminal family to Cascadia Mono"
     );
     assert!(
         backend_source.contains("family_name: Some(DEFAULT_TERMINAL_FONT_FAMILY.to_string())"),
-        "default font requests should explicitly target the Fusion-JetBrainsMapleMono family"
+        "default font requests should explicitly target the shared terminal family contract"
     );
     assert!(
-        dwrite_source.contains("assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"),
-        "Windows native font backend should load the bundled Fusion-JetBrainsMapleMono regular face by default"
+        (fallback_source.contains("\"Sarasa Term SC\"")
+            || fallback_source.contains("DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY"))
+            && (fallback_source.contains("\"Segoe UI Emoji\"")
+                || fallback_source.contains("DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY")),
+        "Windows fallback resolution should explicitly include Sarasa Term SC and Segoe UI Emoji behind the primary Cascadia Mono face"
     );
     assert!(
-        !dwrite_source.contains("ui/fonts/SarasaTermSCNerd-Regular.ttf"),
-        "the old Sarasa bundle path should no longer be the default native terminal font"
-    );
-    assert!(
-        wezterm_source.contains("Fusion JetBrains Maple Mono"),
-        "WezTerm font migration scaffold should track the new default terminal font family"
+        presenter_source.contains("let request = FontRequest::default();"),
+        "presenters should source their default typography from the shared FontRequest contract instead of hard-coding per-path font sizes"
     );
 }
 
@@ -116,7 +87,7 @@ fn bootstrap_no_longer_uses_lazy_terminal_font_registration() {
 
     assert!(
         !content.contains("ensure_terminal_font_registered"),
-        "bootstrap should not rely on lazy terminal font registration once the atlas renderer owns Maple directly"
+        "bootstrap should not rely on lazy terminal font registration"
     );
 }
 
@@ -124,12 +95,12 @@ fn bootstrap_no_longer_uses_lazy_terminal_font_registration() {
 fn legacy_terminal_font_module_is_removed() {
     assert!(
         !Path::new("src/app/terminal_font.rs").exists(),
-        "the legacy lazy-registration terminal font module should be removed"
+        "the legacy lazy-registration terminal font module should stay removed"
     );
 }
 
 #[test]
-fn atlas_renderer_switches_off_fontdue() {
+fn atlas_renderer_stays_on_ab_glyph() {
     let cargo_toml = fs::read_to_string("Cargo.toml").expect("read Cargo.toml");
     let atlas_source =
         fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");

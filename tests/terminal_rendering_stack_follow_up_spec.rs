@@ -26,6 +26,10 @@ fn follow_up_doc_tracks_linux_macos_backends_and_libghostty_stop_loss() {
         follow_up.contains("libghostty"),
         "follow-up doc should record the libghostty stop-loss route"
     );
+    assert!(
+        follow_up.contains("Explicit fallback telemetry for native setup failures"),
+        "follow-up doc should keep the native fallback telemetry backlog item so Windows text diagnostics work has a documented follow-up owner"
+    );
 }
 
 #[test]

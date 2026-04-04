@@ -11,7 +11,8 @@ fn block_between<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
 
 #[test]
 fn runtime_visible_projection_limits_iteration_to_visible_phys_range() {
-    let runtime_source = fs::read_to_string("src/app/ssh/runtime.rs").expect("read runtime source");
+    let runtime_source =
+        fs::read_to_string("src/app/ssh/runtime/terminal.rs").expect("read runtime terminal source");
     let visible_rows_block = block_between(
         &runtime_source,
         "    pub fn visible_rows(&self) -> Vec<TerminalRowState> {",

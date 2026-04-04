@@ -51,6 +51,10 @@ impl FontSystem for OverhangGlyphFontSystem {
             height_px: 2,
             bearing_x_px: 2,
             bearing_y_px: 0,
+            visible_left_px: 2,
+            visible_top_px: 0,
+            visible_width_px: 4,
+            visible_height_px: 2,
             advance_px: 3,
             coverage: vec![255; 8],
         })
@@ -81,6 +85,10 @@ impl FontSystem for ClusterOverhangFontSystem {
             height_px: 2,
             bearing_x_px: 1,
             bearing_y_px: 0,
+            visible_left_px: 1,
+            visible_top_px: 0,
+            visible_width_px: 2,
+            visible_height_px: 2,
             advance_px: 2,
             coverage: vec![255; 4],
         })
@@ -113,6 +121,10 @@ impl FontSystem for VerticalOverhangFontSystem {
             height_px,
             bearing_x_px: 0,
             bearing_y_px: -2,
+            visible_left_px: 0,
+            visible_top_px: -2,
+            visible_width_px: 2,
+            visible_height_px: height_px,
             advance_px: 4,
             coverage: vec![255; (2 * height_px) as usize],
         })
@@ -144,6 +156,10 @@ impl FontSystem for FractionalPhaseFontSystem {
             height_px: 2,
             bearing_x_px: 0,
             bearing_y_px: 0,
+            visible_left_px: 0,
+            visible_top_px: 0,
+            visible_width_px: 2,
+            visible_height_px: 2,
             advance_px: 2,
             coverage: vec![255; 4],
         })
@@ -194,7 +210,7 @@ fn fractional_phase_test_font() -> LoadedFont {
 
 #[cfg(feature = "terminal-native-renderer")]
 #[test]
-fn native_renderer_snaps_single_glyph_origin_back_inside_its_cell_span() -> Result<()> {
+fn native_renderer_preserves_single_glyph_visible_bounds_when_right_ink_overhangs() -> Result<()> {
     let style = TextStyleKey {
         fg_rgba: 0xffd8_dfe8,
         bg_rgba: 0xff0c_1014,
@@ -244,8 +260,9 @@ fn native_renderer_snaps_single_glyph_origin_back_inside_its_cell_span() -> Resu
         .expect("monochrome draw");
 
     assert_eq!(
-        draw.dest_x_px, 0,
-        "renderer should pull a right-overhanging glyph back inside the cell before the frame reaches native or scene-image presentation"
+        draw.dest_x_px + draw.atlas_entry.padding_left_px as i32,
+        2,
+        "renderer should preserve the glyph's visible left edge and rely on row or viewport clip instead of pulling trailing ink back inside the logical cell span"
     );
 
     Ok(())
@@ -253,7 +270,7 @@ fn native_renderer_snaps_single_glyph_origin_back_inside_its_cell_span() -> Resu
 
 #[cfg(feature = "terminal-native-renderer")]
 #[test]
-fn native_renderer_shifts_every_glyph_in_a_cluster_when_trailing_ink_overhangs() -> Result<()> {
+fn native_renderer_preserves_cluster_spacing_when_trailing_ink_overhangs() -> Result<()> {
     let style = TextStyleKey {
         fg_rgba: 0xffd8_dfe8,
         bg_rgba: 0xff0c_1014,
@@ -310,12 +327,16 @@ fn native_renderer_shifts_every_glyph_in_a_cluster_when_trailing_ink_overhangs()
     assert_eq!(prepared.monochrome_glyph_draws.len(), 2, "cluster should still emit two glyph draws");
 
     assert_eq!(
-        prepared.monochrome_glyph_draws[0].dest_x_px, 0,
-        "when the trailing glyph overhangs the right edge, the renderer should shift the entire cluster left instead of only clamping the last glyph"
+        prepared.monochrome_glyph_draws[0].dest_x_px
+            + prepared.monochrome_glyph_draws[0].atlas_entry.padding_left_px as i32,
+        1,
+        "renderer should keep the first glyph on its shaped visible-bounds origin instead of shifting the whole cluster back inside the logical cell span"
     );
     assert_eq!(
-        prepared.monochrome_glyph_draws[1].dest_x_px, 2,
-        "shared cluster offset should preserve intra-cluster spacing after the shift"
+        prepared.monochrome_glyph_draws[1].dest_x_px
+            + prepared.monochrome_glyph_draws[1].atlas_entry.padding_left_px as i32,
+        3,
+        "renderer should preserve intra-cluster spacing while allowing the trailing glyph's visible bounds to overhang the logical cell span"
     );
 
     Ok(())

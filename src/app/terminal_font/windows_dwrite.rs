@@ -2,8 +2,9 @@
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
-use ab_glyph::{Font, FontArc, GlyphId, PxScale, ScaleFont};
+use ab_glyph::{Font, FontArc, FontVec, GlyphId, PxScale, ScaleFont};
 use anyhow::{Result, anyhow};
 use swash::FontRef as SwashFontRef;
 use swash::scale::image::Content as SwashContent;
@@ -12,7 +13,8 @@ use swash::zeno::{Format as SwashFormat, Vector as SwashVector};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::app::terminal_font::backend::{
-    ColorGlyphRaster, DEFAULT_TERMINAL_FONT_FAMILY, FontFaceKey, FontFallbackFace, FontMetrics,
+    ColorGlyphRaster, DEFAULT_TERMINAL_FONT_FAMILY, DEFAULT_TERMINAL_FONT_SIZE_PX,
+    DEFAULT_TERMINAL_LINE_HEIGHT, FontFaceKey, FontFallbackFace, FontMetrics,
     FontRenderProfile, FontRequest, FontSystem, GlyphRasterRequest, LoadedFont, LoadedFontKey,
     OpenTypeFeatureSet, RasterizedGlyph, ShapedGlyph, ShapedGlyphRun, TextShapingRequest,
     shape_text_with_rustybuzz, shape_text_with_rustybuzz_features,
@@ -20,43 +22,62 @@ use crate::app::terminal_font::backend::{
 use crate::app::terminal_font::windows_fallback::{
     WindowsFontFallbackResolver, contains_color_glyph_text,
 };
-use crate::app::terminal_font::windows_locator::WindowsFontLocator;
+use crate::app::terminal_font::windows_locator::{ResolvedFontFaceData, WindowsFontLocator};
 use crate::app::terminal_emoji::{EmojiRenderOutcome, EmojiSprite, TerminalEmojiRenderer};
 
-const FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES: &[u8] =
-    include_bytes!("../../../assets/fonts/Fusion-JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf");
+const CASCADIA_MONO_FONT_BYTES: &[u8] =
+    include_bytes!("../../../assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf");
 const DEFAULT_FACE_KEY: FontFaceKey = FontFaceKey(1);
 const DEFAULT_FACE_INDEX: u32 = 0;
-const MIN_CELL_HEIGHT_PX: f32 = 20.0;
+const MIN_CELL_HEIGHT_PX: f32 = DEFAULT_TERMINAL_FONT_SIZE_PX * DEFAULT_TERMINAL_LINE_HEIGHT;
+
+#[derive(Clone)]
+struct LoadedFaceRecord {
+    family_name: String,
+    face_index: u32,
+    font_data: Arc<Vec<u8>>,
+    font: FontArc,
+}
 
 pub struct DirectWriteFontSystem {
-    font: FontArc,
-    font_bytes: &'static [u8],
-    swash_font: SwashFontRef<'static>,
     scale_context: ScaleContext,
     locator: WindowsFontLocator,
     fallback_resolver: WindowsFontFallbackResolver,
     emoji_renderer: TerminalEmojiRenderer,
     color_glyph_rasters: HashMap<(LoadedFontKey, FontFaceKey, u32), ColorGlyphRaster>,
+    faces: HashMap<FontFaceKey, LoadedFaceRecord>,
+    family_face_keys: HashMap<String, FontFaceKey>,
+    next_face_key: u64,
+    #[cfg(target_os = "windows")]
+    directwrite: Option<directwrite_native::DirectWriteContext>,
 }
 
 impl DirectWriteFontSystem {
     pub fn new() -> Result<Self> {
-        let font = FontArc::try_from_slice(FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES).map_err(
-            |error| anyhow!("failed to load bundled Fusion JetBrains Maple Mono font: {error}"),
+        let bundled_face = build_face_record(
+            DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
+            CASCADIA_MONO_FONT_BYTES.to_vec(),
+            DEFAULT_FACE_INDEX,
         )?;
-        let swash_font =
-            SwashFontRef::from_index(FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES, DEFAULT_FACE_INDEX as usize)
-                .ok_or_else(|| anyhow!("failed to load bundled Fusion JetBrains Maple Mono font into swash"))?;
+        let mut faces = HashMap::new();
+        faces.insert(DEFAULT_FACE_KEY, bundled_face);
+        let mut family_face_keys = HashMap::new();
+        family_face_keys.insert(
+            DEFAULT_TERMINAL_FONT_FAMILY.to_ascii_lowercase(),
+            DEFAULT_FACE_KEY,
+        );
+
         Ok(Self {
-            font,
-            font_bytes: FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES,
-            swash_font,
             scale_context: ScaleContext::new(),
             locator: WindowsFontLocator::new(),
             fallback_resolver: WindowsFontFallbackResolver::new(),
             emoji_renderer: TerminalEmojiRenderer::new(),
             color_glyph_rasters: HashMap::new(),
+            faces,
+            family_face_keys,
+            next_face_key: DEFAULT_FACE_KEY.0.saturating_add(1),
+            #[cfg(target_os = "windows")]
+            directwrite: directwrite_native::DirectWriteContext::new().ok(),
         })
     }
 
@@ -85,29 +106,17 @@ impl DirectWriteFontSystem {
         request: &FontRequest,
         render_profile: FontRenderProfile,
     ) -> Result<LoadedFont> {
-        let scaled = self.font.as_scaled(PxScale::from(request.px_size));
-        let mono_advance = scaled
-            .h_advance(scaled.glyph_id('M'))
-            .max(scaled.h_advance(scaled.glyph_id('0')))
-            .max(scaled.h_advance(scaled.glyph_id('W')))
-            .max(scaled.h_advance(scaled.glyph_id('界')) / 2.0);
-        let line_height = (scaled.ascent() - scaled.descent() + scaled.line_gap()).ceil();
-        let cell_height = line_height.max(MIN_CELL_HEIGHT_PX);
-        let top_padding = ((cell_height - line_height) / 2.0).max(0.0).floor();
-        let baseline_px = top_padding + scaled.ascent().ceil();
+        let primary_family = request
+            .family_name
+            .as_deref()
+            .unwrap_or(DEFAULT_TERMINAL_FONT_FAMILY);
+        let primary_face = self.ensure_face_for_family(primary_family)?;
+        let metrics = self.load_metrics(primary_face.face_key, request.px_size)?;
 
         Ok(LoadedFont::new(
-            DEFAULT_FACE_KEY,
+            primary_face.face_key,
             request.clone(),
-            FontMetrics {
-                units_per_em: self.font.units_per_em().unwrap_or(1000.0).round() as u32,
-                ascent_px: scaled.ascent(),
-                descent_px: scaled.descent(),
-                line_gap_px: scaled.line_gap(),
-                baseline_px,
-                cell_width_px: mono_advance.ceil(),
-                cell_height_px: cell_height,
-            },
+            metrics,
             render_profile,
         ))
     }
@@ -117,22 +126,28 @@ impl DirectWriteFontSystem {
         font: &LoadedFont,
         request: GlyphRasterRequest,
     ) -> Result<RasterizedGlyph> {
+        let face = self.face_record(request.face_key)?;
         let glyph_id = request.glyph_id;
-        if font.face_key() != DEFAULT_FACE_KEY {
-            return Err(anyhow!(
-                "unknown DirectWrite face key: {}",
-                font.face_key().0
-            ));
-        }
-
         let glyph_id = u16::try_from(glyph_id)
             .map(GlyphId)
             .map_err(|_| anyhow!("glyph id {} exceeds ab_glyph u16 range", glyph_id))?;
-        let scaled = self.font.as_scaled(PxScale::from(font.px_size()));
+        let face_font = face.font.clone();
+        let face_index = face.face_index;
+        let face_data = Arc::clone(&face.font_data);
+        let face_family = face.family_name.clone();
+        let scaled = face_font.as_scaled(PxScale::from(font.px_size()));
         let advance_px = scaled.h_advance(glyph_id).round() as i32;
+        let swash_font = SwashFontRef::from_index(face_data.as_slice(), face_index as usize)
+            .ok_or_else(|| {
+                anyhow!(
+                    "failed to resolve swash font for `{}` face index {}",
+                    face_family,
+                    face_index
+                )
+            })?;
         let mut scaler = self
             .scale_context
-            .builder(self.swash_font)
+            .builder(swash_font)
             .size(font.px_size())
             .hint(true)
             .build();
@@ -146,6 +161,10 @@ impl DirectWriteFontSystem {
                 height_px: 0,
                 bearing_x_px: 0,
                 bearing_y_px: 0,
+                visible_left_px: 0,
+                visible_top_px: 0,
+                visible_width_px: 0,
+                visible_height_px: 0,
                 advance_px,
                 coverage: Vec::new(),
             });
@@ -156,6 +175,10 @@ impl DirectWriteFontSystem {
                 height_px: 0,
                 bearing_x_px: 0,
                 bearing_y_px: 0,
+                visible_left_px: 0,
+                visible_top_px: 0,
+                visible_width_px: 0,
+                visible_height_px: 0,
                 advance_px,
                 coverage: Vec::new(),
             });
@@ -184,9 +207,127 @@ impl DirectWriteFontSystem {
             height_px,
             bearing_x_px: image.placement.left,
             bearing_y_px: -image.placement.top,
+            visible_left_px: image.placement.left,
+            visible_top_px: -image.placement.top,
+            visible_width_px: width_px,
+            visible_height_px: height_px,
             advance_px,
             coverage,
         })
+    }
+
+    fn ensure_face_for_family(&mut self, family_name: &str) -> Result<FontFallbackFace> {
+        let family_key = family_name.to_ascii_lowercase();
+        if let Some(face_key) = self.family_face_keys.get(&family_key).copied() {
+            return self.fallback_face_for_key(face_key);
+        }
+
+        let face_data = self
+            .locator
+            .resolve_face_data(family_name)
+            .or_else(|| fallback_face_data_for_family(family_name))
+            .ok_or_else(|| anyhow!("failed to resolve terminal font family `{family_name}`"))?;
+
+        let face_key = FontFaceKey(self.next_face_key);
+        self.next_face_key = self.next_face_key.saturating_add(1);
+        let face_record = build_face_record(
+            face_data.family_name.clone(),
+            face_data.font_data,
+            face_data.face_index,
+        )?;
+        self.family_face_keys.insert(family_key, face_key);
+        self.faces.insert(face_key, face_record);
+
+        self.fallback_face_for_key(face_key)
+    }
+
+    fn fallback_face_for_key(&self, face_key: FontFaceKey) -> Result<FontFallbackFace> {
+        let face = self.face_record(face_key)?;
+        Ok(FontFallbackFace {
+            face_key,
+            family_name: face.family_name.clone(),
+        })
+    }
+
+    fn face_record(&self, face_key: FontFaceKey) -> Result<&LoadedFaceRecord> {
+        self.faces
+            .get(&face_key)
+            .ok_or_else(|| anyhow!("unknown DirectWrite face key: {}", face_key.0))
+    }
+
+    fn load_metrics(&self, face_key: FontFaceKey, px_size: f32) -> Result<FontMetrics> {
+        let face = self.face_record(face_key)?;
+        #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
+        let mut metrics = fallback_metrics_from_face(face, px_size);
+
+        #[cfg(target_os = "windows")]
+        if let Some(directwrite) = &self.directwrite
+            && let Ok(native_metrics) = directwrite.metrics_for_family(face.family_name.as_str(), px_size)
+        {
+            metrics.units_per_em = native_metrics.units_per_em;
+            metrics.ascent_px = native_metrics.ascent_px;
+            metrics.descent_px = native_metrics.descent_px;
+            metrics.line_gap_px = native_metrics.line_gap_px;
+            metrics.baseline_px = native_metrics.baseline_px;
+            metrics.cell_height_px = native_metrics.cell_height_px.max(metrics.cell_height_px);
+        }
+
+        Ok(metrics)
+    }
+}
+
+fn build_face_record(
+    family_name: String,
+    font_data: Vec<u8>,
+    face_index: u32,
+) -> Result<LoadedFaceRecord> {
+    let font = FontArc::new(
+        FontVec::try_from_vec_and_index(font_data.clone(), face_index).map_err(|error| {
+            anyhow!(
+                "failed to parse `{family_name}` face index {face_index} into ab_glyph: {error}"
+            )
+        })?,
+    );
+
+    Ok(LoadedFaceRecord {
+        family_name,
+        face_index,
+        font_data: Arc::new(font_data),
+        font,
+    })
+}
+
+fn fallback_face_data_for_family(family_name: &str) -> Option<ResolvedFontFaceData> {
+    family_name
+        .eq_ignore_ascii_case(DEFAULT_TERMINAL_FONT_FAMILY)
+        .then(|| ResolvedFontFaceData {
+            family_name: DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
+            post_script_name: "CascadiaMono-Regular".to_string(),
+            face_index: DEFAULT_FACE_INDEX,
+            font_data: CASCADIA_MONO_FONT_BYTES.to_vec(),
+        })
+}
+
+fn fallback_metrics_from_face(face: &LoadedFaceRecord, px_size: f32) -> FontMetrics {
+    let scaled = face.font.as_scaled(PxScale::from(px_size));
+    let mono_advance = scaled
+        .h_advance(scaled.glyph_id('M'))
+        .max(scaled.h_advance(scaled.glyph_id('0')))
+        .max(scaled.h_advance(scaled.glyph_id('W')))
+        .max(scaled.h_advance(scaled.glyph_id('界')) / 2.0);
+    let line_height = (scaled.ascent() - scaled.descent() + scaled.line_gap()).ceil();
+    let cell_height = line_height.max(MIN_CELL_HEIGHT_PX);
+    let top_padding = ((cell_height - line_height) / 2.0).max(0.0).floor();
+    let baseline_px = top_padding + scaled.ascent().ceil();
+
+    FontMetrics {
+        units_per_em: face.font.units_per_em().unwrap_or(1000.0).round() as u32,
+        ascent_px: scaled.ascent(),
+        descent_px: scaled.descent(),
+        line_gap_px: scaled.line_gap(),
+        baseline_px,
+        cell_width_px: mono_advance.ceil(),
+        cell_height_px: cell_height,
     }
 }
 
@@ -207,13 +348,8 @@ impl FontSystem for DirectWriteFontSystem {
     }
 
     fn shape_text(&mut self, font: &LoadedFont, text: &str) -> Result<Vec<ShapedGlyph>> {
-        if font.face_key() != DEFAULT_FACE_KEY {
-            return Err(anyhow!(
-                "unknown DirectWrite face key: {}",
-                font.face_key().0
-            ));
-        }
-        shape_text_with_rustybuzz(self.font_bytes, DEFAULT_FACE_INDEX, text)
+        let face = self.face_record(font.face_key())?;
+        shape_text_with_rustybuzz(face.font_data.as_slice(), face.face_index, text)
     }
 
     fn rasterize_glyph(
@@ -229,15 +365,10 @@ impl FontSystem for DirectWriteFontSystem {
         font: &LoadedFont,
         text: &str,
     ) -> Result<Vec<FontFallbackFace>> {
-        Ok(self
-            .discover_fallback_chain(font, text)
+        self.discover_fallback_chain(font, text)
             .into_iter()
-            .enumerate()
-            .map(|(index, family_name)| FontFallbackFace {
-                face_key: FontFaceKey(DEFAULT_FACE_KEY.0 + index as u64),
-                family_name,
-            })
-            .collect())
+            .map(|family_name| self.ensure_face_for_family(family_name.as_str()))
+            .collect()
     }
 
     fn shape_text_runs(
@@ -256,7 +387,6 @@ impl FontSystem for DirectWriteFontSystem {
             });
         let mut shaped_runs = Vec::new();
         let mut active_family: Option<String> = None;
-        let mut active_text = String::new();
         let mut active_start = 0usize;
         let mut active_end = 0usize;
 
@@ -268,13 +398,14 @@ impl FontSystem for DirectWriteFontSystem {
                 grapheme,
             );
 
-            if let Some(current_family) = &active_family {
-                if current_family.eq_ignore_ascii_case(&family_name) {
-                    active_text.push_str(grapheme);
-                    active_end = byte_end;
-                    continue;
-                }
+            if let Some(current_family) = &active_family
+                && current_family.eq_ignore_ascii_case(&family_name)
+            {
+                active_end = byte_end;
+                continue;
+            }
 
+            if let Some(current_family) = &active_family {
                 shaped_runs.push(self.shape_subrun(
                     font,
                     &resolved_face_for_family(&fallback_faces, current_family.as_str()),
@@ -284,8 +415,6 @@ impl FontSystem for DirectWriteFontSystem {
             }
 
             active_family = Some(family_name);
-            active_text.clear();
-            active_text.push_str(grapheme);
             active_start = byte_start;
             active_end = byte_end;
         }
@@ -329,9 +458,10 @@ impl DirectWriteFontSystem {
         } else {
             request.feature_set.clone()
         };
+        let face = self.face_record(resolved_face.face_key)?;
         let glyphs = shape_text_with_rustybuzz_features(
-            self.font_bytes,
-            DEFAULT_FACE_INDEX,
+            face.font_data.as_slice(),
+            face.face_index,
             text,
             &feature_set,
             request.allow_ligatures,
@@ -477,6 +607,104 @@ fn procedural_color_palette(text: &str) -> [[u8; 3]; 3] {
         0x20u8.saturating_add(((seed >> 20) & 0x6f) as u8),
     ];
     [primary, secondary, accent]
+}
+
+#[cfg(target_os = "windows")]
+mod directwrite_native {
+    use anyhow::{Result, anyhow};
+    use windows::Win32::Foundation::BOOL;
+    use windows::Win32::Graphics::DirectWrite::{
+        DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_METRICS, DWRITE_FONT_STRETCH_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_REGULAR, DWriteCreateFactory,
+        IDWriteFactory, IDWriteFactory2, IDWriteFontCollection, IDWriteFontFallback,
+    };
+    use windows::core::{Interface, PCWSTR};
+
+    use crate::app::terminal_font::backend::FontMetrics;
+
+    pub struct DirectWriteContext {
+        factory: IDWriteFactory,
+        font_collection: IDWriteFontCollection,
+        font_fallback: IDWriteFontFallback,
+    }
+
+    impl DirectWriteContext {
+        pub fn new() -> Result<Self> {
+            unsafe {
+                let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
+                let mut font_collection = None;
+                factory.GetSystemFontCollection(&mut font_collection, false)?;
+                let font_collection = font_collection
+                    .ok_or_else(|| anyhow!("DirectWrite returned no system font collection"))?;
+                let factory2: IDWriteFactory2 = Interface::cast(&factory)?;
+                let font_fallback = factory2.GetSystemFontFallback()?;
+
+                Ok(Self {
+                    factory,
+                    font_collection,
+                    font_fallback,
+                })
+            }
+        }
+
+        pub fn metrics_for_family(&self, family_name: &str, px_size: f32) -> Result<FontMetrics> {
+            unsafe {
+                let family_name_utf16 = family_name
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect::<Vec<u16>>();
+                let mut family_index = 0u32;
+                let mut exists = BOOL(0);
+                self.font_collection.FindFamilyName(
+                    PCWSTR(family_name_utf16.as_ptr()),
+                    &mut family_index,
+                    &mut exists,
+                )?;
+                if !exists.as_bool() {
+                    return Err(anyhow!(
+                        "DirectWrite could not find terminal family `{family_name}`"
+                    ));
+                }
+
+                let family = self.font_collection.GetFontFamily(family_index)?;
+                let font = family.GetFirstMatchingFont(
+                    DWRITE_FONT_WEIGHT_REGULAR,
+                    DWRITE_FONT_STRETCH_NORMAL,
+                    DWRITE_FONT_STYLE_NORMAL,
+                )?;
+                let font_face = font.CreateFontFace()?;
+                let mut metrics = DWRITE_FONT_METRICS::default();
+                font_face.GetMetrics(&mut metrics);
+
+                let mut file_count = 0u32;
+                font_face.GetFiles(&mut file_count, None)?;
+                let _ = &self.factory;
+                let _ = &self.font_fallback;
+                // IDWriteFontFallback::MapCharacters remains the Windows source of truth for
+                // script fallback mapping once the native path is compiled on Windows.
+
+                let units_per_em = u32::from(metrics.designUnitsPerEm.max(1));
+                let em_scale = px_size / units_per_em as f32;
+                let ascent_px = metrics.ascent as f32 * em_scale;
+                let descent_px = -(metrics.descent as f32 * em_scale);
+                let line_gap_px = metrics.lineGap as f32 * em_scale;
+                let line_height = (ascent_px - descent_px + line_gap_px).ceil();
+                let cell_height_px = line_height.max(px_size);
+                let top_padding = ((cell_height_px - line_height) / 2.0).max(0.0).floor();
+                let baseline_px = top_padding + ascent_px.ceil();
+
+                Ok(FontMetrics {
+                    units_per_em,
+                    ascent_px,
+                    descent_px,
+                    line_gap_px,
+                    baseline_px,
+                    cell_width_px: px_size.ceil(),
+                    cell_height_px,
+                })
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -564,7 +564,7 @@ export component TerminalSessionHost inherits Rectangle {
     changed session-surface-seqno => {
         root.cursor-blink-visible = true;
         cursor-blink-timer.stop();
-        if root.mode == "terminal" && root.session-cursor-visible && root.session-cursor-blinking {
+        if root.mode == "terminal" && root.session-render-mode == "bitmap" && root.session-cursor-visible && root.session-cursor-blinking {
             cursor-blink-timer.start();
         }
     }
@@ -590,7 +590,7 @@ export component TerminalSessionHost inherits Rectangle {
         running: false;
 
         triggered => {
-            if root.mode != "terminal" || !root.session-cursor-visible || !root.session-cursor-blinking {
+            if root.mode != "terminal" || root.session-render-mode != "bitmap" || !root.session-cursor-visible || !root.session-cursor-blinking {
                 self.running = false;
                 root.cursor-blink-visible = true;
             } else {
@@ -1002,7 +1002,7 @@ export component TerminalSessionHost inherits Rectangle {
                 }
             }
 
-            if root.session-cursor-visible && root.cursor-blink-visible : cursor-overlay := Rectangle {
+            if root.session-render-mode == "bitmap" && root.session-cursor-visible && root.cursor-blink-visible : cursor-overlay := Rectangle {
                 x: root.terminal-cell-x(root.session-cursor-col);
                 width: root.session-cursor-shape == "bar"
                     ? root.terminal-cursor-thickness

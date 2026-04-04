@@ -1,6 +1,36 @@
 //! Runtime diagnostics snapshots for native terminal surface backends.
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NativeTerminalSurfaceGlyphBoundsTrace {
+    pub glyph_id: u32,
+    pub row: u32,
+    pub start_col: u32,
+    pub end_col: u32,
+    pub atlas_slot: u32,
+    pub screen_left_px: i32,
+    pub screen_top_px: i32,
+    pub screen_width_px: u32,
+    pub screen_height_px: u32,
+    pub visible_left_px: i32,
+    pub visible_top_px: i32,
+    pub visible_width_px: u32,
+    pub visible_height_px: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NativeTerminalSurfaceWindowsTextDiagnostics {
+    pub text_antialias_mode: Option<&'static str>,
+    pub render_target_alpha_mode: Option<&'static str>,
+    pub font_chain: Vec<String>,
+    pub baseline_px: Option<i32>,
+    pub pixel_alignment: Option<&'static str>,
+    pub dpi_x: Option<u32>,
+    pub dpi_y: Option<u32>,
+    pub scale_factor_percent: Option<u32>,
+    pub glyph_bounds: Vec<NativeTerminalSurfaceGlyphBoundsTrace>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NativeTerminalSurfaceDrawCounters {
     pub background_runs: usize,
     pub monochrome_glyphs: usize,
@@ -14,6 +44,8 @@ pub struct NativeTerminalSurfaceDrawCounters {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NativeTerminalSurfaceDiagnostics {
     pub hwnd: Option<isize>,
+    pub text_renderer_path: Option<&'static str>,
+    pub windows_text: Option<NativeTerminalSurfaceWindowsTextDiagnostics>,
     pub render_target_generation: u64,
     pub last_prepared_frame_token: u64,
     pub last_presented_frame_token: u64,

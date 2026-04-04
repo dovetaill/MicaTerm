@@ -19,6 +19,9 @@ Default target:
   packaged renderer: winit-skia
   packaged terminal renderer: native
   packaged native present path: rendering-notifier
+  expected primary text path: directwrite-d2d
+  compatibility text fallback path: bitmap-mask-compat
+  verification matrix: DPI 100% | 125% | 150%; font sizes 12px | 13px | 14px | 15px
   runtime fallback chain: winit-skia+d3d -> winit-skia-software -> winit-software
 
 Linux-host Windows GNU package:
@@ -52,7 +55,14 @@ export MICA_TERM_BUILD_FLAVOR="windows-mainline"
 export MICA_TERM_PACKAGE_RENDERER="skia"
 export MICA_TERM_PACKAGE_TERMINAL_RENDERER="native"
 export MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH="rendering-notifier"
+export MICA_TERM_EXPECTED_TEXT_RENDERER_PATH="directwrite-d2d"
+export MICA_TERM_TEXT_RENDERER_FALLBACK_PATH="bitmap-mask-compat"
+export MICA_TERM_VERIFICATION_DPI_SCALE_MATRIX="100,125,150"
+export MICA_TERM_VERIFICATION_FONT_PX_MATRIX="12,13,14,15"
 export MICA_TERM_PACKAGE_PORTABLE=1
 export PACKAGE_FLAVOR_SUFFIX="-skia"
+
+echo "==> Text renderer path: ${MICA_TERM_EXPECTED_TEXT_RENDERER_PATH} -> ${MICA_TERM_TEXT_RENDERER_FALLBACK_PATH}"
+echo "==> Verification matrix: DPI ${MICA_TERM_VERIFICATION_DPI_SCALE_MATRIX}; font px ${MICA_TERM_VERIFICATION_FONT_PX_MATRIX}"
 
 exec "$ROOT_DIR/build-desktop.sh" "$@"

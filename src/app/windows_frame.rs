@@ -2,6 +2,7 @@
 
 use crate::AppWindow;
 use crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics;
+use crate::app::terminal_renderer::diagnostics::NativeTerminalSurfaceGlyphBoundsTrace;
 #[cfg(target_os = "windows")]
 use slint::ComponentHandle;
 use crate::app::window_state::WindowPlacementKind;
@@ -61,6 +62,87 @@ pub fn native_surface_diagnostics_hwnd(
     diagnostics: &NativeTerminalSurfaceDiagnostics,
 ) -> Option<isize> {
     diagnostics.hwnd
+}
+
+pub fn native_surface_text_renderer_path(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<&'static str> {
+    diagnostics.text_renderer_path
+}
+
+pub fn native_surface_text_antialias_mode(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<&'static str> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.text_antialias_mode)
+}
+
+pub fn native_surface_render_target_alpha_mode(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<&'static str> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.render_target_alpha_mode)
+}
+
+pub fn native_surface_font_chain(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<&[String]> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .map(|text| text.font_chain.as_slice())
+}
+
+pub fn native_surface_baseline_px(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<i32> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.baseline_px)
+}
+
+pub fn native_surface_pixel_alignment(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<&'static str> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.pixel_alignment)
+}
+
+pub fn native_surface_scale_factor_percent(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<u32> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.scale_factor_percent)
+}
+
+pub fn native_surface_dpi_x(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<u32> {
+    diagnostics.windows_text.as_ref().and_then(|text| text.dpi_x)
+}
+
+pub fn native_surface_dpi_y(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<u32> {
+    diagnostics.windows_text.as_ref().and_then(|text| text.dpi_y)
+}
+
+pub fn native_surface_glyph_bounds_trace(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<&[NativeTerminalSurfaceGlyphBoundsTrace]> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .map(|text| text.glyph_bounds.as_slice())
 }
 
 pub fn native_surface_is_attached(diagnostics: &NativeTerminalSurfaceDiagnostics) -> bool {

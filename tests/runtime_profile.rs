@@ -109,14 +109,14 @@ fn software_compat_profile_prefers_native_terminal_renderer() {
 }
 
 #[test]
-fn mainline_profile_keeps_terminal_output_in_scene_when_skia_prefers_direct3d() {
+fn mainline_profile_uses_post_render_native_surface_when_skia_prefers_direct3d() {
     let profile = AppRuntimeProfile::mainline();
 
     assert!(profile.prefers_direct3d());
     assert_eq!(
         profile.terminal_composition_mode(),
-        TerminalCompositionMode::SceneImage,
-        "Direct3D-backed Skia mainline builds should keep the terminal pixels inside the Slint scene instead of relying on a same-HWND post-render native surface pass"
+        TerminalCompositionMode::PostRenderNativeSurface,
+        "Direct3D-backed Skia mainline builds should hand terminal text ownership to the retained same-HWND native surface path instead of keeping Windows mainline on the scene-image fallback"
     );
 }
 

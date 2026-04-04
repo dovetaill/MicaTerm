@@ -1006,6 +1006,8 @@ fn terminal_session_host_keeps_reserved_ctrl_shift_shortcuts_local_contract() {
 fn terminal_session_host_uses_compact_terminal_layout_contract() {
     let terminal_host =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+    let font_backend =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
 
     assert!(
         !terminal_host.contains("terminal-cell-width: 9px;"),
@@ -1016,8 +1018,8 @@ fn terminal_session_host_uses_compact_terminal_layout_contract() {
         "terminal host should tighten the prototype font size to a denser IDE-like default"
     );
     assert!(
-        !terminal_host.contains("private property <length> terminal-font-size: 14px;"),
-        "terminal host should move beyond the still-too-small 14px contract"
+        !terminal_host.contains("private property <length> terminal-font-size: 18px;"),
+        "terminal host should stop mirroring the old 18px-style terminal default"
     );
     assert!(
         !terminal_host.contains("private property <length> terminal-cell-width: 8px;"),
@@ -1047,6 +1049,10 @@ fn terminal_session_host_uses_compact_terminal_layout_contract() {
         !terminal_host
             .contains("Reconnect is available once session lifecycle wiring is completed."),
         "session error host should remove the placeholder reconnect copy"
+    );
+    assert!(
+        font_backend.contains("pub const DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 14.0;"),
+        "workspace terminal contracts should source their default typography from the new 14px shared terminal font size"
     );
 }
 

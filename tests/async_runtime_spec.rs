@@ -64,16 +64,20 @@ fn session_bridge_reuses_supplied_runtime_handle_instead_of_creating_another_run
 
 #[test]
 fn terminal_native_clipboard_shortcuts_are_not_guarded_by_windows_only_stub() {
-    let content = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let bootstrap = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let windowing =
+        fs::read_to_string("src/app/bootstrap/windowing.rs").expect("read bootstrap windowing");
 
     assert!(
-        !content.contains(
+        !windowing.contains(
             "#[cfg(not(target_os = \"windows\"))]\nfn bind_windows_window_state_tracking("
         ),
         "terminal clipboard shortcut fallback should not become a non-Windows no-op"
     );
     assert!(
-        content.contains("window()\n        .on_winit_window_event(move |_slint_window, event| {"),
+        bootstrap.contains("windowing::bind_windows_window_state_tracking(")
+            && windowing
+                .contains("window()\n        .on_winit_window_event(move |_slint_window, event| {"),
         "bootstrap should register winit keyboard handling for terminal clipboard shortcuts"
     );
 }

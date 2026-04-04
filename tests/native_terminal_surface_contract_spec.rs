@@ -379,6 +379,8 @@ fn software_winit_sources_expose_after_draw_present_contract() {
 #[test]
 fn bootstrap_source_exposes_scroll_projection_debounce_contract() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let workspace_terminal_source = fs::read_to_string("src/app/bootstrap/workspace_terminal.rs")
+        .expect("read workspace terminal bootstrap module");
 
     assert!(
         bootstrap_source.contains("WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS"),
@@ -389,13 +391,15 @@ fn bootstrap_source_exposes_scroll_projection_debounce_contract() {
         "bootstrap should keep a dedicated scroll projection refresh gate so repeated wheel and scrollbar drag callbacks can collapse into one scheduled projection refresh"
     );
     assert!(
-        bootstrap_source.contains("fn schedule_workspace_scroll_projection_refresh("),
-        "bootstrap should centralize workspace terminal scroll projection refresh scheduling instead of inlining immediate refresh calls in every scroll callback"
+        bootstrap_source.contains("workspace_terminal::schedule_workspace_scroll_projection_refresh(")
+            && workspace_terminal_source.contains("pub(super) fn schedule_workspace_scroll_projection_refresh("),
+        "bootstrap should centralize workspace terminal scroll projection refresh scheduling in the workspace terminal module instead of inlining immediate refresh calls in every scroll callback"
     );
     assert!(
-        bootstrap_source.contains("Duration::from_millis(WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS)")
-            && bootstrap_source.contains("TimerMode::SingleShot"),
-        "bootstrap should drive scroll projection refresh through a single-shot debounce timer so high-frequency scrollbar drag updates do not run the full projection pipeline synchronously for every move event"
+        workspace_terminal_source
+            .contains("Duration::from_millis(WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS)")
+            && workspace_terminal_source.contains("TimerMode::SingleShot"),
+        "workspace terminal bootstrap should drive scroll projection refresh through a single-shot debounce timer so high-frequency scrollbar drag updates do not run the full projection pipeline synchronously for every move event"
     );
 }
 
@@ -479,7 +483,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     let workspace_surface_sync_block = block_between(
         &bootstrap_source,
         "if let Some(surface) = state.active_workspace_terminal_surface() {",
-        "if let Some(cursor) = native_cursor {",
+        "if native_frame_presented {",
     );
     let workspace_surface_projection_block = block_between(
         &bootstrap_source,
@@ -631,6 +635,66 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         no_surface_pending_output < no_surface_surface_seqno
             && no_surface_surface_seqno < no_surface_render_mode,
         "when no terminal surface is active the host should reset surface seqno after clearing payload metadata and before forcing render_mode back to bitmap"
+    );
+}
+
+#[test]
+fn windows_mainline_direct3d_source_prefers_post_render_native_surface() {
+    let runtime_profile_source =
+        fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
+    let composition_block = block_between(
+        &runtime_profile_source,
+        "pub fn terminal_composition_mode(self) -> TerminalCompositionMode {",
+        "\n    pub fn prefers_native_terminal_renderer(self) -> bool {",
+    );
+
+    assert!(
+        composition_block.contains(
+            "AppBuildFlavor::WindowsMainline if self.prefers_direct3d() => {\n                TerminalCompositionMode::PostRenderNativeSurface"
+        ),
+        "Windows mainline should promote Direct3D-backed Skia builds onto the retained post-render native surface path instead of routing the primary terminal text through SceneImage"
+    );
+}
+
+#[test]
+fn terminal_host_cursor_overlay_is_bitmap_only() {
+    let host_source =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        host_source.contains(
+            "if root.session-render-mode == \"bitmap\" && root.session-cursor-visible && root.cursor-blink-visible : cursor-overlay := Rectangle {"
+        ),
+        "terminal session host should only render the Slint cursor rectangle while the bitmap fallback path owns terminal presentation"
+    );
+    assert!(
+        host_source.contains(
+            "if root.mode == \"terminal\" && root.session-render-mode == \"bitmap\" && root.session-cursor-visible && root.session-cursor-blinking {"
+        ),
+        "terminal host should only start cursor blink timing while bitmap mode owns the cursor overlay"
+    );
+}
+
+#[test]
+fn bootstrap_source_clears_host_cursor_when_native_frame_is_active() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let workspace_surface_projection_block = block_between(
+        &bootstrap_source,
+        "if let Some(surface) = state.active_workspace_terminal_surface() {",
+        "\n    } else {\n        let preset = preset_for_theme_mode(state.theme_mode);",
+    );
+
+    assert!(
+        bootstrap_source.contains("fn clear_workspace_session_cursor_overlay(window: &AppWindow) {"),
+        "bootstrap should define a dedicated helper that clears the Slint cursor overlay state when native rendering owns the cursor"
+    );
+    assert!(
+        workspace_surface_projection_block.contains("clear_workspace_session_cursor_overlay(window);"),
+        "workspace terminal sync should explicitly clear the Slint cursor overlay whenever a retained native frame is presented"
+    );
+    assert!(
+        !workspace_surface_projection_block.contains("if let Some(cursor) = native_cursor {"),
+        "workspace terminal sync should stop projecting native cursor payloads back into Slint as if the host still owned the final cursor rectangle"
     );
 }
 
@@ -814,6 +878,22 @@ fn windows_backend_source_exposes_background_and_monochrome_draw_contract() {
         windows_backend_source.contains("FillOpacityMask("),
         "windows backend should draw monochrome glyph alpha masks through Direct2D instead of only counting cache entries"
     );
+    assert!(
+        windows_backend_source.contains("fn draw_directwrite_text("),
+        "Task 4 should add a dedicated DirectWrite text draw stage so Windows mainline text no longer depends only on bitmap opacity masks"
+    );
+    assert!(
+        windows_backend_source.contains("self.state.draw_directwrite_text(frame);"),
+        "windows backend present path should run the DirectWrite text stage before compatibility bitmap fallback logic"
+    );
+    assert!(
+        windows_backend_source.contains("DrawGlyphRun("),
+        "windows backend should issue real DirectWrite glyph draw calls for the primary monochrome text path"
+    );
+    assert!(
+        windows_backend_source.contains("D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE"),
+        "windows backend should request ClearType-capable text antialiasing for the primary DirectWrite path"
+    );
 }
 
 #[test]
@@ -893,6 +973,18 @@ fn windows_backend_source_exposes_color_glyph_and_overlay_draw_contract() {
     assert!(
         windows_backend_source.contains("D2DERR_RECREATE_TARGET"),
         "windows backend should handle Direct2D target-loss by invalidating render-target owned resources"
+    );
+    assert!(
+        windows_backend_source.contains("CreateMonitorRenderingParams"),
+        "windows backend should source monitor-aware DirectWrite rendering parameters instead of hard-coded text AA heuristics"
+    );
+    assert!(
+        windows_backend_source.contains("SetTextRenderingParams("),
+        "windows backend should bind DirectWrite rendering params onto the Direct2D text target before drawing glyph runs"
+    );
+    assert!(
+        windows_backend_source.contains("D2D1_ALPHA_MODE_IGNORE"),
+        "windows backend should keep the primary text draw target opaque so ClearType-friendly rendering does not go through a premultiplied-alpha text surface"
     );
 }
 

@@ -88,8 +88,11 @@ impl FontSystem for MockFontSystem {
         font: &LoadedFont,
         request: GlyphRasterRequest,
     ) -> Result<RasterizedGlyph> {
-        if font.face_key() != DEFAULT_FACE_KEY {
-            return Err(anyhow!("unknown mock font face key: {}", font.face_key().0));
+        if request.face_key != DEFAULT_FACE_KEY {
+            return Err(anyhow!(
+                "unknown mock font face key: {}",
+                request.face_key.0
+            ));
         }
 
         let glyph_id = request.glyph_id;
@@ -110,6 +113,10 @@ impl FontSystem for MockFontSystem {
                 height_px: 0,
                 bearing_x_px: 0,
                 bearing_y_px: 0,
+                visible_left_px: 0,
+                visible_top_px: 0,
+                visible_width_px: 0,
+                visible_height_px: 0,
                 advance_px,
                 coverage: Vec::new(),
             });
@@ -133,6 +140,10 @@ impl FontSystem for MockFontSystem {
             height_px,
             bearing_x_px: bounds.min.x.floor() as i32,
             bearing_y_px: bounds.min.y.floor() as i32,
+            visible_left_px: bounds.min.x.floor() as i32,
+            visible_top_px: bounds.min.y.floor() as i32,
+            visible_width_px: width_px,
+            visible_height_px: height_px,
             advance_px,
             coverage,
         })

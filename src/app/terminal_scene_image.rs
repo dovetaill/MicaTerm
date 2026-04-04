@@ -353,10 +353,9 @@ impl SceneImageTerminalRenderer {
     ) -> Result<()> {
         for draw in &frame.presentable_frame.monochrome_glyph_draws {
             let glyph = self.resolve_monochrome_glyph(draw)?;
-            let clip_rect = cell_span_rect(
+            let clip_rect = row_clip_rect(
                 draw.row,
-                draw.start_col,
-                draw.end_col,
+                frame.presentable_frame.grid_cols,
                 frame.cell_width_px,
                 frame.cell_height_px,
             );
@@ -380,10 +379,9 @@ impl SceneImageTerminalRenderer {
     ) -> Result<()> {
         for draw in &frame.presentable_frame.color_glyph_draws {
             let glyph = self.resolve_color_glyph(draw)?;
-            let clip_rect = cell_span_rect(
+            let clip_rect = row_clip_rect(
                 draw.row,
-                draw.start_col,
-                draw.end_col,
+                frame.presentable_frame.grid_cols,
                 frame.cell_width_px,
                 frame.cell_height_px,
             );
@@ -569,11 +567,6 @@ fn blit_monochrome_glyph(
     color: Rgba8Pixel,
     clip_rect: Option<PixelRect>,
 ) {
-    let dest_x_px = constrain_glyph_origin_x(
-        dest_x_px,
-        glyph.width_px,
-        clip_rect,
-    );
     for source_y in 0..glyph.height_px {
         let target_y = dest_y_px.saturating_add(source_y as i32);
         if target_y < 0 || target_y >= surface.height_px as i32 {
@@ -607,13 +600,6 @@ fn blit_color_glyph(
     dest_y_px: i32,
     clip_rect: Option<PixelRect>,
 ) {
-    let (dest_x_px, dest_y_px) = constrain_glyph_origin(
-        dest_x_px,
-        dest_y_px,
-        glyph.width_px,
-        glyph.height_px,
-        clip_rect,
-    );
     for source_y in 0..glyph.height_px {
         let target_y = dest_y_px.saturating_add(source_y as i32);
         if target_y < 0 || target_y >= surface.height_px as i32 {
@@ -651,68 +637,6 @@ fn pixel_in_clip_rect(x: u32, y: u32, clip_rect: Option<PixelRect>) -> bool {
         && y < clip_rect.start_y.saturating_add(clip_rect.height)
 }
 
-fn constrain_glyph_origin(
-    dest_x_px: i32,
-    dest_y_px: i32,
-    glyph_width_px: u32,
-    glyph_height_px: u32,
-    clip_rect: Option<PixelRect>,
-) -> (i32, i32) {
-    let Some(clip_rect) = clip_rect else {
-        return (dest_x_px, dest_y_px);
-    };
-
-    (
-        constrain_glyph_origin_x(dest_x_px, glyph_width_px, Some(clip_rect)),
-        constrain_glyph_origin_y(dest_y_px, glyph_height_px, Some(clip_rect)),
-    )
-}
-
-fn constrain_glyph_origin_x(
-    dest_x_px: i32,
-    glyph_width_px: u32,
-    clip_rect: Option<PixelRect>,
-) -> i32 {
-    let Some(clip_rect) = clip_rect else {
-        return dest_x_px;
-    };
-
-    constrain_axis_to_clip(dest_x_px, glyph_width_px, clip_rect.start_x, clip_rect.width)
-}
-
-fn constrain_glyph_origin_y(
-    dest_y_px: i32,
-    glyph_height_px: u32,
-    clip_rect: Option<PixelRect>,
-) -> i32 {
-    let Some(clip_rect) = clip_rect else {
-        return dest_y_px;
-    };
-
-    constrain_axis_to_clip(dest_y_px, glyph_height_px, clip_rect.start_y, clip_rect.height)
-}
-
-fn constrain_axis_to_clip(
-    dest_px: i32,
-    glyph_extent_px: u32,
-    clip_start_px: u32,
-    clip_extent_px: u32,
-) -> i32 {
-    if clip_extent_px == 0 {
-        return dest_px;
-    }
-
-    let clip_start_px = clip_start_px as i32;
-    let clip_end_px = clip_start_px.saturating_add(clip_extent_px as i32);
-    let max_dest_px = clip_end_px.saturating_sub(glyph_extent_px as i32);
-
-    if max_dest_px < clip_start_px {
-        clip_start_px
-    } else {
-        dest_px.max(clip_start_px).min(max_dest_px)
-    }
-}
-
 fn cell_span_rect(
     row: u32,
     start_col: u32,
@@ -733,6 +657,25 @@ fn cell_span_rect(
             .saturating_mul(cell_width_px),
         height: cell_height_px,
     })
+}
+
+fn row_clip_rect(
+    row: u32,
+    grid_cols: u32,
+    cell_width_px: u32,
+    cell_height_px: u32,
+) -> Option<PixelRect> {
+    if grid_cols == 0 {
+        return None;
+    }
+
+    cell_span_rect(
+        row,
+        0,
+        grid_cols.saturating_sub(1),
+        cell_width_px,
+        cell_height_px,
+    )
 }
 
 fn underline_thickness(cell_height_px: u32) -> u32 {

@@ -8,7 +8,18 @@ use rustybuzz::{BufferClusterLevel, Face, Feature, UnicodeBuffer, shape};
 #[cfg(feature = "terminal-native-renderer")]
 use std::str::FromStr;
 
-pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = "Fusion JetBrains Maple Mono";
+pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = "Cascadia Mono";
+pub const DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY: &str = "Sarasa Term SC";
+pub const DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY: &str = "Segoe UI Emoji";
+pub const WINDOWS_DEFAULT_TERMINAL_FONT_CHAIN: &[&str] = &[
+    DEFAULT_TERMINAL_FONT_FAMILY,
+    DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY,
+    DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY,
+];
+pub const DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 14.0;
+pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.4;
+pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 0.0;
+pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = "Regular";
 
 const GLYPH_COVERAGE_GAMMA: f32 = 1.0;
 const GLYPH_ALPHA_GAIN: f32 = 1.0;
@@ -56,7 +67,7 @@ impl Default for FontRequest {
     fn default() -> Self {
         Self {
             family_name: Some(DEFAULT_TERMINAL_FONT_FAMILY.to_string()),
-            px_size: 18.0,
+            px_size: DEFAULT_TERMINAL_FONT_SIZE_PX,
         }
     }
 }
@@ -169,6 +180,16 @@ impl LoadedFont {
     }
 
     #[cfg(feature = "terminal-native-renderer")]
+    pub fn raster_request_for_face(
+        &self,
+        face_key: FontFaceKey,
+        glyph_id: u32,
+        bold: bool,
+    ) -> GlyphRasterRequest {
+        GlyphRasterRequest::for_face(self, face_key, glyph_id, bold)
+    }
+
+    #[cfg(feature = "terminal-native-renderer")]
     pub fn raster_request_with_fractional_offset_x(
         &self,
         glyph_id: u32,
@@ -176,6 +197,23 @@ impl LoadedFont {
         fractional_offset_x: f32,
     ) -> GlyphRasterRequest {
         GlyphRasterRequest::with_fractional_offset_x(self, glyph_id, bold, fractional_offset_x)
+    }
+
+    #[cfg(feature = "terminal-native-renderer")]
+    pub fn raster_request_with_fractional_offset_x_for_face(
+        &self,
+        face_key: FontFaceKey,
+        glyph_id: u32,
+        bold: bool,
+        fractional_offset_x: f32,
+    ) -> GlyphRasterRequest {
+        GlyphRasterRequest::with_fractional_offset_x_for_face(
+            self,
+            face_key,
+            glyph_id,
+            bold,
+            fractional_offset_x,
+        )
     }
 
     #[cfg(feature = "terminal-native-renderer")]
@@ -224,6 +262,7 @@ pub struct ShapedGlyph {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GlyphRasterRequest {
     pub font_key: LoadedFontKey,
+    pub face_key: FontFaceKey,
     pub glyph_id: u32,
     pub bold: bool,
     pub fractional_offset_x_bits: u32,
@@ -232,7 +271,16 @@ pub struct GlyphRasterRequest {
 #[cfg(feature = "terminal-native-renderer")]
 impl GlyphRasterRequest {
     pub fn new(font: &LoadedFont, glyph_id: u32, bold: bool) -> Self {
-        Self::with_fractional_offset_x(font, glyph_id, bold, 0.0)
+        Self::for_face(font, font.face_key(), glyph_id, bold)
+    }
+
+    pub fn for_face(
+        font: &LoadedFont,
+        face_key: FontFaceKey,
+        glyph_id: u32,
+        bold: bool,
+    ) -> Self {
+        Self::with_fractional_offset_x_for_face(font, face_key, glyph_id, bold, 0.0)
     }
 
     pub fn with_fractional_offset_x(
@@ -241,8 +289,25 @@ impl GlyphRasterRequest {
         bold: bool,
         fractional_offset_x: f32,
     ) -> Self {
+        Self::with_fractional_offset_x_for_face(
+            font,
+            font.face_key(),
+            glyph_id,
+            bold,
+            fractional_offset_x,
+        )
+    }
+
+    pub fn with_fractional_offset_x_for_face(
+        font: &LoadedFont,
+        face_key: FontFaceKey,
+        glyph_id: u32,
+        bold: bool,
+        fractional_offset_x: f32,
+    ) -> Self {
         Self {
             font_key: font.cache_key(),
+            face_key,
             glyph_id,
             bold,
             fractional_offset_x_bits: normalize_fractional_offset_x(fractional_offset_x).to_bits(),
@@ -261,6 +326,10 @@ pub struct RasterizedGlyph {
     pub height_px: u32,
     pub bearing_x_px: i32,
     pub bearing_y_px: i32,
+    pub visible_left_px: i32,
+    pub visible_top_px: i32,
+    pub visible_width_px: u32,
+    pub visible_height_px: u32,
     pub advance_px: i32,
     pub coverage: Vec<u8>,
 }

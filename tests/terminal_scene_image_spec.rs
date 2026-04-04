@@ -1,5 +1,8 @@
 //! Scene-image terminal renderer coverage for software composition metrics contracts.
 
+use std::fs;
+
+use mica_term::app::terminal_font::FontFaceKey;
 use mica_term::app::terminal_presenter::{
     NativeCursorFrameState, NativeCursorOverlay, NativeImePreviewOverlay, NativeRendererFrameStats,
     NativeSelectionFrameState, NativeSelectionOverlay, NativeSelectionRect, NativeTerminalFrame,
@@ -45,20 +48,32 @@ fn sample_frame_with_wide_glyph() -> NativeTerminalFrame {
                 start_col: 0,
                 end_col: 0,
                 glyph_id: 42,
+                face_key: FontFaceKey(1),
+                font_family_name: "Test Terminal".into(),
+                font_em_size_px: 14,
                 atlas_entry: GlyphAtlasEntry {
                     slot: 7,
                     width_px: 4,
                     height_px: 1,
+                    padding_left_px: 0,
+                    padding_right_px: 0,
                     cache_kind: GlyphCacheKind::Monochrome,
                 },
                 upload: Some(PreparedMonochromeGlyphUploadPayload {
                     width_px: 4,
                     height_px: 1,
+                    padding_left_px: 0,
+                    padding_right_px: 0,
                     bearing_x_px: 0,
                     bearing_y_px: 0,
                     advance_px: 4,
                     coverage: vec![255, 255, 255, 255],
                 }),
+                advance_px: 4,
+                visible_left_px: 0,
+                visible_top_px: 0,
+                visible_width_px: 4,
+                visible_height_px: 1,
                 x_offset_px: 0,
                 y_offset_px: 0,
                 dest_x_px: 0,
@@ -131,20 +146,32 @@ fn sample_frame_with_right_shifted_glyph() -> NativeTerminalFrame {
                 start_col: 0,
                 end_col: 0,
                 glyph_id: 99,
+                face_key: FontFaceKey(1),
+                font_family_name: "Test Terminal".into(),
+                font_em_size_px: 14,
                 atlas_entry: GlyphAtlasEntry {
                     slot: 8,
                     width_px: 3,
                     height_px: 1,
+                    padding_left_px: 0,
+                    padding_right_px: 0,
                     cache_kind: GlyphCacheKind::Monochrome,
                 },
                 upload: Some(PreparedMonochromeGlyphUploadPayload {
                     width_px: 3,
                     height_px: 1,
+                    padding_left_px: 0,
+                    padding_right_px: 0,
                     bearing_x_px: 0,
                     bearing_y_px: 0,
                     advance_px: 3,
                     coverage: vec![255, 255, 255],
                 }),
+                advance_px: 3,
+                visible_left_px: 0,
+                visible_top_px: 0,
+                visible_width_px: 3,
+                visible_height_px: 1,
                 x_offset_px: 0,
                 y_offset_px: 0,
                 dest_x_px: 3,
@@ -274,20 +301,32 @@ fn sample_frame_with_vertical_overhang_glyph() -> NativeTerminalFrame {
                 start_col: 0,
                 end_col: 0,
                 glyph_id: 123,
+                face_key: FontFaceKey(1),
+                font_family_name: "Test Terminal".into(),
+                font_em_size_px: 14,
                 atlas_entry: GlyphAtlasEntry {
                     slot: 9,
                     width_px: 1,
                     height_px: 3,
+                    padding_left_px: 0,
+                    padding_right_px: 0,
                     cache_kind: GlyphCacheKind::Monochrome,
                 },
                 upload: Some(PreparedMonochromeGlyphUploadPayload {
                     width_px: 1,
                     height_px: 3,
+                    padding_left_px: 0,
+                    padding_right_px: 0,
                     bearing_x_px: 0,
                     bearing_y_px: 0,
                     advance_px: 1,
                     coverage: vec![255, 255, 255],
                 }),
+                advance_px: 1,
+                visible_left_px: 0,
+                visible_top_px: 0,
+                visible_width_px: 1,
+                visible_height_px: 3,
                 x_offset_px: 0,
                 y_offset_px: 0,
                 dest_x_px: 0,
@@ -333,7 +372,7 @@ fn sample_frame_with_vertical_overhang_glyph() -> NativeTerminalFrame {
 }
 
 #[test]
-fn scene_image_renderer_clips_monochrome_glyphs_to_declared_cell_span() {
+fn scene_image_renderer_preserves_rightmost_visible_pixels_beyond_the_declared_cell_span() {
     let mut renderer = SceneImageTerminalRenderer::default();
     let frame = renderer
         .render(&sample_frame_with_wide_glyph())
@@ -344,12 +383,12 @@ fn scene_image_renderer_clips_monochrome_glyphs_to_declared_cell_span() {
     assert_eq!(buffer.height(), 2);
     assert_eq!(pixel_argb(&buffer, 0, 0), 0xffff_0000);
     assert_eq!(pixel_argb(&buffer, 1, 0), 0xffff_0000);
-    assert_eq!(pixel_argb(&buffer, 2, 0), 0xff00_0000);
-    assert_eq!(pixel_argb(&buffer, 3, 0), 0xff00_0000);
+    assert_eq!(pixel_argb(&buffer, 2, 0), 0xffff_0000);
+    assert_eq!(pixel_argb(&buffer, 3, 0), 0xffff_0000);
 }
 
 #[test]
-fn scene_image_renderer_clamps_glyph_origin_back_inside_its_cell_span() {
+fn scene_image_renderer_keeps_glyph_origin_and_lets_viewport_clip_trim_overflow() {
     let mut renderer = SceneImageTerminalRenderer::default();
     let frame = renderer
         .render(&sample_frame_with_right_shifted_glyph())
@@ -358,8 +397,8 @@ fn scene_image_renderer_clamps_glyph_origin_back_inside_its_cell_span() {
 
     assert_eq!(buffer.width(), 4);
     assert_eq!(pixel_argb(&buffer, 0, 0), 0xff00_0000);
-    assert_eq!(pixel_argb(&buffer, 1, 0), 0xffff_0000);
-    assert_eq!(pixel_argb(&buffer, 2, 0), 0xffff_0000);
+    assert_eq!(pixel_argb(&buffer, 1, 0), 0xff00_0000);
+    assert_eq!(pixel_argb(&buffer, 2, 0), 0xff00_0000);
     assert_eq!(pixel_argb(&buffer, 3, 0), 0xffff_0000);
 }
 
@@ -383,6 +422,23 @@ fn scene_image_renderer_leaves_cursor_blink_to_the_slint_host_overlay() {
                 | (pixel.b as u32)
                 == 0xff11_2233),
         "scene-image output should keep the bitmap free of cursor ink so the Slint host can own blink timing without double-drawing a block cursor"
+    );
+}
+
+#[test]
+fn terminal_session_host_keeps_bitmap_cursor_and_image_visibility_gated_to_bitmap_mode() {
+    let host_source =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        host_source.contains("visible: root.session-render-mode == \"bitmap\";"),
+        "scene-image fallback should keep the host bitmap image hidden whenever native mode owns terminal presentation"
+    );
+    assert!(
+        host_source.contains(
+            "if root.session-render-mode == \"bitmap\" && root.session-cursor-visible && root.cursor-blink-visible : cursor-overlay := Rectangle {"
+        ),
+        "scene-image fallback should keep the Slint cursor overlay scoped to bitmap mode so the Windows native renderer can own cursor painting without double-draw"
     );
 }
 

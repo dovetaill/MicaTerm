@@ -5,11 +5,12 @@ use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
 
-use crate::app::terminal_font::{FontSystem, LoadedFont};
+use crate::app::terminal_font::{FontFaceKey, FontSystem, LoadedFont};
 use crate::app::terminal_layout::{GlyphRun, ShapedRow};
 use crate::app::terminal_layout::run_segmentation::RunCluster;
 use crate::app::terminal_renderer::atlas::{
     ColorGlyphCacheEntry, ColorGlyphCacheKey, GlyphAtlas, GlyphAtlasEntry,
+    MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -31,6 +32,8 @@ pub struct PreparedBackgroundRun {
 pub struct PreparedMonochromeGlyphUploadPayload {
     pub width_px: u32,
     pub height_px: u32,
+    pub padding_left_px: u32,
+    pub padding_right_px: u32,
     pub bearing_x_px: i32,
     pub bearing_y_px: i32,
     pub advance_px: i32,
@@ -43,8 +46,16 @@ pub struct PreparedMonochromeGlyphDraw {
     pub start_col: u32,
     pub end_col: u32,
     pub glyph_id: u32,
+    pub face_key: FontFaceKey,
+    pub font_family_name: String,
+    pub font_em_size_px: u32,
     pub atlas_entry: GlyphAtlasEntry,
     pub upload: Option<PreparedMonochromeGlyphUploadPayload>,
+    pub advance_px: i32,
+    pub visible_left_px: i32,
+    pub visible_top_px: i32,
+    pub visible_width_px: u32,
+    pub visible_height_px: u32,
     pub x_offset_px: i32,
     pub y_offset_px: i32,
     pub dest_x_px: i32,
@@ -139,6 +150,14 @@ enum PreparedClusterGlyphKind {
         atlas_entry: GlyphAtlasEntry,
         upload: Option<PreparedMonochromeGlyphUploadPayload>,
         fg_rgba: u32,
+        face_key: FontFaceKey,
+        font_family_name: String,
+        font_em_size_px: u32,
+        advance_px: i32,
+        visible_left_px: i32,
+        visible_top_px: i32,
+        visible_width_px: u32,
+        visible_height_px: u32,
     },
     Color {
         cache_entry: ColorGlyphCacheEntry,
@@ -199,6 +218,7 @@ impl WgpuTerminalRenderer {
             .sum::<usize>();
         let (cell_width_px, cell_height_px) = frame.font.cell_size_px();
         let baseline_px = frame.font.metrics().baseline_px.round() as i32;
+        let font_em_size_px = frame.font.px_size().max(1.0).round() as u32;
 
         for row in &frame.rows {
             let row_top_px = (row.row as i32).saturating_mul(cell_height_px as i32);
@@ -298,20 +318,38 @@ impl WgpuTerminalRenderer {
                                     let glyph_origin_x = pen_x_subpx + x_offset_subpx;
                                     let (glyph_origin_x_px, fractional_offset_x) =
                                         split_fractional_offset(glyph_origin_x);
-                                    let request = frame.font.raster_request_with_fractional_offset_x(
-                                        glyph.glyph_id,
-                                        run.style.bold,
-                                        fractional_offset_x,
-                                    );
+                                    let request = frame
+                                        .font
+                                        .raster_request_with_fractional_offset_x_for_face(
+                                            run.resolved_face.face_key,
+                                            glyph.glyph_id,
+                                            run.style.bold,
+                                            fractional_offset_x,
+                                        );
                                     let rasterized = fonts.rasterize_glyph(&frame.font, request)?;
                                     let upload = (!self.atlas.contains(request)).then(|| {
                                         PreparedMonochromeGlyphUploadPayload {
-                                            width_px: rasterized.width_px,
+                                            width_px: rasterized
+                                                .width_px
+                                                .saturating_add(
+                                                    MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX
+                                                        .saturating_mul(2),
+                                                ),
                                             height_px: rasterized.height_px,
+                                            padding_left_px:
+                                                MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
+                                            padding_right_px:
+                                                MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
                                             bearing_x_px: rasterized.bearing_x_px,
                                             bearing_y_px: rasterized.bearing_y_px,
                                             advance_px: rasterized.advance_px,
-                                            coverage: rasterized.coverage.clone(),
+                                            coverage: pad_monochrome_glyph_coverage(
+                                                rasterized.width_px,
+                                                rasterized.height_px,
+                                                &rasterized.coverage,
+                                                MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
+                                                MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
+                                            ),
                                         }
                                     });
                                     let atlas_entry = self.atlas.upsert(request, &rasterized);
@@ -322,7 +360,10 @@ impl WgpuTerminalRenderer {
                                         x_offset_px,
                                         y_offset_px,
                                         raw_dest_x_px: glyph_origin_x_px
-                                            .saturating_add(rasterized.bearing_x_px),
+                                            .saturating_add(rasterized.bearing_x_px)
+                                            .saturating_sub(
+                                                MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX as i32,
+                                            ),
                                         raw_dest_y_px: row_top_px
                                             .saturating_add(baseline_px)
                                             .saturating_add(y_offset_px)
@@ -333,6 +374,14 @@ impl WgpuTerminalRenderer {
                                             atlas_entry,
                                             upload,
                                             fg_rgba: run.style.fg_rgba,
+                                            face_key: run.resolved_face.face_key,
+                                            font_family_name: run.resolved_face.family_name.clone(),
+                                            font_em_size_px,
+                                            advance_px: rasterized.advance_px,
+                                            visible_left_px: rasterized.visible_left_px,
+                                            visible_top_px: rasterized.visible_top_px,
+                                            visible_width_px: rasterized.visible_width_px,
+                                            visible_height_px: rasterized.visible_height_px,
                                         },
                                     });
                                     pen_x_subpx += monochrome_glyph_advance_px_f32(
@@ -353,20 +402,36 @@ impl WgpuTerminalRenderer {
                             let glyph_origin_x = pen_x_subpx + x_offset_subpx;
                             let (glyph_origin_x_px, fractional_offset_x) =
                                 split_fractional_offset(glyph_origin_x);
-                            let request = frame.font.raster_request_with_fractional_offset_x(
-                                glyph.glyph_id,
-                                run.style.bold,
-                                fractional_offset_x,
-                            );
+                            let request = frame
+                                .font
+                                .raster_request_with_fractional_offset_x_for_face(
+                                    run.resolved_face.face_key,
+                                    glyph.glyph_id,
+                                    run.style.bold,
+                                    fractional_offset_x,
+                                );
                             let rasterized = fonts.rasterize_glyph(&frame.font, request)?;
                             let upload = (!self.atlas.contains(request)).then(|| {
                                 PreparedMonochromeGlyphUploadPayload {
-                                    width_px: rasterized.width_px,
+                                    width_px: rasterized
+                                        .width_px
+                                        .saturating_add(
+                                            MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX
+                                                .saturating_mul(2),
+                                        ),
                                     height_px: rasterized.height_px,
+                                    padding_left_px: MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
+                                    padding_right_px: MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
                                     bearing_x_px: rasterized.bearing_x_px,
                                     bearing_y_px: rasterized.bearing_y_px,
                                     advance_px: rasterized.advance_px,
-                                    coverage: rasterized.coverage.clone(),
+                                    coverage: pad_monochrome_glyph_coverage(
+                                        rasterized.width_px,
+                                        rasterized.height_px,
+                                        &rasterized.coverage,
+                                        MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
+                                        MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
+                                    ),
                                 }
                             });
                             let atlas_entry = self.atlas.upsert(request, &rasterized);
@@ -378,7 +443,10 @@ impl WgpuTerminalRenderer {
                                 x_offset_px,
                                 y_offset_px,
                                 raw_dest_x_px: glyph_origin_x_px
-                                    .saturating_add(rasterized.bearing_x_px),
+                                    .saturating_add(rasterized.bearing_x_px)
+                                    .saturating_sub(
+                                        MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX as i32,
+                                    ),
                                 raw_dest_y_px: row_top_px
                                     .saturating_add(baseline_px)
                                     .saturating_add(y_offset_px)
@@ -389,6 +457,14 @@ impl WgpuTerminalRenderer {
                                     atlas_entry,
                                     upload,
                                     fg_rgba: run.style.fg_rgba,
+                                    face_key: run.resolved_face.face_key,
+                                    font_family_name: run.resolved_face.family_name.clone(),
+                                    font_em_size_px,
+                                    advance_px: rasterized.advance_px,
+                                    visible_left_px: rasterized.visible_left_px,
+                                    visible_top_px: rasterized.visible_top_px,
+                                    visible_width_px: rasterized.visible_width_px,
+                                    visible_height_px: rasterized.visible_height_px,
                                 },
                             });
                             pen_x_subpx += monochrome_glyph_advance_px_f32(
@@ -414,24 +490,35 @@ impl WgpuTerminalRenderer {
                     );
 
                     for glyph in cluster_glyphs {
-                        let dest_x_px = clamp_axis_to_span(
-                            glyph.raw_dest_x_px.saturating_add(cluster_offset_x_px),
-                            glyph.width_px,
-                            glyph_span_rect.start_x_px,
-                            glyph_span_rect.width_px,
-                        );
+                        let dest_x_px = glyph.raw_dest_x_px.saturating_add(cluster_offset_x_px);
                         match glyph.kind {
                             PreparedClusterGlyphKind::Monochrome {
                                 atlas_entry,
                                 upload,
                                 fg_rgba,
+                                face_key,
+                                font_family_name,
+                                font_em_size_px,
+                                advance_px,
+                                visible_left_px,
+                                visible_top_px,
+                                visible_width_px,
+                                visible_height_px,
                             } => monochrome_glyph_draws.push(PreparedMonochromeGlyphDraw {
                                 row: row.row,
                                 start_col: glyph.start_col,
                                 end_col: glyph.end_col,
                                 glyph_id: glyph.glyph_id,
+                                face_key,
+                                font_family_name,
+                                font_em_size_px,
                                 atlas_entry,
                                 upload,
+                                advance_px,
+                                visible_left_px,
+                                visible_top_px,
+                                visible_width_px,
+                                visible_height_px,
                                 x_offset_px: glyph.x_offset_px,
                                 y_offset_px: glyph.y_offset_px,
                                 dest_x_px,
@@ -439,12 +526,6 @@ impl WgpuTerminalRenderer {
                                 fg_rgba,
                             }),
                             PreparedClusterGlyphKind::Color { cache_entry, upload } => {
-                                let dest_y_px = clamp_axis_to_span(
-                                    glyph.raw_dest_y_px,
-                                    glyph.height_px,
-                                    glyph_span_rect.start_y_px,
-                                    glyph_span_rect.height_px,
-                                );
                                 color_glyph_draws.push(PreparedColorGlyphDraw {
                                     row: row.row,
                                     start_col: glyph.start_col,
@@ -455,7 +536,7 @@ impl WgpuTerminalRenderer {
                                     x_offset_px: glyph.x_offset_px,
                                     y_offset_px: glyph.y_offset_px,
                                     dest_x_px,
-                                    dest_y_px,
+                                    dest_y_px: glyph.raw_dest_y_px,
                                 });
                             }
                         }
@@ -648,16 +729,6 @@ fn compute_cluster_offset_x_px(
         return 0;
     }
 
-    let min_x_px = glyphs
-        .iter()
-        .map(|glyph| glyph.raw_dest_x_px)
-        .min()
-        .unwrap_or(cluster_origin_x_px);
-    let max_x_px = glyphs
-        .iter()
-        .map(|glyph| glyph.raw_dest_x_px.saturating_add(glyph.width_px as i32))
-        .max()
-        .unwrap_or(cluster_end_x_px);
     let cluster = glyph_cluster(run, cluster_start);
     let span_cells = glyphs[0]
         .end_col
@@ -666,8 +737,6 @@ fn compute_cluster_offset_x_px(
     compute_cluster_offset_x(
         classify_cluster_layout(cluster.map(|value| value.text.as_str()), span_cells),
         span_rect.width_px,
-        min_x_px.saturating_sub(span_rect.start_x_px) as f32,
-        max_x_px.saturating_sub(span_rect.start_x_px) as f32,
         cluster_end_x_px.saturating_sub(cluster_origin_x_px) as f32,
     )
     .round() as i32
@@ -693,25 +762,13 @@ fn classify_cluster_layout(text: Option<&str>, span: u32) -> ClusterLayout {
 fn compute_cluster_offset_x(
     layout: ClusterLayout,
     width_px: u32,
-    min_x: f32,
-    max_x: f32,
     content_advance: f32,
 ) -> f32 {
     let width = width_px as f32;
-    let left_padding = match layout {
+    match layout {
         ClusterLayout::Ascii => 0.0,
         ClusterLayout::Wide | ClusterLayout::Mixed => ((width - content_advance).max(0.0) / 2.0).floor(),
-    };
-    let mut offset_x = left_padding + (-min_x).max(0.0);
-    let right_overflow = max_x + offset_x - width;
-    if right_overflow > 0.0 {
-        offset_x -= right_overflow;
     }
-    let left_overflow = min_x + offset_x;
-    if left_overflow < 0.0 {
-        offset_x -= left_overflow;
-    }
-    offset_x
 }
 
 fn glyph_cell_span_rect(
@@ -729,25 +786,6 @@ fn glyph_cell_span_rect(
             .saturating_add(1)
             .saturating_mul(cell_width_px),
         height_px: cell_height_px,
-    }
-}
-
-fn clamp_axis_to_span(
-    dest_px: i32,
-    glyph_extent_px: u32,
-    clip_start_px: i32,
-    clip_extent_px: u32,
-) -> i32 {
-    if clip_extent_px == 0 {
-        return dest_px;
-    }
-
-    let max_dest_px = clip_start_px.saturating_add(clip_extent_px as i32 - glyph_extent_px as i32);
-
-    if max_dest_px < clip_start_px {
-        clip_start_px
-    } else {
-        dest_px.max(clip_start_px).min(max_dest_px)
     }
 }
 
@@ -785,4 +823,33 @@ fn center_color_glyph_in_cell(cell_height_px: u32, glyph_height_px: u32) -> i32 
     let cell_height_px = cell_height_px as i32;
     let glyph_height_px = glyph_height_px as i32;
     (cell_height_px.saturating_sub(glyph_height_px) / 2).max(0)
+}
+
+fn pad_monochrome_glyph_coverage(
+    width_px: u32,
+    height_px: u32,
+    coverage: &[u8],
+    padding_left_px: u32,
+    padding_right_px: u32,
+) -> Vec<u8> {
+    if width_px == 0 || height_px == 0 || (padding_left_px == 0 && padding_right_px == 0) {
+        return coverage.to_vec();
+    }
+
+    let padded_width_px = width_px
+        .saturating_add(padding_left_px)
+        .saturating_add(padding_right_px);
+    let mut padded = vec![0; (padded_width_px.saturating_mul(height_px)) as usize];
+
+    for row in 0..height_px {
+        let src_start = (row.saturating_mul(width_px)) as usize;
+        let src_end = src_start.saturating_add(width_px as usize);
+        let dst_start = (row
+            .saturating_mul(padded_width_px)
+            .saturating_add(padding_left_px)) as usize;
+        let dst_end = dst_start.saturating_add(width_px as usize);
+        padded[dst_start..dst_end].copy_from_slice(&coverage[src_start..src_end]);
+    }
+
+    padded
 }

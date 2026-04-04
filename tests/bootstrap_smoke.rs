@@ -257,6 +257,11 @@ struct AsyncProjectionLauncher;
 #[derive(Clone, Default)]
 struct InteractiveProjectionLauncher;
 
+#[derive(Clone, Copy)]
+struct WideProjectionLauncher {
+    cols: u32,
+}
+
 #[derive(Clone, Default)]
 struct PasteProjectionLauncher;
 
@@ -1142,6 +1147,42 @@ impl SessionRuntimeLauncher for InteractiveProjectionLauncher {
                     1,
                     24,
                     80,
+                    vec!["welcome to mica-term".into()],
+                ),
+            ));
+            Ok(Box::new(InteractiveProjectionRuntimeControl {
+                session_id,
+                event_tx,
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for WideProjectionLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let cols = self.cols;
+        Box::pin(async move {
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                terminal_surface_with_cells(
+                    session_id,
+                    1,
+                    24,
+                    cols,
                     vec!["welcome to mica-term".into()],
                 ),
             ));
@@ -7274,18 +7315,21 @@ fn workspace_terminal_selection_keeps_native_frame_contract_active() {
         "pointer drag should activate terminal selection state"
     );
     assert_eq!(
-        before, 0,
-        "scene-image and bitmap composition paths should keep the native frame token cleared before selection"
+        app.get_workspace_session_render_mode().as_str(),
+        "native"
     );
-    assert_eq!(
-        after, 0,
-        "scene-image and bitmap composition paths should keep the native frame token cleared after selection"
+    assert!(
+        before > 0,
+        "native composition should keep a retained native frame token active before selection"
+    );
+    assert!(
+        after > 0,
+        "native composition should keep a retained native frame token active after selection"
     );
     assert!(
         before_surface_seqno > 0 && after_surface_seqno > 0,
-        "selection should keep the staged terminal surface alive while bitmap composition handles the visible frame"
+        "selection should keep the staged terminal surface alive while native composition handles the visible frame"
     );
-    assert_eq!(app.get_workspace_session_render_mode().as_str(), "bitmap");
 }
 
 #[test]
@@ -7314,13 +7358,18 @@ fn opening_right_panel_clamps_terminal_surface_width_before_pty_resize_roundtrip
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
-    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(WideProjectionLauncher { cols: 140 }),
+    );
     app.show().expect("show app window");
 
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
     app.invoke_asset_activated(ssh_id.into());
     settle_terminal_projection();
 
+    let before_workspace_width = app.get_layout_main_workspace_width();
     let before = app.get_layout_workspace_session_native_surface_width();
 
     app.invoke_open_sftp_panel_requested();
@@ -7328,6 +7377,10 @@ fn opening_right_panel_clamps_terminal_surface_width_before_pty_resize_roundtrip
     assert!(
         app.get_effective_show_right_panel(),
         "opening the SFTP panel should immediately toggle the right-panel layout state"
+    );
+    assert!(
+        app.get_layout_main_workspace_width() < before_workspace_width,
+        "opening the SFTP panel should immediately shrink the main workspace width budget"
     );
     assert!(
         app.get_layout_workspace_session_native_surface_width() < before,
