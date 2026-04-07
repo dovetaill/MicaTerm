@@ -129,6 +129,14 @@ pub(super) fn bind_shell_chrome_callbacks(
                 Some(session_bridge),
                 &mut workspace_follow_tracker_ref.borrow_mut(),
             );
+            if state.active_workspace_terminal_surface().is_none() {
+                sync_workspace_session_state_with_manager(
+                    &window,
+                    &state,
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                    Some(&session_bridge.manager),
+                );
+            }
         }
         sync_theme_and_window_effects(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
