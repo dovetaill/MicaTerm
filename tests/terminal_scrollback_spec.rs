@@ -2,6 +2,7 @@ use mica_term::app::ssh::runtime::{
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
     TerminalSurfaceState,
 };
+use mica_term::app::terminal_core::TerminalCoreKind;
 use mica_term::app::terminal_model::TerminalModelFrame;
 use mica_term::app::terminal_semantic::{
     SemanticInputSpanKind, SemanticOutputBlockKind, detect_input_line_overlays,
@@ -28,6 +29,25 @@ fn semantic_model_frame(lines: &[&str]) -> TerminalModelFrame {
 #[test]
 fn wheel_without_mouse_grab_scrolls_local_viewport() {
     let mut session = TerminalSession::new(4, 20);
+
+    session.apply_remote_bytes(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n");
+
+    let latest = session.surface_state(Uuid::new_v4());
+    session.scroll_viewport_lines(2);
+    let scrolled = session.surface_state(Uuid::new_v4());
+
+    assert!(!latest.mouse_grabbed);
+    assert_ne!(latest.visible_lines, scrolled.visible_lines);
+    assert!(scrolled.visible_lines.iter().any(|line| line == "3"));
+}
+
+#[test]
+fn experimental_alacritty_core_preserves_local_scrollback_contract() {
+    let mut session = TerminalSession::new_with_core_kind(
+        4,
+        20,
+        TerminalCoreKind::AlacrittyExperimental,
+    );
 
     session.apply_remote_bytes(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n");
 

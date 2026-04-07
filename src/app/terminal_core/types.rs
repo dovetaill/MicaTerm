@@ -8,6 +8,13 @@ use crate::app::ssh::runtime::{
 use crate::theme::ThemeMode;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TerminalCoreKind {
+    #[default]
+    Wezterm,
+    AlacrittyExperimental,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ViewportState {
     pub offset_lines: u32,
     pub max_offset_lines: u32,

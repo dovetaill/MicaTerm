@@ -8,6 +8,7 @@ default = ["slint-renderer-software", "terminal-native-renderer"]
 slint-renderer-software = ["slint/renderer-software"]
 slint-renderer-skia = ["slint/renderer-skia"]
 terminal-native-renderer = ["dep:rustybuzz"]
+terminal-core-alacritty-experimental = []
 
 [dependencies]
 anyhow = "1.0.102"

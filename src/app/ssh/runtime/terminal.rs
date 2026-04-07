@@ -9,7 +9,9 @@ use russh::client;
 use termwiz::input::{KeyCode, Modifiers as KeyModifiers};
 use uuid::Uuid;
 
-use crate::app::terminal_core::{TerminalCoreAdapter, WeztermTerminalCoreAdapter};
+use crate::app::terminal_core::{
+    TerminalCoreAdapter, TerminalCoreKind, TerminalFrameSnapshot, create_terminal_core_adapter,
+};
 use crate::theme::ThemeMode;
 
 use super::{
@@ -152,7 +154,15 @@ pub struct TerminalSession {
 
 impl TerminalSession {
     pub fn new(rows: usize, cols: usize) -> Self {
-        Self::with_core(Box::new(WeztermTerminalCoreAdapter::new(rows, cols)))
+        Self::new_with_core_kind(rows, cols, TerminalCoreKind::Wezterm)
+    }
+
+    pub fn new_with_core_kind(rows: usize, cols: usize, kind: TerminalCoreKind) -> Self {
+        Self::with_core(create_terminal_core_adapter(kind, rows, cols))
+    }
+
+    pub fn new_with_experimental_alacritty_core(rows: usize, cols: usize) -> Self {
+        Self::new_with_core_kind(rows, cols, TerminalCoreKind::AlacrittyExperimental)
     }
 
     pub fn with_core(core: Box<dyn TerminalCoreAdapter>) -> Self {
@@ -185,6 +195,10 @@ impl TerminalSession {
 
     pub fn surface_state(&self, session_id: Uuid) -> TerminalSurfaceState {
         TerminalSurfaceState::from_frame_snapshot(session_id, self.core.frame_snapshot())
+    }
+
+    pub fn frame_snapshot(&self) -> TerminalFrameSnapshot {
+        self.core.frame_snapshot()
     }
 
     pub fn send_key_event(&mut self, event: TerminalKeyEvent) -> Result<Vec<u8>> {
