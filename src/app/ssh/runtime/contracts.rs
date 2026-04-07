@@ -2,6 +2,8 @@
 
 use uuid::Uuid;
 
+use crate::app::terminal_core::TerminalFrameSnapshot;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalSurfaceState {
     pub session_id: Uuid,
@@ -160,6 +162,29 @@ impl TerminalKeyEvent {
 }
 
 impl TerminalSurfaceState {
+    pub fn from_frame_snapshot(session_id: Uuid, frame: TerminalFrameSnapshot) -> Self {
+        Self {
+            session_id,
+            seqno: frame.seqno,
+            rows: frame.rows,
+            cols: frame.cols,
+            default_fg_rgba: frame.default_fg_rgba,
+            default_bg_rgba: frame.default_bg_rgba,
+            row_bg_even_rgba: frame.row_bg_even_rgba,
+            row_bg_odd_rgba: frame.row_bg_odd_rgba,
+            viewport_offset_lines: frame.viewport.offset_lines,
+            viewport_max_offset_lines: frame.viewport.max_offset_lines,
+            viewport_at_bottom: frame.viewport.at_bottom,
+            visible_rows: frame.visible_rows,
+            visible_lines: frame.visible_lines,
+            cells: frame.cells,
+            cursor: frame.cursor,
+            alternate_screen_active: frame.alternate_screen_active,
+            mouse_grabbed: frame.mouse_grabbed,
+            bracketed_paste_enabled: frame.bracketed_paste_enabled,
+        }
+    }
+
     pub fn signature(&self) -> TerminalSurfaceSignature {
         TerminalSurfaceSignature {
             session_id: self.session_id,

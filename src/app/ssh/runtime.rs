@@ -41,7 +41,6 @@ use crate::theme::ThemeMode;
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
 const DEFAULT_TERMINAL_COLS: usize = 80;
-const TERMINAL_SCROLLBACK_LINES: usize = 3_500;
 const SSH_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 const SSH_KEEPALIVE_MAX_MISSES: usize = 3;
 const FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL: Duration = Duration::from_millis(8);
@@ -49,8 +48,6 @@ const SURFACE_DIRTY_NOTIFICATION_INTERVAL: Duration = Duration::from_millis(40);
 const INPUT_ACTIVE_SURFACE_DIRTY_WINDOW: Duration = Duration::from_millis(160);
 const WORKING_SET_TRIM_IDLE_INTERVAL: Duration = Duration::from_secs(2);
 const WORKING_SET_TRIM_MIN_OUTPUT_BYTES: usize = 1024 * 1024;
-const FILTERED_EXACT_BANNER: &str =
-    "Activate the web console with: systemctl enable --now cockpit.socket";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionRuntimeEvent {
