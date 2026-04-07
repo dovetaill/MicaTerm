@@ -1,4 +1,4 @@
-//! Native terminal surface orchestration for retained present scheduling.
+//! Default mainline terminal subsystem path for retained native present scheduling.
 
 use std::cell::RefCell;
 use std::rc::Rc;

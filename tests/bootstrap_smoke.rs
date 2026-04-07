@@ -185,6 +185,30 @@ fn bootstrap_source_uses_windows_native_terminal_presenter_for_native_frames() {
 }
 
 #[test]
+fn runtime_profile_source_defaults_windows_mainline_to_retained_native_terminal_subsystem() {
+    let runtime_profile_source =
+        fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        runtime_profile_source.contains("pub enum TerminalSubsystemMode"),
+        "runtime profile should expose an explicit terminal subsystem mode once the retained native surface path becomes the default mainline stack"
+    );
+    assert!(
+        runtime_profile_source.contains("RetainedNativeSurface"),
+        "runtime profile should name the retained native surface as the default terminal subsystem mode"
+    );
+    assert!(
+        runtime_profile_source.contains("std::env::var(\"MICA_TERM_TERMINAL_SUBSYSTEM\")"),
+        "runtime profile should keep a runtime rollback switch so bring-up can temporarily restore the scene-image terminal subsystem"
+    );
+    assert!(
+        bootstrap_source.contains("profile.terminal_subsystem_mode()"),
+        "bootstrap should thread the terminal subsystem mode through presenter selection so the rollback switch still reaches the scene-image path"
+    );
+}
+
+#[test]
 fn session_manager_skips_auto_bootstrap_for_cached_fallback_host() {
     let runtime =
         mica_term::app::async_runtime::AppAsyncRuntime::new().expect("create app async runtime");
@@ -7380,31 +7404,23 @@ fn workspace_terminal_selection_keeps_native_frame_contract_active() {
         app.get_workspace_session_selection_active(),
         "pointer drag should activate terminal selection state"
     );
-    if cfg!(target_os = "windows") {
-        assert_eq!(render_mode.as_str(), "native");
-        assert!(
-            before > 0,
-            "native composition should keep a retained native frame token active before selection"
-        );
-        assert!(
-            after > 0,
-            "native composition should keep a retained native frame token active after selection"
-        );
-        assert!(
-            before_surface_seqno > 0 && after_surface_seqno > 0,
-            "selection should keep the staged terminal surface alive while native composition handles the visible frame"
-        );
-    } else {
-        assert_eq!(
-            render_mode.as_str(),
-            "bitmap",
-            "non-Windows test runs should keep the bitmap composition contract stable while selection state changes"
-        );
-        assert_eq!(
-            before, after,
-            "selection should not toggle native frame tokens on non-Windows bitmap runs"
-        );
-    }
+    assert_eq!(
+        render_mode.as_str(),
+        "native",
+        "mainline bootstrap should keep the retained native surface active while selection changes once the new terminal subsystem becomes the default path"
+    );
+    assert!(
+        before > 0,
+        "native composition should keep a retained native frame token active before selection"
+    );
+    assert!(
+        after > 0,
+        "native composition should keep a retained native frame token active after selection"
+    );
+    assert!(
+        before_surface_seqno > 0 && after_surface_seqno > 0,
+        "selection should keep the staged terminal surface alive while native composition handles the visible frame"
+    );
 }
 
 #[test]

@@ -2036,6 +2036,13 @@ where
 fn build_workspace_terminal_presenter(
     profile: AppRuntimeProfile,
 ) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)> {
+    let terminal_subsystem_mode = profile.terminal_subsystem_mode();
+    tracing::info!(
+        target: "app.terminal",
+        ?terminal_subsystem_mode,
+        terminal_subsystem = profile.terminal_subsystem_mode_label(),
+        "selected workspace terminal subsystem"
+    );
     if profile.prefers_native_terminal_renderer() {
         return match profile.terminal_composition_mode() {
             TerminalCompositionMode::SceneImage => {

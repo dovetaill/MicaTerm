@@ -37,6 +37,12 @@ pub enum TerminalCompositionMode {
     PostRenderNativeSurface,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalSubsystemMode {
+    SceneImage,
+    RetainedNativeSurface,
+}
+
 impl TerminalRenderMode {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -59,6 +65,15 @@ impl GraphicsApiRequirement {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Direct3D => "direct3d",
+        }
+    }
+}
+
+impl TerminalSubsystemMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SceneImage => "scene-image",
+            Self::RetainedNativeSurface => "retained-native-surface",
         }
     }
 }
@@ -87,6 +102,15 @@ const WINDOWS_MAINLINE_RENDERER_FALLBACK_CHAIN: &[RendererMode] = &[
     RendererMode::Software,
 ];
 const SOFTWARE_RENDERER_FALLBACK_CHAIN: &[RendererMode] = &[RendererMode::Software];
+fn runtime_terminal_subsystem_override() -> Option<TerminalSubsystemMode> {
+    match std::env::var("MICA_TERM_TERMINAL_SUBSYSTEM").ok().as_deref() {
+        Some("scene-image") => Some(TerminalSubsystemMode::SceneImage),
+        Some("native-surface") | Some("retained-native-surface") => {
+            Some(TerminalSubsystemMode::RetainedNativeSurface)
+        }
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppRuntimeProfile {
@@ -219,13 +243,20 @@ impl AppRuntimeProfile {
         self.native_present_path
     }
 
-    pub fn terminal_composition_mode(self) -> TerminalCompositionMode {
+    pub fn terminal_subsystem_mode(self) -> TerminalSubsystemMode {
         match self.build_flavor {
-            AppBuildFlavor::WindowsSoftwareCompat => TerminalCompositionMode::SceneImage,
-            AppBuildFlavor::WindowsMainline if self.prefers_direct3d() => {
-                TerminalCompositionMode::SceneImage
-            }
+            AppBuildFlavor::WindowsSoftwareCompat => TerminalSubsystemMode::SceneImage,
             AppBuildFlavor::Development | AppBuildFlavor::WindowsMainline => {
+                runtime_terminal_subsystem_override()
+                    .unwrap_or(TerminalSubsystemMode::RetainedNativeSurface)
+            }
+        }
+    }
+
+    pub fn terminal_composition_mode(self) -> TerminalCompositionMode {
+        match self.terminal_subsystem_mode() {
+            TerminalSubsystemMode::SceneImage => TerminalCompositionMode::SceneImage,
+            TerminalSubsystemMode::RetainedNativeSurface => {
                 TerminalCompositionMode::PostRenderNativeSurface
             }
         }
@@ -241,6 +272,10 @@ impl AppRuntimeProfile {
 
     pub fn native_present_path_label(self) -> &'static str {
         self.native_present_path().as_str()
+    }
+
+    pub fn terminal_subsystem_mode_label(self) -> &'static str {
+        self.terminal_subsystem_mode().as_str()
     }
 
     fn with_native_present_path(mut self, native_present_path: NativePresentPath) -> Self {

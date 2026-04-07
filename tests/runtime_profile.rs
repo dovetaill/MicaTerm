@@ -4,7 +4,7 @@ use std::fs;
 
 use mica_term::app::runtime_profile::{
     AppBuildFlavor, AppRuntimeProfile, GraphicsApiRequirement, NativePresentPath, RendererMode,
-    TerminalCompositionMode,
+    TerminalCompositionMode, TerminalSubsystemMode,
 };
 
 #[test]
@@ -75,6 +75,11 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
     assert!(
         content.contains("pub fn preferred_graphics_api(self) -> Option<GraphicsApiRequirement>")
     );
+    assert!(content.contains("pub enum TerminalSubsystemMode"));
+    assert!(content.contains("RetainedNativeSurface"));
+    assert!(content.contains("std::env::var(\"MICA_TERM_TERMINAL_SUBSYSTEM\")"));
+    assert!(content.contains("pub fn terminal_subsystem_mode(self) -> TerminalSubsystemMode"));
+    assert!(content.contains("pub fn terminal_subsystem_mode_label(self) -> &'static str"));
     assert!(content.contains("pub fn renderer_fallback_chain(self) -> &'static [RendererMode]"));
     assert!(content.contains("TerminalRenderMode::Bitmap"));
     assert!(content.contains("TerminalRenderMode::Native"));
@@ -109,15 +114,19 @@ fn software_compat_profile_prefers_native_terminal_renderer() {
 }
 
 #[test]
-fn mainline_profile_keeps_scene_image_until_skia_native_surface_is_windows_verified() {
+fn mainline_profile_defaults_to_retained_native_surface_with_scene_image_rollback_available() {
     let profile = AppRuntimeProfile::mainline();
 
-    assert!(profile.prefers_direct3d());
+    assert_eq!(
+        profile.terminal_subsystem_mode(),
+        TerminalSubsystemMode::RetainedNativeSurface
+    );
     assert_eq!(
         profile.terminal_composition_mode(),
-        TerminalCompositionMode::SceneImage,
-        "Direct3D-backed Skia mainline builds should stay on the scene-owned image path until the same-HWND native surface path is Windows-verified; otherwise packaged builds can flip into native mode and show a blank terminal region"
+        TerminalCompositionMode::PostRenderNativeSurface,
+        "mainline builds should default to the retained native surface once the new terminal subsystem becomes the primary execution path"
     );
+    assert_eq!(profile.terminal_subsystem_mode_label(), "retained-native-surface");
 }
 
 #[test]

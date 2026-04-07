@@ -131,9 +131,8 @@ fn bitmap_host_selection_source_exposes_local_overlay_contract() {
         "terminal session host should render local single-row, first-row, middle-row, and last-row selection rectangles for the bitmap path"
     );
     assert!(
-        host_source.contains("background: ThemeTokens.dark-mode ? #5d738b")
-            && host_source.contains(": #c6d8f5"),
-        "terminal session host should keep distinct dark and light selection overlay colors for the bitmap host path"
+        host_source.contains("background: ThemeTokens.terminal-selection-surface;"),
+        "terminal session host should source bitmap host selection overlays from the shared terminal selection token so Catppuccin palette updates stay consistent across local overlays and presenter-rendered frames"
     );
     assert!(
         bootstrap_source.contains("fn workspace_session_uses_host_selection_overlay(window: &AppWindow) -> bool"),
@@ -679,9 +678,10 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
 }
 
 #[test]
-fn windows_mainline_direct3d_source_keeps_scene_image_until_native_surface_is_verified() {
+fn windows_mainline_direct3d_source_defaults_to_retained_native_surface_with_scene_image_rollback() {
     let runtime_profile_source =
         fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
     let composition_block = block_between(
         &runtime_profile_source,
         "pub fn terminal_composition_mode(self) -> TerminalCompositionMode {",
@@ -689,10 +689,41 @@ fn windows_mainline_direct3d_source_keeps_scene_image_until_native_surface_is_ve
     );
 
     assert!(
+        runtime_profile_source.contains("pub enum TerminalSubsystemMode"),
+        "runtime profile should expose a terminal subsystem mode once Windows mainline switches to the retained native surface by default"
+    );
+    assert!(
+        runtime_profile_source.contains("RetainedNativeSurface"),
+        "runtime profile should make the retained native surface an explicit subsystem mode instead of hiding the default behind render-mode heuristics"
+    );
+    assert!(
+        runtime_profile_source.contains("std::env::var(\"MICA_TERM_TERMINAL_SUBSYSTEM\")"),
+        "runtime profile should keep a runtime rollback switch so bring-up can force the scene-image subsystem without rebuilding"
+    );
+    assert!(
+        runtime_profile_source.contains("pub fn terminal_subsystem_mode(self) -> TerminalSubsystemMode"),
+        "runtime profile should expose the selected terminal subsystem mode so bootstrap can log and route the mainline/rollback presenter split explicitly"
+    );
+    assert!(
         composition_block.contains(
+            "TerminalSubsystemMode::SceneImage => TerminalCompositionMode::SceneImage"
+        ),
+        "scene-image composition should remain available as the explicit rollback path even after the retained native surface becomes the default"
+    );
+    assert!(
+        composition_block.contains("TerminalSubsystemMode::RetainedNativeSurface => {")
+            && composition_block.contains("TerminalCompositionMode::PostRenderNativeSurface"),
+        "Windows mainline should default to the retained native surface once the new subsystem becomes the primary execution path"
+    );
+    assert!(
+        !composition_block.contains(
             "AppBuildFlavor::WindowsMainline if self.prefers_direct3d() => {\n                TerminalCompositionMode::SceneImage"
         ),
-        "Windows mainline should keep Direct3D-backed Skia packages on the scene-image path until the retained same-HWND native surface is Windows-verified, otherwise packaged builds can expose a blank native terminal region"
+        "Windows mainline should stop hard-coding the scene-image composition path once the retained native surface is the default subsystem"
+    );
+    assert!(
+        bootstrap_source.contains("profile.terminal_subsystem_mode()"),
+        "bootstrap should consult the terminal subsystem mode explicitly so rollback can keep using the scene-image presenter while mainline defaults to the retained native surface"
     );
 }
 

@@ -79,3 +79,31 @@ fn native_surface_diagnostics_source_exposes_text_renderer_path() {
         "windows frame helpers should expose a stable accessor for the native surface text renderer diagnostics field"
     );
 }
+
+#[test]
+fn native_surface_rollout_sources_document_default_and_rollback_paths() {
+    let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
+        .expect("read native surface");
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
+    let scene_image_source =
+        fs::read_to_string("src/app/terminal_scene_image.rs").expect("read scene image");
+    let readme_source = fs::read_to_string("readme.md").expect("read readme");
+
+    assert!(
+        native_surface_source.contains("Default mainline terminal subsystem path"),
+        "native surface source should document that the retained same-HWND path is now the default mainline terminal subsystem"
+    );
+    assert!(
+        presenter_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
+        "terminal presenter source should document the scene-image presenter as the rollback path once the retained native surface becomes the default"
+    );
+    assert!(
+        scene_image_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
+        "scene-image renderer source should document that it remains available through the rollback switch after the default subsystem flip"
+    );
+    assert!(
+        readme_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
+        "readme should document the scene-image rollback switch so the legacy terminal path remains available during bring-up"
+    );
+}
