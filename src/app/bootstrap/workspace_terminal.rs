@@ -289,7 +289,7 @@ pub(super) fn schedule_workspace_scroll_projection_refresh(
                 return;
             };
             let mut state = state.borrow_mut();
-            refresh_active_workspace_projection(
+            refresh_active_workspace_surface_projection(
                 &window,
                 &mut state,
                 bridge.as_deref(),
@@ -335,7 +335,7 @@ pub(super) fn schedule_workspace_scroll_thumb_drag_update(
                 forward_active_workspace_scroll_ratio(&state, bridge.as_deref(), ratio);
             }
             let mut state = state.borrow_mut();
-            refresh_active_workspace_projection(
+            refresh_active_workspace_surface_projection(
                 &window,
                 &mut state,
                 bridge.as_deref(),

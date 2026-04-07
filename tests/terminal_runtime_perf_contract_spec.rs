@@ -94,3 +94,36 @@ fn bootstrap_exposes_a_coalesced_fast_input_projection_refresh_path() {
         "the coalesced fast input timer should no longer call the full workspace projection walker because that keeps held-key input tied to the slower global projection workload"
     );
 }
+
+#[test]
+fn bootstrap_exposes_surface_only_scroll_projection_refresh_paths() {
+    let workspace_terminal_source = fs::read_to_string("src/app/bootstrap/workspace_terminal.rs")
+        .expect("read workspace terminal source");
+    let scroll_refresh_block = block_between(
+        &workspace_terminal_source,
+        "pub(super) fn schedule_workspace_scroll_projection_refresh(",
+        "pub(super) fn schedule_workspace_scroll_thumb_drag_update(",
+    );
+    let thumb_drag_block = block_between(
+        &workspace_terminal_source,
+        "pub(super) fn schedule_workspace_scroll_thumb_drag_update(",
+        "pub(super) fn forward_active_workspace_text_input(",
+    );
+
+    assert!(
+        scroll_refresh_block.contains("refresh_active_workspace_surface_projection("),
+        "wheel and scroll-jump refresh timers should update only the active terminal surface so scrollbar motion does not rebuild workspace tabs or SFTP state"
+    );
+    assert!(
+        !scroll_refresh_block.contains("refresh_active_workspace_projection("),
+        "wheel and scroll-jump refresh timers should stay off the full workspace projection walker during high-frequency viewport updates"
+    );
+    assert!(
+        thumb_drag_block.contains("refresh_active_workspace_surface_projection("),
+        "scroll thumb drag refreshes should update only the active terminal surface so continuous thumb motion stays on the cheap viewport projection path"
+    );
+    assert!(
+        !thumb_drag_block.contains("refresh_active_workspace_projection("),
+        "scroll thumb drag refreshes should not call the full workspace projection walker after each coalesced runtime update"
+    );
+}
