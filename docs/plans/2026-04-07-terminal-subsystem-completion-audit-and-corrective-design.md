@@ -244,6 +244,9 @@ Rio remains an architectural reference, not a source of transplanted runtime cod
 - if the preferred presenter fails, runtime automatically falls back instead of clearing the view permanently
 - theme mode changes keep terminal colors coherent in normal, fallback, and no-frame states
 - logs and tests make the selected presenter/subsystem/fallback path explicit
+- fast upward scroll through deep history does not force a visibly stuttery full terminal rerender on every tick
+- dense Chinese and mixed CJK/Latin terminal text reads with looser vertical rhythm and more obviously native Windows text treatment
+- Catppuccin is visible not only in the terminal palette contract but also in terminal-adjacent shell chrome such as scrollbars, paused-follow affordances, and fallback/no-frame states
 
 ### Deferred Acceptance Criteria
 
@@ -266,6 +269,9 @@ Those are not done today and should remain marked as future work.
 - test seams could become too synthetic again if they do not mirror packaged bootstrap closely enough
 - theme verification could still look correct in tests while failing on packaged Windows if the visual state is not projected through the real host path
 - trying to resume Alacritty migration before packaged closure is complete would repeat the same mistake
+- scroll perf work could target only event throttling and miss the real hot path inside row shaping / prepared-frame generation
+- typography polish could regress glyph fit, emoji fallback, or Nerd Font baseline alignment if metrics changes are not verified against the existing renderer contracts
+- stronger Catppuccin shell expression could drift away from the terminal preset values if shell tokens are not sourced from the same palette model
 
 ## Final Position
 
@@ -279,3 +285,37 @@ The honest state of the repository is:
 - Rio code migration: not present
 
 The next plan must optimize for real packaged behavior first, not for preserving the appearance of plan completion.
+
+## Remaining Shipped Blockers After The First Corrective Pass
+
+The blank-terminal regression is no longer the only blocker. The next corrective phase must close three user-visible gaps before any honest default-switch discussion can resume.
+
+### 1. Fast Scrollback Performance
+
+Current packaged `scene-image` rendering still feels heavy when the user drags the scrollbar or spins the wheel upward through large histories. The current debounce and surface-local projection seams are real, but the hot path still reshapes and re-prepares the visible frame too aggressively.
+
+The corrective direction is:
+
+- reuse row-shaping work across adjacent viewport shifts
+- keep scroll refreshes on the terminal-local path
+- avoid pretending that event debouncing alone solves the packaged runtime cost
+
+### 2. Windows Typography Polish
+
+The text is now serviceable, but still not at the level of Windows Terminal / WezTerm polish. The remaining gap is not "whether DirectWrite exists" but how the current scene-image/native presenters tune line height, fallback faces, and dense CJK readability.
+
+The corrective direction is:
+
+- preserve the existing DirectWrite ownership
+- tune font metrics and line rhythm with explicit tests
+- verify mixed Chinese / Latin / Nerd Font rows instead of relying on screenshots alone
+
+### 3. Catppuccin Expression In Shell Chrome
+
+Catppuccin palette values already exist, but the packaged UI still does not strongly communicate the theme outside the raw terminal fg/bg contract. The corrective phase needs to project the palette through terminal-adjacent chrome so the theme reads as intentional rather than incidental.
+
+The corrective direction is:
+
+- keep terminal and shell tokens sourced from the same preset model
+- verify scrollbar, paused-follow, fallback, and no-frame states explicitly
+- avoid claiming a "full redesign" when this is really a consistency pass over the shipped shell chrome
