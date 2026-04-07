@@ -61,6 +61,10 @@ Notes:
 
 ## Terminal Renderer Migration Status
 
+- Current terminal core status:
+  - WezTerm-backed terminal core remains the shipped default today
+  - Alacritty adapter path is experimental and not the default runtime core
+  - Rio remains an architectural reference rather than migrated runtime code
 - Windows-first native renderer:
   - packaged `windows-mainline` builds currently default to the scene-owned image presenter while the retained same-HWND native surface remains under packaged-run verification
   - set `MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface` to force the retained native surface path during bring-up

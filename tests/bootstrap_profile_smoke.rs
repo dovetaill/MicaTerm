@@ -78,6 +78,45 @@ fn bootstrap_logs_terminal_subsystem_and_render_fallback_labels() {
 }
 
 #[test]
+fn terminal_completion_docs_state_current_core_and_migration_boundaries_honestly() {
+    let audit_doc = fs::read_to_string(
+        "docs/plans/2026-04-07-terminal-subsystem-completion-audit-and-corrective-design.md",
+    )
+    .expect("read completion audit design");
+
+    assert!(
+        audit_doc.contains("still drives the default terminal core"),
+        "completion audit should state that WezTerm still drives the default core today"
+    );
+    assert!(
+        audit_doc.contains("experimental adapter seam"),
+        "completion audit should state that the Alacritty path is still experimental"
+    );
+    assert!(
+        audit_doc.contains("architectural reference"),
+        "completion audit should state that Rio is an architectural reference rather than migrated runtime code"
+    );
+}
+
+#[test]
+fn readme_states_current_terminal_core_and_reference_boundaries_honestly() {
+    let readme = fs::read_to_string("readme.md").expect("read readme");
+
+    assert!(
+        readme.contains("WezTerm-backed terminal core remains the shipped default today"),
+        "readme should state that the shipped default core is still WezTerm-backed so the repo does not overclaim the migration status"
+    );
+    assert!(
+        readme.contains("Alacritty adapter path is experimental"),
+        "readme should state that the Alacritty path is still experimental"
+    );
+    assert!(
+        readme.contains("Rio remains an architectural reference"),
+        "readme should state that Rio is a reference rather than migrated runtime code"
+    );
+}
+
+#[test]
 fn terminal_renderer_readme_documents_runtime_fallback_diagnostics() {
     let content = fs::read_to_string("readme.md").expect("read readme");
 
