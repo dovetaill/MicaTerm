@@ -56,6 +56,7 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
     assert!(content.contains("option_env!(\"MICA_TERM_BUILD_FLAVOR\")"));
     assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_RENDERER\")"));
     assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_TERMINAL_RENDERER\")"));
+    assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM\")"));
     assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH\")"));
     assert!(content.contains("WindowsSoftwareCompat"));
     assert!(content.contains("Skia"));
@@ -85,10 +86,12 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
     assert!(content.contains("TerminalRenderMode::Native"));
     assert!(content.contains("Some(\"bitmap\")"));
     assert!(content.contains("Some(\"native\")"));
+    assert!(content.contains("Some(\"scene-image\")"));
+    assert!(content.contains("Some(\"retained-native-surface\")"));
     assert!(content.contains("Self::mainline_native()"));
     assert!(content.contains("Self::software_compat()"));
     assert!(content.contains("pub fn prefers_direct3d(self) -> bool"));
-    assert!(content.contains("Preferred native-only shipping profile"));
+    assert!(content.contains("scene-image remains the default terminal subsystem"));
     assert!(content.contains("native-first Windows software profile"));
 }
 

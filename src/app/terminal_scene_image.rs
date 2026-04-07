@@ -1,5 +1,6 @@
 //! Scene-owned terminal image renderer for Windows software compatibility builds and the
-//! `MICA_TERM_TERMINAL_SUBSYSTEM=scene-image` rollback path inside Slint z-order.
+//! default packaged Windows mainline path while
+//! `MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface` remains opt-in inside Slint z-order.
 
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::Hasher;

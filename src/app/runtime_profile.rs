@@ -112,6 +112,16 @@ fn runtime_terminal_subsystem_override() -> Option<TerminalSubsystemMode> {
     }
 }
 
+fn packaged_terminal_subsystem_override() -> Option<TerminalSubsystemMode> {
+    match option_env!("MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM") {
+        Some("scene-image") => Some(TerminalSubsystemMode::SceneImage),
+        Some("native-surface") | Some("retained-native-surface") => {
+            Some(TerminalSubsystemMode::RetainedNativeSurface)
+        }
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppRuntimeProfile {
     pub build_flavor: AppBuildFlavor,
@@ -139,7 +149,9 @@ impl AppRuntimeProfile {
         }
     }
 
-    /// Preferred native-only shipping profile for packaged mainline builds.
+    /// Packaged Windows mainline keeps the native terminal renderer while
+    /// scene-image remains the default terminal subsystem until the retained
+    /// native surface is verified in real packaged runs.
     pub fn mainline_native() -> Self {
         Self::mainline()
     }
@@ -244,11 +256,16 @@ impl AppRuntimeProfile {
     }
 
     pub fn terminal_subsystem_mode(self) -> TerminalSubsystemMode {
+        if let Some(terminal_subsystem_mode) = runtime_terminal_subsystem_override() {
+            return terminal_subsystem_mode;
+        }
+        if let Some(terminal_subsystem_mode) = packaged_terminal_subsystem_override() {
+            return terminal_subsystem_mode;
+        }
         match self.build_flavor {
             AppBuildFlavor::WindowsSoftwareCompat => TerminalSubsystemMode::SceneImage,
             AppBuildFlavor::Development | AppBuildFlavor::WindowsMainline => {
-                runtime_terminal_subsystem_override()
-                    .unwrap_or(TerminalSubsystemMode::RetainedNativeSurface)
+                TerminalSubsystemMode::RetainedNativeSurface
             }
         }
     }

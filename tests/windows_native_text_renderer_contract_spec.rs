@@ -91,19 +91,19 @@ fn native_surface_rollout_sources_document_default_and_rollback_paths() {
     let readme_source = fs::read_to_string("readme.md").expect("read readme");
 
     assert!(
-        native_surface_source.contains("Default mainline terminal subsystem path"),
-        "native surface source should document that the retained same-HWND path is now the default mainline terminal subsystem"
+        native_surface_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface"),
+        "native surface source should document the explicit retained-native-surface bring-up switch now that packaged Windows mainline defaults back to the scene-image presenter"
     );
     assert!(
-        presenter_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
-        "terminal presenter source should document the scene-image presenter as the rollback path once the retained native surface becomes the default"
+        presenter_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface"),
+        "terminal presenter source should document the retained native surface as the explicit bring-up switch while scene-image remains the packaged default"
     );
     assert!(
-        scene_image_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
-        "scene-image renderer source should document that it remains available through the rollback switch after the default subsystem flip"
+        scene_image_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface"),
+        "scene-image renderer source should document that packaged Windows mainline stays on the scene-owned image path unless the retained native surface bring-up switch is enabled"
     );
     assert!(
-        readme_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
-        "readme should document the scene-image rollback switch so the legacy terminal path remains available during bring-up"
+        readme_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface"),
+        "readme should document the retained native surface bring-up switch so packaged Windows mainline can stay on the visible scene-image path by default"
     );
 }

@@ -334,8 +334,9 @@ impl TerminalPresenter for WindowsNativePresenter {
 }
 
 #[cfg(feature = "terminal-native-renderer")]
-/// Scene-image presenter for Windows software compatibility and the
-/// `MICA_TERM_TERMINAL_SUBSYSTEM=scene-image` rollback switch.
+/// Scene-image presenter for Windows software compatibility and the default
+/// packaged Windows mainline path while `MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface`
+/// remains the explicit bring-up switch.
 pub struct WindowsSceneImagePresenter {
     font_system: DirectWriteFontSystem,
     shaper: TerminalTextShaper,

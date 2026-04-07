@@ -231,8 +231,8 @@ fn renderer_migration_docs_describe_windows_native_status_and_native_only_shippi
         "verification notes should include the Windows-first native renderer verification status"
     );
     assert!(
-        mainline_build.contains("Preferred native-only terminal surface path"),
-        "the primary Windows build wrapper should document the native-only terminal surface as the preferred shipping path"
+        mainline_build.contains("MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM=\"scene-image\""),
+        "the primary Windows build wrapper should pin packaged mainline to the scene-image terminal subsystem until the retained native surface is verified"
     );
     assert!(
         mainline_build.contains("MICA_TERM_PACKAGE_TERMINAL_RENDERER=\"native\""),

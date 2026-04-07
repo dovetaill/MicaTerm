@@ -1,4 +1,5 @@
-//! Default mainline terminal subsystem path for retained native present scheduling.
+//! Retained native present scheduling for the explicit
+//! `MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface` bring-up path.
 
 use std::cell::RefCell;
 use std::rc::Rc;

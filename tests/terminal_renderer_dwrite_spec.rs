@@ -558,7 +558,8 @@ fn native_renderer_sources_expose_draw_ready_text_payloads() {
 }
 
 #[test]
-fn windows_presenter_installation_prefers_native_while_shipping_contract_moves_to_native_only() {
+fn windows_presenter_installation_prefers_native_while_packaged_contract_keeps_scene_image_default()
+{
     let runtime_profile_source =
         fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
@@ -572,8 +573,8 @@ fn windows_presenter_installation_prefers_native_while_shipping_contract_moves_t
         "runtime profile should still distinguish the Windows mainline build flavor when deciding native-first terminal installation"
     );
     assert!(
-        runtime_profile_source.contains("Preferred native-only shipping profile"),
-        "runtime profile docs should make the Windows presenter stack target a native-only shipping contract"
+        runtime_profile_source.contains("scene-image remains the default terminal subsystem"),
+        "runtime profile docs should make it explicit that packaged Windows mainline keeps the native renderer while scene-image remains the default terminal subsystem"
     );
     assert!(
         runtime_profile_source.contains("native-first Windows software profile"),

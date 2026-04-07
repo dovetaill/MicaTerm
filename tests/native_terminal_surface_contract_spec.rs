@@ -231,8 +231,8 @@ fn runtime_profile_source_exposes_terminal_render_mode_contract() {
         "runtime profile should keep a native terminal render mode contract for logging and packaging metadata"
     );
     assert!(
-        runtime_profile_source.contains("Preferred native-only shipping profile"),
-        "runtime profile docs should mark the Windows mainline profile as the preferred native-only shipping path"
+        runtime_profile_source.contains("scene-image remains the default terminal subsystem"),
+        "runtime profile docs should note that packaged Windows mainline keeps the native renderer while scene-image remains the default terminal subsystem"
     );
     assert!(
         runtime_profile_source.contains("native-first Windows software profile"),
@@ -678,7 +678,8 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
 }
 
 #[test]
-fn windows_mainline_direct3d_source_defaults_to_retained_native_surface_with_scene_image_rollback() {
+fn windows_mainline_direct3d_source_routes_terminal_subsystem_explicitly_with_packaged_scene_image_default(
+) {
     let runtime_profile_source =
         fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
@@ -701,29 +702,33 @@ fn windows_mainline_direct3d_source_defaults_to_retained_native_surface_with_sce
         "runtime profile should keep a runtime rollback switch so bring-up can force the scene-image subsystem without rebuilding"
     );
     assert!(
+        runtime_profile_source.contains("option_env!(\"MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM\")"),
+        "runtime profile should keep a packaged terminal subsystem override so build wrappers can pin packaged Windows mainline to the scene-image presenter until retained native surface verification is complete"
+    );
+    assert!(
         runtime_profile_source.contains("pub fn terminal_subsystem_mode(self) -> TerminalSubsystemMode"),
-        "runtime profile should expose the selected terminal subsystem mode so bootstrap can log and route the mainline/rollback presenter split explicitly"
+        "runtime profile should expose the selected terminal subsystem mode so bootstrap can log and route the packaged scene-image default versus retained-native-surface bring-up path explicitly"
     );
     assert!(
         composition_block.contains(
             "TerminalSubsystemMode::SceneImage => TerminalCompositionMode::SceneImage"
         ),
-        "scene-image composition should remain available as the explicit rollback path even after the retained native surface becomes the default"
+        "scene-image composition should remain the explicit packaged presenter path while the retained native surface stays behind a bring-up switch"
     );
     assert!(
         composition_block.contains("TerminalSubsystemMode::RetainedNativeSurface => {")
             && composition_block.contains("TerminalCompositionMode::PostRenderNativeSurface"),
-        "Windows mainline should default to the retained native surface once the new subsystem becomes the primary execution path"
+        "runtime profile should keep the retained native surface composition route available behind the explicit subsystem mode"
     );
     assert!(
         !composition_block.contains(
             "AppBuildFlavor::WindowsMainline if self.prefers_direct3d() => {\n                TerminalCompositionMode::SceneImage"
         ),
-        "Windows mainline should stop hard-coding the scene-image composition path once the retained native surface is the default subsystem"
+        "Windows mainline should route composition entirely through terminal_subsystem_mode instead of hard-coding scene-image by build flavor"
     );
     assert!(
         bootstrap_source.contains("profile.terminal_subsystem_mode()"),
-        "bootstrap should consult the terminal subsystem mode explicitly so rollback can keep using the scene-image presenter while mainline defaults to the retained native surface"
+        "bootstrap should consult the terminal subsystem mode explicitly so packaged builds keep the scene-image presenter by default while retained-native-surface stays opt-in"
     );
 }
 

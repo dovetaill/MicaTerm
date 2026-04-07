@@ -62,11 +62,11 @@ Notes:
 ## Terminal Renderer Migration Status
 
 - Windows-first native renderer:
-  - packaged `windows-mainline` builds now default to the retained same-HWND native surface path
-  - set `MICA_TERM_TERMINAL_SUBSYSTEM=scene-image` to roll back to the scene-owned image presenter during bring-up
+  - packaged `windows-mainline` builds currently default to the scene-owned image presenter while the retained same-HWND native surface remains under packaged-run verification
+  - set `MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface` to force the retained native surface path during bring-up
   - if native presenter setup fails, runtime falls back to the bitmap presenter instead of leaving the terminal blank
 - Platform support matrix:
-  - Windows mainline: retained native surface by default, with the scene-image presenter kept as a rollback switch
+  - Windows mainline: scene-image presenter by default, with the retained native surface kept behind an explicit bring-up switch
   - Windows software compatibility: scene-image presenter
   - Linux/macOS: bitmap presenter today; Linux/macOS native renderer follow-up work is still pending
 - Migration scope today:
