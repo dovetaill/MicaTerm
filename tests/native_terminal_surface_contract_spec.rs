@@ -480,7 +480,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     let install_presenter_block = block_between(
         &bootstrap_source,
         "fn ensure_workspace_terminal_presenter(",
-        "fn window_scale_factor(window: &AppWindow) -> f32 {",
+        "\nfn window_scale_factor(",
     );
     assert!(
         !install_presenter_block.contains("window.set_workspace_session_render_mode("),
@@ -538,7 +538,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     let workspace_surface_projection_block = block_between(
         &bootstrap_source,
         "if let Some(surface) = state.active_workspace_terminal_surface() {",
-        "\n    } else {\n        let preset = preset_for_theme_mode(state.theme_mode);",
+        "\n    } else {\n        let preset = terminal_theme_preset;",
     );
     assert!(
         workspace_surface_projection_block.contains("let mut next_render_mode = None;"),
@@ -660,7 +660,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     );
     let no_surface_block = block_between(
         &bootstrap_source,
-        "\n    } else {\n        let preset = preset_for_theme_mode(state.theme_mode);",
+        "\n    } else {\n        let preset = terminal_theme_preset;",
         "\n    }\n\n    if let Some(active_tab) = state.active_workspace_tab() {",
     );
     let no_surface_clear = no_surface_block
@@ -773,22 +773,19 @@ fn terminal_host_cursor_overlay_is_bitmap_only() {
 #[test]
 fn bootstrap_source_clears_host_cursor_when_native_frame_is_active() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
-    let workspace_surface_projection_block = block_between(
-        &bootstrap_source,
-        "if let Some(surface) = state.active_workspace_terminal_surface() {",
-        "\n    } else {\n        let preset = preset_for_theme_mode(state.theme_mode);",
-    );
 
     assert!(
         bootstrap_source.contains("fn clear_workspace_session_cursor_overlay(window: &AppWindow) {"),
         "bootstrap should define a dedicated helper that clears the Slint cursor overlay state when native rendering owns the cursor"
     );
     assert!(
-        workspace_surface_projection_block.contains("clear_workspace_session_cursor_overlay(window);"),
+        bootstrap_source.contains(
+            "if native_frame_presented {\n            clear_workspace_session_cursor_overlay(window);\n        } else {"
+        ),
         "workspace terminal sync should explicitly clear the Slint cursor overlay whenever a retained native frame is presented"
     );
     assert!(
-        !workspace_surface_projection_block.contains("if let Some(cursor) = native_cursor {"),
+        !bootstrap_source.contains("if let Some(cursor) = native_cursor {"),
         "workspace terminal sync should stop projecting native cursor payloads back into Slint as if the host still owned the final cursor rectangle"
     );
 }

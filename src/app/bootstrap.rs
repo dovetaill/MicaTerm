@@ -5708,6 +5708,31 @@ mod tests {
         Ok(())
     }
 
+    fn with_bitmap_workspace_presenter_for_test<T>(body: impl FnOnce() -> T) -> T {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = None;
+        });
+        WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
+            *surface.borrow_mut() = None;
+        });
+        let result = with_workspace_terminal_presenter_factory_for_test(
+            Box::new(|_profile| {
+                Ok((
+                    Box::new(SizedPresenter((10, 22))) as Box<dyn TerminalPresenter>,
+                    TerminalRenderMode::Bitmap,
+                ))
+            }),
+            body,
+        );
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = None;
+        });
+        WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
+            *surface.borrow_mut() = None;
+        });
+        result
+    }
+
     impl SessionRuntimeControl for NoopRuntimeControl {
         fn disconnect(&self) -> Result<()> {
             Ok(())
@@ -5975,144 +6000,158 @@ mod tests {
 
     #[test]
     fn workspace_session_state_refreshes_terminal_image_across_surface_updates() {
-        i_slint_backend_testing::init_no_event_loop();
+        with_bitmap_workspace_presenter_for_test(|| {
+            i_slint_backend_testing::init_no_event_loop();
 
-        let window = AppWindow::new().expect("create app window");
-        let session_id = Uuid::new_v4();
-        let mut state = ShellViewModel::default();
-        let mut tab = WorkspaceTab::from_session(&SessionHandle {
-            session_id,
-            asset_id: "asset-prod".into(),
-            title: "Prod Bastion".into(),
-            subtitle: "ops@10.0.0.12:22".into(),
-            state: SessionState::Connected,
-            can_reconnect: false,
-            enhanced_session_state: EnhancedSessionState::Plain,
+            let window = AppWindow::new().expect("create app window");
+            let session_id = Uuid::new_v4();
+            let mut state = ShellViewModel::default();
+            let mut tab = WorkspaceTab::from_session(&SessionHandle {
+                session_id,
+                asset_id: "asset-prod".into(),
+                title: "Prod Bastion".into(),
+                subtitle: "ops@10.0.0.12:22".into(),
+                state: SessionState::Connected,
+                can_reconnect: false,
+                enhanced_session_state: EnhancedSessionState::Plain,
+            });
+            tab.active = true;
+            state.set_workspace_tabs(vec![tab]);
+            let mut initial_surface = TerminalSurfaceState::from_visible_lines(
+                session_id,
+                1,
+                24,
+                80,
+                vec!["welcome".into()],
+            );
+            initial_surface.cells = vec![TerminalCellState {
+                row: 0,
+                col: 0,
+                width: 1,
+                text: "w".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffff_ffff,
+                bg_rgba: 0xff0d_1117,
+            }];
+            state.set_active_workspace_terminal_surface(Some(initial_surface));
+            let mut follow_tracker = WorkspaceFollowTracker::default();
+
+            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+            let initial_lines_model = window.get_workspace_session_visible_lines();
+            let initial_surface_seqno = window.get_workspace_session_surface_seqno();
+
+            assert_eq!(
+                window.get_workspace_session_native_frame_token(),
+                0,
+                "scene-image and bitmap composition paths should keep the native frame token cleared"
+            );
+            assert_eq!(initial_surface_seqno, 1);
+            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
+
+            let mut updated_surface = TerminalSurfaceState::from_visible_lines(
+                session_id,
+                2,
+                24,
+                80,
+                vec!["welcome".into(), "$ pwd".into()],
+            );
+            updated_surface.cells = vec![TerminalCellState {
+                row: 1,
+                col: 0,
+                width: 1,
+                text: "$".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffff_ffff,
+                bg_rgba: 0xff0d_1117,
+            }];
+            state.set_active_workspace_terminal_surface(Some(updated_surface));
+
+            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+
+            assert_eq!(
+                window.get_workspace_session_visible_lines(),
+                initial_lines_model,
+                "terminal visible line projection should reuse the same VecModel instance"
+            );
+            assert_eq!(
+                window.get_workspace_session_native_frame_token(),
+                0,
+                "scene-image and bitmap composition paths should keep the native frame token cleared while surface seqno tracks the visible frame"
+            );
+            assert_ne!(window.get_workspace_session_surface_seqno(), initial_surface_seqno);
+            assert_eq!(window.get_workspace_session_surface_seqno(), 2);
+            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
         });
-        tab.active = true;
-        state.set_workspace_tabs(vec![tab]);
-        let mut initial_surface =
-            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["welcome".into()]);
-        initial_surface.cells = vec![TerminalCellState {
-            row: 0,
-            col: 0,
-            width: 1,
-            text: "w".into(),
-            bold: false,
-            underline: false,
-            fg_rgba: 0xffff_ffff,
-            bg_rgba: 0xff0d_1117,
-        }];
-        state.set_active_workspace_terminal_surface(Some(initial_surface));
-        let mut follow_tracker = WorkspaceFollowTracker::default();
-
-        sync_workspace_session_state(&window, &state, &mut follow_tracker);
-        let initial_lines_model = window.get_workspace_session_visible_lines();
-        let initial_surface_seqno = window.get_workspace_session_surface_seqno();
-
-        assert_eq!(
-            window.get_workspace_session_native_frame_token(),
-            0,
-            "scene-image and bitmap composition paths should keep the native frame token cleared"
-        );
-        assert_eq!(initial_surface_seqno, 1);
-        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
-
-        let mut updated_surface = TerminalSurfaceState::from_visible_lines(
-            session_id,
-            2,
-            24,
-            80,
-            vec!["welcome".into(), "$ pwd".into()],
-        );
-        updated_surface.cells = vec![TerminalCellState {
-            row: 1,
-            col: 0,
-            width: 1,
-            text: "$".into(),
-            bold: false,
-            underline: false,
-            fg_rgba: 0xffff_ffff,
-            bg_rgba: 0xff0d_1117,
-        }];
-        state.set_active_workspace_terminal_surface(Some(updated_surface));
-
-        sync_workspace_session_state(&window, &state, &mut follow_tracker);
-
-        assert_eq!(
-            window.get_workspace_session_visible_lines(),
-            initial_lines_model,
-            "terminal visible line projection should reuse the same VecModel instance"
-        );
-        assert_eq!(
-            window.get_workspace_session_native_frame_token(),
-            0,
-            "scene-image and bitmap composition paths should keep the native frame token cleared while surface seqno tracks the visible frame"
-        );
-        assert_ne!(window.get_workspace_session_surface_seqno(), initial_surface_seqno);
-        assert_eq!(window.get_workspace_session_surface_seqno(), 2);
-        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
     }
 
     #[test]
     fn workspace_session_state_clears_native_terminal_frame_when_surface_clears() {
-        i_slint_backend_testing::init_no_event_loop();
+        with_bitmap_workspace_presenter_for_test(|| {
+            i_slint_backend_testing::init_no_event_loop();
 
-        let window = AppWindow::new().expect("create app window");
-        let session_id = Uuid::new_v4();
-        let mut state = ShellViewModel::default();
-        let mut tab = WorkspaceTab::from_session(&SessionHandle {
-            session_id,
-            asset_id: "asset-prod".into(),
-            title: "Prod Bastion".into(),
-            subtitle: "ops@10.0.0.12:22".into(),
-            state: SessionState::Connected,
-            can_reconnect: false,
-            enhanced_session_state: EnhancedSessionState::Plain,
+            let window = AppWindow::new().expect("create app window");
+            let session_id = Uuid::new_v4();
+            let mut state = ShellViewModel::default();
+            let mut tab = WorkspaceTab::from_session(&SessionHandle {
+                session_id,
+                asset_id: "asset-prod".into(),
+                title: "Prod Bastion".into(),
+                subtitle: "ops@10.0.0.12:22".into(),
+                state: SessionState::Connected,
+                can_reconnect: false,
+                enhanced_session_state: EnhancedSessionState::Plain,
+            });
+            tab.active = true;
+            state.set_workspace_tabs(vec![tab]);
+            let mut initial_surface = TerminalSurfaceState::from_visible_lines(
+                session_id,
+                1,
+                24,
+                80,
+                vec!["welcome".into()],
+            );
+            initial_surface.cells = vec![TerminalCellState {
+                row: 0,
+                col: 0,
+                width: 1,
+                text: "w".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffff_ffff,
+                bg_rgba: 0xff0d_1117,
+            }];
+            state.set_active_workspace_terminal_surface(Some(initial_surface));
+            let mut follow_tracker = WorkspaceFollowTracker::default();
+
+            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+            let initial_lines_model = window.get_workspace_session_visible_lines();
+            assert_eq!(
+                window.get_workspace_session_native_frame_token(),
+                0,
+                "scene-image and bitmap composition paths should keep the native frame token cleared even after publishing a visible terminal frame"
+            );
+            assert_eq!(window.get_workspace_session_surface_seqno(), 1);
+            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
+
+            state.set_active_workspace_terminal_surface(None);
+            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+
+            assert_eq!(
+                window.get_workspace_session_visible_lines(),
+                initial_lines_model,
+                "clearing the surface should keep reusing the visible line model"
+            );
+            assert_eq!(
+                window.get_workspace_session_native_frame_token(),
+                0,
+                "clearing the surface should reset the retained native frame token"
+            );
+            assert_eq!(window.get_workspace_session_surface_seqno(), 0);
+            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
+            assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
         });
-        tab.active = true;
-        state.set_workspace_tabs(vec![tab]);
-        let mut initial_surface =
-            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["welcome".into()]);
-        initial_surface.cells = vec![TerminalCellState {
-            row: 0,
-            col: 0,
-            width: 1,
-            text: "w".into(),
-            bold: false,
-            underline: false,
-            fg_rgba: 0xffff_ffff,
-            bg_rgba: 0xff0d_1117,
-        }];
-        state.set_active_workspace_terminal_surface(Some(initial_surface));
-        let mut follow_tracker = WorkspaceFollowTracker::default();
-
-        sync_workspace_session_state(&window, &state, &mut follow_tracker);
-        let initial_lines_model = window.get_workspace_session_visible_lines();
-        assert_eq!(
-            window.get_workspace_session_native_frame_token(),
-            0,
-            "scene-image and bitmap composition paths should keep the native frame token cleared even after publishing a visible terminal frame"
-        );
-        assert_eq!(window.get_workspace_session_surface_seqno(), 1);
-        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
-
-        state.set_active_workspace_terminal_surface(None);
-        sync_workspace_session_state(&window, &state, &mut follow_tracker);
-
-        assert_eq!(
-            window.get_workspace_session_visible_lines(),
-            initial_lines_model,
-            "clearing the surface should keep reusing the visible line model"
-        );
-        assert_eq!(
-            window.get_workspace_session_native_frame_token(),
-            0,
-            "clearing the surface should reset the retained native frame token"
-        );
-        assert_eq!(window.get_workspace_session_surface_seqno(), 0);
-        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
-        assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
     }
 
     #[test]
