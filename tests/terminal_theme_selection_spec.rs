@@ -1,5 +1,6 @@
 use mica_term::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
 use mica_term::theme::ThemeMode;
+use std::fs;
 
 #[test]
 fn dark_theme_maps_terminal_palette_to_catppuccin_mocha() {
@@ -52,5 +53,24 @@ fn selection_overlay_colors_stay_translucent_and_theme_specific() {
     assert!(
         ((dark_overlay >> 24) & 0xff) < 0xff && ((light_overlay >> 24) & 0xff) < 0xff,
         "selection overlays should avoid a fully opaque alpha channel"
+    );
+}
+
+#[test]
+fn slint_terminal_tokens_match_catppuccin_no_frame_defaults() {
+    let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
+
+    assert!(
+        tokens.contains("terminal-default-fg: dark-mode ? #cdd6f4 : #4c4f69;"),
+        "Slint no-frame terminal foreground tokens should match the Catppuccin Mocha/Latte defaults used by the Rust fallback preset projection"
+    );
+    assert!(
+        tokens.contains("terminal-default-bg: dark-mode ? #1e1e2e : #eff1f5;"),
+        "Slint no-frame terminal background tokens should match the Catppuccin Mocha/Latte defaults used by the Rust fallback preset projection"
+    );
+    assert!(
+        tokens.contains("terminal-cursor-fg: dark-mode ? #1e1e2e : #eff1f5;")
+            && tokens.contains("terminal-cursor-bg: dark-mode ? #cdd6f4 : #4c4f69;"),
+        "Slint cursor tokens should stay aligned with the Catppuccin fallback preset so no-frame terminal states do not drift from the live terminal palette"
     );
 }
