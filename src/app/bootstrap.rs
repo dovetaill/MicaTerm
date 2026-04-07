@@ -2182,6 +2182,58 @@ fn workspace_terminal_default_cell_size(scale_factor: f32) -> (u32, u32) {
     })
 }
 
+fn present_surface_update_with_bitmap_fallback(
+    host: &mut TerminalRendererHost,
+    surface: &TerminalSurfaceState,
+    options: TerminalRendererHostOptions,
+    scale_factor: f32,
+) -> Result<PresentedTerminalFrame> {
+    match host.present_surface_update(surface, options) {
+        Ok(frame) => Ok(frame),
+        Err(first_err) => {
+            let requested_render_mode = host.render_mode();
+            tracing::error!(
+                target: "app.terminal",
+                session_id = surface.session_id.to_string(),
+                active_render_mode = requested_render_mode.as_str(),
+                error = %first_err,
+                "failed to render workspace terminal surface; retrying with bitmap presenter"
+            );
+
+            let mut fallback_host = TerminalRendererHost::new(
+                Box::new(BitmapAtlasPresenter::new()?),
+                TerminalRenderMode::Bitmap,
+            );
+            fallback_host.set_raster_scale(scale_factor);
+            *host = fallback_host;
+
+            match host.present_surface_update(surface, options) {
+                Ok(frame) => {
+                    tracing::warn!(
+                        target: "app.terminal",
+                        session_id = surface.session_id.to_string(),
+                        requested_render_mode = requested_render_mode.as_str(),
+                        fallback_render_mode = TerminalRenderMode::Bitmap.as_str(),
+                        "workspace terminal presenter fell back to bitmap rendering after a render failure"
+                    );
+                    Ok(frame)
+                }
+                Err(retry_err) => {
+                    tracing::error!(
+                        target: "app.terminal",
+                        session_id = surface.session_id.to_string(),
+                        requested_render_mode = requested_render_mode.as_str(),
+                        fallback_render_mode = TerminalRenderMode::Bitmap.as_str(),
+                        error = %retry_err,
+                        "bitmap presenter retry failed after render failure"
+                    );
+                    Err(retry_err)
+                }
+            }
+        }
+    }
+}
+
 fn window_scale_factor(window: &AppWindow) -> f32 {
     window.window().scale_factor().max(1.0)
 }
@@ -2545,12 +2597,14 @@ fn sync_workspace_session_state_with_manager(
                 return;
             };
             host.set_raster_scale(scale_factor);
-            match host.present_surface_update(
+            match present_surface_update_with_bitmap_fallback(
+                host,
                 surface,
                 TerminalRendererHostOptions {
                     selection,
                     selection_overlay_rgba,
                 },
+                scale_factor,
             ) {
                 Ok(PresentedTerminalFrame::Bitmap(frame)) => {
                     window.set_workspace_session_rows(i32::try_from(frame.grid_rows).unwrap_or(i32::MAX));
@@ -5499,6 +5553,8 @@ mod tests {
     use crate::app::ssh::credentials::MemoryCredentialStore;
     use crate::app::ssh::profile::SshAuthMethod;
     use crate::app::ssh::runtime::{TerminalCellState, TerminalKeyEvent, TerminalSurfaceState};
+    use crate::app::terminal_presenter::TerminalPresentationOptions;
+    use anyhow::{Result, anyhow};
     use std::future::Future;
     use std::pin::Pin;
 
@@ -5509,6 +5565,8 @@ mod tests {
     struct SequencedSurfaceLauncher;
 
     struct NoopRuntimeControl;
+
+    struct FailingPresenter;
 
     #[test]
     fn deferred_workspace_projection_refresh_gate_coalesces_redundant_requests() {
@@ -5531,6 +5589,41 @@ mod tests {
             gate.mark_scheduled(),
             "after a debounced scroll refresh runs, the next scroll interaction should be able to schedule a fresh workspace projection refresh"
         );
+    }
+
+    #[test]
+    fn presenter_render_failure_falls_back_to_bitmap_presenter() -> Result<()> {
+        let session_id = Uuid::new_v4();
+        let surface = TerminalSurfaceState::from_visible_lines(
+            session_id,
+            1,
+            4,
+            12,
+            vec!["prompt>".into(), "echo hi".into()],
+        );
+        let mut host = TerminalRendererHost::new(
+            Box::new(FailingPresenter),
+            TerminalRenderMode::Native,
+        );
+
+        let frame = present_surface_update_with_bitmap_fallback(
+            &mut host,
+            &surface,
+            TerminalRendererHostOptions::default(),
+            1.0,
+        )?;
+
+        assert!(
+            matches!(frame, PresentedTerminalFrame::Bitmap(_)),
+            "when the requested presenter fails at runtime the workspace host should retry through the bitmap presenter instead of leaving the terminal blank"
+        );
+        assert_eq!(
+            host.render_mode(),
+            TerminalRenderMode::Bitmap,
+            "after a presenter render failure the workspace host should stay on the bitmap presenter so later surface updates keep rendering visible terminal content"
+        );
+
+        Ok(())
     }
 
     impl SessionRuntimeControl for NoopRuntimeControl {
@@ -5556,6 +5649,20 @@ mod tests {
 
         fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
             Ok(())
+        }
+    }
+
+    impl TerminalPresenter for FailingPresenter {
+        fn present(
+            &mut self,
+            _surface: &TerminalSurfaceState,
+            _options: TerminalPresentationOptions,
+        ) -> Result<PresentedTerminalFrame> {
+            Err(anyhow!("simulated presenter failure"))
+        }
+
+        fn default_cell_size(&self) -> (u32, u32) {
+            (10, 22)
         }
     }
 
