@@ -17,7 +17,7 @@ pub const WINDOWS_DEFAULT_TERMINAL_FONT_CHAIN: &[&str] = &[
     DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY,
 ];
 pub const DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 14.0;
-pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.4;
+pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.5;
 pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 0.0;
 pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = "Regular";
 
@@ -274,12 +274,7 @@ impl GlyphRasterRequest {
         Self::for_face(font, font.face_key(), glyph_id, bold)
     }
 
-    pub fn for_face(
-        font: &LoadedFont,
-        face_key: FontFaceKey,
-        glyph_id: u32,
-        bold: bool,
-    ) -> Self {
+    pub fn for_face(font: &LoadedFont, face_key: FontFaceKey, glyph_id: u32, bold: bool) -> Self {
         Self::with_fractional_offset_x_for_face(font, face_key, glyph_id, bold, 0.0)
     }
 
@@ -524,10 +519,9 @@ fn rustybuzz_features(
 
     if !allow_ligatures {
         for feature_tag in ["-liga", "-clig", "-dlig", "-hlig", "-calt"] {
-            features.push(
-                Feature::from_str(feature_tag)
-                    .map_err(|error| anyhow!("invalid OpenType feature tag `{feature_tag}`: {error}"))?,
-            );
+            features.push(Feature::from_str(feature_tag).map_err(|error| {
+                anyhow!("invalid OpenType feature tag `{feature_tag}`: {error}")
+            })?);
         }
     }
 
@@ -535,10 +529,8 @@ fn rustybuzz_features(
 }
 
 pub(crate) fn map_glyph_coverage_to_alpha(coverage: f32, render_profile: FontRenderProfile) -> u8 {
-    let adjusted = coverage
-        .clamp(0.0, 1.0)
-        .powf(render_profile.coverage_gamma)
-        * render_profile.alpha_gain;
+    let adjusted =
+        coverage.clamp(0.0, 1.0).powf(render_profile.coverage_gamma) * render_profile.alpha_gain;
     (adjusted.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
@@ -587,9 +579,9 @@ fn normalize_fractional_offset_x(fractional_offset_x: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{FontRenderProfile, map_glyph_coverage_to_alpha};
     #[cfg(feature = "terminal-native-renderer")]
     use super::apply_synthetic_embolden;
+    use super::{FontRenderProfile, map_glyph_coverage_to_alpha};
 
     #[test]
     fn glyph_coverage_mapping_keeps_regular_weight_edges_close_to_source_coverage() {

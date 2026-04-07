@@ -27,8 +27,7 @@ fn windows_dwrite_font_backend_source_exposes_rasterization_contract() {
     assert!(
         (source.contains("Source::ColorOutline(0)")
             && source.contains("Source::ColorBitmap(StrikeWith::BestFit)"))
-            || (source.contains("TerminalEmojiRenderer")
-                && source.contains("rasterize_cluster")),
+            || (source.contains("TerminalEmojiRenderer") && source.contains("rasterize_cluster")),
         "windows font backend should use either inline swash color glyph sources or the shared emoji rasterizer for the real emoji path"
     );
     assert!(
@@ -298,8 +297,8 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         "shared typography defaults should move the terminal font size into the 14px Windows Terminal target range"
     );
     assert!(
-        font_backend_source.contains("pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.4;"),
-        "shared typography defaults should expose a compact 1.4 line-height contract"
+        font_backend_source.contains("pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.5;"),
+        "shared typography defaults should expose a slightly looser 1.5 line-height contract for dense Windows terminal text"
     );
     assert!(
         font_backend_source.contains("pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 0.0;"),
@@ -318,6 +317,10 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         "shared glyph raster settings should include a light synthetic embolden pass to thicken regular-weight strokes"
     );
     assert!(font_backend_source.contains("px_size: DEFAULT_TERMINAL_FONT_SIZE_PX,"));
+    assert!(
+        dwrite_source.contains("let cell_height_px = line_height.max(MIN_CELL_HEIGHT_PX);"),
+        "DirectWrite metrics should honor the shared minimum terminal line-height contract in the native path as well as the scene-image path"
+    );
 }
 
 #[test]
@@ -339,6 +342,10 @@ fn terminal_presenter_threads_presentable_native_frame_state() {
     assert!(
         presenter_source.contains("NativeCursorFrameState"),
         "native terminal frames should thread cursor metadata into the presentable frame payload"
+    );
+    assert!(
+        presenter_source.contains("fn scaled_terminal_font_request("),
+        "terminal presenters should share one font-request scaling helper so scene-image and retained-native typography tuning cannot drift"
     );
     assert!(
         presenter_source.contains("NativeSelectionFrameState"),
@@ -688,7 +695,8 @@ fn windows_platform_surface_backend_source_exposes_hwnd_and_lifecycle_contract()
         "diagnostics snapshots should group draw counters into a dedicated payload"
     );
     assert!(
-        windows_backend_source.contains("fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics"),
+        windows_backend_source
+            .contains("fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics"),
         "Windows backend should expose a diagnostics snapshot helper"
     );
     assert!(
@@ -704,11 +712,13 @@ fn windows_platform_surface_backend_source_exposes_hwnd_and_lifecycle_contract()
         "native surface should retain the latest diagnostics snapshot"
     );
     assert!(
-        native_surface_source.contains("pub fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics"),
+        native_surface_source
+            .contains("pub fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics"),
         "native surface should expose a diagnostics snapshot getter"
     );
     assert!(
-        native_surface_source.contains("state.latest_diagnostics = state.backend.diagnostics_snapshot();"),
+        native_surface_source
+            .contains("state.latest_diagnostics = state.backend.diagnostics_snapshot();"),
         "native surface should refresh cached diagnostics after backend state transitions"
     );
     assert!(
@@ -793,8 +803,10 @@ fn windows_backend_source_hardens_device_loss_and_detach_present_contract() {
             .expect("read windows platform backend");
 
     assert!(
-        windows_backend_source.contains("if self.state.host_hwnd.is_none() {\n            return;\n        }")
-            && windows_backend_source.contains("factory.CreateDCRenderTarget(&render_target_properties)")
+        windows_backend_source
+            .contains("if self.state.host_hwnd.is_none() {\n            return;\n        }")
+            && windows_backend_source
+                .contains("factory.CreateDCRenderTarget(&render_target_properties)")
             && windows_backend_source.contains("render_target.BindDC("),
         "windows backend present path should bail out once the host HWND disappears and otherwise bind Direct2D to the host window DC instead of depending on a separate child HWND"
     );

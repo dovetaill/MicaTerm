@@ -24,9 +24,9 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_scene_image::SceneImageTerminalRenderer;
+use crate::app::terminal_semantic::{SemanticInputOverlay, SemanticOutputOverlay};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_semantic::{detect_input_line_overlays, detect_output_block_overlays};
-use crate::app::terminal_semantic::{SemanticInputOverlay, SemanticOutputOverlay};
 
 #[allow(dead_code)]
 type PresenterFrameSnapshot = TerminalFrameSnapshot;
@@ -251,6 +251,13 @@ impl TerminalPresenter for BitmapAtlasPresenter {
 }
 
 #[cfg(feature = "terminal-native-renderer")]
+fn scaled_terminal_font_request(base_request: &FontRequest, scale_factor: f32) -> FontRequest {
+    let mut request = base_request.clone();
+    request.px_size = (base_request.px_size * scale_factor.max(1.0)).max(1.0);
+    request
+}
+
+#[cfg(feature = "terminal-native-renderer")]
 pub struct WindowsNativePresenter {
     font_system: DirectWriteFontSystem,
     shaper: TerminalTextShaper,
@@ -281,14 +288,8 @@ impl WindowsNativePresenter {
         })
     }
 
-    fn scaled_font_request(&self, scale_factor: f32) -> FontRequest {
-        let mut request = self.base_font_request.clone();
-        request.px_size = (self.base_font_request.px_size * scale_factor.max(1.0)).max(1.0);
-        request
-    }
-
     fn reload_loaded_font_for_scale(&mut self, scale_factor: f32) -> Result<()> {
-        let request = self.scaled_font_request(scale_factor);
+        let request = scaled_terminal_font_request(&self.base_font_request, scale_factor);
         self.loaded_font = self.font_system.load_font(&request)?;
         self.previous_frame = None;
         self.previous_shaped_rows = None;
@@ -376,14 +377,8 @@ impl WindowsSceneImagePresenter {
         })
     }
 
-    fn scaled_font_request(&self, scale_factor: f32) -> FontRequest {
-        let mut request = self.base_font_request.clone();
-        request.px_size = (self.base_font_request.px_size * scale_factor.max(1.0)).max(1.0);
-        request
-    }
-
     fn reload_loaded_font_for_scale(&mut self, scale_factor: f32) -> Result<()> {
-        let request = self.scaled_font_request(scale_factor);
+        let request = scaled_terminal_font_request(&self.base_font_request, scale_factor);
         self.loaded_font = self.font_system.load_scene_image_font(&request)?;
         self.previous_frame = None;
         self.previous_shaped_rows = None;
@@ -788,8 +783,8 @@ mod tests {
     }
 
     #[test]
-    fn prepare_native_terminal_frame_reuses_shaped_rows_for_overlapping_scrollback_rows(
-    ) -> Result<()> {
+    fn prepare_native_terminal_frame_reuses_shaped_rows_for_overlapping_scrollback_rows()
+    -> Result<()> {
         let session_id = Uuid::new_v4();
         let first_surface = scroll_perf_surface(session_id, 1, 0, ["one", "two", "three"]);
         let second_surface = scroll_perf_surface(session_id, 2, 1, ["zero", "one", "two"]);
