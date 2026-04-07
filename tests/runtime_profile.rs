@@ -92,6 +92,7 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
     assert!(content.contains("Self::software_compat()"));
     assert!(content.contains("pub fn prefers_direct3d(self) -> bool"));
     assert!(content.contains("scene-image remains the default terminal subsystem"));
+    assert!(content.contains("default switch remains gated on packaged Windows verification"));
     assert!(content.contains("native-first Windows software profile"));
 }
 

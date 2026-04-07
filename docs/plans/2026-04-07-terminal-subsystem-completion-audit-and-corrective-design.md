@@ -21,8 +21,8 @@ This corrective design exists to stop mixing together four different states:
 
 - `wezterm-term` is still present in dependencies and still drives the default terminal core.
 - `TerminalSession::new()` still defaults to `TerminalCoreKind::Wezterm`.
-- the "Alacritty" path is only an experimental adapter seam and currently wraps the WezTerm adapter internally.
-- there is no real `alacritty_terminal` dependency in `Cargo.toml`.
+- the "Alacritty" path is still an experimental adapter seam, but it now binds to a real `alacritty_terminal` core instead of wrapping the WezTerm adapter internally.
+- `alacritty_terminal` is now present in `Cargo.toml`, but only behind the experimental core path and not the shipped default runtime.
 
 ### Rendering / Presentation
 
@@ -126,18 +126,19 @@ What is missing:
 
 ### Task 6: Introduce An Experimental Alacritty-Style Core Adapter
 
-**Actual state:** Experimental seam only.
+**Actual state:** Experimental real-core adapter landed, but still not the shipped default.
 
 What is real:
 
 - feature flag exists
 - `src/app/terminal_core/alacritty_adapter.rs` exists
+- real `alacritty_terminal` state now sits behind that adapter
 - parity tests exist
 
 What is missing:
 
-- no real upstream Alacritty terminal core integration
-- current adapter wraps `WeztermTerminalCoreAdapter`
+- the shipped default core is still WezTerm-backed
+- packaged Windows verification does not yet justify flipping the default
 - this task is not a real core migration and must not be described as one
 
 ### Task 7: Switch The Default Terminal Subsystem And Retire Legacy Paths

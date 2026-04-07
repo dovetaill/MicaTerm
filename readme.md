@@ -63,13 +63,16 @@ Notes:
 
 - Current terminal core status:
   - WezTerm-backed terminal core remains the shipped default today
-  - Alacritty adapter path is experimental and not the default runtime core
+  - Alacritty adapter path is experimental and not the default runtime core; real `alacritty_terminal` core now exists behind the experimental adapter boundary, so the experimental Alacritty path now binds to the real upstream core rather than staying a WezTerm wrapper seam
   - Rio remains an architectural reference rather than migrated runtime code
 - Windows-first native renderer:
   - packaged `windows-mainline` builds currently default to the scene-owned image presenter while the retained same-HWND native surface remains under packaged-run verification
   - set `MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface` to force the retained native surface path during bring-up
   - if native presenter setup fails, runtime falls back to the bitmap presenter instead of leaving the terminal blank
   - `app.terminal` diagnostics log the selected terminal subsystem, requested render mode, active presenter mode, and fallback transitions during packaged bring-up
+- Default-switch gate:
+  - default switch remains gated on packaged Windows verification rather than adapter-seam completion alone
+  - the gate still includes blank-frame regression closure, rollback/feature-flag coverage, fast scrollback perf, typography sign-off, and Catppuccin palette sign-off on real packaged runs
 - Platform support matrix:
   - Windows mainline: scene-image presenter by default, with the retained native surface kept behind an explicit bring-up switch
   - Windows software compatibility: scene-image presenter

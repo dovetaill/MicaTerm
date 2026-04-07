@@ -114,6 +114,32 @@ fn readme_states_current_terminal_core_and_reference_boundaries_honestly() {
         readme.contains("Rio remains an architectural reference"),
         "readme should state that Rio is a reference rather than migrated runtime code"
     );
+    assert!(
+        readme.contains("real `alacritty_terminal` core now exists behind the experimental adapter boundary"),
+        "readme should state that the experimental Alacritty path now binds to the real upstream core rather than staying a WezTerm wrapper seam"
+    );
+}
+
+#[test]
+fn readme_keeps_default_switch_blocked_on_packaged_verification_gate() {
+    let readme = fs::read_to_string("readme.md").expect("read readme");
+
+    assert!(
+        readme.contains("default switch remains gated on packaged Windows verification"),
+        "readme should state that the terminal default switch is still gated instead of implying the migration is already complete"
+    );
+    assert!(
+        readme.contains("fast scrollback perf"),
+        "readme should call out fast scrollback perf as part of the packaged verification gate before any default switch"
+    );
+    assert!(
+        readme.contains("typography sign-off"),
+        "readme should call out typography sign-off as part of the packaged verification gate before any default switch"
+    );
+    assert!(
+        readme.contains("Catppuccin palette sign-off"),
+        "readme should call out Catppuccin palette sign-off as part of the packaged verification gate before any default switch"
+    );
 }
 
 #[test]
