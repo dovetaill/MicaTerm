@@ -3,6 +3,7 @@ use std::fs;
 use mica_term::app::ssh::runtime::{
     TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalSession,
 };
+use mica_term::app::terminal_theme::preset_for_theme_mode;
 use mica_term::theme::ThemeMode;
 use termwiz::input::{KeyCode, Modifiers};
 use uuid::Uuid;
@@ -178,6 +179,7 @@ fn terminal_session_surface_projection_survives_large_burst_near_live_tail() {
 #[test]
 fn dark_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let mut session = TerminalSession::new(24, 80);
+    let preset = preset_for_theme_mode(ThemeMode::Dark);
 
     session.apply_remote_bytes(b"[root@host ~]# ");
 
@@ -185,13 +187,14 @@ fn dark_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let default_fg_rgba = extract_debug_u32_field(&debug, "default_fg_rgba");
     let default_bg_rgba = extract_debug_u32_field(&debug, "default_bg_rgba");
 
-    assert_eq!(default_fg_rgba, 0xffe6_edf5);
-    assert_eq!(default_bg_rgba, 0xff0c_1014);
+    assert_eq!(default_fg_rgba, 0xff00_0000 | preset.foreground);
+    assert_eq!(default_bg_rgba, 0xff00_0000 | preset.background);
 }
 
 #[test]
 fn light_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let mut session = TerminalSession::new(24, 80);
+    let preset = preset_for_theme_mode(ThemeMode::Light);
 
     session.set_theme_mode(ThemeMode::Light);
     session.apply_remote_bytes(b"[root@host ~]# ");
@@ -200,33 +203,35 @@ fn light_theme_surface_projection_exposes_default_canvas_palette_fields() {
     let default_fg_rgba = extract_debug_u32_field(&debug, "default_fg_rgba");
     let default_bg_rgba = extract_debug_u32_field(&debug, "default_bg_rgba");
 
-    assert_eq!(default_fg_rgba, 0xff17_1c23);
-    assert_eq!(default_bg_rgba, 0xfffc_fdff);
+    assert_eq!(default_fg_rgba, 0xff00_0000 | preset.foreground);
+    assert_eq!(default_bg_rgba, 0xff00_0000 | preset.background);
 }
 
 #[test]
-fn dark_theme_surface_projection_exposes_mica_code_dark_cursor_palette() {
+fn dark_theme_surface_projection_exposes_active_cursor_palette() {
     let mut session = TerminalSession::new(24, 80);
+    let preset = preset_for_theme_mode(ThemeMode::Dark);
 
     session.apply_remote_bytes(b"[root@host ~]# ");
 
     let snapshot = session.surface_state(Uuid::new_v4());
 
-    assert_eq!(snapshot.cursor.fg_rgba, 0xff0c_1014);
-    assert_eq!(snapshot.cursor.bg_rgba, 0xffe6_edf5);
+    assert_eq!(snapshot.cursor.fg_rgba, 0xff00_0000 | preset.cursor_fg);
+    assert_eq!(snapshot.cursor.bg_rgba, 0xff00_0000 | preset.cursor_bg);
 }
 
 #[test]
-fn light_theme_surface_projection_exposes_mica_code_light_cursor_palette() {
+fn light_theme_surface_projection_exposes_active_cursor_palette() {
     let mut session = TerminalSession::new(24, 80);
+    let preset = preset_for_theme_mode(ThemeMode::Light);
 
     session.set_theme_mode(ThemeMode::Light);
     session.apply_remote_bytes(b"[root@host ~]# ");
 
     let snapshot = session.surface_state(Uuid::new_v4());
 
-    assert_eq!(snapshot.cursor.fg_rgba, 0xfffc_fdff);
-    assert_eq!(snapshot.cursor.bg_rgba, 0xff4c_5561);
+    assert_eq!(snapshot.cursor.fg_rgba, 0xff00_0000 | preset.cursor_fg);
+    assert_eq!(snapshot.cursor.bg_rgba, 0xff00_0000 | preset.cursor_bg);
 }
 
 #[test]
@@ -348,6 +353,7 @@ fn dark_theme_palette_uses_bright_default_foreground() {
 #[test]
 fn dark_theme_ansi_prompt_colors_use_higher_contrast_accents() {
     let mut session = TerminalSession::new(24, 80);
+    let preset = preset_for_theme_mode(ThemeMode::Dark);
 
     session.apply_remote_bytes(b"\x1b[32mok\x1b[34mgo\x1b[0m");
 
@@ -363,8 +369,12 @@ fn dark_theme_ansi_prompt_colors_use_higher_contrast_accents() {
         .find(|cell| cell.col == 2)
         .expect("blue prompt cell");
 
-    assert_eq!(green.fg_rgba, 0xffa8_dc8a);
-    assert_eq!(blue.fg_rgba, 0xff7c_c5ff);
+    assert_eq!(green.fg_rgba, 0xff00_0000 | rgb_u32(preset.ansi[2]));
+    assert_eq!(blue.fg_rgba, 0xff00_0000 | rgb_u32(preset.ansi[4]));
+}
+
+fn rgb_u32((red, green, blue): (u8, u8, u8)) -> u32 {
+    (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
 }
 
 #[test]

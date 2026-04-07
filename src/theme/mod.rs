@@ -2,4 +2,4 @@
 
 mod spec;
 
-pub use spec::ThemeMode;
+pub use spec::{ThemeMode, ThemeTerminalPaletteSpec, terminal_palette_spec};

@@ -136,10 +136,10 @@ export component TerminalSessionHost inherits Rectangle {
     in property <bool> session-cursor-visible: false;
     in property <bool> session-cursor-blinking: false;
     in property <string> session-cursor-shape: "block";
-    in property <color> session-cursor-fg: ThemeTokens.dark-mode ? #0c1014 : #fcfdff;
-    in property <color> session-cursor-bg: ThemeTokens.dark-mode ? #d8dfe8 : #4c5561;
-    in property <color> session-default-fg: ThemeTokens.dark-mode ? #d8dfe8 : #24292f;
-    in property <color> session-default-bg: ThemeTokens.dark-mode ? #0c1014 : #fcfdff;
+    in property <color> session-cursor-fg: ThemeTokens.terminal-cursor-fg;
+    in property <color> session-cursor-bg: ThemeTokens.terminal-cursor-bg;
+    in property <color> session-default-fg: ThemeTokens.terminal-default-fg;
+    in property <color> session-default-bg: ThemeTokens.terminal-default-bg;
     in property <bool> session-mouse-grabbed: false;
     in property <[string]> session-visible-lines: [];
     in property <int> session-surface-seqno: 0;
@@ -961,7 +961,7 @@ export component TerminalSessionHost inherits Rectangle {
                     y: root.terminal-local-cell-y(root.selection-start-row);
                     width: root.selection-local-span-width(root.selection-start-col, root.selection-end-col);
                     height: root.selection-local-span-height(root.selection-start-row, root.selection-start-row);
-                    background: ThemeTokens.dark-mode ? #5d738b5c : #c6d8f570;
+                    background: ThemeTokens.terminal-selection-surface;
                 }
 
                 if root.selection-overlay-active() && root.selection-start-row < root.selection-end-row : selection-overlay-first-row := Rectangle {
@@ -969,7 +969,7 @@ export component TerminalSessionHost inherits Rectangle {
                     y: root.terminal-local-cell-y(root.selection-start-row);
                     width: root.selection-local-span-width(root.selection-start-col, root.session-cols);
                     height: root.selection-local-span-height(root.selection-start-row, root.selection-start-row);
-                    background: ThemeTokens.dark-mode ? #5d738b5c : #c6d8f570;
+                    background: ThemeTokens.terminal-selection-surface;
                 }
 
                 if root.selection-overlay-active() && root.selection-start-row + 1 < root.selection-end-row : selection-overlay-middle-rows := Rectangle {
@@ -980,7 +980,7 @@ export component TerminalSessionHost inherits Rectangle {
                         root.selection-start-row + 1,
                         root.selection-end-row - 1,
                     );
-                    background: ThemeTokens.dark-mode ? #5d738b5c : #c6d8f570;
+                    background: ThemeTokens.terminal-selection-surface;
                 }
 
                 if root.selection-overlay-active() && root.selection-start-row < root.selection-end-row : selection-overlay-last-row := Rectangle {
@@ -988,7 +988,7 @@ export component TerminalSessionHost inherits Rectangle {
                     y: root.terminal-local-cell-y(root.selection-end-row);
                     width: root.selection-local-span-width(0, root.selection-end-col);
                     height: root.selection-local-span-height(root.selection-end-row, root.selection-end-row);
-                    background: ThemeTokens.dark-mode ? #5d738b5c : #c6d8f570;
+                    background: ThemeTokens.terminal-selection-surface;
                 }
 
                 input-capture := TouchArea {

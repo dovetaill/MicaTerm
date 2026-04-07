@@ -1,5 +1,7 @@
 //! Persistence coverage for saved UI preferences.
 
+use std::fs;
+
 use mica_term::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use mica_term::shell::view_model::RightPanelView;
 use mica_term::theme::ThemeMode;
@@ -51,4 +53,55 @@ fn ui_preferences_accept_sftp_right_panel_view() {
 #[test]
 fn legacy_appearance_preference_migrates_to_sftp() {
     assert_eq!(RightPanelView::from_id("appearance").id(), "sftp");
+}
+
+#[test]
+fn shell_terminal_tokens_stay_synced_to_theme_backed_terminal_palette_contract() {
+    let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace_pane =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    for token in [
+        "terminal-default-fg",
+        "terminal-default-bg",
+        "terminal-cursor-fg",
+        "terminal-cursor-bg",
+        "terminal-selection-surface",
+    ] {
+        assert!(
+            tokens.contains(token),
+            "theme tokens should expose `{token}` so Slint terminal chrome stays synchronized with the Rust terminal palette presets",
+        );
+    }
+
+    assert!(
+        app_window.contains("ThemeTokens.terminal-default-fg"),
+        "AppWindow should source the workspace terminal foreground default from ThemeTokens instead of carrying a detached inline color ladder"
+    );
+    assert!(
+        app_window.contains("ThemeTokens.terminal-default-bg"),
+        "AppWindow should source the workspace terminal background default from ThemeTokens instead of carrying a detached inline color ladder"
+    );
+    assert!(
+        app_window.contains("ThemeTokens.terminal-cursor-fg")
+            && app_window.contains("ThemeTokens.terminal-cursor-bg"),
+        "AppWindow should source cursor colors from ThemeTokens so dark/light terminal presets stay aligned with shell theme mode"
+    );
+    assert!(
+        workspace_pane.contains("ThemeTokens.terminal-default-fg")
+            && workspace_pane.contains("ThemeTokens.terminal-default-bg"),
+        "WorkspacePane should inherit terminal defaults from ThemeTokens rather than restating divergent inline colors"
+    );
+    assert!(
+        workspace_pane.contains("ThemeTokens.terminal-cursor-fg")
+            && workspace_pane.contains("ThemeTokens.terminal-cursor-bg"),
+        "WorkspacePane should inherit terminal cursor colors from ThemeTokens"
+    );
+    assert!(
+        terminal_host.contains("ThemeTokens.terminal-selection-surface"),
+        "TerminalSessionHost should render selection overlays from ThemeTokens so shell-adjacent terminal chrome stays in sync with the active Catppuccin preset"
+    );
 }

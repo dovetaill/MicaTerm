@@ -2,7 +2,7 @@
 
 use wezterm_term::color::{ColorPalette, RgbColor, SrgbaTuple};
 
-use crate::theme::ThemeMode;
+use crate::theme::{ThemeMode, terminal_palette_spec};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TerminalThemePreset {
@@ -40,77 +40,25 @@ impl TerminalThemePreset {
     }
 }
 
-pub fn mica_code_dark() -> TerminalThemePreset {
+fn preset_from_theme_mode(theme_mode: ThemeMode) -> TerminalThemePreset {
+    let spec = terminal_palette_spec(theme_mode);
     TerminalThemePreset {
-        name: "Mica Code Dark",
-        background: 0x0c_10_14,
-        foreground: 0xe6_ed_f5,
-        row_band_even: 0x0c_10_14,
-        row_band_odd: 0x13_18_1e,
-        cursor_bg: 0xe6_ed_f5,
-        cursor_fg: 0x0c_10_14,
-        selection_bg: (0x5d, 0x73, 0x8b, 0.36),
-        ansi: [
-            (0x1f, 0x24, 0x2b),
-            (0xe8, 0x7f, 0x86),
-            (0xa8, 0xdc, 0x8a),
-            (0xe7, 0xc9, 0x8b),
-            (0x7c, 0xc5, 0xff),
-            (0xd9, 0xa8, 0xff),
-            (0x74, 0xcd, 0xd8),
-            (0xc8, 0xd2, 0xdf),
-            (0x68, 0x75, 0x86),
-            (0xff, 0x9a, 0xa2),
-            (0xc0, 0xea, 0x9d),
-            (0xf0, 0xd3, 0x91),
-            (0x99, 0xd5, 0xff),
-            (0xe3, 0xbb, 0xff),
-            (0x8d, 0xd9, 0xe2),
-            (0xf6, 0xfb, 0xff),
-        ],
-        scrollbar_thumb: (0x32, 0x38, 0x41),
-        split: (0x1d, 0x22, 0x29),
-    }
-}
-
-pub fn mica_code_light() -> TerminalThemePreset {
-    TerminalThemePreset {
-        name: "Mica Code Light",
-        background: 0xfc_fd_ff,
-        foreground: 0x17_1c_23,
-        row_band_even: 0xfc_fd_ff,
-        row_band_odd: 0xf4_f8_ff,
-        cursor_bg: 0x4c_55_61,
-        cursor_fg: 0xfc_fd_ff,
-        selection_bg: (0xc6, 0xd8, 0xf5, 0.44),
-        ansi: [
-            (0x24, 0x29, 0x2f),
-            (0xc7, 0x4e, 0x39),
-            (0x2f, 0x85, 0x5a),
-            (0xa1, 0x62, 0x07),
-            (0x25, 0x63, 0xeb),
-            (0x7c, 0x3a, 0xed),
-            (0x0f, 0x76, 0x6e),
-            (0xd8, 0xde, 0xe8),
-            (0x6b, 0x72, 0x80),
-            (0xdd, 0x6b, 0x55),
-            (0x3c, 0x9c, 0x6a),
-            (0xb7, 0x79, 0x1f),
-            (0x3b, 0x82, 0xf6),
-            (0x8b, 0x5c, 0xf6),
-            (0x0f, 0x8b, 0x83),
-            (0xff, 0xff, 0xff),
-        ],
-        scrollbar_thumb: (0xc6, 0xd0, 0xdd),
-        split: (0xe0, 0xe8, 0xf3),
+        name: spec.name,
+        background: spec.default_bg,
+        foreground: spec.default_fg,
+        row_band_even: spec.row_bg_even,
+        row_band_odd: spec.row_bg_odd,
+        cursor_bg: spec.cursor_bg,
+        cursor_fg: spec.cursor_fg,
+        selection_bg: rgba_components(spec.selection_rgb, spec.selection_alpha),
+        ansi: spec.ansi.map(rgb_components),
+        scrollbar_thumb: rgb_components(spec.scrollbar_thumb),
+        split: rgb_components(spec.split),
     }
 }
 
 pub fn preset_for_theme_mode(theme_mode: ThemeMode) -> TerminalThemePreset {
-    match theme_mode {
-        ThemeMode::Dark => mica_code_dark(),
-        ThemeMode::Light => mica_code_light(),
-    }
+    preset_from_theme_mode(theme_mode)
 }
 
 pub fn palette_for_theme_mode(theme_mode: ThemeMode) -> ColorPalette {
@@ -132,6 +80,19 @@ fn rgb_hex(rgb: u32) -> SrgbaTuple {
 
 fn rgb_tuple((red, green, blue): (u8, u8, u8)) -> SrgbaTuple {
     RgbColor::new_8bpc(red, green, blue).into()
+}
+
+fn rgb_components(rgb: u32) -> (u8, u8, u8) {
+    (
+        ((rgb >> 16) & 0xff) as u8,
+        ((rgb >> 8) & 0xff) as u8,
+        (rgb & 0xff) as u8,
+    )
+}
+
+fn rgba_components(rgb: u32, alpha: f32) -> (u8, u8, u8, f32) {
+    let (red, green, blue) = rgb_components(rgb);
+    (red, green, blue, alpha)
 }
 
 fn rgba_hex((red, green, blue, alpha): (u8, u8, u8, f32)) -> u32 {
