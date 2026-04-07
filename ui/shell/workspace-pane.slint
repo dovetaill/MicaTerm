@@ -53,6 +53,13 @@ export component WorkspacePane inherits Rectangle {
     in property <color> workspace-session-cursor-bg: ThemeTokens.terminal-cursor-bg;
     in property <color> workspace-session-default-fg: ThemeTokens.terminal-default-fg;
     in property <color> workspace-session-default-bg: ThemeTokens.terminal-default-bg;
+    in property <color> workspace-session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
+    in property <color> workspace-session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
+    in property <color> workspace-session-jump-to-latest-bg: ThemeTokens.terminal-jump-to-latest-surface;
+    in property <color> workspace-session-jump-to-latest-hover-bg: ThemeTokens.terminal-jump-to-latest-hover-surface;
+    in property <color> workspace-session-jump-to-latest-pressed-bg: ThemeTokens.terminal-jump-to-latest-pressed-surface;
+    in property <color> workspace-session-jump-to-latest-border: ThemeTokens.terminal-jump-to-latest-border;
+    in property <color> workspace-session-jump-to-latest-fg: ThemeTokens.terminal-jump-to-latest-fg;
     in property <bool> workspace-session-mouse-grabbed: false;
     in property <[string]> workspace-session-visible-lines: [];
     in property <int> workspace-session-surface-seqno: 0;
@@ -172,6 +179,13 @@ export component WorkspacePane inherits Rectangle {
                 session-cursor-bg: root.workspace-session-cursor-bg;
                 session-default-fg: root.workspace-session-default-fg;
                 session-default-bg: root.workspace-session-default-bg;
+                session-scrollbar-thumb: root.workspace-session-scrollbar-thumb;
+                session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;
+                session-jump-to-latest-bg: root.workspace-session-jump-to-latest-bg;
+                session-jump-to-latest-hover-bg: root.workspace-session-jump-to-latest-hover-bg;
+                session-jump-to-latest-pressed-bg: root.workspace-session-jump-to-latest-pressed-bg;
+                session-jump-to-latest-border: root.workspace-session-jump-to-latest-border;
+                session-jump-to-latest-fg: root.workspace-session-jump-to-latest-fg;
                 session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                 session-visible-lines: root.workspace-session-visible-lines;
                 session-surface-seqno: root.workspace-session-surface-seqno;

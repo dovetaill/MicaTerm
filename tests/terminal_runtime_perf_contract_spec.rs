@@ -51,8 +51,7 @@ fn runtime_visible_projection_limits_iteration_to_visible_phys_range() {
 
 #[test]
 fn runtime_dirty_notifications_expose_a_fast_input_active_flush_contract() {
-    let runtime_source =
-        fs::read_to_string("src/app/ssh/runtime.rs").expect("read runtime source");
+    let runtime_source = fs::read_to_string("src/app/ssh/runtime.rs").expect("read runtime source");
     let pump_source =
         fs::read_to_string("src/app/ssh/runtime/pump.rs").expect("read runtime pump source");
 
@@ -162,6 +161,27 @@ fn renderer_hot_paths_consume_terminal_frame_snapshot_contract() {
     assert!(
         !presenter_source.contains("TerminalSurfaceState"),
         "renderer-facing hot paths should stop depending directly on TerminalSurfaceState once the compact frame snapshot seam exists"
+    );
+}
+
+#[test]
+fn presenter_sources_expose_scrollback_row_shape_reuse_contract() {
+    let presenter_source = fs::read_to_string("src/app/terminal_presenter.rs")
+        .expect("read terminal presenter source");
+    let model_source =
+        fs::read_to_string("src/app/terminal_model.rs").expect("read terminal model source");
+
+    assert!(
+        presenter_source.contains("previous_shaped_rows"),
+        "presenter hot paths should retain the previous frame's shaped rows so adjacent viewport scrolls can reuse overlapping row shaping work instead of re-shaping every visible row"
+    );
+    assert!(
+        presenter_source.contains("content_hash"),
+        "presenter hot paths should key scroll reuse off a viewport-stable row content hash rather than the transient viewport row index"
+    );
+    assert!(
+        model_source.contains("pub content_hash: u64"),
+        "terminal model rows should expose a viewport-stable content hash so presenters can reuse overlapping scrollback rows even after they move to a new viewport slot"
     );
 }
 

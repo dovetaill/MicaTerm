@@ -196,3 +196,137 @@ fn terminal_model_marks_only_changed_rows_dirty() {
 
     assert_eq!(next.dirty_rows, vec![3, 4]);
 }
+
+#[test]
+fn terminal_model_tracks_viewport_stable_content_hashes_across_scrollback_shifts() {
+    let session_id = Uuid::new_v4();
+    let mut first_surface = TerminalSurfaceState::from_visible_lines(
+        session_id,
+        1,
+        3,
+        8,
+        vec!["one".into(), "two".into(), "three".into()],
+    );
+    first_surface.visible_rows = vec![
+        TerminalRowState {
+            index: 0,
+            text: "one".into(),
+            wrapped: false,
+        },
+        TerminalRowState {
+            index: 1,
+            text: "two".into(),
+            wrapped: false,
+        },
+        TerminalRowState {
+            index: 2,
+            text: "three".into(),
+            wrapped: false,
+        },
+    ];
+    first_surface.cells = vec![
+        TerminalCellState {
+            row: 0,
+            col: 0,
+            width: 1,
+            text: "one".into(),
+            bold: false,
+            underline: false,
+            fg_rgba: 0xff11_1111,
+            bg_rgba: 0xff00_0000,
+        },
+        TerminalCellState {
+            row: 1,
+            col: 0,
+            width: 1,
+            text: "two".into(),
+            bold: false,
+            underline: false,
+            fg_rgba: 0xff22_2222,
+            bg_rgba: 0xff00_0000,
+        },
+        TerminalCellState {
+            row: 2,
+            col: 0,
+            width: 1,
+            text: "three".into(),
+            bold: false,
+            underline: false,
+            fg_rgba: 0xff33_3333,
+            bg_rgba: 0xff00_0000,
+        },
+    ];
+
+    let mut second_surface = TerminalSurfaceState::from_visible_lines(
+        session_id,
+        2,
+        3,
+        8,
+        vec!["zero".into(), "one".into(), "two".into()],
+    );
+    second_surface.viewport_offset_lines = 1;
+    second_surface.viewport_max_offset_lines = 8;
+    second_surface.viewport_at_bottom = false;
+    second_surface.visible_rows = vec![
+        TerminalRowState {
+            index: 0,
+            text: "zero".into(),
+            wrapped: false,
+        },
+        TerminalRowState {
+            index: 1,
+            text: "one".into(),
+            wrapped: false,
+        },
+        TerminalRowState {
+            index: 2,
+            text: "two".into(),
+            wrapped: false,
+        },
+    ];
+    second_surface.cells = vec![
+        TerminalCellState {
+            row: 0,
+            col: 0,
+            width: 1,
+            text: "zero".into(),
+            bold: false,
+            underline: false,
+            fg_rgba: 0xff44_4444,
+            bg_rgba: 0xff00_0000,
+        },
+        TerminalCellState {
+            row: 1,
+            col: 0,
+            width: 1,
+            text: "one".into(),
+            bold: false,
+            underline: false,
+            fg_rgba: 0xff11_1111,
+            bg_rgba: 0xff00_0000,
+        },
+        TerminalCellState {
+            row: 2,
+            col: 0,
+            width: 1,
+            text: "two".into(),
+            bold: false,
+            underline: false,
+            fg_rgba: 0xff22_2222,
+            bg_rgba: 0xff00_0000,
+        },
+    ];
+
+    let previous = TerminalModelFrame::from_surface(&first_surface, None);
+    let next = TerminalModelFrame::from_surface(&second_surface, Some(&previous));
+
+    assert_eq!(
+        previous.rows[0].content_hash, next.rows[1].content_hash,
+        "scrollback shifts should preserve a viewport-stable row content hash for reused lines"
+    );
+    assert_eq!(
+        previous.rows[1].content_hash,
+        next.rows[2].content_hash,
+        "adjacent viewport shifts should keep overlapping rows reusable even when they move to a new viewport row index"
+    );
+}

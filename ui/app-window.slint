@@ -237,6 +237,13 @@ export component AppWindow inherits Window {
     in-out property <color> workspace-session-cursor-bg: ThemeTokens.terminal-cursor-bg;
     in-out property <color> workspace-session-default-fg: ThemeTokens.terminal-default-fg;
     in-out property <color> workspace-session-default-bg: ThemeTokens.terminal-default-bg;
+    in-out property <color> workspace-session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
+    in-out property <color> workspace-session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
+    in-out property <color> workspace-session-jump-to-latest-bg: ThemeTokens.terminal-jump-to-latest-surface;
+    in-out property <color> workspace-session-jump-to-latest-hover-bg: ThemeTokens.terminal-jump-to-latest-hover-surface;
+    in-out property <color> workspace-session-jump-to-latest-pressed-bg: ThemeTokens.terminal-jump-to-latest-pressed-surface;
+    in-out property <color> workspace-session-jump-to-latest-border: ThemeTokens.terminal-jump-to-latest-border;
+    in-out property <color> workspace-session-jump-to-latest-fg: ThemeTokens.terminal-jump-to-latest-fg;
     in-out property <bool> workspace-session-mouse-grabbed: false;
     in-out property <[string]> workspace-session-visible-lines: [];
     in-out property <int> workspace-session-surface-seqno: 0;
@@ -742,6 +749,13 @@ export component AppWindow inherits Window {
                         workspace-session-cursor-bg: root.workspace-session-cursor-bg;
                         workspace-session-default-fg: root.workspace-session-default-fg;
                         workspace-session-default-bg: root.workspace-session-default-bg;
+                        workspace-session-scrollbar-thumb: root.workspace-session-scrollbar-thumb;
+                        workspace-session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;
+                        workspace-session-jump-to-latest-bg: root.workspace-session-jump-to-latest-bg;
+                        workspace-session-jump-to-latest-hover-bg: root.workspace-session-jump-to-latest-hover-bg;
+                        workspace-session-jump-to-latest-pressed-bg: root.workspace-session-jump-to-latest-pressed-bg;
+                        workspace-session-jump-to-latest-border: root.workspace-session-jump-to-latest-border;
+                        workspace-session-jump-to-latest-fg: root.workspace-session-jump-to-latest-fg;
                         workspace-session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                         workspace-session-visible-lines: root.workspace-session-visible-lines;
                         workspace-session-surface-seqno: root.workspace-session-surface-seqno;

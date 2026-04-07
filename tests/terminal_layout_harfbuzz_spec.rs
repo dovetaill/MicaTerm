@@ -13,6 +13,7 @@ fn build_row(cells: Vec<TerminalModelCell>, text: &str) -> TerminalModelRow {
         text: text.into(),
         wrapped: false,
         cells,
+        content_hash: 0,
         row_hash: 0,
     }
 }

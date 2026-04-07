@@ -1,7 +1,7 @@
 //! Renderer-facing terminal frame model derived from runtime surface snapshots.
 
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use crate::app::ssh::runtime::{TerminalCellState, TerminalCursorShape, TerminalSurfaceState};
@@ -32,6 +32,7 @@ pub struct TerminalModelRow {
     pub text: String,
     pub wrapped: bool,
     pub cells: Vec<TerminalModelCell>,
+    pub content_hash: u64,
     pub row_hash: u64,
 }
 
@@ -113,12 +114,14 @@ impl TerminalModelFrame {
                 })
                 .unwrap_or_else(|| (String::new(), false));
             let cells = row_cells.remove(&row_index).unwrap_or_default();
+            let content_hash = hash_row_content(&text, wrapped, &cells);
             let row_hash = hash_row(row_index, &text, wrapped, &cells, palette);
             rows.push(TerminalModelRow {
                 row_index,
                 text,
                 wrapped,
                 cells,
+                content_hash,
                 row_hash,
             });
         }
@@ -189,21 +192,35 @@ fn hash_row(
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
     row_index.hash(&mut hasher);
-    text.hash(&mut hasher);
-    wrapped.hash(&mut hasher);
     palette.default_fg_rgba.hash(&mut hasher);
     palette.default_bg_rgba.hash(&mut hasher);
     palette.row_bg_even_rgba.hash(&mut hasher);
     palette.row_bg_odd_rgba.hash(&mut hasher);
-    for cell in cells {
-        cell.row.hash(&mut hasher);
-        cell.col.hash(&mut hasher);
-        cell.width.hash(&mut hasher);
-        cell.text.hash(&mut hasher);
-        cell.bold.hash(&mut hasher);
-        cell.underline.hash(&mut hasher);
-        cell.fg_rgba.hash(&mut hasher);
-        cell.bg_rgba.hash(&mut hasher);
-    }
+    hash_row_content_into(&mut hasher, text, wrapped, cells);
     hasher.finish()
+}
+
+fn hash_row_content(text: &str, wrapped: bool, cells: &[TerminalModelCell]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hash_row_content_into(&mut hasher, text, wrapped, cells);
+    hasher.finish()
+}
+
+fn hash_row_content_into(
+    hasher: &mut DefaultHasher,
+    text: &str,
+    wrapped: bool,
+    cells: &[TerminalModelCell],
+) {
+    text.hash(hasher);
+    wrapped.hash(hasher);
+    for cell in cells {
+        cell.col.hash(hasher);
+        cell.width.hash(hasher);
+        cell.text.hash(hasher);
+        cell.bold.hash(hasher);
+        cell.underline.hash(hasher);
+        cell.fg_rgba.hash(hasher);
+        cell.bg_rgba.hash(hasher);
+    }
 }

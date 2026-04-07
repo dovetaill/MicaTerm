@@ -12,6 +12,7 @@ use swash::scale::{Render, ScaleContext, Source};
 use swash::zeno::{Format as SwashFormat, Vector as SwashVector};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::app::terminal_emoji::{EmojiRenderOutcome, EmojiSprite, TerminalEmojiRenderer};
 use crate::app::terminal_font::backend::{
     ColorGlyphRaster, DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY, DEFAULT_TERMINAL_FONT_FAMILY,
     DEFAULT_TERMINAL_FONT_SIZE_PX, DEFAULT_TERMINAL_LINE_HEIGHT, FontFaceKey, FontFallbackFace,
@@ -23,7 +24,6 @@ use crate::app::terminal_font::windows_fallback::{
     WindowsFontFallbackResolver, contains_color_glyph_text,
 };
 use crate::app::terminal_font::windows_locator::{ResolvedFontFaceData, WindowsFontLocator};
-use crate::app::terminal_emoji::{EmojiRenderOutcome, EmojiSprite, TerminalEmojiRenderer};
 
 const CASCADIA_MONO_FONT_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf");
@@ -264,7 +264,8 @@ impl DirectWriteFontSystem {
 
         #[cfg(target_os = "windows")]
         if let Some(directwrite) = &self.directwrite
-            && let Ok(native_metrics) = directwrite.metrics_for_family(face.family_name.as_str(), px_size)
+            && let Ok(native_metrics) =
+                directwrite.metrics_for_family(face.family_name.as_str(), px_size)
         {
             metrics.units_per_em = native_metrics.units_per_em;
             metrics.ascent_px = native_metrics.ascent_px;
@@ -504,15 +505,16 @@ impl DirectWriteFontSystem {
     ) -> Option<Vec<ShapedGlyph>> {
         let (cell_width_px, cell_height_px) = font.cell_size_px();
         let span = color_glyph_cell_span(text);
-        let sprite = match self
-            .emoji_renderer
-            .rasterize_cluster(text, span, cell_width_px, cell_height_px)
-        {
-            EmojiRenderOutcome::Sprite(sprite) => sprite,
-            EmojiRenderOutcome::VisibleFallback { .. } => {
-                procedural_color_glyph_sprite(text, span, cell_width_px, cell_height_px)
-            }
-        };
+        let sprite =
+            match self
+                .emoji_renderer
+                .rasterize_cluster(text, span, cell_width_px, cell_height_px)
+            {
+                EmojiRenderOutcome::Sprite(sprite) => sprite,
+                EmojiRenderOutcome::VisibleFallback { .. } => {
+                    procedural_color_glyph_sprite(text, span, cell_width_px, cell_height_px)
+                }
+            };
         let synthetic_glyph_id = synthetic_color_glyph_id(text);
         self.color_glyph_rasters.insert(
             (font.cache_key(), resolved_face.face_key, synthetic_glyph_id),
@@ -541,7 +543,11 @@ fn synthetic_color_glyph_id(text: &str) -> u32 {
 }
 
 fn color_glyph_cell_span(text: &str) -> u32 {
-    if contains_color_glyph_text(text) { 2 } else { 1 }
+    if contains_color_glyph_text(text) {
+        2
+    } else {
+        1
+    }
 }
 
 fn resolved_face_for_family(
@@ -553,13 +559,10 @@ fn resolved_face_for_family(
         .find(|face| face.family_name.eq_ignore_ascii_case(family_name))
         .cloned()
         .unwrap_or_else(|| {
-            fallback_faces
-                .first()
-                .cloned()
-                .unwrap_or(FontFallbackFace {
-                    face_key: DEFAULT_FACE_KEY,
-                    family_name: DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
-                })
+            fallback_faces.first().cloned().unwrap_or(FontFallbackFace {
+                face_key: DEFAULT_FACE_KEY,
+                family_name: DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
+            })
         })
 }
 
@@ -626,11 +629,12 @@ mod directwrite_native {
     use windows::Win32::Foundation::BOOL;
     use windows::Win32::Graphics::DirectWrite::{
         DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_METRICS, DWRITE_FONT_STRETCH_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_REGULAR, DWriteCreateFactory,
-        IDWriteFactory, IDWriteFactory2, IDWriteFontCollection, IDWriteFontFallback,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_REGULAR, DWriteCreateFactory, IDWriteFactory,
+        IDWriteFactory2, IDWriteFontCollection, IDWriteFontFallback,
     };
     use windows::core::{Interface, PCWSTR};
 
+    use super::MIN_CELL_HEIGHT_PX;
     use crate::app::terminal_font::backend::FontMetrics;
 
     pub struct DirectWriteContext {
@@ -700,7 +704,7 @@ mod directwrite_native {
                 let descent_px = -(metrics.descent as f32 * em_scale);
                 let line_gap_px = metrics.lineGap as f32 * em_scale;
                 let line_height = (ascent_px - descent_px + line_gap_px).ceil();
-                let cell_height_px = line_height.max(px_size);
+                let cell_height_px = line_height.max(MIN_CELL_HEIGHT_PX);
                 let top_padding = ((cell_height_px - line_height) / 2.0).max(0.0).floor();
                 let baseline_px = top_padding + ascent_px.ceil();
 

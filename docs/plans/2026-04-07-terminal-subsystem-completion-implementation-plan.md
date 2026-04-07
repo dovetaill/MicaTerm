@@ -529,3 +529,170 @@ Expected: PASS.
 git add src/app/runtime_profile.rs src/app/bootstrap.rs build-win-x64.sh readme.md tests/bootstrap_smoke.rs tests/native_terminal_surface_contract_spec.rs tests/windows_native_text_renderer_contract_spec.rs
 git commit -m "feat: switch terminal default after packaged verification"
 ```
+
+### Task 9: Reuse Scrollback Row Shaping Work In The Packaged Scene-Image Path
+
+**Files:**
+- Modify: `src/app/terminal_model.rs`
+- Modify: `src/app/terminal_presenter.rs`
+- Modify: `tests/terminal_model_spec.rs`
+- Modify: `tests/terminal_runtime_perf_contract_spec.rs`
+
+**Step 1: Write the failing tests**
+
+Add coverage that proves adjacent viewport shifts do not reshape every visible row from scratch.
+
+Recommended checks:
+
+- a model-level test that tracks row content identity across viewport shifts
+- a presenter-level or contract test that requires reuse of previously shaped rows when the visible viewport scrolls by a small delta
+
+Example Rust skeleton:
+
+```rust
+#[test]
+fn prepare_native_terminal_frame_reuses_shaped_rows_for_overlapping_scrollback_rows() {
+    // render one visible viewport
+    // shift the viewport by one line
+    // assert only newly exposed rows need fresh shaping work
+}
+```
+
+**Step 2: Run tests to verify they fail**
+
+Run:
+
+```bash
+cargo test --test terminal_model_spec -- --nocapture
+cargo test --test terminal_runtime_perf_contract_spec -- --nocapture
+cargo test prepare_native_terminal_frame_reuses_shaped_rows_for_overlapping_scrollback_rows --lib -- --exact --nocapture
+```
+
+Expected: FAIL because the current presenter hot path still reshapes every visible row on each scroll update.
+
+**Step 3: Write minimal implementation**
+
+Add a small reuse seam in the presenter path:
+
+- derive a row-content hash that stays stable when identical row content slides to a new viewport row
+- keep only the previous frame's shaped rows as a reuse cache
+- rebase reused shaped rows onto the current viewport row index
+- clear the cache whenever the loaded font changes
+
+Do not claim full dirty-region rendering yet. The goal here is to remove the obvious repeated shaping work in the shipped path.
+
+**Step 4: Run tests to verify they pass**
+
+Run:
+
+```bash
+cargo test --test terminal_model_spec -- --nocapture
+cargo test --test terminal_runtime_perf_contract_spec -- --nocapture
+cargo test prepare_native_terminal_frame_reuses_shaped_rows_for_overlapping_scrollback_rows --lib -- --exact --nocapture
+```
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add src/app/terminal_model.rs src/app/terminal_presenter.rs tests/terminal_model_spec.rs tests/terminal_runtime_perf_contract_spec.rs
+git commit -m "perf: reuse shaped rows across scrollback viewport shifts"
+```
+
+### Task 10: Tune Windows Terminal Typography For Dense CJK And Mixed Rows
+
+**Files:**
+- Modify: `src/app/terminal_font/backend.rs`
+- Modify: `src/app/terminal_font/windows_dwrite.rs`
+- Modify: `src/app/terminal_presenter.rs`
+- Modify: `tests/windows_terminal_typography_defaults_spec.rs`
+- Modify: `tests/terminal_renderer_dwrite_spec.rs`
+- Modify: `tests/terminal_color_emoji_spec.rs`
+
+**Step 1: Write the failing tests**
+
+Add focused typography assertions that require:
+
+- slightly looser vertical rhythm for dense terminal text
+- stable baseline alignment for mixed Chinese / Latin / Nerd Font rows
+- scene-image/native presenter defaults to use the same typography contract
+
+**Step 2: Run tests to verify they fail**
+
+Run:
+
+```bash
+cargo test --test windows_terminal_typography_defaults_spec -- --nocapture
+cargo test --test terminal_renderer_dwrite_spec -- --nocapture
+cargo test --test terminal_color_emoji_spec -- --nocapture
+```
+
+Expected: FAIL until the typography defaults and verification contracts are tightened.
+
+**Step 3: Write minimal implementation**
+
+Tune the existing DirectWrite-backed defaults rather than introducing a new renderer:
+
+- adjust the shared terminal font metrics contract where needed
+- keep scene-image/native presenter font requests aligned
+- preserve emoji / fallback / baseline safety
+
+**Step 4: Run tests to verify they pass**
+
+Run the same commands from Step 2.
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add src/app/terminal_font/backend.rs src/app/terminal_font/windows_dwrite.rs src/app/terminal_presenter.rs tests/windows_terminal_typography_defaults_spec.rs tests/terminal_renderer_dwrite_spec.rs tests/terminal_color_emoji_spec.rs
+git commit -m "feat: polish Windows terminal typography defaults"
+```
+
+### Task 11: Make Catppuccin Visible In Terminal-Adjacent Shell Chrome
+
+**Files:**
+- Modify: `src/app/terminal_theme.rs`
+- Modify: `src/theme/spec.rs`
+- Modify: `ui/theme/tokens.slint`
+- Modify: `ui/shell/terminal-session-host.slint`
+- Modify: `tests/terminal_theme_selection_spec.rs`
+- Modify: `tests/bootstrap_smoke.rs`
+
+**Step 1: Write the failing tests**
+
+Add checks that require terminal-adjacent shell chrome to read from the same Catppuccin preset source in:
+
+- scrollbar thumb / active thumb states
+- paused-follow affordance
+- fallback / no-frame states
+
+**Step 2: Run tests to verify they fail**
+
+Run:
+
+```bash
+cargo test --test terminal_theme_selection_spec -- --nocapture
+cargo test --test bootstrap_smoke -- --nocapture
+```
+
+Expected: FAIL if the shell chrome still carries detached terminal-adjacent token values.
+
+**Step 3: Write minimal implementation**
+
+Wire the shell-adjacent tokens to the same preset-backed theme source already used by terminal fg/bg/cursor/selection defaults.
+
+**Step 4: Run tests to verify they pass**
+
+Run the same commands from Step 2.
+
+Expected: PASS.
+
+**Step 5: Commit**
+
+```bash
+git add src/app/terminal_theme.rs src/theme/spec.rs ui/theme/tokens.slint ui/shell/terminal-session-host.slint tests/terminal_theme_selection_spec.rs tests/bootstrap_smoke.rs
+git commit -m "feat: project Catppuccin through terminal shell chrome"
+```

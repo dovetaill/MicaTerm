@@ -1,25 +1,26 @@
 use anyhow::Result;
-#[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_font::{
-    ColorGlyphRaster, DirectWriteFontSystem, FontFaceKey, FontFallbackFace, FontRequest,
-    FontSystem, GlyphRasterRequest, LoadedFont, RasterizedGlyph, TextShapingRequest,
-};
-#[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_font::mock::mock_font_system;
 use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
 use mica_term::app::terminal_atlas::{ClusterSpriteKind, TerminalAtlasRenderer};
-#[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
-#[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 use mica_term::app::terminal_emoji::{
     ClusterRenderKind, EmojiFallbackReason, EmojiFontRasterizeRequest, EmojiFontResolution,
     EmojiRasterizerBackend, EmojiRenderOutcome, EmojiSprite, ResolvedEmojiFont,
     TerminalEmojiRenderer, TerminalEmojiResolver, classify_cluster_render_kind,
     recommended_emoji_font_size_px,
 };
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_font::mock::mock_font_system;
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_font::{
+    ColorGlyphRaster, DirectWriteFontSystem, FontFaceKey, FontFallbackFace, FontRequest,
+    FontSystem, GlyphRasterRequest, LoadedFont, RasterizedGlyph, TextShapingRequest,
+};
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_layout::run_segmentation::RunCluster;
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
 use mica_term::app::terminal_presenter::{
     PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter, WindowsNativePresenter,
+    WindowsSceneImagePresenter,
 };
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
@@ -83,6 +84,29 @@ fn native_presenter_reloads_font_metrics_when_raster_scale_changes() -> Result<(
     assert!(
         scaled_cell_height > base_cell_height,
         "native presenter should reload a taller device-pixel line box when raster scale increases"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn scene_image_and_native_presenters_share_default_line_box_contract() -> Result<()> {
+    let mut native = WindowsNativePresenter::new()?;
+    let mut scene_image = WindowsSceneImagePresenter::new()?;
+
+    assert_eq!(
+        native.default_cell_size().1,
+        scene_image.default_cell_size().1,
+        "native and scene-image presenters should share the same default line box so packaged and retained-native Windows paths keep dense text spacing aligned"
+    );
+
+    native.set_raster_scale(1.5);
+    scene_image.set_raster_scale(1.5);
+
+    assert_eq!(
+        native.default_cell_size().1,
+        scene_image.default_cell_size().1,
+        "native and scene-image presenters should keep the same scaled line box after DPI/raster-scale changes"
     );
 
     Ok(())

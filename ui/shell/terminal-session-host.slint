@@ -140,6 +140,13 @@ export component TerminalSessionHost inherits Rectangle {
     in property <color> session-cursor-bg: ThemeTokens.terminal-cursor-bg;
     in property <color> session-default-fg: ThemeTokens.terminal-default-fg;
     in property <color> session-default-bg: ThemeTokens.terminal-default-bg;
+    in property <color> session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
+    in property <color> session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
+    in property <color> session-jump-to-latest-bg: ThemeTokens.terminal-jump-to-latest-surface;
+    in property <color> session-jump-to-latest-hover-bg: ThemeTokens.terminal-jump-to-latest-hover-surface;
+    in property <color> session-jump-to-latest-pressed-bg: ThemeTokens.terminal-jump-to-latest-pressed-surface;
+    in property <color> session-jump-to-latest-border: ThemeTokens.terminal-jump-to-latest-border;
+    in property <color> session-jump-to-latest-fg: ThemeTokens.terminal-jump-to-latest-fg;
     in property <bool> session-mouse-grabbed: false;
     in property <[string]> session-visible-lines: [];
     in property <int> session-surface-seqno: 0;
@@ -1156,7 +1163,7 @@ export component TerminalSessionHost inherits Rectangle {
                 height: root.scrollbar-track-height();
                 border-radius: self.width / 2;
                 background: scrollbar-track-touch.has-hover || root.scrollbar-thumb-drag-active
-                    ? ThemeTokens.terminal-scrollbar-thumb-surface
+                    ? root.session-scrollbar-thumb
                     : ThemeTokens.terminal-scrollbar-track-surface;
 
                 scrollbar-track-touch := TouchArea {
@@ -1183,8 +1190,8 @@ export component TerminalSessionHost inherits Rectangle {
                     height: root.scrollbar-thumb-height();
                     border-radius: self.width / 2;
                     background: scrollbar-thumb-touch.has-hover || root.scrollbar-thumb-drag-active
-                        ? ThemeTokens.terminal-scrollbar-thumb-active-surface
-                        : ThemeTokens.terminal-scrollbar-thumb-surface;
+                        ? root.session-scrollbar-thumb-active
+                        : root.session-scrollbar-thumb;
 
                     scrollbar-thumb-touch := TouchArea {
                         width: parent.width;
@@ -1221,22 +1228,22 @@ export component TerminalSessionHost inherits Rectangle {
                 height: root.jump-to-latest-height;
                 border-radius: self.height / 2;
                 border-width: 1px;
-                border-color: ThemeTokens.divider-strong;
+                border-color: root.session-jump-to-latest-border;
                 background: jump-to-latest-touch.pressed
-                    ? ThemeTokens.control-active-surface
+                    ? root.session-jump-to-latest-pressed-bg
                     : jump-to-latest-touch.has-hover
-                        ? ThemeTokens.control-hover-surface
-                        : ThemeTokens.inspector-surface;
+                        ? root.session-jump-to-latest-hover-bg
+                        : root.session-jump-to-latest-bg;
 
                 Text {
                     x: 14px;
                     y: 0px;
                     width: parent.width - 28px;
                     height: parent.height;
-                    text: root.session-pending-output-lines > 0
-                        ? "Jump to latest (" + root.session-pending-output-lines + " new)"
-                        : "Jump to latest";
-                    color: ThemeTokens.text-primary;
+                        text: root.session-pending-output-lines > 0
+                            ? "Jump to latest (" + root.session-pending-output-lines + " new)"
+                            : "Jump to latest";
+                    color: root.session-jump-to-latest-fg;
                     font-size: 12px;
                     font-weight: 600;
                     horizontal-alignment: center;

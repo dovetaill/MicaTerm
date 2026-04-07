@@ -32,6 +32,10 @@ impl TerminalRendererHost {
         self.render_mode
     }
 
+    pub fn render_mode_label(&self) -> &'static str {
+        self.render_mode.as_str()
+    }
+
     pub fn set_raster_scale(&mut self, scale_factor: f32) {
         self.presenter.set_raster_scale(scale_factor);
     }

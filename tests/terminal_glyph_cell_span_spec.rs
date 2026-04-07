@@ -100,6 +100,7 @@ fn build_ascii_row(text: &str) -> TerminalModelRow {
         row_index: 0,
         text: text.into(),
         wrapped: false,
+        content_hash: 0,
         row_hash: 0,
         cells: text
             .chars()

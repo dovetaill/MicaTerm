@@ -94,7 +94,7 @@ use crate::app::terminal_renderer::{
     NativeTerminalSurface, NativeTerminalSurfaceDiagnostics, NativeTerminalSurfaceRect,
     TerminalRendererHost, TerminalRendererHostOptions,
 };
-use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
+use crate::app::terminal_theme::{TerminalThemePreset, preset_for_theme_mode, selection_overlay_rgba};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, bootstrap_provider_credential_ref, load_local_vault_bootstrap_state,
@@ -194,6 +194,13 @@ const FALLBACK_WORKSPACE_TERMINAL_CELL_HEIGHT_PX: u32 = 22;
 const WORKSPACE_INPUT_PROJECTION_DEBOUNCE_MS: u64 = 12;
 const WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS: u64 = 16;
 
+#[cfg(test)]
+type WorkspaceTerminalPresenterFactory =
+    dyn Fn(AppRuntimeProfile) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)>;
+#[cfg(test)]
+#[allow(non_camel_case_types)]
+type TEST_WORKSPACE_TERMINAL_HOST_FACTORY = WorkspaceTerminalPresenterFactory;
+
 thread_local! {
     static WORKSPACE_TERMINAL_RENDERER_HOST: RefCell<Option<TerminalRendererHost>> = const {
         RefCell::new(None)
@@ -202,6 +209,10 @@ thread_local! {
         RefCell::new(None)
     };
     static WORKSPACE_RUNTIME_PROFILE: RefCell<Option<AppRuntimeProfile>> = const {
+        RefCell::new(None)
+    };
+    #[cfg(test)]
+    static WORKSPACE_TEST_TERMINAL_PRESENTER_FACTORY: RefCell<Option<Box<TEST_WORKSPACE_TERMINAL_HOST_FACTORY>>> = const {
         RefCell::new(None)
     };
 }
@@ -1970,6 +1981,34 @@ fn slint_color_from_rgba(rgba: u32) -> Color {
     Color::from_argb_u8(a, r, g, b)
 }
 
+fn terminal_rgb_to_rgba((red, green, blue): (u8, u8, u8)) -> u32 {
+    0xff00_0000 | (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
+}
+
+fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: TerminalThemePreset) {
+    window.set_workspace_session_scrollbar_thumb(slint_color_from_rgba(
+        terminal_rgb_to_rgba(preset.scrollbar_thumb),
+    ));
+    window.set_workspace_session_scrollbar_thumb_active(slint_color_from_rgba(
+        terminal_rgb_to_rgba(preset.scrollbar_thumb_active),
+    ));
+    window.set_workspace_session_jump_to_latest_bg(slint_color_from_rgba(
+        0xff00_0000 | preset.jump_to_latest_bg,
+    ));
+    window.set_workspace_session_jump_to_latest_hover_bg(slint_color_from_rgba(
+        0xff00_0000 | preset.jump_to_latest_hover_bg,
+    ));
+    window.set_workspace_session_jump_to_latest_pressed_bg(slint_color_from_rgba(
+        0xff00_0000 | preset.jump_to_latest_pressed_bg,
+    ));
+    window.set_workspace_session_jump_to_latest_border(slint_color_from_rgba(
+        0xff00_0000 | preset.jump_to_latest_border,
+    ));
+    window.set_workspace_session_jump_to_latest_fg(slint_color_from_rgba(
+        0xff00_0000 | preset.jump_to_latest_fg,
+    ));
+}
+
 fn terminal_selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
     selection_overlay_rgba(theme_mode)
 }
@@ -2084,7 +2123,19 @@ fn build_scene_image_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> 
     ))
 }
 
-#[cfg(not(test))]
+fn resolve_workspace_terminal_presenter(
+    profile: AppRuntimeProfile,
+) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)> {
+    #[cfg(test)]
+    if let Some(result) = WORKSPACE_TEST_TERMINAL_PRESENTER_FACTORY.with(|cell| {
+        cell.borrow().as_ref().map(|factory| factory(profile))
+    }) {
+        return result;
+    }
+
+    build_workspace_terminal_presenter(profile)
+}
+
 fn ensure_workspace_terminal_presenter(
     window: &AppWindow,
     profile: AppRuntimeProfile,
@@ -2095,7 +2146,7 @@ fn ensure_workspace_terminal_presenter(
         let needs_init = cell.borrow().is_none();
         if needs_init {
             let (presenter, active_render_mode) =
-                match build_workspace_terminal_presenter(profile) {
+                match resolve_workspace_terminal_presenter(profile) {
                     Ok(presenter) => presenter,
                     Err(err) => {
                         tracing::error!(
@@ -2115,6 +2166,14 @@ fn ensure_workspace_terminal_presenter(
                 };
             let mut host = TerminalRendererHost::new(presenter, active_render_mode);
             host.set_raster_scale(scale_factor);
+            tracing::info!(
+                target: "app.terminal",
+                terminal_subsystem = profile.terminal_subsystem_mode_label(),
+                requested_render_mode = profile.terminal_render_mode_label(),
+                active_render_mode = active_render_mode.as_str(),
+                native_present_path = profile.native_present_path_label(),
+                "initialized workspace terminal presenter"
+            );
             *cell.borrow_mut() = Some(host);
             initialized_render_mode = Some(active_render_mode);
         }
@@ -2149,20 +2208,15 @@ fn ensure_workspace_terminal_presenter(
 }
 
 #[cfg(test)]
-fn ensure_workspace_terminal_presenter(
-    window: &AppWindow,
-    _profile: AppRuntimeProfile,
-    scale_factor: f32,
-) -> Result<()> {
-    WORKSPACE_TERMINAL_RENDERER_HOST.with(|cell| -> Result<()> {
-        if cell.borrow().is_none() {
-            let presenter = Box::new(BitmapAtlasPresenter::new()?) as Box<dyn TerminalPresenter>;
-            let mut host = TerminalRendererHost::new(presenter, TerminalRenderMode::Bitmap);
-            host.set_raster_scale(scale_factor);
-            *cell.borrow_mut() = Some(host);
-            window.set_workspace_session_native_frame_token(0);
-        }
-        Ok(())
+fn with_workspace_terminal_presenter_factory_for_test<T>(
+    factory: Box<WorkspaceTerminalPresenterFactory>,
+    body: impl FnOnce() -> T,
+) -> T {
+    WORKSPACE_TEST_TERMINAL_PRESENTER_FACTORY.with(|cell| {
+        let previous = cell.replace(Some(factory));
+        let result = body();
+        cell.replace(previous);
+        result
     })
 }
 
@@ -2180,6 +2234,58 @@ fn workspace_terminal_default_cell_size(scale_factor: f32) -> (u32, u32) {
                 FALLBACK_WORKSPACE_TERMINAL_CELL_HEIGHT_PX,
             ))
     })
+}
+
+fn present_surface_update_with_bitmap_fallback(
+    host: &mut TerminalRendererHost,
+    surface: &TerminalSurfaceState,
+    options: TerminalRendererHostOptions,
+    scale_factor: f32,
+) -> Result<PresentedTerminalFrame> {
+    match host.present_surface_update(surface, options) {
+        Ok(frame) => Ok(frame),
+        Err(first_err) => {
+            let requested_render_mode = host.render_mode();
+            tracing::error!(
+                target: "app.terminal",
+                session_id = surface.session_id.to_string(),
+                requested_render_mode = requested_render_mode.as_str(),
+                error = %first_err,
+                "failed to render workspace terminal surface; retrying with bitmap presenter"
+            );
+
+            let mut fallback_host = TerminalRendererHost::new(
+                Box::new(BitmapAtlasPresenter::new()?),
+                TerminalRenderMode::Bitmap,
+            );
+            fallback_host.set_raster_scale(scale_factor);
+            *host = fallback_host;
+
+            match host.present_surface_update(surface, options) {
+                Ok(frame) => {
+                    tracing::warn!(
+                        target: "app.terminal",
+                        session_id = surface.session_id.to_string(),
+                        requested_render_mode = requested_render_mode.as_str(),
+                        fallback_render_mode = TerminalRenderMode::Bitmap.as_str(),
+                        "workspace terminal presenter fell back to bitmap rendering after a render failure"
+                    );
+                    Ok(frame)
+                }
+                Err(retry_err) => {
+                    tracing::error!(
+                        target: "app.terminal",
+                        session_id = surface.session_id.to_string(),
+                        requested_render_mode = requested_render_mode.as_str(),
+                        fallback_render_mode = TerminalRenderMode::Bitmap.as_str(),
+                        error = %retry_err,
+                        "bitmap presenter retry failed after render failure"
+                    );
+                    Err(retry_err)
+                }
+            }
+        }
+    }
 }
 
 fn window_scale_factor(window: &AppWindow) -> f32 {
@@ -2522,6 +2628,8 @@ fn sync_workspace_session_state_with_manager(
     window.set_workspace_session_cell_width(default_cell_width_px as f32 / scale_factor);
     window.set_workspace_session_cell_height(default_cell_height_px as f32 / scale_factor);
     sync_workspace_native_terminal_surface_geometry(window);
+    let terminal_theme_preset = preset_for_theme_mode(state.theme_mode);
+    sync_workspace_terminal_shell_chrome(window, terminal_theme_preset);
 
     let follow_indicator =
         follow_tracker.indicator_for_surface(state.active_workspace_terminal_surface());
@@ -2545,12 +2653,14 @@ fn sync_workspace_session_state_with_manager(
                 return;
             };
             host.set_raster_scale(scale_factor);
-            match host.present_surface_update(
+            match present_surface_update_with_bitmap_fallback(
+                host,
                 surface,
                 TerminalRendererHostOptions {
                     selection,
                     selection_overlay_rgba,
                 },
+                scale_factor,
             ) {
                 Ok(PresentedTerminalFrame::Bitmap(frame)) => {
                     window.set_workspace_session_rows(i32::try_from(frame.grid_rows).unwrap_or(i32::MAX));
@@ -2637,7 +2747,7 @@ fn sync_workspace_session_state_with_manager(
             window.set_workspace_session_render_mode(next_render_mode.as_str().into());
         }
     } else {
-        let preset = preset_for_theme_mode(state.theme_mode);
+        let preset = terminal_theme_preset;
         window.set_workspace_session_rows(24);
         window.set_workspace_session_cols(80);
         window.set_workspace_session_cursor_row(0);
@@ -5499,6 +5609,8 @@ mod tests {
     use crate::app::ssh::credentials::MemoryCredentialStore;
     use crate::app::ssh::profile::SshAuthMethod;
     use crate::app::ssh::runtime::{TerminalCellState, TerminalKeyEvent, TerminalSurfaceState};
+    use crate::app::terminal_presenter::TerminalPresentationOptions;
+    use anyhow::{Result, anyhow};
     use std::future::Future;
     use std::pin::Pin;
 
@@ -5509,6 +5621,9 @@ mod tests {
     struct SequencedSurfaceLauncher;
 
     struct NoopRuntimeControl;
+
+    struct FailingPresenter;
+    struct SizedPresenter((u32, u32));
 
     #[test]
     fn deferred_workspace_projection_refresh_gate_coalesces_redundant_requests() {
@@ -5531,6 +5646,91 @@ mod tests {
             gate.mark_scheduled(),
             "after a debounced scroll refresh runs, the next scroll interaction should be able to schedule a fresh workspace projection refresh"
         );
+    }
+
+    #[test]
+    fn presenter_render_failure_falls_back_to_bitmap_presenter() -> Result<()> {
+        let session_id = Uuid::new_v4();
+        let surface = TerminalSurfaceState::from_visible_lines(
+            session_id,
+            1,
+            4,
+            12,
+            vec!["prompt>".into(), "echo hi".into()],
+        );
+        let mut host = TerminalRendererHost::new(
+            Box::new(FailingPresenter),
+            TerminalRenderMode::Native,
+        );
+
+        let frame = present_surface_update_with_bitmap_fallback(
+            &mut host,
+            &surface,
+            TerminalRendererHostOptions::default(),
+            1.0,
+        )?;
+
+        assert!(
+            matches!(frame, PresentedTerminalFrame::Bitmap(_)),
+            "when the requested presenter fails at runtime the workspace host should retry through the bitmap presenter instead of leaving the terminal blank"
+        );
+        assert_eq!(
+            host.render_mode(),
+            TerminalRenderMode::Bitmap,
+            "after a presenter render failure the workspace host should stay on the bitmap presenter so later surface updates keep rendering visible terminal content"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_workspace_terminal_presenter_can_use_test_override_factory() -> Result<()> {
+        let (presenter, render_mode) = with_workspace_terminal_presenter_factory_for_test(
+            Box::new(|_profile| {
+                Ok((
+                    Box::new(SizedPresenter((33, 44))) as Box<dyn TerminalPresenter>,
+                    TerminalRenderMode::Bitmap,
+                ))
+            }),
+            || resolve_workspace_terminal_presenter(AppRuntimeProfile::development()),
+        )?;
+
+        assert_eq!(
+            presenter.default_cell_size(),
+            (33, 44),
+            "test overrides should be able to install a non-default presenter path instead of always forcing BitmapAtlasPresenter"
+        );
+        assert_eq!(
+            render_mode,
+            TerminalRenderMode::Bitmap,
+            "test overrides should be able to request a specific render mode through the shared presenter resolution path"
+        );
+        Ok(())
+    }
+
+    fn with_bitmap_workspace_presenter_for_test<T>(body: impl FnOnce() -> T) -> T {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = None;
+        });
+        WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
+            *surface.borrow_mut() = None;
+        });
+        let result = with_workspace_terminal_presenter_factory_for_test(
+            Box::new(|_profile| {
+                Ok((
+                    Box::new(SizedPresenter((10, 22))) as Box<dyn TerminalPresenter>,
+                    TerminalRenderMode::Bitmap,
+                ))
+            }),
+            body,
+        );
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = None;
+        });
+        WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
+            *surface.borrow_mut() = None;
+        });
+        result
     }
 
     impl SessionRuntimeControl for NoopRuntimeControl {
@@ -5556,6 +5756,34 @@ mod tests {
 
         fn resize(&self, _rows: u32, _cols: u32) -> Result<()> {
             Ok(())
+        }
+    }
+
+    impl TerminalPresenter for FailingPresenter {
+        fn present(
+            &mut self,
+            _surface: &TerminalSurfaceState,
+            _options: TerminalPresentationOptions,
+        ) -> Result<PresentedTerminalFrame> {
+            Err(anyhow!("simulated presenter failure"))
+        }
+
+        fn default_cell_size(&self) -> (u32, u32) {
+            (10, 22)
+        }
+    }
+
+    impl TerminalPresenter for SizedPresenter {
+        fn present(
+            &mut self,
+            _surface: &TerminalSurfaceState,
+            _options: TerminalPresentationOptions,
+        ) -> Result<PresentedTerminalFrame> {
+            Err(anyhow!("sized presenter is only used for install-path tests"))
+        }
+
+        fn default_cell_size(&self) -> (u32, u32) {
+            self.0
         }
     }
 
@@ -5772,144 +6000,158 @@ mod tests {
 
     #[test]
     fn workspace_session_state_refreshes_terminal_image_across_surface_updates() {
-        i_slint_backend_testing::init_no_event_loop();
+        with_bitmap_workspace_presenter_for_test(|| {
+            i_slint_backend_testing::init_no_event_loop();
 
-        let window = AppWindow::new().expect("create app window");
-        let session_id = Uuid::new_v4();
-        let mut state = ShellViewModel::default();
-        let mut tab = WorkspaceTab::from_session(&SessionHandle {
-            session_id,
-            asset_id: "asset-prod".into(),
-            title: "Prod Bastion".into(),
-            subtitle: "ops@10.0.0.12:22".into(),
-            state: SessionState::Connected,
-            can_reconnect: false,
-            enhanced_session_state: EnhancedSessionState::Plain,
+            let window = AppWindow::new().expect("create app window");
+            let session_id = Uuid::new_v4();
+            let mut state = ShellViewModel::default();
+            let mut tab = WorkspaceTab::from_session(&SessionHandle {
+                session_id,
+                asset_id: "asset-prod".into(),
+                title: "Prod Bastion".into(),
+                subtitle: "ops@10.0.0.12:22".into(),
+                state: SessionState::Connected,
+                can_reconnect: false,
+                enhanced_session_state: EnhancedSessionState::Plain,
+            });
+            tab.active = true;
+            state.set_workspace_tabs(vec![tab]);
+            let mut initial_surface = TerminalSurfaceState::from_visible_lines(
+                session_id,
+                1,
+                24,
+                80,
+                vec!["welcome".into()],
+            );
+            initial_surface.cells = vec![TerminalCellState {
+                row: 0,
+                col: 0,
+                width: 1,
+                text: "w".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffff_ffff,
+                bg_rgba: 0xff0d_1117,
+            }];
+            state.set_active_workspace_terminal_surface(Some(initial_surface));
+            let mut follow_tracker = WorkspaceFollowTracker::default();
+
+            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+            let initial_lines_model = window.get_workspace_session_visible_lines();
+            let initial_surface_seqno = window.get_workspace_session_surface_seqno();
+
+            assert_eq!(
+                window.get_workspace_session_native_frame_token(),
+                0,
+                "scene-image and bitmap composition paths should keep the native frame token cleared"
+            );
+            assert_eq!(initial_surface_seqno, 1);
+            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
+
+            let mut updated_surface = TerminalSurfaceState::from_visible_lines(
+                session_id,
+                2,
+                24,
+                80,
+                vec!["welcome".into(), "$ pwd".into()],
+            );
+            updated_surface.cells = vec![TerminalCellState {
+                row: 1,
+                col: 0,
+                width: 1,
+                text: "$".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffff_ffff,
+                bg_rgba: 0xff0d_1117,
+            }];
+            state.set_active_workspace_terminal_surface(Some(updated_surface));
+
+            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+
+            assert_eq!(
+                window.get_workspace_session_visible_lines(),
+                initial_lines_model,
+                "terminal visible line projection should reuse the same VecModel instance"
+            );
+            assert_eq!(
+                window.get_workspace_session_native_frame_token(),
+                0,
+                "scene-image and bitmap composition paths should keep the native frame token cleared while surface seqno tracks the visible frame"
+            );
+            assert_ne!(window.get_workspace_session_surface_seqno(), initial_surface_seqno);
+            assert_eq!(window.get_workspace_session_surface_seqno(), 2);
+            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
         });
-        tab.active = true;
-        state.set_workspace_tabs(vec![tab]);
-        let mut initial_surface =
-            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["welcome".into()]);
-        initial_surface.cells = vec![TerminalCellState {
-            row: 0,
-            col: 0,
-            width: 1,
-            text: "w".into(),
-            bold: false,
-            underline: false,
-            fg_rgba: 0xffff_ffff,
-            bg_rgba: 0xff0d_1117,
-        }];
-        state.set_active_workspace_terminal_surface(Some(initial_surface));
-        let mut follow_tracker = WorkspaceFollowTracker::default();
-
-        sync_workspace_session_state(&window, &state, &mut follow_tracker);
-        let initial_lines_model = window.get_workspace_session_visible_lines();
-        let initial_surface_seqno = window.get_workspace_session_surface_seqno();
-
-        assert_eq!(
-            window.get_workspace_session_native_frame_token(),
-            0,
-            "scene-image and bitmap composition paths should keep the native frame token cleared"
-        );
-        assert_eq!(initial_surface_seqno, 1);
-        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
-
-        let mut updated_surface = TerminalSurfaceState::from_visible_lines(
-            session_id,
-            2,
-            24,
-            80,
-            vec!["welcome".into(), "$ pwd".into()],
-        );
-        updated_surface.cells = vec![TerminalCellState {
-            row: 1,
-            col: 0,
-            width: 1,
-            text: "$".into(),
-            bold: false,
-            underline: false,
-            fg_rgba: 0xffff_ffff,
-            bg_rgba: 0xff0d_1117,
-        }];
-        state.set_active_workspace_terminal_surface(Some(updated_surface));
-
-        sync_workspace_session_state(&window, &state, &mut follow_tracker);
-
-        assert_eq!(
-            window.get_workspace_session_visible_lines(),
-            initial_lines_model,
-            "terminal visible line projection should reuse the same VecModel instance"
-        );
-        assert_eq!(
-            window.get_workspace_session_native_frame_token(),
-            0,
-            "scene-image and bitmap composition paths should keep the native frame token cleared while surface seqno tracks the visible frame"
-        );
-        assert_ne!(window.get_workspace_session_surface_seqno(), initial_surface_seqno);
-        assert_eq!(window.get_workspace_session_surface_seqno(), 2);
-        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
     }
 
     #[test]
     fn workspace_session_state_clears_native_terminal_frame_when_surface_clears() {
-        i_slint_backend_testing::init_no_event_loop();
+        with_bitmap_workspace_presenter_for_test(|| {
+            i_slint_backend_testing::init_no_event_loop();
 
-        let window = AppWindow::new().expect("create app window");
-        let session_id = Uuid::new_v4();
-        let mut state = ShellViewModel::default();
-        let mut tab = WorkspaceTab::from_session(&SessionHandle {
-            session_id,
-            asset_id: "asset-prod".into(),
-            title: "Prod Bastion".into(),
-            subtitle: "ops@10.0.0.12:22".into(),
-            state: SessionState::Connected,
-            can_reconnect: false,
-            enhanced_session_state: EnhancedSessionState::Plain,
+            let window = AppWindow::new().expect("create app window");
+            let session_id = Uuid::new_v4();
+            let mut state = ShellViewModel::default();
+            let mut tab = WorkspaceTab::from_session(&SessionHandle {
+                session_id,
+                asset_id: "asset-prod".into(),
+                title: "Prod Bastion".into(),
+                subtitle: "ops@10.0.0.12:22".into(),
+                state: SessionState::Connected,
+                can_reconnect: false,
+                enhanced_session_state: EnhancedSessionState::Plain,
+            });
+            tab.active = true;
+            state.set_workspace_tabs(vec![tab]);
+            let mut initial_surface = TerminalSurfaceState::from_visible_lines(
+                session_id,
+                1,
+                24,
+                80,
+                vec!["welcome".into()],
+            );
+            initial_surface.cells = vec![TerminalCellState {
+                row: 0,
+                col: 0,
+                width: 1,
+                text: "w".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xffff_ffff,
+                bg_rgba: 0xff0d_1117,
+            }];
+            state.set_active_workspace_terminal_surface(Some(initial_surface));
+            let mut follow_tracker = WorkspaceFollowTracker::default();
+
+            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+            let initial_lines_model = window.get_workspace_session_visible_lines();
+            assert_eq!(
+                window.get_workspace_session_native_frame_token(),
+                0,
+                "scene-image and bitmap composition paths should keep the native frame token cleared even after publishing a visible terminal frame"
+            );
+            assert_eq!(window.get_workspace_session_surface_seqno(), 1);
+            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
+
+            state.set_active_workspace_terminal_surface(None);
+            sync_workspace_session_state(&window, &state, &mut follow_tracker);
+
+            assert_eq!(
+                window.get_workspace_session_visible_lines(),
+                initial_lines_model,
+                "clearing the surface should keep reusing the visible line model"
+            );
+            assert_eq!(
+                window.get_workspace_session_native_frame_token(),
+                0,
+                "clearing the surface should reset the retained native frame token"
+            );
+            assert_eq!(window.get_workspace_session_surface_seqno(), 0);
+            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
+            assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
         });
-        tab.active = true;
-        state.set_workspace_tabs(vec![tab]);
-        let mut initial_surface =
-            TerminalSurfaceState::from_visible_lines(session_id, 1, 24, 80, vec!["welcome".into()]);
-        initial_surface.cells = vec![TerminalCellState {
-            row: 0,
-            col: 0,
-            width: 1,
-            text: "w".into(),
-            bold: false,
-            underline: false,
-            fg_rgba: 0xffff_ffff,
-            bg_rgba: 0xff0d_1117,
-        }];
-        state.set_active_workspace_terminal_surface(Some(initial_surface));
-        let mut follow_tracker = WorkspaceFollowTracker::default();
-
-        sync_workspace_session_state(&window, &state, &mut follow_tracker);
-        let initial_lines_model = window.get_workspace_session_visible_lines();
-        assert_eq!(
-            window.get_workspace_session_native_frame_token(),
-            0,
-            "scene-image and bitmap composition paths should keep the native frame token cleared even after publishing a visible terminal frame"
-        );
-        assert_eq!(window.get_workspace_session_surface_seqno(), 1);
-        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
-
-        state.set_active_workspace_terminal_surface(None);
-        sync_workspace_session_state(&window, &state, &mut follow_tracker);
-
-        assert_eq!(
-            window.get_workspace_session_visible_lines(),
-            initial_lines_model,
-            "clearing the surface should keep reusing the visible line model"
-        );
-        assert_eq!(
-            window.get_workspace_session_native_frame_token(),
-            0,
-            "clearing the surface should reset the retained native frame token"
-        );
-        assert_eq!(window.get_workspace_session_surface_seqno(), 0);
-        assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
-        assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
     }
 
     #[test]

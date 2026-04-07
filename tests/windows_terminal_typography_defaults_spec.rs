@@ -12,7 +12,8 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
         fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite");
 
     assert!(
-        backend_source.contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Cascadia Mono\";"),
+        backend_source
+            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Cascadia Mono\";"),
         "backend should set Cascadia Mono as the shared terminal default family"
     );
     assert!(
@@ -20,8 +21,8 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
         "backend should expose a 14px default terminal font size"
     );
     assert!(
-        backend_source.contains("pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.4;"),
-        "backend should expose a compact 1.4 default line height"
+        backend_source.contains("pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.5;"),
+        "backend should expose a slightly looser 1.5 default line height for denser CJK readability"
     );
     assert!(
         backend_source.contains("pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 0.0;"),
@@ -65,5 +66,9 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
         dwrite_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf")
             && dwrite_source.contains("DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY"),
         "DirectWrite fallback should keep a bundled Sarasa Term SC face available when packaged Windows builds cannot resolve the system CJK family"
+    );
+    assert!(
+        dwrite_source.contains("let cell_height_px = line_height.max(MIN_CELL_HEIGHT_PX);"),
+        "DirectWrite metrics should keep the native line box aligned with the shared minimum terminal line-height contract so retained-native and scene-image paths do not diverge on dense text spacing"
     );
 }
