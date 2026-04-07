@@ -94,7 +94,7 @@ use crate::app::terminal_renderer::{
     NativeTerminalSurface, NativeTerminalSurfaceDiagnostics, NativeTerminalSurfaceRect,
     TerminalRendererHost, TerminalRendererHostOptions,
 };
-use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
+use crate::app::terminal_theme::{TerminalThemePreset, preset_for_theme_mode, selection_overlay_rgba};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, bootstrap_provider_credential_ref, load_local_vault_bootstrap_state,
@@ -1981,6 +1981,34 @@ fn slint_color_from_rgba(rgba: u32) -> Color {
     Color::from_argb_u8(a, r, g, b)
 }
 
+fn terminal_rgb_to_rgba((red, green, blue): (u8, u8, u8)) -> u32 {
+    0xff00_0000 | (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
+}
+
+fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: TerminalThemePreset) {
+    window.set_workspace_session_scrollbar_thumb(slint_color_from_rgba(
+        terminal_rgb_to_rgba(preset.scrollbar_thumb),
+    ));
+    window.set_workspace_session_scrollbar_thumb_active(slint_color_from_rgba(
+        terminal_rgb_to_rgba(preset.scrollbar_thumb_active),
+    ));
+    window.set_workspace_session_jump_to_latest_bg(slint_color_from_rgba(
+        0xff00_0000 | preset.jump_to_latest_bg,
+    ));
+    window.set_workspace_session_jump_to_latest_hover_bg(slint_color_from_rgba(
+        0xff00_0000 | preset.jump_to_latest_hover_bg,
+    ));
+    window.set_workspace_session_jump_to_latest_pressed_bg(slint_color_from_rgba(
+        0xff00_0000 | preset.jump_to_latest_pressed_bg,
+    ));
+    window.set_workspace_session_jump_to_latest_border(slint_color_from_rgba(
+        0xff00_0000 | preset.jump_to_latest_border,
+    ));
+    window.set_workspace_session_jump_to_latest_fg(slint_color_from_rgba(
+        0xff00_0000 | preset.jump_to_latest_fg,
+    ));
+}
+
 fn terminal_selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
     selection_overlay_rgba(theme_mode)
 }
@@ -2600,6 +2628,8 @@ fn sync_workspace_session_state_with_manager(
     window.set_workspace_session_cell_width(default_cell_width_px as f32 / scale_factor);
     window.set_workspace_session_cell_height(default_cell_height_px as f32 / scale_factor);
     sync_workspace_native_terminal_surface_geometry(window);
+    let terminal_theme_preset = preset_for_theme_mode(state.theme_mode);
+    sync_workspace_terminal_shell_chrome(window, terminal_theme_preset);
 
     let follow_indicator =
         follow_tracker.indicator_for_surface(state.active_workspace_terminal_surface());
@@ -2717,7 +2747,7 @@ fn sync_workspace_session_state_with_manager(
             window.set_workspace_session_render_mode(next_render_mode.as_str().into());
         }
     } else {
-        let preset = preset_for_theme_mode(state.theme_mode);
+        let preset = terminal_theme_preset;
         window.set_workspace_session_rows(24);
         window.set_workspace_session_cols(80);
         window.set_workspace_session_cursor_row(0);

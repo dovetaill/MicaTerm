@@ -86,6 +86,10 @@ use uuid::Uuid;
 
 static KNOWN_HOSTS_ENV_LOCK: Mutex<()> = Mutex::new(());
 
+fn rgb_tuple_to_hex((red, green, blue): (u8, u8, u8)) -> u32 {
+    (u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)
+}
+
 #[test]
 fn bootstrap_source_uses_terminal_presenter_contract() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
@@ -8231,6 +8235,133 @@ fn no_surface_terminal_projection_uses_catppuccin_defaults_and_tracks_theme_togg
         app.get_workspace_session_default_bg().as_argb_encoded(),
         0xff00_0000 | light_preset.background,
         "when no terminal surface is active the fallback terminal projection should still use the Catppuccin light background after a theme toggle"
+    );
+}
+
+#[test]
+fn bootstrap_projects_terminal_shell_chrome_contract_from_theme_preset() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let app_window_source = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace_pane_source =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+
+    assert!(
+        bootstrap_source.contains("set_workspace_session_scrollbar_thumb(")
+            && bootstrap_source.contains("set_workspace_session_scrollbar_thumb_active("),
+        "bootstrap should publish terminal scrollbar thumb colors through the workspace session contract so fallback and live shell chrome stay on the same Catppuccin preset source"
+    );
+    assert!(
+        bootstrap_source.contains("set_workspace_session_jump_to_latest_bg(")
+            && bootstrap_source.contains("set_workspace_session_jump_to_latest_hover_bg(")
+            && bootstrap_source.contains("set_workspace_session_jump_to_latest_pressed_bg(")
+            && bootstrap_source.contains("set_workspace_session_jump_to_latest_border(")
+            && bootstrap_source.contains("set_workspace_session_jump_to_latest_fg("),
+        "bootstrap should publish paused-follow pill colors through the workspace session contract so no-frame and active terminal states do not fall back to detached generic shell tokens"
+    );
+    assert!(
+        app_window_source.contains("workspace-session-scrollbar-thumb")
+            && app_window_source.contains("workspace-session-scrollbar-thumb-active")
+            && app_window_source.contains("workspace-session-jump-to-latest-bg")
+            && app_window_source.contains("workspace-session-jump-to-latest-hover-bg")
+            && app_window_source.contains("workspace-session-jump-to-latest-pressed-bg")
+            && app_window_source.contains("workspace-session-jump-to-latest-border")
+            && app_window_source.contains("workspace-session-jump-to-latest-fg"),
+        "AppWindow should surface terminal shell chrome colors as first-class workspace session properties so Rust can project the Catppuccin preset into the shell host"
+    );
+    assert!(
+        workspace_pane_source.contains("workspace-session-scrollbar-thumb")
+            && workspace_pane_source.contains("workspace-session-scrollbar-thumb-active")
+            && workspace_pane_source.contains("workspace-session-jump-to-latest-bg")
+            && workspace_pane_source.contains("workspace-session-jump-to-latest-hover-bg")
+            && workspace_pane_source.contains("workspace-session-jump-to-latest-pressed-bg")
+            && workspace_pane_source.contains("workspace-session-jump-to-latest-border")
+            && workspace_pane_source.contains("workspace-session-jump-to-latest-fg"),
+        "WorkspacePane should thread the terminal shell chrome properties through to TerminalSessionHost instead of letting that chrome drift back to generic shell tokens"
+    );
+}
+
+#[test]
+fn no_surface_terminal_shell_chrome_tracks_catppuccin_theme_toggle() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+
+    let dark_preset = preset_for_theme_mode(ThemeMode::Dark);
+    assert_eq!(
+        app.get_workspace_session_scrollbar_thumb().as_argb_encoded(),
+        0xff00_0000 | rgb_tuple_to_hex(dark_preset.scrollbar_thumb)
+    );
+    assert_eq!(
+        app.get_workspace_session_scrollbar_thumb_active()
+            .as_argb_encoded(),
+        0xff00_0000 | rgb_tuple_to_hex(dark_preset.scrollbar_thumb_active)
+    );
+    assert_eq!(
+        app.get_workspace_session_jump_to_latest_bg().as_argb_encoded(),
+        0xff00_0000 | dark_preset.jump_to_latest_bg
+    );
+    assert_eq!(
+        app.get_workspace_session_jump_to_latest_hover_bg()
+            .as_argb_encoded(),
+        0xff00_0000 | dark_preset.jump_to_latest_hover_bg
+    );
+    assert_eq!(
+        app.get_workspace_session_jump_to_latest_pressed_bg()
+            .as_argb_encoded(),
+        0xff00_0000 | dark_preset.jump_to_latest_pressed_bg
+    );
+    assert_eq!(
+        app.get_workspace_session_jump_to_latest_border()
+            .as_argb_encoded(),
+        0xff00_0000 | dark_preset.jump_to_latest_border
+    );
+    assert_eq!(
+        app.get_workspace_session_jump_to_latest_fg().as_argb_encoded(),
+        0xff00_0000 | dark_preset.jump_to_latest_fg
+    );
+
+    app.invoke_toggle_theme_mode_requested();
+
+    let light_preset = preset_for_theme_mode(ThemeMode::Light);
+    assert_eq!(
+        app.get_workspace_session_scrollbar_thumb().as_argb_encoded(),
+        0xff00_0000 | rgb_tuple_to_hex(light_preset.scrollbar_thumb),
+        "without an active terminal surface the terminal scrollbar thumb should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_workspace_session_scrollbar_thumb_active()
+            .as_argb_encoded(),
+        0xff00_0000 | rgb_tuple_to_hex(light_preset.scrollbar_thumb_active),
+        "without an active terminal surface the terminal scrollbar hover thumb should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_workspace_session_jump_to_latest_bg().as_argb_encoded(),
+        0xff00_0000 | light_preset.jump_to_latest_bg,
+        "without an active terminal surface the paused-follow pill background should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_workspace_session_jump_to_latest_hover_bg()
+            .as_argb_encoded(),
+        0xff00_0000 | light_preset.jump_to_latest_hover_bg,
+        "without an active terminal surface the paused-follow pill hover background should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_workspace_session_jump_to_latest_pressed_bg()
+            .as_argb_encoded(),
+        0xff00_0000 | light_preset.jump_to_latest_pressed_bg,
+        "without an active terminal surface the paused-follow pill pressed background should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_workspace_session_jump_to_latest_border()
+            .as_argb_encoded(),
+        0xff00_0000 | light_preset.jump_to_latest_border,
+        "without an active terminal surface the paused-follow pill border should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
+    );
+    assert_eq!(
+        app.get_workspace_session_jump_to_latest_fg().as_argb_encoded(),
+        0xff00_0000 | light_preset.jump_to_latest_fg,
+        "without an active terminal surface the paused-follow pill label should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
     );
 }
 
