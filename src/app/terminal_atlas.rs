@@ -77,19 +77,24 @@ impl TerminalAtlasSelection {
         }
 
         let start_col = if row == self.start_row {
-            self.start_col
+            self.start_col.min(cols)
         } else {
             0
         };
-        let end_col = if row == self.end_row {
-            self.end_col
+        let end_col_exclusive = if row == self.end_row {
+            self.end_col.min(cols)
         } else {
-            cols.saturating_sub(1)
+            cols
         };
+        if start_col >= end_col_exclusive {
+            return None;
+        }
 
         Some((
             start_col.min(cols.saturating_sub(1)),
-            end_col.min(cols.saturating_sub(1)),
+            end_col_exclusive
+                .saturating_sub(1)
+                .min(cols.saturating_sub(1)),
         ))
     }
 }

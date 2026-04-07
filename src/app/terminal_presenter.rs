@@ -570,24 +570,29 @@ fn selection_overlay_rects(
     }
 
     (selection.start_row..=selection.end_row)
-        .map(|row| {
+        .filter_map(|row| {
             let start_col = if row == selection.start_row {
-                selection.start_col
+                selection.start_col.min(cols)
             } else {
                 0
             };
-            let end_col = if row == selection.end_row {
-                selection.end_col
+            let end_col_exclusive = if row == selection.end_row {
+                selection.end_col.min(cols)
             } else {
-                cols.saturating_sub(1)
+                cols
             };
+            if start_col >= end_col_exclusive {
+                return None;
+            }
 
-            NativeSelectionRect {
+            Some(NativeSelectionRect {
                 row,
                 start_col: start_col.min(cols.saturating_sub(1)),
-                end_col: end_col.min(cols.saturating_sub(1)),
+                end_col: end_col_exclusive
+                    .saturating_sub(1)
+                    .min(cols.saturating_sub(1)),
                 overlay_rgba,
-            }
+            })
         })
         .collect()
 }

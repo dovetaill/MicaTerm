@@ -191,6 +191,7 @@ const MAX_SSH_PROXY_CHAIN_DEPTH: usize = 8;
 const WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD: usize = 4;
 const FALLBACK_WORKSPACE_TERMINAL_CELL_WIDTH_PX: u32 = 10;
 const FALLBACK_WORKSPACE_TERMINAL_CELL_HEIGHT_PX: u32 = 22;
+const WORKSPACE_INPUT_PROJECTION_DEBOUNCE_MS: u64 = 12;
 const WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS: u64 = 16;
 
 thread_local! {
@@ -3746,6 +3747,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     }
     install_windows_frame_adapter(window);
     let session_projection_timer = Rc::new(Timer::default());
+    let input_projection_refresh_timer = Rc::new(Timer::default());
+    let input_projection_refresh_gate = Rc::new(RefCell::new(
+        DeferredWorkspaceProjectionRefreshGate::default(),
+    ));
     let scroll_projection_refresh_timer = Rc::new(Timer::default());
     let scroll_projection_refresh_gate = Rc::new(RefCell::new(
         DeferredWorkspaceProjectionRefreshGate::default(),
@@ -5099,31 +5104,43 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
     });
 
-    let state = Rc::clone(&view_model);
+    let view_model_ref = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let input_projection_refresh_timer_ref = Rc::clone(&input_projection_refresh_timer);
+    let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
     window.on_workspace_session_text_input(move |text| {
-        let mut state = state.borrow_mut();
+        let mut state = view_model_ref.borrow_mut();
         workspace_terminal::forward_active_workspace_text_input(&state, session_bridge_ref.as_deref(), text.as_str());
-        if workspace_terminal::apply_local_input_projection_hint(&mut state)
-            && let Some(window) = window_handle.upgrade()
-        {
-            workspace_terminal::refresh_projection_after_local_input_hint(
+        if let Some(window) = window_handle.upgrade() {
+            if workspace_terminal::apply_local_input_projection_hint(&mut state) {
+                workspace_terminal::refresh_projection_after_local_input_hint(
+                    &window,
+                    &mut state,
+                    session_bridge_ref.as_deref(),
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                );
+            }
+            workspace_terminal::schedule_workspace_input_projection_refresh(
                 &window,
-                &mut state,
-                session_bridge_ref.as_deref(),
-                &mut workspace_follow_tracker_ref.borrow_mut(),
+                Rc::clone(&view_model_ref),
+                session_bridge_ref.clone(),
+                Rc::clone(&workspace_follow_tracker_ref),
+                Rc::clone(&input_projection_refresh_timer_ref),
+                Rc::clone(&input_projection_refresh_gate_ref),
             );
         }
     });
 
-    let state = Rc::clone(&view_model);
+    let view_model_ref = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let input_projection_refresh_timer_ref = Rc::clone(&input_projection_refresh_timer);
+    let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
     window.on_workspace_session_key_input(move |key, alt, ctrl, shift| {
-        let mut state = state.borrow_mut();
+        let mut state = view_model_ref.borrow_mut();
         workspace_terminal::forward_active_workspace_key_input(
             &state,
             session_bridge_ref.as_deref(),
@@ -5132,14 +5149,22 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             ctrl,
             shift,
         );
-        if workspace_terminal::apply_local_input_projection_hint(&mut state)
-            && let Some(window) = window_handle.upgrade()
-        {
-            workspace_terminal::refresh_projection_after_local_input_hint(
+        if let Some(window) = window_handle.upgrade() {
+            if workspace_terminal::apply_local_input_projection_hint(&mut state) {
+                workspace_terminal::refresh_projection_after_local_input_hint(
+                    &window,
+                    &mut state,
+                    session_bridge_ref.as_deref(),
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                );
+            }
+            workspace_terminal::schedule_workspace_input_projection_refresh(
                 &window,
-                &mut state,
-                session_bridge_ref.as_deref(),
-                &mut workspace_follow_tracker_ref.borrow_mut(),
+                Rc::clone(&view_model_ref),
+                session_bridge_ref.clone(),
+                Rc::clone(&workspace_follow_tracker_ref),
+                Rc::clone(&input_projection_refresh_timer_ref),
+                Rc::clone(&input_projection_refresh_gate_ref),
             );
         }
     });
@@ -5172,6 +5197,18 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     });
 
     let state = Rc::clone(&view_model);
+    window.on_workspace_session_normalize_hit_col(move |row, col| {
+        let state = state.borrow();
+        workspace_terminal::normalize_active_workspace_hit_col(&state, row, col)
+    });
+
+    let state = Rc::clone(&view_model);
+    window.on_workspace_session_normalize_selection_hit_col(move |row, col| {
+        let state = state.borrow();
+        workspace_terminal::normalize_active_workspace_selection_hit_col(&state, row, col)
+    });
+
+    let state = Rc::clone(&view_model);
     window.on_workspace_session_copy_selection_requested(
         move |start_row, start_col, end_row, end_col| {
             let state = state.borrow();
@@ -5179,13 +5216,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         },
     );
 
-    let state = Rc::clone(&view_model);
+    let view_model_ref = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
     let window_handle = window.as_weak();
     let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let input_projection_refresh_timer_ref = Rc::clone(&input_projection_refresh_timer);
+    let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
     window.on_workspace_session_paste_requested(move || {
-        let mut state = state.borrow_mut();
+        let mut state = view_model_ref.borrow_mut();
         let outcome = workspace_terminal::forward_active_workspace_paste(
             &state,
             session_bridge_ref.as_deref(),
@@ -5200,6 +5239,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &mut state,
                     session_bridge_ref.as_deref(),
                     &mut workspace_follow_tracker_ref.borrow_mut(),
+                );
+                workspace_terminal::schedule_workspace_input_projection_refresh(
+                    &window,
+                    Rc::clone(&view_model_ref),
+                    session_bridge_ref.clone(),
+                    Rc::clone(&workspace_follow_tracker_ref),
+                    Rc::clone(&input_projection_refresh_timer_ref),
+                    Rc::clone(&input_projection_refresh_gate_ref),
                 );
             }
         }

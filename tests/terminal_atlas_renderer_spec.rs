@@ -306,7 +306,7 @@ fn atlas_renderer_composites_color_emoji_sprites_and_preserves_them_under_select
     let before = renderer.render(&surface)?;
     let selected = renderer.render_with_selection(
         &surface,
-        Some(TerminalAtlasSelection::new(0, 0, 0, 0)),
+        Some(TerminalAtlasSelection::new(0, 0, 0, 1)),
         0x6625_63eb,
     )?;
     let center_x = before.metrics.cell_width / 2;

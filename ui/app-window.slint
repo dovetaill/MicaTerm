@@ -386,6 +386,8 @@ export component AppWindow inherits Window {
     callback workspace-session-text-input(string);
     callback workspace-session-key-input(string, bool, bool, bool);
     callback workspace-session-resize-requested(int, int);
+    callback workspace-session-normalize-hit-col(int, int) -> int;
+    callback workspace-session-normalize-selection-hit-col(int, int) -> int;
     callback workspace-session-copy-selection-requested(int, int, int, int);
     callback workspace-session-selection-changed();
     callback workspace-session-paste-requested();
@@ -776,6 +778,14 @@ export component AppWindow inherits Window {
 
                         surface-resize-requested(rows, cols) => {
                             root.workspace-session-resize-requested(rows, cols);
+                        }
+
+                        normalize-hit-col(row, col) => {
+                            return root.workspace-session-normalize-hit-col(row, col);
+                        }
+
+                        normalize-selection-hit-col(row, col) => {
+                            return root.workspace-session-normalize-selection-hit-col(row, col);
                         }
 
                         copy-selection-requested(start-row, start-col, end-row, end-col) => {

@@ -80,6 +80,8 @@ export component WorkspacePane inherits Rectangle {
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
+    callback normalize-hit-col(int, int) -> int;
+    callback normalize-selection-hit-col(int, int) -> int;
     callback copy-selection-requested(int, int, int, int);
     callback selection-changed();
     callback paste-requested();
@@ -194,6 +196,14 @@ export component WorkspacePane inherits Rectangle {
 
                 surface-resize-requested(rows, cols) => {
                     root.surface-resize-requested(rows, cols);
+                }
+
+                normalize-hit-col(row, col) => {
+                    return root.normalize-hit-col(row, col);
+                }
+
+                normalize-selection-hit-col(row, col) => {
+                    return root.normalize-selection-hit-col(row, col);
                 }
 
                 copy-selection-requested(start-row, start-col, end-row, end-col) => {

@@ -1,6 +1,7 @@
 //! SSH runtime channel pump and output coalescing helpers.
 
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use russh::client;
 use russh::{Channel, ChannelMsg, Disconnect};
@@ -14,6 +15,7 @@ use super::auth::RuntimeClientHandler;
 use super::terminal::{TerminalSession, apply_remote_output, snapshot_terminal_surface};
 use super::transport::TransportChainGuard;
 use super::{
+    FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL, INPUT_ACTIVE_SURFACE_DIRTY_WINDOW,
     RuntimeCommand, SURFACE_DIRTY_NOTIFICATION_INTERVAL, SessionRuntimeEvent,
     WORKING_SET_TRIM_IDLE_INTERVAL, WORKING_SET_TRIM_MIN_OUTPUT_BYTES,
 };
@@ -30,6 +32,7 @@ pub(super) async fn run_channel_pump(
     let mut command_channel_open = true;
     let mut dirty_notifier = SurfaceDirtyNotifier::default();
     let mut dirty_timer: Option<std::pin::Pin<Box<Sleep>>> = None;
+    let mut dirty_timer_interval: Option<std::time::Duration> = None;
     let mut working_set_trim_scheduler = WorkingSetTrimScheduler::default();
     let mut working_set_trim_timer: Option<std::pin::Pin<Box<Sleep>>> = None;
 
@@ -38,6 +41,7 @@ pub(super) async fn run_channel_pump(
             maybe_command = command_rx.recv(), if command_channel_open => {
                 match maybe_command {
                     Some(RuntimeCommand::TextInput(text)) => {
+                        dirty_notifier.note_local_input(Instant::now());
                         let bytes = text.into_bytes();
                         if let Err(bytes) = handle.data(channel.id(), bytes).await {
                             let _ = event_tx.send(SessionRuntimeEvent::Error(format!(
@@ -48,6 +52,7 @@ pub(super) async fn run_channel_pump(
                         }
                     }
                     Some(RuntimeCommand::KeyInput(event)) => {
+                        dirty_notifier.note_local_input(Instant::now());
                         let bytes = match terminal.lock() {
                             Ok(mut terminal) => match terminal.send_key_event(event) {
                                 Ok(bytes) => bytes,
@@ -106,6 +111,7 @@ pub(super) async fn run_channel_pump(
                         }
                     }
                     Some(RuntimeCommand::Paste(text)) => {
+                        dirty_notifier.note_local_input(Instant::now());
                         let bytes = match terminal.lock() {
                             Ok(mut terminal) => match terminal.encode_paste(&text) {
                                 Ok(bytes) => bytes,
@@ -180,8 +186,13 @@ pub(super) async fn run_channel_pump(
                             working_set_trim_scheduler.record_output(parsed.sanitized_bytes.len());
                             working_set_trim_timer =
                                 Some(Box::pin(sleep(WORKING_SET_TRIM_IDLE_INTERVAL)));
-                            if dirty_notifier.record_output() {
-                                dirty_timer = Some(Box::pin(sleep(SURFACE_DIRTY_NOTIFICATION_INTERVAL)));
+                            let now = Instant::now();
+                            let (should_arm, preferred_interval) = dirty_notifier.record_output(now);
+                            let should_speed_up_timer = dirty_timer_interval
+                                .is_some_and(|current_interval| preferred_interval < current_interval);
+                            if should_arm || should_speed_up_timer {
+                                dirty_timer = Some(Box::pin(sleep(preferred_interval)));
+                                dirty_timer_interval = Some(preferred_interval);
                             }
                         }
                     }
@@ -206,6 +217,7 @@ pub(super) async fn run_channel_pump(
             }
             () = async { if let Some(timer) = dirty_timer.as_mut() { timer.await } }, if dirty_timer.is_some() => {
                 dirty_timer = None;
+                dirty_timer_interval = None;
                 if dirty_notifier.flush_due() {
                     let _ = event_tx.send(SessionRuntimeEvent::SurfaceDirty);
                 }
@@ -224,17 +236,30 @@ pub(super) async fn run_channel_pump(
 struct SurfaceDirtyNotifier {
     dirty: bool,
     notification_armed: bool,
+    input_active_until: Option<Instant>,
 }
 
 impl SurfaceDirtyNotifier {
-    fn record_output(&mut self) -> bool {
-        self.dirty = true;
-        if self.notification_armed {
-            false
+    fn note_local_input(&mut self, now: Instant) {
+        self.input_active_until = Some(now + INPUT_ACTIVE_SURFACE_DIRTY_WINDOW);
+    }
+
+    fn preferred_interval(&self, now: Instant) -> std::time::Duration {
+        if self
+            .input_active_until
+            .is_some_and(|deadline| deadline > now)
+        {
+            FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL
         } else {
-            self.notification_armed = true;
-            true
+            SURFACE_DIRTY_NOTIFICATION_INTERVAL
         }
+    }
+
+    fn record_output(&mut self, now: Instant) -> (bool, std::time::Duration) {
+        self.dirty = true;
+        let should_arm = !self.notification_armed;
+        self.notification_armed = true;
+        (should_arm, self.preferred_interval(now))
     }
 
     fn flush_due(&mut self) -> bool {
@@ -278,14 +303,25 @@ impl WorkingSetTrimScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn surface_dirty_notifier_coalesces_repeated_output_until_flush() {
         let mut notifier = SurfaceDirtyNotifier::default();
+        let now = Instant::now();
 
-        assert!(notifier.record_output());
-        assert!(!notifier.record_output());
-        assert!(!notifier.record_output());
+        assert_eq!(
+            notifier.record_output(now),
+            (true, SURFACE_DIRTY_NOTIFICATION_INTERVAL)
+        );
+        assert_eq!(
+            notifier.record_output(now),
+            (false, SURFACE_DIRTY_NOTIFICATION_INTERVAL)
+        );
+        assert_eq!(
+            notifier.record_output(now),
+            (false, SURFACE_DIRTY_NOTIFICATION_INTERVAL)
+        );
         assert!(notifier.flush_due());
         assert!(!notifier.flush_due());
     }
@@ -293,12 +329,37 @@ mod tests {
     #[test]
     fn surface_dirty_notifier_rearms_after_flush() {
         let mut notifier = SurfaceDirtyNotifier::default();
+        let now = Instant::now();
 
-        assert!(notifier.record_output());
+        assert_eq!(
+            notifier.record_output(now),
+            (true, SURFACE_DIRTY_NOTIFICATION_INTERVAL)
+        );
         assert!(notifier.flush_due());
-        assert!(notifier.record_output());
+        assert_eq!(
+            notifier.record_output(now),
+            (true, SURFACE_DIRTY_NOTIFICATION_INTERVAL)
+        );
         assert!(notifier.take_pending());
         assert!(!notifier.take_pending());
+    }
+
+    #[test]
+    fn surface_dirty_notifier_prefers_fast_interval_during_local_input_window() {
+        let mut notifier = SurfaceDirtyNotifier::default();
+        let now = Instant::now();
+
+        notifier.note_local_input(now);
+
+        assert_eq!(notifier.preferred_interval(now), FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL);
+        assert_eq!(
+            notifier.preferred_interval(now + INPUT_ACTIVE_SURFACE_DIRTY_WINDOW + Duration::from_millis(1)),
+            SURFACE_DIRTY_NOTIFICATION_INTERVAL
+        );
+        assert_eq!(
+            notifier.record_output(now),
+            (true, FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL)
+        );
     }
 
     #[test]

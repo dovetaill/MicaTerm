@@ -571,6 +571,14 @@ fn terminal_session_host_exposes_text_key_and_resize_callbacks() {
         "AppWindow should expose a workspace resize callback for terminal surfaces"
     );
     assert!(
+        app_window.contains("callback workspace-session-normalize-hit-col(int, int) -> int;"),
+        "AppWindow should expose a wide-char cell-hit normalization callback for the active terminal session"
+    );
+    assert!(
+        app_window.contains("callback workspace-session-normalize-selection-hit-col(int, int) -> int;"),
+        "AppWindow should expose a wide-char-aware selection-boundary normalization callback for the active terminal session"
+    );
+    assert!(
         workspace_pane.contains("text-input(text) =>"),
         "WorkspacePane should forward printable terminal input back to the app shell"
     );
@@ -583,6 +591,14 @@ fn terminal_session_host_exposes_text_key_and_resize_callbacks() {
         "WorkspacePane should forward terminal resize events back to the app shell"
     );
     assert!(
+        workspace_pane.contains("callback normalize-hit-col(int, int) -> int;"),
+        "WorkspacePane should expose a cell-hit normalization callback for TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains("callback normalize-selection-hit-col(int, int) -> int;"),
+        "WorkspacePane should expose a selection-boundary normalization callback for TerminalSessionHost"
+    );
+    assert!(
         terminal_host.contains("callback text-input(string);"),
         "TerminalSessionHost should emit printable text input"
     );
@@ -593,6 +609,14 @@ fn terminal_session_host_exposes_text_key_and_resize_callbacks() {
     assert!(
         terminal_host.contains("callback surface-resize-requested(int, int);"),
         "TerminalSessionHost should emit resize requests with terminal rows/cols"
+    );
+    assert!(
+        terminal_host.contains("callback normalize-hit-col(int, int) -> int;"),
+        "TerminalSessionHost should expose a callback for Rust-side wide-char cell-hit normalization"
+    );
+    assert!(
+        terminal_host.contains("callback normalize-selection-hit-col(int, int) -> int;"),
+        "TerminalSessionHost should expose a callback for Rust-side wide-char selection-boundary normalization"
     );
     assert!(
         !terminal_host.contains("Remote shell is ready but has not produced output yet."),
@@ -659,6 +683,16 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         app_window.contains("workspace-session-copy-selection-requested(int, int, int, int);"),
         "AppWindow should expose a copy-selection callback for terminal text selection"
+    );
+    assert!(
+        app_window.contains("callback workspace-session-normalize-hit-col(int, int) -> int;"),
+        "AppWindow should expose a hit-column normalization callback so pointer-driven mouse reporting can collapse trailing wide cells back onto their owning glyph span"
+    );
+    assert!(
+        app_window.contains(
+            "callback workspace-session-normalize-selection-hit-col(int, int) -> int;"
+        ),
+        "AppWindow should expose a selection-hit normalization callback so half-cell terminal selection can snap wide-character interior boundaries onto stable cluster edges"
     );
     assert!(
         app_window.contains("workspace-session-paste-requested();"),
@@ -736,12 +770,30 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "WorkspacePane should forward copy-selection requests back to the app shell"
     );
     assert!(
+        workspace_pane.contains("callback normalize-hit-col(int, int) -> int;"),
+        "WorkspacePane should expose a pointer-hit normalization callback for TerminalSessionHost"
+    );
+    assert!(
+        workspace_pane.contains(
+            "normalize-selection-hit-col(row, col) => {\n                    return root.normalize-selection-hit-col(row, col);\n                }"
+        ),
+        "WorkspacePane should forward selection-hit normalization requests back to the app shell"
+    );
+    assert!(
         workspace_pane.contains("paste-requested() =>"),
         "WorkspacePane should forward paste requests back to the app shell"
     );
     assert!(
         workspace_pane.contains("mouse-input(kind, button, row, col, shift, ctrl, alt) =>"),
         "WorkspacePane should forward terminal mouse events back to the app shell"
+    );
+    assert!(
+        workspace_pane.contains("normalize-hit-col(row, col) =>"),
+        "WorkspacePane should forward wide-char cell-hit normalization requests back to the app shell"
+    );
+    assert!(
+        workspace_pane.contains("normalize-selection-hit-col(row, col) =>"),
+        "WorkspacePane should forward wide-char selection-boundary normalization requests back to the app shell"
     );
     assert!(
         workspace_pane.contains("workspace-session-viewport-offset-lines"),
@@ -772,6 +824,11 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should emit a copy-selection callback"
     );
     assert!(
+        terminal_host.contains("callback normalize-hit-col(int, int) -> int;")
+            && terminal_host.contains("callback normalize-selection-hit-col(int, int) -> int;"),
+        "TerminalSessionHost should expose separate pointer-hit and selection-hit normalization callbacks so mouse reporting and half-cell selection can share Rust-side wide-character ownership logic without reintroducing UI-side guesses"
+    );
+    assert!(
         terminal_host.contains("callback paste-requested();"),
         "TerminalSessionHost should emit a paste callback"
     );
@@ -782,6 +839,14 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
     assert!(
         terminal_host.contains("callback scroll-thumb-drag-requested(float);"),
         "TerminalSessionHost should emit thumb drag requests for local scrollback"
+    );
+    assert!(
+        app_window.contains("normalize-hit-col(row, col) =>"),
+        "AppWindow should forward cell-hit normalization requests from WorkspacePane back into bootstrap"
+    );
+    assert!(
+        app_window.contains("normalize-selection-hit-col(row, col) =>"),
+        "AppWindow should forward selection-boundary normalization requests from WorkspacePane back into bootstrap"
     );
     assert!(
         terminal_host.contains("callback scroll-jump-requested(float);"),

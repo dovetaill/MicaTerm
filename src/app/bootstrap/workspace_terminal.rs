@@ -135,13 +135,79 @@ pub(super) fn apply_local_input_projection_hint(state: &mut ShellViewModel) -> b
     true
 }
 
+pub(super) fn normalize_active_workspace_hit_col(
+    state: &ShellViewModel,
+    row: i32,
+    col: i32,
+) -> i32 {
+    let safe_row = row.max(0) as u32;
+    let safe_col = col.max(0) as u32;
+    state.active_workspace_terminal_surface()
+        .map(|surface| surface.normalize_hit_col(safe_row, safe_col) as i32)
+        .unwrap_or(col.max(0))
+}
+
+pub(super) fn normalize_active_workspace_selection_hit_col(
+    state: &ShellViewModel,
+    row: i32,
+    col: i32,
+) -> i32 {
+    let safe_row = row.max(0) as u32;
+    let safe_col = col.max(0) as u32;
+    state.active_workspace_terminal_surface()
+        .map(|surface| surface.normalize_selection_hit_col(safe_row, safe_col) as i32)
+        .unwrap_or(col.max(0))
+}
+
 pub(super) fn refresh_projection_after_local_input_hint(
     window: &AppWindow,
     state: &mut ShellViewModel,
     bridge: Option<&ShellSessionBridge>,
     follow_tracker: &mut WorkspaceFollowTracker,
 ) {
-    refresh_active_workspace_projection(window, state, bridge, follow_tracker);
+    let Some(bridge) = bridge else {
+        return;
+    };
+    let _ = sync_active_workspace_surface_projection_from_manager(state, &bridge.manager);
+    sync_workspace_session_state_with_manager(window, state, follow_tracker, Some(&bridge.manager));
+}
+
+pub(super) fn refresh_active_workspace_surface_projection(
+    window: &AppWindow,
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    follow_tracker: &mut WorkspaceFollowTracker,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    if sync_active_workspace_surface_projection_from_manager(state, &bridge.manager) {
+        sync_workspace_session_state_with_manager(
+            window,
+            state,
+            follow_tracker,
+            Some(&bridge.manager),
+        );
+    }
+}
+
+pub(super) fn sync_active_workspace_surface_projection_from_manager(
+    state: &mut ShellViewModel,
+    manager: &SessionManager,
+) -> bool {
+    let Some(session_id) = active_workspace_session_uuid(state) else {
+        return false;
+    };
+    let current_surface_signature = state
+        .active_workspace_terminal_surface()
+        .map(TerminalSurfaceState::signature);
+    let next_surface_signature = manager.terminal_surface_signature(session_id);
+    if current_surface_signature == next_surface_signature {
+        return false;
+    }
+    let next_surface = manager.terminal_surface(session_id);
+    state.set_active_workspace_terminal_surface(next_surface);
+    true
 }
 
 pub(super) fn refresh_active_workspace_projection(
@@ -161,6 +227,41 @@ pub(super) fn refresh_active_workspace_projection(
             super::sftp::sync_right_panel_state(window, state);
         }
     }
+}
+
+pub(super) fn schedule_workspace_input_projection_refresh(
+    window: &AppWindow,
+    state: Rc<RefCell<ShellViewModel>>,
+    bridge: Option<Rc<ShellSessionBridge>>,
+    follow_tracker: Rc<RefCell<WorkspaceFollowTracker>>,
+    timer: Rc<Timer>,
+    gate: Rc<RefCell<DeferredWorkspaceProjectionRefreshGate>>,
+) {
+    {
+        let mut gate = gate.borrow_mut();
+        if !gate.mark_scheduled() {
+            return;
+        }
+    }
+
+    let window_handle = window.as_weak();
+    timer.start(
+        TimerMode::SingleShot,
+        Duration::from_millis(WORKSPACE_INPUT_PROJECTION_DEBOUNCE_MS),
+        move || {
+            gate.borrow_mut().clear();
+            let Some(window) = window_handle.upgrade() else {
+                return;
+            };
+            let mut state = state.borrow_mut();
+            refresh_active_workspace_surface_projection(
+                &window,
+                &mut state,
+                bridge.as_deref(),
+                &mut follow_tracker.borrow_mut(),
+            );
+        },
+    );
 }
 
 pub(super) fn schedule_workspace_scroll_projection_refresh(

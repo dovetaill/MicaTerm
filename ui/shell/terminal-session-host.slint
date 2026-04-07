@@ -161,6 +161,8 @@ export component TerminalSessionHost inherits Rectangle {
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
+    callback normalize-hit-col(int, int) -> int;
+    callback normalize-selection-hit-col(int, int) -> int;
     callback copy-selection-requested(int, int, int, int);
     callback selection-changed();
     callback paste-requested();
@@ -363,7 +365,7 @@ export component TerminalSessionHost inherits Rectangle {
 
     function selection-span-width(start-col: int, end-col: int) -> length {
         let clamped-start-col = max(0, min(root.session-cols, start-col));
-        let clamped-end-col = max(clamped-start-col, min(root.session-cols, end-col + 1));
+        let clamped-end-col = max(clamped-start-col, min(root.session-cols, end-col));
         return max(
             0px,
             root.terminal-cell-x(clamped-end-col) - root.terminal-cell-x(clamped-start-col),
@@ -385,7 +387,7 @@ export component TerminalSessionHost inherits Rectangle {
 
     function selection-local-span-width(start-col: int, end-col: int) -> length {
         let clamped-start-col = max(0, min(root.session-cols, start-col));
-        let clamped-end-col = max(clamped-start-col, min(root.session-cols, end-col + 1));
+        let clamped-end-col = max(clamped-start-col, min(root.session-cols, end-col));
         return max(
             0px,
             root.terminal-local-cell-x(clamped-end-col) - root.terminal-local-cell-x(clamped-start-col),
@@ -412,6 +414,13 @@ export component TerminalSessionHost inherits Rectangle {
         return max(0, min(
             root.session-cols - 1,
             Math.floor((pointer-x / 1px) / (root.terminal-cell-width / 1px)),
+        ));
+    }
+
+    function terminal-selection-hit-col(pointer-x: length) -> int {
+        return max(0, min(
+            root.session-cols,
+            Math.floor(((pointer-x / 1px) / (root.terminal-cell-width / 1px)) + 0.5),
         ));
     }
 
@@ -493,39 +502,58 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function has-selection() -> bool {
-        return root.selection-anchor-row >= 0 && root.selection-focus-row >= 0;
+        return root.selection-anchor-row >= 0
+            && root.selection-focus-row >= 0
+            && (root.ordered-selection-start-row() != root.ordered-selection-end-row()
+                || root.ordered-selection-start-col() != root.ordered-selection-end-col());
+    }
+
+    function ordered-selection-start-row() -> int {
+        return root.selection-anchor-row < root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col <= root.selection-focus-col)
+            ? root.selection-anchor-row
+            : root.selection-focus-row;
+    }
+
+    function ordered-selection-start-col() -> int {
+        return root.selection-anchor-row < root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col <= root.selection-focus-col)
+            ? root.selection-anchor-col
+            : root.selection-focus-col;
+    }
+
+    function ordered-selection-end-row() -> int {
+        return root.selection-anchor-row > root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col > root.selection-focus-col)
+            ? root.selection-anchor-row
+            : root.selection-focus-row;
+    }
+
+    function ordered-selection-end-col() -> int {
+        return root.selection-anchor-row > root.selection-focus-row
+            || (root.selection-anchor-row == root.selection-focus-row
+                && root.selection-anchor-col > root.selection-focus-col)
+            ? root.selection-anchor-col
+            : root.selection-focus-col;
     }
 
     function normalized-selection-start-row() -> int {
-        return root.selection-anchor-row < root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col <= root.selection-focus-col)
-            ? root.selection-anchor-row
-            : root.selection-focus-row;
+        return root.ordered-selection-start-row();
     }
 
     function normalized-selection-start-col() -> int {
-        return root.selection-anchor-row < root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col <= root.selection-focus-col)
-            ? root.selection-anchor-col
-            : root.selection-focus-col;
+        return root.ordered-selection-start-col();
     }
 
     function normalized-selection-end-row() -> int {
-        return root.selection-anchor-row > root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col > root.selection-focus-col)
-            ? root.selection-anchor-row
-            : root.selection-focus-row;
+        return root.ordered-selection-end-row();
     }
 
     function normalized-selection-end-col() -> int {
-        return root.selection-anchor-row > root.selection-focus-row
-            || (root.selection-anchor-row == root.selection-focus-row
-                && root.selection-anchor-col > root.selection-focus-col)
-            ? root.selection-anchor-col
-            : root.selection-focus-col;
+        return root.ordered-selection-end-col();
     }
 
     function selection-copy-enabled() -> bool {
@@ -542,9 +570,9 @@ export component TerminalSessionHost inherits Rectangle {
             return false;
         }
         let row-start-col = row == start-row ? root.normalized-selection-start-col() : 0;
-        let row-end-col = row == end-row ? root.normalized-selection-end-col() : root.session-cols - 1;
-        let cell-end-col = col + width - 1;
-        return cell-end-col >= row-start-col && col <= row-end-col;
+        let row-end-col = row == end-row ? root.normalized-selection-end-col() : root.session-cols;
+        let cell-end-col = col + width;
+        return cell-end-col > row-start-col && col < row-end-col;
     }
 
     function terminal-menu-width() -> length {
@@ -939,7 +967,7 @@ export component TerminalSessionHost inherits Rectangle {
                 if root.selection-overlay-active() && root.selection-start-row < root.selection-end-row : selection-overlay-first-row := Rectangle {
                     x: root.selection-local-span-x(root.selection-start-col);
                     y: root.terminal-local-cell-y(root.selection-start-row);
-                    width: root.selection-local-span-width(root.selection-start-col, root.session-cols - 1);
+                    width: root.selection-local-span-width(root.selection-start-col, root.session-cols);
                     height: root.selection-local-span-height(root.selection-start-row, root.selection-start-row);
                     background: ThemeTokens.dark-mode ? #5d738b5c : #c6d8f570;
                 }
@@ -947,7 +975,7 @@ export component TerminalSessionHost inherits Rectangle {
                 if root.selection-overlay-active() && root.selection-start-row + 1 < root.selection-end-row : selection-overlay-middle-rows := Rectangle {
                     x: root.selection-local-span-x(0);
                     y: root.terminal-local-cell-y(root.selection-start-row + 1);
-                    width: root.selection-local-span-width(0, root.session-cols - 1);
+                    width: root.selection-local-span-width(0, root.session-cols);
                     height: root.selection-local-span-height(
                         root.selection-start-row + 1,
                         root.selection-end-row - 1,
@@ -973,7 +1001,10 @@ export component TerminalSessionHost inherits Rectangle {
                     scroll-event(event) => {
                         if event.delta-y > 0px || event.delta-y < 0px {
                             let row = root.terminal-hit-row(self.mouse-y);
-                            let col = root.terminal-hit-col(self.mouse-x);
+                            let col = root.normalize-hit-col(
+                                row,
+                                root.terminal-hit-col(self.mouse-x),
+                            );
                             root.wheel-delta-remainder = root.wheel-delta-remainder + (event.delta-y / 1px);
                             let delta-lines =
                                 root.wheel-delta-remainder >= root.wheel-delta-threshold
@@ -1005,7 +1036,14 @@ export component TerminalSessionHost inherits Rectangle {
 
                     pointer-event(event) => {
                         let row = root.terminal-hit-row(self.mouse-y);
-                        let col = root.terminal-hit-col(self.mouse-x);
+                        let col = root.normalize-hit-col(
+                            row,
+                            root.terminal-hit-col(self.mouse-x),
+                        );
+                        let selection-col = root.normalize-selection-hit-col(
+                            row,
+                            root.terminal-selection-hit-col(self.mouse-x),
+                        );
                         if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                             terminal-input.focus();
                             root.close-context-menu();
@@ -1041,7 +1079,7 @@ export component TerminalSessionHost inherits Rectangle {
                             } else if root.selection-drag-active {
                                 terminal-input.focus();
                                 root.selection-focus-row = row;
-                                root.selection-focus-col = col;
+                                root.selection-focus-col = selection-col;
                                 root.sync-selection-state();
                             }
                         } else if event.kind == PointerEventKind.up && event.button == PointerEventButton.left {
@@ -1279,7 +1317,7 @@ export component TerminalSessionHost inherits Rectangle {
                             root.selection-anchor-row = 0;
                             root.selection-anchor-col = 0;
                             root.selection-focus-row = max(0, root.session-rows - 1);
-                            root.selection-focus-col = max(0, root.session-cols - 1);
+                            root.selection-focus-col = max(0, root.session-cols);
                             root.sync-selection-state();
                             terminal-input.focus();
                         }

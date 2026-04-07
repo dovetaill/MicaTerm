@@ -1,7 +1,8 @@
 use std::fs;
 
 use mica_term::app::ssh::runtime::{
-    TerminalKeyEvent, TerminalSession, extract_current_working_directory_from_osc7,
+    TerminalCellState, TerminalKeyEvent, TerminalSession, TerminalSurfaceState,
+    extract_current_working_directory_from_osc7,
 };
 use mica_term::app::terminal_theme::preset_for_theme_mode;
 use mica_term::theme::ThemeMode;
@@ -22,6 +23,56 @@ fn malformed_osc7_sequence_is_ignored() {
     assert_eq!(
         extract_current_working_directory_from_osc7(b"\x1b]7;not-a-file-url\x07"),
         None
+    );
+}
+
+#[test]
+fn wide_char_trailing_cell_hit_normalizes_back_to_the_leading_cell() {
+    let session_id = Uuid::new_v4();
+    let mut surface = TerminalSurfaceState::from_visible_lines(
+        session_id,
+        1,
+        1,
+        4,
+        vec!["条a ".into()],
+    );
+    surface.cells = vec![
+        TerminalCellState {
+            row: 0,
+            col: 0,
+            width: 2,
+            text: "条".into(),
+            bold: false,
+            underline: false,
+            fg_rgba: 0xffff_ffff,
+            bg_rgba: 0xff0d_1117,
+        },
+        TerminalCellState {
+            row: 0,
+            col: 2,
+            width: 1,
+            text: "a".into(),
+            bold: false,
+            underline: false,
+            fg_rgba: 0xffff_ffff,
+            bg_rgba: 0xff0d_1117,
+        },
+    ];
+
+    assert_eq!(
+        surface.normalize_hit_col(0, 1),
+        0,
+        "the trailing half of a wide glyph should normalize back to the leading logical cell"
+    );
+    assert_eq!(
+        surface.normalize_hit_col(0, 2),
+        2,
+        "single-cell glyphs should keep their own hit column"
+    );
+    assert_eq!(
+        surface.normalize_hit_col(0, 3),
+        3,
+        "empty cells should preserve their raw hit column"
     );
 }
 
@@ -286,6 +337,55 @@ fn terminal_host_bitmap_selection_overlay_stays_in_blank_surface_local_coordinat
 }
 
 #[test]
+fn terminal_host_uses_half_cell_selection_boundaries_and_wide_char_normalization_hooks() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        terminal_host.contains("callback normalize-hit-col(int, int) -> int;"),
+        "TerminalSessionHost should expose a Rust-backed callback that normalizes wide-char trailing cell mouse hits back to the owning leading cell"
+    );
+    assert!(
+        terminal_host.contains("callback normalize-selection-hit-col(int, int) -> int;"),
+        "TerminalSessionHost should expose a Rust-backed callback that can collapse half-cell selection boundaries away from wide-char interior columns"
+    );
+    assert!(
+        terminal_host.contains("function terminal-selection-hit-col("),
+        "TerminalSessionHost should separate selection boundary hit-testing from plain mouse cell hit-testing"
+    );
+    assert!(
+        terminal_host
+            .contains("Math.floor(((pointer-x / 1px) / (root.terminal-cell-width / 1px)) + 0.5)"),
+        "TerminalSessionHost selection hit-testing should use half-cell edge rounding instead of a plain left-edge floor"
+    );
+    assert!(
+        terminal_host.contains("root.normalize-selection-hit-col("),
+        "TerminalSessionHost should normalize half-cell selection hits through the active terminal surface metadata before mutating selection state"
+    );
+    assert!(
+        terminal_host.contains("root.normalize-hit-col("),
+        "TerminalSessionHost should normalize mouse-reporting hit cells through the active terminal surface metadata before forwarding them"
+    );
+}
+
+#[test]
+fn terminal_host_treats_selection_end_columns_as_exclusive_boundaries() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        terminal_host.contains(
+            "let clamped-end-col = max(clamped-start-col, min(root.session-cols, end-col));"
+        ),
+        "TerminalSessionHost selection overlay width should treat the focus column as an exclusive boundary so wide-char cluster ends line up with the runtime selection model"
+    );
+    assert!(
+        !terminal_host.contains("end-col + 1"),
+        "TerminalSessionHost should not re-expand exclusive selection boundaries by adding an extra cell during overlay sizing"
+    );
+}
+
+#[test]
 fn workspace_terminal_input_handlers_avoid_per_keystroke_full_projection_refresh() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
@@ -314,6 +414,25 @@ fn workspace_terminal_input_handlers_avoid_per_keystroke_full_projection_refresh
             && !key_input_block
                 .contains("workspace_terminal::refresh_active_workspace_projection("),
         "per-keystroke full projection refreshes block the UI thread during key repeat and should stay out of the local input handlers"
+    );
+}
+
+#[test]
+fn terminal_host_selection_hit_testing_routes_half_cell_boundaries_through_rust_normalization() {
+    let terminal_host =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        terminal_host.contains("callback normalize-selection-hit-col(int, int) -> int;"),
+        "TerminalSessionHost should expose a Rust-backed selection boundary normalization callback so wide trailing cells can collapse onto stable cluster edges"
+    );
+    assert!(
+        terminal_host.contains("function terminal-selection-hit-col(pointer-x: length) -> int {"),
+        "TerminalSessionHost should derive half-cell boundary hits instead of treating every pointer move as a plain left-edge floor() cell index"
+    );
+    assert!(
+        terminal_host.contains("root.normalize-selection-hit-col("),
+        "TerminalSessionHost should route selection hit-testing through a dedicated half-cell helper plus Rust-side boundary normalization instead of reusing raw floor() cell hits"
     );
 }
 

@@ -243,21 +243,27 @@ impl TerminalSurfaceState {
         let mut text = String::new();
 
         for row in start_row..=end_row {
-            let row_start = if row == start_row { start_col } else { 0 };
-            let row_end = if row == end_row {
-                end_col
+            let row_start = if row == start_row {
+                start_col.min(self.cols)
             } else {
-                self.cols.saturating_sub(1)
+                0
+            };
+            let row_end = if row == end_row {
+                end_col.min(self.cols)
+            } else {
+                self.cols
             };
             let mut row_text = String::new();
 
-            for cell in self.cells.iter().filter(|cell| cell.row == row) {
-                let cell_start = cell.col;
-                let cell_end = cell.col.saturating_add(cell.width.saturating_sub(1));
-                if cell_end < row_start || cell_start > row_end {
-                    continue;
+            if row_end > row_start {
+                for cell in self.cells.iter().filter(|cell| cell.row == row) {
+                    let cell_start = cell.col;
+                    let cell_end = cell.col.saturating_add(cell.width);
+                    if cell_end <= row_start || cell_start >= row_end {
+                        continue;
+                    }
+                    row_text.push_str(&cell.text);
                 }
-                row_text.push_str(&cell.text);
             }
 
             text.push_str(row_text.trim_end_matches(' '));
@@ -274,6 +280,34 @@ impl TerminalSurfaceState {
 
         text
     }
+
+    pub fn normalize_hit_col(&self, row: u32, col: u32) -> u32 {
+        let clamped_col = col.min(self.cols.saturating_sub(1));
+        self.cells
+            .iter()
+            .find(|cell| {
+                cell.row == row
+                    && cell.width > 1
+                    && clamped_col > cell.col
+                    && clamped_col < cell.col.saturating_add(cell.width)
+            })
+            .map(|cell| cell.col)
+            .unwrap_or(clamped_col)
+    }
+
+    pub fn normalize_selection_hit_col(&self, row: u32, col: u32) -> u32 {
+        let clamped_col = col.min(self.cols);
+        self.cells
+            .iter()
+            .find(|cell| {
+                cell.row == row
+                    && cell.width > 1
+                    && clamped_col > cell.col
+                    && clamped_col < cell.col.saturating_add(cell.width)
+            })
+            .map(|cell| cell.col.saturating_add(cell.width))
+            .unwrap_or(clamped_col)
+    }
 }
 
 fn normalized_selection(start: (u32, u32), end: (u32, u32)) -> ((u32, u32), (u32, u32)) {
@@ -281,5 +315,80 @@ fn normalized_selection(start: (u32, u32), end: (u32, u32)) -> ((u32, u32), (u32
         (start, end)
     } else {
         (end, start)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_surface() -> TerminalSurfaceState {
+        let session_id = Uuid::nil();
+        let mut surface = TerminalSurfaceState::from_visible_lines(
+            session_id,
+            1,
+            1,
+            8,
+            vec!["A条B".into()],
+        );
+        surface.cells = vec![
+            TerminalCellState {
+                row: 0,
+                col: 0,
+                width: 1,
+                text: "A".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xff_ff_ff_ff,
+                bg_rgba: 0xff_00_00_00,
+            },
+            TerminalCellState {
+                row: 0,
+                col: 1,
+                width: 2,
+                text: "条".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xff_ff_ff_ff,
+                bg_rgba: 0xff_00_00_00,
+            },
+            TerminalCellState {
+                row: 0,
+                col: 3,
+                width: 1,
+                text: "B".into(),
+                bold: false,
+                underline: false,
+                fg_rgba: 0xff_ff_ff_ff,
+                bg_rgba: 0xff_00_00_00,
+            },
+        ];
+        surface
+    }
+
+    #[test]
+    fn selection_text_uses_exclusive_end_column_boundaries() {
+        let surface = sample_surface();
+
+        assert_eq!(surface.selection_text(0, 0, 0, 1), "A");
+        assert_eq!(surface.selection_text(0, 1, 0, 3), "条");
+        assert_eq!(surface.selection_text(0, 0, 0, 4), "A条B");
+    }
+
+    #[test]
+    fn wide_char_trailing_cell_hit_normalizes_back_to_leading_cell() {
+        let surface = sample_surface();
+
+        assert_eq!(surface.normalize_hit_col(0, 2), 1);
+        assert_eq!(surface.normalize_hit_col(0, 3), 3);
+    }
+
+    #[test]
+    fn wide_char_internal_selection_boundary_snaps_to_cluster_end() {
+        let surface = sample_surface();
+
+        assert_eq!(surface.normalize_selection_hit_col(0, 2), 3);
+        assert_eq!(surface.normalize_selection_hit_col(0, 1), 1);
+        assert_eq!(surface.normalize_selection_hit_col(0, 4), 4);
     }
 }

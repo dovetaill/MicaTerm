@@ -122,6 +122,24 @@ fn bootstrap_source_threads_native_terminal_surface_contract() {
 }
 
 #[test]
+fn bootstrap_binds_workspace_terminal_hit_normalization_callbacks() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("window.on_workspace_session_normalize_hit_col("),
+        "bootstrap should bind a host callback that normalizes wide-char mouse hit columns through the active terminal surface"
+    );
+    assert!(
+        bootstrap_source.contains("window.on_workspace_session_normalize_selection_hit_col("),
+        "bootstrap should bind a host callback that normalizes half-cell selection hit columns through the active terminal surface"
+    );
+    assert!(
+        bootstrap_source.contains("workspace_terminal::normalize_active_workspace_hit_col("),
+        "bootstrap should delegate wide-char hit normalization to the workspace terminal interaction helpers"
+    );
+}
+
+#[test]
 fn bootstrap_source_uses_windows_native_terminal_presenter_for_native_frames() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
@@ -2523,7 +2541,7 @@ fn focus_workspace_terminal(app: &AppWindow) {
 fn select_terminal_welcome_span(app: &AppWindow) {
     let selection_start = LogicalPosition::new(
         app.get_layout_workspace_session_native_surface_x()
-            + (app.get_workspace_session_cell_width() * 0.5),
+            + (app.get_workspace_session_cell_width() * 0.25),
         app.get_layout_titlebar_height()
             + app.get_layout_workspace_session_native_surface_y()
             + (app.get_workspace_session_cell_height() * 0.5),
@@ -2562,6 +2580,38 @@ fn drag_terminal_padding_into_grid(app: &AppWindow) {
     let drag_end = LogicalPosition::new(
         app.get_layout_workspace_session_native_surface_x()
             + (app.get_workspace_session_cell_width() * 10.5),
+        app.get_layout_titlebar_height()
+            + app.get_layout_workspace_session_native_surface_y()
+            + (app.get_workspace_session_cell_height() * 0.5),
+    );
+
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: drag_start,
+    });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position: drag_start,
+        button: PointerEventButton::Left,
+    });
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: drag_end,
+    });
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position: drag_end,
+        button: PointerEventButton::Left,
+    });
+}
+
+fn drag_within_first_terminal_cell(app: &AppWindow) {
+    let drag_start = LogicalPosition::new(
+        app.get_layout_workspace_session_native_surface_x()
+            + (app.get_workspace_session_cell_width() * 0.1),
+        app.get_layout_titlebar_height()
+            + app.get_layout_workspace_session_native_surface_y()
+            + (app.get_workspace_session_cell_height() * 0.5),
+    );
+    let drag_end = LogicalPosition::new(
+        app.get_layout_workspace_session_native_surface_x()
+            + (app.get_workspace_session_cell_width() * 0.9),
         app.get_layout_titlebar_height()
             + app.get_layout_workspace_session_native_surface_y()
             + (app.get_workspace_session_cell_height() * 0.5),
@@ -7309,27 +7359,37 @@ fn workspace_terminal_selection_keeps_native_frame_contract_active() {
 
     let after = app.get_workspace_session_native_frame_token();
     let after_surface_seqno = app.get_workspace_session_surface_seqno();
+    let render_mode = app.get_workspace_session_render_mode();
 
     assert!(
         app.get_workspace_session_selection_active(),
         "pointer drag should activate terminal selection state"
     );
-    assert_eq!(
-        app.get_workspace_session_render_mode().as_str(),
-        "native"
-    );
-    assert!(
-        before > 0,
-        "native composition should keep a retained native frame token active before selection"
-    );
-    assert!(
-        after > 0,
-        "native composition should keep a retained native frame token active after selection"
-    );
-    assert!(
-        before_surface_seqno > 0 && after_surface_seqno > 0,
-        "selection should keep the staged terminal surface alive while native composition handles the visible frame"
-    );
+    if cfg!(target_os = "windows") {
+        assert_eq!(render_mode.as_str(), "native");
+        assert!(
+            before > 0,
+            "native composition should keep a retained native frame token active before selection"
+        );
+        assert!(
+            after > 0,
+            "native composition should keep a retained native frame token active after selection"
+        );
+        assert!(
+            before_surface_seqno > 0 && after_surface_seqno > 0,
+            "selection should keep the staged terminal surface alive while native composition handles the visible frame"
+        );
+    } else {
+        assert_eq!(
+            render_mode.as_str(),
+            "bitmap",
+            "non-Windows test runs should keep the bitmap composition contract stable while selection state changes"
+        );
+        assert_eq!(
+            before, after,
+            "selection should not toggle native frame tokens on non-Windows bitmap runs"
+        );
+    }
 }
 
 #[test]
@@ -7351,6 +7411,31 @@ fn workspace_terminal_padding_drag_does_not_start_selection_inside_the_grid() {
         !app.get_workspace_session_selection_active(),
         "pointer drags that start in the terminal padding should not be clamped into column 0 because that makes the selection model feel offset from the rendered grid"
     );
+}
+
+#[test]
+fn workspace_terminal_half_cell_drag_selects_a_single_ascii_cell() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(InteractiveProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    drag_within_first_terminal_cell(&app);
+    settle_terminal_projection();
+
+    assert!(
+        app.get_workspace_session_selection_active(),
+        "dragging from the left half to the right half of the same visible cell should still select that cell instead of collapsing to an empty range"
+    );
+    assert_eq!(app.get_workspace_session_selection_start_row(), 0);
+    assert_eq!(app.get_workspace_session_selection_end_row(), 0);
+    assert_eq!(app.get_workspace_session_selection_start_col(), 0);
+    assert_eq!(app.get_workspace_session_selection_end_col(), 1);
 }
 
 #[test]
