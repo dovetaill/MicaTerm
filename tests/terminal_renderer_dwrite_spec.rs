@@ -828,8 +828,8 @@ fn native_terminal_pipeline_sources_keep_bitmap_raster_scale_hooks() {
         "terminal presenter seam should keep the bitmap raster scale hook so the atlas image path can respect HiDPI scale"
     );
     assert!(
-        bootstrap_source.contains("presenter.set_raster_scale(scale_factor)"),
-        "workspace terminal sync should keep pushing Slint window scale into the bitmap raster path"
+        bootstrap_source.contains("host.set_raster_scale(scale_factor)"),
+        "workspace terminal sync should keep pushing Slint window scale through the renderer host so the bitmap raster path still tracks HiDPI scale after the presenter-host seam extraction"
     );
 }
 
@@ -921,8 +921,8 @@ fn windows_native_renderer_source_threads_fractional_x_phase_into_raster_request
 fn terminal_style_contract_threads_bold_and_underline_across_runtime_model_and_layout() {
     let runtime_contracts_source =
         fs::read_to_string("src/app/ssh/runtime/contracts.rs").expect("read runtime contracts");
-    let runtime_terminal_source =
-        fs::read_to_string("src/app/ssh/runtime/terminal.rs").expect("read runtime terminal");
+    let wezterm_adapter_source = fs::read_to_string("src/app/terminal_core/wezterm_adapter.rs")
+        .expect("read wezterm adapter");
     let model_source =
         fs::read_to_string("src/app/terminal_model.rs").expect("read terminal model");
     let segmentation_source = fs::read_to_string("src/app/terminal_layout/run_segmentation.rs")
@@ -939,12 +939,12 @@ fn terminal_style_contract_threads_bold_and_underline_across_runtime_model_and_l
         "runtime terminal cells should expose the underline SGR state"
     );
     assert!(
-        runtime_terminal_source.contains("attrs.intensity()"),
-        "surface projection should derive bold state from wezterm cell intensity"
+        wezterm_adapter_source.contains("attrs.intensity()"),
+        "wezterm adapter projection should derive bold state from wezterm cell intensity before the runtime surface snapshot crosses the core adapter boundary"
     );
     assert!(
-        runtime_terminal_source.contains("attrs.underline()"),
-        "surface projection should derive underline state from wezterm cell underline metadata"
+        wezterm_adapter_source.contains("attrs.underline()"),
+        "wezterm adapter projection should derive underline state from wezterm cell underline metadata before the runtime surface snapshot reaches the renderer/model stack"
     );
     assert!(
         model_source.contains("pub bold: bool"),
