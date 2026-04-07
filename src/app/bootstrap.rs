@@ -88,11 +88,11 @@ use crate::app::terminal_atlas::TerminalAtlasSelection;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_presenter::{
-    BitmapAtlasPresenter, NativeImePreviewOverlay, NativeTerminalFrame, PresentedTerminalFrame,
-    TerminalPresentationOptions, TerminalPresenter,
+    BitmapAtlasPresenter, NativeTerminalFrame, PresentedTerminalFrame, TerminalPresenter,
 };
 use crate::app::terminal_renderer::{
     NativeTerminalSurface, NativeTerminalSurfaceDiagnostics, NativeTerminalSurfaceRect,
+    TerminalRendererHost, TerminalRendererHostOptions,
 };
 use crate::app::terminal_theme::{preset_for_theme_mode, selection_overlay_rgba};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
@@ -195,7 +195,7 @@ const WORKSPACE_INPUT_PROJECTION_DEBOUNCE_MS: u64 = 12;
 const WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS: u64 = 16;
 
 thread_local! {
-    static WORKSPACE_TERMINAL_PRESENTER: RefCell<Option<Box<dyn TerminalPresenter>>> = const {
+    static WORKSPACE_TERMINAL_RENDERER_HOST: RefCell<Option<TerminalRendererHost>> = const {
         RefCell::new(None)
     };
     static WORKSPACE_NATIVE_TERMINAL_SURFACE: RefCell<Option<NativeTerminalSurface>> = const {
@@ -2084,10 +2084,10 @@ fn ensure_workspace_terminal_presenter(
     scale_factor: f32,
 ) -> Result<()> {
     let mut initialized_render_mode = None;
-    WORKSPACE_TERMINAL_PRESENTER.with(|cell| -> Result<()> {
+    WORKSPACE_TERMINAL_RENDERER_HOST.with(|cell| -> Result<()> {
         let needs_init = cell.borrow().is_none();
         if needs_init {
-            let (mut presenter, active_render_mode) =
+            let (presenter, active_render_mode) =
                 match build_workspace_terminal_presenter(profile) {
                     Ok(presenter) => presenter,
                     Err(err) => {
@@ -2106,8 +2106,9 @@ fn ensure_workspace_terminal_presenter(
                         )
                     }
                 };
-            presenter.set_raster_scale(scale_factor);
-            *cell.borrow_mut() = Some(presenter);
+            let mut host = TerminalRendererHost::new(presenter, active_render_mode);
+            host.set_raster_scale(scale_factor);
+            *cell.borrow_mut() = Some(host);
             initialized_render_mode = Some(active_render_mode);
         }
         Ok(())
@@ -2146,11 +2147,12 @@ fn ensure_workspace_terminal_presenter(
     _profile: AppRuntimeProfile,
     scale_factor: f32,
 ) -> Result<()> {
-    WORKSPACE_TERMINAL_PRESENTER.with(|cell| -> Result<()> {
+    WORKSPACE_TERMINAL_RENDERER_HOST.with(|cell| -> Result<()> {
         if cell.borrow().is_none() {
-            let mut presenter = Box::new(BitmapAtlasPresenter::new()?) as Box<dyn TerminalPresenter>;
-            presenter.set_raster_scale(scale_factor);
-            *cell.borrow_mut() = Some(presenter);
+            let presenter = Box::new(BitmapAtlasPresenter::new()?) as Box<dyn TerminalPresenter>;
+            let mut host = TerminalRendererHost::new(presenter, TerminalRenderMode::Bitmap);
+            host.set_raster_scale(scale_factor);
+            *cell.borrow_mut() = Some(host);
             window.set_workspace_session_native_frame_token(0);
         }
         Ok(())
@@ -2158,13 +2160,13 @@ fn ensure_workspace_terminal_presenter(
 }
 
 fn workspace_terminal_default_cell_size(scale_factor: f32) -> (u32, u32) {
-    WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
-        presenter
+    WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+        host
             .borrow_mut()
             .as_mut()
-            .map(|presenter| {
-                presenter.set_raster_scale(scale_factor);
-                presenter.default_cell_size()
+            .map(|host| {
+                host.set_raster_scale(scale_factor);
+                host.default_cell_size()
             })
             .unwrap_or((
                 FALLBACK_WORKSPACE_TERMINAL_CELL_WIDTH_PX,
@@ -2527,21 +2529,20 @@ fn sync_workspace_session_state_with_manager(
         let mut native_frame_presented = false;
         let mut next_render_mode = None;
         let mut next_surface_seqno = None;
-        WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
-            let mut presenter = presenter.borrow_mut();
-            let Some(presenter) = presenter.as_mut() else {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            let mut host = host.borrow_mut();
+            let Some(host) = host.as_mut() else {
                 clear_workspace_native_terminal_frame(window);
                 next_surface_seqno = Some(0);
                 next_render_mode = Some(TerminalRenderMode::Bitmap);
                 return;
             };
-            presenter.set_raster_scale(scale_factor);
-            match presenter.present(
+            host.set_raster_scale(scale_factor);
+            match host.present(
                 surface,
-                TerminalPresentationOptions {
+                TerminalRendererHostOptions {
                     selection,
                     selection_overlay_rgba,
-                    ime_preview_overlay: NativeImePreviewOverlay::default(),
                 },
             ) {
                 Ok(PresentedTerminalFrame::Bitmap(frame)) => {
@@ -3714,8 +3715,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     WORKSPACE_RUNTIME_PROFILE.with(|runtime_profile| {
         *runtime_profile.borrow_mut() = Some(profile);
     });
-    WORKSPACE_TERMINAL_PRESENTER.with(|presenter| {
-        *presenter.borrow_mut() = None;
+    WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+        *host.borrow_mut() = None;
     });
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
         *surface.borrow_mut() = None;

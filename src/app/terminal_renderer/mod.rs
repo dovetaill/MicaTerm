@@ -4,6 +4,7 @@
 pub mod atlas;
 pub mod damage;
 pub mod diagnostics;
+pub mod host;
 pub mod native_surface;
 pub mod present_driver;
 pub mod platform;
@@ -14,6 +15,8 @@ pub mod wgpu_renderer;
 pub use atlas::{GlyphAtlas, GlyphAtlasEntry, GlyphAtlasKey};
 pub use damage::{NativeFrameDamageTracker, NativeSurfaceDamage, NativeSurfaceDamageKind};
 pub use diagnostics::{NativeTerminalSurfaceDiagnostics, NativeTerminalSurfaceDrawCounters};
+pub use host::TerminalRendererHost;
+pub use host::TerminalRendererHostOptions;
 pub use native_surface::NativeTerminalSurface;
 pub use present_driver::{
     EventLoopPresentDriver, NativeSurfacePresentDriver, RenderingNotifierPresentDriver,

@@ -1,4 +1,4 @@
-//! Terminal presentation seam that decouples bootstrap/UI projection from concrete renderers.
+//! Terminal presentation seam consumed through TerminalRendererHost.
 
 use anyhow::Result;
 use slint::Image;

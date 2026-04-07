@@ -1,4 +1,4 @@
-//! GPU-preparation stage for the staged native terminal renderer.
+//! GPU-preparation stage for TerminalRendererHost native-frame presentation.
 
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
