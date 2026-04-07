@@ -259,7 +259,7 @@ pub struct ShapedGlyph {
 }
 
 #[cfg(feature = "terminal-native-renderer")]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct GlyphRasterRequest {
     pub font_key: LoadedFontKey,
     pub face_key: FontFaceKey,

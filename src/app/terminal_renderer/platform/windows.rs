@@ -7,18 +7,18 @@ use slint::ComponentHandle;
 
 use crate::AppWindow;
 #[cfg(target_os = "windows")]
-use crate::app::terminal_font::FontFaceKey;
-#[cfg(target_os = "windows")]
 use crate::app::ssh::runtime::TerminalCursorShape;
+#[cfg(target_os = "windows")]
+use crate::app::terminal_font::FontFaceKey;
 use crate::app::terminal_renderer::diagnostics::{
     NativeTerminalSurfaceGlyphBoundsTrace, NativeTerminalSurfaceWindowsTextDiagnostics,
+};
+use crate::app::terminal_renderer::wgpu_renderer::{
+    PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw,
 };
 use crate::app::terminal_renderer::{
     NativeSurfaceDamage, NativeSurfaceDamageKind, NativeTerminalSurfaceDiagnostics,
     NativeTerminalSurfaceDrawCounters,
-};
-use crate::app::terminal_renderer::wgpu_renderer::{
-    PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw,
 };
 use crate::app::windows_frame::resolve_host_window_hwnd;
 
@@ -30,32 +30,33 @@ use super::backend::{
 use windows::Win32::Foundation::{BOOL, D2DERR_RECREATE_TARGET, HWND, RECT};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_POINT_2F, D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE,
-    D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
+    D2D_POINT_2F, D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED,
+    D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-    D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED,
-    D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE,
-    D2D1_OPACITY_MASK_CONTENT_GRAPHICS, D2D1_RENDER_TARGET_PROPERTIES, D2D1CreateFactory,
+    D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_OPACITY_MASK_CONTENT_GRAPHICS,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE, D2D1CreateFactory,
     ID2D1Bitmap, ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
     DWRITE_FONT_WEIGHT_REGULAR, DWRITE_GLYPH_OFFSET, DWRITE_GLYPH_RUN,
-    DWRITE_MEASURING_MODE_NATURAL, DWriteCreateFactory, IDWriteFactory,
-    IDWriteFontCollection, IDWriteFontFace,
+    DWRITE_MEASURING_MODE_NATURAL, DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection,
+    IDWriteFontFace,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM};
 #[cfg(target_os = "windows")]
-use windows::Win32::Graphics::Gdi::{GetDC, HDC, MONITOR_DEFAULTTONEAREST, MonitorFromWindow, ReleaseDC};
-#[cfg(target_os = "windows")]
-use windows::core::PCWSTR;
+use windows::Win32::Graphics::Gdi::{
+    GetDC, HDC, MONITOR_DEFAULTTONEAREST, MonitorFromWindow, ReleaseDC,
+};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
+#[cfg(target_os = "windows")]
+use windows::core::PCWSTR;
 
 #[derive(Default)]
 pub struct WindowsD2DFactoryState {
@@ -689,7 +690,11 @@ impl WindowsNativeSurfaceState {
         let mut exists = BOOL(0);
         unsafe {
             font_collection
-                .FindFamilyName(PCWSTR(family_name_utf16.as_ptr()), &mut family_index, &mut exists)
+                .FindFamilyName(
+                    PCWSTR(family_name_utf16.as_ptr()),
+                    &mut family_index,
+                    &mut exists,
+                )
                 .ok()?;
         }
         if !exists.as_bool() {
@@ -712,10 +717,7 @@ impl WindowsNativeSurfaceState {
     }
 
     #[cfg(not(target_os = "windows"))]
-    fn resolve_directwrite_font_face(
-        &mut self,
-        draw: &PreparedMonochromeGlyphDraw,
-    ) -> Option<()> {
+    fn resolve_directwrite_font_face(&mut self, draw: &PreparedMonochromeGlyphDraw) -> Option<()> {
         let _ = draw;
         None
     }
@@ -757,8 +759,9 @@ impl WindowsNativeSurfaceState {
                 .as_ref()
                 .and_then(|renderer| renderer.factory.as_ref())
                 .and_then(|factory| {
-                    let monitor =
-                        unsafe { MonitorFromWindow(HWND(host_hwnd as _), MONITOR_DEFAULTTONEAREST) };
+                    let monitor = unsafe {
+                        MonitorFromWindow(HWND(host_hwnd as _), MONITOR_DEFAULTTONEAREST)
+                    };
                     if monitor.0.is_null() {
                         unsafe { factory.CreateRenderingParams().ok() }
                     } else {
@@ -1150,7 +1153,11 @@ impl WindowsNativeSurfaceState {
 
     fn active_baseline_px(&self) -> Option<i32> {
         let frame = self.retained_frame.as_ref()?;
-        let draw = frame.frame.presentable_frame.monochrome_glyph_draws.first()?;
+        let draw = frame
+            .frame
+            .presentable_frame
+            .monochrome_glyph_draws
+            .first()?;
         let row_top_px = (draw.row as i32).saturating_mul(frame.frame.cell_height_px as i32);
         Some(
             draw.dest_y_px
@@ -1426,6 +1433,9 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
             render_target_generation: self.state.render_target_generation,
             last_prepared_frame_token: self.state.last_prepared_frame_token,
             last_presented_frame_token: self.state.last_presented_frame_token,
+            scheduled_present_count: 0,
+            host_redraw_request_count: 0,
+            host_redraw_replay_count: 0,
             draw_counters: self.state.draw_counters(),
         }
     }
@@ -1435,8 +1445,9 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         self.state.retained_frame = None;
         self.state.clear_device_resources();
         self.state.d2d_brushes.clear();
-        self.state.monochrome_glyph_bitmaps.clear();
-        self.state.color_glyph_bitmaps.clear();
+        // Keep CPU-side glyph payload caches across detach so a later reattach can
+        // recreate D2D bitmaps even when the renderer reuses prepared rows without
+        // resending upload payloads on the next frame.
         self.state.d2d_factory = None;
         self.state.directwrite_text_renderer = None;
         self.state.host_hwnd = None;

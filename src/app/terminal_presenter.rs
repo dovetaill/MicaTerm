@@ -5,6 +5,8 @@ use slint::Image;
 
 #[cfg(feature = "terminal-native-renderer")]
 use std::collections::HashMap;
+#[cfg(feature = "terminal-native-renderer")]
+use std::time::Instant;
 
 use crate::app::ssh::runtime::{SurfaceState, TerminalCursorShape};
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
@@ -23,7 +25,7 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_scene_image::SceneImageTerminalRenderer;
+use crate::app::terminal_scene_image::{SceneImageRenderDiagnostics, SceneImageTerminalRenderer};
 use crate::app::terminal_semantic::{SemanticInputOverlay, SemanticOutputOverlay};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_semantic::{detect_input_line_overlays, detect_output_block_overlays};
@@ -151,6 +153,8 @@ pub struct PresentableNativeFrame {
     pub glyph_run_count: usize,
     pub glyph_count: usize,
     pub dirty_row_count: usize,
+    pub viewport_offset_lines: u32,
+    pub row_content_hashes: Vec<u64>,
     pub default_fg_rgba: u32,
     pub default_bg_rgba: u32,
     pub row_bg_even_rgba: u32,
@@ -186,6 +190,22 @@ pub struct TerminalPresentationOptions {
     pub selection: Option<TerminalAtlasSelection>,
     pub selection_overlay_rgba: u32,
     pub ime_preview_overlay: NativeImePreviewOverlay,
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct TerminalPrepareDiagnostics {
+    prepare_native_terminal_frame_us: u64,
+    model_frame_us: u64,
+    shape_rows_us: u64,
+    renderer_prepare_us: u64,
+    viewport_offset_lines: u32,
+    shaped_row_count: usize,
+    reused_shaped_row_count: usize,
+    fresh_shaped_row_count: usize,
+    dirty_row_count: usize,
+    prepared_row_reuse_count: usize,
+    glyph_raster_cache_entry_count: usize,
 }
 
 pub trait TerminalPresenter {
@@ -323,7 +343,7 @@ impl TerminalPresenter for WindowsNativePresenter {
         surface: &SurfaceState,
         options: TerminalPresentationOptions,
     ) -> Result<PresentedTerminalFrame> {
-        let frame = prepare_native_terminal_frame(
+        let (frame, diagnostics) = prepare_native_terminal_frame_with_diagnostics(
             &mut self.font_system,
             &mut self.shaper,
             &mut self.renderer,
@@ -333,6 +353,7 @@ impl TerminalPresenter for WindowsNativePresenter {
             surface,
             options,
         )?;
+        log_native_present_diagnostics(surface, diagnostics);
         Ok(PresentedTerminalFrame::Native(Box::new(frame)))
     }
 
@@ -414,7 +435,7 @@ impl TerminalPresenter for WindowsSceneImagePresenter {
         options: TerminalPresentationOptions,
     ) -> Result<PresentedTerminalFrame> {
         // software 包必须把终端像素放回 Slint scene，否则 overlay 一定会被整窗 post-pass 盖掉。
-        let frame = prepare_native_terminal_frame(
+        let (frame, prepare_diagnostics) = prepare_native_terminal_frame_with_diagnostics(
             &mut self.font_system,
             &mut self.shaper,
             &mut self.renderer,
@@ -424,9 +445,11 @@ impl TerminalPresenter for WindowsSceneImagePresenter {
             surface,
             options,
         )?;
-        Ok(PresentedTerminalFrame::Bitmap(
-            self.scene_renderer.render(&frame)?,
-        ))
+        let bitmap = self.scene_renderer.render(&frame)?;
+        if let Some(scene_diagnostics) = self.scene_renderer.last_render_diagnostics() {
+            log_scene_image_present_diagnostics(surface, prepare_diagnostics, scene_diagnostics);
+        }
+        Ok(PresentedTerminalFrame::Bitmap(bitmap))
     }
 
     fn default_cell_size(&self) -> (u32, u32) {
@@ -435,6 +458,7 @@ impl TerminalPresenter for WindowsSceneImagePresenter {
 }
 
 #[cfg(feature = "terminal-native-renderer")]
+#[allow(dead_code)]
 fn prepare_native_terminal_frame(
     font_system: &mut dyn FontSystem,
     shaper: &mut TerminalTextShaper,
@@ -445,8 +469,36 @@ fn prepare_native_terminal_frame(
     surface: &SurfaceState,
     options: TerminalPresentationOptions,
 ) -> Result<NativeTerminalFrame> {
+    Ok(prepare_native_terminal_frame_with_diagnostics(
+        font_system,
+        shaper,
+        renderer,
+        loaded_font,
+        previous_frame,
+        previous_shaped_rows,
+        surface,
+        options,
+    )?
+    .0)
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+fn prepare_native_terminal_frame_with_diagnostics(
+    font_system: &mut dyn FontSystem,
+    shaper: &mut TerminalTextShaper,
+    renderer: &mut WgpuTerminalRenderer,
+    loaded_font: &LoadedFont,
+    previous_frame: &mut Option<TerminalModelFrame>,
+    previous_shaped_rows: &mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
+    surface: &SurfaceState,
+    options: TerminalPresentationOptions,
+) -> Result<(NativeTerminalFrame, TerminalPrepareDiagnostics)> {
+    let prepare_started = Instant::now();
+    let model_started = Instant::now();
     let frame_model = TerminalModelFrame::from_surface(surface, previous_frame.as_ref());
-    let rows = shape_rows_with_previous_cache(
+    let model_frame_us = model_started.elapsed().as_micros() as u64;
+    let shape_started = Instant::now();
+    let (rows, reused_shaped_row_count) = shape_rows_with_previous_cache(
         &frame_model,
         previous_frame.as_ref(),
         previous_shaped_rows.as_ref(),
@@ -454,6 +506,8 @@ fn prepare_native_terminal_frame(
         loaded_font,
         font_system,
     )?;
+    let shape_rows_us = shape_started.elapsed().as_micros() as u64;
+    let renderer_prepare_started = Instant::now();
     let prepared = renderer.prepare(
         &ShapedTerminalFrame {
             seqno: frame_model.seqno as u64,
@@ -462,6 +516,7 @@ fn prepare_native_terminal_frame(
         },
         font_system,
     )?;
+    let renderer_prepare_us = renderer_prepare_started.elapsed().as_micros() as u64;
     let selection = options.selection;
     let selection_state = match selection {
         Some(selection) => NativeSelectionFrameState {
@@ -521,6 +576,8 @@ fn prepare_native_terminal_frame(
         glyph_run_count: prepared.glyph_run_count,
         glyph_count: prepared.glyph_count,
         dirty_row_count: frame_model.dirty_rows.len(),
+        viewport_offset_lines: frame_model.viewport_offset_lines,
+        row_content_hashes: frame_model.rows.iter().map(|row| row.content_hash).collect(),
         default_fg_rgba: frame_model.palette.default_fg_rgba,
         default_bg_rgba: frame_model.palette.default_bg_rgba,
         row_bg_even_rgba: frame_model.palette.row_bg_even_rgba,
@@ -560,12 +617,31 @@ fn prepare_native_terminal_frame(
     *previous_shaped_rows = Some(rows);
     *previous_frame = Some(frame_model);
 
-    Ok(NativeTerminalFrame {
-        frame_token: prepared.frame_token,
-        cell_width_px: prepared.cell_width_px,
-        cell_height_px: prepared.cell_height_px,
-        presentable_frame,
-    })
+    let shaped_row_count = presentable_frame.shaped_row_count;
+    let dirty_row_count = presentable_frame.dirty_row_count;
+    let diagnostics = TerminalPrepareDiagnostics {
+        prepare_native_terminal_frame_us: prepare_started.elapsed().as_micros() as u64,
+        model_frame_us,
+        shape_rows_us,
+        renderer_prepare_us,
+        viewport_offset_lines: presentable_frame.viewport_offset_lines,
+        shaped_row_count,
+        reused_shaped_row_count,
+        fresh_shaped_row_count: shaped_row_count.saturating_sub(reused_shaped_row_count),
+        dirty_row_count,
+        prepared_row_reuse_count: renderer.last_prepared_row_reuse_count(),
+        glyph_raster_cache_entry_count: renderer.glyph_raster_cache_entry_count(),
+    };
+
+    Ok((
+        NativeTerminalFrame {
+            frame_token: prepared.frame_token,
+            cell_width_px: prepared.cell_width_px,
+            cell_height_px: prepared.cell_height_px,
+            presentable_frame,
+        },
+        diagnostics,
+    ))
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -576,7 +652,7 @@ fn shape_rows_with_previous_cache(
     shaper: &mut TerminalTextShaper,
     loaded_font: &LoadedFont,
     font_system: &mut dyn FontSystem,
-) -> Result<Vec<crate::app::terminal_layout::ShapedRow>> {
+) -> Result<(Vec<crate::app::terminal_layout::ShapedRow>, usize)> {
     let mut previous_row_cache = HashMap::new();
     if let (Some(previous_frame), Some(previous_shaped_rows)) =
         (previous_frame, previous_shaped_rows)
@@ -588,17 +664,21 @@ fn shape_rows_with_previous_cache(
         }
     }
 
-    frame_model
+    let mut reused_shaped_row_count = 0usize;
+    let rows = frame_model
         .rows
         .iter()
         .map(|row| {
             if let Some(cached) = previous_row_cache.get(&row.content_hash) {
+                reused_shaped_row_count = reused_shaped_row_count.saturating_add(1);
                 Ok(rebased_shaped_row(cached, row.row_index))
             } else {
                 shaper.shape_row(row, loaded_font, font_system)
             }
         })
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok((rows, reused_shaped_row_count))
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -612,6 +692,59 @@ fn rebased_shaped_row(
         run.row = row_index;
     }
     reused
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+fn log_native_present_diagnostics(surface: &SurfaceState, diagnostics: TerminalPrepareDiagnostics) {
+    tracing::debug!(
+        target: "app.terminal.perf",
+        render_path = "retained-native-surface",
+        seqno = surface.seqno as u64,
+        viewport_offset_lines = diagnostics.viewport_offset_lines,
+        prepare_native_terminal_frame_us = diagnostics.prepare_native_terminal_frame_us,
+        model_frame_us = diagnostics.model_frame_us,
+        shape_rows_us = diagnostics.shape_rows_us,
+        renderer_prepare_us = diagnostics.renderer_prepare_us,
+        shaped_row_count = diagnostics.shaped_row_count,
+        reused_shaped_row_count = diagnostics.reused_shaped_row_count,
+        fresh_shaped_row_count = diagnostics.fresh_shaped_row_count,
+        dirty_row_count = diagnostics.dirty_row_count,
+        prepared_row_reuse_count = diagnostics.prepared_row_reuse_count,
+        glyph_raster_cache_entry_count = diagnostics.glyph_raster_cache_entry_count,
+        "prepared retained native terminal frame"
+    );
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+fn log_scene_image_present_diagnostics(
+    surface: &SurfaceState,
+    prepare_diagnostics: TerminalPrepareDiagnostics,
+    scene_diagnostics: SceneImageRenderDiagnostics,
+) {
+    tracing::debug!(
+        target: "app.terminal.perf",
+        render_path = "scene-image",
+        seqno = surface.seqno as u64,
+        viewport_offset_lines = prepare_diagnostics.viewport_offset_lines,
+        prepare_native_terminal_frame_us = prepare_diagnostics.prepare_native_terminal_frame_us,
+        model_frame_us = prepare_diagnostics.model_frame_us,
+        shape_rows_us = prepare_diagnostics.shape_rows_us,
+        renderer_prepare_us = prepare_diagnostics.renderer_prepare_us,
+        shaped_row_count = prepare_diagnostics.shaped_row_count,
+        reused_shaped_row_count = prepare_diagnostics.reused_shaped_row_count,
+        fresh_shaped_row_count = prepare_diagnostics.fresh_shaped_row_count,
+        dirty_row_count = prepare_diagnostics.dirty_row_count,
+        prepared_row_reuse_count = prepare_diagnostics.prepared_row_reuse_count,
+        glyph_raster_cache_entry_count = prepare_diagnostics.glyph_raster_cache_entry_count,
+        scene_image_render_us = scene_diagnostics.scene_image_render_us,
+        scene_image_base_raster_us = scene_diagnostics.base_raster_us,
+        scene_image_overlay_compose_us = scene_diagnostics.overlay_compose_us,
+        scene_image_reuse_mode = scene_diagnostics.reuse_mode,
+        incremental_scroll_delta_rows = scene_diagnostics.incremental_scroll_delta_rows,
+        dirty_edge_row_count = scene_diagnostics.dirty_edge_row_count,
+        bitmap_render_count = scene_diagnostics.bitmap_render_count,
+        "presented scene-image terminal frame"
+    );
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -826,6 +959,51 @@ mod tests {
             4,
             "scrolling the viewport by one line should only shape the newly exposed row instead of reshaping all three visible rows"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn prepare_native_terminal_frame_reports_scroll_reuse_diagnostics() -> Result<()> {
+        let session_id = Uuid::new_v4();
+        let first_surface = scroll_perf_surface(session_id, 1, 0, ["one", "two", "three"]);
+        let second_surface = scroll_perf_surface(session_id, 2, 1, ["zero", "one", "two"]);
+        let mut font_system = CountingFontSystem::new()?;
+        let loaded_font = font_system.load_font(&FontRequest::default())?;
+        let mut shaper = TerminalTextShaper;
+        let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+        let mut previous_frame = None;
+        let mut previous_shaped_rows = None;
+
+        prepare_native_terminal_frame(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &first_surface,
+            TerminalPresentationOptions::default(),
+        )?;
+
+        let (_, diagnostics) = prepare_native_terminal_frame_with_diagnostics(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &second_surface,
+            TerminalPresentationOptions::default(),
+        )?;
+
+        assert_eq!(diagnostics.viewport_offset_lines, 1);
+        assert_eq!(diagnostics.shaped_row_count, 3);
+        assert_eq!(diagnostics.reused_shaped_row_count, 2);
+        assert_eq!(diagnostics.fresh_shaped_row_count, 1);
+        assert_eq!(diagnostics.dirty_row_count, 3);
+        assert_eq!(diagnostics.prepared_row_reuse_count, 2);
+        assert!(diagnostics.glyph_raster_cache_entry_count >= 4);
 
         Ok(())
     }

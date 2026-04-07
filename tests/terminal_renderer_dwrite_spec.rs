@@ -718,8 +718,16 @@ fn windows_platform_surface_backend_source_exposes_hwnd_and_lifecycle_contract()
     );
     assert!(
         native_surface_source
-            .contains("state.latest_diagnostics = state.backend.diagnostics_snapshot();"),
-        "native surface should refresh cached diagnostics after backend state transitions"
+            .contains("let mut diagnostics = state.backend.diagnostics_snapshot();")
+            && native_surface_source
+                .contains("diagnostics.scheduled_present_count = state.scheduled_present_count;")
+            && native_surface_source.contains(
+                "diagnostics.host_redraw_request_count = state.host_redraw_request_count;"
+            )
+            && native_surface_source
+                .contains("diagnostics.host_redraw_replay_count = state.host_redraw_replay_count;")
+            && native_surface_source.contains("state.latest_diagnostics = diagnostics;"),
+        "native surface should refresh cached diagnostics after backend state transitions and annotate them with native present scheduling counters"
     );
     assert!(
         windows_frame_source
@@ -984,16 +992,20 @@ fn terminal_style_contract_threads_bold_and_underline_across_runtime_model_and_l
         "text style keys should include background color so retained native frames can draw ANSI background runs"
     );
     assert!(
-        renderer_source.contains("run.style.bold.hash(&mut hasher);"),
-        "native frame fingerprints should include bold state so style-only changes trigger redraws"
+        model_source.contains("cell.bold.hash(hasher);"),
+        "terminal model row hashing should include bold state so style-only changes still invalidate downstream renderer fingerprints"
     );
     assert!(
-        renderer_source.contains("run.style.underline.hash(&mut hasher);"),
-        "native frame fingerprints should include underline state so decoration changes trigger redraws"
+        model_source.contains("cell.underline.hash(hasher);"),
+        "terminal model row hashing should include underline state so decoration-only changes still invalidate downstream renderer fingerprints"
     );
     assert!(
-        renderer_source.contains("run.style.bg_rgba.hash(&mut hasher);"),
-        "native frame fingerprints should include background color so background-only style changes trigger redraws"
+        model_source.contains("cell.bg_rgba.hash(hasher);"),
+        "terminal model row hashing should include background color so background-only style changes still invalidate downstream renderer fingerprints"
+    );
+    assert!(
+        renderer_source.contains("row.row_hash.hash(&mut hasher);"),
+        "native frame fingerprints should consume the model-layer row hash so the renderer can keep style-sensitive invalidation without re-hashing every run and glyph on each frame"
     );
 }
 
@@ -1114,8 +1126,9 @@ fn terminal_font_backend_owns_rasterization_contract_and_renderer_delegates_to_i
         "native renderer should depend on the font backend trait so the rendering seam can survive further backend extraction work"
     );
     assert!(
-        renderer_source.contains("fonts.rasterize_glyph(&frame.font, request)?"),
-        "native renderer should rasterize through the shared font backend contract"
+        renderer_source.contains("fonts.rasterize_glyph(&frame.font, request)?")
+            || renderer_source.contains("fonts.rasterize_glyph(font, request)?"),
+        "native renderer should rasterize through the shared font backend contract even when prepare-path helpers abstract the direct call site"
     );
     assert!(
         !renderer_source.contains("DirectWriteFontSystem"),
@@ -1435,6 +1448,11 @@ fn windows_backend_source_hardens_detach_and_device_loss_contracts() {
         windows_backend_source.contains("if err.code() == D2DERR_RECREATE_TARGET {")
             && windows_backend_source.contains("self.clear_device_resources();"),
         "Windows backend should clear stale Direct2D resources when target loss forces device recreation"
+    );
+    assert!(
+        !windows_backend_source.contains("self.state.monochrome_glyph_bitmaps.clear();")
+            && !windows_backend_source.contains("self.state.color_glyph_bitmaps.clear();"),
+        "Windows backend detach should preserve CPU-side glyph payload caches so prepared-row reuse can survive a later surface reattach without requiring fresh upload payloads"
     );
     assert!(
         windows_frame_source.contains("pub fn native_surface_is_attached("),

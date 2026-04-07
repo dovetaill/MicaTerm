@@ -41,10 +41,10 @@ fn runtime_visible_projection_limits_iteration_to_visible_phys_range() {
         "visible cell projection should not walk the full scrollback when projecting the current viewport"
     );
     assert!(
-        adapter_source
-            .contains("let visible_end = visible_start.saturating_add(visible_rows).min(total_rows);")
-            && adapter_source
-                .contains("let visible_start = visible_end.saturating_sub(visible_rows);"),
+        adapter_source.contains(
+            "let visible_end = visible_start.saturating_add(visible_rows).min(total_rows);"
+        ) && adapter_source
+            .contains("let visible_start = visible_end.saturating_sub(visible_rows);"),
         "visible phys bounds should clamp against the live screen length so wrapped scrollback layouts cannot feed out-of-range phys indexes into the viewport projection path"
     );
 }
@@ -56,7 +56,9 @@ fn runtime_dirty_notifications_expose_a_fast_input_active_flush_contract() {
         fs::read_to_string("src/app/ssh/runtime/pump.rs").expect("read runtime pump source");
 
     assert!(
-        runtime_source.contains("const FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL: Duration = Duration::from_millis("),
+        runtime_source.contains(
+            "const FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL: Duration = Duration::from_millis("
+        ),
         "runtime should expose a dedicated fast dirty-notification cadence so local key repeat does not wait for the conservative idle 40ms output flush budget"
     );
     assert!(
@@ -112,16 +114,16 @@ fn bootstrap_exposes_surface_only_scroll_projection_refresh_paths() {
     );
 
     assert!(
-        scroll_refresh_block.contains("refresh_active_workspace_surface_projection("),
-        "wheel and scroll-jump refresh timers should update only the active terminal surface so scrollbar motion does not rebuild workspace tabs or SFTP state"
+        scroll_refresh_block.contains("refresh_active_terminal_scroll_projection_only("),
+        "wheel and scroll-jump refresh timers should update only the active terminal render payload so scrollbar motion does not rebuild unrelated workspace/session chrome"
     );
     assert!(
         !scroll_refresh_block.contains("refresh_active_workspace_projection("),
         "wheel and scroll-jump refresh timers should stay off the full workspace projection walker during high-frequency viewport updates"
     );
     assert!(
-        thumb_drag_block.contains("refresh_active_workspace_surface_projection("),
-        "scroll thumb drag refreshes should update only the active terminal surface so continuous thumb motion stays on the cheap viewport projection path"
+        thumb_drag_block.contains("refresh_active_terminal_scroll_projection_only("),
+        "scroll thumb drag refreshes should update only the active terminal render payload so continuous thumb motion stays on the cheap viewport projection path"
     );
     assert!(
         !thumb_drag_block.contains("refresh_active_workspace_projection("),
@@ -140,12 +142,24 @@ fn terminal_scroll_refresh_avoids_full_workspace_projection() {
     );
 
     assert!(
-        scroll_refresh_block.contains("refresh_active_terminal_surface_only("),
-        "terminal scroll refreshes should target a dedicated surface-only helper so the migration can route viewport updates through the new renderer host without borrowing the legacy workspace projection naming and responsibilities"
+        workspace_terminal_source
+            .contains("pub(super) fn refresh_active_terminal_scroll_projection_only("),
+        "terminal scroll refreshes should target a dedicated render-only helper so viewport updates can skip unrelated session-chrome syncing"
     );
     assert!(
-        !scroll_refresh_block.contains("refresh_active_workspace_projection("),
-        "terminal scroll refreshes must stay off the full workspace projection walker even while the new terminal subsystem is being introduced"
+        !scroll_refresh_block.contains("refresh_active_terminal_surface_only("),
+        "terminal scroll refreshes should stop calling the broader surface helper once a tighter render-only path exists"
+    );
+    assert!(
+        workspace_terminal_source
+            .contains("super::sync_workspace_terminal_surface_projection_only("),
+        "the dedicated scroll helper should hand off directly to a render-only bootstrap sync routine instead of rebuilding visible-line models and session chrome"
+    );
+    assert!(
+        !workspace_terminal_source.contains(
+            "pub(super) fn refresh_active_terminal_scroll_projection_only(\n    window: &AppWindow,\n    state: &mut ShellViewModel,\n    bridge: Option<&ShellSessionBridge>,\n    follow_tracker: &mut WorkspaceFollowTracker,\n) {\n    let Some(bridge) = bridge else {\n        return;\n    };\n    if sync_active_workspace_surface_projection_from_manager(state, &bridge.manager) {\n        sync_workspace_session_state_with_manager("
+        ),
+        "the dedicated scroll helper should not fall back to the full workspace session sync because that reprojects visible lines, chrome tokens, and connection state on every wheel notch"
     );
 }
 
@@ -162,6 +176,49 @@ fn renderer_hot_paths_consume_terminal_frame_snapshot_contract() {
         !presenter_source.contains("TerminalSurfaceState"),
         "renderer-facing hot paths should stop depending directly on TerminalSurfaceState once the compact frame snapshot seam exists"
     );
+}
+
+#[test]
+fn presenter_and_scene_image_paths_expose_perf_breakdown_diagnostics() {
+    let presenter_source = fs::read_to_string("src/app/terminal_presenter.rs")
+        .expect("read terminal presenter source");
+    let scene_image_source = fs::read_to_string("src/app/terminal_scene_image.rs")
+        .expect("read scene image source");
+
+    for expected in [
+        "struct TerminalPrepareDiagnostics",
+        "prepare_native_terminal_frame_with_diagnostics(",
+        "prepare_native_terminal_frame_us",
+        "shape_rows_us",
+        "renderer_prepare_us",
+        "reused_shaped_row_count",
+        "prepared_row_reuse_count",
+        "glyph_raster_cache_entry_count",
+        "target: \"app.terminal.perf\"",
+        "scene_image_render_us",
+        "scene_image_base_raster_us",
+    ] {
+        assert!(
+            presenter_source.contains(expected),
+            "presenter perf instrumentation should expose `{expected}` so runtime logs can show whether prepare_native_terminal_frame or downstream raster work is actually dominating scroll latency"
+        );
+    }
+
+    for expected in [
+        "pub struct SceneImageRenderDiagnostics",
+        "pub fn last_render_diagnostics(&self)",
+        "incremental_scroll_render_count",
+        "dirty_edge_row_raster_count",
+        "base_raster_us",
+        "overlay_compose_us",
+        "detect_incremental_scroll_delta(",
+        "render_incremental_base_pixels(",
+    ] {
+        assert!(
+            scene_image_source.contains(expected),
+            "scene-image renderer should expose `{expected}` so incremental scroll reuse and raster timings stay observable while we chase scroll smoothness regressions"
+        );
+    }
 }
 
 #[test]
@@ -198,5 +255,52 @@ fn renderer_host_exposes_surface_local_present_updates() {
     assert!(
         bootstrap_source.contains(".present_surface_update("),
         "bootstrap should consume the renderer host's surface-local present entry point instead of reaching for a generic presenter call during terminal-only refreshes"
+    );
+}
+
+#[test]
+fn native_renderer_prepare_avoids_cloning_cached_rows_and_rehashing_full_glyph_runs() {
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read wgpu renderer source");
+    let shaper_source = fs::read_to_string("src/app/terminal_layout/shaper.rs")
+        .expect("read shaper source");
+
+    assert!(
+        renderer_source.contains("std::mem::take(&mut self.previous_prepared_rows)"),
+        "native renderer prepare should move the previous prepared-row cache out of self instead of cloning the entire retained row-artifact map on every frame"
+    );
+    assert!(
+        !renderer_source.contains("let previous_prepared_rows = self.previous_prepared_rows.clone();"),
+        "native renderer prepare should stop cloning the retained row-artifact cache because repeated large viewport scrolls otherwise spend hot-path time duplicating cached draw payload vectors before any reuse happens"
+    );
+    assert!(
+        shaper_source.contains("pub content_hash: u64")
+            && shaper_source.contains("pub row_hash: u64"),
+        "shaped rows should retain the model-layer content and row hashes so renderer prepare can key row reuse and frame fingerprints off cheap precomputed hashes instead of walking every glyph cluster again"
+    );
+    assert!(
+        renderer_source.contains("row.content_hash.hash(&mut hasher)")
+            && renderer_source.contains("row.row_hash.hash(&mut hasher)"),
+        "renderer prepare should hash precomputed row hash fields rather than re-hashing each run, cluster, and glyph just to detect cache reuse and frame-token changes"
+    );
+}
+
+#[test]
+fn native_renderer_cached_glyph_hits_keep_raster_payloads_behind_shared_refs() {
+    let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read wgpu renderer source");
+
+    assert!(
+        renderer_source
+            .contains("glyph_raster_cache: HashMap<GlyphRasterRequest, Arc<RasterizedGlyph>>"),
+        "native renderer should keep cached monochrome raster payloads behind Arc so cache hits do not clone full coverage buffers back onto the hot prepare path"
+    );
+    assert!(
+        renderer_source.contains("return Ok(Arc::clone(rasterized));"),
+        "native renderer should hand out shared glyph cache hits by Arc clone so cached raster payloads stay zero-copy until an upload is actually required"
+    );
+    assert!(
+        !renderer_source.contains("return Ok(rasterized.clone());"),
+        "native renderer cache hits should stop cloning RasterizedGlyph payloads directly because that duplicates large coverage buffers on every scroll/frame reuse"
     );
 }
