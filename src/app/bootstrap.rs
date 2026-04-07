@@ -194,6 +194,13 @@ const FALLBACK_WORKSPACE_TERMINAL_CELL_HEIGHT_PX: u32 = 22;
 const WORKSPACE_INPUT_PROJECTION_DEBOUNCE_MS: u64 = 12;
 const WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS: u64 = 16;
 
+#[cfg(test)]
+type WorkspaceTerminalPresenterFactory =
+    dyn Fn(AppRuntimeProfile) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)>;
+#[cfg(test)]
+#[allow(non_camel_case_types)]
+type TEST_WORKSPACE_TERMINAL_HOST_FACTORY = WorkspaceTerminalPresenterFactory;
+
 thread_local! {
     static WORKSPACE_TERMINAL_RENDERER_HOST: RefCell<Option<TerminalRendererHost>> = const {
         RefCell::new(None)
@@ -202,6 +209,10 @@ thread_local! {
         RefCell::new(None)
     };
     static WORKSPACE_RUNTIME_PROFILE: RefCell<Option<AppRuntimeProfile>> = const {
+        RefCell::new(None)
+    };
+    #[cfg(test)]
+    static WORKSPACE_TEST_TERMINAL_PRESENTER_FACTORY: RefCell<Option<Box<TEST_WORKSPACE_TERMINAL_HOST_FACTORY>>> = const {
         RefCell::new(None)
     };
 }
@@ -2084,7 +2095,19 @@ fn build_scene_image_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> 
     ))
 }
 
-#[cfg(not(test))]
+fn resolve_workspace_terminal_presenter(
+    profile: AppRuntimeProfile,
+) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)> {
+    #[cfg(test)]
+    if let Some(result) = WORKSPACE_TEST_TERMINAL_PRESENTER_FACTORY.with(|cell| {
+        cell.borrow().as_ref().map(|factory| factory(profile))
+    }) {
+        return result;
+    }
+
+    build_workspace_terminal_presenter(profile)
+}
+
 fn ensure_workspace_terminal_presenter(
     window: &AppWindow,
     profile: AppRuntimeProfile,
@@ -2095,7 +2118,7 @@ fn ensure_workspace_terminal_presenter(
         let needs_init = cell.borrow().is_none();
         if needs_init {
             let (presenter, active_render_mode) =
-                match build_workspace_terminal_presenter(profile) {
+                match resolve_workspace_terminal_presenter(profile) {
                     Ok(presenter) => presenter,
                     Err(err) => {
                         tracing::error!(
@@ -2149,20 +2172,15 @@ fn ensure_workspace_terminal_presenter(
 }
 
 #[cfg(test)]
-fn ensure_workspace_terminal_presenter(
-    window: &AppWindow,
-    _profile: AppRuntimeProfile,
-    scale_factor: f32,
-) -> Result<()> {
-    WORKSPACE_TERMINAL_RENDERER_HOST.with(|cell| -> Result<()> {
-        if cell.borrow().is_none() {
-            let presenter = Box::new(BitmapAtlasPresenter::new()?) as Box<dyn TerminalPresenter>;
-            let mut host = TerminalRendererHost::new(presenter, TerminalRenderMode::Bitmap);
-            host.set_raster_scale(scale_factor);
-            *cell.borrow_mut() = Some(host);
-            window.set_workspace_session_native_frame_token(0);
-        }
-        Ok(())
+fn with_workspace_terminal_presenter_factory_for_test<T>(
+    factory: Box<WorkspaceTerminalPresenterFactory>,
+    body: impl FnOnce() -> T,
+) -> T {
+    WORKSPACE_TEST_TERMINAL_PRESENTER_FACTORY.with(|cell| {
+        let previous = cell.replace(Some(factory));
+        let result = body();
+        cell.replace(previous);
+        result
     })
 }
 
@@ -5567,6 +5585,7 @@ mod tests {
     struct NoopRuntimeControl;
 
     struct FailingPresenter;
+    struct SizedPresenter((u32, u32));
 
     #[test]
     fn deferred_workspace_projection_refresh_gate_coalesces_redundant_requests() {
@@ -5626,6 +5645,31 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn resolve_workspace_terminal_presenter_can_use_test_override_factory() -> Result<()> {
+        let (presenter, render_mode) = with_workspace_terminal_presenter_factory_for_test(
+            Box::new(|_profile| {
+                Ok((
+                    Box::new(SizedPresenter((33, 44))) as Box<dyn TerminalPresenter>,
+                    TerminalRenderMode::Bitmap,
+                ))
+            }),
+            || resolve_workspace_terminal_presenter(AppRuntimeProfile::development()),
+        )?;
+
+        assert_eq!(
+            presenter.default_cell_size(),
+            (33, 44),
+            "test overrides should be able to install a non-default presenter path instead of always forcing BitmapAtlasPresenter"
+        );
+        assert_eq!(
+            render_mode,
+            TerminalRenderMode::Bitmap,
+            "test overrides should be able to request a specific render mode through the shared presenter resolution path"
+        );
+        Ok(())
+    }
+
     impl SessionRuntimeControl for NoopRuntimeControl {
         fn disconnect(&self) -> Result<()> {
             Ok(())
@@ -5663,6 +5707,20 @@ mod tests {
 
         fn default_cell_size(&self) -> (u32, u32) {
             (10, 22)
+        }
+    }
+
+    impl TerminalPresenter for SizedPresenter {
+        fn present(
+            &mut self,
+            _surface: &TerminalSurfaceState,
+            _options: TerminalPresentationOptions,
+        ) -> Result<PresentedTerminalFrame> {
+            Err(anyhow!("sized presenter is only used for install-path tests"))
+        }
+
+        fn default_cell_size(&self) -> (u32, u32) {
+            self.0
         }
     }
 
