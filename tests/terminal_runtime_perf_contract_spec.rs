@@ -11,15 +11,15 @@ fn block_between<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
 
 #[test]
 fn runtime_visible_projection_limits_iteration_to_visible_phys_range() {
-    let runtime_source =
-        fs::read_to_string("src/app/ssh/runtime/terminal.rs").expect("read runtime terminal source");
+    let adapter_source = fs::read_to_string("src/app/terminal_core/wezterm_adapter.rs")
+        .expect("read wezterm adapter source");
     let visible_rows_block = block_between(
-        &runtime_source,
+        &adapter_source,
         "    pub fn visible_rows(&self) -> Vec<TerminalRowState> {",
         "    pub fn visible_lines(&self) -> Vec<String> {",
     );
     let visible_cells_block = block_between(
-        &runtime_source,
+        &adapter_source,
         "    fn visible_cells(&self, palette: &ColorPalette) -> Vec<TerminalCellState> {",
         "    fn cursor_state(&self, palette: &ColorPalette) -> TerminalCursorState {",
     );
@@ -41,8 +41,10 @@ fn runtime_visible_projection_limits_iteration_to_visible_phys_range() {
         "visible cell projection should not walk the full scrollback when projecting the current viewport"
     );
     assert!(
-        runtime_source.contains("let visible_end = visible_start.saturating_add(visible_rows).min(total_rows);")
-            && runtime_source.contains("let visible_start = visible_end.saturating_sub(visible_rows);"),
+        adapter_source
+            .contains("let visible_end = visible_start.saturating_add(visible_rows).min(total_rows);")
+            && adapter_source
+                .contains("let visible_start = visible_end.saturating_sub(visible_rows);"),
         "visible phys bounds should clamp against the live screen length so wrapped scrollback layouts cannot feed out-of-range phys indexes into the viewport projection path"
     );
 }
@@ -160,5 +162,21 @@ fn renderer_hot_paths_consume_terminal_frame_snapshot_contract() {
     assert!(
         !presenter_source.contains("TerminalSurfaceState"),
         "renderer-facing hot paths should stop depending directly on TerminalSurfaceState once the compact frame snapshot seam exists"
+    );
+}
+
+#[test]
+fn renderer_host_exposes_surface_local_present_updates() {
+    let host_source =
+        fs::read_to_string("src/app/terminal_renderer/host.rs").expect("read renderer host");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        host_source.contains("pub fn present_surface_update("),
+        "renderer host should expose a dedicated surface-local present entry point so scroll/theme refreshes can stay on the terminal-only path while dirty-region support is introduced behind the host seam"
+    );
+    assert!(
+        bootstrap_source.contains(".present_surface_update("),
+        "bootstrap should consume the renderer host's surface-local present entry point instead of reaching for a generic presenter call during terminal-only refreshes"
     );
 }

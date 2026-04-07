@@ -3,8 +3,9 @@
 use anyhow::Result;
 use slint::Image;
 
-use crate::app::ssh::runtime::{TerminalCursorShape, TerminalSurfaceState};
+use crate::app::ssh::runtime::{SurfaceState, TerminalCursorShape};
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
+use crate::app::terminal_core::TerminalFrameSnapshot;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_font::{DirectWriteFontSystem, FontRequest, FontSystem, LoadedFont};
 #[cfg(feature = "terminal-native-renderer")]
@@ -23,6 +24,9 @@ use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_semantic::{detect_input_line_overlays, detect_output_block_overlays};
 use crate::app::terminal_semantic::{SemanticInputOverlay, SemanticOutputOverlay};
+
+#[allow(dead_code)]
+type PresenterFrameSnapshot = TerminalFrameSnapshot;
 
 #[cfg(not(feature = "terminal-native-renderer"))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -186,7 +190,7 @@ pub trait TerminalPresenter {
 
     fn present(
         &mut self,
-        surface: &TerminalSurfaceState,
+        surface: &SurfaceState,
         options: TerminalPresentationOptions,
     ) -> Result<PresentedTerminalFrame>;
 
@@ -214,7 +218,7 @@ impl TerminalPresenter for BitmapAtlasPresenter {
 
     fn present(
         &mut self,
-        surface: &TerminalSurfaceState,
+        surface: &SurfaceState,
         options: TerminalPresentationOptions,
     ) -> Result<PresentedTerminalFrame> {
         let frame_model = TerminalModelFrame::from_surface(surface, self.previous_frame.as_ref());
@@ -309,7 +313,7 @@ impl TerminalPresenter for WindowsNativePresenter {
 
     fn present(
         &mut self,
-        surface: &TerminalSurfaceState,
+        surface: &SurfaceState,
         options: TerminalPresentationOptions,
     ) -> Result<PresentedTerminalFrame> {
         let frame = prepare_native_terminal_frame(
@@ -398,7 +402,7 @@ impl TerminalPresenter for WindowsSceneImagePresenter {
 
     fn present(
         &mut self,
-        surface: &TerminalSurfaceState,
+        surface: &SurfaceState,
         options: TerminalPresentationOptions,
     ) -> Result<PresentedTerminalFrame> {
         // software 包必须把终端像素放回 Slint scene，否则 overlay 一定会被整窗 post-pass 盖掉。
@@ -428,7 +432,7 @@ fn prepare_native_terminal_frame(
     renderer: &mut WgpuTerminalRenderer,
     loaded_font: &LoadedFont,
     previous_frame: &mut Option<TerminalModelFrame>,
-    surface: &TerminalSurfaceState,
+    surface: &SurfaceState,
     options: TerminalPresentationOptions,
 ) -> Result<NativeTerminalFrame> {
     let frame_model = TerminalModelFrame::from_surface(surface, previous_frame.as_ref());
@@ -597,8 +601,8 @@ fn selection_overlay_rects(
         .collect()
 }
 
-fn model_frame_to_surface(model: &TerminalModelFrame) -> TerminalSurfaceState {
-    TerminalSurfaceState {
+fn model_frame_to_surface(model: &TerminalModelFrame) -> SurfaceState {
+    SurfaceState {
         session_id: model.session_id,
         seqno: model.seqno,
         rows: model.grid_rows,

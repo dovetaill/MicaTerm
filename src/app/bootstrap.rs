@@ -2538,7 +2538,7 @@ fn sync_workspace_session_state_with_manager(
                 return;
             };
             host.set_raster_scale(scale_factor);
-            match host.present(
+            match host.present_surface_update(
                 surface,
                 TerminalRendererHostOptions {
                     selection,

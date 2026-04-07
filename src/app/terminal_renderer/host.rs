@@ -45,6 +45,14 @@ impl TerminalRendererHost {
         surface: &TerminalSurfaceState,
         options: TerminalRendererHostOptions,
     ) -> Result<PresentedTerminalFrame> {
+        self.present_surface_update(surface, options)
+    }
+
+    pub fn present_surface_update(
+        &mut self,
+        surface: &TerminalSurfaceState,
+        options: TerminalRendererHostOptions,
+    ) -> Result<PresentedTerminalFrame> {
         self.presenter.present(
             surface,
             TerminalPresentationOptions {

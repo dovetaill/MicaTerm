@@ -172,7 +172,7 @@ pub(super) fn refresh_projection_after_local_input_hint(
     sync_workspace_session_state_with_manager(window, state, follow_tracker, Some(&bridge.manager));
 }
 
-pub(super) fn refresh_active_workspace_surface_projection(
+pub(super) fn refresh_active_terminal_surface_only(
     window: &AppWindow,
     state: &mut ShellViewModel,
     bridge: Option<&ShellSessionBridge>,
@@ -189,6 +189,15 @@ pub(super) fn refresh_active_workspace_surface_projection(
             Some(&bridge.manager),
         );
     }
+}
+
+pub(super) fn refresh_active_workspace_surface_projection(
+    window: &AppWindow,
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    follow_tracker: &mut WorkspaceFollowTracker,
+) {
+    refresh_active_terminal_surface_only(window, state, bridge, follow_tracker);
 }
 
 pub(super) fn sync_active_workspace_surface_projection_from_manager(
@@ -289,7 +298,9 @@ pub(super) fn schedule_workspace_scroll_projection_refresh(
                 return;
             };
             let mut state = state.borrow_mut();
-            refresh_active_workspace_surface_projection(
+            // Keep refresh_active_workspace_surface_projection(...) as the legacy alias
+            // for this surface-local refresh seam while callers migrate.
+            refresh_active_terminal_surface_only(
                 &window,
                 &mut state,
                 bridge.as_deref(),
@@ -335,7 +346,9 @@ pub(super) fn schedule_workspace_scroll_thumb_drag_update(
                 forward_active_workspace_scroll_ratio(&state, bridge.as_deref(), ratio);
             }
             let mut state = state.borrow_mut();
-            refresh_active_workspace_surface_projection(
+            // Keep refresh_active_workspace_surface_projection(...) as the legacy alias
+            // for this surface-local refresh seam while callers migrate.
+            refresh_active_terminal_surface_only(
                 &window,
                 &mut state,
                 bridge.as_deref(),

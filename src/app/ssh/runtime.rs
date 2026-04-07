@@ -12,6 +12,7 @@ pub use contracts::{
     TerminalKeyKind, TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput,
     TerminalRowState, TerminalSurfaceSignature, TerminalSurfaceState,
 };
+pub use contracts::TerminalSurfaceState as SurfaceState;
 pub use auth::UnknownHostKeyError;
 pub use terminal::{
     TerminalSession, encode_named_key_input, extract_current_working_directory_from_osc7,

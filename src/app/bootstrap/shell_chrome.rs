@@ -123,19 +123,12 @@ pub(super) fn bind_shell_chrome_callbacks(
                     "failed to synchronize theme mode into SSH sessions"
                 );
             }
-            let projection =
-                workspace_terminal::sync_workspace_projection_from_manager(
-                    &mut state,
-                    &session_bridge.manager,
-                );
-            if projection.tabs_changed || projection.surface_changed {
-                sync_workspace_tabs_with_manager(
-                    &window,
-                    &state,
-                    &mut workspace_follow_tracker_ref.borrow_mut(),
-                    Some(&session_bridge.manager),
-                );
-            }
+            workspace_terminal::refresh_active_terminal_surface_only(
+                &window,
+                &mut state,
+                Some(session_bridge),
+                &mut workspace_follow_tracker_ref.borrow_mut(),
+            );
         }
         sync_theme_and_window_effects(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
