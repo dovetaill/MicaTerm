@@ -12,6 +12,7 @@ terminal-core-alacritty-experimental = []
 
 [dependencies]
 anyhow = "1.0.102"
+alacritty_terminal = "0.26.0"
 argon2 = "0.5.3"
 aws-config = "1"
 aws-sdk-s3 = "1"

@@ -33,6 +33,30 @@ fn repository_exposes_experimental_alacritty_core_selection_contract() {
 }
 
 #[test]
+fn experimental_alacritty_core_binds_to_real_upstream_terminal_state() {
+    let cargo_toml = fs::read_to_string("Cargo.toml").expect("read cargo manifest");
+    let adapter_source = fs::read_to_string("src/app/terminal_core/alacritty_adapter.rs")
+        .expect("read alacritty adapter source");
+
+    assert!(
+        cargo_toml.contains("alacritty_terminal"),
+        "Cargo.toml should pull in the upstream alacritty_terminal crate once the experimental adapter stops proxying through wezterm state"
+    );
+    assert!(
+        adapter_source.contains("alacritty_terminal"),
+        "the alacritty adapter should reference the upstream alacritty terminal crate instead of staying as a rename-only seam"
+    );
+    assert!(
+        !adapter_source.contains("inner: WeztermTerminalCoreAdapter"),
+        "the experimental alacritty adapter should stop storing a WeztermTerminalCoreAdapter internally once the upstream core is wired in"
+    );
+    assert!(
+        !adapter_source.contains("WeztermTerminalCoreAdapter::new"),
+        "the experimental alacritty adapter should construct upstream alacritty terminal state instead of booting a nested wezterm adapter"
+    );
+}
+
+#[test]
 fn experimental_alacritty_core_matches_wezterm_for_viewport_cursor_and_selection_contracts() {
     let mut wezterm = parity_session(TerminalCoreKind::Wezterm, 4, 20);
     let mut alacritty = parity_session(TerminalCoreKind::AlacrittyExperimental, 4, 20);
@@ -48,7 +72,10 @@ fn experimental_alacritty_core_matches_wezterm_for_viewport_cursor_and_selection
     let wezterm_frame = wezterm.frame_snapshot();
     let alacritty_frame = alacritty.frame_snapshot();
 
-    assert_eq!(alacritty_surface.visible_lines, wezterm_surface.visible_lines);
+    assert_eq!(
+        alacritty_surface.visible_lines,
+        wezterm_surface.visible_lines
+    );
     assert_eq!(alacritty_surface.cursor, wezterm_surface.cursor);
     assert_eq!(
         alacritty_surface.viewport_offset_lines,
@@ -82,8 +109,14 @@ fn experimental_alacritty_core_matches_wezterm_for_truecolor_and_writeback_contr
         .send_key_event(TerminalKeyEvent::named("tab", false, false, true))
         .expect("alacritty writeback");
 
-    assert_eq!(alacritty_surface.default_fg_rgba, wezterm_surface.default_fg_rgba);
-    assert_eq!(alacritty_surface.default_bg_rgba, wezterm_surface.default_bg_rgba);
+    assert_eq!(
+        alacritty_surface.default_fg_rgba,
+        wezterm_surface.default_fg_rgba
+    );
+    assert_eq!(
+        alacritty_surface.default_bg_rgba,
+        wezterm_surface.default_bg_rgba
+    );
     assert_eq!(alacritty_surface.cells, wezterm_surface.cells);
     assert_eq!(alacritty_writeback, wezterm_writeback);
 }
