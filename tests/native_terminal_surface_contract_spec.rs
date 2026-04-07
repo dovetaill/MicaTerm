@@ -249,6 +249,17 @@ fn runtime_profile_source_exposes_terminal_render_mode_contract() {
 }
 
 #[test]
+fn terminal_renderer_host_source_exposes_render_mode_label_for_diagnostics() {
+    let host_source =
+        fs::read_to_string("src/app/terminal_renderer/host.rs").expect("read terminal host source");
+
+    assert!(
+        host_source.contains("pub fn render_mode_label(&self) -> &'static str"),
+        "terminal renderer host should expose a render-mode label helper so bootstrap diagnostics can log active presenter modes without reaching into raw enum formatting at every call site"
+    );
+}
+
+#[test]
 fn native_surface_source_exposes_present_bridge_contract() {
     assert!(
         Path::new("src/app/terminal_renderer/present_driver.rs").exists(),
@@ -729,6 +740,14 @@ fn windows_mainline_direct3d_source_routes_terminal_subsystem_explicitly_with_pa
     assert!(
         bootstrap_source.contains("profile.terminal_subsystem_mode()"),
         "bootstrap should consult the terminal subsystem mode explicitly so packaged builds keep the scene-image presenter by default while retained-native-surface stays opt-in"
+    );
+    assert!(
+        bootstrap_source.contains("requested_render_mode = profile.terminal_render_mode_label()"),
+        "workspace presenter initialization should log the requested render mode so packaged runtime diagnostics can distinguish profile intent from the active presenter that actually got installed"
+    );
+    assert!(
+        bootstrap_source.contains("active_render_mode = active_render_mode.as_str()"),
+        "workspace presenter initialization should log the active presenter mode so packaged runtime diagnostics can show whether bootstrap installed bitmap or native presentation"
     );
 }
 

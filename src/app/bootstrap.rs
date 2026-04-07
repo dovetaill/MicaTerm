@@ -2138,6 +2138,14 @@ fn ensure_workspace_terminal_presenter(
                 };
             let mut host = TerminalRendererHost::new(presenter, active_render_mode);
             host.set_raster_scale(scale_factor);
+            tracing::info!(
+                target: "app.terminal",
+                terminal_subsystem = profile.terminal_subsystem_mode_label(),
+                requested_render_mode = profile.terminal_render_mode_label(),
+                active_render_mode = active_render_mode.as_str(),
+                native_present_path = profile.native_present_path_label(),
+                "initialized workspace terminal presenter"
+            );
             *cell.borrow_mut() = Some(host);
             initialized_render_mode = Some(active_render_mode);
         }
@@ -2213,7 +2221,7 @@ fn present_surface_update_with_bitmap_fallback(
             tracing::error!(
                 target: "app.terminal",
                 session_id = surface.session_id.to_string(),
-                active_render_mode = requested_render_mode.as_str(),
+                requested_render_mode = requested_render_mode.as_str(),
                 error = %first_err,
                 "failed to render workspace terminal surface; retrying with bitmap presenter"
             );

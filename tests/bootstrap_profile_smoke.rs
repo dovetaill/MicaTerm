@@ -62,3 +62,30 @@ fn build_win_x64_wrapper_keeps_scene_image_as_packaged_default_until_native_surf
         "build-win-x64.sh help text should describe the scene-image packaged default so packaging output matches the runtime path users should expect"
     );
 }
+
+#[test]
+fn bootstrap_logs_terminal_subsystem_and_render_fallback_labels() {
+    let content = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        content.contains("terminal_subsystem = profile.terminal_subsystem_mode_label()"),
+        "bootstrap should include the selected terminal subsystem label in render-fallback diagnostics so packaged scene-image and retained-native-surface bring-up logs are distinguishable"
+    );
+    assert!(
+        content.contains("fallback_render_mode = TerminalRenderMode::Bitmap.as_str()"),
+        "bootstrap should keep fallback render mode labels visible in diagnostics when a presenter downgrade happens"
+    );
+}
+
+#[test]
+fn terminal_renderer_readme_documents_runtime_fallback_diagnostics() {
+    let content = fs::read_to_string("readme.md").expect("read readme");
+
+    assert!(
+        content.contains("selected terminal subsystem")
+            && content.contains("requested render mode")
+            && content.contains("active presenter mode")
+            && content.contains("fallback transitions"),
+        "readme should describe the runtime diagnostics emitted for terminal subsystem selection and presenter fallback transitions so packaged bring-up has an explicit debugging contract"
+    );
+}
