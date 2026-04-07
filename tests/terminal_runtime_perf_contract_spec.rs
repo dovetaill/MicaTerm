@@ -127,3 +127,38 @@ fn bootstrap_exposes_surface_only_scroll_projection_refresh_paths() {
         "scroll thumb drag refreshes should not call the full workspace projection walker after each coalesced runtime update"
     );
 }
+
+#[test]
+fn terminal_scroll_refresh_avoids_full_workspace_projection() {
+    let workspace_terminal_source = fs::read_to_string("src/app/bootstrap/workspace_terminal.rs")
+        .expect("read workspace terminal source");
+    let scroll_refresh_block = block_between(
+        &workspace_terminal_source,
+        "pub(super) fn schedule_workspace_scroll_projection_refresh(",
+        "pub(super) fn schedule_workspace_scroll_thumb_drag_update(",
+    );
+
+    assert!(
+        scroll_refresh_block.contains("refresh_active_terminal_surface_only("),
+        "terminal scroll refreshes should target a dedicated surface-only helper so the migration can route viewport updates through the new renderer host without borrowing the legacy workspace projection naming and responsibilities"
+    );
+    assert!(
+        !scroll_refresh_block.contains("refresh_active_workspace_projection("),
+        "terminal scroll refreshes must stay off the full workspace projection walker even while the new terminal subsystem is being introduced"
+    );
+}
+
+#[test]
+fn renderer_hot_paths_consume_terminal_frame_snapshot_contract() {
+    let presenter_source = fs::read_to_string("src/app/terminal_presenter.rs")
+        .expect("read terminal presenter source");
+
+    assert!(
+        presenter_source.contains("TerminalFrameSnapshot"),
+        "renderer-facing terminal hot paths should consume a compact TerminalFrameSnapshot contract so glyph prep and present scheduling no longer depend on the heavier surface projection model"
+    );
+    assert!(
+        !presenter_source.contains("TerminalSurfaceState"),
+        "renderer-facing hot paths should stop depending directly on TerminalSurfaceState once the compact frame snapshot seam exists"
+    );
+}

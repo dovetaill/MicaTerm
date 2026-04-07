@@ -122,6 +122,21 @@ fn bootstrap_source_threads_native_terminal_surface_contract() {
 }
 
 #[test]
+fn theme_toggle_keeps_terminal_refreshes_on_a_surface_local_contract() {
+    let shell_chrome_source =
+        fs::read_to_string("src/app/bootstrap/shell_chrome.rs").expect("read shell chrome");
+
+    assert!(
+        shell_chrome_source.contains("refresh_active_terminal_surface_only("),
+        "theme mode changes should refresh the active terminal through a dedicated surface-local helper so palette swaps stay off the heavier workspace projection rebuild path"
+    );
+    assert!(
+        !shell_chrome_source.contains("sync_workspace_projection_from_manager("),
+        "theme mode changes should not force a full workspace projection pass once the new terminal subsystem isolates terminal-local refresh work"
+    );
+}
+
+#[test]
 fn bootstrap_binds_workspace_terminal_hit_normalization_callbacks() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 

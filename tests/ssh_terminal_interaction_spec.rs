@@ -283,6 +283,24 @@ fn light_theme_palette_preserves_mica_code_light_ansi_black_bright_white_and_def
 }
 
 #[test]
+fn theme_mode_switch_preserves_visible_text_and_cursor_state() {
+    let session_id = Uuid::new_v4();
+    let mut session = TerminalSession::new(4, 20);
+
+    session.apply_remote_bytes(b"echo hi\r\nline two");
+    let dark = session.surface_state(session_id);
+
+    session.set_theme_mode(ThemeMode::Light);
+    let light = session.surface_state(session_id);
+
+    assert_eq!(light.visible_lines, dark.visible_lines);
+    assert_eq!(light.cursor.row, dark.cursor.row);
+    assert_eq!(light.cursor.col, dark.cursor.col);
+    assert_ne!(light.default_bg_rgba, dark.default_bg_rgba);
+    assert!(light.seqno > dark.seqno);
+}
+
+#[test]
 fn terminal_host_declares_accumulated_multi_line_wheel_scrollback_contract() {
     let terminal_host =
         fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
