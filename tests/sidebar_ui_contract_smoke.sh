@@ -30,8 +30,8 @@ grep -F 'active-sidebar-destination: root.active-sidebar-destination;' "$APP_WIN
 grep -F 'Folder Open' "$ASSETS" >/dev/null || true
 grep -F 'No assets yet' "$ASSETS" >/dev/null
 grep -F 'Right-click or use Create to add a folder or SSH connection.' "$ASSETS" >/dev/null
-grep -F 'Snippets' "$ASSETS" >/dev/null
-grep -F 'Groups, favorites, templates' "$ASSETS" >/dev/null
+grep -F 'active-panel == "snippets"' "$ASSETS" >/dev/null
+grep -F 'No snippets yet' "$ASSETS" >/dev/null
 grep -F 'active-panel == "keychain"' "$ASSETS" >/dev/null
 grep -F 'No keychain items yet' "$ASSETS" >/dev/null
 grep -F 'Use Create to add a folder, identity, or SSH key.' "$ASSETS" >/dev/null
@@ -39,5 +39,5 @@ grep -F 'folder-open-20-regular.svg' "$BUTTON" >/dev/null
 grep -F 'window-console-20-regular.svg' "$BUTTON" >/dev/null
 grep -F 'document-code-16-regular.svg' "$BUTTON" >/dev/null
 grep -F 'key-multiple-20-regular.svg' "$BUTTON" >/dev/null
-grep -F 'ThemeTokens.control-hover-surface' "$BUTTON" >/dev/null
-grep -F 'ThemeTokens.control-active-surface' "$BUTTON" >/dev/null
+grep -F 'ThemeTokens.sidebar-hover-surface' "$BUTTON" >/dev/null
+grep -F 'ThemeTokens.sidebar-selected-surface' "$BUTTON" >/dev/null

@@ -152,11 +152,9 @@ fn confirming_identity_modal_waits_for_valid_input_and_persists_password_secret(
 
     let identity_id = find_keychain_row_id(&app, "identity", "Prod Identity");
     let credential_ref = keychain_identity_credential_ref(identity_id.as_str());
-    let bundle = load_keychain_identity_secret_bundle(
-        credential_store.as_ref(),
-        credential_ref.as_str(),
-    )
-    .expect("load saved identity secret");
+    let bundle =
+        load_keychain_identity_secret_bundle(credential_store.as_ref(), credential_ref.as_str())
+            .expect("load saved identity secret");
 
     assert_eq!(app.get_keychain_asset_items().row_count(), 1);
     assert_eq!(bundle.password.as_deref(), Some("secret"));
@@ -183,53 +181,88 @@ fn editing_identity_can_switch_between_password_and_ssh_key_auth_without_losing_
     let identity_id = find_keychain_row_id(&app, "identity", "Prod Identity");
     let credential_ref = keychain_identity_credential_ref(identity_id.as_str());
 
-    app.invoke_asset_context_menu_requested(identity_id.clone().into(), "identity".into(), 96.0, 160.0);
+    app.invoke_asset_context_menu_requested(
+        identity_id.clone().into(),
+        "identity".into(),
+        96.0,
+        160.0,
+    );
     app.invoke_assets_context_menu_action_invoked("edit-keychain-identity".into());
 
     assert!(app.get_asset_modal_open());
-    assert_eq!(app.get_keychain_identity_modal_name().as_str(), "Prod Identity");
+    assert_eq!(
+        app.get_keychain_identity_modal_name().as_str(),
+        "Prod Identity"
+    );
     assert_eq!(app.get_keychain_identity_modal_username().as_str(), "ops");
-    assert_eq!(app.get_keychain_identity_modal_password().as_str(), "secret");
+    assert_eq!(
+        app.get_keychain_identity_modal_password().as_str(),
+        "secret"
+    );
     assert_eq!(app.get_keychain_identity_modal_remark().as_str(), "primary");
 
     app.invoke_keychain_identity_modal_draft_changed("auth_kind".into(), "ssh-key".into());
 
-    assert_eq!(app.get_keychain_identity_modal_auth_kind().as_str(), "ssh-key");
+    assert_eq!(
+        app.get_keychain_identity_modal_auth_kind().as_str(),
+        "ssh-key"
+    );
     assert_eq!(app.get_keychain_identity_modal_password().as_str(), "");
-    assert_eq!(app.get_keychain_identity_modal_name().as_str(), "Prod Identity");
+    assert_eq!(
+        app.get_keychain_identity_modal_name().as_str(),
+        "Prod Identity"
+    );
     assert_eq!(app.get_keychain_identity_modal_username().as_str(), "ops");
     assert_eq!(app.get_keychain_identity_modal_remark().as_str(), "primary");
 
     app.invoke_keychain_identity_modal_action_requested("use-existing-ssh-key".into());
-    assert_eq!(app.get_keychain_identity_modal_ssh_key_label().as_str(), "Prod Key");
+    assert_eq!(
+        app.get_keychain_identity_modal_ssh_key_label().as_str(),
+        "Prod Key"
+    );
     assert!(app.get_asset_modal_can_confirm());
 
     app.invoke_confirm_asset_modal_requested();
 
-    let after_ssh_key = load_keychain_identity_secret_bundle(
-        credential_store.as_ref(),
-        credential_ref.as_str(),
-    )
-    .expect("load identity bundle after switching to ssh key");
-    assert_eq!(
-        after_ssh_key,
-        StoredKeychainIdentitySecretBundle::default()
-    );
+    let after_ssh_key =
+        load_keychain_identity_secret_bundle(credential_store.as_ref(), credential_ref.as_str())
+            .expect("load identity bundle after switching to ssh key");
+    assert_eq!(after_ssh_key, StoredKeychainIdentitySecretBundle::default());
 
-    app.invoke_asset_context_menu_requested(identity_id.clone().into(), "identity".into(), 96.0, 160.0);
+    app.invoke_asset_context_menu_requested(
+        identity_id.clone().into(),
+        "identity".into(),
+        96.0,
+        160.0,
+    );
     app.invoke_assets_context_menu_action_invoked("edit-keychain-identity".into());
 
-    assert_eq!(app.get_keychain_identity_modal_auth_kind().as_str(), "ssh-key");
-    assert_eq!(app.get_keychain_identity_modal_ssh_key_label().as_str(), "Prod Key");
+    assert_eq!(
+        app.get_keychain_identity_modal_auth_kind().as_str(),
+        "ssh-key"
+    );
+    assert_eq!(
+        app.get_keychain_identity_modal_ssh_key_label().as_str(),
+        "Prod Key"
+    );
     assert_eq!(app.get_keychain_identity_modal_password().as_str(), "");
-    assert_eq!(app.get_keychain_identity_modal_name().as_str(), "Prod Identity");
+    assert_eq!(
+        app.get_keychain_identity_modal_name().as_str(),
+        "Prod Identity"
+    );
     assert_eq!(app.get_keychain_identity_modal_username().as_str(), "ops");
     assert_eq!(app.get_keychain_identity_modal_remark().as_str(), "primary");
 
     app.invoke_keychain_identity_modal_draft_changed("auth_kind".into(), "password".into());
-    assert_eq!(app.get_keychain_identity_modal_auth_kind().as_str(), "password");
+    assert_eq!(
+        app.get_keychain_identity_modal_auth_kind().as_str(),
+        "password"
+    );
     assert_eq!(app.get_keychain_identity_modal_ssh_key_label().as_str(), "");
-    assert_eq!(app.get_keychain_identity_modal_name().as_str(), "Prod Identity");
+    assert_eq!(
+        app.get_keychain_identity_modal_name().as_str(),
+        "Prod Identity"
+    );
     assert_eq!(app.get_keychain_identity_modal_username().as_str(), "ops");
     assert_eq!(app.get_keychain_identity_modal_remark().as_str(), "primary");
 
@@ -240,9 +273,18 @@ fn editing_identity_can_switch_between_password_and_ssh_key_auth_without_losing_
     app.invoke_asset_context_menu_requested(identity_id.into(), "identity".into(), 96.0, 160.0);
     app.invoke_assets_context_menu_action_invoked("edit-keychain-identity".into());
 
-    assert_eq!(app.get_keychain_identity_modal_auth_kind().as_str(), "password");
-    assert_eq!(app.get_keychain_identity_modal_password().as_str(), "rotated-secret");
-    assert_eq!(app.get_keychain_identity_modal_name().as_str(), "Prod Identity");
+    assert_eq!(
+        app.get_keychain_identity_modal_auth_kind().as_str(),
+        "password"
+    );
+    assert_eq!(
+        app.get_keychain_identity_modal_password().as_str(),
+        "rotated-secret"
+    );
+    assert_eq!(
+        app.get_keychain_identity_modal_name().as_str(),
+        "Prod Identity"
+    );
     assert_eq!(app.get_keychain_identity_modal_username().as_str(), "ops");
     assert_eq!(app.get_keychain_identity_modal_remark().as_str(), "primary");
 }

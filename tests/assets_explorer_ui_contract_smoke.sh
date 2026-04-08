@@ -17,7 +17,7 @@ grep -F 'private property <image> chevron-right-icon:' "$ROW" >/dev/null
 grep -F 'private property <image> chevron-down-icon:' "$ROW" >/dev/null
 grep -F 'private property <length> row-height: 28px;' "$ROW" >/dev/null
 ! grep -F 'root.path-hint == "" ? 36px : 48px' "$ROW" >/dev/null
-grep -F 'ThemeTokens.explorer-row-hover-surface' "$ROW" >/dev/null
+grep -F 'ThemeTokens.sidebar-hover-surface' "$ROW" >/dev/null
 grep -F 'callback toggle-expanded-requested(string);' "$ROW" >/dev/null
 grep -F 'callback activated-requested(string);' "$ROW" >/dev/null
 grep -F 'double-clicked => {' "$ROW" >/dev/null

@@ -19,9 +19,11 @@ impl ShellViewModel {
     ) -> AssetNameValidation {
         if self.console_asset_tree.contains(asset_id) {
             let parent_id = self.console_asset_tree.parent_id(asset_id).flatten();
-            return self
-                .console_asset_tree
-                .validate_name_in_parent(parent_id, draft_name, Some(asset_id));
+            return self.console_asset_tree.validate_name_in_parent(
+                parent_id,
+                draft_name,
+                Some(asset_id),
+            );
         }
 
         if let Some(node) = self.keychain_catalog.nodes.get(asset_id) {

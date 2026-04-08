@@ -410,8 +410,7 @@ fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
         app.set_sync_modal_title("Sync Settings".into());
         app.set_sync_modal_headline("Configure sync".into());
         app.set_sync_modal_status_text(
-            "Enter a master password once to enable sync and keep recovery state available."
-                .into(),
+            "Enter a master password once to enable sync and keep recovery state available.".into(),
         );
         app.set_sync_modal_git_remote_url("https://example.com/org/mica-term.git".into());
         app.set_sync_modal_primary_action_label("Save and enable".into());

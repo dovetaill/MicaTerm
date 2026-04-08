@@ -748,7 +748,6 @@ fn sftp_kind_rank(kind: crate::app::sftp::SftpDirectoryEntryKind) -> u8 {
 }
 
 impl ShellViewModel {
-
     pub fn open_appearance_panel(&mut self) {
         self.open_sftp_panel();
     }
@@ -1653,9 +1652,11 @@ impl ShellViewModel {
         editing_item_id: Option<&str>,
         draft: &KeychainIdentityDraft,
     ) -> String {
-        let name_message = asset_name_validation_message(
-            self.keychain_name_validation(parent_id, &draft.name, editing_item_id),
-        );
+        let name_message = asset_name_validation_message(self.keychain_name_validation(
+            parent_id,
+            &draft.name,
+            editing_item_id,
+        ));
         if !name_message.is_empty() {
             return name_message;
         }

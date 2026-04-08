@@ -12,6 +12,7 @@ ROW="$ROOT_DIR/ui/components/assets-toolbar-menu-row.slint"
 MENU="$ROOT_DIR/ui/components/assets-create-menu.slint"
 SEARCH="$ROOT_DIR/ui/components/assets-search-popover.slint"
 VIEW_MODEL="$ROOT_DIR/src/shell/view_model.rs"
+VIEW_MODEL_ASSETS="$ROOT_DIR/src/shell/view_model/assets.rs"
 
 grep -F 'export component SidebarToolbarIconButton' "$BUTTON" >/dev/null
 grep -F 'in property <string> tooltip-text;' "$BUTTON" >/dev/null
@@ -36,7 +37,8 @@ grep -F 'public function focus-menu()' "$MENU" >/dev/null
 grep -F 'new-folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg")' "$MENU" >/dev/null
 grep -F 'new-ssh-connection-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg")' "$MENU" >/dev/null
 
-grep -F 'Text { text: "Assets"; color: ThemeTokens.text-primary; vertical-alignment: center; }' "$ASSETS" >/dev/null
+grep -F 'text: "Assets";' "$ASSETS" >/dev/null
+grep -F 'color: ThemeTokens.text-secondary;' "$ASSETS" >/dev/null
 grep -F 'callback toggle-assets-create-menu-requested();' "$ASSETS" >/dev/null
 grep -F 'callback close-assets-create-menu-requested();' "$ASSETS" >/dev/null
 grep -F 'in property <bool> asset-create-menu-open: false;' "$ASSETS" >/dev/null
@@ -103,5 +105,5 @@ grep -F 'public function focus-input()' "$SEARCH" >/dev/null
 grep -F 'callback collapse-requested();' "$SEARCH" >/dev/null
 grep -F 'callback close-requested();' "$SEARCH" >/dev/null
 grep -F 'pub asset_create_menu_open: bool,' "$VIEW_MODEL" >/dev/null
-grep -F 'pub fn toggle_asset_create_menu(&mut self) {' "$VIEW_MODEL" >/dev/null
-grep -F 'pub fn close_asset_create_menu(&mut self) {' "$VIEW_MODEL" >/dev/null
+grep -F 'pub fn toggle_asset_create_menu(&mut self) {' "$VIEW_MODEL_ASSETS" >/dev/null
+grep -F 'pub fn close_asset_create_menu(&mut self) {' "$VIEW_MODEL_ASSETS" >/dev/null

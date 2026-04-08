@@ -10,7 +10,7 @@ export component AssetsSearchPopover inherits Rectangle {
 
     width: 272px;
     height: 32px;
-    border-radius: 0px;
+    border-radius: 10px;
     background: transparent;
     z: 100;
 
@@ -23,10 +23,10 @@ export component AssetsSearchPopover inherits Rectangle {
         y: 0px;
         width: parent.width;
         height: parent.height;
-        border-radius: 0px;
+        border-radius: 10px;
         border-width: 1px;
-        border-color: ThemeTokens.accent;
-        opacity: ThemeTokens.dark-mode ? 0.16 : 0.20;
+        border-color: ThemeTokens.input-focus-ring;
+        opacity: search-input.has-focus ? (ThemeTokens.dark-mode ? 0.34 : 0.28) : 0;
         background: transparent;
     }
 
@@ -35,10 +35,10 @@ export component AssetsSearchPopover inherits Rectangle {
         y: 1px;
         width: parent.width - 2px;
         height: parent.height - 2px;
-        border-radius: 0px;
+        border-radius: 10px;
         border-width: 1px;
-        border-color: ThemeTokens.divider-subtle;
-        background: ThemeTokens.inspector-surface;
+        border-color: search-input.has-focus ? ThemeTokens.input-focus-ring : ThemeTokens.input-border;
+        background: ThemeTokens.input-surface;
 
         search-input := TextInput {
             x: 10px;
@@ -47,8 +47,8 @@ export component AssetsSearchPopover inherits Rectangle {
             height: 22px;
             font-size: 13px;
             text: root.query;
-            color: ThemeTokens.text-primary;
-            selection-background-color: ThemeTokens.accent;
+            color: root.query == "" ? ThemeTokens.text-muted : ThemeTokens.text-primary;
+            selection-background-color: ThemeTokens.focus-ring;
             selection-foreground-color: ThemeTokens.text-primary;
 
             changed has-focus => {

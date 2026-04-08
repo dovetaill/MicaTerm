@@ -461,13 +461,11 @@ pub(super) fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel)
         }) => {
             window.set_asset_modal_open(true);
             window.set_asset_modal_kind("new-keychain-ssh-key".into());
-            window.set_asset_ssh_modal_dialog_title(
-                if editing_item_id.is_some() {
-                    "Edit SSH Key".into()
-                } else {
-                    "New SSH Key".into()
-                },
-            );
+            window.set_asset_ssh_modal_dialog_title(if editing_item_id.is_some() {
+                "Edit SSH Key".into()
+            } else {
+                "New SSH Key".into()
+            });
             window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
             window.set_asset_modal_validation_message(
                 state.asset_create_modal_validation_message().into(),
@@ -792,7 +790,6 @@ fn sync_keychain_modal_defaults(window: &AppWindow) {
     window.set_keychain_ssh_key_modal_public_key("".into());
     window.set_keychain_ssh_key_modal_fingerprint("".into());
 }
-
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn bind_assets_keychain_callbacks(

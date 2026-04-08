@@ -248,9 +248,7 @@ fn resolve_snippets_blank_area_actions(selection: &SelectionContext) -> Vec<Cont
     snippet_create_actions(false)
 }
 
-fn resolve_keychain_blank_area_actions(
-    selection: &SelectionContext,
-) -> Vec<ContextMenuActionNode> {
+fn resolve_keychain_blank_area_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
     let _ = selection;
     keychain_create_actions(false)
 }
@@ -276,9 +274,7 @@ fn resolve_keychain_folder_actions(selection: &SelectionContext) -> Vec<ContextM
     actions
 }
 
-fn resolve_keychain_identity_actions(
-    selection: &SelectionContext,
-) -> Vec<ContextMenuActionNode> {
+fn resolve_keychain_identity_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
     vec![
         action_with_state(
             "edit-keychain-identity",
@@ -304,9 +300,7 @@ fn resolve_keychain_identity_actions(
     ]
 }
 
-fn resolve_keychain_ssh_key_actions(
-    selection: &SelectionContext,
-) -> Vec<ContextMenuActionNode> {
+fn resolve_keychain_ssh_key_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
     vec![
         action_with_state(
             "edit-keychain-ssh-key",

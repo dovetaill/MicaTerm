@@ -83,7 +83,9 @@ pub(super) fn sftp_panel_entry_type_label(kind: SftpDirectoryEntryKind) -> &'sta
     }
 }
 
-pub(super) fn sftp_panel_entry_modified_label(entry: &crate::app::sftp::SftpDirectoryEntry) -> String {
+pub(super) fn sftp_panel_entry_modified_label(
+    entry: &crate::app::sftp::SftpDirectoryEntry,
+) -> String {
     let Some(unix_seconds) = entry.modified_unix_seconds else {
         return String::new();
     };
@@ -270,7 +272,10 @@ pub(super) fn open_sftp_remote_file_editor_for_entry(
     }
 }
 
-pub(super) fn initial_sftp_browser_path(manager: &SessionManager, session_id: Uuid) -> Option<String> {
+pub(super) fn initial_sftp_browser_path(
+    manager: &SessionManager,
+    session_id: Uuid,
+) -> Option<String> {
     if let Some(cwd) = manager.current_working_directory(session_id) {
         return Some(cwd);
     }
@@ -703,8 +708,10 @@ pub(super) fn bind_sftp_callbacks(
                     );
                     false
                 } else {
-                    let projection =
-                        workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                    let projection = workspace_terminal::sync_workspace_projection_from_manager(
+                        &mut state,
+                        &session_bridge.manager,
+                    );
                     let browser_changed = {
                         let mut controller = sftp_browser_controller_ref.borrow_mut();
                         if let Some(request) = controller.retry(session_id) {

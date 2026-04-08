@@ -152,6 +152,4 @@ impl ShellViewModel {
         self.ssh_modal_action_state = SshModalActionState::Busy(action);
         true
     }
-
-
 }

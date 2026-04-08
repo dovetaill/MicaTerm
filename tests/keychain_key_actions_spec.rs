@@ -303,9 +303,15 @@ fn editing_saved_key_rehydrates_private_public_and_fingerprint() {
 
     open_keychain_ssh_key_modal(&app);
     app.invoke_keychain_ssh_key_modal_draft_changed("name".into(), "Prod Key".into());
-    app.invoke_keychain_ssh_key_modal_draft_changed("private_key".into(), private_key.clone().into());
+    app.invoke_keychain_ssh_key_modal_draft_changed(
+        "private_key".into(),
+        private_key.clone().into(),
+    );
     app.invoke_keychain_ssh_key_modal_draft_changed("public_key".into(), public_key.clone().into());
-    app.invoke_keychain_ssh_key_modal_draft_changed("fingerprint".into(), fingerprint.clone().into());
+    app.invoke_keychain_ssh_key_modal_draft_changed(
+        "fingerprint".into(),
+        fingerprint.clone().into(),
+    );
     app.invoke_confirm_asset_modal_requested();
 
     let key_id = find_keychain_row_id(&app, "ssh-key", "Prod Key");
@@ -314,7 +320,10 @@ fn editing_saved_key_rehydrates_private_public_and_fingerprint() {
         keychain_key_credential_ref(key_id.as_str()).as_str(),
     )
     .expect("load saved key secret bundle");
-    assert_eq!(stored.private_key_content.as_deref(), Some(private_key.as_str()));
+    assert_eq!(
+        stored.private_key_content.as_deref(),
+        Some(private_key.as_str())
+    );
 
     app.invoke_asset_context_menu_requested(key_id.into(), "ssh-key".into(), 96.0, 160.0);
     app.invoke_assets_context_menu_action_invoked("edit-keychain-ssh-key".into());
@@ -322,9 +331,18 @@ fn editing_saved_key_rehydrates_private_public_and_fingerprint() {
     assert!(app.get_asset_modal_open());
     assert_eq!(app.get_asset_modal_kind().as_str(), "new-keychain-ssh-key");
     assert_eq!(app.get_keychain_ssh_key_modal_name().as_str(), "Prod Key");
-    assert_eq!(app.get_keychain_ssh_key_modal_private_key().as_str(), private_key);
-    assert_eq!(app.get_keychain_ssh_key_modal_public_key().as_str(), public_key);
-    assert_eq!(app.get_keychain_ssh_key_modal_fingerprint().as_str(), fingerprint);
+    assert_eq!(
+        app.get_keychain_ssh_key_modal_private_key().as_str(),
+        private_key
+    );
+    assert_eq!(
+        app.get_keychain_ssh_key_modal_public_key().as_str(),
+        public_key
+    );
+    assert_eq!(
+        app.get_keychain_ssh_key_modal_fingerprint().as_str(),
+        fingerprint
+    );
 }
 
 #[test]

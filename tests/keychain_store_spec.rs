@@ -265,16 +265,29 @@ fn bootstrap_roundtrip_reloads_keychain_catalog_with_folder_identity_and_key_lin
             .expect("root keychain folder");
         folder_id = folder_row.id.to_string();
 
-        app.invoke_asset_context_menu_requested(folder_id.clone().into(), "folder".into(), 96.0, 160.0);
+        app.invoke_asset_context_menu_requested(
+            folder_id.clone().into(),
+            "folder".into(),
+            96.0,
+            160.0,
+        );
         app.invoke_assets_context_menu_action_invoked("new-ssh-key".into());
         app.invoke_keychain_ssh_key_modal_draft_changed("name".into(), "Prod Key".into());
         app.invoke_keychain_ssh_key_modal_draft_changed("private_key".into(), "PRIVATE".into());
-        app.invoke_keychain_ssh_key_modal_draft_changed("public_key".into(), "ssh-ed25519 AAAATEST prod@example".into());
+        app.invoke_keychain_ssh_key_modal_draft_changed(
+            "public_key".into(),
+            "ssh-ed25519 AAAATEST prod@example".into(),
+        );
         app.invoke_keychain_ssh_key_modal_draft_changed("fingerprint".into(), "SHA256:prod".into());
         app.invoke_confirm_asset_modal_requested();
         key_id = find_keychain_row_id(&app, "ssh-key", "Prod Key");
 
-        app.invoke_asset_context_menu_requested(folder_id.clone().into(), "folder".into(), 96.0, 160.0);
+        app.invoke_asset_context_menu_requested(
+            folder_id.clone().into(),
+            "folder".into(),
+            96.0,
+            160.0,
+        );
         app.invoke_assets_context_menu_action_invoked("new-identity".into());
         app.invoke_keychain_identity_modal_draft_changed("name".into(), "Ops".into());
         app.invoke_keychain_identity_modal_draft_changed("username".into(), "ops".into());
@@ -289,7 +302,10 @@ fn bootstrap_roundtrip_reloads_keychain_catalog_with_folder_identity_and_key_lin
 
     assert_eq!(reloaded.root_ids, vec![folder_id.clone()]);
     assert_eq!(reloaded.nodes[&folder_id].child_ids.len(), 2);
-    assert_eq!(reloaded.nodes[&key_id].parent_id.as_deref(), Some(folder_id.as_str()));
+    assert_eq!(
+        reloaded.nodes[&key_id].parent_id.as_deref(),
+        Some(folder_id.as_str())
+    );
     assert_eq!(
         reloaded.nodes[&identity_id].parent_id.as_deref(),
         Some(folder_id.as_str())
@@ -309,11 +325,21 @@ fn bootstrap_roundtrip_reloads_keychain_catalog_with_folder_identity_and_key_lin
     let rows = second_app.get_keychain_asset_items();
     assert_eq!(rows.row_count(), 3);
     assert_eq!(
-        find_keychain_row_id(&second_app, "folder", reloaded.nodes[&folder_id].title.as_str()),
+        find_keychain_row_id(
+            &second_app,
+            "folder",
+            reloaded.nodes[&folder_id].title.as_str()
+        ),
         folder_id
     );
-    assert_eq!(find_keychain_row_id(&second_app, "ssh-key", "Prod Key"), key_id);
-    assert_eq!(find_keychain_row_id(&second_app, "identity", "Ops"), identity_id);
+    assert_eq!(
+        find_keychain_row_id(&second_app, "ssh-key", "Prod Key"),
+        key_id
+    );
+    assert_eq!(
+        find_keychain_row_id(&second_app, "identity", "Ops"),
+        identity_id
+    );
 
     unsafe {
         std::env::remove_var("MICA_TERM_APP_DIR");

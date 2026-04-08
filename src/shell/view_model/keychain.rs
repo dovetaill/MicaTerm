@@ -1,9 +1,9 @@
 //! ShellViewModel keychain domain impls.
 
-use super::*;
 use super::asset_modal_executor::{
     keychain_identity_auth_kind_id, normalized_keychain_identity_auth_kind_id,
 };
+use super::*;
 
 impl ShellViewModel {
     pub fn keychain_catalog(&self) -> &KeychainCatalog {
@@ -137,11 +137,7 @@ impl ShellViewModel {
         });
     }
 
-    pub fn open_edit_keychain_identity_modal(
-        &mut self,
-        item_id: String,
-        password: Option<String>,
-    ) {
+    pub fn open_edit_keychain_identity_modal(&mut self, item_id: String, password: Option<String>) {
         let Some(node) = self.keychain_catalog.nodes.get(&item_id).cloned() else {
             return;
         };
@@ -202,7 +198,11 @@ impl ShellViewModel {
         });
     }
 
-    pub fn open_edit_keychain_ssh_key_modal(&mut self, item_id: String, private_key: Option<String>) {
+    pub fn open_edit_keychain_ssh_key_modal(
+        &mut self,
+        item_id: String,
+        private_key: Option<String>,
+    ) {
         let Some(node) = self.keychain_catalog.nodes.get(&item_id).cloned() else {
             return;
         };

@@ -109,10 +109,8 @@ impl ShellViewModel {
                     }
                 }
                 "rename-asset" => {
-                    if let Some(asset_id) = self
-                        .context_target_asset_id
-                        .clone()
-                        .filter(|asset_id| {
+                    if let Some(asset_id) =
+                        self.context_target_asset_id.clone().filter(|asset_id| {
                             self.console_asset_tree.contains(asset_id)
                                 || self.keychain_catalog.nodes.contains_key(asset_id)
                         })
@@ -166,30 +164,28 @@ impl ShellViewModel {
                     }
                 }
                 "edit-keychain-identity" => {
-                    if let Some(item_id) =
-                        self.context_target_asset_id.clone().filter(|item_id| {
-                            self.keychain_catalog
-                                .nodes
-                                .get(item_id)
-                                .is_some_and(|node| {
-                                    matches!(node.payload, KeychainNodePayload::Identity(_))
-                                })
-                        })
-                    {
+                    if let Some(item_id) = self.context_target_asset_id.clone().filter(|item_id| {
+                        self.keychain_catalog
+                            .nodes
+                            .get(item_id)
+                            .is_some_and(|node| {
+                                matches!(node.payload, KeychainNodePayload::Identity(_))
+                            })
+                    }) {
                         self.open_edit_keychain_identity_modal(item_id, None);
                     } else {
                         self.close_context_menu();
                     }
                 }
                 "edit-keychain-ssh-key" => {
-                    if let Some(item_id) =
-                        self.context_target_asset_id.clone().filter(|item_id| {
-                            self.keychain_catalog
-                                .nodes
-                                .get(item_id)
-                                .is_some_and(|node| matches!(node.payload, KeychainNodePayload::SshKey(_)))
-                        })
-                    {
+                    if let Some(item_id) = self.context_target_asset_id.clone().filter(|item_id| {
+                        self.keychain_catalog
+                            .nodes
+                            .get(item_id)
+                            .is_some_and(|node| {
+                                matches!(node.payload, KeychainNodePayload::SshKey(_))
+                            })
+                    }) {
                         self.open_edit_keychain_ssh_key_modal(item_id, None);
                     } else {
                         self.close_context_menu();
@@ -274,6 +270,4 @@ impl ShellViewModel {
 
         resolve_action_tree(target_kind, &self.context_menu_selection())
     }
-
-
 }

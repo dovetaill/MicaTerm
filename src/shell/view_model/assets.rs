@@ -303,7 +303,8 @@ impl ShellViewModel {
         let asset_summary = if let Some(node) = self.keychain_catalog.nodes.get(&asset_id) {
             Some((
                 node.title.clone(),
-                self.keychain_descendant_count(&asset_id).unwrap_or_default(),
+                self.keychain_descendant_count(&asset_id)
+                    .unwrap_or_default(),
             ))
         } else {
             let snippet_first = self.active_sidebar_destination == SidebarDestination::Snippets;

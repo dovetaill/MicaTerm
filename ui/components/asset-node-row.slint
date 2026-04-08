@@ -52,15 +52,15 @@ export component AssetNodeRow inherits Rectangle {
                         : root.ssh-icon;
 
     height: root.row-height;
-    border-radius: 0px;
+    border-radius: 8px;
     border-width: root.focused ? 1px : 0px;
-    border-color: root.focused ? ThemeTokens.divider-strong : transparent;
+    border-color: root.focused ? ThemeTokens.focus-ring : transparent;
     background: touch.pressed
-        ? ThemeTokens.explorer-row-selected-surface
+        ? ThemeTokens.sidebar-selected-surface
         : root.selected
-            ? ThemeTokens.explorer-row-selected-surface
+            ? ThemeTokens.sidebar-selected-surface
             : touch.has-hover
-                ? ThemeTokens.explorer-row-hover-surface
+                ? ThemeTokens.sidebar-hover-surface
                 : transparent;
 
     Rectangle {
@@ -77,8 +77,8 @@ export component AssetNodeRow inherits Rectangle {
             height: 12px;
             source: root.disclosure-icon;
             image-fit: contain;
-            colorize: ThemeTokens.text-primary;
-            opacity: root.disclosure-state == "expanded" ? 1.0 : 0.72;
+            colorize: root.selected || touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+            opacity: root.disclosure-state == "expanded" ? 0.96 : 0.72;
         }
 
         chevron-touch := TouchArea {
@@ -100,7 +100,7 @@ export component AssetNodeRow inherits Rectangle {
         height: 16px;
         source: root.kind-icon;
         image-fit: contain;
-        colorize: ThemeTokens.text-primary;
+        colorize: root.selected || touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
     }
 
     Text {
@@ -119,8 +119,7 @@ export component AssetNodeRow inherits Rectangle {
         width: root.hint-width;
         height: parent.height;
         text: root.path-hint;
-        color: ThemeTokens.text-primary;
-        opacity: 0.62;
+        color: ThemeTokens.text-muted;
         font-size: 11px;
         horizontal-alignment: right;
         vertical-alignment: center;

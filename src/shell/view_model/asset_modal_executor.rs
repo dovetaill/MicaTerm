@@ -171,7 +171,10 @@ impl ShellViewModel {
 
                 let item_id = if let Some(item_id) = editing_item_id {
                     let auth_kind = keychain_identity_auth_kind_from_id(draft.auth_kind.as_str());
-                    if self.rename_keychain_item(&item_id, draft.name.trim()).is_err() {
+                    if self
+                        .rename_keychain_item(&item_id, draft.name.trim())
+                        .is_err()
+                    {
                         return false;
                     }
                     let credential_ref = (auth_kind == KeychainIdentityAuthKind::Password)
@@ -252,7 +255,10 @@ impl ShellViewModel {
                     .unwrap_or_default()
                     .to_string();
                 let item_id = if let Some(item_id) = editing_item_id {
-                    if self.rename_keychain_item(&item_id, draft.name.trim()).is_err() {
+                    if self
+                        .rename_keychain_item(&item_id, draft.name.trim())
+                        .is_err()
+                    {
                         return false;
                     }
                     let credential_ref = (!draft.private_key.trim().is_empty())
@@ -393,7 +399,10 @@ impl ShellViewModel {
                 }
 
                 if self.keychain_catalog.nodes.contains_key(&asset_id) {
-                    if self.rename_keychain_item(&asset_id, draft_name.trim()).is_err() {
+                    if self
+                        .rename_keychain_item(&asset_id, draft_name.trim())
+                        .is_err()
+                    {
                         return false;
                     }
                     self.focused_keychain_id = Some(asset_id.clone());
@@ -483,8 +492,6 @@ impl ShellViewModel {
         self.ssh_modal_action_state = SshModalActionState::Idle;
         true
     }
-
-
 }
 
 fn build_saved_ssh_connection_spec(
