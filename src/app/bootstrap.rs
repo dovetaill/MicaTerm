@@ -8,7 +8,7 @@ mod windowing;
 mod workspace_terminal;
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -87,7 +87,6 @@ use crate::app::terminal_atlas::TerminalAtlasSelection;
 use crate::app::terminal_presenter::WindowsNativePresenter;
 use crate::app::terminal_presenter::{
     BitmapAtlasPresenter, NativeTerminalFrame, PresentedTerminalFrame, TerminalPresenter,
-    TerminalPresenterCacheStats,
 };
 use crate::app::terminal_renderer::{
     NativeTerminalSurface, NativeTerminalSurfaceDiagnostics, NativeTerminalSurfaceRect,
@@ -203,10 +202,6 @@ thread_local! {
         RefCell::new(None)
     };
     static WORKSPACE_NATIVE_TERMINAL_SURFACE: RefCell<Option<NativeTerminalSurface>> = const {
-        RefCell::new(None)
-    };
-    static WORKSPACE_TERMINAL_LAST_SURFACE_REFRESH: RefCell<HashMap<Uuid, TerminalMemorySurfaceRefreshSnapshot>> = RefCell::new(HashMap::new());
-    static WORKSPACE_TERMINAL_LAST_CACHE_RESET_GENERATION: RefCell<Option<u64>> = const {
         RefCell::new(None)
     };
     static WORKSPACE_RUNTIME_PROFILE: RefCell<Option<AppRuntimeProfile>> = const {
@@ -2416,66 +2411,6 @@ fn clear_workspace_terminal_transient_caches(
     );
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct TerminalMemorySurfaceRefreshSnapshot {
-    render_mode: TerminalRenderMode,
-    mono_glyph_cache_entries: usize,
-    color_glyph_cache_entries: usize,
-    glyph_raster_cache_entries: usize,
-    scene_image_mono_glyph_cache_entries: usize,
-    scene_image_color_glyph_cache_entries: usize,
-    scene_image_last_base_pixels_bytes: usize,
-    scene_image_working_pixels_bytes: usize,
-}
-
-impl TerminalMemorySurfaceRefreshSnapshot {
-    fn capture(render_mode: TerminalRenderMode, stats: TerminalPresenterCacheStats) -> Self {
-        Self {
-            render_mode,
-            mono_glyph_cache_entries: stats.mono_glyph_cache_entries,
-            color_glyph_cache_entries: stats.color_glyph_cache_entries,
-            glyph_raster_cache_entries: stats.glyph_raster_cache_entries,
-            scene_image_mono_glyph_cache_entries: stats.scene_image_mono_glyph_cache_entries,
-            scene_image_color_glyph_cache_entries: stats.scene_image_color_glyph_cache_entries,
-            scene_image_last_base_pixels_bytes: stats.scene_image_last_base_pixels_bytes,
-            scene_image_working_pixels_bytes: stats.scene_image_working_pixels_bytes,
-        }
-    }
-}
-
-fn should_emit_terminal_memory_surface_refresh(
-    last: &mut HashMap<Uuid, TerminalMemorySurfaceRefreshSnapshot>,
-    session_id: Uuid,
-    render_mode: TerminalRenderMode,
-    _seqno: u64,
-    stats: TerminalPresenterCacheStats,
-) -> bool {
-    let next = TerminalMemorySurfaceRefreshSnapshot::capture(render_mode, stats);
-    if last.get(&session_id) == Some(&next) {
-        return false;
-    }
-
-    last.insert(session_id, next);
-    true
-}
-
-fn should_emit_terminal_memory_cache_reset(
-    last_generation: &mut Option<u64>,
-    generation: u64,
-) -> bool {
-    let previous = last_generation.replace(generation);
-    matches!(previous, Some(previous) if generation > previous)
-}
-
-fn clear_workspace_terminal_memory_diagnostic_state() {
-    WORKSPACE_TERMINAL_LAST_SURFACE_REFRESH.with(|last| {
-        last.borrow_mut().clear();
-    });
-    WORKSPACE_TERMINAL_LAST_CACHE_RESET_GENERATION.with(|last| {
-        last.borrow_mut().take();
-    });
-}
-
 fn update_workspace_terminal_idle_cache_shrink(
     has_active_surface: bool,
     surface_disappeared: bool,
@@ -2721,7 +2656,6 @@ fn sync_workspace_session_state_with_manager(
 fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &ShellViewModel) {
     let profile = WORKSPACE_RUNTIME_PROFILE
         .with(|profile| (*profile.borrow()).unwrap_or_else(AppRuntimeProfile::packaged));
-    let memory_diagnostics = crate::app::logging::runtime::memory_diagnostics_enabled();
     let scale_factor = window_scale_factor(window);
     window.set_workspace_session_device_scale_factor(scale_factor);
     if state.active_workspace_terminal_surface().is_some()
@@ -2750,9 +2684,6 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         let mut native_frame_presented = false;
         let mut next_render_mode = None;
         let mut next_surface_seqno = None;
-        let mut cache_reset_generation = 0u64;
-        let mut memory_stats =
-            crate::app::terminal_presenter::TerminalPresenterCacheStats::default();
         WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
             let mut host = host.borrow_mut();
             let Some(host) = host.as_mut() else {
@@ -2829,8 +2760,6 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
                     next_render_mode = Some(TerminalRenderMode::Bitmap);
                 }
             }
-            cache_reset_generation = host.cache_reset_generation();
-            memory_stats = host.cache_stats();
         });
         if native_frame_presented {
             clear_workspace_session_cursor_overlay(window);
@@ -2869,45 +2798,8 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         }
         if let Some(next_render_mode) = next_render_mode {
             window.set_workspace_session_render_mode(next_render_mode.as_str().into());
-            let should_emit_cache_reset =
-                WORKSPACE_TERMINAL_LAST_CACHE_RESET_GENERATION.with(|last_generation| {
-                    should_emit_terminal_memory_cache_reset(
-                        &mut last_generation.borrow_mut(),
-                        cache_reset_generation,
-                    )
-                });
-            if should_emit_cache_reset {
-                crate::app::logging::runtime::emit_terminal_memory_cache_reset(
-                    memory_diagnostics,
-                    surface.session_id,
-                    "glyph-cache-cap",
-                    next_render_mode.as_str(),
-                    cache_reset_generation,
-                    memory_stats,
-                );
-            }
-            let should_emit = WORKSPACE_TERMINAL_LAST_SURFACE_REFRESH.with(|last| {
-                should_emit_terminal_memory_surface_refresh(
-                    &mut last.borrow_mut(),
-                    surface.session_id,
-                    next_render_mode,
-                    surface.seqno as u64,
-                    memory_stats,
-                )
-            });
-            if should_emit {
-                crate::app::logging::runtime::emit_terminal_memory_surface_refresh(
-                    memory_diagnostics,
-                    surface.session_id,
-                    "surface-refresh",
-                    next_render_mode.as_str(),
-                    surface.seqno as u64,
-                    memory_stats,
-                );
-            }
         }
     } else {
-        clear_workspace_terminal_memory_diagnostic_state();
         let preset = terminal_theme_preset;
         window.set_workspace_session_rows(24);
         window.set_workspace_session_cols(80);
@@ -3990,12 +3882,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
         *surface.borrow_mut() = None;
     });
-    clear_workspace_terminal_memory_diagnostic_state();
-    crate::app::logging::runtime::emit_terminal_memory_startup_snapshot(
-        crate::app::logging::runtime::memory_diagnostics_enabled(),
-        profile,
-        crate::app::terminal_presenter::TerminalPresenterCacheStats::default(),
-    );
 
     apply_restored_window_size(window, default_window_size());
     windowing::bind_windows_window_state_tracking(
@@ -6523,206 +6409,6 @@ mod tests {
             idle_cache_shrunk,
             "once the no-surface threshold elapses the idle shrink path should mark itself complete until an active surface returns"
         );
-    }
-
-    #[test]
-    fn surface_refresh_logging_emits_first_snapshot() {
-        let session_id = Uuid::new_v4();
-        let mut last = std::collections::HashMap::new();
-
-        assert!(should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_id,
-            TerminalRenderMode::Bitmap,
-            1,
-            crate::app::terminal_presenter::TerminalPresenterCacheStats::default(),
-        ));
-    }
-
-    #[test]
-    fn surface_refresh_logging_suppresses_identical_snapshot() {
-        let session_id = Uuid::new_v4();
-        let mut last = std::collections::HashMap::new();
-        let stats = crate::app::terminal_presenter::TerminalPresenterCacheStats {
-            glyph_raster_cache_entries: 8,
-            ..crate::app::terminal_presenter::TerminalPresenterCacheStats::default()
-        };
-
-        assert!(should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_id,
-            TerminalRenderMode::Bitmap,
-            7,
-            stats,
-        ));
-        assert!(!should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_id,
-            TerminalRenderMode::Bitmap,
-            7,
-            stats,
-        ));
-    }
-
-    #[test]
-    fn surface_refresh_logging_suppresses_when_only_seqno_changes() {
-        let session_id = Uuid::new_v4();
-        let mut last = std::collections::HashMap::new();
-        let stats = crate::app::terminal_presenter::TerminalPresenterCacheStats {
-            glyph_raster_cache_entries: 8,
-            ..crate::app::terminal_presenter::TerminalPresenterCacheStats::default()
-        };
-
-        assert!(should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_id,
-            TerminalRenderMode::Bitmap,
-            7,
-            stats,
-        ));
-        assert!(!should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_id,
-            TerminalRenderMode::Bitmap,
-            8,
-            stats,
-        ));
-    }
-
-    #[test]
-    fn surface_refresh_logging_emits_when_cache_stats_change() {
-        let session_id = Uuid::new_v4();
-        let mut last = std::collections::HashMap::new();
-        let stats = crate::app::terminal_presenter::TerminalPresenterCacheStats {
-            glyph_raster_cache_entries: 8,
-            ..crate::app::terminal_presenter::TerminalPresenterCacheStats::default()
-        };
-        let next_stats = crate::app::terminal_presenter::TerminalPresenterCacheStats {
-            glyph_raster_cache_entries: 9,
-            ..stats
-        };
-
-        assert!(should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_id,
-            TerminalRenderMode::Bitmap,
-            7,
-            stats,
-        ));
-        assert!(should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_id,
-            TerminalRenderMode::Bitmap,
-            7,
-            next_stats,
-        ));
-    }
-
-    #[test]
-    fn surface_refresh_logging_emits_when_render_mode_changes() {
-        let session_id = Uuid::new_v4();
-        let mut last = std::collections::HashMap::new();
-        let stats = crate::app::terminal_presenter::TerminalPresenterCacheStats {
-            glyph_raster_cache_entries: 8,
-            ..crate::app::terminal_presenter::TerminalPresenterCacheStats::default()
-        };
-
-        assert!(should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_id,
-            TerminalRenderMode::Bitmap,
-            7,
-            stats,
-        ));
-        assert!(should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_id,
-            TerminalRenderMode::Native,
-            8,
-            stats,
-        ));
-    }
-
-    #[test]
-    fn surface_refresh_logging_tracks_each_session_independently() {
-        let session_a = Uuid::new_v4();
-        let session_b = Uuid::new_v4();
-        let mut last = std::collections::HashMap::new();
-        let stats = crate::app::terminal_presenter::TerminalPresenterCacheStats {
-            glyph_raster_cache_entries: 8,
-            ..crate::app::terminal_presenter::TerminalPresenterCacheStats::default()
-        };
-
-        assert!(should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_a,
-            TerminalRenderMode::Bitmap,
-            7,
-            stats,
-        ));
-        assert!(should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_b,
-            TerminalRenderMode::Bitmap,
-            7,
-            stats,
-        ));
-        assert!(!should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_a,
-            TerminalRenderMode::Bitmap,
-            7,
-            stats,
-        ));
-    }
-
-    #[test]
-    fn surface_refresh_logging_ignores_non_memory_fields() {
-        let session_id = Uuid::new_v4();
-        let mut last = std::collections::HashMap::new();
-        let stats = crate::app::terminal_presenter::TerminalPresenterCacheStats {
-            previous_frame_rows: 24,
-            previous_shaped_rows: 24,
-            shaped_row_cache_entries: 10,
-            shaped_row_cache_capacity: 256,
-            glyph_raster_cache_entries: 8,
-            prepared_row_cache_entries: 9,
-            ..crate::app::terminal_presenter::TerminalPresenterCacheStats::default()
-        };
-        let next_stats = crate::app::terminal_presenter::TerminalPresenterCacheStats {
-            previous_frame_rows: 38,
-            previous_shaped_rows: 38,
-            shaped_row_cache_entries: 88,
-            shaped_row_cache_capacity: 304,
-            prepared_row_cache_entries: 38,
-            ..stats
-        };
-
-        assert!(should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_id,
-            TerminalRenderMode::Bitmap,
-            7,
-            stats,
-        ));
-        assert!(!should_emit_terminal_memory_surface_refresh(
-            &mut last,
-            session_id,
-            TerminalRenderMode::Bitmap,
-            7,
-            next_stats,
-        ));
-    }
-
-    #[test]
-    fn cache_reset_logging_emits_only_when_generation_advances() {
-        let mut last = None;
-
-        assert!(!should_emit_terminal_memory_cache_reset(&mut last, 0));
-        assert!(!should_emit_terminal_memory_cache_reset(&mut last, 0));
-        assert!(should_emit_terminal_memory_cache_reset(&mut last, 1));
-        assert!(!should_emit_terminal_memory_cache_reset(&mut last, 1));
-        assert!(should_emit_terminal_memory_cache_reset(&mut last, 3));
     }
 
     #[test]

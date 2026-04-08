@@ -3,7 +3,6 @@
 use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
-use uuid::Uuid;
 
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::terminal_presenter::TerminalPresenterCacheStats;
@@ -54,72 +53,6 @@ pub fn emit_app_root_metadata(paths: &LoggingPaths) {
     );
 }
 
-pub fn emit_terminal_memory_startup_snapshot(
-    enabled: bool,
-    profile: AppRuntimeProfile,
-    stats: TerminalPresenterCacheStats,
-) {
-    if !enabled {
-        return;
-    }
-
-    tracing::debug!(
-        target: "app.memory",
-        event = "startup-snapshot",
-        build_flavor = ?profile.build_flavor,
-        terminal_render_mode = profile.terminal_render_mode_label(),
-        terminal_subsystem_mode = profile.terminal_subsystem_mode_label(),
-        previous_frame_rows = stats.previous_frame_rows,
-        previous_shaped_rows = stats.previous_shaped_rows,
-        shaped_row_cache_entries = stats.shaped_row_cache_entries,
-        shaped_row_cache_capacity = stats.shaped_row_cache_capacity,
-        mono_glyph_cache_entries = stats.mono_glyph_cache_entries,
-        color_glyph_cache_entries = stats.color_glyph_cache_entries,
-        glyph_raster_cache_entries = stats.glyph_raster_cache_entries,
-        prepared_row_cache_entries = stats.prepared_row_cache_entries,
-        scene_image_mono_glyph_cache_entries = stats.scene_image_mono_glyph_cache_entries,
-        scene_image_color_glyph_cache_entries = stats.scene_image_color_glyph_cache_entries,
-        scene_image_last_base_pixels_bytes = stats.scene_image_last_base_pixels_bytes,
-        scene_image_working_pixels_bytes = stats.scene_image_working_pixels_bytes,
-        "terminal memory startup snapshot"
-    );
-}
-
-pub fn emit_terminal_memory_surface_refresh(
-    enabled: bool,
-    session_id: Uuid,
-    reason: &str,
-    render_mode: &str,
-    seqno: u64,
-    stats: TerminalPresenterCacheStats,
-) {
-    if !enabled {
-        return;
-    }
-
-    tracing::debug!(
-        target: "app.memory",
-        event = "surface-refresh",
-        session_id = %session_id,
-        reason,
-        render_mode,
-        seqno,
-        previous_frame_rows = stats.previous_frame_rows,
-        previous_shaped_rows = stats.previous_shaped_rows,
-        shaped_row_cache_entries = stats.shaped_row_cache_entries,
-        shaped_row_cache_capacity = stats.shaped_row_cache_capacity,
-        mono_glyph_cache_entries = stats.mono_glyph_cache_entries,
-        color_glyph_cache_entries = stats.color_glyph_cache_entries,
-        glyph_raster_cache_entries = stats.glyph_raster_cache_entries,
-        prepared_row_cache_entries = stats.prepared_row_cache_entries,
-        scene_image_mono_glyph_cache_entries = stats.scene_image_mono_glyph_cache_entries,
-        scene_image_color_glyph_cache_entries = stats.scene_image_color_glyph_cache_entries,
-        scene_image_last_base_pixels_bytes = stats.scene_image_last_base_pixels_bytes,
-        scene_image_working_pixels_bytes = stats.scene_image_working_pixels_bytes,
-        "terminal memory surface refresh"
-    );
-}
-
 pub fn emit_terminal_memory_cache_clear(
     enabled: bool,
     event: &str,
@@ -162,37 +95,6 @@ pub fn emit_terminal_memory_cache_clear(
         after_scene_image_last_base_pixels_bytes = after.scene_image_last_base_pixels_bytes,
         after_scene_image_working_pixels_bytes = after.scene_image_working_pixels_bytes,
         "terminal memory cache shrink"
-    );
-}
-
-pub fn emit_terminal_memory_cache_reset(
-    enabled: bool,
-    session_id: Uuid,
-    reason: &str,
-    render_mode: &str,
-    generation: u64,
-    stats: TerminalPresenterCacheStats,
-) {
-    if !enabled {
-        return;
-    }
-
-    tracing::debug!(
-        target: "app.memory",
-        event = "cache-reset",
-        session_id = %session_id,
-        reason,
-        render_mode,
-        generation,
-        mono_glyph_cache_entries = stats.mono_glyph_cache_entries,
-        color_glyph_cache_entries = stats.color_glyph_cache_entries,
-        glyph_raster_cache_entries = stats.glyph_raster_cache_entries,
-        prepared_row_cache_entries = stats.prepared_row_cache_entries,
-        scene_image_mono_glyph_cache_entries = stats.scene_image_mono_glyph_cache_entries,
-        scene_image_color_glyph_cache_entries = stats.scene_image_color_glyph_cache_entries,
-        scene_image_last_base_pixels_bytes = stats.scene_image_last_base_pixels_bytes,
-        scene_image_working_pixels_bytes = stats.scene_image_working_pixels_bytes,
-        "terminal memory cache reset"
     );
 }
 
