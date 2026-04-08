@@ -12,6 +12,7 @@ use mica_term::app::logging::runtime::{
 };
 use mica_term::app::runtime_profile::AppRuntimeProfile;
 use mica_term::app::terminal_presenter::TerminalPresenterCacheStats;
+use uuid::Uuid;
 
 #[test]
 fn logging_runtime_writes_error_but_filters_debug_by_default() {
@@ -151,6 +152,7 @@ fn debug_logging_emits_app_root_metadata() {
 
 #[test]
 fn terminal_memory_diagnostics_remain_quiet_when_disabled() {
+    let session_id = Uuid::new_v4();
     let temp_root = std::env::temp_dir()
         .join("mica-term")
         .join("tests")
@@ -177,6 +179,7 @@ fn terminal_memory_diagnostics_remain_quiet_when_disabled() {
         );
         emit_terminal_memory_surface_refresh(
             false,
+            session_id,
             "startup-idle",
             "bitmap",
             0,
@@ -192,6 +195,7 @@ fn terminal_memory_diagnostics_remain_quiet_when_disabled() {
         );
         emit_terminal_memory_cache_reset(
             false,
+            session_id,
             "glyph-cache-cap",
             "bitmap",
             1,
@@ -214,6 +218,7 @@ fn terminal_memory_diagnostics_remain_quiet_when_disabled() {
 
 #[test]
 fn terminal_memory_diagnostics_emit_when_enabled() {
+    let session_id = Uuid::new_v4();
     let temp_root = std::env::temp_dir()
         .join("mica-term")
         .join("tests")
@@ -245,7 +250,14 @@ fn terminal_memory_diagnostics_emit_when_enabled() {
 
     tracing::dispatcher::with_default(&runtime.dispatch, || {
         emit_terminal_memory_startup_snapshot(true, AppRuntimeProfile::mainline(), stats);
-        emit_terminal_memory_surface_refresh(true, "surface-refresh", "bitmap", 7, stats);
+        emit_terminal_memory_surface_refresh(
+            true,
+            session_id,
+            "surface-refresh",
+            "bitmap",
+            7,
+            stats,
+        );
         emit_terminal_memory_cache_clear(
             true,
             "idle-shrink",
@@ -254,7 +266,14 @@ fn terminal_memory_diagnostics_emit_when_enabled() {
             stats,
             shrunk_stats,
         );
-        emit_terminal_memory_cache_reset(true, "glyph-cache-cap", "bitmap", 1, shrunk_stats);
+        emit_terminal_memory_cache_reset(
+            true,
+            session_id,
+            "glyph-cache-cap",
+            "bitmap",
+            1,
+            shrunk_stats,
+        );
         emit_terminal_memory_trim_request(true, 1024 * 1024);
         emit_terminal_memory_trim_executed(true, 1024 * 1024, true);
     });
@@ -268,6 +287,7 @@ fn terminal_memory_diagnostics_emit_when_enabled() {
     assert!(content.contains("terminal memory cache reset"));
     assert!(content.contains("cache-reset"));
     assert!(content.contains("reason=\"glyph-cache-cap\""));
+    assert!(content.contains(&format!("session_id={session_id}")));
     assert!(content.contains("generation=1"));
     assert!(content.contains("idle-shrink"));
     assert!(content.contains("reason=\"no-active-surface-idle\""));

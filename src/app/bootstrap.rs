@@ -2879,6 +2879,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
             if should_emit_cache_reset {
                 crate::app::logging::runtime::emit_terminal_memory_cache_reset(
                     memory_diagnostics,
+                    surface.session_id,
                     "glyph-cache-cap",
                     next_render_mode.as_str(),
                     cache_reset_generation,
@@ -2897,6 +2898,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
             if should_emit {
                 crate::app::logging::runtime::emit_terminal_memory_surface_refresh(
                     memory_diagnostics,
+                    surface.session_id,
                     "surface-refresh",
                     next_render_mode.as_str(),
                     surface.seqno as u64,

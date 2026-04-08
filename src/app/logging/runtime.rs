@@ -3,6 +3,7 @@
 use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
+use uuid::Uuid;
 
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::terminal_presenter::TerminalPresenterCacheStats;
@@ -86,6 +87,7 @@ pub fn emit_terminal_memory_startup_snapshot(
 
 pub fn emit_terminal_memory_surface_refresh(
     enabled: bool,
+    session_id: Uuid,
     reason: &str,
     render_mode: &str,
     seqno: u64,
@@ -98,6 +100,7 @@ pub fn emit_terminal_memory_surface_refresh(
     tracing::debug!(
         target: "app.memory",
         event = "surface-refresh",
+        session_id = %session_id,
         reason,
         render_mode,
         seqno,
@@ -164,6 +167,7 @@ pub fn emit_terminal_memory_cache_clear(
 
 pub fn emit_terminal_memory_cache_reset(
     enabled: bool,
+    session_id: Uuid,
     reason: &str,
     render_mode: &str,
     generation: u64,
@@ -176,6 +180,7 @@ pub fn emit_terminal_memory_cache_reset(
     tracing::debug!(
         target: "app.memory",
         event = "cache-reset",
+        session_id = %session_id,
         reason,
         render_mode,
         generation,
