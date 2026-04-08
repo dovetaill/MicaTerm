@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::Hasher;
+use std::time::Instant;
 
 use anyhow::{Result, anyhow};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
@@ -21,14 +22,18 @@ pub struct SceneImageTerminalRenderer {
     monochrome_glyph_cache: HashMap<u32, CachedMonochromeGlyph>,
     color_glyph_cache: HashMap<u32, CachedColorGlyph>,
     last_base_fingerprint: Option<u64>,
+    last_base_metadata: Option<CachedBaseFrameMetadata>,
     last_base_pixels: Option<Vec<Rgba8Pixel>>,
     last_base_bitmap_frame: Option<BitmapTerminalFrame>,
     last_bitmap_fingerprint: Option<u64>,
     last_bitmap_frame: Option<BitmapTerminalFrame>,
     base_render_count: usize,
+    incremental_scroll_render_count: usize,
+    dirty_edge_row_raster_count: usize,
     bitmap_render_count: usize,
     working_resize_count: usize,
     working_pixels: Vec<Rgba8Pixel>,
+    last_render_diagnostics: Option<SceneImageRenderDiagnostics>,
 }
 
 #[derive(Clone)]
@@ -43,6 +48,31 @@ struct CachedColorGlyph {
     width_px: u32,
     height_px: u32,
     pixels: Vec<Rgba8Pixel>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CachedBaseFrameMetadata {
+    grid_rows: u32,
+    grid_cols: u32,
+    cell_width_px: u32,
+    cell_height_px: u32,
+    default_bg_rgba: u32,
+    row_bg_even_rgba: u32,
+    row_bg_odd_rgba: u32,
+    viewport_offset_lines: u32,
+    row_content_hashes: Vec<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SceneImageRenderDiagnostics {
+    pub scene_image_render_us: u64,
+    pub base_raster_us: u64,
+    pub overlay_compose_us: u64,
+    pub incremental_scroll_delta_rows: i32,
+    pub dirty_edge_row_count: usize,
+    pub bitmap_render_count: usize,
+    pub reuse_mode: &'static str,
+    pub fallback_reason: Option<&'static str>,
 }
 
 #[derive(Clone, Copy)]
@@ -64,10 +94,12 @@ impl SceneImageTerminalRenderer {
         self.monochrome_glyph_cache.clear();
         self.color_glyph_cache.clear();
         self.last_base_fingerprint = None;
+        self.last_base_metadata = None;
         self.last_base_pixels = None;
         self.last_base_bitmap_frame = None;
         self.last_bitmap_fingerprint = None;
         self.last_bitmap_frame = None;
+        self.last_render_diagnostics = None;
     }
 
     pub fn base_render_count(&self) -> usize {
@@ -78,11 +110,24 @@ impl SceneImageTerminalRenderer {
         self.bitmap_render_count
     }
 
+    pub fn incremental_scroll_render_count(&self) -> usize {
+        self.incremental_scroll_render_count
+    }
+
+    pub fn dirty_edge_row_raster_count(&self) -> usize {
+        self.dirty_edge_row_raster_count
+    }
+
     pub fn working_resize_count(&self) -> usize {
         self.working_resize_count
     }
 
+    pub fn last_render_diagnostics(&self) -> Option<SceneImageRenderDiagnostics> {
+        self.last_render_diagnostics
+    }
+
     pub fn render(&mut self, frame: &NativeTerminalFrame) -> Result<BitmapTerminalFrame> {
+        let render_started = Instant::now();
         let base_fingerprint = self.fingerprint_base_frame(frame)?;
         let overlay_fingerprint = self.fingerprint_overlay_frame(frame);
         let bitmap_fingerprint = combine_fingerprints(base_fingerprint, overlay_fingerprint);
@@ -90,6 +135,13 @@ impl SceneImageTerminalRenderer {
         if self.last_bitmap_fingerprint == Some(bitmap_fingerprint)
             && let Some(bitmap_frame) = &self.last_bitmap_frame
         {
+            self.last_render_diagnostics = Some(SceneImageRenderDiagnostics {
+                scene_image_render_us: render_started.elapsed().as_micros() as u64,
+                bitmap_render_count: self.bitmap_render_count,
+                reuse_mode: "bitmap-cache-hit",
+                fallback_reason: None,
+                ..SceneImageRenderDiagnostics::default()
+            });
             return Ok(bitmap_frame.clone());
         }
 
@@ -110,34 +162,105 @@ impl SceneImageTerminalRenderer {
                 cell_width_px: frame.cell_width_px,
                 cell_height_px: frame.cell_height_px,
             };
+            self.last_base_metadata = Some(CachedBaseFrameMetadata::from_frame(frame));
             self.last_base_bitmap_frame = Some(bitmap_frame.clone());
             self.last_bitmap_fingerprint = Some(bitmap_fingerprint);
             self.last_bitmap_frame = Some(bitmap_frame.clone());
+            self.last_render_diagnostics = Some(SceneImageRenderDiagnostics {
+                scene_image_render_us: render_started.elapsed().as_micros() as u64,
+                bitmap_render_count: self.bitmap_render_count,
+                reuse_mode: "empty-frame",
+                fallback_reason: None,
+                ..SceneImageRenderDiagnostics::default()
+            });
             return Ok(bitmap_frame);
         }
 
+        let mut base_raster_us = 0u64;
+        let mut incremental_scroll_delta_rows = 0i32;
+        let mut dirty_edge_row_count = 0usize;
+        let mut reuse_mode = "full-base-raster";
+        let mut fallback_reason = Some("base-fingerprint-changed");
+        let mut base_bitmap_invalidated = false;
+        let incremental_scroll_candidate = match self.detect_incremental_scroll_delta(frame) {
+            Ok(delta_rows) => Some(delta_rows),
+            Err(reason) => {
+                fallback_reason = Some(reason);
+                None
+            }
+        };
         let pixels = if self.last_base_fingerprint == Some(base_fingerprint) {
             if let Some(pixels) = &self.last_base_pixels {
+                reuse_mode = "base-cache-hit";
+                fallback_reason = None;
                 pixels.clone()
             } else {
+                fallback_reason = Some("base-fingerprint-hit-missing-pixels");
+                let base_started = Instant::now();
                 let pixels = self.render_base_pixels(frame)?;
+                base_raster_us = base_started.elapsed().as_micros() as u64;
                 self.base_render_count = self.base_render_count.saturating_add(1);
                 self.last_base_pixels = Some(pixels.clone());
+                base_bitmap_invalidated = true;
                 pixels
             }
         } else {
-            let pixels = self.render_base_pixels(frame)?;
-            self.base_render_count = self.base_render_count.saturating_add(1);
-            self.last_base_fingerprint = Some(base_fingerprint);
-            self.last_base_pixels = Some(pixels.clone());
-            self.last_base_bitmap_frame = None;
-            pixels
+            let incremental_scroll_result = incremental_scroll_candidate.map(|delta_rows| {
+                self.render_incremental_base_pixels(frame, delta_rows)
+                    .map(|(pixels, incremental_base_raster_us, dirty_rows)| {
+                        (pixels, incremental_base_raster_us, delta_rows, dirty_rows)
+                    })
+            });
+            match incremental_scroll_result {
+                Some(Ok((pixels, incremental_base_raster_us, delta_rows, dirty_rows))) => {
+                    base_raster_us = incremental_base_raster_us;
+                    incremental_scroll_delta_rows = delta_rows;
+                    dirty_edge_row_count = dirty_rows;
+                    reuse_mode = "incremental-scroll";
+                    fallback_reason = None;
+                    base_bitmap_invalidated = true;
+                    pixels
+                }
+                Some(Err(reason)) => {
+                    fallback_reason = Some(reason);
+                    let base_started = Instant::now();
+                    let pixels = self.render_base_pixels(frame)?;
+                    base_raster_us = base_started.elapsed().as_micros() as u64;
+                    self.base_render_count = self.base_render_count.saturating_add(1);
+                    base_bitmap_invalidated = true;
+                    pixels
+                }
+                None => {
+                    let base_started = Instant::now();
+                    let pixels = self.render_base_pixels(frame)?;
+                    base_raster_us = base_started.elapsed().as_micros() as u64;
+                    self.base_render_count = self.base_render_count.saturating_add(1);
+                    base_bitmap_invalidated = true;
+                    pixels
+                }
+            }
         };
+        self.last_base_fingerprint = Some(base_fingerprint);
+        self.last_base_metadata = Some(CachedBaseFrameMetadata::from_frame(frame));
+        self.last_base_pixels = Some(pixels.clone());
+        if base_bitmap_invalidated {
+            self.last_base_bitmap_frame = None;
+        }
 
         if overlay_is_noop {
             if let Some(base_frame) = &self.last_base_bitmap_frame {
                 self.last_bitmap_fingerprint = Some(bitmap_fingerprint);
                 self.last_bitmap_frame = Some(base_frame.clone());
+                self.last_render_diagnostics = Some(SceneImageRenderDiagnostics {
+                    scene_image_render_us: render_started.elapsed().as_micros() as u64,
+                    base_raster_us,
+                    incremental_scroll_delta_rows,
+                    dirty_edge_row_count,
+                    bitmap_render_count: self.bitmap_render_count,
+                    reuse_mode,
+                    fallback_reason,
+                    ..SceneImageRenderDiagnostics::default()
+                });
                 return Ok(base_frame.clone());
             }
 
@@ -146,9 +269,20 @@ impl SceneImageTerminalRenderer {
             self.last_base_bitmap_frame = Some(bitmap_frame.clone());
             self.last_bitmap_fingerprint = Some(bitmap_fingerprint);
             self.last_bitmap_frame = Some(bitmap_frame.clone());
+            self.last_render_diagnostics = Some(SceneImageRenderDiagnostics {
+                scene_image_render_us: render_started.elapsed().as_micros() as u64,
+                base_raster_us,
+                incremental_scroll_delta_rows,
+                dirty_edge_row_count,
+                bitmap_render_count: self.bitmap_render_count,
+                reuse_mode,
+                fallback_reason,
+                ..SceneImageRenderDiagnostics::default()
+            });
             return Ok(bitmap_frame);
         }
 
+        let overlay_started = Instant::now();
         let mut pixels = std::mem::take(&mut self.working_pixels);
         let pixel_count = (width_px * height_px) as usize;
         if pixels.len() != pixel_count {
@@ -171,12 +305,159 @@ impl SceneImageTerminalRenderer {
         }
 
         let bitmap_frame = self.bitmap_frame_from_pixels(frame, &pixels);
+        let overlay_compose_us = overlay_started.elapsed().as_micros() as u64;
         self.bitmap_render_count = self.bitmap_render_count.saturating_add(1);
         self.working_pixels = pixels;
         self.last_bitmap_fingerprint = Some(bitmap_fingerprint);
         self.last_bitmap_frame = Some(bitmap_frame.clone());
+        self.last_render_diagnostics = Some(SceneImageRenderDiagnostics {
+            scene_image_render_us: render_started.elapsed().as_micros() as u64,
+            base_raster_us,
+            overlay_compose_us,
+            incremental_scroll_delta_rows,
+            dirty_edge_row_count,
+            bitmap_render_count: self.bitmap_render_count,
+            reuse_mode,
+            fallback_reason,
+        });
 
         Ok(bitmap_frame)
+    }
+
+    fn detect_incremental_scroll_delta(
+        &self,
+        frame: &NativeTerminalFrame,
+    ) -> std::result::Result<i32, &'static str> {
+        let Some(previous) = self.last_base_metadata.as_ref() else {
+            return Err("missing-base-metadata");
+        };
+        if previous.grid_rows != frame.presentable_frame.grid_rows
+            || previous.grid_cols != frame.presentable_frame.grid_cols
+            || previous.cell_width_px != frame.cell_width_px
+            || previous.cell_height_px != frame.cell_height_px
+        {
+            return Err("grid-metrics-changed");
+        }
+        if previous.default_bg_rgba != frame.presentable_frame.default_bg_rgba
+            || previous.row_bg_even_rgba != frame.presentable_frame.row_bg_even_rgba
+            || previous.row_bg_odd_rgba != frame.presentable_frame.row_bg_odd_rgba
+        {
+            return Err("background-palette-changed");
+        }
+        if previous.row_content_hashes.len() != frame.presentable_frame.row_content_hashes.len() {
+            return Err("row-hash-count-changed");
+        }
+
+        let delta_rows = frame.presentable_frame.viewport_offset_lines as i32
+            - previous.viewport_offset_lines as i32;
+        if delta_rows == 0 {
+            return Err("zero-delta");
+        }
+        if delta_rows.unsigned_abs() >= frame.presentable_frame.grid_rows {
+            return Err("delta-exceeds-viewport");
+        }
+        if previous.row_bg_even_rgba != previous.row_bg_odd_rgba && delta_rows.abs() % 2 == 1 {
+            return Err("odd-delta-striped-background");
+        }
+
+        Ok(delta_rows)
+    }
+
+    fn render_incremental_base_pixels(
+        &mut self,
+        frame: &NativeTerminalFrame,
+        delta_rows: i32,
+    ) -> std::result::Result<(Vec<Rgba8Pixel>, u64, usize), &'static str> {
+        let Some(previous) = self.last_base_metadata.as_ref() else {
+            return Err("missing-base-metadata");
+        };
+        let Some(previous_pixels) = self.last_base_pixels.as_ref() else {
+            return Err("missing-base-pixels");
+        };
+        let width_px = frame
+            .presentable_frame
+            .grid_cols
+            .saturating_mul(frame.cell_width_px);
+        let height_px = frame
+            .presentable_frame
+            .grid_rows
+            .saturating_mul(frame.cell_height_px);
+        let pixel_count = (width_px * height_px) as usize;
+        if previous_pixels.len() != pixel_count || width_px == 0 || height_px == 0 {
+            return Err("pixel-buffer-size-mismatch");
+        }
+
+        let current_hashes = &frame.presentable_frame.row_content_hashes;
+        let mut row_filter = vec![false; current_hashes.len()];
+        let mut reusable_row_count = 0usize;
+        for (current_row, current_hash) in current_hashes.iter().enumerate() {
+            let previous_row = current_row as i32 - delta_rows;
+            if previous_row >= 0
+                && (previous_row as usize) < previous.row_content_hashes.len()
+                && previous.row_content_hashes[previous_row as usize] == *current_hash
+            {
+                reusable_row_count = reusable_row_count.saturating_add(1);
+            } else {
+                row_filter[current_row] = true;
+            }
+        }
+        if reusable_row_count == 0 {
+            return Err("zero-reusable-rows");
+        }
+
+        let base_started = Instant::now();
+        let mut pixels = vec![rgba8(frame.presentable_frame.default_bg_rgba); pixel_count];
+        self.copy_shifted_pixel_rows(
+            previous_pixels,
+            &mut pixels,
+            width_px,
+            frame.cell_height_px,
+            frame.presentable_frame.grid_rows,
+            delta_rows,
+        );
+        {
+            let mut surface = PixelSurface {
+                pixels: &mut pixels,
+                width_px,
+                height_px,
+            };
+            self.draw_row_backgrounds_filtered(&mut surface, frame, Some(&row_filter));
+            self.draw_background_runs_filtered(&mut surface, frame, Some(&row_filter));
+            self.draw_monochrome_glyphs_filtered(&mut surface, frame, Some(&row_filter))
+                .map_err(|_| "incremental-monochrome-glyph-resolve-failed")?;
+            self.draw_color_glyphs_filtered(&mut surface, frame, Some(&row_filter))
+                .map_err(|_| "incremental-color-glyph-resolve-failed")?;
+        }
+        let dirty_row_count = row_filter.iter().filter(|dirty| **dirty).count();
+        self.incremental_scroll_render_count =
+            self.incremental_scroll_render_count.saturating_add(1);
+        self.dirty_edge_row_raster_count = self
+            .dirty_edge_row_raster_count
+            .saturating_add(dirty_row_count);
+
+        Ok((pixels, base_started.elapsed().as_micros() as u64, dirty_row_count))
+    }
+
+    fn copy_shifted_pixel_rows(
+        &self,
+        previous_pixels: &[Rgba8Pixel],
+        next_pixels: &mut [Rgba8Pixel],
+        width_px: u32,
+        cell_height_px: u32,
+        grid_rows: u32,
+        delta_rows: i32,
+    ) {
+        let pixels_per_row = (width_px.saturating_mul(cell_height_px)) as usize;
+        for current_row in 0..grid_rows {
+            let previous_row = current_row as i32 - delta_rows;
+            if previous_row < 0 || previous_row >= grid_rows as i32 {
+                continue;
+            }
+            let dst_start = current_row as usize * pixels_per_row;
+            let src_start = previous_row as usize * pixels_per_row;
+            next_pixels[dst_start..dst_start + pixels_per_row]
+                .copy_from_slice(&previous_pixels[src_start..src_start + pixels_per_row]);
+        }
     }
 
     fn fingerprint_base_frame(&mut self, frame: &NativeTerminalFrame) -> Result<u64> {
@@ -276,12 +557,20 @@ impl SceneImageTerminalRenderer {
         }
     }
 
-    fn draw_row_backgrounds(
+    fn draw_row_backgrounds(&self, surface: &mut PixelSurface<'_>, frame: &NativeTerminalFrame) {
+        self.draw_row_backgrounds_filtered(surface, frame, None);
+    }
+
+    fn draw_row_backgrounds_filtered(
         &self,
         surface: &mut PixelSurface<'_>,
         frame: &NativeTerminalFrame,
+        row_filter: Option<&[bool]>,
     ) {
         for row in 0..frame.presentable_frame.grid_rows {
+            if !row_selected(row_filter, row) {
+                continue;
+            }
             let color = if row % 2 == 0 {
                 rgba8(frame.presentable_frame.row_bg_even_rgba)
             } else {
@@ -300,12 +589,20 @@ impl SceneImageTerminalRenderer {
         }
     }
 
-    fn draw_background_runs(
+    fn draw_background_runs(&self, surface: &mut PixelSurface<'_>, frame: &NativeTerminalFrame) {
+        self.draw_background_runs_filtered(surface, frame, None);
+    }
+
+    fn draw_background_runs_filtered(
         &self,
         surface: &mut PixelSurface<'_>,
         frame: &NativeTerminalFrame,
+        row_filter: Option<&[bool]>,
     ) {
         for run in &frame.presentable_frame.background_runs {
+            if !row_selected(row_filter, run.row) {
+                continue;
+            }
             if let Some(rect) = cell_span_rect(
                 run.row,
                 run.start_col,
@@ -313,20 +610,12 @@ impl SceneImageTerminalRenderer {
                 frame.cell_width_px,
                 frame.cell_height_px,
             ) {
-                fill_rect(
-                    surface,
-                    rect,
-                    rgba8(run.bg_rgba),
-                );
+                fill_rect(surface, rect, rgba8(run.bg_rgba));
             }
         }
     }
 
-    fn draw_selection_overlay(
-        &self,
-        surface: &mut PixelSurface<'_>,
-        frame: &NativeTerminalFrame,
-    ) {
+    fn draw_selection_overlay(&self, surface: &mut PixelSurface<'_>, frame: &NativeTerminalFrame) {
         if !frame.presentable_frame.selection_overlay.active {
             return;
         }
@@ -339,11 +628,7 @@ impl SceneImageTerminalRenderer {
                 frame.cell_width_px,
                 frame.cell_height_px,
             ) {
-                fill_rect_alpha(
-                    surface,
-                    pixel_rect,
-                    rgba8(rect.overlay_rgba),
-                );
+                fill_rect_alpha(surface, pixel_rect, rgba8(rect.overlay_rgba));
             }
         }
     }
@@ -353,7 +638,19 @@ impl SceneImageTerminalRenderer {
         surface: &mut PixelSurface<'_>,
         frame: &NativeTerminalFrame,
     ) -> Result<()> {
+        self.draw_monochrome_glyphs_filtered(surface, frame, None)
+    }
+
+    fn draw_monochrome_glyphs_filtered(
+        &mut self,
+        surface: &mut PixelSurface<'_>,
+        frame: &NativeTerminalFrame,
+        row_filter: Option<&[bool]>,
+    ) -> Result<()> {
         for draw in &frame.presentable_frame.monochrome_glyph_draws {
+            if !row_selected(row_filter, draw.row) {
+                continue;
+            }
             let glyph = self.resolve_monochrome_glyph(draw)?;
             let clip_rect = row_clip_rect(
                 draw.row,
@@ -379,7 +676,19 @@ impl SceneImageTerminalRenderer {
         surface: &mut PixelSurface<'_>,
         frame: &NativeTerminalFrame,
     ) -> Result<()> {
+        self.draw_color_glyphs_filtered(surface, frame, None)
+    }
+
+    fn draw_color_glyphs_filtered(
+        &mut self,
+        surface: &mut PixelSurface<'_>,
+        frame: &NativeTerminalFrame,
+        row_filter: Option<&[bool]>,
+    ) -> Result<()> {
         for draw in &frame.presentable_frame.color_glyph_draws {
+            if !row_selected(row_filter, draw.row) {
+                continue;
+            }
             let glyph = self.resolve_color_glyph(draw)?;
             let clip_rect = row_clip_rect(
                 draw.row,
@@ -387,23 +696,13 @@ impl SceneImageTerminalRenderer {
                 frame.cell_width_px,
                 frame.cell_height_px,
             );
-            blit_color_glyph(
-                surface,
-                &glyph,
-                draw.dest_x_px,
-                draw.dest_y_px,
-                clip_rect,
-            );
+            blit_color_glyph(surface, &glyph, draw.dest_x_px, draw.dest_y_px, clip_rect);
         }
 
         Ok(())
     }
 
-    fn draw_underline_overlay(
-        &self,
-        surface: &mut PixelSurface<'_>,
-        frame: &NativeTerminalFrame,
-    ) {
+    fn draw_underline_overlay(&self, surface: &mut PixelSurface<'_>, frame: &NativeTerminalFrame) {
         if !frame.presentable_frame.underline_overlay.visible {
             return;
         }
@@ -417,13 +716,11 @@ impl SceneImageTerminalRenderer {
                 frame.cell_width_px,
                 frame.cell_height_px,
             ) {
-                rect.start_y = rect.start_y.saturating_add(rect.height.saturating_sub(thickness_px));
+                rect.start_y = rect
+                    .start_y
+                    .saturating_add(rect.height.saturating_sub(thickness_px));
                 rect.height = thickness_px;
-                fill_rect(
-                    surface,
-                    rect,
-                    rgba8(run.fg_rgba),
-                );
+                fill_rect(surface, rect, rgba8(run.fg_rgba));
             }
         }
     }
@@ -447,11 +744,7 @@ impl SceneImageTerminalRenderer {
             frame.cell_width_px,
             frame.cell_height_px,
         ) {
-            fill_rect_alpha(
-                surface,
-                rect,
-                rgba8(preview_rgba),
-            );
+            fill_rect_alpha(surface, rect, rgba8(preview_rgba));
         }
         if let Some(rect) = ime_cursor_rect(
             ime.row,
@@ -485,7 +778,12 @@ impl SceneImageTerminalRenderer {
         self.monochrome_glyph_cache
             .get(&draw.atlas_entry.slot)
             .cloned()
-            .ok_or_else(|| anyhow!("missing cached monochrome glyph for slot {}", draw.atlas_entry.slot))
+            .ok_or_else(|| {
+                anyhow!(
+                    "missing cached monochrome glyph for slot {}",
+                    draw.atlas_entry.slot
+                )
+            })
     }
 
     fn resolve_color_glyph(&mut self, draw: &PreparedColorGlyphDraw) -> Result<CachedColorGlyph> {
@@ -503,7 +801,28 @@ impl SceneImageTerminalRenderer {
         self.color_glyph_cache
             .get(&draw.cache_entry.slot)
             .cloned()
-            .ok_or_else(|| anyhow!("missing cached color glyph for slot {}", draw.cache_entry.slot))
+            .ok_or_else(|| {
+                anyhow!(
+                    "missing cached color glyph for slot {}",
+                    draw.cache_entry.slot
+                )
+            })
+    }
+}
+
+impl CachedBaseFrameMetadata {
+    fn from_frame(frame: &NativeTerminalFrame) -> Self {
+        Self {
+            grid_rows: frame.presentable_frame.grid_rows,
+            grid_cols: frame.presentable_frame.grid_cols,
+            cell_width_px: frame.cell_width_px,
+            cell_height_px: frame.cell_height_px,
+            default_bg_rgba: frame.presentable_frame.default_bg_rgba,
+            row_bg_even_rgba: frame.presentable_frame.row_bg_even_rgba,
+            row_bg_odd_rgba: frame.presentable_frame.row_bg_odd_rgba,
+            viewport_offset_lines: frame.presentable_frame.viewport_offset_lines,
+            row_content_hashes: frame.presentable_frame.row_content_hashes.clone(),
+        }
     }
 }
 
@@ -518,6 +837,14 @@ fn rgba_pixels_from_upload(upload: &PreparedColorGlyphUploadPayload) -> Vec<Rgba
             a: rgba[3],
         })
         .collect()
+}
+
+fn row_selected(row_filter: Option<&[bool]>, row: u32) -> bool {
+    let Some(row_filter) = row_filter else {
+        return true;
+    };
+
+    row_filter.get(row as usize).copied().unwrap_or(false)
 }
 
 fn rgba8(color: u32) -> Rgba8Pixel {
@@ -546,7 +873,11 @@ fn fill_rect_alpha(surface: &mut PixelSurface<'_>, rect: PixelRect, color: Rgba8
 
     for y in rect.start_y.min(surface.height_px)..end_y {
         for x in rect.start_x.min(surface.width_px)..end_x {
-            blend(&mut surface.pixels[(y * surface.width_px + x) as usize], color, color.a);
+            blend(
+                &mut surface.pixels[(y * surface.width_px + x) as usize],
+                color,
+                color.a,
+            );
         }
     }
 }
@@ -695,7 +1026,10 @@ fn ime_cursor_rect(
     Some(rect)
 }
 
-fn hash_background_run(hasher: &mut impl Hasher, run: &crate::app::terminal_renderer::wgpu_renderer::PreparedBackgroundRun) {
+fn hash_background_run(
+    hasher: &mut impl Hasher,
+    run: &crate::app::terminal_renderer::wgpu_renderer::PreparedBackgroundRun,
+) {
     hash_u32(hasher, run.row);
     hash_u32(hasher, run.start_col);
     hash_u32(hasher, run.end_col);

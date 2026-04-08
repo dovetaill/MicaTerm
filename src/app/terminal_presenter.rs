@@ -4,7 +4,7 @@ use anyhow::Result;
 use slint::Image;
 
 #[cfg(feature = "terminal-native-renderer")]
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 #[cfg(feature = "terminal-native-renderer")]
 use std::time::Instant;
 
@@ -12,7 +12,9 @@ use crate::app::ssh::runtime::{SurfaceState, TerminalCursorShape};
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
 use crate::app::terminal_core::TerminalFrameSnapshot;
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_font::{DirectWriteFontSystem, FontRequest, FontSystem, LoadedFont};
+use crate::app::terminal_font::{
+    DirectWriteFontSystem, FontRequest, FontSystem, LoadedFont, LoadedFontKey,
+};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_layout::{TerminalTextShaper, TextShaper};
 #[cfg(feature = "terminal-native-renderer")]
@@ -208,6 +210,116 @@ struct TerminalPrepareDiagnostics {
     glyph_raster_cache_entry_count: usize,
 }
 
+#[cfg(feature = "terminal-native-renderer")]
+const PRESENTER_SHAPED_ROW_CACHE_MIN_CAPACITY: usize = 256;
+#[cfg(feature = "terminal-native-renderer")]
+const PRESENTER_SHAPED_ROW_CACHE_MAX_CAPACITY: usize = 1024;
+#[cfg(feature = "terminal-native-renderer")]
+const PRESENTER_SHAPED_ROW_CACHE_VIEWPORT_MULTIPLIER: usize = 8;
+
+#[cfg(feature = "terminal-native-renderer")]
+#[derive(Clone, Debug)]
+struct PresenterShapedRowCache {
+    entries: HashMap<PresenterShapedRowCacheKey, crate::app::terminal_layout::ShapedRow>,
+    recency: VecDeque<PresenterShapedRowCacheKey>,
+    capacity: usize,
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct PresenterShapedRowCacheKey {
+    font_key: LoadedFontKey,
+    content_hash: u64,
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+impl Default for PresenterShapedRowCache {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::new(),
+            recency: VecDeque::new(),
+            capacity: PRESENTER_SHAPED_ROW_CACHE_MIN_CAPACITY,
+        }
+    }
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+impl PresenterShapedRowCache {
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.recency.clear();
+    }
+
+    fn resize_for_visible_rows(&mut self, visible_rows: u32) {
+        self.capacity = (visible_rows as usize)
+            .saturating_mul(PRESENTER_SHAPED_ROW_CACHE_VIEWPORT_MULTIPLIER)
+            .clamp(
+                PRESENTER_SHAPED_ROW_CACHE_MIN_CAPACITY,
+                PRESENTER_SHAPED_ROW_CACHE_MAX_CAPACITY,
+            );
+
+        while self.entries.len() > self.capacity {
+            let Some(oldest_key) = self.recency.pop_front() else {
+                break;
+            };
+            self.entries.remove(&oldest_key);
+        }
+    }
+
+    fn get(
+        &mut self,
+        font_key: LoadedFontKey,
+        content_hash: u64,
+        row_index: u32,
+    ) -> Option<crate::app::terminal_layout::ShapedRow> {
+        let key = PresenterShapedRowCacheKey {
+            font_key,
+            content_hash,
+        };
+        let cached = self.entries.get(&key).cloned()?;
+        self.touch(key);
+        Some(rebased_shaped_row(&cached, row_index))
+    }
+
+    fn insert(
+        &mut self,
+        font_key: LoadedFontKey,
+        content_hash: u64,
+        shaped_row: &crate::app::terminal_layout::ShapedRow,
+    ) {
+        if self.capacity == 0 {
+            return;
+        }
+        let key = PresenterShapedRowCacheKey {
+            font_key,
+            content_hash,
+        };
+
+        if let Some(existing) = self.entries.get_mut(&key) {
+            *existing = shaped_row.clone();
+            self.touch(key);
+            return;
+        }
+
+        while self.entries.len() >= self.capacity {
+            let Some(oldest_key) = self.recency.pop_front() else {
+                break;
+            };
+            self.entries.remove(&oldest_key);
+        }
+
+        self.entries.insert(key, shaped_row.clone());
+        self.recency.push_back(key);
+    }
+
+    fn touch(&mut self, key: PresenterShapedRowCacheKey) {
+        if let Some(position) = self.recency.iter().position(|existing| *existing == key) {
+            self.recency.remove(position);
+        }
+        self.recency.push_back(key);
+    }
+}
+
 pub trait TerminalPresenter {
     fn set_raster_scale(&mut self, _scale_factor: f32) {}
 
@@ -287,6 +399,7 @@ pub struct WindowsNativePresenter {
     raster_scale: f32,
     previous_frame: Option<TerminalModelFrame>,
     previous_shaped_rows: Option<Vec<crate::app::terminal_layout::ShapedRow>>,
+    shaped_row_cache: PresenterShapedRowCache,
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -305,6 +418,7 @@ impl WindowsNativePresenter {
             raster_scale: 1.0,
             previous_frame: None,
             previous_shaped_rows: None,
+            shaped_row_cache: PresenterShapedRowCache::default(),
         })
     }
 
@@ -313,6 +427,7 @@ impl WindowsNativePresenter {
         self.loaded_font = self.font_system.load_font(&request)?;
         self.previous_frame = None;
         self.previous_shaped_rows = None;
+        self.shaped_row_cache.clear();
         Ok(())
     }
 }
@@ -350,6 +465,7 @@ impl TerminalPresenter for WindowsNativePresenter {
             &self.loaded_font,
             &mut self.previous_frame,
             &mut self.previous_shaped_rows,
+            &mut self.shaped_row_cache,
             surface,
             options,
         )?;
@@ -376,6 +492,7 @@ pub struct WindowsSceneImagePresenter {
     raster_scale: f32,
     previous_frame: Option<TerminalModelFrame>,
     previous_shaped_rows: Option<Vec<crate::app::terminal_layout::ShapedRow>>,
+    shaped_row_cache: PresenterShapedRowCache,
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -395,6 +512,7 @@ impl WindowsSceneImagePresenter {
             raster_scale: 1.0,
             previous_frame: None,
             previous_shaped_rows: None,
+            shaped_row_cache: PresenterShapedRowCache::default(),
         })
     }
 
@@ -403,6 +521,7 @@ impl WindowsSceneImagePresenter {
         self.loaded_font = self.font_system.load_scene_image_font(&request)?;
         self.previous_frame = None;
         self.previous_shaped_rows = None;
+        self.shaped_row_cache.clear();
         self.scene_renderer.clear();
         Ok(())
     }
@@ -442,6 +561,7 @@ impl TerminalPresenter for WindowsSceneImagePresenter {
             &self.loaded_font,
             &mut self.previous_frame,
             &mut self.previous_shaped_rows,
+            &mut self.shaped_row_cache,
             surface,
             options,
         )?;
@@ -466,6 +586,7 @@ fn prepare_native_terminal_frame(
     loaded_font: &LoadedFont,
     previous_frame: &mut Option<TerminalModelFrame>,
     previous_shaped_rows: &mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
+    shaped_row_cache: &mut PresenterShapedRowCache,
     surface: &SurfaceState,
     options: TerminalPresentationOptions,
 ) -> Result<NativeTerminalFrame> {
@@ -476,6 +597,7 @@ fn prepare_native_terminal_frame(
         loaded_font,
         previous_frame,
         previous_shaped_rows,
+        shaped_row_cache,
         surface,
         options,
     )?
@@ -490,6 +612,7 @@ fn prepare_native_terminal_frame_with_diagnostics(
     loaded_font: &LoadedFont,
     previous_frame: &mut Option<TerminalModelFrame>,
     previous_shaped_rows: &mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
+    shaped_row_cache: &mut PresenterShapedRowCache,
     surface: &SurfaceState,
     options: TerminalPresentationOptions,
 ) -> Result<(NativeTerminalFrame, TerminalPrepareDiagnostics)> {
@@ -502,6 +625,7 @@ fn prepare_native_terminal_frame_with_diagnostics(
         &frame_model,
         previous_frame.as_ref(),
         previous_shaped_rows.as_ref(),
+        shaped_row_cache,
         shaper,
         loaded_font,
         font_system,
@@ -649,18 +773,18 @@ fn shape_rows_with_previous_cache(
     frame_model: &TerminalModelFrame,
     previous_frame: Option<&TerminalModelFrame>,
     previous_shaped_rows: Option<&Vec<crate::app::terminal_layout::ShapedRow>>,
+    shaped_row_cache: &mut PresenterShapedRowCache,
     shaper: &mut TerminalTextShaper,
     loaded_font: &LoadedFont,
     font_system: &mut dyn FontSystem,
 ) -> Result<(Vec<crate::app::terminal_layout::ShapedRow>, usize)> {
-    let mut previous_row_cache = HashMap::new();
+    shaped_row_cache.resize_for_visible_rows(frame_model.grid_rows);
+
     if let (Some(previous_frame), Some(previous_shaped_rows)) =
         (previous_frame, previous_shaped_rows)
     {
         for (model_row, shaped_row) in previous_frame.rows.iter().zip(previous_shaped_rows.iter()) {
-            previous_row_cache
-                .entry(model_row.content_hash)
-                .or_insert_with(|| shaped_row.clone());
+            shaped_row_cache.insert(loaded_font.cache_key(), model_row.content_hash, shaped_row);
         }
     }
 
@@ -669,11 +793,15 @@ fn shape_rows_with_previous_cache(
         .rows
         .iter()
         .map(|row| {
-            if let Some(cached) = previous_row_cache.get(&row.content_hash) {
+            if let Some(cached) =
+                shaped_row_cache.get(loaded_font.cache_key(), row.content_hash, row.row_index)
+            {
                 reused_shaped_row_count = reused_shaped_row_count.saturating_add(1);
-                Ok(rebased_shaped_row(cached, row.row_index))
+                Ok(cached)
             } else {
-                shaper.shape_row(row, loaded_font, font_system)
+                let shaped = shaper.shape_row(row, loaded_font, font_system)?;
+                shaped_row_cache.insert(loaded_font.cache_key(), row.content_hash, &shaped);
+                Ok(shaped)
             }
         })
         .collect::<Result<Vec<_>>>()?;
@@ -740,6 +868,7 @@ fn log_scene_image_present_diagnostics(
         scene_image_base_raster_us = scene_diagnostics.base_raster_us,
         scene_image_overlay_compose_us = scene_diagnostics.overlay_compose_us,
         scene_image_reuse_mode = scene_diagnostics.reuse_mode,
+        scene_image_fallback_reason = scene_diagnostics.fallback_reason.unwrap_or("none"),
         incremental_scroll_delta_rows = scene_diagnostics.incremental_scroll_delta_rows,
         dirty_edge_row_count = scene_diagnostics.dirty_edge_row_count,
         bitmap_render_count = scene_diagnostics.bitmap_render_count,
@@ -927,6 +1056,7 @@ mod tests {
         let mut renderer = WgpuTerminalRenderer::new_for_test()?;
         let mut previous_frame = None;
         let mut previous_shaped_rows = None;
+        let mut shaped_row_cache = PresenterShapedRowCache::default();
 
         prepare_native_terminal_frame(
             &mut font_system,
@@ -935,6 +1065,7 @@ mod tests {
             &loaded_font,
             &mut previous_frame,
             &mut previous_shaped_rows,
+            &mut shaped_row_cache,
             &first_surface,
             TerminalPresentationOptions::default(),
         )?;
@@ -951,6 +1082,7 @@ mod tests {
             &loaded_font,
             &mut previous_frame,
             &mut previous_shaped_rows,
+            &mut shaped_row_cache,
             &second_surface,
             TerminalPresentationOptions::default(),
         )?;
@@ -974,6 +1106,7 @@ mod tests {
         let mut renderer = WgpuTerminalRenderer::new_for_test()?;
         let mut previous_frame = None;
         let mut previous_shaped_rows = None;
+        let mut shaped_row_cache = PresenterShapedRowCache::default();
 
         prepare_native_terminal_frame(
             &mut font_system,
@@ -982,6 +1115,7 @@ mod tests {
             &loaded_font,
             &mut previous_frame,
             &mut previous_shaped_rows,
+            &mut shaped_row_cache,
             &first_surface,
             TerminalPresentationOptions::default(),
         )?;
@@ -993,6 +1127,7 @@ mod tests {
             &loaded_font,
             &mut previous_frame,
             &mut previous_shaped_rows,
+            &mut shaped_row_cache,
             &second_surface,
             TerminalPresentationOptions::default(),
         )?;
@@ -1004,6 +1139,182 @@ mod tests {
         assert_eq!(diagnostics.dirty_row_count, 3);
         assert_eq!(diagnostics.prepared_row_reuse_count, 2);
         assert!(diagnostics.glyph_raster_cache_entry_count >= 4);
+
+        Ok(())
+    }
+
+    #[test]
+    fn prepare_native_terminal_frame_reuses_shaped_rows_after_large_viewport_jump() -> Result<()> {
+        let session_id = Uuid::new_v4();
+        let first_surface = scroll_perf_surface(session_id, 1, 0, ["one", "two", "three"]);
+        let second_surface = scroll_perf_surface(session_id, 2, 120, ["four", "five", "six"]);
+        let third_surface = scroll_perf_surface(session_id, 3, 0, ["one", "two", "three"]);
+        let mut font_system = CountingFontSystem::new()?;
+        let loaded_font = font_system.load_font(&FontRequest::default())?;
+        let mut shaper = TerminalTextShaper;
+        let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+        let mut previous_frame = None;
+        let mut previous_shaped_rows = None;
+        let mut shaped_row_cache = PresenterShapedRowCache::default();
+
+        prepare_native_terminal_frame(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+            &first_surface,
+            TerminalPresentationOptions::default(),
+        )?;
+        assert_eq!(font_system.shape_text_runs_calls(), 3);
+
+        prepare_native_terminal_frame(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+            &second_surface,
+            TerminalPresentationOptions::default(),
+        )?;
+        assert_eq!(font_system.shape_text_runs_calls(), 6);
+
+        prepare_native_terminal_frame(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+            &third_surface,
+            TerminalPresentationOptions::default(),
+        )?;
+        assert_eq!(
+            font_system.shape_text_runs_calls(),
+            6,
+            "presenter-side row shaping should survive large viewport jumps so revisiting cached scrollback rows does not reshape content that already left the previous viewport"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn prepare_native_terminal_frame_partially_reuses_shaped_rows_after_large_jump() -> Result<()> {
+        let session_id = Uuid::new_v4();
+        let first_surface = scroll_perf_surface(session_id, 1, 0, ["one", "two", "three"]);
+        let second_surface = scroll_perf_surface(session_id, 2, 180, ["four", "five", "six"]);
+        let third_surface = scroll_perf_surface(session_id, 3, 181, ["zero", "one", "two"]);
+        let mut font_system = CountingFontSystem::new()?;
+        let loaded_font = font_system.load_font(&FontRequest::default())?;
+        let mut shaper = TerminalTextShaper;
+        let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+        let mut previous_frame = None;
+        let mut previous_shaped_rows = None;
+        let mut shaped_row_cache = PresenterShapedRowCache::default();
+
+        prepare_native_terminal_frame(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+            &first_surface,
+            TerminalPresentationOptions::default(),
+        )?;
+        prepare_native_terminal_frame(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+            &second_surface,
+            TerminalPresentationOptions::default(),
+        )?;
+        assert_eq!(font_system.shape_text_runs_calls(), 6);
+
+        prepare_native_terminal_frame(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+            &third_surface,
+            TerminalPresentationOptions::default(),
+        )?;
+        assert_eq!(
+            font_system.shape_text_runs_calls(),
+            7,
+            "after a large jump, revisiting two cached rows should only shape the newly exposed row instead of re-shaping the whole viewport"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn prepare_native_terminal_frame_reuses_shaped_rows_from_cached_scrollback_history()
+    -> Result<()> {
+        let session_id = Uuid::new_v4();
+        let first_surface = scroll_perf_surface(session_id, 1, 0, ["one", "two", "three"]);
+        let second_surface = scroll_perf_surface(session_id, 2, 32, ["alpha", "beta", "gamma"]);
+        let third_surface = scroll_perf_surface(session_id, 3, 96, ["one", "delta", "epsilon"]);
+        let mut font_system = CountingFontSystem::new()?;
+        let loaded_font = font_system.load_font(&FontRequest::default())?;
+        let mut shaper = TerminalTextShaper;
+        let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+        let mut previous_frame = None;
+        let mut previous_shaped_rows = None;
+        let mut shaped_row_cache = PresenterShapedRowCache::default();
+
+        prepare_native_terminal_frame(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+            &first_surface,
+            TerminalPresentationOptions::default(),
+        )?;
+        prepare_native_terminal_frame(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+            &second_surface,
+            TerminalPresentationOptions::default(),
+        )?;
+        prepare_native_terminal_frame(
+            &mut font_system,
+            &mut shaper,
+            &mut renderer,
+            &loaded_font,
+            &mut previous_frame,
+            &mut previous_shaped_rows,
+            &mut shaped_row_cache,
+            &third_surface,
+            TerminalPresentationOptions::default(),
+        )?;
+
+        assert_eq!(
+            font_system.shape_text_runs_calls(),
+            8,
+            "presenter row shaping should reuse cached row content from scrollback history even when the immediately previous viewport no longer contains the row"
+        );
 
         Ok(())
     }

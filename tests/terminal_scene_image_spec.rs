@@ -2,6 +2,7 @@
 
 use std::fs;
 
+use mica_term::app::ssh::runtime::TerminalCursorShape;
 use mica_term::app::terminal_font::FontFaceKey;
 use mica_term::app::terminal_presenter::{
     NativeCursorFrameState, NativeCursorOverlay, NativeImePreviewOverlay, NativeRendererFrameStats,
@@ -13,7 +14,6 @@ use mica_term::app::terminal_renderer::wgpu_renderer::{
     PreparedBackgroundRun, PreparedMonochromeGlyphDraw, PreparedMonochromeGlyphUploadPayload,
 };
 use mica_term::app::terminal_scene_image::SceneImageTerminalRenderer;
-use mica_term::app::ssh::runtime::TerminalCursorShape;
 
 fn pixel_argb(buffer: &slint::SharedPixelBuffer<slint::Rgba8Pixel>, x: u32, y: u32) -> u32 {
     let pixel = buffer.as_slice()[(y * buffer.width() + x) as usize];
@@ -31,6 +31,8 @@ fn sample_frame_with_wide_glyph() -> NativeTerminalFrame {
             glyph_run_count: 1,
             glyph_count: 1,
             dirty_row_count: 1,
+            viewport_offset_lines: 0,
+            row_content_hashes: vec![0x42],
             default_fg_rgba: 0xffff_0000,
             default_bg_rgba: 0xff00_0000,
             row_bg_even_rgba: 0xff00_0000,
@@ -129,6 +131,8 @@ fn sample_frame_with_right_shifted_glyph() -> NativeTerminalFrame {
             glyph_run_count: 1,
             glyph_count: 1,
             dirty_row_count: 1,
+            viewport_offset_lines: 0,
+            row_content_hashes: vec![0x99],
             default_fg_rgba: 0xffff_0000,
             default_bg_rgba: 0xff00_0000,
             row_bg_even_rgba: 0xff00_0000,
@@ -227,6 +231,8 @@ fn sample_frame_with_cursor_only() -> NativeTerminalFrame {
             glyph_run_count: 0,
             glyph_count: 0,
             dirty_row_count: 1,
+            viewport_offset_lines: 0,
+            row_content_hashes: vec![0x77],
             default_fg_rgba: 0xffff_ffff,
             default_bg_rgba: 0xff11_2233,
             row_bg_even_rgba: 0xff11_2233,
@@ -284,6 +290,8 @@ fn sample_frame_with_vertical_overhang_glyph() -> NativeTerminalFrame {
             glyph_run_count: 1,
             glyph_count: 1,
             dirty_row_count: 1,
+            viewport_offset_lines: 0,
+            row_content_hashes: vec![0x123],
             default_fg_rgba: 0xffff_0000,
             default_bg_rgba: 0xff00_0000,
             row_bg_even_rgba: 0xff00_0000,
@@ -365,6 +373,80 @@ fn sample_frame_with_vertical_overhang_glyph() -> NativeTerminalFrame {
                 mono_glyph_cache_entries: 1,
                 color_glyph_cache_entries: 0,
                 monochrome_glyphs_prepared: 1,
+                color_glyphs_prepared: 0,
+            },
+        },
+    }
+}
+
+fn sample_scrolled_background_frame(
+    frame_token: u64,
+    seqno: u64,
+    viewport_offset_lines: u32,
+    row_hashes: [u64; 3],
+    row_colors: [u32; 3],
+) -> NativeTerminalFrame {
+    NativeTerminalFrame {
+        frame_token,
+        cell_width_px: 2,
+        cell_height_px: 2,
+        presentable_frame: PresentableNativeFrame {
+            seqno,
+            shaped_row_count: 0,
+            glyph_run_count: 0,
+            glyph_count: 0,
+            dirty_row_count: 3,
+            viewport_offset_lines,
+            row_content_hashes: row_hashes.to_vec(),
+            default_fg_rgba: 0xffff_ffff,
+            default_bg_rgba: 0xff00_0000,
+            row_bg_even_rgba: 0xff00_0000,
+            row_bg_odd_rgba: 0xff00_0000,
+            grid_rows: 3,
+            grid_cols: 1,
+            background_runs: row_colors
+                .into_iter()
+                .enumerate()
+                .map(|(row, bg_rgba)| PreparedBackgroundRun {
+                    row: row as u32,
+                    start_col: 0,
+                    end_col: 0,
+                    bg_rgba,
+                })
+                .collect(),
+            monochrome_glyph_draws: vec![],
+            color_glyph_draws: vec![],
+            underline_run_count: 0,
+            cursor: NativeCursorFrameState {
+                row: 0,
+                col: 0,
+                visible: false,
+                blinking: false,
+                shape: TerminalCursorShape::Block,
+                fg_rgba: 0,
+                bg_rgba: 0,
+            },
+            cursor_overlay: NativeCursorOverlay {
+                visible: false,
+                row: 0,
+                col: 0,
+                cell_width_px: 2,
+                cell_height_px: 2,
+                shape: TerminalCursorShape::Block,
+                fg_rgba: 0,
+                bg_rgba: 0,
+            },
+            selection: NativeSelectionFrameState::default(),
+            selection_overlay: NativeSelectionOverlay::default(),
+            underline_overlay: NativeUnderlineOverlay::default(),
+            semantic_overlays: vec![],
+            semantic_input_overlays: vec![],
+            ime_preview_overlay: NativeImePreviewOverlay::default(),
+            renderer_stats: NativeRendererFrameStats {
+                glyph_cache_entries: 0,
+                mono_glyph_cache_entries: 0,
+                color_glyph_cache_entries: 0,
+                monochrome_glyphs_prepared: 0,
                 color_glyphs_prepared: 0,
             },
         },
@@ -519,8 +601,12 @@ fn scene_image_renderer_reuses_base_bitmap_across_overlay_only_updates() {
     };
 
     renderer.render(&first).expect("render base frame");
-    renderer.render(&second).expect("render selection overlay frame");
-    renderer.render(&third).expect("render underline overlay frame");
+    renderer
+        .render(&second)
+        .expect("render selection overlay frame");
+    renderer
+        .render(&third)
+        .expect("render underline overlay frame");
     renderer.render(&fourth).expect("render ime overlay frame");
 
     assert_eq!(
@@ -615,8 +701,12 @@ fn scene_image_renderer_reuses_overlay_work_buffer_for_same_sized_frames() {
         }],
     };
 
-    renderer.render(&first_overlay).expect("render first overlay frame");
-    renderer.render(&second_overlay).expect("render second overlay frame");
+    renderer
+        .render(&first_overlay)
+        .expect("render first overlay frame");
+    renderer
+        .render(&second_overlay)
+        .expect("render second overlay frame");
 
     assert_eq!(
         renderer.working_resize_count(),
@@ -644,5 +734,199 @@ fn scene_image_renderer_clips_vertical_overhang_without_reanchoring_glyph_origin
         pixel_argb(&buffer, 0, 1),
         0xffff_0000,
         "scene-image blit should preserve the glyph's incoming y origin and let clip rects drop the overflow below the row"
+    );
+}
+
+#[test]
+fn scene_image_renderer_uses_incremental_dirty_edge_raster_for_simple_scroll_frames() {
+    let mut renderer = SceneImageTerminalRenderer::default();
+    let first = sample_scrolled_background_frame(
+        10,
+        10,
+        0,
+        [11, 22, 33],
+        [0xff11_1111, 0xff22_2222, 0xff33_3333],
+    );
+    let second = sample_scrolled_background_frame(
+        11,
+        11,
+        1,
+        [44, 11, 22],
+        [0xff44_4444, 0xff11_1111, 0xff22_2222],
+    );
+
+    renderer.render(&first).expect("render first frame");
+    let second_bitmap = renderer.render(&second).expect("render second frame");
+    let second_rgba = second_bitmap.image.to_rgba8().expect("second rgba");
+
+    assert_eq!(
+        renderer.base_render_count(),
+        1,
+        "simple scroll frames should reuse the retained base pixels instead of paying a second full base raster pass"
+    );
+    assert_eq!(
+        renderer.incremental_scroll_render_count(),
+        1,
+        "scene-image renderer should count incremental scroll reuse when viewport hashes shift by one row"
+    );
+    assert_eq!(
+        renderer.dirty_edge_row_raster_count(),
+        1,
+        "only the newly exposed edge row should be repainted for a one-row scroll when the overlap hashes still match"
+    );
+    assert_eq!(pixel_argb(&second_rgba, 0, 0), 0xff44_4444);
+    assert_eq!(pixel_argb(&second_rgba, 0, 2), 0xff11_1111);
+    assert_eq!(pixel_argb(&second_rgba, 0, 4), 0xff22_2222);
+    let diagnostics = renderer
+        .last_render_diagnostics()
+        .expect("scroll diagnostics");
+    assert_eq!(diagnostics.reuse_mode, "incremental-scroll");
+    assert_eq!(diagnostics.fallback_reason, None);
+}
+
+#[test]
+fn scene_image_renderer_reports_parity_fallback_reason_for_odd_scrolls() {
+    let mut renderer = SceneImageTerminalRenderer::default();
+    let first = sample_scrolled_background_frame(
+        20,
+        20,
+        0,
+        [11, 22, 33],
+        [0xff11_1111, 0xff22_2222, 0xff33_3333],
+    );
+    let mut parity_sensitive = first.clone();
+    parity_sensitive.presentable_frame.row_bg_even_rgba = 0xff00_0000;
+    parity_sensitive.presentable_frame.row_bg_odd_rgba = 0xff10_1010;
+
+    let mut second = parity_sensitive.clone();
+    second.frame_token += 1;
+    second.presentable_frame.seqno += 1;
+    second.presentable_frame.viewport_offset_lines = 1;
+    second.presentable_frame.row_content_hashes = vec![44, 11, 22];
+    second.presentable_frame.background_runs = vec![
+        PreparedBackgroundRun {
+            row: 0,
+            start_col: 0,
+            end_col: 0,
+            bg_rgba: 0xff44_4444,
+        },
+        PreparedBackgroundRun {
+            row: 1,
+            start_col: 0,
+            end_col: 0,
+            bg_rgba: 0xff11_1111,
+        },
+        PreparedBackgroundRun {
+            row: 2,
+            start_col: 0,
+            end_col: 0,
+            bg_rgba: 0xff22_2222,
+        },
+    ];
+
+    renderer.render(&parity_sensitive).expect("render base frame");
+    renderer.render(&second).expect("render parity fallback frame");
+
+    let diagnostics = renderer
+        .last_render_diagnostics()
+        .expect("parity fallback diagnostics");
+    assert_eq!(diagnostics.reuse_mode, "full-base-raster");
+    assert_eq!(
+        diagnostics.fallback_reason,
+        Some("odd-delta-striped-background")
+    );
+}
+
+#[test]
+fn scene_image_renderer_reports_missing_overlap_fallback_reason() {
+    let mut renderer = SceneImageTerminalRenderer::default();
+    let first = sample_scrolled_background_frame(
+        30,
+        30,
+        0,
+        [11, 22, 33],
+        [0xff11_1111, 0xff22_2222, 0xff33_3333],
+    );
+    let second = sample_scrolled_background_frame(
+        31,
+        31,
+        1,
+        [77, 88, 99],
+        [0xff77_7777, 0xff88_8888, 0xff99_9999],
+    );
+
+    renderer.render(&first).expect("render base frame");
+    renderer.render(&second).expect("render no-overlap fallback frame");
+
+    let diagnostics = renderer
+        .last_render_diagnostics()
+        .expect("no-overlap fallback diagnostics");
+    assert_eq!(diagnostics.reuse_mode, "full-base-raster");
+    assert_eq!(diagnostics.fallback_reason, Some("zero-reusable-rows"));
+}
+
+#[test]
+fn scene_image_renderer_reports_fallback_reason_for_zero_overlap_scroll() {
+    let mut renderer = SceneImageTerminalRenderer::default();
+    let first = sample_scrolled_background_frame(
+        20,
+        20,
+        0,
+        [11, 22, 33],
+        [0xff11_1111, 0xff22_2222, 0xff33_3333],
+    );
+    let second = sample_scrolled_background_frame(
+        21,
+        21,
+        1,
+        [44, 55, 66],
+        [0xff44_4444, 0xff55_5555, 0xff66_6666],
+    );
+
+    renderer.render(&first).expect("render first frame");
+    renderer.render(&second).expect("render second frame");
+    let diagnostics = renderer
+        .last_render_diagnostics()
+        .expect("second render diagnostics");
+
+    assert_eq!(diagnostics.reuse_mode, "full-base-raster");
+    assert_eq!(diagnostics.fallback_reason, Some("zero-reusable-rows"));
+}
+
+#[test]
+fn scene_image_renderer_reports_fallback_reason_for_odd_delta_striped_background() {
+    let mut renderer = SceneImageTerminalRenderer::default();
+    let first = sample_scrolled_background_frame(
+        30,
+        30,
+        0,
+        [11, 22, 33],
+        [0xff11_1111, 0xff22_2222, 0xff33_3333],
+    );
+    let mut second = sample_scrolled_background_frame(
+        31,
+        31,
+        1,
+        [44, 11, 22],
+        [0xff44_4444, 0xff11_1111, 0xff22_2222],
+    );
+    second.presentable_frame.row_bg_even_rgba = 0xff0a_0a0a;
+    second.presentable_frame.row_bg_odd_rgba = 0xff1a_1a1a;
+    let mut striped_first = first.clone();
+    striped_first.presentable_frame.row_bg_even_rgba = 0xff0a_0a0a;
+    striped_first.presentable_frame.row_bg_odd_rgba = 0xff1a_1a1a;
+
+    renderer
+        .render(&striped_first)
+        .expect("render striped first frame");
+    renderer.render(&second).expect("render striped second frame");
+    let diagnostics = renderer
+        .last_render_diagnostics()
+        .expect("striped render diagnostics");
+
+    assert_eq!(diagnostics.reuse_mode, "full-base-raster");
+    assert_eq!(
+        diagnostics.fallback_reason,
+        Some("odd-delta-striped-background")
     );
 }

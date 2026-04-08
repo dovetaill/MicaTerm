@@ -197,6 +197,7 @@ fn presenter_and_scene_image_paths_expose_perf_breakdown_diagnostics() {
         "target: \"app.terminal.perf\"",
         "scene_image_render_us",
         "scene_image_base_raster_us",
+        "scene_image_fallback_reason",
     ] {
         assert!(
             presenter_source.contains(expected),
@@ -211,6 +212,7 @@ fn presenter_and_scene_image_paths_expose_perf_breakdown_diagnostics() {
         "dirty_edge_row_raster_count",
         "base_raster_us",
         "overlay_compose_us",
+        "fallback_reason",
         "detect_incremental_scroll_delta(",
         "render_incremental_base_pixels(",
     ] {
@@ -227,10 +229,18 @@ fn presenter_sources_expose_scrollback_row_shape_reuse_contract() {
         .expect("read terminal presenter source");
     let model_source =
         fs::read_to_string("src/app/terminal_model.rs").expect("read terminal model source");
+    let font_backend_source =
+        fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend source");
 
     assert!(
         presenter_source.contains("previous_shaped_rows"),
         "presenter hot paths should retain the previous frame's shaped rows so adjacent viewport scrolls can reuse overlapping row shaping work instead of re-shaping every visible row"
+    );
+    assert!(
+        presenter_source.contains("PresenterShapedRowCache")
+            && presenter_source.contains("LoadedFontKey")
+            && presenter_source.contains("content_hash"),
+        "presenter hot paths should retain a bounded shaped-row cache keyed by font identity plus row content hash so large scroll jumps and back-scrolls can reuse shaping work even after rows leave the previous viewport"
     );
     assert!(
         presenter_source.contains("content_hash"),
@@ -239,6 +249,10 @@ fn presenter_sources_expose_scrollback_row_shape_reuse_contract() {
     assert!(
         model_source.contains("pub content_hash: u64"),
         "terminal model rows should expose a viewport-stable content hash so presenters can reuse overlapping scrollback rows even after they move to a new viewport slot"
+    );
+    assert!(
+        font_backend_source.contains("pub struct LoadedFontKey"),
+        "the font backend should expose a stable loaded-font cache identity so presenter-side shaping caches can safely separate rows shaped under different terminal font metrics"
     );
 }
 
