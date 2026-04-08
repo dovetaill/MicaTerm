@@ -824,8 +824,12 @@ fn scene_image_renderer_reports_parity_fallback_reason_for_odd_scrolls() {
         },
     ];
 
-    renderer.render(&parity_sensitive).expect("render base frame");
-    renderer.render(&second).expect("render parity fallback frame");
+    renderer
+        .render(&parity_sensitive)
+        .expect("render base frame");
+    renderer
+        .render(&second)
+        .expect("render parity fallback frame");
 
     let diagnostics = renderer
         .last_render_diagnostics()
@@ -856,7 +860,9 @@ fn scene_image_renderer_reports_missing_overlap_fallback_reason() {
     );
 
     renderer.render(&first).expect("render base frame");
-    renderer.render(&second).expect("render no-overlap fallback frame");
+    renderer
+        .render(&second)
+        .expect("render no-overlap fallback frame");
 
     let diagnostics = renderer
         .last_render_diagnostics()
@@ -919,7 +925,9 @@ fn scene_image_renderer_reports_fallback_reason_for_odd_delta_striped_background
     renderer
         .render(&striped_first)
         .expect("render striped first frame");
-    renderer.render(&second).expect("render striped second frame");
+    renderer
+        .render(&second)
+        .expect("render striped second frame");
     let diagnostics = renderer
         .last_render_diagnostics()
         .expect("striped render diagnostics");

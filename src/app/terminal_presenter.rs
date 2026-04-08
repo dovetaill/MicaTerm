@@ -809,7 +809,11 @@ fn prepare_native_terminal_frame_with_diagnostics(
         glyph_count: prepared.glyph_count,
         dirty_row_count: frame_model.dirty_rows.len(),
         viewport_offset_lines: frame_model.viewport_offset_lines,
-        row_content_hashes: frame_model.rows.iter().map(|row| row.content_hash).collect(),
+        row_content_hashes: frame_model
+            .rows
+            .iter()
+            .map(|row| row.content_hash)
+            .collect(),
         default_fg_rgba: frame_model.palette.default_fg_rgba,
         default_bg_rgba: frame_model.palette.default_bg_rgba,
         row_bg_even_rgba: frame_model.palette.row_bg_even_rgba,

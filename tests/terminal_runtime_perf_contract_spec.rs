@@ -182,8 +182,8 @@ fn renderer_hot_paths_consume_terminal_frame_snapshot_contract() {
 fn presenter_and_scene_image_paths_keep_perf_diagnostics_without_runtime_log_spam() {
     let presenter_source = fs::read_to_string("src/app/terminal_presenter.rs")
         .expect("read terminal presenter source");
-    let scene_image_source = fs::read_to_string("src/app/terminal_scene_image.rs")
-        .expect("read scene image source");
+    let scene_image_source =
+        fs::read_to_string("src/app/terminal_scene_image.rs").expect("read scene image source");
 
     for expected in [
         "struct TerminalPrepareDiagnostics",
@@ -261,8 +261,8 @@ fn presenter_sources_expose_scrollback_row_shape_reuse_contract() {
 fn presenter_and_scene_image_sources_expose_cache_stats_and_clear_hooks() {
     let presenter_source = fs::read_to_string("src/app/terminal_presenter.rs")
         .expect("read terminal presenter source");
-    let scene_image_source = fs::read_to_string("src/app/terminal_scene_image.rs")
-        .expect("read scene image source");
+    let scene_image_source =
+        fs::read_to_string("src/app/terminal_scene_image.rs").expect("read scene image source");
 
     for expected in [
         "pub struct TerminalPresenterCacheStats",
@@ -307,15 +307,16 @@ fn renderer_host_exposes_surface_local_present_updates() {
 fn native_renderer_prepare_avoids_cloning_cached_rows_and_rehashing_full_glyph_runs() {
     let renderer_source = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
         .expect("read wgpu renderer source");
-    let shaper_source = fs::read_to_string("src/app/terminal_layout/shaper.rs")
-        .expect("read shaper source");
+    let shaper_source =
+        fs::read_to_string("src/app/terminal_layout/shaper.rs").expect("read shaper source");
 
     assert!(
         renderer_source.contains("std::mem::take(&mut self.previous_prepared_rows)"),
         "native renderer prepare should move the previous prepared-row cache out of self instead of cloning the entire retained row-artifact map on every frame"
     );
     assert!(
-        !renderer_source.contains("let previous_prepared_rows = self.previous_prepared_rows.clone();"),
+        !renderer_source
+            .contains("let previous_prepared_rows = self.previous_prepared_rows.clone();"),
         "native renderer prepare should stop cloning the retained row-artifact cache because repeated large viewport scrolls otherwise spend hot-path time duplicating cached draw payload vectors before any reuse happens"
     );
     assert!(

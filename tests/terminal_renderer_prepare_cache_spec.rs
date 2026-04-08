@@ -1,10 +1,6 @@
 #[cfg(feature = "terminal-native-renderer")]
 use anyhow::Result;
 #[cfg(feature = "terminal-native-renderer")]
-use std::collections::hash_map::DefaultHasher;
-#[cfg(feature = "terminal-native-renderer")]
-use std::hash::{Hash, Hasher};
-#[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_font::mock::MockFontSystem;
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_font::{
@@ -17,6 +13,10 @@ use mica_term::app::terminal_layout::{TerminalTextShaper, TextShaper};
 use mica_term::app::terminal_model::{TerminalModelCell, TerminalModelRow};
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
+#[cfg(feature = "terminal-native-renderer")]
+use std::collections::hash_map::DefaultHasher;
+#[cfg(feature = "terminal-native-renderer")]
+use std::hash::{Hash, Hasher};
 
 #[cfg(feature = "terminal-native-renderer")]
 struct CountingRasterFontSystem {

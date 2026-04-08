@@ -188,6 +188,7 @@ const FALLBACK_WORKSPACE_TERMINAL_CELL_HEIGHT_PX: u32 = 22;
 const WORKSPACE_INPUT_PROJECTION_DEBOUNCE_MS: u64 = 12;
 const WORKSPACE_SCROLL_VIEWPORT_PROJECTION_DEBOUNCE_MS: u64 = 4;
 const WORKSPACE_SCROLL_THUMB_DRAG_PROJECTION_DEBOUNCE_MS: u64 = 8;
+const WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS: u64 = 1_000;
 
 #[cfg(test)]
 type WorkspaceTerminalPresenterFactory =
@@ -2375,6 +2376,84 @@ fn clear_workspace_native_terminal_frame(window: &AppWindow) {
     clear_workspace_retained_native_terminal_surface(window);
 }
 
+fn clear_workspace_terminal_transient_caches(
+    memory_diagnostics: bool,
+    event: &'static str,
+    reason: &'static str,
+) {
+    let (render_mode, before, after) = WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+        let mut host = host.borrow_mut();
+        let render_mode = host
+            .as_ref()
+            .map(|host| host.render_mode_label())
+            .unwrap_or("uninitialized");
+        let before = host
+            .as_ref()
+            .map(|host| host.cache_stats())
+            .unwrap_or_default();
+        if let Some(host) = host.as_mut() {
+            host.clear_transient_caches();
+        }
+        let after = host
+            .as_ref()
+            .map(|host| host.cache_stats())
+            .unwrap_or_default();
+        (render_mode, before, after)
+    });
+
+    crate::app::logging::runtime::emit_terminal_memory_cache_clear(
+        memory_diagnostics,
+        event,
+        reason,
+        render_mode,
+        before,
+        after,
+    );
+}
+
+fn update_workspace_terminal_idle_cache_shrink(
+    has_active_surface: bool,
+    surface_disappeared: bool,
+    now: Instant,
+    no_surface_since: &mut Option<Instant>,
+    idle_cache_shrunk: &mut bool,
+    memory_diagnostics: bool,
+) {
+    if has_active_surface {
+        no_surface_since.take();
+        *idle_cache_shrunk = false;
+        return;
+    }
+
+    if surface_disappeared {
+        clear_workspace_terminal_transient_caches(
+            memory_diagnostics,
+            "close-shrink",
+            "surface-cleared",
+        );
+        *no_surface_since = Some(now);
+        *idle_cache_shrunk = false;
+        return;
+    }
+
+    let Some(no_surface_since_at) = *no_surface_since else {
+        return;
+    };
+    if *idle_cache_shrunk
+        || now.duration_since(no_surface_since_at)
+            < Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS)
+    {
+        return;
+    }
+
+    clear_workspace_terminal_transient_caches(
+        memory_diagnostics,
+        "idle-shrink",
+        "no-active-surface-idle",
+    );
+    *idle_cache_shrunk = true;
+}
+
 #[cfg(test)]
 fn sync_workspace_session_state(
     window: &AppWindow,
@@ -2606,7 +2685,8 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         let mut native_frame_presented = false;
         let mut next_render_mode = None;
         let mut next_surface_seqno = None;
-        let mut memory_stats = crate::app::terminal_presenter::TerminalPresenterCacheStats::default();
+        let mut memory_stats =
+            crate::app::terminal_presenter::TerminalPresenterCacheStats::default();
         WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
             let mut host = host.borrow_mut();
             let Some(host) = host.as_mut() else {
@@ -3856,6 +3936,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let scroll_thumb_drag_timer = Rc::new(Timer::default());
     let deferred_scroll_thumb_drag =
         Rc::new(RefCell::new(DeferredWorkspaceScrollThumbDrag::default()));
+    let workspace_terminal_no_surface_since = Rc::new(RefCell::new(None::<Instant>));
+    let workspace_terminal_idle_cache_shrunk = Rc::new(RefCell::new(false));
     if let Some(session_bridge_ref) = session_bridge.as_ref() {
         let state = Rc::clone(&view_model);
         let handle = window.as_weak();
@@ -3863,13 +3945,22 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
         let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
         let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
+        let workspace_terminal_no_surface_since_ref =
+            Rc::clone(&workspace_terminal_no_surface_since);
+        let workspace_terminal_idle_cache_shrunk_ref =
+            Rc::clone(&workspace_terminal_idle_cache_shrunk);
+        let memory_diagnostics = crate::app::logging::runtime::memory_diagnostics_enabled();
         session_projection_timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
             let Some(window) = handle.upgrade() else {
                 return;
             };
             let mut state = state.borrow_mut();
+            let had_active_surface = state.active_workspace_terminal_surface().is_some();
             let projection_delta =
                 workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+            let surface_disappeared = projection_delta.surface_changed
+                && had_active_surface
+                && state.active_workspace_terminal_surface().is_none();
             let should_clear_pending_paste = pending_workspace_paste_warning_ref
                 .borrow()
                 .as_ref()
@@ -3921,6 +4012,19 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     sftp::sync_right_panel_state(&window, &state);
                 }
             }
+
+            let now = Instant::now();
+            let has_active_surface = state.active_workspace_terminal_surface().is_some();
+            let mut no_surface_since = workspace_terminal_no_surface_since_ref.borrow_mut();
+            let mut idle_cache_shrunk = workspace_terminal_idle_cache_shrunk_ref.borrow_mut();
+            update_workspace_terminal_idle_cache_shrink(
+                has_active_surface,
+                surface_disappeared,
+                now,
+                &mut no_surface_since,
+                &mut idle_cache_shrunk,
+                memory_diagnostics,
+            );
         });
     }
 
@@ -6203,6 +6307,124 @@ mod tests {
             );
             assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
         });
+    }
+
+    #[test]
+    fn idle_cache_shrink_does_not_arm_without_a_surface_clear_transition() {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = None;
+        });
+
+        let now = Instant::now();
+        let mut no_surface_since = None;
+        let mut idle_cache_shrunk = false;
+
+        update_workspace_terminal_idle_cache_shrink(
+            false,
+            false,
+            now,
+            &mut no_surface_since,
+            &mut idle_cache_shrunk,
+            false,
+        );
+
+        assert!(
+            no_surface_since.is_none(),
+            "cold startup without an active terminal surface should not automatically arm the no-surface idle shrink timer because there is no close/disappear transition to diagnose"
+        );
+        assert!(
+            !idle_cache_shrunk,
+            "without a surface-clear transition the idle shrink path should stay dormant"
+        );
+    }
+
+    #[test]
+    fn idle_cache_shrink_arms_after_surface_disappears() {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = None;
+        });
+
+        let now = Instant::now();
+        let mut no_surface_since = None;
+        let mut idle_cache_shrunk = true;
+
+        update_workspace_terminal_idle_cache_shrink(
+            false,
+            true,
+            now,
+            &mut no_surface_since,
+            &mut idle_cache_shrunk,
+            false,
+        );
+
+        assert_eq!(
+            no_surface_since,
+            Some(now),
+            "surface clear transitions should start the no-surface idle window from the moment the active terminal surface disappears"
+        );
+        assert!(
+            !idle_cache_shrunk,
+            "the immediate close-shrink should re-arm the delayed idle shrink so it can run later if the workspace still has no active surface"
+        );
+    }
+
+    #[test]
+    fn idle_cache_shrink_resets_when_surface_returns() {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = None;
+        });
+
+        let now = Instant::now();
+        let mut no_surface_since = Some(now);
+        let mut idle_cache_shrunk = true;
+
+        update_workspace_terminal_idle_cache_shrink(
+            true,
+            false,
+            now + Duration::from_millis(1),
+            &mut no_surface_since,
+            &mut idle_cache_shrunk,
+            false,
+        );
+
+        assert!(
+            no_surface_since.is_none(),
+            "any visible terminal surface should cancel the no-surface idle shrink timer immediately"
+        );
+        assert!(
+            !idle_cache_shrunk,
+            "returning to an active surface should clear the idle-shrunk marker so the next real disappearance can schedule a fresh delayed shrink"
+        );
+    }
+
+    #[test]
+    fn idle_cache_shrink_marks_itself_after_threshold() {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = None;
+        });
+
+        let now = Instant::now();
+        let mut no_surface_since = Some(now);
+        let mut idle_cache_shrunk = false;
+
+        update_workspace_terminal_idle_cache_shrink(
+            false,
+            false,
+            now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
+            &mut no_surface_since,
+            &mut idle_cache_shrunk,
+            false,
+        );
+
+        assert_eq!(
+            no_surface_since,
+            Some(now),
+            "idle shrink should preserve the original no-surface timestamp so diagnostics can report how long the workspace had been idle before the delayed shrink fired"
+        );
+        assert!(
+            idle_cache_shrunk,
+            "once the no-surface threshold elapses the idle shrink path should mark itself complete until an active surface returns"
+        );
     }
 
     #[test]

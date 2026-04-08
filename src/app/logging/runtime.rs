@@ -117,6 +117,51 @@ pub fn emit_terminal_memory_surface_refresh(
     );
 }
 
+pub fn emit_terminal_memory_cache_clear(
+    enabled: bool,
+    event: &str,
+    reason: &str,
+    render_mode: &str,
+    before: TerminalPresenterCacheStats,
+    after: TerminalPresenterCacheStats,
+) {
+    if !enabled {
+        return;
+    }
+
+    tracing::debug!(
+        target: "app.memory",
+        event,
+        reason,
+        render_mode,
+        before_previous_frame_rows = before.previous_frame_rows,
+        before_previous_shaped_rows = before.previous_shaped_rows,
+        before_shaped_row_cache_entries = before.shaped_row_cache_entries,
+        before_shaped_row_cache_capacity = before.shaped_row_cache_capacity,
+        before_mono_glyph_cache_entries = before.mono_glyph_cache_entries,
+        before_color_glyph_cache_entries = before.color_glyph_cache_entries,
+        before_glyph_raster_cache_entries = before.glyph_raster_cache_entries,
+        before_prepared_row_cache_entries = before.prepared_row_cache_entries,
+        before_scene_image_mono_glyph_cache_entries = before.scene_image_mono_glyph_cache_entries,
+        before_scene_image_color_glyph_cache_entries = before.scene_image_color_glyph_cache_entries,
+        before_scene_image_last_base_pixels_bytes = before.scene_image_last_base_pixels_bytes,
+        before_scene_image_working_pixels_bytes = before.scene_image_working_pixels_bytes,
+        after_previous_frame_rows = after.previous_frame_rows,
+        after_previous_shaped_rows = after.previous_shaped_rows,
+        after_shaped_row_cache_entries = after.shaped_row_cache_entries,
+        after_shaped_row_cache_capacity = after.shaped_row_cache_capacity,
+        after_mono_glyph_cache_entries = after.mono_glyph_cache_entries,
+        after_color_glyph_cache_entries = after.color_glyph_cache_entries,
+        after_glyph_raster_cache_entries = after.glyph_raster_cache_entries,
+        after_prepared_row_cache_entries = after.prepared_row_cache_entries,
+        after_scene_image_mono_glyph_cache_entries = after.scene_image_mono_glyph_cache_entries,
+        after_scene_image_color_glyph_cache_entries = after.scene_image_color_glyph_cache_entries,
+        after_scene_image_last_base_pixels_bytes = after.scene_image_last_base_pixels_bytes,
+        after_scene_image_working_pixels_bytes = after.scene_image_working_pixels_bytes,
+        "terminal memory cache shrink"
+    );
+}
+
 pub fn emit_terminal_memory_trim_request(enabled: bool, pending_output_bytes: usize) {
     if !enabled {
         return;

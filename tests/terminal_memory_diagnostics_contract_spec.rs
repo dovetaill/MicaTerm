@@ -28,4 +28,8 @@ fn readme_documents_windows_memory_diagnostics_repro_flow() {
         content.contains("MICA_TERM_MEMORY_DIAGNOSTICS=1"),
         "README should mention the dedicated memory diagnostics toggle by name"
     );
+    assert!(
+        content.contains("close-shrink") && content.contains("idle-shrink"),
+        "README should document the close-shrink and idle-shrink memory events so field diagnostics can distinguish immediate surface-clear cleanup from delayed no-surface cleanup"
+    );
 }

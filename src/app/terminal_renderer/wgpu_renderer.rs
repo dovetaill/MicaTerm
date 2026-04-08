@@ -281,18 +281,18 @@ impl WgpuTerminalRenderer {
                     self.last_prepared_row_reuse_count.saturating_add(1);
                 cached_row.rebase_for_row(row.row, cell_height_px)
             } else {
-                let (fresh_row, row_monochrome_glyphs_prepared, row_color_glyphs_prepared) =
-                    self.prepare_row(
-                        frame,
-                        row,
-                        fonts,
-                        cell_width_px,
-                        cell_height_px,
-                        baseline_px,
-                        font_em_size_px,
-                    )?;
-                monochrome_glyphs_prepared = monochrome_glyphs_prepared
-                    .saturating_add(row_monochrome_glyphs_prepared);
+                let (fresh_row, row_monochrome_glyphs_prepared, row_color_glyphs_prepared) = self
+                    .prepare_row(
+                    frame,
+                    row,
+                    fonts,
+                    cell_width_px,
+                    cell_height_px,
+                    baseline_px,
+                    font_em_size_px,
+                )?;
+                monochrome_glyphs_prepared =
+                    monochrome_glyphs_prepared.saturating_add(row_monochrome_glyphs_prepared);
                 color_glyphs_prepared =
                     color_glyphs_prepared.saturating_add(row_color_glyphs_prepared);
                 fresh_row
@@ -435,8 +435,8 @@ impl WgpuTerminalRenderer {
             let mut glyph_index = 0usize;
             while glyph_index < run.glyphs.len() {
                 let cluster_start = run.glyphs[glyph_index].cluster;
-                let (glyph_start_col, glyph_end_col) = glyph_cell_span(run, cluster_start)
-                    .unwrap_or((run.start_col(), run.end_col()));
+                let (glyph_start_col, glyph_end_col) =
+                    glyph_cell_span(run, cluster_start).unwrap_or((run.start_col(), run.end_col()));
                 let glyph_span_rect = glyph_cell_span_rect(
                     row.row,
                     glyph_start_col,
@@ -492,7 +492,10 @@ impl WgpuTerminalRenderer {
                                         .saturating_add(y_offset_px),
                                     width_px: rasterized.width_px,
                                     height_px: rasterized.height_px,
-                                    kind: PreparedClusterGlyphKind::Color { cache_entry, upload },
+                                    kind: PreparedClusterGlyphKind::Color {
+                                        cache_entry,
+                                        upload,
+                                    },
                                 });
                                 cluster_pen_x_subpx += color_glyph_advance_px_f32(
                                     &frame.font,
@@ -512,9 +515,8 @@ impl WgpuTerminalRenderer {
                                 let glyph_origin_x = cluster_pen_x_subpx + x_offset_subpx;
                                 let (glyph_origin_x_px, fractional_offset_x) =
                                     split_fractional_offset(glyph_origin_x);
-                                let request = frame
-                                    .font
-                                    .raster_request_with_fractional_offset_x_for_face(
+                                let request =
+                                    frame.font.raster_request_with_fractional_offset_x_for_face(
                                         run.resolved_face.face_key,
                                         glyph.glyph_id,
                                         run.style.bold,
@@ -529,10 +531,8 @@ impl WgpuTerminalRenderer {
                                                 .saturating_mul(2),
                                         ),
                                         height_px: rasterized.height_px,
-                                        padding_left_px:
-                                            MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
-                                        padding_right_px:
-                                            MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
+                                        padding_left_px: MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
+                                        padding_right_px: MONOCHROME_ATLAS_HORIZONTAL_PADDING_PX,
                                         bearing_x_px: rasterized.bearing_x_px,
                                         bearing_y_px: rasterized.bearing_y_px,
                                         advance_px: rasterized.advance_px,
@@ -600,8 +600,7 @@ impl WgpuTerminalRenderer {
                             run.style.bold,
                             fractional_offset_x,
                         );
-                        let rasterized =
-                            self.cached_rasterize_glyph(fonts, frame, request)?;
+                        let rasterized = self.cached_rasterize_glyph(fonts, frame, request)?;
                         let upload = (!self.atlas.contains(request)).then(|| {
                             PreparedMonochromeGlyphUploadPayload {
                                 width_px: rasterized.width_px.saturating_add(
@@ -659,8 +658,7 @@ impl WgpuTerminalRenderer {
                             rasterized.advance_px,
                             cell_width_px,
                         );
-                        monochrome_glyphs_prepared =
-                            monochrome_glyphs_prepared.saturating_add(1);
+                        monochrome_glyphs_prepared = monochrome_glyphs_prepared.saturating_add(1);
                     }
                     glyph_index = glyph_index.saturating_add(1);
                 }
@@ -709,30 +707,27 @@ impl WgpuTerminalRenderer {
                                 dest_y_px: glyph.raw_dest_y_px,
                                 fg_rgba,
                             }),
-                        PreparedClusterGlyphKind::Color { cache_entry, upload } => artifacts
-                            .color_glyph_draws
-                            .push(PreparedColorGlyphDraw {
-                                row: row.row,
-                                start_col: glyph.start_col,
-                                end_col: glyph.end_col,
-                                glyph_id: glyph.glyph_id,
-                                cache_entry,
-                                upload,
-                                x_offset_px: glyph.x_offset_px,
-                                y_offset_px: glyph.y_offset_px,
-                                dest_x_px,
-                                dest_y_px: glyph.raw_dest_y_px,
-                            }),
+                        PreparedClusterGlyphKind::Color {
+                            cache_entry,
+                            upload,
+                        } => artifacts.color_glyph_draws.push(PreparedColorGlyphDraw {
+                            row: row.row,
+                            start_col: glyph.start_col,
+                            end_col: glyph.end_col,
+                            glyph_id: glyph.glyph_id,
+                            cache_entry,
+                            upload,
+                            x_offset_px: glyph.x_offset_px,
+                            y_offset_px: glyph.y_offset_px,
+                            dest_x_px,
+                            dest_y_px: glyph.raw_dest_y_px,
+                        }),
                     }
                 }
             }
         }
 
-        Ok((
-            artifacts,
-            monochrome_glyphs_prepared,
-            color_glyphs_prepared,
-        ))
+        Ok((artifacts, monochrome_glyphs_prepared, color_glyphs_prepared))
     }
 }
 

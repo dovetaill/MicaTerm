@@ -6,8 +6,9 @@ use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::{
     build_test_logging_runtime, emit_app_root_metadata, emit_runtime_profile_metadata,
-    emit_terminal_memory_startup_snapshot, emit_terminal_memory_surface_refresh,
-    emit_terminal_memory_trim_executed, emit_terminal_memory_trim_request,
+    emit_terminal_memory_cache_clear, emit_terminal_memory_startup_snapshot,
+    emit_terminal_memory_surface_refresh, emit_terminal_memory_trim_executed,
+    emit_terminal_memory_trim_request,
 };
 use mica_term::app::runtime_profile::AppRuntimeProfile;
 use mica_term::app::terminal_presenter::TerminalPresenterCacheStats;
@@ -181,6 +182,14 @@ fn terminal_memory_diagnostics_remain_quiet_when_disabled() {
             0,
             TerminalPresenterCacheStats::default(),
         );
+        emit_terminal_memory_cache_clear(
+            false,
+            "idle-shrink",
+            "surface-disappeared",
+            "bitmap",
+            TerminalPresenterCacheStats::default(),
+            TerminalPresenterCacheStats::default(),
+        );
         emit_terminal_memory_trim_request(false, 1024 * 1024);
         emit_terminal_memory_trim_executed(false, 1024 * 1024, true);
     });
@@ -190,6 +199,7 @@ fn terminal_memory_diagnostics_remain_quiet_when_disabled() {
     let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
     assert!(!content.contains("terminal memory startup snapshot"));
     assert!(!content.contains("terminal memory surface refresh"));
+    assert!(!content.contains("terminal memory cache shrink"));
     assert!(!content.contains("terminal memory trim request"));
     assert!(!content.contains("terminal memory trim executed"));
 }
@@ -219,10 +229,23 @@ fn terminal_memory_diagnostics_emit_when_enabled() {
         scene_image_working_pixels_bytes: 4096,
         ..TerminalPresenterCacheStats::default()
     };
+    let shrunk_stats = TerminalPresenterCacheStats {
+        shaped_row_cache_entries: 1,
+        glyph_raster_cache_entries: 2,
+        ..TerminalPresenterCacheStats::default()
+    };
 
     tracing::dispatcher::with_default(&runtime.dispatch, || {
         emit_terminal_memory_startup_snapshot(true, AppRuntimeProfile::mainline(), stats);
         emit_terminal_memory_surface_refresh(true, "surface-refresh", "bitmap", 7, stats);
+        emit_terminal_memory_cache_clear(
+            true,
+            "idle-shrink",
+            "no-active-surface-idle",
+            "bitmap",
+            stats,
+            shrunk_stats,
+        );
         emit_terminal_memory_trim_request(true, 1024 * 1024);
         emit_terminal_memory_trim_executed(true, 1024 * 1024, true);
     });
@@ -232,9 +255,14 @@ fn terminal_memory_diagnostics_emit_when_enabled() {
     let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
     assert!(content.contains("terminal memory startup snapshot"));
     assert!(content.contains("terminal memory surface refresh"));
+    assert!(content.contains("terminal memory cache shrink"));
+    assert!(content.contains("idle-shrink"));
+    assert!(content.contains("reason=\"no-active-surface-idle\""));
     assert!(content.contains("terminal memory trim request"));
     assert!(content.contains("terminal memory trim executed"));
-    assert!(content.contains("shaped_row_cache_entries=12"));
-    assert!(content.contains("glyph_raster_cache_entries=24"));
-    assert!(content.contains("scene_image_working_pixels_bytes=4096"));
+    assert!(content.contains("before_shaped_row_cache_entries=12"));
+    assert!(content.contains("before_glyph_raster_cache_entries=24"));
+    assert!(content.contains("before_scene_image_working_pixels_bytes=4096"));
+    assert!(content.contains("after_shaped_row_cache_entries=1"));
+    assert!(content.contains("after_glyph_raster_cache_entries=2"));
 }

@@ -109,7 +109,11 @@ impl SceneImageTerminalRenderer {
             last_base_pixels_bytes: self
                 .last_base_pixels
                 .as_ref()
-                .map(|pixels| pixels.len().saturating_mul(std::mem::size_of::<Rgba8Pixel>()))
+                .map(|pixels| {
+                    pixels
+                        .len()
+                        .saturating_mul(std::mem::size_of::<Rgba8Pixel>())
+                })
                 .unwrap_or_default(),
             working_pixels_bytes: self
                 .working_pixels
@@ -238,10 +242,11 @@ impl SceneImageTerminalRenderer {
             }
         } else {
             let incremental_scroll_result = incremental_scroll_candidate.map(|delta_rows| {
-                self.render_incremental_base_pixels(frame, delta_rows)
-                    .map(|(pixels, incremental_base_raster_us, dirty_rows)| {
+                self.render_incremental_base_pixels(frame, delta_rows).map(
+                    |(pixels, incremental_base_raster_us, dirty_rows)| {
                         (pixels, incremental_base_raster_us, delta_rows, dirty_rows)
-                    })
+                    },
+                )
             });
             match incremental_scroll_result {
                 Some(Ok((pixels, incremental_base_raster_us, delta_rows, dirty_rows))) => {
@@ -467,7 +472,11 @@ impl SceneImageTerminalRenderer {
             .dirty_edge_row_raster_count
             .saturating_add(dirty_row_count);
 
-        Ok((pixels, base_started.elapsed().as_micros() as u64, dirty_row_count))
+        Ok((
+            pixels,
+            base_started.elapsed().as_micros() as u64,
+            dirty_row_count,
+        ))
     }
 
     fn copy_shifted_pixel_rows(

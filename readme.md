@@ -135,6 +135,10 @@ Notes:
 - `MICA_TERM_MEMORY_DIAGNOSTICS=1` enables opt-in terminal memory diagnostics for startup, trim, scroll, and session-close investigations.
 - Without `MICA_TERM_LOG=debug`, only error-level events are persisted.
 - Windows builds use daily log rotation, so the file name includes the current date.
+- Terminal memory entries are written under the `app.memory` target with events like
+  `startup-snapshot`, `surface-refresh`, `close-shrink`, `idle-shrink`, `trim-request`, and `trim-executed`.
+- After reproducing, you can filter just the memory diagnostics with
+  `Select-String -Path .\logs\system-error.log* -Pattern "app.memory","shrink","trim-"`.
 
 ## Asset Persistence
 

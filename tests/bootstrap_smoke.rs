@@ -8345,6 +8345,44 @@ fn bootstrap_projects_terminal_shell_chrome_contract_from_theme_preset() {
 }
 
 #[test]
+fn bootstrap_clears_terminal_renderer_caches_when_no_surface_remains() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let host_source =
+        fs::read_to_string("src/app/terminal_renderer/host.rs").expect("read renderer host");
+
+    assert!(
+        host_source.contains("pub fn clear_transient_caches(&mut self)"),
+        "terminal renderer host should expose a clear_transient_caches hook so bootstrap can drop retained presenter caches when no terminal surface remains"
+    );
+    assert!(
+        bootstrap_source.contains("clear_workspace_terminal_transient_caches("),
+        "bootstrap should route terminal cache shrink through a lifecycle helper so close-driven and idle-driven shrink paths can share cache diagnostics"
+    );
+    assert!(
+        bootstrap_source.contains("\"close-shrink\""),
+        "bootstrap should label the immediate shrink event that runs when the active workspace surface disappears"
+    );
+}
+
+#[test]
+fn bootstrap_tracks_no_surface_idle_before_terminal_cache_shrink() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("const WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS: u64 ="),
+        "bootstrap should define a dedicated idle threshold before shrinking terminal caches so active session transitions do not immediately throw away caches needed for fast reconnect or tab switching"
+    );
+    assert!(
+        bootstrap_source.contains("workspace_terminal_no_surface_since"),
+        "bootstrap should track how long the workspace has been without an active terminal surface before firing the idle cache shrink path"
+    );
+    assert!(
+        bootstrap_source.contains("\"idle-shrink\""),
+        "bootstrap should label the delayed no-surface shrink path so diagnostics can distinguish it from the immediate close-driven shrink"
+    );
+}
+
+#[test]
 fn no_surface_terminal_shell_chrome_tracks_catppuccin_theme_toggle() {
     i_slint_backend_testing::init_no_event_loop();
 
