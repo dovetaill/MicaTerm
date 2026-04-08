@@ -100,6 +100,8 @@ fn ascii_clusters_snap_to_cell_starts_instead_of_accumulating_shaped_drift() -> 
         font: test_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..3,
@@ -160,10 +162,23 @@ fn ascii_clusters_snap_to_cell_starts_instead_of_accumulating_shaped_drift() -> 
 
     let prepared = renderer.prepare(&shaped_frame, &mut fonts)?;
     let glyphs = &prepared.monochrome_glyph_draws;
-    assert_eq!(glyphs.len(), 3, "three ascii cells should produce three draws");
-    assert_eq!(glyphs[0].dest_x_px + glyphs[0].atlas_entry.padding_left_px as i32, 0);
-    assert_eq!(glyphs[1].dest_x_px + glyphs[1].atlas_entry.padding_left_px as i32, 8);
-    assert_eq!(glyphs[2].dest_x_px + glyphs[2].atlas_entry.padding_left_px as i32, 16);
+    assert_eq!(
+        glyphs.len(),
+        3,
+        "three ascii cells should produce three draws"
+    );
+    assert_eq!(
+        glyphs[0].dest_x_px + glyphs[0].atlas_entry.padding_left_px as i32,
+        0
+    );
+    assert_eq!(
+        glyphs[1].dest_x_px + glyphs[1].atlas_entry.padding_left_px as i32,
+        8
+    );
+    assert_eq!(
+        glyphs[2].dest_x_px + glyphs[2].atlas_entry.padding_left_px as i32,
+        16
+    );
 
     Ok(())
 }
@@ -176,6 +191,8 @@ fn wide_cluster_keeps_following_ascii_cell_on_its_own_grid_column() -> Result<()
         font: test_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..3,
@@ -223,12 +240,19 @@ fn wide_cluster_keeps_following_ascii_cell_on_its_own_grid_column() -> Result<()
 
     let prepared = renderer.prepare(&shaped_frame, &mut fonts)?;
     let glyphs = &prepared.monochrome_glyph_draws;
-    assert_eq!(glyphs.len(), 2, "wide char plus ascii should produce two draws");
+    assert_eq!(
+        glyphs.len(),
+        2,
+        "wide char plus ascii should produce two draws"
+    );
     assert_eq!(glyphs[0].start_col, 0);
     assert_eq!(glyphs[0].end_col, 1);
     assert_eq!(glyphs[1].start_col, 2);
     assert_eq!(glyphs[1].end_col, 2);
-    assert_eq!(glyphs[1].dest_x_px + glyphs[1].atlas_entry.padding_left_px as i32, 16);
+    assert_eq!(
+        glyphs[1].dest_x_px + glyphs[1].atlas_entry.padding_left_px as i32,
+        16
+    );
 
     Ok(())
 }
@@ -241,6 +265,8 @@ fn oversized_space_advance_does_not_expand_the_visual_gap_between_cells() -> Res
         font: test_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..3,
@@ -301,8 +327,15 @@ fn oversized_space_advance_does_not_expand_the_visual_gap_between_cells() -> Res
 
     let prepared = renderer.prepare(&shaped_frame, &mut fonts)?;
     let glyphs = &prepared.monochrome_glyph_draws;
-    assert_eq!(glyphs.len(), 3, "space clusters should still preserve per-cell draw bookkeeping");
-    assert_eq!(glyphs[2].dest_x_px + glyphs[2].atlas_entry.padding_left_px as i32, 16);
+    assert_eq!(
+        glyphs.len(),
+        3,
+        "space clusters should still preserve per-cell draw bookkeeping"
+    );
+    assert_eq!(
+        glyphs[2].dest_x_px + glyphs[2].atlas_entry.padding_left_px as i32,
+        16
+    );
 
     Ok(())
 }

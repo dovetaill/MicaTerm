@@ -2,13 +2,13 @@
 use anyhow::{Result, bail};
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_font::{
-    FontFaceKey, FontMetrics, FontRenderProfile, FontRequest, FontSystem, FontFallbackFace,
+    FontFaceKey, FontFallbackFace, FontMetrics, FontRenderProfile, FontRequest, FontSystem,
     GlyphRasterRequest, LoadedFont, RasterizedGlyph,
 };
 #[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
-#[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_layout::run_segmentation::RunCluster;
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 
@@ -222,6 +222,8 @@ fn native_renderer_preserves_single_glyph_visible_bounds_when_right_ink_overhang
         font: test_loaded_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..1,
@@ -282,6 +284,8 @@ fn native_renderer_preserves_cluster_spacing_when_trailing_ink_overhangs() -> Re
         font: test_loaded_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..1,
@@ -324,17 +328,25 @@ fn native_renderer_preserves_cluster_spacing_when_trailing_ink_overhangs() -> Re
     let mut fonts = ClusterOverhangFontSystem;
 
     let prepared = renderer.prepare(&shaped_frame, &mut fonts)?;
-    assert_eq!(prepared.monochrome_glyph_draws.len(), 2, "cluster should still emit two glyph draws");
+    assert_eq!(
+        prepared.monochrome_glyph_draws.len(),
+        2,
+        "cluster should still emit two glyph draws"
+    );
 
     assert_eq!(
         prepared.monochrome_glyph_draws[0].dest_x_px
-            + prepared.monochrome_glyph_draws[0].atlas_entry.padding_left_px as i32,
+            + prepared.monochrome_glyph_draws[0]
+                .atlas_entry
+                .padding_left_px as i32,
         1,
         "renderer should keep the first glyph on its shaped visible-bounds origin instead of shifting the whole cluster back inside the logical cell span"
     );
     assert_eq!(
         prepared.monochrome_glyph_draws[1].dest_x_px
-            + prepared.monochrome_glyph_draws[1].atlas_entry.padding_left_px as i32,
+            + prepared.monochrome_glyph_draws[1]
+                .atlas_entry
+                .padding_left_px as i32,
         3,
         "renderer should preserve intra-cluster spacing while allowing the trailing glyph's visible bounds to overhang the logical cell span"
     );
@@ -356,6 +368,8 @@ fn native_renderer_keeps_shared_row_baseline_when_a_glyph_overhangs_vertically()
         font: test_loaded_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..2,
@@ -437,6 +451,8 @@ fn native_renderer_resets_fractional_x_phase_at_each_terminal_cell_start() -> Re
         font: fractional_phase_test_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..2,
@@ -519,6 +535,8 @@ fn native_renderer_preserves_fractional_x_phase_inside_a_single_cluster() -> Res
         font: fractional_phase_test_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..1,
@@ -610,6 +628,8 @@ fn native_renderer_partitions_monochrome_glyph_cache_by_fractional_x_phase() -> 
         ),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..1,
@@ -682,8 +702,8 @@ fn native_renderer_partitions_monochrome_glyph_cache_by_fractional_x_phase() -> 
 
 #[cfg(feature = "terminal-native-renderer")]
 #[test]
-fn native_renderer_preserves_fractional_x_phase_when_color_run_falls_back_to_monochrome() -> Result<()>
-{
+fn native_renderer_preserves_fractional_x_phase_when_color_run_falls_back_to_monochrome()
+-> Result<()> {
     let style = TextStyleKey {
         fg_rgba: 0xffd8_dfe8,
         bg_rgba: 0xff0c_1014,
@@ -711,6 +731,8 @@ fn native_renderer_preserves_fractional_x_phase_when_color_run_falls_back_to_mon
         ),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..2,

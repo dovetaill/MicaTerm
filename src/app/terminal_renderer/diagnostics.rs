@@ -49,5 +49,8 @@ pub struct NativeTerminalSurfaceDiagnostics {
     pub render_target_generation: u64,
     pub last_prepared_frame_token: u64,
     pub last_presented_frame_token: u64,
+    pub scheduled_present_count: u64,
+    pub host_redraw_request_count: u64,
+    pub host_redraw_replay_count: u64,
     pub draw_counters: NativeTerminalSurfaceDrawCounters,
 }

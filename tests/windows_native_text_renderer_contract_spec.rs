@@ -50,12 +50,10 @@ fn windows_native_text_renderer_source_uses_monitor_aware_clear_type_contract() 
 
 #[test]
 fn native_surface_diagnostics_source_exposes_text_renderer_path() {
-    let diagnostics_source =
-        fs::read_to_string("src/app/terminal_renderer/diagnostics.rs")
-            .expect("read native surface diagnostics");
-    let native_surface_source =
-        fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
-            .expect("read native surface");
+    let diagnostics_source = fs::read_to_string("src/app/terminal_renderer/diagnostics.rs")
+        .expect("read native surface diagnostics");
+    let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
+        .expect("read native surface");
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows backend");
@@ -71,8 +69,17 @@ fn native_surface_diagnostics_source_exposes_text_renderer_path() {
         "windows backend diagnostics snapshot should publish which primary text renderer path is active"
     );
     assert!(
-        native_surface_source.contains("state.latest_diagnostics = state.backend.diagnostics_snapshot();"),
-        "native surface should keep refreshing the diagnostics snapshot after backend state changes"
+        native_surface_source
+            .contains("let mut diagnostics = state.backend.diagnostics_snapshot();")
+            && native_surface_source
+                .contains("diagnostics.scheduled_present_count = state.scheduled_present_count;")
+            && native_surface_source.contains(
+                "diagnostics.host_redraw_request_count = state.host_redraw_request_count;"
+            )
+            && native_surface_source
+                .contains("diagnostics.host_redraw_replay_count = state.host_redraw_replay_count;")
+            && native_surface_source.contains("state.latest_diagnostics = diagnostics;"),
+        "native surface should keep refreshing the diagnostics snapshot after backend state changes and surface present/redraw counter state"
     );
     assert!(
         windows_frame_source.contains("pub fn native_surface_text_renderer_path("),

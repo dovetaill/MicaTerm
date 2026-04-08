@@ -10,11 +10,9 @@ use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
 #[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
+use mica_term::app::terminal_renderer::wgpu_renderer::PreparedMonochromeGlyphDraw;
 #[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_renderer::wgpu_renderer::{
-    PreparedMonochromeGlyphDraw,
-};
+use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 
 #[cfg(feature = "terminal-native-renderer")]
 struct GridAnchorFontSystem;
@@ -120,6 +118,8 @@ fn ascii_frame(text: &str, x_advance: i32) -> ShapedTerminalFrame {
         font: grid_test_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..text.chars().count() as u32,
@@ -176,6 +176,8 @@ fn wide_cjk_cluster_does_not_shift_following_ascii_origin_off_grid() -> Result<(
         font: grid_test_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..3,
@@ -248,6 +250,8 @@ fn mixed_row_draw_origins_match_declared_start_cols_for_selection_grid() -> Resu
         font: grid_test_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..4,

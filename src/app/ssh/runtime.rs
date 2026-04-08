@@ -7,18 +7,18 @@ mod sftp_backend;
 mod terminal;
 mod transport;
 
-pub use contracts::{
-    TerminalCellState, TerminalCursorShape, TerminalCursorState, TerminalKeyEvent,
-    TerminalKeyKind, TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput,
-    TerminalRowState, TerminalSurfaceSignature, TerminalSurfaceState,
-};
-pub use contracts::TerminalSurfaceState as SurfaceState;
 pub use auth::UnknownHostKeyError;
+pub(crate) use auth::{load_optional_stored_secret_bundle, stored_secret_lookup_message};
+pub use contracts::TerminalSurfaceState as SurfaceState;
+pub use contracts::{
+    TerminalCellState, TerminalCursorShape, TerminalCursorState, TerminalKeyEvent, TerminalKeyKind,
+    TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalRowState,
+    TerminalSurfaceSignature, TerminalSurfaceState,
+};
 pub use terminal::{
     TerminalSession, encode_named_key_input, extract_current_working_directory_from_osc7,
     negotiated_terminal_environment,
 };
-pub(crate) use auth::{load_optional_stored_secret_bundle, stored_secret_lookup_message};
 
 use self::auth::ConnectionProgressReporter;
 use self::pump::run_channel_pump;
@@ -326,8 +326,8 @@ impl SessionRuntimeControl for SshSessionRuntime {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::terminal::visible_lines_from_rows;
+    use super::*;
 
     #[test]
     fn ssh_client_config_uses_keepalive_without_inactivity_disconnects() {
@@ -374,5 +374,4 @@ mod tests {
             vec!["top".to_string(), String::new(), "bottom".to_string()]
         );
     }
-
 }

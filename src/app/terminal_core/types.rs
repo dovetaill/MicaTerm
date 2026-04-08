@@ -2,8 +2,7 @@ use anyhow::Result;
 use termwiz::input::{KeyCode, Modifiers as KeyModifiers};
 
 use crate::app::ssh::runtime::{
-    TerminalCellState, TerminalCursorState, TerminalKeyEvent, TerminalMouseInput,
-    TerminalRowState,
+    TerminalCellState, TerminalCursorState, TerminalKeyEvent, TerminalMouseInput, TerminalRowState,
 };
 use crate::theme::ThemeMode;
 

@@ -12,14 +12,16 @@ use mica_term::app::windows_frame::{
 
 #[test]
 fn diagnostics_contract_exposes_windows_text_rendering_trace_fields() {
-    let diagnostics_source =
-        fs::read_to_string("src/app/terminal_renderer/diagnostics.rs")
-            .expect("read diagnostics source");
+    let diagnostics_source = fs::read_to_string("src/app/terminal_renderer/diagnostics.rs")
+        .expect("read diagnostics source");
 
     for expected in [
         "pub struct NativeTerminalSurfaceWindowsTextDiagnostics",
         "pub struct NativeTerminalSurfaceGlyphBoundsTrace",
         "pub windows_text: Option<NativeTerminalSurfaceWindowsTextDiagnostics>",
+        "pub scheduled_present_count: u64",
+        "pub host_redraw_request_count: u64",
+        "pub host_redraw_replay_count: u64",
         "pub text_antialias_mode: Option<&'static str>",
         "pub render_target_alpha_mode: Option<&'static str>",
         "pub font_chain: Vec<String>",
@@ -94,7 +96,10 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
         ..Default::default()
     };
 
-    assert_eq!(native_surface_text_antialias_mode(&diagnostics), Some("cleartype"));
+    assert_eq!(
+        native_surface_text_antialias_mode(&diagnostics),
+        Some("cleartype")
+    );
     assert_eq!(
         native_surface_render_target_alpha_mode(&diagnostics),
         Some("ignore")
@@ -107,7 +112,10 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
     assert_eq!(native_surface_scale_factor_percent(&diagnostics), Some(150));
     assert_eq!(
         native_surface_font_chain(&diagnostics).map(|chain| chain.to_vec()),
-        Some(vec!["Cascadia Mono".to_string(), "Sarasa Term SC".to_string()])
+        Some(vec![
+            "Cascadia Mono".to_string(),
+            "Sarasa Term SC".to_string()
+        ])
     );
     assert_eq!(
         native_surface_glyph_bounds_trace(&diagnostics)
@@ -129,6 +137,9 @@ fn bootstrap_source_installs_native_terminal_diagnostics_trace_hook() {
         "native_surface_render_target_alpha_mode(&diagnostics)",
         "native_surface_font_chain(&diagnostics)",
         "native_surface_glyph_bounds_trace(&diagnostics)",
+        "scheduled_present_count = diagnostics.scheduled_present_count",
+        "host_redraw_request_count = diagnostics.host_redraw_request_count",
+        "host_redraw_replay_count = diagnostics.host_redraw_replay_count",
         "window_scale_factor(window)",
     ] {
         assert!(

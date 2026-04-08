@@ -55,19 +55,12 @@ export component WorkspacePane inherits Rectangle {
     in property <color> workspace-session-default-bg: ThemeTokens.terminal-default-bg;
     in property <color> workspace-session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
     in property <color> workspace-session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
-    in property <color> workspace-session-jump-to-latest-bg: ThemeTokens.terminal-jump-to-latest-surface;
-    in property <color> workspace-session-jump-to-latest-hover-bg: ThemeTokens.terminal-jump-to-latest-hover-surface;
-    in property <color> workspace-session-jump-to-latest-pressed-bg: ThemeTokens.terminal-jump-to-latest-pressed-surface;
-    in property <color> workspace-session-jump-to-latest-border: ThemeTokens.terminal-jump-to-latest-border;
-    in property <color> workspace-session-jump-to-latest-fg: ThemeTokens.terminal-jump-to-latest-fg;
     in property <bool> workspace-session-mouse-grabbed: false;
     in property <[string]> workspace-session-visible-lines: [];
     in property <int> workspace-session-surface-seqno: 0;
     in property <int> workspace-session-viewport-offset-lines: 0;
     in property <int> workspace-session-viewport-max-offset-lines: 0;
     in property <bool> workspace-session-viewport-at-bottom: true;
-    in property <bool> workspace-session-follow-paused: false;
-    in property <int> workspace-session-pending-output-lines: 0;
     in-out property <bool> workspace-session-selection-active: false;
     in-out property <int> workspace-session-selection-start-row: -1;
     in-out property <int> workspace-session-selection-start-col: -1;
@@ -96,7 +89,6 @@ export component WorkspacePane inherits Rectangle {
     callback scroll-requested(int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
-    callback jump-to-latest-requested();
     callback mouse-input(string, string, int, int, bool, bool, bool);
     callback welcome-quick-launch-asset-selected(string);
     callback welcome-quick-launch-search-changed(string);
@@ -181,19 +173,12 @@ export component WorkspacePane inherits Rectangle {
                 session-default-bg: root.workspace-session-default-bg;
                 session-scrollbar-thumb: root.workspace-session-scrollbar-thumb;
                 session-scrollbar-thumb-active: root.workspace-session-scrollbar-thumb-active;
-                session-jump-to-latest-bg: root.workspace-session-jump-to-latest-bg;
-                session-jump-to-latest-hover-bg: root.workspace-session-jump-to-latest-hover-bg;
-                session-jump-to-latest-pressed-bg: root.workspace-session-jump-to-latest-pressed-bg;
-                session-jump-to-latest-border: root.workspace-session-jump-to-latest-border;
-                session-jump-to-latest-fg: root.workspace-session-jump-to-latest-fg;
                 session-mouse-grabbed: root.workspace-session-mouse-grabbed;
                 session-visible-lines: root.workspace-session-visible-lines;
                 session-surface-seqno: root.workspace-session-surface-seqno;
                 session-viewport-offset-lines: root.workspace-session-viewport-offset-lines;
                 session-viewport-max-offset-lines: root.workspace-session-viewport-max-offset-lines;
                 session-viewport-at-bottom: root.workspace-session-viewport-at-bottom;
-                session-follow-paused: root.workspace-session-follow-paused;
-                session-pending-output-lines: root.workspace-session-pending-output-lines;
                 selection-active <=> root.workspace-session-selection-active;
                 selection-start-row <=> root.workspace-session-selection-start-row;
                 selection-start-col <=> root.workspace-session-selection-start-col;
@@ -246,10 +231,6 @@ export component WorkspacePane inherits Rectangle {
 
                 scroll-jump-requested(ratio) => {
                     root.scroll-jump-requested(ratio);
-                }
-
-                jump-to-latest-requested() => {
-                    root.jump-to-latest-requested();
                 }
 
                 mouse-input(kind, button, row, col, shift, ctrl, alt) => {

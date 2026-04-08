@@ -115,7 +115,9 @@ fn readme_states_current_terminal_core_and_reference_boundaries_honestly() {
         "readme should state that Rio is a reference rather than migrated runtime code"
     );
     assert!(
-        readme.contains("real `alacritty_terminal` core now exists behind the experimental adapter boundary"),
+        readme.contains(
+            "real `alacritty_terminal` core now exists behind the experimental adapter boundary"
+        ),
         "readme should state that the experimental Alacritty path now binds to the real upstream core rather than staying a WezTerm wrapper seam"
     );
 }

@@ -6,15 +6,15 @@ use anyhow::bail;
 use mica_term::app::terminal_font::mock::mock_font_system;
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_font::{
-    FontFaceKey, FontMetrics, FontRenderProfile, FontRequest, FontSystem, FontFallbackFace,
+    FontFaceKey, FontFallbackFace, FontMetrics, FontRenderProfile, FontRequest, FontSystem,
     GlyphRasterRequest, LoadedFont, RasterizedGlyph,
 };
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_layout::{
     GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey, shape_row,
 };
-#[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_model::{TerminalModelCell, TerminalModelRow};
 #[cfg(feature = "terminal-native-renderer")]
@@ -179,6 +179,8 @@ fn native_renderer_keeps_logical_cell_span_even_when_visible_bounds_extend_past_
         ),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..1,
@@ -256,6 +258,8 @@ fn wide_cluster_stays_anchored_to_span_start_instead_of_centering() -> Result<()
         ),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..2,

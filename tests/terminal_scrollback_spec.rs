@@ -43,11 +43,8 @@ fn wheel_without_mouse_grab_scrolls_local_viewport() {
 
 #[test]
 fn experimental_alacritty_core_preserves_local_scrollback_contract() {
-    let mut session = TerminalSession::new_with_core_kind(
-        4,
-        20,
-        TerminalCoreKind::AlacrittyExperimental,
-    );
+    let mut session =
+        TerminalSession::new_with_core_kind(4, 20, TerminalCoreKind::AlacrittyExperimental);
 
     session.apply_remote_bytes(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n");
 
@@ -210,7 +207,8 @@ fn semantic_input_overlay_is_disabled_when_tui_mouse_grab_is_active() {
 fn renderer_migration_docs_describe_windows_native_status_and_native_only_shipping_path() {
     let readme = fs::read_to_string("readme.md").expect("read readme");
     let verification = fs::read_to_string("verification.md").expect("read verification");
-    let mainline_build = fs::read_to_string("build-win-x64.sh").expect("read mainline build script");
+    let mainline_build =
+        fs::read_to_string("build-win-x64.sh").expect("read mainline build script");
     let software_build =
         fs::read_to_string("build-win-x64-software.sh").expect("read software build script");
 

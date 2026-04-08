@@ -30,13 +30,8 @@ fn malformed_osc7_sequence_is_ignored() {
 #[test]
 fn wide_char_trailing_cell_hit_normalizes_back_to_the_leading_cell() {
     let session_id = Uuid::new_v4();
-    let mut surface = TerminalSurfaceState::from_visible_lines(
-        session_id,
-        1,
-        1,
-        4,
-        vec!["条a ".into()],
-    );
+    let mut surface =
+        TerminalSurfaceState::from_visible_lines(session_id, 1, 1, 4, vec!["条a ".into()]);
     surface.cells = vec![
         TerminalCellState {
             row: 0,
@@ -140,11 +135,8 @@ fn terminal_host_forwards_backtab_into_terminal_tab_input() {
 #[test]
 fn experimental_alacritty_core_preserves_light_theme_palette_and_shift_tab_writeback() {
     let mut wezterm = TerminalSession::new_with_core_kind(24, 80, TerminalCoreKind::Wezterm);
-    let mut alacritty = TerminalSession::new_with_core_kind(
-        24,
-        80,
-        TerminalCoreKind::AlacrittyExperimental,
-    );
+    let mut alacritty =
+        TerminalSession::new_with_core_kind(24, 80, TerminalCoreKind::AlacrittyExperimental);
     let preset = preset_for_theme_mode(ThemeMode::Light);
 
     wezterm.set_theme_mode(ThemeMode::Light);
@@ -161,9 +153,18 @@ fn experimental_alacritty_core_preserves_light_theme_palette_and_shift_tab_write
         .send_key_event(TerminalKeyEvent::named("tab", false, false, true))
         .expect("alacritty backtab");
 
-    assert_eq!(alacritty_snapshot.default_bg_rgba, wezterm_snapshot.default_bg_rgba);
-    assert_eq!(alacritty_snapshot.default_bg_rgba, 0xff00_0000 | preset.background);
-    assert_eq!(alacritty_snapshot.cursor.bg_rgba, wezterm_snapshot.cursor.bg_rgba);
+    assert_eq!(
+        alacritty_snapshot.default_bg_rgba,
+        wezterm_snapshot.default_bg_rgba
+    );
+    assert_eq!(
+        alacritty_snapshot.default_bg_rgba,
+        0xff00_0000 | preset.background
+    );
+    assert_eq!(
+        alacritty_snapshot.cursor.bg_rgba,
+        wezterm_snapshot.cursor.bg_rgba
+    );
     assert_eq!(alacritty_backtab, wezterm_backtab);
 }
 
@@ -349,15 +350,18 @@ fn terminal_host_declares_accumulated_multi_line_wheel_scrollback_contract() {
     );
     assert!(
         terminal_host.contains("private property <float> wheel-delta-threshold: 120;"),
-        "TerminalSessionHost should define a wheel threshold before converting movement into scrollback lines"
+        "TerminalSessionHost should define the wheel normalization threshold used to scale partial deltas into scrollback lines"
     );
     assert!(
         terminal_host.contains("private property <int> wheel-lines-per-notch: 6;"),
         "TerminalSessionHost should map one wheel notch to multiple local scrollback lines"
     );
     assert!(
-        !terminal_host.contains("let delta-lines = event.delta-y > 0px ? 1 : -1;"),
-        "TerminalSessionHost should not keep the prototype one-line-per-event wheel mapping"
+        terminal_host.contains("function accumulated-wheel-lines() -> int {")
+            && terminal_host.contains("let delta-lines = root.accumulated-wheel-lines();")
+            && terminal_host.contains("root.wheel-delta-remainder = root.wheel-delta-remainder\n                                + (((event.delta-y / 1px) / root.wheel-delta-threshold)")
+            && terminal_host.contains("root.wheel-delta-remainder = root.wheel-delta-remainder - delta-lines;"),
+        "TerminalSessionHost should convert partial wheel deltas into proportional line scrollback instead of waiting for full-notch jumps"
     );
 }
 

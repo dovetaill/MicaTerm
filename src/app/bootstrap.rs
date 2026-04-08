@@ -8,7 +8,7 @@ mod windowing;
 mod workspace_terminal;
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -52,9 +52,7 @@ use crate::app::keychain::{
 use crate::app::quick_launch_preferences::{
     QuickLaunchPreferences, QuickLaunchPreferencesStore, retain_known_ssh_asset_ids,
 };
-use crate::app::runtime_profile::{
-    AppRuntimeProfile, TerminalCompositionMode, TerminalRenderMode,
-};
+use crate::app::runtime_profile::{AppRuntimeProfile, TerminalCompositionMode, TerminalRenderMode};
 use crate::app::sftp::{
     SftpBrowserController, SftpBrowserLoadRequest, SftpBrowserSessionState, SftpDirectoryEntryKind,
     SftpFollowMode, SftpPanelMode, SftpSessionBindingState,
@@ -94,13 +92,14 @@ use crate::app::terminal_renderer::{
     NativeTerminalSurface, NativeTerminalSurfaceDiagnostics, NativeTerminalSurfaceRect,
     TerminalRendererHost, TerminalRendererHostOptions,
 };
-use crate::app::terminal_theme::{TerminalThemePreset, preset_for_theme_mode, selection_overlay_rgba};
+use crate::app::terminal_theme::{
+    TerminalThemePreset, preset_for_theme_mode, selection_overlay_rgba,
+};
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, bootstrap_provider_credential_ref, load_local_vault_bootstrap_state,
     load_provider_credential, load_runtime_vault_key, persist_provider_credential,
-    persist_runtime_vault_key, save_local_vault_bootstrap_state,
-    vault_runtime_key_credential_ref,
+    persist_runtime_vault_key, save_local_vault_bootstrap_state, vault_runtime_key_credential_ref,
 };
 use crate::app::vault::cache::{load_encrypted_cache, store_encrypted_cache};
 use crate::app::vault::conflict_inbox::{
@@ -118,27 +117,23 @@ use crate::app::vault::model::{
     GitRepoRemoteDraft, KdfConfig, ProviderAuthKind, ProviderKind, RemoteRole,
     SnapshotSyncPreferences, VaultAssetPayload, VaultHead, VaultSnapshot, VaultSshProxySpec,
 };
-use crate::app::vault::provider::gitee_gist::{GiteeGistProvider, GiteeGistProviderConfig};
 use crate::app::vault::provider::git_repo::{
     GitRepoProvider, GitRepoProviderConfig, validate_first_release_git_host,
 };
+use crate::app::vault::provider::gitee_gist::{GiteeGistProvider, GiteeGistProviderConfig};
 use crate::app::vault::provider::github_gist::{GitHubGistProvider, GitHubGistProviderConfig};
 use crate::app::vault::provider::gitlab_snippet::{
     GitLabSnippetProvider, GitLabSnippetProviderConfig,
 };
 use crate::app::vault::provider::s3::{S3VaultProvider, S3VaultProviderConfig};
-use crate::app::vault::provider::{
-    VaultProvider, first_release_formal_provider_label,
-};
+use crate::app::vault::provider::{VaultProvider, first_release_formal_provider_label};
 use crate::app::vault::recovery::{
     RecoverySnapshotRecord, RecoverySource, persist_recovery_snapshot,
 };
 use crate::app::vault::snapshot::{
     apply_vault_snapshot, export_vault_snapshot, normalize_snapshot_secret_refs,
 };
-use crate::app::vault::sync_decision::{
-    LocalSyncState, SyncAction, decide_sync_action,
-};
+use crate::app::vault::sync_decision::{LocalSyncState, SyncAction, decide_sync_action};
 use crate::app::vault::sync_service::RemoteHeadSnapshot;
 use crate::app::window_effects::{
     PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
@@ -148,16 +143,15 @@ use crate::app::windowing::{
     ModalDragState, WindowController, apply_restored_window_size, parse_resize_direction,
     window_appearance,
 };
-use crate::app::windows_frame::{
-    native_surface_baseline_px, native_surface_dpi_x, native_surface_dpi_y,
-    native_surface_font_chain, native_surface_glyph_bounds_trace,
-    native_surface_pixel_alignment, native_surface_render_target_alpha_mode,
-    native_surface_scale_factor_percent, native_surface_text_antialias_mode,
-    native_surface_text_renderer_path,
-};
 #[cfg(target_os = "windows")]
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
+};
+use crate::app::windows_frame::{
+    native_surface_baseline_px, native_surface_dpi_x, native_surface_dpi_y,
+    native_surface_font_chain, native_surface_glyph_bounds_trace, native_surface_pixel_alignment,
+    native_surface_render_target_alpha_mode, native_surface_scale_factor_percent,
+    native_surface_text_antialias_mode, native_surface_text_renderer_path,
 };
 use crate::shell::assets::{
     AssetDisclosureState, AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec,
@@ -192,7 +186,8 @@ const WORKSPACE_PASTE_EDITOR_LINE_THRESHOLD: usize = 4;
 const FALLBACK_WORKSPACE_TERMINAL_CELL_WIDTH_PX: u32 = 10;
 const FALLBACK_WORKSPACE_TERMINAL_CELL_HEIGHT_PX: u32 = 22;
 const WORKSPACE_INPUT_PROJECTION_DEBOUNCE_MS: u64 = 12;
-const WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS: u64 = 16;
+const WORKSPACE_SCROLL_VIEWPORT_PROJECTION_DEBOUNCE_MS: u64 = 4;
+const WORKSPACE_SCROLL_THUMB_DRAG_PROJECTION_DEBOUNCE_MS: u64 = 8;
 
 #[cfg(test)]
 type WorkspaceTerminalPresenterFactory =
@@ -369,9 +364,9 @@ impl VaultProviderFactory for DefaultVaultProviderFactory {
             ProviderKind::S3Compatible => Ok(Arc::new(S3VaultProvider::new(
                 S3VaultProviderConfig::try_from(remote)?,
             )?)),
-            ProviderKind::GitRepo => Err(anyhow!(
-                "git repo provider requires a vault runtime root"
-            )),
+            ProviderKind::GitRepo => {
+                Err(anyhow!("git repo provider requires a vault runtime root"))
+            }
             ProviderKind::GitHubGist => Ok(Arc::new(GitHubGistProvider::new(
                 GitHubGistProviderConfig::try_from(remote)?,
             )?)),
@@ -581,7 +576,11 @@ fn apply_pending_snippet_activation(
             } else {
                 format!("{script}\n")
             };
-            workspace_terminal::forward_active_workspace_text_input(state, bridge, &runnable_script);
+            workspace_terminal::forward_active_workspace_text_input(
+                state,
+                bridge,
+                &runnable_script,
+            );
         }
     }
 
@@ -1366,53 +1365,8 @@ impl DeferredWorkspaceScrollThumbDrag {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct WorkspaceFollowIndicator {
-    paused: bool,
-    pending_output_lines: u32,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct WorkspaceFollowSessionState {
-    last_surface_seqno: usize,
-    last_viewport_offset_lines: u32,
-    pending_output_lines: u32,
-}
-
 #[derive(Debug, Default)]
-struct WorkspaceFollowTracker {
-    by_session: HashMap<Uuid, WorkspaceFollowSessionState>,
-}
-
-impl WorkspaceFollowTracker {
-    fn indicator_for_surface(
-        &mut self,
-        surface: Option<&TerminalSurfaceState>,
-    ) -> WorkspaceFollowIndicator {
-        let Some(surface) = surface else {
-            return WorkspaceFollowIndicator::default();
-        };
-
-        let session = self.by_session.entry(surface.session_id).or_default();
-        if surface.viewport_at_bottom {
-            session.pending_output_lines = 0;
-        } else if session.last_surface_seqno != 0 && surface.seqno != session.last_surface_seqno {
-            let appended_lines = surface
-                .viewport_offset_lines
-                .saturating_sub(session.last_viewport_offset_lines);
-            session.pending_output_lines =
-                session.pending_output_lines.saturating_add(appended_lines);
-        }
-
-        session.last_surface_seqno = surface.seqno;
-        session.last_viewport_offset_lines = surface.viewport_offset_lines;
-
-        WorkspaceFollowIndicator {
-            paused: !surface.viewport_at_bottom,
-            pending_output_lines: session.pending_output_lines,
-        }
-    }
-}
+struct WorkspaceFollowTracker;
 
 fn active_workspace_session_uuid(state: &ShellViewModel) -> Option<Uuid> {
     state
@@ -1986,26 +1940,11 @@ fn terminal_rgb_to_rgba((red, green, blue): (u8, u8, u8)) -> u32 {
 }
 
 fn sync_workspace_terminal_shell_chrome(window: &AppWindow, preset: TerminalThemePreset) {
-    window.set_workspace_session_scrollbar_thumb(slint_color_from_rgba(
-        terminal_rgb_to_rgba(preset.scrollbar_thumb),
-    ));
+    window.set_workspace_session_scrollbar_thumb(slint_color_from_rgba(terminal_rgb_to_rgba(
+        preset.scrollbar_thumb,
+    )));
     window.set_workspace_session_scrollbar_thumb_active(slint_color_from_rgba(
         terminal_rgb_to_rgba(preset.scrollbar_thumb_active),
-    ));
-    window.set_workspace_session_jump_to_latest_bg(slint_color_from_rgba(
-        0xff00_0000 | preset.jump_to_latest_bg,
-    ));
-    window.set_workspace_session_jump_to_latest_hover_bg(slint_color_from_rgba(
-        0xff00_0000 | preset.jump_to_latest_hover_bg,
-    ));
-    window.set_workspace_session_jump_to_latest_pressed_bg(slint_color_from_rgba(
-        0xff00_0000 | preset.jump_to_latest_pressed_bg,
-    ));
-    window.set_workspace_session_jump_to_latest_border(slint_color_from_rgba(
-        0xff00_0000 | preset.jump_to_latest_border,
-    ));
-    window.set_workspace_session_jump_to_latest_fg(slint_color_from_rgba(
-        0xff00_0000 | preset.jump_to_latest_fg,
     ));
 }
 
@@ -2084,12 +2023,14 @@ fn build_workspace_terminal_presenter(
     );
     if profile.prefers_native_terminal_renderer() {
         return match profile.terminal_composition_mode() {
-            TerminalCompositionMode::SceneImage => {
-                Ok((build_scene_image_terminal_presenter()?, TerminalRenderMode::Bitmap))
-            }
-            TerminalCompositionMode::PostRenderNativeSurface => {
-                Ok((build_native_terminal_presenter()?, TerminalRenderMode::Native))
-            }
+            TerminalCompositionMode::SceneImage => Ok((
+                build_scene_image_terminal_presenter()?,
+                TerminalRenderMode::Bitmap,
+            )),
+            TerminalCompositionMode::PostRenderNativeSurface => Ok((
+                build_native_terminal_presenter()?,
+                TerminalRenderMode::Native,
+            )),
         };
     }
 
@@ -2106,7 +2047,9 @@ fn build_native_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
 
 #[cfg(feature = "terminal-native-renderer")]
 fn build_scene_image_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
-    Ok(Box::new(crate::app::terminal_presenter::WindowsSceneImagePresenter::new()?))
+    Ok(Box::new(
+        crate::app::terminal_presenter::WindowsSceneImagePresenter::new()?,
+    ))
 }
 
 #[cfg(not(feature = "terminal-native-renderer"))]
@@ -2127,9 +2070,9 @@ fn resolve_workspace_terminal_presenter(
     profile: AppRuntimeProfile,
 ) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)> {
     #[cfg(test)]
-    if let Some(result) = WORKSPACE_TEST_TERMINAL_PRESENTER_FACTORY.with(|cell| {
-        cell.borrow().as_ref().map(|factory| factory(profile))
-    }) {
+    if let Some(result) = WORKSPACE_TEST_TERMINAL_PRESENTER_FACTORY
+        .with(|cell| cell.borrow().as_ref().map(|factory| factory(profile)))
+    {
         return result;
     }
 
@@ -2186,10 +2129,12 @@ fn ensure_workspace_terminal_presenter(
                 WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
                     let mut surface = surface.borrow_mut();
                     if let Some(native_surface) = surface.as_ref() {
-                        native_surface.configure_present_path(window, profile.native_present_path());
+                        native_surface
+                            .configure_present_path(window, profile.native_present_path());
                     } else {
                         let native_surface = NativeTerminalSurface::attach(window);
-                        native_surface.configure_present_path(window, profile.native_present_path());
+                        native_surface
+                            .configure_present_path(window, profile.native_present_path());
                         *surface = Some(native_surface);
                     }
                 });
@@ -2222,8 +2167,7 @@ fn with_workspace_terminal_presenter_factory_for_test<T>(
 
 fn workspace_terminal_default_cell_size(scale_factor: f32) -> (u32, u32) {
     WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
-        host
-            .borrow_mut()
+        host.borrow_mut()
             .as_mut()
             .map(|host| {
                 host.set_raster_scale(scale_factor);
@@ -2299,8 +2243,8 @@ fn workspace_native_terminal_rect(window: &AppWindow) -> NativeTerminalSurfaceRe
         y: (window.get_layout_workspace_session_native_surface_y() * scale_factor).round() as i32,
         width: (window.get_layout_workspace_session_native_surface_width() * scale_factor).round()
             as i32,
-        height: (window.get_layout_workspace_session_native_surface_height() * scale_factor)
-            .round() as i32,
+        height: (window.get_layout_workspace_session_native_surface_height() * scale_factor).round()
+            as i32,
     }
 }
 
@@ -2402,6 +2346,9 @@ fn trace_workspace_native_terminal_diagnostics(window: &AppWindow) {
         text_antialias_mode = native_surface_text_antialias_mode(&diagnostics).unwrap_or("unknown"),
         render_target_alpha_mode = native_surface_render_target_alpha_mode(&diagnostics)
             .unwrap_or("unknown"),
+        scheduled_present_count = diagnostics.scheduled_present_count,
+        host_redraw_request_count = diagnostics.host_redraw_request_count,
+        host_redraw_replay_count = diagnostics.host_redraw_replay_count,
         baseline_px = native_surface_baseline_px(&diagnostics).unwrap_or_default(),
         pixel_alignment = native_surface_pixel_alignment(&diagnostics).unwrap_or("unknown"),
         dpi_x = native_surface_dpi_x(&diagnostics).unwrap_or_default(),
@@ -2592,12 +2539,9 @@ fn sync_workspace_connection_progress_state(
 fn sync_workspace_session_state_with_manager(
     window: &AppWindow,
     state: &ShellViewModel,
-    follow_tracker: &mut WorkspaceFollowTracker,
+    _follow_tracker: &mut WorkspaceFollowTracker,
     manager: Option<&SessionManager>,
 ) {
-    let profile = WORKSPACE_RUNTIME_PROFILE.with(|profile| {
-        (*profile.borrow()).unwrap_or_else(AppRuntimeProfile::packaged)
-    });
     window
         .set_active_workspace_session_id(state.active_workspace_session_id().unwrap_or("").into());
     window.set_workspace_session_host_mode(state.workspace_session_host_mode().into());
@@ -2611,7 +2555,28 @@ fn sync_workspace_session_state_with_manager(
         visible_lines,
         |model| window.set_workspace_session_visible_lines(model),
     );
+    sync_workspace_terminal_shell_chrome(window, preset_for_theme_mode(state.theme_mode));
+    sync_workspace_terminal_surface_projection_only(window, state);
+    sync_workspace_connection_progress_state(window, state, manager);
 
+    if let Some(active_tab) = state.active_workspace_tab() {
+        window.set_workspace_session_title(active_tab.title.clone().into());
+        window.set_workspace_session_subtitle(active_tab.subtitle.clone().into());
+        window.set_workspace_session_state(active_tab.state.clone().into());
+        window.set_workspace_session_error_detail(active_tab.error_detail.clone().into());
+        window.set_workspace_session_can_reconnect(active_tab.can_reconnect());
+    } else {
+        window.set_workspace_session_title("".into());
+        window.set_workspace_session_subtitle("".into());
+        window.set_workspace_session_state("".into());
+        window.set_workspace_session_error_detail("".into());
+        window.set_workspace_session_can_reconnect(false);
+    }
+}
+
+fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &ShellViewModel) {
+    let profile = WORKSPACE_RUNTIME_PROFILE
+        .with(|profile| (*profile.borrow()).unwrap_or_else(AppRuntimeProfile::packaged));
     let scale_factor = window_scale_factor(window);
     window.set_workspace_session_device_scale_factor(scale_factor);
     if state.active_workspace_terminal_surface().is_some()
@@ -2629,10 +2594,6 @@ fn sync_workspace_session_state_with_manager(
     window.set_workspace_session_cell_height(default_cell_height_px as f32 / scale_factor);
     sync_workspace_native_terminal_surface_geometry(window);
     let terminal_theme_preset = preset_for_theme_mode(state.theme_mode);
-    sync_workspace_terminal_shell_chrome(window, terminal_theme_preset);
-
-    let follow_indicator =
-        follow_tracker.indicator_for_surface(state.active_workspace_terminal_surface());
 
     if let Some(surface) = state.active_workspace_terminal_surface() {
         let selection = if workspace_session_uses_host_selection_overlay(window) {
@@ -2663,14 +2624,21 @@ fn sync_workspace_session_state_with_manager(
                 scale_factor,
             ) {
                 Ok(PresentedTerminalFrame::Bitmap(frame)) => {
-                    window.set_workspace_session_rows(i32::try_from(frame.grid_rows).unwrap_or(i32::MAX));
-                    window.set_workspace_session_cols(i32::try_from(frame.grid_cols).unwrap_or(i32::MAX));
-                    window.set_workspace_session_cell_width(frame.cell_width_px as f32 / scale_factor);
-                    window.set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);
+                    window.set_workspace_session_rows(
+                        i32::try_from(frame.grid_rows).unwrap_or(i32::MAX),
+                    );
+                    window.set_workspace_session_cols(
+                        i32::try_from(frame.grid_cols).unwrap_or(i32::MAX),
+                    );
+                    window.set_workspace_session_cell_width(
+                        frame.cell_width_px as f32 / scale_factor,
+                    );
+                    window.set_workspace_session_cell_height(
+                        frame.cell_height_px as f32 / scale_factor,
+                    );
                     clear_workspace_retained_native_terminal_surface(window);
                     window.set_workspace_session_surface_image(frame.image);
-                    next_surface_seqno =
-                        Some(i32::try_from(surface.seqno).unwrap_or(i32::MAX));
+                    next_surface_seqno = Some(i32::try_from(surface.seqno).unwrap_or(i32::MAX));
                     next_render_mode = Some(TerminalRenderMode::Bitmap);
                 }
                 Ok(PresentedTerminalFrame::Native(frame)) => {
@@ -2678,15 +2646,21 @@ fn sync_workspace_session_state_with_manager(
                     let presentable_frame = frame.presentable_frame.clone();
                     native_frame_presented = true;
                     let scale_factor = window_scale_factor(window);
-                    window.set_workspace_session_rows(i32::try_from(presentable_frame.grid_rows).unwrap_or(i32::MAX));
-                    window.set_workspace_session_cols(i32::try_from(presentable_frame.grid_cols).unwrap_or(i32::MAX));
-                    window.set_workspace_session_cell_width(frame.cell_width_px as f32 / scale_factor);
-                    window
-                        .set_workspace_session_cell_height(frame.cell_height_px as f32 / scale_factor);
+                    window.set_workspace_session_rows(
+                        i32::try_from(presentable_frame.grid_rows).unwrap_or(i32::MAX),
+                    );
+                    window.set_workspace_session_cols(
+                        i32::try_from(presentable_frame.grid_cols).unwrap_or(i32::MAX),
+                    );
+                    window.set_workspace_session_cell_width(
+                        frame.cell_width_px as f32 / scale_factor,
+                    );
+                    window.set_workspace_session_cell_height(
+                        frame.cell_height_px as f32 / scale_factor,
+                    );
                     sync_workspace_native_terminal_surface_geometry(window);
                     present_workspace_native_terminal_frame(window, frame);
-                    next_surface_seqno =
-                        Some(i32::try_from(surface.seqno).unwrap_or(i32::MAX));
+                    next_surface_seqno = Some(i32::try_from(surface.seqno).unwrap_or(i32::MAX));
                     next_render_mode = Some(TerminalRenderMode::Native);
                 }
                 Err(err) => {
@@ -2696,8 +2670,12 @@ fn sync_workspace_session_state_with_manager(
                         error = %err,
                         "failed to render workspace terminal surface"
                     );
-                    window.set_workspace_session_cell_width(default_cell_width_px as f32 / scale_factor);
-                    window.set_workspace_session_cell_height(default_cell_height_px as f32 / scale_factor);
+                    window.set_workspace_session_cell_width(
+                        default_cell_width_px as f32 / scale_factor,
+                    );
+                    window.set_workspace_session_cell_height(
+                        default_cell_height_px as f32 / scale_factor,
+                    );
                     clear_workspace_native_terminal_frame(window);
                     next_surface_seqno = Some(0);
                     next_render_mode = Some(TerminalRenderMode::Bitmap);
@@ -2736,10 +2714,6 @@ fn sync_workspace_session_state_with_manager(
             i32::try_from(surface.viewport_max_offset_lines).unwrap_or(i32::MAX),
         );
         window.set_workspace_session_viewport_at_bottom(surface.viewport_at_bottom);
-        window.set_workspace_session_follow_paused(follow_indicator.paused);
-        window.set_workspace_session_pending_output_lines(
-            i32::try_from(follow_indicator.pending_output_lines).unwrap_or(i32::MAX),
-        );
         if let Some(next_surface_seqno) = next_surface_seqno {
             window.set_workspace_session_surface_seqno(next_surface_seqno);
         }
@@ -2770,27 +2744,9 @@ fn sync_workspace_session_state_with_manager(
         window.set_workspace_session_viewport_offset_lines(0);
         window.set_workspace_session_viewport_max_offset_lines(0);
         window.set_workspace_session_viewport_at_bottom(true);
-        window.set_workspace_session_follow_paused(false);
-        window.set_workspace_session_pending_output_lines(0);
         window.set_workspace_session_surface_seqno(0);
         window.set_workspace_session_render_mode(TerminalRenderMode::Bitmap.as_str().into());
     }
-
-    if let Some(active_tab) = state.active_workspace_tab() {
-        window.set_workspace_session_title(active_tab.title.clone().into());
-        window.set_workspace_session_subtitle(active_tab.subtitle.clone().into());
-        window.set_workspace_session_state(active_tab.state.clone().into());
-        window.set_workspace_session_error_detail(active_tab.error_detail.clone().into());
-        window.set_workspace_session_can_reconnect(active_tab.can_reconnect());
-    } else {
-        window.set_workspace_session_title("".into());
-        window.set_workspace_session_subtitle("".into());
-        window.set_workspace_session_state("".into());
-        window.set_workspace_session_error_detail("".into());
-        window.set_workspace_session_can_reconnect(false);
-    }
-
-    sync_workspace_connection_progress_state(window, state, manager);
 }
 
 fn sync_workspace_tabs(
@@ -3154,16 +3110,17 @@ fn load_git_repo_credential_material(
         return PersistedGitRepoCredentialMaterial::default();
     };
 
-    serde_json::from_str::<PersistedGitRepoCredentialMaterial>(&raw).unwrap_or_else(|_| match auth_kind
-    {
-        ProviderAuthKind::SshKey => PersistedGitRepoCredentialMaterial {
-            ssh_private_key: raw,
-            ..PersistedGitRepoCredentialMaterial::default()
-        },
-        _ => PersistedGitRepoCredentialMaterial {
-            https_secret: raw,
-            ..PersistedGitRepoCredentialMaterial::default()
-        },
+    serde_json::from_str::<PersistedGitRepoCredentialMaterial>(&raw).unwrap_or_else(|_| {
+        match auth_kind {
+            ProviderAuthKind::SshKey => PersistedGitRepoCredentialMaterial {
+                ssh_private_key: raw,
+                ..PersistedGitRepoCredentialMaterial::default()
+            },
+            _ => PersistedGitRepoCredentialMaterial {
+                https_secret: raw,
+                ..PersistedGitRepoCredentialMaterial::default()
+            },
+        }
     })
 }
 
@@ -3429,7 +3386,10 @@ fn save_asset_catalog(repo: &dyn AssetCatalogRepository, state: &ShellViewModel)
     repo.save(&catalog)
 }
 
-fn save_keychain_catalog(repo: &dyn KeychainCatalogRepository, state: &ShellViewModel) -> Result<()> {
+fn save_keychain_catalog(
+    repo: &dyn KeychainCatalogRepository,
+    state: &ShellViewModel,
+) -> Result<()> {
     repo.save(state.keychain_catalog())
 }
 
@@ -3797,15 +3757,20 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         vault_runtime.bootstrap_template.clone(),
         initial_local_vault_state,
     );
-    let initial_runtime_recovery_error = vault_sync::silently_restore_vault_session_from_runtime_key(
-        &mut initial_view_model,
-        &mut initial_vault_session,
-        credential_store.as_ref(),
-    );
+    let initial_runtime_recovery_error =
+        vault_sync::silently_restore_vault_session_from_runtime_key(
+            &mut initial_view_model,
+            &mut initial_vault_session,
+            credential_store.as_ref(),
+        );
     update_vault_panel_for_local_state(&mut initial_view_model, &initial_vault_session);
     vault_sync::update_sync_modal_for_local_state(&mut initial_view_model, &initial_vault_session);
     if let Some(error) = initial_runtime_recovery_error {
-        vault_sync::set_sync_modal_error_without_opening(&mut initial_view_model, &initial_vault_session, error);
+        vault_sync::set_sync_modal_error_without_opening(
+            &mut initial_view_model,
+            &initial_vault_session,
+            error,
+        );
     }
     let view_model = Rc::new(RefCell::new(initial_view_model));
     let workspace_follow_tracker = Rc::new(RefCell::new(WorkspaceFollowTracker::default()));
@@ -3874,9 +3839,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         DeferredWorkspaceProjectionRefreshGate::default(),
     ));
     let scroll_thumb_drag_timer = Rc::new(Timer::default());
-    let deferred_scroll_thumb_drag = Rc::new(RefCell::new(
-        DeferredWorkspaceScrollThumbDrag::default(),
-    ));
+    let deferred_scroll_thumb_drag =
+        Rc::new(RefCell::new(DeferredWorkspaceScrollThumbDrag::default()));
     if let Some(session_bridge_ref) = session_bridge.as_ref() {
         let state = Rc::clone(&view_model);
         let handle = window.as_weak();
@@ -3889,7 +3853,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 return;
             };
             let mut state = state.borrow_mut();
-            let projection_delta = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+            let projection_delta =
+                workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
             let should_clear_pending_paste = pending_workspace_paste_warning_ref
                 .borrow()
                 .as_ref()
@@ -3911,26 +3876,28 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&manager),
                 );
-                let (sftp_open_changed, sftp_retry_changed, sftp_follow_changed) = if state
-                    .show_right_panel
-                {
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    let open_changed =
-                        sftp::ensure_active_sftp_browser_started(&mut state, &mut controller, &manager);
-                    let retry_changed = sftp::sync_active_sftp_browser_pending_request(
-                        &mut state,
-                        &mut controller,
-                        &manager,
-                    );
-                    let follow_changed = sftp::sync_active_sftp_browser_follow_request(
-                        &mut state,
-                        &mut controller,
-                        &manager,
-                    );
-                    (open_changed, retry_changed, follow_changed)
-                } else {
-                    (false, false, false)
-                };
+                let (sftp_open_changed, sftp_retry_changed, sftp_follow_changed) =
+                    if state.show_right_panel {
+                        let mut controller = sftp_browser_controller_ref.borrow_mut();
+                        let open_changed = sftp::ensure_active_sftp_browser_started(
+                            &mut state,
+                            &mut controller,
+                            &manager,
+                        );
+                        let retry_changed = sftp::sync_active_sftp_browser_pending_request(
+                            &mut state,
+                            &mut controller,
+                            &manager,
+                        );
+                        let follow_changed = sftp::sync_active_sftp_browser_follow_request(
+                            &mut state,
+                            &mut controller,
+                            &manager,
+                        );
+                        (open_changed, retry_changed, follow_changed)
+                    } else {
+                        (false, false, false)
+                    };
                 if projection_delta.sftp_changed
                     || sftp_open_changed
                     || sftp_retry_changed
@@ -3980,9 +3947,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     || (matches!(trigger, VaultSyncTrigger::Manual)
                         && vault_sync::vault_requires_initial_remote_sync(&vault));
                 let should_attempt_refresh = !should_attempt_push
-                    && matches!(trigger, VaultSyncTrigger::Manual | VaultSyncTrigger::Periodic);
-                if matches!(trigger, VaultSyncTrigger::DebouncedAuto | VaultSyncTrigger::Periodic)
-                    && !vault_sync::vault_background_sync_ready(&vault)
+                    && matches!(
+                        trigger,
+                        VaultSyncTrigger::Manual | VaultSyncTrigger::Periodic
+                    );
+                if matches!(
+                    trigger,
+                    VaultSyncTrigger::DebouncedAuto | VaultSyncTrigger::Periodic
+                ) && !vault_sync::vault_background_sync_ready(&vault)
                 {
                     return;
                 }
@@ -4110,15 +4082,17 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                                 vault_sync_trigger = ?trigger,
                                 "vault background sync task join failed"
                             );
-                            let _ = completion_tx.send(vault_sync::VaultSyncBackgroundMessage::Completed {
-                                trigger,
-                                result: Err(vault_sync::VaultSyncBackgroundFailure {
-                                    sync_modal_state: SyncModalViewState::default(),
-                                    vault_panel_state: VaultPanelViewState::default(),
-                                    local_state: None,
-                                    should_clear_dirty: false,
-                                }),
-                            });
+                            let _ = completion_tx.send(
+                                vault_sync::VaultSyncBackgroundMessage::Completed {
+                                    trigger,
+                                    result: Err(vault_sync::VaultSyncBackgroundFailure {
+                                        sync_modal_state: SyncModalViewState::default(),
+                                        vault_panel_state: VaultPanelViewState::default(),
+                                        local_state: None,
+                                        should_clear_dirty: false,
+                                    }),
+                                },
+                            );
                         }
                     }
                 });
@@ -4173,7 +4147,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         vault_sync_trigger = ?trigger,
                         "failed to run scheduled vault sync"
                     );
-                    vault_sync::set_sync_modal_error_without_opening(&mut state, &vault, err.to_string());
+                    vault_sync::set_sync_modal_error_without_opening(
+                        &mut state,
+                        &vault,
+                        err.to_string(),
+                    );
                     if matches!(trigger, VaultSyncTrigger::Manual) {
                         state.show_sync_feedback("Sync failed");
                     } else {
@@ -4223,80 +4201,90 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     let (width, height) = current_window_size(&window);
 
                     match message {
-                        vault_sync::VaultSyncBackgroundMessage::Completed { trigger, result } => match result {
-                            Ok(success) => {
-                                if let Some(projection) = success.projection {
-                                    state.replace_vault_projection(
-                                        projection.console_tree,
-                                        projection.snippet_tree,
-                                        projection.keychain_catalog,
+                        vault_sync::VaultSyncBackgroundMessage::Completed { trigger, result } => {
+                            match result {
+                                Ok(success) => {
+                                    if let Some(projection) = success.projection {
+                                        state.replace_vault_projection(
+                                            projection.console_tree,
+                                            projection.snippet_tree,
+                                            projection.keychain_catalog,
+                                        );
+                                    }
+                                    vault.local_state = success.local_state;
+                                    vault.decrypted_snapshot = success.decrypted_snapshot;
+                                    update_vault_panel_for_local_state(&mut state, &vault);
+                                    vault_sync::update_sync_modal_for_local_state(
+                                        &mut state, &vault,
                                     );
-                                }
-                                vault.local_state = success.local_state;
-                                vault.decrypted_snapshot = success.decrypted_snapshot;
-                                update_vault_panel_for_local_state(&mut state, &vault);
-                                vault_sync::update_sync_modal_for_local_state(&mut state, &vault);
-                                state.vault_panel_state_mut().primary_status_label =
-                                    success.vault_panel_state.primary_status_label.clone();
-                                state.sync_modal_state_mut().status_text =
-                                    success.sync_modal_state.status_text.clone();
-                                state.sync_modal_state_mut().error_text =
-                                    success.sync_modal_state.error_text.clone();
+                                    state.vault_panel_state_mut().primary_status_label =
+                                        success.vault_panel_state.primary_status_label.clone();
+                                    state.sync_modal_state_mut().status_text =
+                                        success.sync_modal_state.status_text.clone();
+                                    state.sync_modal_state_mut().error_text =
+                                        success.sync_modal_state.error_text.clone();
 
-                                {
-                                    let mut scheduler = scheduler_ref.borrow_mut();
-                                    scheduler.running = false;
-                                    if success.should_clear_dirty {
-                                        scheduler.dirty = false;
-                                    }
-                                }
-
-                                if matches!(trigger, VaultSyncTrigger::Manual) {
-                                    let feedback = if !success
-                                        .vault_panel_state
-                                        .primary_status_label
-                                        .trim()
-                                        .is_empty()
                                     {
-                                        success.vault_panel_state.primary_status_label
-                                    } else {
-                                        "Sync completed".into()
-                                    };
-                                    state.show_sync_feedback(feedback);
-                                } else {
-                                    state.clear_sync_feedback();
-                                }
-                            }
-                            Err(failure) => {
-                                if let Some(local_state) = failure.local_state {
-                                    vault.local_state = Some(local_state);
-                                }
-                                update_vault_panel_for_local_state(&mut state, &vault);
-                                vault_sync::update_sync_modal_for_local_state(&mut state, &vault);
-                                state.vault_panel_state_mut().primary_status_label =
-                                    failure.vault_panel_state.primary_status_label.clone();
-                                state.sync_modal_state_mut().status_text =
-                                    failure.sync_modal_state.status_text.clone();
-                                state.sync_modal_state_mut().error_text =
-                                    failure.sync_modal_state.error_text.clone();
+                                        let mut scheduler = scheduler_ref.borrow_mut();
+                                        scheduler.running = false;
+                                        if success.should_clear_dirty {
+                                            scheduler.dirty = false;
+                                        }
+                                    }
 
-                                {
-                                    let mut scheduler = scheduler_ref.borrow_mut();
-                                    scheduler.running = false;
-                                    if failure.should_clear_dirty {
-                                        scheduler.dirty = false;
+                                    if matches!(trigger, VaultSyncTrigger::Manual) {
+                                        let feedback = if !success
+                                            .vault_panel_state
+                                            .primary_status_label
+                                            .trim()
+                                            .is_empty()
+                                        {
+                                            success.vault_panel_state.primary_status_label
+                                        } else {
+                                            "Sync completed".into()
+                                        };
+                                        state.show_sync_feedback(feedback);
+                                    } else {
+                                        state.clear_sync_feedback();
                                     }
                                 }
+                                Err(failure) => {
+                                    if let Some(local_state) = failure.local_state {
+                                        vault.local_state = Some(local_state);
+                                    }
+                                    update_vault_panel_for_local_state(&mut state, &vault);
+                                    vault_sync::update_sync_modal_for_local_state(
+                                        &mut state, &vault,
+                                    );
+                                    state.vault_panel_state_mut().primary_status_label =
+                                        failure.vault_panel_state.primary_status_label.clone();
+                                    state.sync_modal_state_mut().status_text =
+                                        failure.sync_modal_state.status_text.clone();
+                                    state.sync_modal_state_mut().error_text =
+                                        failure.sync_modal_state.error_text.clone();
 
-                                if matches!(trigger, VaultSyncTrigger::Manual) {
-                                    state.show_sync_feedback("Sync failed");
-                                } else {
-                                    state.clear_sync_feedback();
+                                    {
+                                        let mut scheduler = scheduler_ref.borrow_mut();
+                                        scheduler.running = false;
+                                        if failure.should_clear_dirty {
+                                            scheduler.dirty = false;
+                                        }
+                                    }
+
+                                    if matches!(trigger, VaultSyncTrigger::Manual) {
+                                        state.show_sync_feedback("Sync failed");
+                                    } else {
+                                        state.clear_sync_feedback();
+                                    }
                                 }
                             }
-                        },
-                        vault_sync::VaultSyncBackgroundMessage::RemoteHeadRefreshed { snapshot } => {
-                            vault_sync::apply_remote_head_snapshot_to_sync_modal(&mut state, snapshot);
+                        }
+                        vault_sync::VaultSyncBackgroundMessage::RemoteHeadRefreshed {
+                            snapshot,
+                        } => {
+                            vault_sync::apply_remote_head_snapshot_to_sync_modal(
+                                &mut state, snapshot,
+                            );
                         }
                     }
 
@@ -4991,12 +4979,20 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let mut state = state.borrow_mut();
         if state.activate_workspace_session(session_id.as_str()) {
             if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(
+                    &mut state,
+                    &session_bridge.manager,
+                );
                 let (rows, cols) = state
                     .active_workspace_terminal_surface()
                     .map(|surface| (surface.rows as i32, surface.cols as i32))
                     .unwrap_or((24, 80));
-                workspace_terminal::forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
+                workspace_terminal::forward_active_workspace_resize(
+                    &state,
+                    Some(session_bridge),
+                    rows,
+                    cols,
+                );
             }
             sync_workspace_tabs_with_manager(
                 &window,
@@ -5034,12 +5030,20 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             session_id.as_str(),
         ) {
             if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(
+                    &mut state,
+                    &session_bridge.manager,
+                );
                 let (rows, cols) = state
                     .active_workspace_terminal_surface()
                     .map(|surface| (surface.rows as i32, surface.cols as i32))
                     .unwrap_or((24, 80));
-                workspace_terminal::forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
+                workspace_terminal::forward_active_workspace_resize(
+                    &state,
+                    Some(session_bridge),
+                    rows,
+                    cols,
+                );
             }
             sync_workspace_tabs_with_manager(
                 &window,
@@ -5102,7 +5106,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                             .active_workspace_terminal_surface()
                             .map(|surface| (surface.rows as i32, surface.cols as i32))
                             .unwrap_or((24, 80));
-                        workspace_terminal::forward_active_workspace_resize(&state, Some(session_bridge), rows, cols);
+                        workspace_terminal::forward_active_workspace_resize(
+                            &state,
+                            Some(session_bridge),
+                            rows,
+                            cols,
+                        );
                     }
                     sync_workspace_tabs_with_manager(
                         &window,
@@ -5131,7 +5140,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     return;
                 };
                 let _ = session_bridge.manager.cancel_connection_attempt(session_id);
-                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(
+                    &mut state,
+                    &session_bridge.manager,
+                );
                 sync_workspace_tabs_with_manager(
                     &window,
                     &state,
@@ -5155,7 +5167,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     );
                     return;
                 }
-                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(
+                    &mut state,
+                    &session_bridge.manager,
+                );
                 sync_workspace_tabs_with_manager(
                     &window,
                     &state,
@@ -5194,7 +5209,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     );
                     return;
                 }
-                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(
+                    &mut state,
+                    &session_bridge.manager,
+                );
                 sync_workspace_tabs_with_manager(
                     &window,
                     &state,
@@ -5210,7 +5228,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     return;
                 };
                 let _ = session_bridge.manager.reject_host_key_prompt(session_id);
-                let _ = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &session_bridge.manager);
+                let _ = workspace_terminal::sync_workspace_projection_from_manager(
+                    &mut state,
+                    &session_bridge.manager,
+                );
                 sync_workspace_tabs_with_manager(
                     &window,
                     &state,
@@ -5230,7 +5251,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
     window.on_workspace_session_text_input(move |text| {
         let mut state = view_model_ref.borrow_mut();
-        workspace_terminal::forward_active_workspace_text_input(&state, session_bridge_ref.as_deref(), text.as_str());
+        workspace_terminal::forward_active_workspace_text_input(
+            &state,
+            session_bridge_ref.as_deref(),
+            text.as_str(),
+        );
         if let Some(window) = window_handle.upgrade() {
             if workspace_terminal::apply_local_input_projection_hint(&mut state) {
                 workspace_terminal::refresh_projection_after_local_input_hint(
@@ -5291,7 +5316,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_bridge_ref = session_bridge.clone();
     window.on_workspace_session_resize_requested(move |rows, cols| {
         let state = state.borrow();
-        workspace_terminal::forward_active_workspace_resize(&state, session_bridge_ref.as_deref(), rows, cols);
+        workspace_terminal::forward_active_workspace_resize(
+            &state,
+            session_bridge_ref.as_deref(),
+            rows,
+            cols,
+        );
     });
 
     let state = Rc::clone(&view_model);
@@ -5330,7 +5360,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_workspace_session_copy_selection_requested(
         move |start_row, start_col, end_row, end_col| {
             let state = state.borrow();
-            workspace_terminal::forward_active_workspace_copy_selection(&state, start_row, start_col, end_row, end_col);
+            workspace_terminal::forward_active_workspace_copy_selection(
+                &state, start_row, start_col, end_row, end_col,
+            );
         },
     );
 
@@ -5479,7 +5511,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_workspace_session_scroll_jump_requested(move |ratio| {
         {
             let state = view_model_ref.borrow();
-            workspace_terminal::forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), ratio);
+            workspace_terminal::forward_active_workspace_scroll_ratio(
+                &state,
+                session_bridge_ref.as_deref(),
+                ratio,
+            );
         }
         if let Some(window) = window_handle.upgrade() {
             workspace_terminal::schedule_workspace_scroll_projection_refresh(
@@ -5492,25 +5528,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             );
         }
     });
-
-    let state = Rc::clone(&view_model);
-    let session_bridge_ref = session_bridge.clone();
-    let window_handle = window.as_weak();
-    let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
-    window.on_workspace_session_jump_to_latest_requested(move || {
-        let mut state = state.borrow_mut();
-        workspace_terminal::forward_active_workspace_scroll_ratio(&state, session_bridge_ref.as_deref(), 0.0);
-        if let Some(window) = window_handle.upgrade() {
-            workspace_terminal::refresh_active_workspace_projection(
-                &window,
-                &mut state,
-                session_bridge_ref.as_deref(),
-                &mut workspace_follow_tracker_ref.borrow_mut(),
-            );
-        }
-    });
-
-
 }
 
 pub fn bind_top_status_bar_with_store(window: &AppWindow, store: Option<UiPreferencesStore>) {
@@ -5658,10 +5675,8 @@ mod tests {
             12,
             vec!["prompt>".into(), "echo hi".into()],
         );
-        let mut host = TerminalRendererHost::new(
-            Box::new(FailingPresenter),
-            TerminalRenderMode::Native,
-        );
+        let mut host =
+            TerminalRendererHost::new(Box::new(FailingPresenter), TerminalRenderMode::Native);
 
         let frame = present_surface_update_with_bitmap_fallback(
             &mut host,
@@ -5779,7 +5794,9 @@ mod tests {
             _surface: &TerminalSurfaceState,
             _options: TerminalPresentationOptions,
         ) -> Result<PresentedTerminalFrame> {
-            Err(anyhow!("sized presenter is only used for install-path tests"))
+            Err(anyhow!(
+                "sized presenter is only used for install-path tests"
+            ))
         }
 
         fn default_cell_size(&self) -> (u32, u32) {
@@ -5940,7 +5957,8 @@ mod tests {
             .expect("open session");
         let mut state = ShellViewModel::default();
 
-        let delta = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        let delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
         assert!(delta.tabs_changed);
         assert!(!delta.surface_changed);
         assert_eq!(
@@ -5948,7 +5966,8 @@ mod tests {
             Some(handle.session_id.to_string().as_str())
         );
 
-        let delta = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        let delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
         assert!(
             !delta.tabs_changed && !delta.surface_changed,
             "re-running projection without manager changes should not churn tab chrome"
@@ -5970,7 +5989,8 @@ mod tests {
         });
 
         let mut state = ShellViewModel::default();
-        let delta = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        let delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
         assert!(delta.tabs_changed);
         assert!(
             !delta.surface_changed,
@@ -5981,7 +6001,8 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         });
 
-        let delta = workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
+        let delta =
+            workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
         assert!(
             delta.surface_changed,
             "terminal surface refresh should still update the active workspace surface"
@@ -6047,7 +6068,10 @@ mod tests {
                 "scene-image and bitmap composition paths should keep the native frame token cleared"
             );
             assert_eq!(initial_surface_seqno, 1);
-            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
+            assert_eq!(
+                window.get_workspace_session_render_mode().as_str(),
+                "bitmap"
+            );
 
             let mut updated_surface = TerminalSurfaceState::from_visible_lines(
                 session_id,
@@ -6080,9 +6104,15 @@ mod tests {
                 0,
                 "scene-image and bitmap composition paths should keep the native frame token cleared while surface seqno tracks the visible frame"
             );
-            assert_ne!(window.get_workspace_session_surface_seqno(), initial_surface_seqno);
+            assert_ne!(
+                window.get_workspace_session_surface_seqno(),
+                initial_surface_seqno
+            );
             assert_eq!(window.get_workspace_session_surface_seqno(), 2);
-            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
+            assert_eq!(
+                window.get_workspace_session_render_mode().as_str(),
+                "bitmap"
+            );
         });
     }
 
@@ -6133,7 +6163,10 @@ mod tests {
                 "scene-image and bitmap composition paths should keep the native frame token cleared even after publishing a visible terminal frame"
             );
             assert_eq!(window.get_workspace_session_surface_seqno(), 1);
-            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
+            assert_eq!(
+                window.get_workspace_session_render_mode().as_str(),
+                "bitmap"
+            );
 
             state.set_active_workspace_terminal_surface(None);
             sync_workspace_session_state(&window, &state, &mut follow_tracker);
@@ -6149,7 +6182,10 @@ mod tests {
                 "clearing the surface should reset the retained native frame token"
             );
             assert_eq!(window.get_workspace_session_surface_seqno(), 0);
-            assert_eq!(window.get_workspace_session_render_mode().as_str(), "bitmap");
+            assert_eq!(
+                window.get_workspace_session_render_mode().as_str(),
+                "bitmap"
+            );
             assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
         });
     }
@@ -6225,23 +6261,38 @@ mod tests {
             None
         );
         assert_eq!(
-            workspace_terminal::workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\n"),
+            workspace_terminal::workspace_paste_prompt_mode(
+                &ShellViewModel::default(),
+                "echo hello\n"
+            ),
             None
         );
         assert_eq!(
-            workspace_terminal::workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\r\n"),
+            workspace_terminal::workspace_paste_prompt_mode(
+                &ShellViewModel::default(),
+                "echo hello\r\n"
+            ),
             None
         );
         assert_eq!(
-            workspace_terminal::workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\nwhoami"),
+            workspace_terminal::workspace_paste_prompt_mode(
+                &ShellViewModel::default(),
+                "echo hello\nwhoami"
+            ),
             Some(WorkspacePastePromptMode::Confirm)
         );
         assert_eq!(
-            workspace_terminal::workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\r\nwhoami"),
+            workspace_terminal::workspace_paste_prompt_mode(
+                &ShellViewModel::default(),
+                "echo hello\r\nwhoami"
+            ),
             Some(WorkspacePastePromptMode::Confirm)
         );
         assert_eq!(
-            workspace_terminal::workspace_paste_prompt_mode(&ShellViewModel::default(), "echo hello\rwhoami"),
+            workspace_terminal::workspace_paste_prompt_mode(
+                &ShellViewModel::default(),
+                "echo hello\rwhoami"
+            ),
             Some(WorkspacePastePromptMode::Confirm)
         );
     }

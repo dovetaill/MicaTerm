@@ -32,13 +32,15 @@ export component SidebarNavButton inherits Rectangle {
 
     width: 36px;
     height: 36px;
-    border-radius: 8px;
-    border-width: root.active ? 1px : 0px;
-    border-color: ThemeTokens.divider-subtle;
+    border-radius: 10px;
+    border-width: root.active || touch.has-hover ? 1px : 0px;
+    border-color: root.active ? ThemeTokens.divider-strong : ThemeTokens.divider-subtle;
     background: touch.pressed
-        ? ThemeTokens.control-active-surface
-        : (touch.has-hover || root.active)
-            ? ThemeTokens.control-hover-surface
+        ? ThemeTokens.control-pressed-surface
+        : root.active
+            ? ThemeTokens.sidebar-selected-surface
+            : touch.has-hover
+                ? ThemeTokens.sidebar-hover-surface
             : transparent;
 
     if (root.displayed-icon.width > 0 && root.displayed-icon.height > 0) : Image {
@@ -48,7 +50,7 @@ export component SidebarNavButton inherits Rectangle {
         height: 20px;
         source <=> root.displayed-icon;
         image-fit: contain;
-        colorize: ThemeTokens.text-primary;
+        colorize: root.active || touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
     }
 
     changed has-hover => {

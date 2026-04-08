@@ -6,8 +6,8 @@ const JSON_OVERLAY_RGBA: u32 = 0x3328_7dff;
 const XML_OVERLAY_RGBA: u32 = 0x3348_bf91;
 const LOG_OVERLAY_RGBA: u32 = 0x33f5_a524;
 const LOG_LEVEL_PREFIXES: &[&str] = &[
-    "[TRACE]", "[DEBUG]", "[INFO]", "[WARN]", "[ERROR]", "TRACE ", "DEBUG ", "INFO ",
-    "WARN ", "ERROR ",
+    "[TRACE]", "[DEBUG]", "[INFO]", "[WARN]", "[ERROR]", "TRACE ", "DEBUG ", "INFO ", "WARN ",
+    "ERROR ",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,7 +88,8 @@ fn detect_xml_block(
     start_index: usize,
 ) -> Option<(SemanticOutputOverlay, usize)> {
     let first_line = rows.get(start_index)?.text.trim_start();
-    if !first_line.starts_with('<') || first_line.starts_with("<?") || first_line.starts_with("<!") {
+    if !first_line.starts_with('<') || first_line.starts_with("<?") || first_line.starts_with("<!")
+    {
         return None;
     }
 
@@ -136,7 +137,12 @@ fn detect_log_block(
     }
 
     Some((
-        build_overlay(rows, start_index, end_index - 1, SemanticOutputBlockKind::Log),
+        build_overlay(
+            rows,
+            start_index,
+            end_index - 1,
+            SemanticOutputBlockKind::Log,
+        ),
         end_index,
     ))
 }

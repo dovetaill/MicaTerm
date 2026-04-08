@@ -4,20 +4,20 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::AppWindow;
 use crate::app::runtime_profile::NativePresentPath;
 use crate::app::terminal_presenter::NativeTerminalFrame;
-use crate::AppWindow;
 
 use super::damage::{NativeFrameDamageTracker, NativeSurfaceDamage, NativeSurfaceDamageKind};
 use super::diagnostics::NativeTerminalSurfaceDiagnostics;
 use super::platform::{
-    create_platform_native_surface_backend, NativeTerminalSurfaceRect,
-    PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
+    NativeTerminalSurfaceRect, PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
+    create_platform_native_surface_backend,
 };
 use super::present_driver::{
-    create_present_driver, install_rendering_notifier, install_winit_after_draw_hook,
     EventLoopPresentDriver, NativeSurfacePresentCallback, NativeSurfacePresentDriver,
-    RenderingNotifierPresentDriver,
+    RenderingNotifierPresentDriver, create_present_driver, install_rendering_notifier,
+    install_winit_after_draw_hook,
 };
 
 #[derive(Clone)]
@@ -27,7 +27,7 @@ pub struct NativeTerminalSurface {
 
 struct NativeTerminalSurfaceState {
     backend: Box<dyn PlatformNativeSurfaceBackend>,
-    present_driver: Box<dyn NativeSurfacePresentDriver>,
+    present_driver: Rc<dyn NativeSurfacePresentDriver>,
     retained_frame: Option<RetainedNativeTerminalSurfaceFrame>,
     rect: NativeTerminalSurfaceRect,
     last_drawn_frame_token: u64,
@@ -37,6 +37,10 @@ struct NativeTerminalSurfaceState {
     host_surface_invalidated: bool,
     dirty: bool,
     pending_present: PendingPresentGate,
+    pending_host_redraw: PendingPresentGate,
+    scheduled_present_count: u64,
+    host_redraw_request_count: u64,
+    host_redraw_replay_count: u64,
 }
 
 #[derive(Default)]
@@ -63,7 +67,7 @@ impl NativeTerminalSurfaceState {
     fn new(window: &AppWindow) -> Self {
         Self {
             backend: create_platform_native_surface_backend(),
-            present_driver: Box::new(EventLoopPresentDriver::new(window)),
+            present_driver: Rc::new(EventLoopPresentDriver::new(window)),
             retained_frame: None,
             rect: NativeTerminalSurfaceRect::default(),
             last_drawn_frame_token: 0,
@@ -73,6 +77,10 @@ impl NativeTerminalSurfaceState {
             host_surface_invalidated: false,
             dirty: false,
             pending_present: PendingPresentGate::default(),
+            pending_host_redraw: PendingPresentGate::default(),
+            scheduled_present_count: 0,
+            host_redraw_request_count: 0,
+            host_redraw_replay_count: 0,
         }
     }
 }
@@ -231,7 +239,7 @@ impl NativeTerminalSurface {
         ) {
             Ok(()) => {
                 let mut state = self.state.borrow_mut();
-                state.present_driver = Box::new(RenderingNotifierPresentDriver::new(window));
+                state.present_driver = Rc::new(RenderingNotifierPresentDriver::new(window));
                 refresh_diagnostics(&mut state);
             }
             Err(err) => {
@@ -241,7 +249,7 @@ impl NativeTerminalSurface {
                     "native terminal rendering notifier is unavailable; falling back to host-window after-draw present scheduling"
                 );
                 let mut state = self.state.borrow_mut();
-                state.present_driver = Box::new(EventLoopPresentDriver::new(window));
+                state.present_driver = Rc::new(EventLoopPresentDriver::new(window));
                 refresh_diagnostics(&mut state);
                 drop(state);
                 install_after_draw_hook(&self.state);
@@ -257,15 +265,24 @@ impl NativeTerminalSurface {
             }
         });
 
-        {
+        let present_driver = {
             let mut state = self.state.borrow_mut();
             if !state.pending_present.mark_scheduled() {
                 return;
             }
-        }
+            state.scheduled_present_count = state.scheduled_present_count.saturating_add(1);
+            let request_host_redraw = state.pending_host_redraw.mark_scheduled();
+            if request_host_redraw {
+                state.host_redraw_request_count = state.host_redraw_request_count.saturating_add(1);
+            }
+            // Clone the driver out of RefCell state before it can choose an
+            // immediate callback path; otherwise the callback re-enters while
+            // `self.state` is still borrowed and panics.
+            (Rc::clone(&state.present_driver), request_host_redraw)
+        };
 
-        let state = self.state.borrow();
-        state.present_driver.schedule_present(callback);
+        let (present_driver, request_host_redraw) = present_driver;
+        present_driver.schedule_present(callback, request_host_redraw);
     }
 }
 
@@ -300,6 +317,8 @@ fn draw_retained_frame(state: &mut NativeTerminalSurfaceState) {
 }
 
 fn replay_after_host_redraw(state: &mut NativeTerminalSurfaceState) {
+    state.pending_host_redraw.clear();
+    state.host_redraw_replay_count = state.host_redraw_replay_count.saturating_add(1);
     state.host_surface_invalidated = true;
     draw_retained_frame(state);
 }
@@ -318,12 +337,17 @@ fn teardown_native_surface(state: &mut NativeTerminalSurfaceState) {
     state.dirty = false;
     state.host_surface_invalidated = false;
     state.pending_present.clear();
+    state.pending_host_redraw.clear();
     state.backend.detach();
     refresh_diagnostics(state);
 }
 
 fn refresh_diagnostics(state: &mut NativeTerminalSurfaceState) {
-    state.latest_diagnostics = state.backend.diagnostics_snapshot();
+    let mut diagnostics = state.backend.diagnostics_snapshot();
+    diagnostics.scheduled_present_count = state.scheduled_present_count;
+    diagnostics.host_redraw_request_count = state.host_redraw_request_count;
+    diagnostics.host_redraw_replay_count = state.host_redraw_replay_count;
+    state.latest_diagnostics = diagnostics;
 }
 
 #[cfg(test)]

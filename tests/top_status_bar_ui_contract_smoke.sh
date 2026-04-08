@@ -88,7 +88,7 @@ grep -F 'in property <string> tooltip-source-id;' "$ROOT_DIR/ui/components/title
 grep -F 'in property <string> tooltip-source-id;' "$ROOT_DIR/ui/components/window-control-button.slint" >/dev/null
 grep -F 'callback tooltip-open-requested(string, string, length, length);' "$ROOT_DIR/ui/components/titlebar-icon-button.slint" >/dev/null
 grep -F 'callback tooltip-close-requested(string);' "$ROOT_DIR/ui/components/window-control-button.slint" >/dev/null
-grep -F 'border-radius: 8px;' "$ROOT_DIR/ui/components/titlebar-tooltip.slint" >/dev/null
+grep -F 'border-radius: 10px;' "$ROOT_DIR/ui/components/titlebar-tooltip.slint" >/dev/null
 grep -F 'border-radius: 8px;' "$ROOT_DIR/ui/components/titlebar-icon-button.slint" >/dev/null
 grep -F 'border-radius: 6px;' "$ROOT_DIR/ui/components/sidebar-toolbar-icon-button.slint" >/dev/null
 grep -F 'visible: root.tooltip-visible;' "$TOOLTIP" >/dev/null
@@ -130,9 +130,9 @@ fi
 grep -F 'ThemeTokens.control-hover-surface' "$ROOT_DIR/ui/components/titlebar-icon-button.slint" >/dev/null
 grep -F 'ThemeTokens.control-active-surface' "$ROOT_DIR/ui/components/titlebar-icon-button.slint" >/dev/null
 grep -F 'ThemeTokens.control-hover-surface' "$ROOT_DIR/ui/components/window-control-button.slint" >/dev/null
-grep -F 'ThemeTokens.control-active-surface' "$ROOT_DIR/ui/components/window-control-button.slint" >/dev/null
-grep -F 'background: ThemeTokens.inspector-surface;' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
-grep -F 'background: ThemeTokens.inspector-surface;' "$ROOT_DIR/ui/components/titlebar-tooltip.slint" >/dev/null
+grep -F 'ThemeTokens.control-pressed-surface' "$ROOT_DIR/ui/components/window-control-button.slint" >/dev/null
+grep -F 'background: ThemeTokens.panel-surface;' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
+grep -F 'background: ThemeTokens.panel-surface;' "$ROOT_DIR/ui/components/titlebar-tooltip.slint" >/dev/null
 grep -F 'border-color: ThemeTokens.divider-strong;' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null
 grep -F 'callback sync-settings-selected;' "$TITLEBAR" >/dev/null || true
 grep -F 'callback sync-settings-selected;' "$ROOT_DIR/ui/components/titlebar-menu.slint" >/dev/null

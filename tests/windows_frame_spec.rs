@@ -1,11 +1,11 @@
 //! Windows frame helper coverage for hit-testing and reserved resize bands.
 
+use mica_term::app::terminal_renderer::NativeTerminalSurfaceDiagnostics;
 use mica_term::app::window_state::WindowPlacementKind;
 use mica_term::app::windows_frame::{
     CaptionButtonGeometry, native_surface_text_renderer_path, point_hits_outer_resize_band,
     uses_native_maximize_button_hit_test,
 };
-use mica_term::app::terminal_renderer::NativeTerminalSurfaceDiagnostics;
 
 #[test]
 fn maximize_button_geometry_detects_points_inside_exported_rect() {

@@ -13,12 +13,12 @@ use swash::scale::{Render, ScaleContext, Scaler, Source};
 use swash::zeno::{Format as SwashFormat, Vector as SwashVector};
 
 use crate::app::ssh::runtime::{TerminalCellState, TerminalSurfaceState};
-use crate::app::terminal_font::backend::{
-    DEFAULT_TERMINAL_FONT_SIZE_PX, FontRenderProfile, map_glyph_coverage_to_alpha,
-};
 use crate::app::terminal_emoji::{
     ClusterRenderKind as EmojiClusterRenderKind, EmojiRenderOutcome, TerminalEmojiRenderer,
     classify_cluster_render_kind,
+};
+use crate::app::terminal_font::backend::{
+    DEFAULT_TERMINAL_FONT_SIZE_PX, FontRenderProfile, map_glyph_coverage_to_alpha,
 };
 
 const CASCADIA_MONO_FONT_BYTES: &[u8] =
@@ -212,9 +212,8 @@ impl TerminalAtlasRenderer {
     }
 
     fn with_emoji_renderer(emoji_renderer: TerminalEmojiRenderer) -> Result<Self> {
-        let font = FontArc::try_from_slice(CASCADIA_MONO_FONT_BYTES).map_err(
-            |error| anyhow!("failed to load bundled Cascadia Mono font: {error}"),
-        )?;
+        let font = FontArc::try_from_slice(CASCADIA_MONO_FONT_BYTES)
+            .map_err(|error| anyhow!("failed to load bundled Cascadia Mono font: {error}"))?;
         let swash_font = SwashFontRef::from_index(CASCADIA_MONO_FONT_BYTES, 0)
             .ok_or_else(|| anyhow!("failed to load bundled Cascadia Mono font into swash"))?;
         let logical_metrics = compute_terminal_metrics(&font, TERMINAL_FONT_SIZE_PX);
@@ -634,13 +633,9 @@ fn rasterize_mono_cluster_sprite(request: MonoRasterRequest<'_>) -> CachedCluste
         let glyph_id = scaled.glyph_id(ch);
 
         let (origin_x, offset_x) = split_fractional_offset(pen_x);
-        if let Some(image) = render_hinted_mono_glyph(
-            &mut scaler,
-            glyph_id.0,
-            embolden,
-            offset_x,
-            render_profile,
-        ) {
+        if let Some(image) =
+            render_hinted_mono_glyph(&mut scaler, glyph_id.0, embolden, offset_x, render_profile)
+        {
             let left = origin_x + image.left;
             min_x = min_x.min(left as f32);
             max_x = max_x.max(left as f32 + image.width as f32);

@@ -103,7 +103,10 @@ const WINDOWS_MAINLINE_RENDERER_FALLBACK_CHAIN: &[RendererMode] = &[
 ];
 const SOFTWARE_RENDERER_FALLBACK_CHAIN: &[RendererMode] = &[RendererMode::Software];
 fn runtime_terminal_subsystem_override() -> Option<TerminalSubsystemMode> {
-    match std::env::var("MICA_TERM_TERMINAL_SUBSYSTEM").ok().as_deref() {
+    match std::env::var("MICA_TERM_TERMINAL_SUBSYSTEM")
+        .ok()
+        .as_deref()
+    {
         Some("scene-image") => Some(TerminalSubsystemMode::SceneImage),
         Some("native-surface") | Some("retained-native-surface") => {
             Some(TerminalSubsystemMode::RetainedNativeSurface)

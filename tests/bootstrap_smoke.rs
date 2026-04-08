@@ -2636,9 +2636,8 @@ fn drag_terminal_padding_into_grid(app: &AppWindow) {
         position: drag_start,
         button: PointerEventButton::Left,
     });
-    app.window().dispatch_event(WindowEvent::PointerMoved {
-        position: drag_end,
-    });
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position: drag_end });
     app.window().dispatch_event(WindowEvent::PointerReleased {
         position: drag_end,
         button: PointerEventButton::Left,
@@ -2668,9 +2667,8 @@ fn drag_within_first_terminal_cell(app: &AppWindow) {
         position: drag_start,
         button: PointerEventButton::Left,
     });
-    app.window().dispatch_event(WindowEvent::PointerMoved {
-        position: drag_end,
-    });
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position: drag_end });
     app.window().dispatch_event(WindowEvent::PointerReleased {
         position: drag_end,
         button: PointerEventButton::Left,
@@ -2762,9 +2760,10 @@ fn settings_panel_can_create_a_vault_and_persist_local_bootstrap_state() {
     app.invoke_open_sync_modal_requested();
     app.invoke_sync_modal_submit_master_password("correct horse battery staple".into());
 
-    let local_state = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
-        .unwrap()
-        .expect("persisted local bootstrap state");
+    let local_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("persisted local bootstrap state");
 
     assert_eq!(app.get_sync_modal_mode().as_str(), "ready");
     assert!(!local_state.device_id.trim().is_empty());
@@ -2932,22 +2931,26 @@ fn missing_local_vault_state_with_preexisting_assets_merges_and_pushes_on_attach
         &runtime_vault_key,
     )
     .unwrap();
-    assert!(merged_snapshot
-        .asset_catalog
-        .nodes
-        .values()
-        .any(|node| matches!(
-            &node.payload,
-            VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.12"
-        )));
-    assert!(merged_snapshot
-        .asset_catalog
-        .nodes
-        .values()
-        .any(|node| matches!(
-            &node.payload,
-            VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.99"
-        )));
+    assert!(
+        merged_snapshot
+            .asset_catalog
+            .nodes
+            .values()
+            .any(|node| matches!(
+                &node.payload,
+                VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.12"
+            ))
+    );
+    assert!(
+        merged_snapshot
+            .asset_catalog
+            .nodes
+            .values()
+            .any(|node| matches!(
+                &node.payload,
+                VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.99"
+            ))
+    );
 }
 
 #[test]
@@ -3130,11 +3133,13 @@ fn enabling_sync_persists_runtime_vault_key_material() {
     app.invoke_open_sync_modal_requested();
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
 
-    let local_state = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
-        .unwrap()
-        .expect("persisted local bootstrap state");
-    let runtime_key = load_runtime_vault_key(credential_store.as_ref(), &local_state.bundle.vault_id)
-        .expect("load persisted runtime vault key");
+    let local_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("persisted local bootstrap state");
+    let runtime_key =
+        load_runtime_vault_key(credential_store.as_ref(), &local_state.bundle.vault_id)
+            .expect("load persisted runtime vault key");
 
     assert!(runtime_key.is_some());
     assert_ne!(runtime_key.expect("runtime key"), [0u8; 32]);
@@ -3169,9 +3174,10 @@ fn restart_recovers_vault_session_without_prompting_for_unlock() {
     app.invoke_open_sync_modal_requested();
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     assert_eq!(app.get_console_asset_items().row_count(), 1);
-    let persisted_before = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
-        .unwrap()
-        .expect("persisted local bootstrap state before restart");
+    let persisted_before =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("persisted local bootstrap state before restart");
 
     let restarted = AppWindow::new().unwrap();
     bind_with_vault_runtime(
@@ -3196,9 +3202,10 @@ fn restart_recovers_vault_session_without_prompting_for_unlock() {
     restarted.invoke_open_sync_modal_requested();
     assert_eq!(restarted.get_sync_modal_mode().as_str(), "ready");
 
-    let persisted_after = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
-        .unwrap()
-        .expect("persisted local bootstrap state after restart");
+    let persisted_after =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("persisted local bootstrap state after restart");
     assert_eq!(persisted_after.device_id, persisted_before.device_id);
     assert_eq!(
         persisted_after.device_id,
@@ -3239,7 +3246,9 @@ fn manual_sync_merges_divergent_local_and_remote_additions_before_push() {
     app.invoke_open_sync_modal_requested();
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     app.invoke_sync_modal_sync_now_requested();
-    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 1
+    });
     assert_eq!(primary.recorded_writes().len(), 1);
 
     let local_added_asset_id = create_root_ssh(&app, "DB Replica", "10.0.0.24");
@@ -3254,9 +3263,10 @@ fn manual_sync_merges_divergent_local_and_remote_additions_before_push() {
         },
     )
     .unwrap();
-    let local_state = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
-        .unwrap()
-        .expect("local bootstrap state after first sync");
+    let local_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("local bootstrap state after first sync");
     let first_write = primary
         .recorded_writes()
         .into_iter()
@@ -3300,7 +3310,10 @@ fn manual_sync_merges_divergent_local_and_remote_additions_before_push() {
         .asset_catalog
         .nodes
         .insert(local_added_asset_id.clone(), remote_seed_node);
-    if let Some(secret_bundle) = remote_seed_snapshot.ssh_secret_bundles.remove(&remote_seed_id) {
+    if let Some(secret_bundle) = remote_seed_snapshot
+        .ssh_secret_bundles
+        .remove(&remote_seed_id)
+    {
         remote_seed_snapshot
             .ssh_secret_bundles
             .insert(local_added_asset_id.clone(), secret_bundle);
@@ -3329,7 +3342,9 @@ fn manual_sync_merges_divergent_local_and_remote_additions_before_push() {
     primary.set_remote_revision(Some(remote_revision));
 
     app.invoke_sync_modal_sync_now_requested();
-    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 2);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 2
+    });
 
     assert_eq!(primary.recorded_writes().len(), 2);
     let latest_write = primary
@@ -3337,7 +3352,10 @@ fn manual_sync_merges_divergent_local_and_remote_additions_before_push() {
         .into_iter()
         .last()
         .expect("merged sync write");
-    assert_eq!(latest_write.head.parent_revision.as_deref(), Some("rev-0002"));
+    assert_eq!(
+        latest_write.head.parent_revision.as_deref(),
+        Some("rev-0002")
+    );
     assert_eq!(latest_write.head.vault_revision, "rev-0003");
     assert!(
         credential_store
@@ -3346,8 +3364,9 @@ fn manual_sync_merges_divergent_local_and_remote_additions_before_push() {
             .is_some()
     );
 
-    let recovery_entries = load_recovery_snapshots(temp_root.join("recovery").as_path(), "vault-main")
-        .expect("load persisted recovery snapshots");
+    let recovery_entries =
+        load_recovery_snapshots(temp_root.join("recovery").as_path(), "vault-main")
+            .expect("load persisted recovery snapshots");
     assert!(recovery_entries.is_empty());
 
     let cached_snapshot = decrypt_snapshot(
@@ -3484,7 +3503,9 @@ fn debounced_auto_sync_returns_before_slow_primary_write_completes() {
         started.elapsed() < Duration::from_millis(120),
         "debounced auto sync should return quickly while the provider writes in the background"
     );
-    wait_for_condition(Duration::from_secs(2), || primary_inner.recorded_writes().len() == 1);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary_inner.recorded_writes().len() == 1
+    });
 }
 
 #[test]
@@ -3567,7 +3588,9 @@ fn asset_mutation_syncs_without_auto_sync_toggle() {
     app.invoke_confirm_asset_modal_requested();
     assert_eq!(primary.recorded_writes().len(), 0);
     settle_sync_scheduler(Duration::from_millis(1300));
-    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 1
+    });
 
     let folder_id = app
         .get_console_asset_items()
@@ -3582,14 +3605,18 @@ fn asset_mutation_syncs_without_auto_sync_toggle() {
     app.invoke_confirm_asset_rename_requested();
     assert_eq!(primary.recorded_writes().len(), 1);
     settle_sync_scheduler(Duration::from_millis(1300));
-    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 2);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 2
+    });
 
     app.invoke_asset_context_menu_requested(folder_id.into(), "folder".into(), 96.0, 160.0);
     app.invoke_assets_context_menu_action_invoked("delete-asset".into());
     app.invoke_confirm_delete_asset_requested();
     assert_eq!(primary.recorded_writes().len(), 2);
     settle_sync_scheduler(Duration::from_millis(1300));
-    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 3);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 3
+    });
     assert_eq!(primary.recorded_writes().len(), 3);
 }
 
@@ -3625,7 +3652,9 @@ fn periodic_sync_pulls_remote_changes_even_without_local_dirty_state() {
     app.invoke_open_sync_modal_requested();
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     app.invoke_sync_modal_sync_now_requested();
-    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 1
+    });
     app.invoke_sync_modal_close_requested();
 
     assert_eq!(primary.recorded_writes().len(), 1);
@@ -3642,9 +3671,10 @@ fn periodic_sync_pulls_remote_changes_even_without_local_dirty_state() {
         },
     )
     .unwrap();
-    let local_state = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
-        .unwrap()
-        .expect("local bootstrap state after initial sync");
+    let local_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("local bootstrap state after initial sync");
     let runtime_vault_key = load_runtime_vault_key(credential_store.as_ref(), "vault-main")
         .unwrap()
         .expect("runtime vault key after enabling sync");
@@ -3662,7 +3692,9 @@ fn periodic_sync_pulls_remote_changes_even_without_local_dirty_state() {
     primary.set_remote_revision(Some(remote_revision));
 
     settle_sync_scheduler(Duration::from_secs(121));
-    wait_for_condition(Duration::from_secs(2), || app.get_console_asset_items().row_count() == 1);
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_console_asset_items().row_count() == 1
+    });
 
     assert_eq!(
         primary.recorded_writes().len(),
@@ -3715,7 +3747,9 @@ fn periodic_sync_returns_before_slow_primary_refresh_completes() {
     app.invoke_open_sync_modal_requested();
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     app.invoke_sync_modal_sync_now_requested();
-    wait_for_condition(Duration::from_secs(2), || primary_inner.recorded_writes().len() == 1);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary_inner.recorded_writes().len() == 1
+    });
     app.invoke_sync_modal_close_requested();
 
     let remote_store = Arc::new(MemoryCredentialStore::default());
@@ -3729,9 +3763,10 @@ fn periodic_sync_returns_before_slow_primary_refresh_completes() {
         },
     )
     .unwrap();
-    let local_state = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
-        .unwrap()
-        .expect("local bootstrap state after initial sync");
+    let local_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("local bootstrap state after initial sync");
     let runtime_vault_key = load_runtime_vault_key(credential_store.as_ref(), "vault-main")
         .unwrap()
         .expect("runtime vault key after enabling sync");
@@ -3755,7 +3790,9 @@ fn periodic_sync_returns_before_slow_primary_refresh_completes() {
         started.elapsed() < Duration::from_millis(120),
         "periodic sync should return quickly while the provider refresh runs in the background"
     );
-    wait_for_condition(Duration::from_secs(2), || app.get_console_asset_items().row_count() == 1);
+    wait_for_condition(Duration::from_secs(2), || {
+        app.get_console_asset_items().row_count() == 1
+    });
 }
 
 #[test]
@@ -3792,7 +3829,9 @@ fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies() {
     app.invoke_open_sync_modal_requested();
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
     app.invoke_sync_modal_sync_now_requested();
-    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 1
+    });
     assert_eq!(primary.recorded_writes().len(), 1);
 
     let ssh_id = app
@@ -3816,9 +3855,10 @@ fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies() {
     assert_eq!(primary.recorded_writes().len(), 1);
     primary.set_write_error(None);
 
-    let local_state = load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
-        .unwrap()
-        .expect("local bootstrap state after dirty local mutation");
+    let local_state =
+        load_local_vault_bootstrap_state(&temp_root.join("vault-bootstrap-state.json"))
+            .unwrap()
+            .expect("local bootstrap state after dirty local mutation");
     let runtime_vault_key = load_runtime_vault_key(credential_store.as_ref(), "vault-main")
         .unwrap()
         .expect("runtime vault key after enabling sync");
@@ -3854,7 +3894,9 @@ fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies() {
     primary.set_remote_revision(Some(remote_revision));
 
     settle_sync_scheduler(Duration::from_secs(121));
-    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 2);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 2
+    });
 
     assert_eq!(primary.recorded_writes().len(), 2);
     let latest_write = primary
@@ -3862,19 +3904,27 @@ fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies() {
         .into_iter()
         .last()
         .expect("merged periodic sync write");
-    assert_eq!(latest_write.head.parent_revision.as_deref(), Some("rev-0002"));
+    assert_eq!(
+        latest_write.head.parent_revision.as_deref(),
+        Some("rev-0002")
+    );
     assert_eq!(latest_write.head.vault_revision, "rev-0003");
     assert_eq!(app.get_console_asset_items().row_count(), 1);
 
-    let recovery_entries = load_recovery_snapshots(temp_root.join("recovery").as_path(), "vault-main")
-        .expect("load persisted periodic recovery snapshots");
+    let recovery_entries =
+        load_recovery_snapshots(temp_root.join("recovery").as_path(), "vault-main")
+            .expect("load persisted periodic recovery snapshots");
     assert_eq!(recovery_entries.len(), 2);
-    assert!(recovery_entries
-        .iter()
-        .any(|entry| entry.source == RecoverySource::LocalConflictCopy));
-    assert!(recovery_entries
-        .iter()
-        .any(|entry| entry.source == RecoverySource::RemoteConflictCopy));
+    assert!(
+        recovery_entries
+            .iter()
+            .any(|entry| entry.source == RecoverySource::LocalConflictCopy)
+    );
+    assert!(
+        recovery_entries
+            .iter()
+            .any(|entry| entry.source == RecoverySource::RemoteConflictCopy)
+    );
 
     let merged_snapshot = decrypt_snapshot(
         &load_encrypted_cache(&temp_root.join("cache"), "vault-main")
@@ -3883,14 +3933,16 @@ fn periodic_sync_conflicts_use_merge_engine_and_persist_conflict_copies() {
         &runtime_vault_key,
     )
     .unwrap();
-    assert!(merged_snapshot
-        .asset_catalog
-        .nodes
-        .values()
-        .any(|node| matches!(
-            &node.payload,
-            VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.24"
-        )));
+    assert!(
+        merged_snapshot
+            .asset_catalog
+            .nodes
+            .values()
+            .any(|node| matches!(
+                &node.payload,
+                VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.24"
+            ))
+    );
 }
 
 #[test]
@@ -3931,7 +3983,9 @@ fn back_to_back_mutations_share_one_debounced_auto_sync_upload() {
 
     assert_eq!(primary.recorded_writes().len(), 0);
     settle_sync_scheduler(Duration::from_millis(1300));
-    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 1
+    });
 
     assert_eq!(
         primary.recorded_writes().len(),
@@ -4023,7 +4077,9 @@ fn manual_vault_sync_reports_mirror_degradation_after_primary_commit() {
     app.invoke_sync_modal_submit_master_password("vault-pass".into());
 
     app.invoke_sync_modal_sync_now_requested();
-    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 1
+    });
 
     assert_eq!(primary.recorded_writes().len(), 1);
     assert_eq!(mirror.recorded_writes().len(), 0);
@@ -6226,7 +6282,10 @@ fn workspace_tab_selection_restores_native_terminal_surface_rect_immediately() {
 
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
     assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
-    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_height(),
+        0.0
+    );
 
     app.invoke_workspace_tab_selected(session_id.clone().into());
 
@@ -6278,7 +6337,10 @@ fn launcher_quick_launch_connect_restores_native_terminal_surface_rect() {
 
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
     assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
-    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_height(),
+        0.0
+    );
 
     app.invoke_welcome_quick_launch_connect_requested(ssh_id.into());
     settle_terminal_projection();
@@ -6341,7 +6403,10 @@ fn launcher_picker_activation_restores_native_terminal_surface_rect() {
     assert!(app.get_open_saved_ssh_modal_open());
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
     assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
-    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_height(),
+        0.0
+    );
 
     app.invoke_open_saved_ssh_modal_asset_activated(ssh_id.into());
     settle_terminal_projection();
@@ -6405,7 +6470,10 @@ fn asset_activation_restores_native_terminal_surface_rect_from_welcome() {
 
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
     assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
-    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_height(),
+        0.0
+    );
 
     app.invoke_asset_activated(ssh_id.into());
     settle_terminal_projection();
@@ -6435,7 +6503,10 @@ fn context_menu_open_connection_restores_native_terminal_surface_rect_from_welco
 
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "welcome");
     assert_eq!(app.get_layout_workspace_session_native_surface_width(), 0.0);
-    assert_eq!(app.get_layout_workspace_session_native_surface_height(), 0.0);
+    assert_eq!(
+        app.get_layout_workspace_session_native_surface_height(),
+        0.0
+    );
 
     app.invoke_asset_context_menu_requested(ssh_id.into(), "ssh".into(), 96.0, 160.0);
     assert!(app.get_assets_context_menu_open());
@@ -6898,8 +6969,14 @@ fn host_key_inline_flow_keeps_native_rect_collapsed_until_terminal_resumes() {
     flush_runtime_projection();
     let session_id = app.get_active_workspace_session_id().to_string();
 
-    assert_eq!(app.get_workspace_session_host_mode().as_str(), "connection-progress");
-    assert_eq!(app.get_workspace_session_connection_headline().as_str(), "waiting-user");
+    assert_eq!(
+        app.get_workspace_session_host_mode().as_str(),
+        "connection-progress"
+    );
+    assert_eq!(
+        app.get_workspace_session_connection_headline().as_str(),
+        "waiting-user"
+    );
     assert_eq!(
         app.get_layout_workspace_session_native_surface_width(),
         0.0,
@@ -6914,7 +6991,10 @@ fn host_key_inline_flow_keeps_native_rect_collapsed_until_terminal_resumes() {
     app.invoke_workspace_session_local_action_requested("trust-host-key".into());
     flush_runtime_projection();
 
-    assert_eq!(app.get_active_workspace_session_id().as_str(), session_id.as_str());
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        session_id.as_str()
+    );
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
     assert!(
         app.get_layout_workspace_session_native_surface_width() > 0.0
@@ -7479,11 +7559,7 @@ fn opening_right_panel_clamps_terminal_surface_width_before_pty_resize_roundtrip
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
-    bind_with_launcher(
-        &app,
-        None,
-        Arc::new(WideProjectionLauncher { cols: 140 }),
-    );
+    bind_with_launcher(&app, None, Arc::new(WideProjectionLauncher { cols: 140 }));
     app.show().expect("show app window");
 
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
@@ -8251,31 +8327,19 @@ fn bootstrap_projects_terminal_shell_chrome_contract_from_theme_preset() {
         "bootstrap should publish terminal scrollbar thumb colors through the workspace session contract so fallback and live shell chrome stay on the same Catppuccin preset source"
     );
     assert!(
-        bootstrap_source.contains("set_workspace_session_jump_to_latest_bg(")
-            && bootstrap_source.contains("set_workspace_session_jump_to_latest_hover_bg(")
-            && bootstrap_source.contains("set_workspace_session_jump_to_latest_pressed_bg(")
-            && bootstrap_source.contains("set_workspace_session_jump_to_latest_border(")
-            && bootstrap_source.contains("set_workspace_session_jump_to_latest_fg("),
-        "bootstrap should publish paused-follow pill colors through the workspace session contract so no-frame and active terminal states do not fall back to detached generic shell tokens"
+        !bootstrap_source.contains("set_workspace_session_jump_to_latest"),
+        "bootstrap should stop publishing removed jump-to-latest pill colors"
     );
     assert!(
         app_window_source.contains("workspace-session-scrollbar-thumb")
             && app_window_source.contains("workspace-session-scrollbar-thumb-active")
-            && app_window_source.contains("workspace-session-jump-to-latest-bg")
-            && app_window_source.contains("workspace-session-jump-to-latest-hover-bg")
-            && app_window_source.contains("workspace-session-jump-to-latest-pressed-bg")
-            && app_window_source.contains("workspace-session-jump-to-latest-border")
-            && app_window_source.contains("workspace-session-jump-to-latest-fg"),
+            && !app_window_source.contains("workspace-session-jump-to-latest"),
         "AppWindow should surface terminal shell chrome colors as first-class workspace session properties so Rust can project the Catppuccin preset into the shell host"
     );
     assert!(
         workspace_pane_source.contains("workspace-session-scrollbar-thumb")
             && workspace_pane_source.contains("workspace-session-scrollbar-thumb-active")
-            && workspace_pane_source.contains("workspace-session-jump-to-latest-bg")
-            && workspace_pane_source.contains("workspace-session-jump-to-latest-hover-bg")
-            && workspace_pane_source.contains("workspace-session-jump-to-latest-pressed-bg")
-            && workspace_pane_source.contains("workspace-session-jump-to-latest-border")
-            && workspace_pane_source.contains("workspace-session-jump-to-latest-fg"),
+            && !workspace_pane_source.contains("workspace-session-jump-to-latest"),
         "WorkspacePane should thread the terminal shell chrome properties through to TerminalSessionHost instead of letting that chrome drift back to generic shell tokens"
     );
 }
@@ -8289,7 +8353,8 @@ fn no_surface_terminal_shell_chrome_tracks_catppuccin_theme_toggle() {
 
     let dark_preset = preset_for_theme_mode(ThemeMode::Dark);
     assert_eq!(
-        app.get_workspace_session_scrollbar_thumb().as_argb_encoded(),
+        app.get_workspace_session_scrollbar_thumb()
+            .as_argb_encoded(),
         0xff00_0000 | rgb_tuple_to_hex(dark_preset.scrollbar_thumb)
     );
     assert_eq!(
@@ -8297,35 +8362,13 @@ fn no_surface_terminal_shell_chrome_tracks_catppuccin_theme_toggle() {
             .as_argb_encoded(),
         0xff00_0000 | rgb_tuple_to_hex(dark_preset.scrollbar_thumb_active)
     );
-    assert_eq!(
-        app.get_workspace_session_jump_to_latest_bg().as_argb_encoded(),
-        0xff00_0000 | dark_preset.jump_to_latest_bg
-    );
-    assert_eq!(
-        app.get_workspace_session_jump_to_latest_hover_bg()
-            .as_argb_encoded(),
-        0xff00_0000 | dark_preset.jump_to_latest_hover_bg
-    );
-    assert_eq!(
-        app.get_workspace_session_jump_to_latest_pressed_bg()
-            .as_argb_encoded(),
-        0xff00_0000 | dark_preset.jump_to_latest_pressed_bg
-    );
-    assert_eq!(
-        app.get_workspace_session_jump_to_latest_border()
-            .as_argb_encoded(),
-        0xff00_0000 | dark_preset.jump_to_latest_border
-    );
-    assert_eq!(
-        app.get_workspace_session_jump_to_latest_fg().as_argb_encoded(),
-        0xff00_0000 | dark_preset.jump_to_latest_fg
-    );
 
     app.invoke_toggle_theme_mode_requested();
 
     let light_preset = preset_for_theme_mode(ThemeMode::Light);
     assert_eq!(
-        app.get_workspace_session_scrollbar_thumb().as_argb_encoded(),
+        app.get_workspace_session_scrollbar_thumb()
+            .as_argb_encoded(),
         0xff00_0000 | rgb_tuple_to_hex(light_preset.scrollbar_thumb),
         "without an active terminal surface the terminal scrollbar thumb should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
     );
@@ -8334,34 +8377,6 @@ fn no_surface_terminal_shell_chrome_tracks_catppuccin_theme_toggle() {
             .as_argb_encoded(),
         0xff00_0000 | rgb_tuple_to_hex(light_preset.scrollbar_thumb_active),
         "without an active terminal surface the terminal scrollbar hover thumb should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
-    );
-    assert_eq!(
-        app.get_workspace_session_jump_to_latest_bg().as_argb_encoded(),
-        0xff00_0000 | light_preset.jump_to_latest_bg,
-        "without an active terminal surface the paused-follow pill background should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
-    );
-    assert_eq!(
-        app.get_workspace_session_jump_to_latest_hover_bg()
-            .as_argb_encoded(),
-        0xff00_0000 | light_preset.jump_to_latest_hover_bg,
-        "without an active terminal surface the paused-follow pill hover background should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
-    );
-    assert_eq!(
-        app.get_workspace_session_jump_to_latest_pressed_bg()
-            .as_argb_encoded(),
-        0xff00_0000 | light_preset.jump_to_latest_pressed_bg,
-        "without an active terminal surface the paused-follow pill pressed background should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
-    );
-    assert_eq!(
-        app.get_workspace_session_jump_to_latest_border()
-            .as_argb_encoded(),
-        0xff00_0000 | light_preset.jump_to_latest_border,
-        "without an active terminal surface the paused-follow pill border should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
-    );
-    assert_eq!(
-        app.get_workspace_session_jump_to_latest_fg().as_argb_encoded(),
-        0xff00_0000 | light_preset.jump_to_latest_fg,
-        "without an active terminal surface the paused-follow pill label should still refresh to the light Catppuccin shell chrome palette after a theme toggle"
     );
 }
 
@@ -8539,7 +8554,7 @@ fn workspace_terminal_scroll_thumb_drag_coalesces_runtime_scroll_updates() {
         "the visible viewport should remain stable until the coalesced thumb-drag refresh executes"
     );
 
-    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(16));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(8));
     slint::platform::update_timers_and_animations();
 
     assert_eq!(
@@ -8552,7 +8567,78 @@ fn workspace_terminal_scroll_thumb_drag_coalesces_runtime_scroll_updates() {
 }
 
 #[test]
-fn workspace_terminal_pointer_wheel_accumulates_before_multi_line_scrollback() {
+fn workspace_terminal_scroll_thumb_drag_refreshes_within_single_digit_milliseconds() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let state = ScrollProjectionState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(CountingScrollProjectionLauncher::new(state.clone())),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    app.invoke_workspace_session_scroll_thumb_drag_requested(0.0);
+
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(7));
+    slint::platform::update_timers_and_animations();
+    assert_eq!(
+        state.scroll_call_count(),
+        0,
+        "thumb-drag projection refresh should still be deferred before the tighter low-latency budget expires"
+    );
+
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+    slint::platform::update_timers_and_animations();
+    assert_eq!(
+        state.scroll_call_count(),
+        1,
+        "thumb-drag projection refresh should land once roughly 8ms have elapsed so local scrollback feels less delayed"
+    );
+}
+
+#[test]
+fn workspace_terminal_scroll_jump_refreshes_faster_than_thumb_drag() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollProjectionLauncher));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+
+    std::thread::sleep(Duration::from_millis(20));
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    slint::platform::update_timers_and_animations();
+
+    app.invoke_workspace_session_scroll_jump_requested(0.0);
+
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(3));
+    slint::platform::update_timers_and_animations();
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        3,
+        "scroll-jump projection should still be deferred before the tighter wheel/jump budget expires"
+    );
+
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(1));
+    slint::platform::update_timers_and_animations();
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        0,
+        "wheel and scroll-jump updates should project within roughly 4ms so keyboard-like navigation feels more immediate than thumb drag coalescing"
+    );
+}
+
+#[test]
+fn workspace_terminal_pointer_wheel_scrolls_proportionally_for_partial_notches() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -8574,8 +8660,8 @@ fn workspace_terminal_pointer_wheel_accumulates_before_multi_line_scrollback() {
 
     assert_eq!(
         app.get_workspace_session_viewport_offset_lines(),
-        3,
-        "half-wheel motion should be retained locally until the accumulation threshold is crossed"
+        6,
+        "half-wheel motion should move half a notch worth of terminal lines immediately"
     );
 
     app.window().dispatch_event(WindowEvent::PointerScrolled {
@@ -8588,12 +8674,53 @@ fn workspace_terminal_pointer_wheel_accumulates_before_multi_line_scrollback() {
     assert_eq!(
         app.get_workspace_session_viewport_offset_lines(),
         8,
-        "one accumulated wheel notch should request six local lines, capped by the current viewport max offset"
+        "a second half-notch should continue the proportional scrollback, capped by the current viewport max offset"
     );
 }
 
 #[test]
-fn workspace_terminal_paused_follow_tracks_pending_output_until_jump_to_latest() {
+fn workspace_terminal_small_pointer_wheel_delta_scrolls_gradually() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(&app, None, Arc::new(ScrollProjectionLauncher));
+    app.show().expect("show app window");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+    focus_workspace_terminal(&app);
+
+    let position = terminal_interaction_position(&app);
+    app.window().dispatch_event(WindowEvent::PointerScrolled {
+        position,
+        delta_x: 0.0,
+        delta_y: 20.0,
+    });
+    settle_terminal_projection();
+
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        4,
+        "small wheel deltas should start moving the viewport immediately instead of waiting for a full notch"
+    );
+
+    app.window().dispatch_event(WindowEvent::PointerScrolled {
+        position,
+        delta_x: 0.0,
+        delta_y: 20.0,
+    });
+    settle_terminal_projection();
+
+    assert_eq!(
+        app.get_workspace_session_viewport_offset_lines(),
+        5,
+        "successive small wheel deltas should continue accumulating into smooth line-by-line scrollback"
+    );
+}
+
+#[test]
+fn workspace_terminal_scroll_jump_returns_viewport_to_latest() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -8612,25 +8739,22 @@ fn workspace_terminal_paused_follow_tracks_pending_output_until_jump_to_latest()
 
     app.invoke_workspace_session_scroll_jump_requested(1.0);
     settle_terminal_projection();
-    assert!(app.get_workspace_session_follow_paused());
-    assert_eq!(app.get_workspace_session_pending_output_lines(), 0);
+    assert!(!app.get_workspace_session_viewport_at_bottom());
 
     follow_state.emit_remote_output(3);
     settle_terminal_projection();
 
-    assert!(app.get_workspace_session_follow_paused());
     assert_eq!(app.get_workspace_session_viewport_offset_lines(), 11);
-    assert_eq!(app.get_workspace_session_pending_output_lines(), 3);
+    assert!(!app.get_workspace_session_viewport_at_bottom());
 
-    app.invoke_workspace_session_jump_to_latest_requested();
+    app.invoke_workspace_session_scroll_jump_requested(0.0);
+    settle_terminal_projection();
     assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
     assert!(app.get_workspace_session_viewport_at_bottom());
-    assert!(!app.get_workspace_session_follow_paused());
-    assert_eq!(app.get_workspace_session_pending_output_lines(), 0);
 }
 
 #[test]
-fn workspace_terminal_live_input_resumes_follow_and_clears_pending_output() {
+fn workspace_terminal_live_input_resumes_follow_from_scrollback() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -8652,16 +8776,13 @@ fn workspace_terminal_live_input_resumes_follow_and_clears_pending_output() {
     follow_state.emit_remote_output(2);
     settle_terminal_projection();
 
-    assert!(app.get_workspace_session_follow_paused());
-    assert_eq!(app.get_workspace_session_pending_output_lines(), 2);
+    assert!(!app.get_workspace_session_viewport_at_bottom());
 
     app.invoke_workspace_session_text_input("a".into());
     settle_terminal_projection();
 
     assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
     assert!(app.get_workspace_session_viewport_at_bottom());
-    assert!(!app.get_workspace_session_follow_paused());
-    assert_eq!(app.get_workspace_session_pending_output_lines(), 0);
 }
 
 #[test]

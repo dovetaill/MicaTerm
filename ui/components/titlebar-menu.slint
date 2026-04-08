@@ -7,11 +7,11 @@ component MenuActionItem inherits Rectangle {
     callback invoked;
 
     height: 36px;
-    border-radius: 0px;
+    border-radius: 8px;
     background: touch.pressed
-        ? ThemeTokens.control-active-surface
+        ? ThemeTokens.menu-row-open-surface
         : touch.has-hover
-            ? ThemeTokens.control-hover-surface
+            ? ThemeTokens.menu-row-hover-surface
             : transparent;
 
     Text {
@@ -19,7 +19,7 @@ component MenuActionItem inherits Rectangle {
         width: parent.width - 24px;
         height: parent.height;
         text: root.label;
-        color: ThemeTokens.text-primary;
+        color: touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
         vertical-alignment: center;
     }
 
@@ -42,13 +42,13 @@ export component TitlebarMenu inherits PopupWindow {
     background-layer := Rectangle {
         width: root.width;
         height: root.height;
-        border-radius: 0px;
+        border-radius: 12px;
         border-width: 1px;
         border-color: ThemeTokens.divider-strong;
-        background: ThemeTokens.inspector-surface;
+        background: ThemeTokens.panel-surface;
 
         VerticalLayout {
-            padding: 8px;
+            padding: 6px;
             spacing: 4px;
 
             MenuActionItem {

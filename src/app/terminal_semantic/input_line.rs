@@ -97,7 +97,12 @@ fn prompt_input_start(row: &TerminalModelRow) -> Option<u32> {
 
     let (marker_start, marker) = PROMPT_MARKERS
         .iter()
-        .filter_map(|marker| row.text.rmatch_indices(marker).next().map(|(index, _)| (index, *marker)))
+        .filter_map(|marker| {
+            row.text
+                .rmatch_indices(marker)
+                .next()
+                .map(|(index, _)| (index, *marker))
+        })
         .max_by_key(|(index, _)| *index)?;
     let input_start = marker_start + marker.len();
     if row.text[input_start..].trim().is_empty() {

@@ -3,11 +3,11 @@
 use crate::AppWindow;
 use crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics;
 use crate::app::terminal_renderer::diagnostics::NativeTerminalSurfaceGlyphBoundsTrace;
-#[cfg(target_os = "windows")]
-use slint::ComponentHandle;
 use crate::app::window_state::WindowPlacementKind;
 #[cfg(target_os = "windows")]
 use crate::app::window_state::{Rect, classify_window_placement};
+#[cfg(target_os = "windows")]
+use slint::ComponentHandle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CaptionButtonGeometry {
@@ -97,9 +97,7 @@ pub fn native_surface_font_chain(
         .map(|text| text.font_chain.as_slice())
 }
 
-pub fn native_surface_baseline_px(
-    diagnostics: &NativeTerminalSurfaceDiagnostics,
-) -> Option<i32> {
+pub fn native_surface_baseline_px(diagnostics: &NativeTerminalSurfaceDiagnostics) -> Option<i32> {
     diagnostics
         .windows_text
         .as_ref()
@@ -124,16 +122,18 @@ pub fn native_surface_scale_factor_percent(
         .and_then(|text| text.scale_factor_percent)
 }
 
-pub fn native_surface_dpi_x(
-    diagnostics: &NativeTerminalSurfaceDiagnostics,
-) -> Option<u32> {
-    diagnostics.windows_text.as_ref().and_then(|text| text.dpi_x)
+pub fn native_surface_dpi_x(diagnostics: &NativeTerminalSurfaceDiagnostics) -> Option<u32> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.dpi_x)
 }
 
-pub fn native_surface_dpi_y(
-    diagnostics: &NativeTerminalSurfaceDiagnostics,
-) -> Option<u32> {
-    diagnostics.windows_text.as_ref().and_then(|text| text.dpi_y)
+pub fn native_surface_dpi_y(diagnostics: &NativeTerminalSurfaceDiagnostics) -> Option<u32> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.dpi_y)
 }
 
 pub fn native_surface_glyph_bounds_trace(

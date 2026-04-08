@@ -11,9 +11,9 @@ use wezterm_term::color::{ColorAttribute, ColorPalette, SrgbaTuple};
 use wezterm_term::{Intensity, Line, Terminal, TerminalConfiguration, TerminalSize, Underline};
 
 use crate::app::ssh::runtime::{
-    TerminalCellState, TerminalCursorShape, TerminalCursorState, TerminalKeyEvent,
-    TerminalKeyKind, TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput,
-    TerminalRowState, TerminalSurfaceState,
+    TerminalCellState, TerminalCursorShape, TerminalCursorState, TerminalKeyEvent, TerminalKeyKind,
+    TerminalMouseButton, TerminalMouseEventKind, TerminalMouseInput, TerminalRowState,
+    TerminalSurfaceState,
 };
 use crate::app::terminal_core::{
     SelectionState, TerminalCoreAdapter, TerminalFrameSnapshot, ViewportState,
@@ -114,7 +114,11 @@ impl WeztermTerminalCoreAdapter {
             .screen()
             .lines_in_phys_range(visible_start..visible_end);
         for (visible_row, line) in lines.iter().enumerate() {
-            rows.push(project_terminal_row(line, visible_row as u32, size.cols.max(1)));
+            rows.push(project_terminal_row(
+                line,
+                visible_row as u32,
+                size.cols.max(1),
+            ));
         }
 
         while rows.len() < size.rows.max(1) {
@@ -952,7 +956,6 @@ impl Write for SharedWriteBuffer {
         Ok(())
     }
 }
-
 
 impl TerminalCoreAdapter for WeztermTerminalCoreAdapter {
     fn sequence_number(&self) -> usize {

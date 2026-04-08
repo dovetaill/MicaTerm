@@ -1,8 +1,8 @@
 //! Present-driver seams for native terminal surface scheduling.
 
-use std::rc::Rc;
 use i_slint_backend_winit::WinitWindowAfterDrawHook;
 use slint::{ComponentHandle, RenderingState, SetRenderingNotifierError};
+use std::rc::Rc;
 
 use crate::AppWindow;
 use crate::app::runtime_profile::NativePresentPath;
@@ -10,7 +10,7 @@ use crate::app::runtime_profile::NativePresentPath;
 pub type NativeSurfacePresentCallback = Rc<dyn Fn()>;
 
 pub trait NativeSurfacePresentDriver {
-    fn schedule_present(&self, callback: NativeSurfacePresentCallback);
+    fn schedule_present(&self, callback: NativeSurfacePresentCallback, request_host_redraw: bool);
 }
 
 #[derive(Clone)]
@@ -27,9 +27,12 @@ impl RenderingNotifierPresentDriver {
 }
 
 impl NativeSurfacePresentDriver for RenderingNotifierPresentDriver {
-    fn schedule_present(&self, _callback: NativeSurfacePresentCallback) {
-        if let Some(window) = self.window.upgrade() {
-            window.window().request_redraw();
+    fn schedule_present(&self, callback: NativeSurfacePresentCallback, request_host_redraw: bool) {
+        callback();
+        if request_host_redraw {
+            if let Some(window) = self.window.upgrade() {
+                window.window().request_redraw();
+            }
         }
     }
 }
@@ -48,9 +51,12 @@ impl EventLoopPresentDriver {
 }
 
 impl NativeSurfacePresentDriver for EventLoopPresentDriver {
-    fn schedule_present(&self, _callback: NativeSurfacePresentCallback) {
-        if let Some(window) = self.window.upgrade() {
-            window.window().request_redraw();
+    fn schedule_present(&self, callback: NativeSurfacePresentCallback, request_host_redraw: bool) {
+        callback();
+        if request_host_redraw {
+            if let Some(window) = self.window.upgrade() {
+                window.window().request_redraw();
+            }
         }
     }
 }
@@ -58,10 +64,12 @@ impl NativeSurfacePresentDriver for EventLoopPresentDriver {
 pub fn create_present_driver(
     window: &AppWindow,
     native_present_path: NativePresentPath,
-) -> Box<dyn NativeSurfacePresentDriver> {
+) -> Rc<dyn NativeSurfacePresentDriver> {
     match native_present_path {
-        NativePresentPath::EventLoop => Box::new(EventLoopPresentDriver::new(window)),
-        NativePresentPath::RenderingNotifier => Box::new(RenderingNotifierPresentDriver::new(window)),
+        NativePresentPath::EventLoop => Rc::new(EventLoopPresentDriver::new(window)),
+        NativePresentPath::RenderingNotifier => {
+            Rc::new(RenderingNotifierPresentDriver::new(window))
+        }
     }
 }
 
@@ -72,11 +80,13 @@ pub fn install_rendering_notifier(
 ) -> Result<(), SetRenderingNotifierError> {
     window
         .window()
-        .set_rendering_notifier(move |rendering_state, _graphics_api| match rendering_state {
-            RenderingState::AfterRendering => on_after_rendering(),
-            RenderingState::RenderingTeardown => on_rendering_teardown(),
-            _ => {}
-        })
+        .set_rendering_notifier(
+            move |rendering_state, _graphics_api| match rendering_state {
+                RenderingState::AfterRendering => on_after_rendering(),
+                RenderingState::RenderingTeardown => on_rendering_teardown(),
+                _ => {}
+            },
+        )
 }
 
 pub fn install_winit_after_draw_hook(

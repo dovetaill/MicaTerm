@@ -1,3 +1,4 @@
+use mica_term::app::ssh::runtime::TerminalCursorShape;
 use mica_term::app::terminal_presenter::{
     NativeCursorFrameState, NativeCursorOverlay, NativeImePreviewOverlay, NativeRendererFrameStats,
     NativeSelectionFrameState, NativeSelectionOverlay, NativeSelectionRect, NativeTerminalFrame,
@@ -7,7 +8,6 @@ use mica_term::app::terminal_renderer::{
     NativeFrameDamageTracker, NativeSurfaceDamageKind, NativeTerminalSurfaceRect,
     RetainedNativeTerminalSurfaceFrame,
 };
-use mica_term::app::ssh::runtime::TerminalCursorShape;
 
 fn frame_with_cursor(frame_token: u64, cursor_col: Option<u32>) -> NativeTerminalFrame {
     let cursor_overlay = cursor_col.map_or(
@@ -43,6 +43,8 @@ fn frame_with_cursor(frame_token: u64, cursor_col: Option<u32>) -> NativeTermina
             glyph_run_count: 0,
             glyph_count: 0,
             dirty_row_count: 1,
+            viewport_offset_lines: 0,
+            row_content_hashes: vec![0, 0],
             default_fg_rgba: 0xffff_ffff,
             default_bg_rgba: 0xff11_2233,
             row_bg_even_rgba: 0xff11_2233,
@@ -106,6 +108,8 @@ fn frame_with_underline(
             glyph_run_count: 0,
             glyph_count: 0,
             dirty_row_count: 1,
+            viewport_offset_lines: 0,
+            row_content_hashes: vec![0, 0],
             default_fg_rgba: 0xffff_ffff,
             default_bg_rgba: 0xff11_2233,
             row_bg_even_rgba: 0xff11_2233,
@@ -171,6 +175,8 @@ fn frame_with_selection(
             glyph_run_count: 0,
             glyph_count: 0,
             dirty_row_count: 1,
+            viewport_offset_lines: 0,
+            row_content_hashes: vec![0, 0],
             default_fg_rgba: 0xffff_ffff,
             default_bg_rgba: 0xff11_2233,
             row_bg_even_rgba: 0xff11_2233,
@@ -240,6 +246,8 @@ fn frame_with_ime_preview(
             glyph_run_count: 0,
             glyph_count: 0,
             dirty_row_count: 1,
+            viewport_offset_lines: 0,
+            row_content_hashes: vec![0, 0],
             default_fg_rgba: 0xffff_ffff,
             default_bg_rgba: 0xff11_2233,
             row_bg_even_rgba: 0xff11_2233,

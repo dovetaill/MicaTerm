@@ -88,7 +88,9 @@ impl PlatformNativeSurfaceBackend for DetachedPlatformSurfaceBackend {
 
     fn present(&mut self, _damage: crate::app::terminal_renderer::NativeSurfaceDamage) {}
 
-    fn diagnostics_snapshot(&self) -> crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics {
+    fn diagnostics_snapshot(
+        &self,
+    ) -> crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics {
         crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics::default()
     }
 

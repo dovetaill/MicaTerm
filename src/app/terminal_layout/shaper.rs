@@ -3,8 +3,7 @@
 use anyhow::Result;
 
 use crate::app::terminal_font::{
-    FontFallbackFace, FontSystem, LoadedFont, OpenTypeFeatureSet, ShapedGlyph,
-    TextShapingRequest,
+    FontFallbackFace, FontSystem, LoadedFont, OpenTypeFeatureSet, ShapedGlyph, TextShapingRequest,
 };
 use crate::app::terminal_layout::run_segmentation::{
     RunCluster, SegmentedRun, TextStyleKey, segment_row,
@@ -38,6 +37,8 @@ pub struct GlyphRun {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShapedRow {
     pub row: u32,
+    pub content_hash: u64,
+    pub row_hash: u64,
     pub runs: Vec<GlyphRun>,
 }
 
@@ -70,6 +71,8 @@ impl TextShaper for TerminalTextShaper {
 
         Ok(ShapedRow {
             row: row.row_index,
+            content_hash: row.content_hash,
+            row_hash: row.row_hash,
             runs,
         })
     }
@@ -185,8 +188,14 @@ fn source_byte_range_to_clusters(
                 Some(RunCluster {
                     text: cluster.text.clone(),
                     cell_range: cluster.cell_range.clone(),
-                    byte_range: cluster.byte_range.start.saturating_sub(source_byte_range.start)
-                        ..cluster.byte_range.end.saturating_sub(source_byte_range.start),
+                    byte_range: cluster
+                        .byte_range
+                        .start
+                        .saturating_sub(source_byte_range.start)
+                        ..cluster
+                            .byte_range
+                            .end
+                            .saturating_sub(source_byte_range.start),
                 })
             } else {
                 None

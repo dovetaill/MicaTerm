@@ -26,14 +26,16 @@ pub struct MockFontSystem {
 }
 
 pub fn mock_font_system() -> MockFontSystem {
-    MockFontSystem::new().expect("bundled Fusion JetBrains Maple Mono mock font system should initialize")
+    MockFontSystem::new()
+        .expect("bundled Fusion JetBrains Maple Mono mock font system should initialize")
 }
 
 impl MockFontSystem {
     pub fn new() -> Result<Self> {
-        let font = FontArc::try_from_slice(FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES).map_err(
-            |error| anyhow!("failed to load bundled Fusion JetBrains Maple Mono font: {error}"),
-        )?;
+        let font =
+            FontArc::try_from_slice(FUSION_JETBRAINS_MAPLE_MONO_FONT_BYTES).map_err(|error| {
+                anyhow!("failed to load bundled Fusion JetBrains Maple Mono font: {error}")
+            })?;
         Ok(Self {
             font,
             #[cfg(feature = "terminal-native-renderer")]

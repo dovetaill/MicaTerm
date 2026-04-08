@@ -431,8 +431,8 @@ fn tabbar_sizes_workspace_tabs_from_title_content_instead_of_even_stretch() {
         "tab row should keep unused width in a trailing spacer instead of stretching the last tab"
     );
     assert!(
-        tabbar.contains("background: ThemeTokens.titlebar-surface;"),
-        "tab strip should sit on the titlebar-like surface instead of the plain editor surface"
+        tabbar.contains("background: ThemeTokens.tabbar-surface;"),
+        "tab strip should sit on the dedicated semantic tabbar surface instead of the plain editor surface"
     );
     assert!(
         active_tab.contains("preferred-width"),
@@ -575,7 +575,8 @@ fn terminal_session_host_exposes_text_key_and_resize_callbacks() {
         "AppWindow should expose a wide-char cell-hit normalization callback for the active terminal session"
     );
     assert!(
-        app_window.contains("callback workspace-session-normalize-selection-hit-col(int, int) -> int;"),
+        app_window
+            .contains("callback workspace-session-normalize-selection-hit-col(int, int) -> int;"),
         "AppWindow should expose a wide-char-aware selection-boundary normalization callback for the active terminal session"
     );
     assert!(
@@ -689,9 +690,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose a hit-column normalization callback so pointer-driven mouse reporting can collapse trailing wide cells back onto their owning glyph span"
     );
     assert!(
-        app_window.contains(
-            "callback workspace-session-normalize-selection-hit-col(int, int) -> int;"
-        ),
+        app_window
+            .contains("callback workspace-session-normalize-selection-hit-col(int, int) -> int;"),
         "AppWindow should expose a selection-hit normalization callback so half-cell terminal selection can snap wide-character interior boundaries onto stable cluster edges"
     );
     assert!(
@@ -717,12 +717,12 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "AppWindow should expose whether the terminal viewport is already at bottom"
     );
     assert!(
-        app_window.contains("in-out property <bool> workspace-session-follow-paused: false;"),
-        "AppWindow should expose whether the active terminal session has paused auto-follow"
+        !app_window.contains("workspace-session-follow-paused"),
+        "AppWindow should stop exposing paused-follow chrome after removing the jump-to-latest affordance"
     );
     assert!(
-        app_window.contains("in-out property <int> workspace-session-pending-output-lines: 0;"),
-        "AppWindow should expose the unread output count accumulated while auto-follow is paused"
+        !app_window.contains("workspace-session-pending-output-lines"),
+        "AppWindow should stop exposing pending-output badge state after removing the jump-to-latest affordance"
     );
     assert!(
         app_window.contains("in-out property <bool> workspace-session-selection-active: false;"),
@@ -808,12 +808,12 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "WorkspacePane should forward the viewport bottom-state projection into TerminalSessionHost"
     );
     assert!(
-        workspace_pane.contains("workspace-session-follow-paused"),
-        "WorkspacePane should forward the paused-follow projection into TerminalSessionHost"
+        !workspace_pane.contains("workspace-session-follow-paused"),
+        "WorkspacePane should stop threading paused-follow chrome into TerminalSessionHost"
     );
     assert!(
-        workspace_pane.contains("workspace-session-pending-output-lines"),
-        "WorkspacePane should forward the pending-output count into TerminalSessionHost"
+        !workspace_pane.contains("workspace-session-pending-output-lines"),
+        "WorkspacePane should stop threading pending-output badge state into TerminalSessionHost"
     );
     assert!(
         workspace_pane.contains("selection-active <=> root.workspace-session-selection-active;"),
@@ -853,16 +853,16 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should emit track jump requests for local scrollback"
     );
     assert!(
-        terminal_host.contains("callback jump-to-latest-requested();"),
-        "TerminalSessionHost should emit a jump-to-latest callback while auto-follow is paused"
+        !terminal_host.contains("jump-to-latest-requested();"),
+        "TerminalSessionHost should stop exposing a jump-to-latest callback"
     );
     assert!(
-        terminal_host.contains("in property <bool> session-follow-paused: false;"),
-        "TerminalSessionHost should accept a paused-follow projection"
+        !terminal_host.contains("session-follow-paused"),
+        "TerminalSessionHost should stop accepting paused-follow state once the pill is removed"
     );
     assert!(
-        terminal_host.contains("in property <int> session-pending-output-lines: 0;"),
-        "TerminalSessionHost should accept an unread output count projection"
+        !terminal_host.contains("session-pending-output-lines"),
+        "TerminalSessionHost should stop accepting pending-output state once the pill is removed"
     );
     assert!(
         terminal_host.contains("private property <length> terminal-font-size"),
@@ -1001,8 +1001,8 @@ fn terminal_session_host_exposes_cell_cursor_selection_and_context_menu_contract
         "TerminalSessionHost should render a dedicated scrollbar thumb"
     );
     assert!(
-        terminal_host.contains("Jump to latest"),
-        "TerminalSessionHost should render a jump-to-latest affordance when auto-follow is paused"
+        !terminal_host.contains("Jump to latest"),
+        "TerminalSessionHost should no longer render a jump-to-latest affordance"
     );
     assert!(
         !terminal_host.contains("terminal-lines := ListView {"),

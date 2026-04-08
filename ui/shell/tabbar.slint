@@ -24,7 +24,7 @@ export component TabBar inherits Rectangle {
     width: 100%;
     min-width: 0px;
     height: 36px;
-    background: ThemeTokens.titlebar-surface;
+    background: ThemeTokens.tabbar-surface;
     border-width: 0px;
 
     HorizontalLayout {
@@ -54,14 +54,16 @@ export component TabBar inherits Rectangle {
         }
 
         new-tab-button := Rectangle {
-            width: 32px;
+            width: 34px;
             height: 30px;
             y: 3px;
-            border-radius: 0px;
+            border-radius: 8px;
+            border-width: new-tab-touch.has-hover ? 1px : 0px;
+            border-color: ThemeTokens.divider-subtle;
             background: new-tab-touch.pressed
                 ? ThemeTokens.control-pressed-surface
                 : new-tab-touch.has-hover
-                    ? ThemeTokens.control-hover-surface
+                    ? ThemeTokens.tab-inactive-surface
                     : transparent;
 
             Image {
@@ -71,7 +73,7 @@ export component TabBar inherits Rectangle {
                 height: 16px;
                 source: root.new-tab-icon;
                 image-fit: contain;
-                colorize: ThemeTokens.text-primary;
+                colorize: new-tab-touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
             }
 
             new-tab-touch := TouchArea {

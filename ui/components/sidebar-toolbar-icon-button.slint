@@ -23,14 +23,16 @@ export component SidebarToolbarIconButton inherits Rectangle {
     width: 28px;
     height: 28px;
     border-radius: 6px;
-    border-width: root.active ? 1px : 0px;
-    border-color: ThemeTokens.divider-subtle;
+    border-width: root.active || root.has-hover ? 1px : 0px;
+    border-color: root.active ? ThemeTokens.divider-strong : ThemeTokens.divider-subtle;
     background: !root.enabled
         ? transparent
         : touch.pressed
-            ? ThemeTokens.control-active-surface
-            : (touch.has-hover || root.active)
-                ? ThemeTokens.control-hover-surface
+            ? ThemeTokens.control-pressed-surface
+            : root.active
+                ? ThemeTokens.control-active-surface
+                : touch.has-hover
+                    ? ThemeTokens.control-hover-surface
                 : transparent;
 
     if (root.displayed-icon.width > 0 && root.displayed-icon.height > 0) : Image {
@@ -40,7 +42,7 @@ export component SidebarToolbarIconButton inherits Rectangle {
         height: 20px;
         source <=> root.displayed-icon;
         image-fit: contain;
-        colorize: ThemeTokens.text-primary;
+        colorize: root.active || touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
     }
 
     changed has-hover => {

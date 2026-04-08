@@ -61,7 +61,8 @@ fn bitmap_and_native_font_sources_point_at_windows_terminal_defaults() {
         "bitmap atlas should load the bundled Cascadia Mono face as the default Latin terminal font"
     );
     assert!(
-        backend_source.contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Cascadia Mono\";"),
+        backend_source
+            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Cascadia Mono\";"),
         "font backend should move the default terminal family to Cascadia Mono"
     );
     assert!(

@@ -40,15 +40,14 @@ impl NativeFrameDamageTracker {
                 if previous.rect == next.rect
                     && previous.frame.frame_token == next.frame.frame_token =>
             {
-                let overlays_changed =
-                    previous.frame.presentable_frame.cursor_overlay
-                        != next.frame.presentable_frame.cursor_overlay
-                        || previous.frame.presentable_frame.selection_overlay
-                            != next.frame.presentable_frame.selection_overlay
-                        || previous.frame.presentable_frame.underline_overlay
-                            != next.frame.presentable_frame.underline_overlay
-                        || previous.frame.presentable_frame.ime_preview_overlay
-                            != next.frame.presentable_frame.ime_preview_overlay;
+                let overlays_changed = previous.frame.presentable_frame.cursor_overlay
+                    != next.frame.presentable_frame.cursor_overlay
+                    || previous.frame.presentable_frame.selection_overlay
+                        != next.frame.presentable_frame.selection_overlay
+                    || previous.frame.presentable_frame.underline_overlay
+                        != next.frame.presentable_frame.underline_overlay
+                    || previous.frame.presentable_frame.ime_preview_overlay
+                        != next.frame.presentable_frame.ime_preview_overlay;
                 if overlays_changed {
                     self.pending = Some(NativeSurfaceDamage {
                         kind: NativeSurfaceDamageKind::OverlayOnly,
@@ -95,7 +94,10 @@ fn extend_overlay_damage_rect(
     frame: &RetainedNativeTerminalSurfaceFrame,
 ) {
     let presentable = &frame.frame.presentable_frame;
-    union_rect(damage, cursor_overlay_rect(frame.rect, presentable.cursor_overlay));
+    union_rect(
+        damage,
+        cursor_overlay_rect(frame.rect, presentable.cursor_overlay),
+    );
 
     if presentable.underline_overlay.visible {
         for run in &presentable.underline_overlay.runs {
@@ -112,7 +114,6 @@ fn extend_overlay_damage_rect(
             );
         }
     }
-
 }
 
 fn cursor_overlay_rect(
@@ -141,16 +142,34 @@ fn extend_changed_selection_damage_rect(
     extend_unique_selection_rects(
         damage,
         previous.rect,
-        previous.frame.presentable_frame.selection_overlay.rects.as_slice(),
-        next.frame.presentable_frame.selection_overlay.rects.as_slice(),
+        previous
+            .frame
+            .presentable_frame
+            .selection_overlay
+            .rects
+            .as_slice(),
+        next.frame
+            .presentable_frame
+            .selection_overlay
+            .rects
+            .as_slice(),
         previous.frame.cell_width_px,
         previous.frame.cell_height_px,
     );
     extend_unique_selection_rects(
         damage,
         next.rect,
-        next.frame.presentable_frame.selection_overlay.rects.as_slice(),
-        previous.frame.presentable_frame.selection_overlay.rects.as_slice(),
+        next.frame
+            .presentable_frame
+            .selection_overlay
+            .rects
+            .as_slice(),
+        previous
+            .frame
+            .presentable_frame
+            .selection_overlay
+            .rects
+            .as_slice(),
         next.frame.cell_width_px,
         next.frame.cell_height_px,
     );
@@ -171,7 +190,9 @@ fn extend_unique_selection_rects(
         }) {
             pending_segments = pending_segments
                 .into_iter()
-                .flat_map(|segment| subtract_cell_span(segment, (overlap.start_col, overlap.end_col)))
+                .flat_map(|segment| {
+                    subtract_cell_span(segment, (overlap.start_col, overlap.end_col))
+                })
                 .collect();
             if pending_segments.is_empty() {
                 break;
@@ -294,10 +315,7 @@ fn ime_preview_cursor_rect(
     )
 }
 
-fn subtract_cell_span(
-    source: (u32, u32),
-    overlap: (u32, u32),
-) -> Vec<(u32, u32)> {
+fn subtract_cell_span(source: (u32, u32), overlap: (u32, u32)) -> Vec<(u32, u32)> {
     let (source_start, source_end) = source;
     let (overlap_start, overlap_end) = overlap;
 
@@ -323,7 +341,10 @@ fn cell_span_rect(
     cell_width_px: u32,
     cell_height_px: u32,
 ) -> Option<NativeTerminalSurfaceRect> {
-    if cell_width_px == 0 || cell_height_px == 0 || surface_rect.width <= 0 || surface_rect.height <= 0
+    if cell_width_px == 0
+        || cell_height_px == 0
+        || surface_rect.width <= 0
+        || surface_rect.height <= 0
     {
         return None;
     }
@@ -334,9 +355,9 @@ fn cell_span_rect(
     let top = surface_rect
         .y
         .saturating_add((row.saturating_mul(cell_height_px)) as i32);
-    let right = surface_rect.x.saturating_add(
-        (end_col.saturating_add(1).saturating_mul(cell_width_px)) as i32,
-    );
+    let right = surface_rect
+        .x
+        .saturating_add((end_col.saturating_add(1).saturating_mul(cell_width_px)) as i32);
     let bottom = surface_rect
         .y
         .saturating_add((row.saturating_add(1).saturating_mul(cell_height_px)) as i32);
@@ -352,7 +373,10 @@ fn cell_span_rect(
     )
 }
 
-fn union_rect(damage: &mut Option<NativeTerminalSurfaceRect>, next: Option<NativeTerminalSurfaceRect>) {
+fn union_rect(
+    damage: &mut Option<NativeTerminalSurfaceRect>,
+    next: Option<NativeTerminalSurfaceRect>,
+) {
     let Some(next) = next else {
         return;
     };

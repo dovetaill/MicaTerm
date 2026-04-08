@@ -15,9 +15,9 @@ export component WindowControlButton inherits Rectangle {
     width: 46px;
     height: 36px;
     background: touch.pressed
-        ? (root.danger ? #9f1239 : ThemeTokens.control-active-surface)
+        ? (root.danger ? ThemeTokens.danger-pressed-surface : ThemeTokens.control-pressed-surface)
         : touch.has-hover
-            ? (root.danger ? #be123c : ThemeTokens.control-hover-surface)
+            ? (root.danger ? ThemeTokens.danger-hover-surface : ThemeTokens.control-hover-surface)
             : transparent;
 
     if (root.icon-source.width > 0 && root.icon-source.height > 0) : Image {
@@ -27,7 +27,11 @@ export component WindowControlButton inherits Rectangle {
         height: 20px;
         source <=> root.icon-source;
         image-fit: contain;
-        colorize: ThemeTokens.text-primary;
+        colorize: root.danger && root.has-hover
+            ? ThemeTokens.danger-fg
+            : root.has-hover
+                ? ThemeTokens.text-primary
+                : ThemeTokens.text-secondary;
     }
 
     changed has-hover => {

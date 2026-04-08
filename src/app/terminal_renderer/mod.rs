@@ -6,8 +6,8 @@ pub mod damage;
 pub mod diagnostics;
 pub mod host;
 pub mod native_surface;
-pub mod present_driver;
 pub mod platform;
+pub mod present_driver;
 #[cfg(feature = "terminal-native-renderer")]
 pub mod wgpu_renderer;
 
@@ -18,12 +18,12 @@ pub use diagnostics::{NativeTerminalSurfaceDiagnostics, NativeTerminalSurfaceDra
 pub use host::TerminalRendererHost;
 pub use host::TerminalRendererHostOptions;
 pub use native_surface::NativeTerminalSurface;
-pub use present_driver::{
-    EventLoopPresentDriver, NativeSurfacePresentDriver, RenderingNotifierPresentDriver,
-};
 pub use platform::{
     NativeTerminalSurfaceRect, PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
     WindowsNativeSurfaceBackend,
+};
+pub use present_driver::{
+    EventLoopPresentDriver, NativeSurfacePresentDriver, RenderingNotifierPresentDriver,
 };
 #[cfg(feature = "terminal-native-renderer")]
 pub use wgpu_renderer::{PreparedNativeFrame, ShapedTerminalFrame, WgpuTerminalRenderer};

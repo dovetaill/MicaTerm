@@ -10,8 +10,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::app::ssh::connection_progress::{
-    ConnectionHeadlineState, ConnectionProgressEvent, ConnectionStepState,
-    ConnectionStepStateItem,
+    ConnectionHeadlineState, ConnectionProgressEvent, ConnectionStepState, ConnectionStepStateItem,
 };
 use crate::app::ssh::credentials::{
     CredentialStore, StoredSecretLookupError, StoredSshSecretBundle,

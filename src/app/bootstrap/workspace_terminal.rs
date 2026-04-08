@@ -142,7 +142,8 @@ pub(super) fn normalize_active_workspace_hit_col(
 ) -> i32 {
     let safe_row = row.max(0) as u32;
     let safe_col = col.max(0) as u32;
-    state.active_workspace_terminal_surface()
+    state
+        .active_workspace_terminal_surface()
         .map(|surface| surface.normalize_hit_col(safe_row, safe_col) as i32)
         .unwrap_or(col.max(0))
 }
@@ -154,7 +155,8 @@ pub(super) fn normalize_active_workspace_selection_hit_col(
 ) -> i32 {
     let safe_row = row.max(0) as u32;
     let safe_col = col.max(0) as u32;
-    state.active_workspace_terminal_surface()
+    state
+        .active_workspace_terminal_surface()
         .map(|surface| surface.normalize_selection_hit_col(safe_row, safe_col) as i32)
         .unwrap_or(col.max(0))
 }
@@ -188,6 +190,20 @@ pub(super) fn refresh_active_terminal_surface_only(
             follow_tracker,
             Some(&bridge.manager),
         );
+    }
+}
+
+pub(super) fn refresh_active_terminal_scroll_projection_only(
+    window: &AppWindow,
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    _follow_tracker: &mut WorkspaceFollowTracker,
+) {
+    let Some(bridge) = bridge else {
+        return;
+    };
+    if sync_active_workspace_surface_projection_from_manager(state, &bridge.manager) {
+        super::sync_workspace_terminal_surface_projection_only(window, state);
     }
 }
 
@@ -291,16 +307,14 @@ pub(super) fn schedule_workspace_scroll_projection_refresh(
     let window_handle = window.as_weak();
     timer.start(
         TimerMode::SingleShot,
-        Duration::from_millis(WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS),
+        Duration::from_millis(WORKSPACE_SCROLL_VIEWPORT_PROJECTION_DEBOUNCE_MS),
         move || {
             gate.borrow_mut().clear();
             let Some(window) = window_handle.upgrade() else {
                 return;
             };
             let mut state = state.borrow_mut();
-            // Keep refresh_active_workspace_surface_projection(...) as the legacy alias
-            // for this surface-local refresh seam while callers migrate.
-            refresh_active_terminal_surface_only(
+            refresh_active_terminal_scroll_projection_only(
                 &window,
                 &mut state,
                 bridge.as_deref(),
@@ -329,7 +343,7 @@ pub(super) fn schedule_workspace_scroll_thumb_drag_update(
     let window_handle = window.as_weak();
     timer.start(
         TimerMode::SingleShot,
-        Duration::from_millis(WORKSPACE_SCROLL_PROJECTION_DEBOUNCE_MS),
+        Duration::from_millis(WORKSPACE_SCROLL_THUMB_DRAG_PROJECTION_DEBOUNCE_MS),
         move || {
             let ratio = {
                 let mut deferred_drag = deferred_drag.borrow_mut();
@@ -346,9 +360,7 @@ pub(super) fn schedule_workspace_scroll_thumb_drag_update(
                 forward_active_workspace_scroll_ratio(&state, bridge.as_deref(), ratio);
             }
             let mut state = state.borrow_mut();
-            // Keep refresh_active_workspace_surface_projection(...) as the legacy alias
-            // for this surface-local refresh seam while callers migrate.
-            refresh_active_terminal_surface_only(
+            refresh_active_terminal_scroll_projection_only(
                 &window,
                 &mut state,
                 bridge.as_deref(),

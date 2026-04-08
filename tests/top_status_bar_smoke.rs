@@ -1,7 +1,7 @@
 //! Smoke coverage for titlebar bindings, theme sync, and auxiliary actions.
 
-use std::collections::BTreeMap;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fs;
 use std::future::Future;
 use std::pin::Pin;
@@ -13,9 +13,8 @@ use anyhow::{Result, anyhow};
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::{
     PrivateKeyImporter, VaultProviderFactory, VaultRuntimeOptions,
-    bind_top_status_bar_with_injected_services_and_vault_runtime,
-    bind_top_status_bar_with_store, bind_top_status_bar_with_store_and_effects,
-    runtime_window_title,
+    bind_top_status_bar_with_injected_services_and_vault_runtime, bind_top_status_bar_with_store,
+    bind_top_status_bar_with_store_and_effects, runtime_window_title,
 };
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
@@ -27,8 +26,8 @@ use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, Termin
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::ui_preferences::UiPreferencesStore;
 use mica_term::app::vault::model::{
-    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, ProviderAuthKind,
-    ProviderKind, RemoteRole,
+    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, ProviderAuthKind, ProviderKind,
+    RemoteRole,
 };
 use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
@@ -130,7 +129,10 @@ impl PrivateKeyImporter for CancelledPrivateKeyImporter {
 }
 
 fn sample_vault_runtime_root(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("mica-term-titlebar-sync-{label}-{}", Uuid::new_v4()))
+    std::env::temp_dir().join(format!(
+        "mica-term-titlebar-sync-{label}-{}",
+        Uuid::new_v4()
+    ))
 }
 
 fn sample_bootstrap_bundle_with_primary() -> BootstrapBundle {

@@ -2,7 +2,8 @@ use std::fs;
 
 #[test]
 fn runtime_depends_on_terminal_core_adapter_contract() {
-    let source = fs::read_to_string("src/app/ssh/runtime/terminal.rs").expect("read runtime terminal source");
+    let source = fs::read_to_string("src/app/ssh/runtime/terminal.rs")
+        .expect("read runtime terminal source");
 
     assert!(
         source.contains("dyn TerminalCoreAdapter"),

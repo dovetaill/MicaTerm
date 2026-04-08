@@ -325,8 +325,7 @@ fn terminal_model_tracks_viewport_stable_content_hashes_across_scrollback_shifts
         "scrollback shifts should preserve a viewport-stable row content hash for reused lines"
     );
     assert_eq!(
-        previous.rows[1].content_hash,
-        next.rows[2].content_hash,
+        previous.rows[1].content_hash, next.rows[2].content_hash,
         "adjacent viewport shifts should keep overlapping rows reusable even when they move to a new viewport row index"
     );
 }

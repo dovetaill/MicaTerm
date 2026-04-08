@@ -18,16 +18,16 @@ export component ActiveTab inherits Rectangle {
     private property <bool> close-visible: root.active || root.has-hover;
 
     min-width: 0px;
-    height: 30px;
+    height: 32px;
     preferred-width: min(root.max-chip-width, max(root.min-chip-width, title-metric.preferred-width + 62px));
-    border-radius: 0px;
+    border-radius: 10px;
     border-width: 0px;
     background: root.active
-        ? ThemeTokens.workspace-surface
+        ? ThemeTokens.tab-active-surface
         : (content-hit-target.pressed || close-hit-target.pressed)
             ? ThemeTokens.control-pressed-surface
             : root.has-hover
-                ? ThemeTokens.control-hover-surface
+                ? ThemeTokens.tab-inactive-surface
                 : transparent;
     clip: true;
 
@@ -48,9 +48,23 @@ export component ActiveTab inherits Rectangle {
         width: 2px;
         height: 14px;
         border-radius: 1px;
-        background: root.state == "error" || root.state == "disconnected" ? #c94f4f :
-                    root.state == "connecting" ? ThemeTokens.accent :
-                    root.state == "launcher" ? ThemeTokens.divider-subtle : #4da36d;
+        background: root.state == "error" || root.state == "disconnected"
+            ? ThemeTokens.status-error-accent
+            : root.state == "connecting"
+                ? ThemeTokens.status-busy-accent
+                : root.state == "launcher"
+                    ? ThemeTokens.divider-strong
+                    : ThemeTokens.status-success-accent;
+    }
+
+    active-indicator := Rectangle {
+        x: 10px;
+        y: parent.height - 2px;
+        width: parent.width - 20px;
+        height: 2px;
+        border-radius: 1px;
+        background: ThemeTokens.tab-active-indicator;
+        visible: root.active;
     }
 
     bottom-divider := Rectangle {
@@ -85,12 +99,12 @@ export component ActiveTab inherits Rectangle {
         if (root.close-icon.width > 0 && root.close-icon.height > 0) : Image {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: 14px;
-            height: 14px;
-            source <=> root.close-icon;
-            image-fit: contain;
-            colorize: ThemeTokens.text-primary;
-        }
+        width: 14px;
+        height: 14px;
+        source <=> root.close-icon;
+        image-fit: contain;
+        colorize: close-hit-target.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+    }
     }
 
     title-label := Text {
@@ -99,7 +113,7 @@ export component ActiveTab inherits Rectangle {
         width: max(0px, close-button.x - 24px);
         height: parent.height;
         text: root.title;
-        color: ThemeTokens.text-primary;
+        color: root.active ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
         font-size: 12px;
         font-weight: root.active ? 700 : 600;
         vertical-alignment: center;

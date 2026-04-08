@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use xwin_link::{maybe_prepare_advapi32_shim, ShimConfig};
+use xwin_link::{ShimConfig, maybe_prepare_advapi32_shim};
 
 #[test]
 fn creates_case_exact_advapi32_shim_from_xwin_cache() {

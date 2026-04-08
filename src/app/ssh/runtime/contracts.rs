@@ -349,13 +349,8 @@ mod tests {
 
     fn sample_surface() -> TerminalSurfaceState {
         let session_id = Uuid::nil();
-        let mut surface = TerminalSurfaceState::from_visible_lines(
-            session_id,
-            1,
-            1,
-            8,
-            vec!["A条B".into()],
-        );
+        let mut surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 1, 1, 8, vec!["A条B".into()]);
         surface.cells = vec![
             TerminalCellState {
                 row: 0,

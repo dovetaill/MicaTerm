@@ -690,6 +690,8 @@ fn native_renderer_keeps_color_cache_entries_distinct_per_fallback_face() -> Res
         font: loaded_font,
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![
                 GlyphRun {
                     row: 0,

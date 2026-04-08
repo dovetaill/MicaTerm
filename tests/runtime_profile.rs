@@ -130,7 +130,10 @@ fn mainline_profile_defaults_to_retained_native_surface_with_scene_image_rollbac
         TerminalCompositionMode::PostRenderNativeSurface,
         "mainline builds should default to the retained native surface once the new terminal subsystem becomes the primary execution path"
     );
-    assert_eq!(profile.terminal_subsystem_mode_label(), "retained-native-surface");
+    assert_eq!(
+        profile.terminal_subsystem_mode_label(),
+        "retained-native-surface"
+    );
 }
 
 #[test]

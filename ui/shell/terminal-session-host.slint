@@ -142,19 +142,12 @@ export component TerminalSessionHost inherits Rectangle {
     in property <color> session-default-bg: ThemeTokens.terminal-default-bg;
     in property <color> session-scrollbar-thumb: ThemeTokens.terminal-scrollbar-thumb-surface;
     in property <color> session-scrollbar-thumb-active: ThemeTokens.terminal-scrollbar-thumb-active-surface;
-    in property <color> session-jump-to-latest-bg: ThemeTokens.terminal-jump-to-latest-surface;
-    in property <color> session-jump-to-latest-hover-bg: ThemeTokens.terminal-jump-to-latest-hover-surface;
-    in property <color> session-jump-to-latest-pressed-bg: ThemeTokens.terminal-jump-to-latest-pressed-surface;
-    in property <color> session-jump-to-latest-border: ThemeTokens.terminal-jump-to-latest-border;
-    in property <color> session-jump-to-latest-fg: ThemeTokens.terminal-jump-to-latest-fg;
     in property <bool> session-mouse-grabbed: false;
     in property <[string]> session-visible-lines: [];
     in property <int> session-surface-seqno: 0;
     in property <int> session-viewport-offset-lines: 0;
     in property <int> session-viewport-max-offset-lines: 0;
     in property <bool> session-viewport-at-bottom: true;
-    in property <bool> session-follow-paused: false;
-    in property <int> session-pending-output-lines: 0;
     in property <float> session-device-scale-factor: 1.0;
     in-out property <bool> selection-active: false;
     in-out property <int> selection-start-row: -1;
@@ -177,7 +170,6 @@ export component TerminalSessionHost inherits Rectangle {
     callback scroll-requested(int, int, int, bool, bool, bool);
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
-    callback jump-to-latest-requested();
     callback mouse-input(string, string, int, int, bool, bool, bool);
     callback welcome-quick-launch-asset-selected(string);
     callback welcome-quick-launch-search-changed(string);
@@ -198,7 +190,6 @@ export component TerminalSessionHost inherits Rectangle {
     private property <length> scrollbar-reserved-width: 12px;
     private property <length> scrollbar-track-width: 7px;
     private property <length> scrollbar-thumb-min-height: 28px;
-    private property <length> jump-to-latest-height: 32px;
     private property <float> wheel-delta-remainder: 0;
     private property <float> wheel-delta-threshold: 120;
     private property <int> wheel-lines-per-notch: 6;
@@ -323,24 +314,10 @@ export component TerminalSessionHost inherits Rectangle {
         );
     }
 
-    function jump-to-latest-width() -> length {
-        return root.session-pending-output-lines > 0 ? 212px : 144px;
-    }
-
-    function jump-to-latest-x() -> length {
-        return max(
-            root.terminal-surface-origin-x(),
-            root.width - root.terminal-padding-right
-                - (root.scrollbar-visible() ? root.scrollbar-reserved-width : 0px)
-                - root.jump-to-latest-width(),
-        );
-    }
-
-    function jump-to-latest-y() -> length {
-        return root.terminal-surface-origin-y() + max(
-            0px,
-            root.terminal-visible-grid-height() - root.jump-to-latest-height - 12px,
-        );
+    function accumulated-wheel-lines() -> int {
+        return root.wheel-delta-remainder >= 0
+            ? Math.floor(root.wheel-delta-remainder)
+            : -Math.floor(-root.wheel-delta-remainder);
     }
 
     function terminal-cell-x(col: int) -> length {
@@ -942,7 +919,7 @@ export component TerminalSessionHost inherits Rectangle {
             clip: true;
             border-width: 1px;
             border-color: ThemeTokens.divider-subtle;
-            background: root.session-default-bg;
+            background: ThemeTokens.panel-surface;
 
             blank-surface := Rectangle {
                 x: root.terminal-surface-origin-x();
@@ -1012,21 +989,14 @@ export component TerminalSessionHost inherits Rectangle {
                                 row,
                                 root.terminal-hit-col(self.mouse-x),
                             );
-                            root.wheel-delta-remainder = root.wheel-delta-remainder + (event.delta-y / 1px);
-                            let delta-lines =
-                                root.wheel-delta-remainder >= root.wheel-delta-threshold
-                                ? root.wheel-lines-per-notch
-                                : root.wheel-delta-remainder <= -root.wheel-delta-threshold
-                                ? -root.wheel-lines-per-notch
-                                : 0;
+                            root.wheel-delta-remainder = root.wheel-delta-remainder
+                                + (((event.delta-y / 1px) / root.wheel-delta-threshold)
+                                    * root.wheel-lines-per-notch);
+                            let delta-lines = root.accumulated-wheel-lines();
                             terminal-input.focus();
                             root.close-context-menu();
                             if delta-lines != 0 {
-                                if delta-lines > 0 {
-                                    root.wheel-delta-remainder = root.wheel-delta-remainder - root.wheel-delta-threshold;
-                                } else {
-                                    root.wheel-delta-remainder = root.wheel-delta-remainder + root.wheel-delta-threshold;
-                                }
+                                root.wheel-delta-remainder = root.wheel-delta-remainder - delta-lines;
                                 root.scroll-requested(
                                     delta-lines,
                                     row,
@@ -1221,47 +1191,6 @@ export component TerminalSessionHost inherits Rectangle {
                 }
             }
 
-            if root.session-follow-paused : jump-to-latest-pill := Rectangle {
-                x: root.jump-to-latest-x();
-                y: root.jump-to-latest-y();
-                width: root.jump-to-latest-width();
-                height: root.jump-to-latest-height;
-                border-radius: self.height / 2;
-                border-width: 1px;
-                border-color: root.session-jump-to-latest-border;
-                background: jump-to-latest-touch.pressed
-                    ? root.session-jump-to-latest-pressed-bg
-                    : jump-to-latest-touch.has-hover
-                        ? root.session-jump-to-latest-hover-bg
-                        : root.session-jump-to-latest-bg;
-
-                Text {
-                    x: 14px;
-                    y: 0px;
-                    width: parent.width - 28px;
-                    height: parent.height;
-                        text: root.session-pending-output-lines > 0
-                            ? "Jump to latest (" + root.session-pending-output-lines + " new)"
-                            : "Jump to latest";
-                    color: root.session-jump-to-latest-fg;
-                    font-size: 12px;
-                    font-weight: 600;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                jump-to-latest-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        terminal-input.focus();
-                        root.close-context-menu();
-                        root.jump-to-latest-requested();
-                    }
-                }
-            }
-
             if root.terminal-context-menu-open : terminal-context-menu-dismiss-layer := TouchArea {
                 width: parent.width;
                 height: parent.height;
@@ -1281,7 +1210,7 @@ export component TerminalSessionHost inherits Rectangle {
                 border-radius: 8px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-strong;
-                background: ThemeTokens.inspector-surface;
+                background: ThemeTokens.panel-surface;
 
                 VerticalLayout {
                     x: 8px;
@@ -1355,7 +1284,7 @@ export component TerminalSessionHost inherits Rectangle {
                 border-radius: 12px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.titlebar-surface;
+                background: ThemeTokens.panel-surface;
 
                 VerticalLayout {
                     width: parent.width;
@@ -1375,8 +1304,7 @@ export component TerminalSessionHost inherits Rectangle {
 
                     Text {
                         text: root.session-subtitle != "" ? root.session-subtitle : root.connection-progress-headline-label();
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.72;
+                        color: ThemeTokens.text-secondary;
                         font-size: 12px;
                     }
 
@@ -1384,8 +1312,7 @@ export component TerminalSessionHost inherits Rectangle {
                         text: root.connection-progress-current-hop != ""
                             ? root.connection-progress-headline-label() + " · " + root.connection-progress-current-hop
                             : root.connection-progress-headline-label();
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.84;
+                        color: ThemeTokens.text-secondary;
                         font-size: 12px;
                     }
                 }
@@ -1397,7 +1324,7 @@ export component TerminalSessionHost inherits Rectangle {
                 border-radius: 12px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.titlebar-surface;
+                background: ThemeTokens.panel-surface;
                 clip: true;
 
                 VerticalLayout {
@@ -1415,15 +1342,15 @@ export component TerminalSessionHost inherits Rectangle {
                         border-radius: 10px;
                         border-width: 1px;
                         border-color: step.state == "running"
-                            ? ThemeTokens.accent
+                            ? ThemeTokens.focus-ring
                             : ThemeTokens.divider-subtle;
                         background: step.state == "running"
-                            ? ThemeTokens.control-hover-surface
+                            ? ThemeTokens.sidebar-selected-surface
                             : step.state == "failed"
                                 ? ThemeTokens.status-error-surface
                                 : step.state == "done"
                                     ? ThemeTokens.status-success-surface
-                                    : ThemeTokens.control-active-surface;
+                                    : ThemeTokens.input-surface;
 
                         HorizontalLayout {
                             width: parent.width;
@@ -1440,11 +1367,11 @@ export component TerminalSessionHost inherits Rectangle {
                                 border-radius: 5px;
                                 y: 6px;
                                 background: step.state == "running"
-                                    ? ThemeTokens.accent
+                                    ? ThemeTokens.status-busy-accent
                                     : step.state == "failed"
-                                        ? #d46a78
+                                        ? ThemeTokens.status-error-accent
                                         : step.state == "done"
-                                            ? #5bb37f
+                                            ? ThemeTokens.status-success-accent
                                             : ThemeTokens.divider-strong;
                             }
 
@@ -1462,8 +1389,7 @@ export component TerminalSessionHost inherits Rectangle {
 
                                 Text {
                                     text: step.detail;
-                                    color: ThemeTokens.text-primary;
-                                    opacity: 0.72;
+                                    color: ThemeTokens.text-secondary;
                                     font-size: 11px;
                                     overflow: elide;
                                 }
@@ -1479,7 +1405,7 @@ export component TerminalSessionHost inherits Rectangle {
                 border-radius: 10px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.control-active-surface;
+                background: ThemeTokens.input-surface;
 
                 Text {
                     x: 16px;
@@ -1489,7 +1415,7 @@ export component TerminalSessionHost inherits Rectangle {
                     text: root.connection-progress-current-detail != ""
                         ? root.connection-progress-current-detail
                         : "Preparing SSH connection timeline...";
-                    color: ThemeTokens.text-primary;
+                    color: ThemeTokens.text-secondary;
                     vertical-alignment: center;
                     wrap: word-wrap;
                 }
@@ -1501,7 +1427,7 @@ export component TerminalSessionHost inherits Rectangle {
                 border-radius: 10px;
                 border-width: 1px;
                 border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.control-active-surface;
+                background: ThemeTokens.input-surface;
 
                 VerticalLayout {
                     width: parent.width;
@@ -1521,15 +1447,13 @@ export component TerminalSessionHost inherits Rectangle {
 
                     Text {
                         text: root.connection-progress-host-key-prompt-host;
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.84;
+                        color: ThemeTokens.text-secondary;
                         font-size: 11px;
                     }
 
                     Text {
                         text: root.connection-progress-host-key-prompt-fingerprint;
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.64;
+                        color: ThemeTokens.text-muted;
                         font-size: 11px;
                         wrap: word-wrap;
                     }
@@ -1568,7 +1492,7 @@ export component TerminalSessionHost inherits Rectangle {
                 border-radius: 10px;
                 border-width: root.connection-progress-diagnostics-expanded ? 1px : 0px;
                 border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.control-active-surface;
+                background: ThemeTokens.input-surface;
 
                 VerticalLayout {
                     width: parent.width;
@@ -1581,8 +1505,7 @@ export component TerminalSessionHost inherits Rectangle {
 
                     for line in root.connection-progress-diagnostics : Text {
                         text: line.text;
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.72;
+                        color: ThemeTokens.text-secondary;
                         font-size: 11px;
                         wrap: word-wrap;
                     }

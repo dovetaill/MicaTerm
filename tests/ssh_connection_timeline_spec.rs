@@ -173,11 +173,7 @@ fn sample_profile(asset_id: &str) -> ConnectionProfile {
     }
 }
 
-fn wait_for_host_key_prompt(
-    runtime: &AppAsyncRuntime,
-    manager: &SessionManager,
-    session_id: Uuid,
-) {
+fn wait_for_host_key_prompt(runtime: &AppAsyncRuntime, manager: &SessionManager, session_id: Uuid) {
     runtime.block_on(async {
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {

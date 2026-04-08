@@ -98,6 +98,8 @@ fn native_renderer_snaps_ascii_clusters_to_cell_origins_instead_of_shaped_pen_dr
         font: grid_test_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..3,
@@ -164,24 +166,34 @@ fn native_renderer_snaps_ascii_clusters_to_cell_origins_instead_of_shaped_pen_dr
     assert_eq!(prepared.monochrome_glyph_draws.len(), 3);
     assert_eq!(
         prepared.monochrome_glyph_draws[0].dest_x_px
-            + prepared.monochrome_glyph_draws[0].atlas_entry.padding_left_px as i32,
+            + prepared.monochrome_glyph_draws[0]
+                .atlas_entry
+                .padding_left_px as i32,
         0,
         "the first glyph should start at the first cell origin"
     );
     assert_eq!(
         prepared.monochrome_glyph_draws[1].dest_x_px
-            + prepared.monochrome_glyph_draws[1].atlas_entry.padding_left_px as i32,
+            + prepared.monochrome_glyph_draws[1]
+                .atlas_entry
+                .padding_left_px as i32,
         8,
         "the second glyph should snap to column 1 instead of inheriting the previous glyph's 7.2px shaped advance"
     );
     assert_eq!(
         prepared.monochrome_glyph_draws[2].dest_x_px
-            + prepared.monochrome_glyph_draws[2].atlas_entry.padding_left_px as i32,
+            + prepared.monochrome_glyph_draws[2]
+                .atlas_entry
+                .padding_left_px as i32,
         16,
         "the third glyph should stay on column 2 so cursor and selection geometry do not drift as the line grows"
     );
     assert_eq!(
-        fonts.requests.iter().map(|request| request.fractional_offset_x()).collect::<Vec<_>>(),
+        fonts
+            .requests
+            .iter()
+            .map(|request| request.fractional_offset_x())
+            .collect::<Vec<_>>(),
         vec![0.0, 0.0, 0.0],
         "single-cell terminal clusters should reset their raster phase at each cell boundary instead of carrying subpixel pen drift across the row"
     );
@@ -197,6 +209,8 @@ fn native_renderer_advances_following_clusters_by_logical_span_after_a_wide_cell
         font: grid_test_font(),
         rows: vec![ShapedRow {
             row: 0,
+            content_hash: 0,
+            row_hash: 0,
             runs: vec![GlyphRun {
                 row: 0,
                 cell_range: 0..3,
@@ -249,18 +263,18 @@ fn native_renderer_advances_following_clusters_by_logical_span_after_a_wide_cell
 
     assert_eq!(prepared.monochrome_glyph_draws.len(), 2);
     assert_eq!(
-        prepared.monochrome_glyph_draws[0].start_col,
-        0,
+        prepared.monochrome_glyph_draws[0].start_col, 0,
         "the wide glyph should still own the first logical column in its span"
     );
     assert_eq!(
-        prepared.monochrome_glyph_draws[0].end_col,
-        1,
+        prepared.monochrome_glyph_draws[0].end_col, 1,
         "the wide glyph should still report a two-cell logical ownership span"
     );
     assert_eq!(
         prepared.monochrome_glyph_draws[1].dest_x_px
-            + prepared.monochrome_glyph_draws[1].atlas_entry.padding_left_px as i32,
+            + prepared.monochrome_glyph_draws[1]
+                .atlas_entry
+                .padding_left_px as i32,
         16,
         "the cluster after a wide glyph should start at the next logical cell after the full span instead of sliding left into the wide cell's reserved space"
     );

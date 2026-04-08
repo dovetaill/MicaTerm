@@ -15,9 +15,9 @@ use super::auth::RuntimeClientHandler;
 use super::terminal::{TerminalSession, apply_remote_output, snapshot_terminal_surface};
 use super::transport::TransportChainGuard;
 use super::{
-    FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL, INPUT_ACTIVE_SURFACE_DIRTY_WINDOW,
-    RuntimeCommand, SURFACE_DIRTY_NOTIFICATION_INTERVAL, SessionRuntimeEvent,
-    WORKING_SET_TRIM_IDLE_INTERVAL, WORKING_SET_TRIM_MIN_OUTPUT_BYTES,
+    FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL, INPUT_ACTIVE_SURFACE_DIRTY_WINDOW, RuntimeCommand,
+    SURFACE_DIRTY_NOTIFICATION_INTERVAL, SessionRuntimeEvent, WORKING_SET_TRIM_IDLE_INTERVAL,
+    WORKING_SET_TRIM_MIN_OUTPUT_BYTES,
 };
 
 pub(super) async fn run_channel_pump(
@@ -351,9 +351,14 @@ mod tests {
 
         notifier.note_local_input(now);
 
-        assert_eq!(notifier.preferred_interval(now), FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL);
         assert_eq!(
-            notifier.preferred_interval(now + INPUT_ACTIVE_SURFACE_DIRTY_WINDOW + Duration::from_millis(1)),
+            notifier.preferred_interval(now),
+            FAST_SURFACE_DIRTY_NOTIFICATION_INTERVAL
+        );
+        assert_eq!(
+            notifier.preferred_interval(
+                now + INPUT_ACTIVE_SURFACE_DIRTY_WINDOW + Duration::from_millis(1)
+            ),
             SURFACE_DIRTY_NOTIFICATION_INTERVAL
         );
         assert_eq!(

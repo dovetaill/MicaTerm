@@ -7,13 +7,17 @@ export component StatusPill inherits Rectangle {
 
     width: 120px;
     height: 28px;
-    border-radius: 0px;
-    background: ThemeTokens.inspector-surface;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: ThemeTokens.status-pill-border;
+    background: ThemeTokens.status-pill-surface;
 
     Text {
         text: root.label;
-        color: ThemeTokens.text-primary;
+        color: ThemeTokens.text-secondary;
         horizontal-alignment: center;
         vertical-alignment: center;
+        font-size: 12px;
+        font-weight: 600;
     }
 }

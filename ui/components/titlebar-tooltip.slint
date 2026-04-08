@@ -26,17 +26,17 @@ export component TitlebarTooltip inherits Rectangle {
     background-layer := Rectangle {
         width: parent.width;
         height: parent.height;
-        border-radius: 8px;
+        border-radius: 10px;
         border-width: 1px;
         border-color: ThemeTokens.divider-strong;
-        background: ThemeTokens.inspector-surface;
+        background: ThemeTokens.panel-surface;
 
         tooltip-label := Text {
             x: 10px;
             width: parent.width - 20px;
             height: parent.height;
             text: root.text;
-            color: ThemeTokens.text-primary;
+            color: ThemeTokens.text-secondary;
             horizontal-alignment: center;
             vertical-alignment: center;
         }

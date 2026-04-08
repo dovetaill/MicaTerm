@@ -17,11 +17,6 @@ pub struct TerminalThemePreset {
     pub ansi: [(u8, u8, u8); 16],
     pub scrollbar_thumb: (u8, u8, u8),
     pub scrollbar_thumb_active: (u8, u8, u8),
-    pub jump_to_latest_bg: u32,
-    pub jump_to_latest_hover_bg: u32,
-    pub jump_to_latest_pressed_bg: u32,
-    pub jump_to_latest_border: u32,
-    pub jump_to_latest_fg: u32,
     pub split: (u8, u8, u8),
 }
 
@@ -60,11 +55,6 @@ fn preset_from_theme_mode(theme_mode: ThemeMode) -> TerminalThemePreset {
         ansi: spec.ansi.map(rgb_components),
         scrollbar_thumb: rgb_components(spec.scrollbar_thumb),
         scrollbar_thumb_active: rgb_components(spec.scrollbar_thumb_active),
-        jump_to_latest_bg: spec.jump_to_latest_bg,
-        jump_to_latest_hover_bg: spec.jump_to_latest_hover_bg,
-        jump_to_latest_pressed_bg: spec.jump_to_latest_pressed_bg,
-        jump_to_latest_border: spec.jump_to_latest_border,
-        jump_to_latest_fg: spec.jump_to_latest_fg,
         split: rgb_components(spec.split),
     }
 }

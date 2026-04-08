@@ -4,7 +4,9 @@ use std::fs;
 #[cfg(feature = "terminal-native-renderer")]
 use anyhow::Result;
 #[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_font::{DirectWriteFontSystem, FontRequest, FontSystem, TextShapingRequest};
+use mica_term::app::terminal_font::{
+    DirectWriteFontSystem, FontRequest, FontSystem, TextShapingRequest,
+};
 
 #[test]
 fn cargo_manifest_enables_windows_directwrite_bindings_for_terminal_font_work() {

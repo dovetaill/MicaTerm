@@ -80,12 +80,13 @@ impl WindowsFontLocator {
             .unwrap_or_else(|| family_name.clone());
         let post_script_name = face.post_script_name.clone();
 
-        self.database.with_face_data(face_id, |font_data, face_index| ResolvedFontFaceData {
-            family_name: resolved_family,
-            post_script_name,
-            face_index,
-            font_data: font_data.to_vec(),
-        })
+        self.database
+            .with_face_data(face_id, |font_data, face_index| ResolvedFontFaceData {
+                family_name: resolved_family,
+                post_script_name,
+                face_index,
+                font_data: font_data.to_vec(),
+            })
     }
 
     fn resolve_installed_family(&self, family_name: &str) -> Option<String> {

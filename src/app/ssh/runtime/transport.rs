@@ -13,8 +13,7 @@ use crate::app::ssh::known_hosts::{KnownHostsService, default_known_hosts_path};
 use crate::app::ssh::profile::{ConnectionProfile, ResolvedProxyHop};
 
 use super::auth::{
-    ConnectionProgressReporter, RuntimeClientHandler, UnknownHostKeyError,
-    authenticate_client,
+    ConnectionProgressReporter, RuntimeClientHandler, UnknownHostKeyError, authenticate_client,
 };
 use super::{SSH_KEEPALIVE_INTERVAL, SSH_KEEPALIVE_MAX_MISSES};
 

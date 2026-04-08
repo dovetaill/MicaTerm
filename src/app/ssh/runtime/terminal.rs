@@ -14,9 +14,7 @@ use crate::app::terminal_core::{
 };
 use crate::theme::ThemeMode;
 
-use super::{
-    TerminalKeyEvent, TerminalMouseInput, TerminalRowState, TerminalSurfaceState,
-};
+use super::{TerminalKeyEvent, TerminalMouseInput, TerminalRowState, TerminalSurfaceState};
 
 pub(super) fn apply_remote_output(terminal: &Arc<Mutex<TerminalSession>>, bytes: &[u8]) {
     if let Ok(mut terminal) = terminal.lock() {

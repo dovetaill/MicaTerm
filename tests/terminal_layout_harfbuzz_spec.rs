@@ -1,9 +1,9 @@
+#[cfg(feature = "terminal-native-renderer")]
+use mica_term::app::terminal_font::DirectWriteFontSystem;
 use mica_term::app::terminal_font::mock::mock_font_system;
 use mica_term::app::terminal_font::{
     FontRequest, FontSystem, OpenTypeFeatureSet, TextShapingRequest,
 };
-#[cfg(feature = "terminal-native-renderer")]
-use mica_term::app::terminal_font::DirectWriteFontSystem;
 use mica_term::app::terminal_layout::shape_row;
 use mica_term::app::terminal_model::{TerminalModelCell, TerminalModelRow};
 
@@ -349,7 +349,10 @@ fn dwrite_shape_text_runs_split_mixed_text_and_preserve_feature_request() -> any
         "mixed text should shape into multiple fallback-aware runs"
     );
     assert_eq!(
-        shaped_runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+        shaped_runs
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>(),
         request.text,
         "fallback-aware shaping should preserve the original text payload across subruns"
     );
@@ -439,7 +442,11 @@ fn harfbuzz_layout_maps_fallback_subruns_back_to_terminal_cells() -> anyhow::Res
         "mixed text layout should expose multiple fallback-aware runs"
     );
     assert_eq!(
-        shaped.runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+        shaped
+            .runs
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect::<String>(),
         row.text,
         "layout fallback runs should preserve the source row text"
     );

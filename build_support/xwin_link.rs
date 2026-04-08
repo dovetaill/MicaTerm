@@ -1,8 +1,7 @@
 use std::{
     env,
     ffi::OsString,
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
 };
 
