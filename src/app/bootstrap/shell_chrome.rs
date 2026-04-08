@@ -42,6 +42,7 @@ pub(super) fn sync_top_status_bar_state(
     window.set_is_window_maximized(state.is_window_maximized());
     window.set_is_window_active(state.is_window_active);
     window.set_is_window_always_on_top(state.is_always_on_top);
+    window.set_settings_modal_open(state.settings_modal_open());
     window.set_sync_feedback_text(state.sync_feedback_state().text.clone().into());
     window.set_sync_feedback_sequence(state.sync_feedback_state().sequence);
     window.set_sync_feedback_running(state.sync_feedback_state().running);
@@ -69,6 +70,16 @@ pub(super) fn bind_shell_chrome_callbacks(
         sftp::sync_right_panel_state(&window, &state);
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    window.on_settings_modal_close_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_settings_modal();
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
     });
 
     let state = Rc::clone(view_model);

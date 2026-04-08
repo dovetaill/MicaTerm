@@ -21,6 +21,22 @@ fn settings_action_no_longer_routes_right_panel_to_sync_and_vault() {
 }
 
 #[test]
+fn settings_action_opens_settings_modal_without_touching_sftp_panel() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    assert!(!app.get_settings_modal_open());
+    assert_eq!(app.get_right_panel_view().as_str(), "sftp");
+
+    app.invoke_open_settings_panel_requested();
+
+    assert!(app.get_settings_modal_open());
+    assert_eq!(app.get_right_panel_view().as_str(), "sftp");
+}
+
+#[test]
 fn sync_settings_starts_closed_until_explicitly_requested() {
     i_slint_backend_testing::init_no_event_loop();
 

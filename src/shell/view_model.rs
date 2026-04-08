@@ -259,6 +259,11 @@ pub struct SyncFeedbackViewState {
     pub running: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SettingsModalViewState {
+    pub open: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultPanelViewState {
     pub title: String,
@@ -568,6 +573,7 @@ pub struct ShellViewModel {
     sftp_conflict_modal_state: SftpConflictModalState,
     sftp_remote_file_editor_state: SftpRemoteFileEditorState,
     sync_modal_state: SyncModalViewState,
+    settings_modal_state: SettingsModalViewState,
     sync_feedback_state: SyncFeedbackViewState,
     vault_panel_state: VaultPanelViewState,
     console_asset_tree: AssetTree,
@@ -636,6 +642,7 @@ impl Default for ShellViewModel {
             sftp_conflict_modal_state: SftpConflictModalState::default(),
             sftp_remote_file_editor_state: SftpRemoteFileEditorState::default(),
             sync_modal_state: SyncModalViewState::default(),
+            settings_modal_state: SettingsModalViewState::default(),
             sync_feedback_state: SyncFeedbackViewState::default(),
             vault_panel_state: VaultPanelViewState::default(),
             console_asset_tree: AssetTree::new(),

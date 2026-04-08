@@ -13,6 +13,7 @@ import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal
 import { BlockingModalShell } from "components/blocking-modal-shell.slint";
 import { OpenSavedSshModal } from "components/open-saved-ssh-modal.slint";
 import { SftpRemoteFileModal } from "components/sftp-remote-file-modal.slint";
+import { SettingsModal } from "components/settings-modal.slint";
 import { SyncVaultModal } from "components/sync-vault-modal.slint";
 import { SshHostKeyConfirmModal } from "components/ssh-host-key-confirm-modal.slint";
 import { StatusPill } from "components/status-pill.slint";
@@ -33,6 +34,7 @@ import { WorkspacePane } from "shell/workspace-pane.slint";
 export component AppWindow inherits Window {
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
     in-out property <bool> sync-modal-open: false;
+    in-out property <bool> settings-modal-open: false;
     in-out property <string> sync-modal-mode: "not-configured";
     in-out property <string> sync-modal-title: "Sync Settings";
     in-out property <string> sync-modal-headline: "";
@@ -322,6 +324,7 @@ export component AppWindow inherits Window {
     callback sync-modal-secondary-action-requested();
     callback sync-modal-draft-changed(string, string);
     callback sync-modal-toggle-changed(string, bool);
+    callback settings-modal-close-requested();
     callback open-settings-panel-requested();
     callback open-appearance-panel-requested();
     callback open-sftp-panel-requested();
@@ -461,6 +464,13 @@ export component AppWindow inherits Window {
 
     changed sync-modal-open => {
         if root.sync-modal-open {
+            root.blocking-modal-offset-x = 0px;
+            root.blocking-modal-offset-y = 0px;
+        }
+    }
+
+    changed settings-modal-open => {
+        if root.settings-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
         }
@@ -1093,7 +1103,7 @@ export component AppWindow inherits Window {
         y: titlebar.height;
         width: root.width;
         height: root.height - titlebar.height;
-        enabled: root.sync-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open || root.open-saved-ssh-modal-open;
+        enabled: root.sync-modal-open || root.settings-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open || root.open-saved-ssh-modal-open;
 
         clicked => { }
     }
@@ -1220,6 +1230,48 @@ export component AppWindow inherits Window {
 
             toggle-changed(field, value) => {
                 root.sync-modal-toggle-changed(field, value);
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
+    }
+
+    if root.settings-modal-open : settings-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 560px;
+        modal-height: 340px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        settings-modal-overlay := SettingsModal {
+            x: 0px;
+            y: 0px;
+            width: settings-modal-shell.content-width;
+            height: settings-modal-shell.content-height;
+
+            close-requested => {
+                root.settings-modal-close-requested();
             }
 
             drag-requested(pointer-x, pointer-y) => {

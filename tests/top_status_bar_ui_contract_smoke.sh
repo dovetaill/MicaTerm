@@ -8,6 +8,7 @@ TITLEBAR="$ROOT_DIR/ui/shell/titlebar.slint"
 TOOLTIP="$ROOT_DIR/ui/components/titlebar-tooltip.slint"
 APP_WINDOW="$ROOT_DIR/ui/app-window.slint"
 SYNC_MODAL="$ROOT_DIR/ui/components/sync-vault-modal.slint"
+SETTINGS_MODAL="$ROOT_DIR/ui/components/settings-modal.slint"
 VIEW_MODEL="$ROOT_DIR/src/shell/view_model.rs"
 
 [[ -f "$TOOLTIP" ]] || {
@@ -56,7 +57,9 @@ grep -F 'titlebar := Titlebar {' "$APP_WINDOW" >/dev/null
 grep -F 'show-right-panel: root.effective-show-right-panel;' "$APP_WINDOW" >/dev/null
 grep -F 'callback sync-now-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback open-sync-modal-requested();' "$APP_WINDOW" >/dev/null
+grep -F 'callback settings-modal-close-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> sync-modal-open: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <bool> settings-modal-open: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-local-last-sync-text: "Never synced";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-remote-last-update-text: "Unknown";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-primary-revision-text: "Unknown";' "$APP_WINDOW" >/dev/null
@@ -142,6 +145,9 @@ grep -F 'remote-last-update-text: root.sync-modal-remote-last-update-text;' "$AP
 grep -F 'primary-revision-text: root.sync-modal-primary-revision-text;' "$APP_WINDOW" >/dev/null
 grep -F 'remote-status-text: root.sync-modal-remote-status-text;' "$APP_WINDOW" >/dev/null
 grep -F 'remote-status-loading: root.sync-modal-remote-status-loading;' "$APP_WINDOW" >/dev/null
+grep -F 'if root.settings-modal-open : settings-modal-shell := BlockingModalShell {' "$APP_WINDOW" >/dev/null
+grep -F 'settings-modal-overlay := SettingsModal {' "$APP_WINDOW" >/dev/null
+[[ -f "$SETTINGS_MODAL" ]]
 grep -F 'in property <string> local-last-sync-text: "Never synced";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> remote-last-update-text: "Unknown";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> primary-revision-text: "Unknown";' "$SYNC_MODAL" >/dev/null
@@ -161,3 +167,4 @@ grep -F 'label: "Primary revision";' "$SYNC_MODAL" >/dev/null
 ! grep -F 'Lock' "$SYNC_MODAL" >/dev/null
 ! grep -F 'Locked,' "$VIEW_MODEL" >/dev/null
 ! grep -F 'UnlockedButRemoteIncomplete,' "$VIEW_MODEL" >/dev/null
+! grep -F 'self.open_sftp_panel();' "$ROOT_DIR/src/shell/view_model/projection.rs" >/dev/null

@@ -127,6 +127,10 @@ impl ShellViewModel {
         &self.sync_feedback_state
     }
 
+    pub fn settings_modal_open(&self) -> bool {
+        self.settings_modal_state.open
+    }
+
     pub fn start_sync_feedback(&mut self, text: impl Into<String>) {
         self.sync_feedback_state.text = text.into();
         self.sync_feedback_state.running = true;
@@ -152,7 +156,13 @@ impl ShellViewModel {
     }
 
     pub fn open_settings_panel(&mut self) {
-        self.open_sftp_panel();
+        self.settings_modal_state.open = true;
+        self.show_global_menu = false;
+    }
+
+    pub fn close_settings_modal(&mut self) {
+        self.settings_modal_state.open = false;
+        self.show_global_menu = false;
     }
 
     pub fn open_sync_modal(&mut self) {

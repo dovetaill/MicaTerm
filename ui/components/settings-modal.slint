@@ -1,0 +1,86 @@
+import { ModalHeaderBar } from "./modal-chrome.slint";
+import { ThemeTokens } from "../theme/tokens.slint";
+
+export component SettingsModal inherits Rectangle {
+    callback close-requested();
+    callback drag-requested(length, length);
+    callback drag-moved(length, length);
+    callback drag-ended();
+    callback focus-restore-requested();
+
+    background: ThemeTokens.assets-surface;
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: ThemeTokens.divider-subtle;
+
+    modal-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.focus-restore-requested();
+                root.close-requested();
+                accept
+            } else {
+                reject
+            }
+        }
+
+        header := ModalHeaderBar {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            title: "Settings";
+            prominent: true;
+
+            close-requested => {
+                root.close-requested();
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.focus-restore-requested();
+            }
+        }
+
+        body := Rectangle {
+            x: 0px;
+            y: header.height;
+            width: parent.width;
+            height: parent.height - header.height;
+            background: ThemeTokens.inspector-surface;
+
+            title-copy := Text {
+                x: 20px;
+                y: 18px;
+                width: parent.width - 40px;
+                text: "Terminal settings";
+                color: ThemeTokens.text-primary;
+                font-size: 16px;
+                font-weight: 600;
+            }
+
+            subtitle-copy := Text {
+                x: 20px;
+                y: 48px;
+                width: parent.width - 40px;
+                text: "Scrollback and memory controls are configured here.";
+                color: ThemeTokens.text-primary;
+                opacity: 0.74;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
