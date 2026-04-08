@@ -258,6 +258,36 @@ fn presenter_sources_expose_scrollback_row_shape_reuse_contract() {
 }
 
 #[test]
+fn presenter_and_scene_image_sources_expose_cache_stats_and_clear_hooks() {
+    let presenter_source = fs::read_to_string("src/app/terminal_presenter.rs")
+        .expect("read terminal presenter source");
+    let scene_image_source = fs::read_to_string("src/app/terminal_scene_image.rs")
+        .expect("read scene image source");
+
+    for expected in [
+        "pub struct TerminalPresenterCacheStats",
+        "fn cache_stats(&self) -> TerminalPresenterCacheStats",
+        "fn clear_transient_caches(&mut self)",
+    ] {
+        assert!(
+            presenter_source.contains(expected),
+            "terminal presenter source should expose `{expected}` so bootstrap can inspect and shrink retained caches when terminal memory diagnostics are enabled"
+        );
+    }
+
+    for expected in [
+        "pub struct SceneImageCacheStats",
+        "pub fn cache_stats(&self) -> SceneImageCacheStats",
+        "pub fn clear_transient_caches(&mut self)",
+    ] {
+        assert!(
+            scene_image_source.contains(expected),
+            "scene-image renderer should expose `{expected}` so retained bitmap and glyph caches are observable and shrinkable after scroll-heavy sessions close"
+        );
+    }
+}
+
+#[test]
 fn renderer_host_exposes_surface_local_present_updates() {
     let host_source =
         fs::read_to_string("src/app/terminal_renderer/host.rs").expect("read renderer host");

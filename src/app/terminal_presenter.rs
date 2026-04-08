@@ -22,12 +22,12 @@ use crate::app::terminal_model::TerminalModelFrame;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::wgpu_renderer::{
     PreparedBackgroundRun, PreparedColorGlyphDraw, PreparedMonochromeGlyphDraw,
-    PreparedUnderlineRun,
+    PreparedUnderlineRun, WgpuRendererCacheStats,
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_scene_image::SceneImageTerminalRenderer;
+use crate::app::terminal_scene_image::{SceneImageCacheStats, SceneImageTerminalRenderer};
 use crate::app::terminal_semantic::{SemanticInputOverlay, SemanticOutputOverlay};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_semantic::{detect_input_line_overlays, detect_output_block_overlays};
@@ -194,6 +194,22 @@ pub struct TerminalPresentationOptions {
     pub ime_preview_overlay: NativeImePreviewOverlay,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TerminalPresenterCacheStats {
+    pub previous_frame_rows: usize,
+    pub previous_shaped_rows: usize,
+    pub shaped_row_cache_entries: usize,
+    pub shaped_row_cache_capacity: usize,
+    pub mono_glyph_cache_entries: usize,
+    pub color_glyph_cache_entries: usize,
+    pub glyph_raster_cache_entries: usize,
+    pub prepared_row_cache_entries: usize,
+    pub scene_image_mono_glyph_cache_entries: usize,
+    pub scene_image_color_glyph_cache_entries: usize,
+    pub scene_image_last_base_pixels_bytes: usize,
+    pub scene_image_working_pixels_bytes: usize,
+}
+
 #[cfg(feature = "terminal-native-renderer")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct TerminalPrepareDiagnostics {
@@ -245,6 +261,14 @@ impl Default for PresenterShapedRowCache {
 
 #[cfg(feature = "terminal-native-renderer")]
 impl PresenterShapedRowCache {
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn capacity(&self) -> usize {
+        self.capacity
+    }
+
     fn clear(&mut self) {
         self.entries.clear();
         self.recency.clear();
@@ -330,6 +354,12 @@ pub trait TerminalPresenter {
     ) -> Result<PresentedTerminalFrame>;
 
     fn default_cell_size(&self) -> (u32, u32);
+
+    fn cache_stats(&self) -> TerminalPresenterCacheStats {
+        TerminalPresenterCacheStats::default()
+    }
+
+    fn clear_transient_caches(&mut self) {}
 }
 
 pub struct BitmapAtlasPresenter {
@@ -379,6 +409,21 @@ impl TerminalPresenter for BitmapAtlasPresenter {
     fn default_cell_size(&self) -> (u32, u32) {
         let metrics = self.renderer.raster_metrics();
         (metrics.cell_width, metrics.cell_height)
+    }
+
+    fn cache_stats(&self) -> TerminalPresenterCacheStats {
+        TerminalPresenterCacheStats {
+            previous_frame_rows: self
+                .previous_frame
+                .as_ref()
+                .map(|frame| frame.rows.len())
+                .unwrap_or_default(),
+            ..TerminalPresenterCacheStats::default()
+        }
+    }
+
+    fn clear_transient_caches(&mut self) {
+        self.previous_frame = None;
     }
 }
 
@@ -476,6 +521,36 @@ impl TerminalPresenter for WindowsNativePresenter {
     fn default_cell_size(&self) -> (u32, u32) {
         self.loaded_font.cell_size_px()
     }
+
+    fn cache_stats(&self) -> TerminalPresenterCacheStats {
+        let renderer_stats: WgpuRendererCacheStats = self.renderer.cache_stats();
+        TerminalPresenterCacheStats {
+            previous_frame_rows: self
+                .previous_frame
+                .as_ref()
+                .map(|frame| frame.rows.len())
+                .unwrap_or_default(),
+            previous_shaped_rows: self
+                .previous_shaped_rows
+                .as_ref()
+                .map(|rows| rows.len())
+                .unwrap_or_default(),
+            shaped_row_cache_entries: self.shaped_row_cache.len(),
+            shaped_row_cache_capacity: self.shaped_row_cache.capacity(),
+            mono_glyph_cache_entries: renderer_stats.mono_glyph_cache_entries,
+            color_glyph_cache_entries: renderer_stats.color_glyph_cache_entries,
+            glyph_raster_cache_entries: renderer_stats.glyph_raster_cache_entries,
+            prepared_row_cache_entries: renderer_stats.prepared_row_cache_entries,
+            ..TerminalPresenterCacheStats::default()
+        }
+    }
+
+    fn clear_transient_caches(&mut self) {
+        self.previous_frame = None;
+        self.previous_shaped_rows = None;
+        self.shaped_row_cache.clear();
+        self.renderer.clear_transient_caches();
+    }
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -572,6 +647,41 @@ impl TerminalPresenter for WindowsSceneImagePresenter {
 
     fn default_cell_size(&self) -> (u32, u32) {
         self.loaded_font.cell_size_px()
+    }
+
+    fn cache_stats(&self) -> TerminalPresenterCacheStats {
+        let renderer_stats: WgpuRendererCacheStats = self.renderer.cache_stats();
+        let scene_stats: SceneImageCacheStats = self.scene_renderer.cache_stats();
+        TerminalPresenterCacheStats {
+            previous_frame_rows: self
+                .previous_frame
+                .as_ref()
+                .map(|frame| frame.rows.len())
+                .unwrap_or_default(),
+            previous_shaped_rows: self
+                .previous_shaped_rows
+                .as_ref()
+                .map(|rows| rows.len())
+                .unwrap_or_default(),
+            shaped_row_cache_entries: self.shaped_row_cache.len(),
+            shaped_row_cache_capacity: self.shaped_row_cache.capacity(),
+            mono_glyph_cache_entries: renderer_stats.mono_glyph_cache_entries,
+            color_glyph_cache_entries: renderer_stats.color_glyph_cache_entries,
+            glyph_raster_cache_entries: renderer_stats.glyph_raster_cache_entries,
+            prepared_row_cache_entries: renderer_stats.prepared_row_cache_entries,
+            scene_image_mono_glyph_cache_entries: scene_stats.monochrome_glyph_cache_entries,
+            scene_image_color_glyph_cache_entries: scene_stats.color_glyph_cache_entries,
+            scene_image_last_base_pixels_bytes: scene_stats.last_base_pixels_bytes,
+            scene_image_working_pixels_bytes: scene_stats.working_pixels_bytes,
+        }
+    }
+
+    fn clear_transient_caches(&mut self) {
+        self.previous_frame = None;
+        self.previous_shaped_rows = None;
+        self.shaped_row_cache.clear();
+        self.renderer.clear_transient_caches();
+        self.scene_renderer.clear_transient_caches();
     }
 }
 

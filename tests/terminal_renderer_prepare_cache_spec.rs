@@ -256,3 +256,43 @@ fn native_renderer_reuses_prepared_rows_for_overlapping_scrollback_viewports() -
 
     Ok(())
 }
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_clear_transient_caches_drops_prepared_and_glyph_state() -> Result<()> {
+    let mut font_system = CountingRasterFontSystem::new()?;
+    let loaded_font = font_system.load_font(&FontRequest::default())?;
+    let mut renderer = WgpuTerminalRenderer::new_for_test()?;
+
+    let rows = vec![
+        build_ascii_row(0, "one"),
+        build_ascii_row(1, "two"),
+        build_ascii_row(2, "three"),
+    ];
+    let frame = ShapedTerminalFrame {
+        seqno: 10,
+        font: loaded_font.clone(),
+        rows: shape_rows(&mut font_system, &loaded_font, &rows)?,
+    };
+    renderer.prepare(&frame, &mut font_system)?;
+
+    assert!(
+        renderer.glyph_raster_cache_entry_count() > 0,
+        "renderer prepare should populate glyph caches before the clear hook runs"
+    );
+
+    renderer.clear_transient_caches();
+
+    assert_eq!(
+        renderer.glyph_raster_cache_entry_count(),
+        0,
+        "clear_transient_caches should drop retained glyph rasters when the workspace no longer has an active terminal surface"
+    );
+    assert_eq!(
+        renderer.prepared_row_cache_entry_count(),
+        0,
+        "clear_transient_caches should drop retained prepared rows so scroll-heavy sessions do not leave renderer row caches behind after close"
+    );
+
+    Ok(())
+}

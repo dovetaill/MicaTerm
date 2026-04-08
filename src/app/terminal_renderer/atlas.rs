@@ -74,6 +74,11 @@ pub struct GlyphAtlas {
 }
 
 impl GlyphAtlas {
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.next_slot = 0;
+    }
+
     pub fn contains(&self, request: GlyphRasterRequest) -> bool {
         self.entries.contains_key(&GlyphAtlasKey::from(request))
     }

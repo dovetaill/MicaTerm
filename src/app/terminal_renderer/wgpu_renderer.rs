@@ -196,6 +196,14 @@ pub struct WgpuTerminalRenderer {
     next_color_slot: u32,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WgpuRendererCacheStats {
+    pub mono_glyph_cache_entries: usize,
+    pub color_glyph_cache_entries: usize,
+    pub glyph_raster_cache_entries: usize,
+    pub prepared_row_cache_entries: usize,
+}
+
 impl WgpuTerminalRenderer {
     pub fn new() -> Self {
         Self::default()
@@ -211,6 +219,29 @@ impl WgpuTerminalRenderer {
 
     pub fn last_prepared_row_reuse_count(&self) -> usize {
         self.last_prepared_row_reuse_count
+    }
+
+    pub fn prepared_row_cache_entry_count(&self) -> usize {
+        self.previous_prepared_rows.len()
+    }
+
+    pub fn cache_stats(&self) -> WgpuRendererCacheStats {
+        WgpuRendererCacheStats {
+            mono_glyph_cache_entries: self.atlas.entry_count(),
+            color_glyph_cache_entries: self.color_glyph_cache.len(),
+            glyph_raster_cache_entries: self.glyph_raster_cache.len(),
+            prepared_row_cache_entries: self.previous_prepared_rows.len(),
+        }
+    }
+
+    pub fn clear_transient_caches(&mut self) {
+        self.atlas.clear();
+        self.color_glyph_cache.clear();
+        self.glyph_raster_cache.clear();
+        self.previous_prepared_rows.clear();
+        self.last_prepared_row_reuse_count = 0;
+        self.last_frame_fingerprint = None;
+        self.next_color_slot = 0;
     }
 
     pub fn prepare(

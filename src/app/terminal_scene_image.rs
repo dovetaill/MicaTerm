@@ -36,6 +36,16 @@ pub struct SceneImageTerminalRenderer {
     last_render_diagnostics: Option<SceneImageRenderDiagnostics>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SceneImageCacheStats {
+    pub monochrome_glyph_cache_entries: usize,
+    pub color_glyph_cache_entries: usize,
+    pub has_last_base_bitmap_frame: bool,
+    pub has_last_bitmap_frame: bool,
+    pub last_base_pixels_bytes: usize,
+    pub working_pixels_bytes: usize,
+}
+
 #[derive(Clone)]
 struct CachedMonochromeGlyph {
     width_px: u32,
@@ -90,6 +100,28 @@ struct PixelSurface<'a> {
 }
 
 impl SceneImageTerminalRenderer {
+    pub fn cache_stats(&self) -> SceneImageCacheStats {
+        SceneImageCacheStats {
+            monochrome_glyph_cache_entries: self.monochrome_glyph_cache.len(),
+            color_glyph_cache_entries: self.color_glyph_cache.len(),
+            has_last_base_bitmap_frame: self.last_base_bitmap_frame.is_some(),
+            has_last_bitmap_frame: self.last_bitmap_frame.is_some(),
+            last_base_pixels_bytes: self
+                .last_base_pixels
+                .as_ref()
+                .map(|pixels| pixels.len().saturating_mul(std::mem::size_of::<Rgba8Pixel>()))
+                .unwrap_or_default(),
+            working_pixels_bytes: self
+                .working_pixels
+                .len()
+                .saturating_mul(std::mem::size_of::<Rgba8Pixel>()),
+        }
+    }
+
+    pub fn clear_transient_caches(&mut self) {
+        self.clear();
+    }
+
     pub fn clear(&mut self) {
         self.monochrome_glyph_cache.clear();
         self.color_glyph_cache.clear();
