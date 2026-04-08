@@ -52,7 +52,10 @@ pub fn persist_conflict_entries(
     Ok(persisted_paths)
 }
 
-pub fn load_conflict_entries(conflict_root: &Path, vault_id: &str) -> Result<Vec<ConflictInboxEntry>> {
+pub fn load_conflict_entries(
+    conflict_root: &Path,
+    vault_id: &str,
+) -> Result<Vec<ConflictInboxEntry>> {
     let vault_dir = conflict_root.join(vault_id);
     if !vault_dir.exists() {
         return Ok(Vec::new());
@@ -82,9 +85,10 @@ pub fn load_conflict_entries(conflict_root: &Path, vault_id: &str) -> Result<Vec
         }
         let encoded = fs::read(&path)
             .with_context(|| format!("failed to read conflict inbox entry `{}`", path.display()))?;
-        let entry: ConflictInboxEntry = serde_json::from_slice(encoded.as_slice()).with_context(|| {
-            format!("failed to decode conflict inbox entry `{}`", path.display())
-        })?;
+        let entry: ConflictInboxEntry =
+            serde_json::from_slice(encoded.as_slice()).with_context(|| {
+                format!("failed to decode conflict inbox entry `{}`", path.display())
+            })?;
         entries.push(entry);
     }
 

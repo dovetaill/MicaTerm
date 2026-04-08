@@ -348,7 +348,10 @@ fn sync_modal_projects_persisted_conflict_summary_from_local_inbox() {
 
     assert_eq!(app.get_sync_modal_conflict_count(), 1);
     let summary = app.get_sync_modal_conflict_summary().to_string();
-    assert!(summary.contains("asset-prod"), "unexpected summary: {summary}");
+    assert!(
+        summary.contains("asset-prod"),
+        "unexpected summary: {summary}"
+    );
     assert!(
         summary.contains("asset-delete-vs-modify"),
         "unexpected summary: {summary}"
@@ -669,7 +672,9 @@ fn sync_modal_primary_action_routes_to_sync_and_secondary_action_closes() {
     app.invoke_sync_modal_draft_changed("git-https-username".into(), "demo-user".into());
     app.invoke_sync_modal_draft_changed("git-https-secret".into(), "pat-primary-secret".into());
     app.invoke_sync_modal_primary_action_requested();
-    wait_for_condition(Duration::from_secs(2), || primary.recorded_writes().len() == 1);
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 1
+    });
 
     app.invoke_sync_modal_secondary_action_requested();
     assert!(!app.get_sync_modal_open());
@@ -777,9 +782,18 @@ fn sync_modal_shows_local_and_remote_sync_timestamps() {
     app.set_sync_modal_primary_revision_text("rev-0042".into());
     app.set_sync_modal_remote_status_text("Primary remote is currently at rev-0042.".into());
 
-    assert_eq!(app.get_sync_modal_local_last_sync_text().as_str(), "2026-04-02 10:30");
-    assert_eq!(app.get_sync_modal_remote_last_update_text().as_str(), "2026-04-02 10:31");
-    assert_eq!(app.get_sync_modal_primary_revision_text().as_str(), "rev-0042");
+    assert_eq!(
+        app.get_sync_modal_local_last_sync_text().as_str(),
+        "2026-04-02 10:30"
+    );
+    assert_eq!(
+        app.get_sync_modal_remote_last_update_text().as_str(),
+        "2026-04-02 10:31"
+    );
+    assert_eq!(
+        app.get_sync_modal_primary_revision_text().as_str(),
+        "rev-0042"
+    );
     assert_eq!(
         app.get_sync_modal_remote_status_text().as_str(),
         "Primary remote is currently at rev-0042."
@@ -832,8 +846,14 @@ fn opening_sync_settings_refreshes_primary_head_in_background() {
         app.get_sync_modal_primary_revision_text().as_str() == "rev-0042"
     });
 
-    assert_eq!(app.get_sync_modal_remote_last_update_text().as_str(), "2026-03-31 08:00");
-    assert_eq!(app.get_sync_modal_primary_revision_text().as_str(), "rev-0042");
+    assert_eq!(
+        app.get_sync_modal_remote_last_update_text().as_str(),
+        "2026-03-31 08:00"
+    );
+    assert_eq!(
+        app.get_sync_modal_primary_revision_text().as_str(),
+        "rev-0042"
+    );
     assert!(
         app.get_sync_modal_remote_status_text()
             .to_string()
@@ -889,5 +909,9 @@ fn remote_head_refresh_failure_keeps_sync_settings_non_blocking() {
             .contains("Failed to refresh remote status")
     });
 
-    assert!(app.get_sync_modal_error_text().to_string().contains("token expired"));
+    assert!(
+        app.get_sync_modal_error_text()
+            .to_string()
+            .contains("token expired")
+    );
 }

@@ -130,12 +130,16 @@ pub fn apply_vault_snapshot(
             KeychainNodePayload::Identity(spec) => restore_keychain_bundle(
                 credential_store,
                 spec,
-                normalized_snapshot.keychain_identity_secret_bundles.get(&node.id),
+                normalized_snapshot
+                    .keychain_identity_secret_bundles
+                    .get(&node.id),
             )?,
             KeychainNodePayload::SshKey(spec) => restore_keychain_bundle(
                 credential_store,
                 spec,
-                normalized_snapshot.keychain_key_secret_bundles.get(&node.id),
+                normalized_snapshot
+                    .keychain_key_secret_bundles
+                    .get(&node.id),
             )?,
         }
     }
@@ -183,9 +187,8 @@ pub fn normalize_snapshot_secret_refs(snapshot: VaultSnapshot) -> VaultSnapshot 
             }
             VaultSshProxySpec::None | VaultSshProxySpec::SshAsset { .. } => false,
         };
-        let needs_canonical_secret_ref = spec.credential_ref.is_some()
-            || proxy_needs_saved_secret
-            || saved_bundle.is_some();
+        let needs_canonical_secret_ref =
+            spec.credential_ref.is_some() || proxy_needs_saved_secret || saved_bundle.is_some();
         let duplicated_secret_ref = spec
             .credential_ref
             .as_ref()
@@ -194,9 +197,9 @@ pub fn normalize_snapshot_secret_refs(snapshot: VaultSnapshot) -> VaultSnapshot 
             Some(if duplicated_secret_ref {
                 ssh_credential_ref(node_id, SshCredentialKind::SavedSecrets)
             } else {
-                spec.credential_ref.clone().unwrap_or_else(|| {
-                    ssh_credential_ref(node_id, SshCredentialKind::SavedSecrets)
-                })
+                spec.credential_ref
+                    .clone()
+                    .unwrap_or_else(|| ssh_credential_ref(node_id, SshCredentialKind::SavedSecrets))
             })
         } else {
             None
@@ -221,8 +224,8 @@ pub fn normalize_snapshot_secret_refs(snapshot: VaultSnapshot) -> VaultSnapshot 
             KeychainNodePayload::Identity(spec) => {
                 let needs_canonical_ref =
                     spec.credential_ref.is_some() || identity_bundle_ids.contains(node_id);
-                spec.credential_ref = needs_canonical_ref
-                    .then(|| keychain_identity_credential_ref(node_id.as_str()));
+                spec.credential_ref =
+                    needs_canonical_ref.then(|| keychain_identity_credential_ref(node_id.as_str()));
             }
             KeychainNodePayload::SshKey(spec) => {
                 let needs_canonical_ref =

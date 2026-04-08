@@ -397,8 +397,9 @@ pub fn load_fixed_binary_secret<const N: usize>(
 
     let mut decoded = [0u8; N];
     for (index, pair) in encoded.as_bytes().chunks_exact(2).enumerate() {
-        let hex = std::str::from_utf8(pair)
-            .with_context(|| format!("credential `{credential_ref}` contains non-UTF-8 hex data"))?;
+        let hex = std::str::from_utf8(pair).with_context(|| {
+            format!("credential `{credential_ref}` contains non-UTF-8 hex data")
+        })?;
         decoded[index] = u8::from_str_radix(hex, 16).with_context(|| {
             format!("credential `{credential_ref}` contains invalid hex byte `{hex}`")
         })?;

@@ -476,7 +476,10 @@ fn bootstrap_bundle_roundtrip_preserves_git_repo_locator_and_dual_auth_kinds() {
 
     assert_eq!(decoded.remotes.len(), 2);
     assert_eq!(decoded.remotes[0].provider, ProviderKind::GitRepo);
-    assert_eq!(decoded.remotes[0].auth_kind, ProviderAuthKind::HttpsCredentials);
+    assert_eq!(
+        decoded.remotes[0].auth_kind,
+        ProviderAuthKind::HttpsCredentials
+    );
     assert_eq!(decoded.remotes[1].auth_kind, ProviderAuthKind::SshKey);
     match &decoded.remotes[0].locator {
         BootstrapRemoteLocator::GitRepo {

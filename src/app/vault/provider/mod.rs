@@ -3,8 +3,8 @@ use anyhow::{Context, Result, anyhow};
 use crate::app::vault::crypto::EncryptedSnapshot;
 use crate::app::vault::model::{PackLayout, ProviderKind, VaultHead, VaultManifest};
 
-pub mod gitee_gist;
 pub mod git_repo;
+pub mod gitee_gist;
 pub mod github_gist;
 pub mod gitlab_snippet;
 pub mod mock;

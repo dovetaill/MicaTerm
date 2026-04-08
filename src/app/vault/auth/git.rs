@@ -10,8 +10,14 @@ pub enum GitAuthMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitTransportAuthPlan {
-    HttpsCredentials { username: String, secret: String },
-    SshKey { private_key: String, passphrase: Option<String> },
+    HttpsCredentials {
+        username: String,
+        secret: String,
+    },
+    SshKey {
+        private_key: String,
+        passphrase: Option<String>,
+    },
 }
 
 pub fn git_auth_mode_for_provider_auth(auth_kind: ProviderAuthKind) -> Result<GitAuthMode> {

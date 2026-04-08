@@ -1,9 +1,5 @@
-use mica_term::app::vault::model::{
-    CipherKind, CompressionKind, KdfConfig, PackLayout, VaultHead,
-};
-use mica_term::app::vault::sync_decision::{
-    LocalSyncState, SyncAction, decide_sync_action,
-};
+use mica_term::app::vault::model::{CipherKind, CompressionKind, KdfConfig, PackLayout, VaultHead};
+use mica_term::app::vault::sync_decision::{LocalSyncState, SyncAction, decide_sync_action};
 
 fn sample_kdf() -> KdfConfig {
     KdfConfig::Argon2id {
@@ -42,11 +38,7 @@ fn diverged_local_and_remote_changes_require_merge_then_push() {
         last_successful_push_at: Some("00000000000000000100".into()),
         last_successful_pull_at: Some("00000000000000000100".into()),
     };
-    let remote = sample_remote_head(
-        "rev-0002",
-        "sha256:remote-new",
-        "00000000000000000150",
-    );
+    let remote = sample_remote_head("rev-0002", "sha256:remote-new", "00000000000000000150");
 
     let decision = decide_sync_action(&local, Some(&remote));
 
@@ -62,11 +54,7 @@ fn remote_only_changes_pull_without_merge() {
         last_successful_push_at: Some("00000000000000000100".into()),
         last_successful_pull_at: Some("00000000000000000100".into()),
     };
-    let remote = sample_remote_head(
-        "rev-0002",
-        "sha256:remote-new",
-        "00000000000000000150",
-    );
+    let remote = sample_remote_head("rev-0002", "sha256:remote-new", "00000000000000000150");
 
     let decision = decide_sync_action(&local, Some(&remote));
 
@@ -82,11 +70,7 @@ fn local_only_changes_push_without_merge() {
         last_successful_push_at: Some("00000000000000000100".into()),
         last_successful_pull_at: Some("00000000000000000100".into()),
     };
-    let remote = sample_remote_head(
-        "rev-0001",
-        "sha256:remote-base",
-        "00000000000000000100",
-    );
+    let remote = sample_remote_head("rev-0001", "sha256:remote-base", "00000000000000000100");
 
     let decision = decide_sync_action(&local, Some(&remote));
 

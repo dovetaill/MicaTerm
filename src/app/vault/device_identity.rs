@@ -17,8 +17,9 @@ pub fn load_or_create_device_id(root: &Path) -> Result<String> {
 
     let path = root.join(DEVICE_ID_FILE_NAME);
     if path.exists() {
-        let existing = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read vault device identity `{}`", path.display()))?;
+        let existing = fs::read_to_string(&path).with_context(|| {
+            format!("failed to read vault device identity `{}`", path.display())
+        })?;
         let existing = existing.trim().to_string();
         if !existing.is_empty() {
             return Ok(existing);
@@ -26,8 +27,12 @@ pub fn load_or_create_device_id(root: &Path) -> Result<String> {
     }
 
     let device_id = format!("device-{}", Uuid::new_v4().simple());
-    fs::write(&path, device_id.as_bytes())
-        .with_context(|| format!("failed to persist vault device identity `{}`", path.display()))?;
+    fs::write(&path, device_id.as_bytes()).with_context(|| {
+        format!(
+            "failed to persist vault device identity `{}`",
+            path.display()
+        )
+    })?;
     Ok(device_id)
 }
 

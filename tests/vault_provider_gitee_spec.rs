@@ -8,11 +8,11 @@ use mica_term::app::vault::model::{
     PackLayout, PackRef, ProviderAuthKind, ProviderKind, RemoteRole, VaultHead, VaultManifest,
 };
 use mica_term::app::vault::provider::VaultProvider;
+use mica_term::app::vault::provider::first_release_formal_provider_kind;
 use mica_term::app::vault::provider::gitee_gist::{
     GiteeGistApi, GiteeGistAuth, GiteeGistDocument, GiteeGistFile, GiteeGistProvider,
     GiteeGistProviderConfig, GiteeGistUpdateRequest,
 };
-use mica_term::app::vault::provider::first_release_formal_provider_kind;
 
 fn sample_gitee_remote(auth_kind: ProviderAuthKind) -> BootstrapRemoteConfig {
     BootstrapRemoteConfig {
@@ -496,7 +496,9 @@ fn gitee_provider_prune_revisions_older_than_keep_latest_limit() {
         },
     )]);
     for revision in 1..=12 {
-        files.extend(gist_revision_payload_file_set(format!("rev-{revision:04}").as_str()));
+        files.extend(gist_revision_payload_file_set(
+            format!("rev-{revision:04}").as_str(),
+        ));
     }
 
     let api = Arc::new(RecordingGiteeGistApi::with_gist(GiteeGistDocument {
@@ -530,5 +532,8 @@ fn gitee_provider_prune_revisions_older_than_keep_latest_limit() {
 #[test]
 fn gitee_provider_is_retained_for_payload_io_but_not_formal_primary() {
     assert_eq!(first_release_formal_provider_kind(), ProviderKind::GitRepo);
-    assert_ne!(first_release_formal_provider_kind(), ProviderKind::GiteeGist);
+    assert_ne!(
+        first_release_formal_provider_kind(),
+        ProviderKind::GiteeGist
+    );
 }

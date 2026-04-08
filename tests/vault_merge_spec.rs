@@ -5,10 +5,12 @@ use mica_term::app::keychain::model::{
     KeychainNodeKind, KeychainNodeMergeMetadata, KeychainNodePayload,
 };
 use mica_term::app::ssh::credentials::StoredSshSecretBundle;
-use mica_term::app::vault::merge::{MergeEntityKind, MergeInput, MergeRecoveryAction, merge_snapshots};
+use mica_term::app::vault::merge::{
+    MergeEntityKind, MergeInput, MergeRecoveryAction, merge_snapshots,
+};
 use mica_term::app::vault::model::{
-    SnapshotSyncPreferences, SnapshotUiPreferences, VaultAssetCatalog, VaultAssetKind, VaultAssetNode,
-    VaultAssetPayload, VaultKnownHostEntry, VaultNodeMergeMetadata, VaultSnapshot,
+    SnapshotSyncPreferences, SnapshotUiPreferences, VaultAssetCatalog, VaultAssetKind,
+    VaultAssetNode, VaultAssetPayload, VaultKnownHostEntry, VaultNodeMergeMetadata, VaultSnapshot,
     VaultSshConnectionSpec, VaultSshProxySpec,
 };
 
@@ -114,9 +116,10 @@ fn merge_unions_assets_added_on_different_devices() {
 #[test]
 fn merge_records_conflict_when_local_deletes_and_remote_modifies_same_asset() {
     let mut base = empty_snapshot();
-    base.asset_catalog
-        .nodes
-        .insert("asset-gateway".into(), ssh_asset("asset-gateway", "Gateway", None));
+    base.asset_catalog.nodes.insert(
+        "asset-gateway".into(),
+        ssh_asset("asset-gateway", "Gateway", None),
+    );
     base.asset_catalog.root_ids.push("asset-gateway".into());
     base.asset_catalog.merge_metadata.insert(
         "asset-gateway".into(),
@@ -160,12 +163,14 @@ fn merge_records_conflict_when_local_deletes_and_remote_modifies_same_asset() {
         device_id: "device-local".into(),
     });
 
-    assert!(result
-        .conflicts
-        .iter()
-        .any(|conflict| conflict.entity == MergeEntityKind::Asset
-            && conflict.node_id == "asset-gateway"
-            && conflict.message.contains("deleted")));
+    assert!(
+        result
+            .conflicts
+            .iter()
+            .any(|conflict| conflict.entity == MergeEntityKind::Asset
+                && conflict.node_id == "asset-gateway"
+                && conflict.message.contains("deleted"))
+    );
     assert!(matches!(
         result.recovery_actions.first(),
         Some(MergeRecoveryAction::ConflictCopyRequired {
@@ -188,10 +193,10 @@ fn merge_records_conflict_when_local_deletes_and_remote_modifies_same_asset() {
 #[test]
 fn merge_keeps_keychain_identity_references_intact_when_asset_and_identity_arrive_together() {
     let mut local = empty_snapshot();
-    local
-        .asset_catalog
-        .nodes
-        .insert("asset-gateway".into(), ssh_asset("asset-gateway", "Gateway", Some("identity-ops")));
+    local.asset_catalog.nodes.insert(
+        "asset-gateway".into(),
+        ssh_asset("asset-gateway", "Gateway", Some("identity-ops")),
+    );
     local.asset_catalog.root_ids.push("asset-gateway".into());
     local.asset_catalog.merge_metadata.insert(
         "asset-gateway".into(),
@@ -241,11 +246,13 @@ fn merge_keeps_keychain_identity_references_intact_when_asset_and_identity_arriv
         }
         other => panic!("unexpected payload: {other:?}"),
     }
-    assert!(result
-        .merged
-        .keychain_catalog
-        .nodes
-        .contains_key("identity-ops"));
+    assert!(
+        result
+            .merged
+            .keychain_catalog
+            .nodes
+            .contains_key("identity-ops")
+    );
     assert_eq!(
         result
             .merged
@@ -288,19 +295,25 @@ fn merge_known_hosts_uses_conservative_union_without_destructive_overwrite() {
     });
 
     assert_eq!(result.merged.known_hosts.len(), 3);
-    assert!(result
-        .merged
-        .known_hosts
-        .iter()
-        .any(|entry| entry.host_pattern == "[base.example.com]:22"));
-    assert!(result
-        .merged
-        .known_hosts
-        .iter()
-        .any(|entry| entry.host_pattern == "[local.example.com]:22"));
-    assert!(result
-        .merged
-        .known_hosts
-        .iter()
-        .any(|entry| entry.host_pattern == "[remote.example.com]:22"));
+    assert!(
+        result
+            .merged
+            .known_hosts
+            .iter()
+            .any(|entry| entry.host_pattern == "[base.example.com]:22")
+    );
+    assert!(
+        result
+            .merged
+            .known_hosts
+            .iter()
+            .any(|entry| entry.host_pattern == "[local.example.com]:22")
+    );
+    assert!(
+        result
+            .merged
+            .known_hosts
+            .iter()
+            .any(|entry| entry.host_pattern == "[remote.example.com]:22")
+    );
 }

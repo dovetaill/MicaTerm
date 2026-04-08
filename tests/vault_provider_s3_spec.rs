@@ -7,8 +7,7 @@ use mica_term::app::vault::model::{
 };
 use mica_term::app::vault::provider::VaultProvider;
 use mica_term::app::vault::provider::s3::{
-    S3CredentialMode, S3ObjectKeySet, S3ObjectStoreAdapter, S3VaultProvider,
-    S3VaultProviderConfig,
+    S3CredentialMode, S3ObjectKeySet, S3ObjectStoreAdapter, S3VaultProvider, S3VaultProviderConfig,
 };
 
 fn sample_s3_remote() -> BootstrapRemoteConfig {
@@ -77,7 +76,10 @@ impl S3ObjectStoreAdapter for RecordingS3ObjectStoreAdapter {
         Ok(None)
     }
 
-    fn put_object(&self, _request: &mica_term::app::vault::provider::s3::S3PutObjectRequest) -> Result<()> {
+    fn put_object(
+        &self,
+        _request: &mica_term::app::vault::provider::s3::S3PutObjectRequest,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -169,14 +171,19 @@ fn s3_provider_prune_revision_objects_older_than_keep_latest_limit() {
         })
         .collect::<Vec<_>>();
     let adapter = Arc::new(RecordingS3ObjectStoreAdapter::with_keys(keys));
-    let provider = S3VaultProvider::with_adapter(config, adapter.clone()).expect("build s3 provider");
+    let provider =
+        S3VaultProvider::with_adapter(config, adapter.clone()).expect("build s3 provider");
 
     provider
         .prune_revisions(10, &sample_head("rev-0012"))
         .expect("prune old s3 revisions");
 
     assert_eq!(
-        adapter.deleted_keys.lock().expect("lock deleted keys").as_slice(),
+        adapter
+            .deleted_keys
+            .lock()
+            .expect("lock deleted keys")
+            .as_slice(),
         &[
             (
                 "vault-bucket".to_string(),

@@ -220,7 +220,9 @@ fn github_provider_prune_revisions_older_than_keep_latest_limit() {
         },
     )]);
     for revision in 1..=12 {
-        files.extend(gist_revision_payload_file_set(format!("rev-{revision:04}").as_str()));
+        files.extend(gist_revision_payload_file_set(
+            format!("rev-{revision:04}").as_str(),
+        ));
     }
 
     let api = Arc::new(RecordingGitHubGistApi::with_gist(GitHubGistDocument {

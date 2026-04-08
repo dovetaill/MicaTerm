@@ -1,6 +1,5 @@
 use mica_term::app::vault::sync_service::{
-    VaultSyncExecution, VaultSyncIntent, VaultSyncService, VaultSyncServiceConfig,
-    VaultSyncTrigger,
+    VaultSyncExecution, VaultSyncIntent, VaultSyncService, VaultSyncServiceConfig, VaultSyncTrigger,
 };
 use std::time::Duration;
 

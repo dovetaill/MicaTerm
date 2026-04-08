@@ -90,7 +90,10 @@ pub fn load_recovery_snapshots(
             continue;
         }
         let encoded = fs::read(&path).with_context(|| {
-            format!("failed to read recovery snapshot record `{}`", path.display())
+            format!(
+                "failed to read recovery snapshot record `{}`",
+                path.display()
+            )
         })?;
         let record = serde_json::from_slice(encoded.as_slice()).with_context(|| {
             format!(

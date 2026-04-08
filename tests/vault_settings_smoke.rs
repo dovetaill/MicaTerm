@@ -99,5 +99,8 @@ fn formal_sync_settings_contract_no_longer_exposes_gitee_gist_primary() {
     assert!(!app_window.contains("sync-modal-primary-pat"));
     assert!(!app_window.contains("Gitee Gist"));
     assert!(provider_contract.contains("ProviderKind::GitRepo"));
-    assert!(!provider_contract.contains("first_release_formal_provider_kind() -> ProviderKind::GiteeGist"));
+    assert!(
+        !provider_contract
+            .contains("first_release_formal_provider_kind() -> ProviderKind::GiteeGist")
+    );
 }

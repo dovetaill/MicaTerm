@@ -509,7 +509,10 @@ fn apply_vault_snapshot_canonicalizes_remapped_keychain_secret_refs_and_preserve
         .ssh_connection_spec("asset-remote")
         .expect("restored host");
 
-    assert_eq!(restored_host.keychain_identity_id.as_deref(), Some(identity_id));
+    assert_eq!(
+        restored_host.keychain_identity_id.as_deref(),
+        Some(identity_id)
+    );
 
     let identity = applied
         .keychain_catalog
@@ -519,7 +522,10 @@ fn apply_vault_snapshot_canonicalizes_remapped_keychain_secret_refs_and_preserve
     match &identity.payload {
         KeychainNodePayload::Identity(spec) => {
             assert_eq!(spec.ssh_key_id.as_deref(), Some(key_id));
-            assert_eq!(spec.credential_ref.as_deref(), Some(canonical_identity_ref.as_str()));
+            assert_eq!(
+                spec.credential_ref.as_deref(),
+                Some(canonical_identity_ref.as_str())
+            );
         }
         other => panic!("unexpected identity payload: {other:?}"),
     }
@@ -531,19 +537,26 @@ fn apply_vault_snapshot_canonicalizes_remapped_keychain_secret_refs_and_preserve
         .expect("restored key node");
     match &key.payload {
         KeychainNodePayload::SshKey(spec) => {
-            assert_eq!(spec.credential_ref.as_deref(), Some(canonical_key_ref.as_str()));
+            assert_eq!(
+                spec.credential_ref.as_deref(),
+                Some(canonical_key_ref.as_str())
+            );
         }
         other => panic!("unexpected key payload: {other:?}"),
     }
 
-    assert!(store
-        .get_secret(canonical_identity_ref.as_str())
-        .expect("load canonical identity ref")
-        .is_some());
-    assert!(store
-        .get_secret(canonical_key_ref.as_str())
-        .expect("load canonical key ref")
-        .is_some());
+    assert!(
+        store
+            .get_secret(canonical_identity_ref.as_str())
+            .expect("load canonical identity ref")
+            .is_some()
+    );
+    assert!(
+        store
+            .get_secret(canonical_key_ref.as_str())
+            .expect("load canonical key ref")
+            .is_some()
+    );
     assert_eq!(
         store
             .get_secret("keychain/identity/identity-ops")

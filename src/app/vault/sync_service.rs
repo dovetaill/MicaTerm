@@ -121,10 +121,13 @@ impl VaultSyncService {
             return None;
         }
 
-        let should_attempt_push =
-            state.dirty || (matches!(trigger, VaultSyncTrigger::Manual) && requires_initial_remote_sync);
+        let should_attempt_push = state.dirty
+            || (matches!(trigger, VaultSyncTrigger::Manual) && requires_initial_remote_sync);
         let should_attempt_refresh = !should_attempt_push
-            && matches!(trigger, VaultSyncTrigger::Manual | VaultSyncTrigger::Periodic);
+            && matches!(
+                trigger,
+                VaultSyncTrigger::Manual | VaultSyncTrigger::Periodic
+            );
 
         if matches!(
             trigger,

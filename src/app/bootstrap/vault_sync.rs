@@ -59,7 +59,10 @@ pub(super) fn persist_sync_modal_settings(
     Ok(())
 }
 
-pub(super) fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vault: &VaultSessionState) {
+pub(super) fn update_sync_modal_for_local_state(
+    state: &mut ShellViewModel,
+    vault: &VaultSessionState,
+) {
     let has_primary_remote = vault_primary_remote(vault).is_some();
     let git_repo_setup = GitRepoRemoteDraft::default();
     let (conflict_count, conflict_summary, conflict_review_available) =
@@ -129,8 +132,7 @@ pub(super) fn update_sync_modal_for_local_state(state: &mut ShellViewModel, vaul
             modal.mode = SyncModalMode::Ready;
             modal.headline = "Sync ready".into();
             modal.status_text = if vault.unlocked_vault_key.is_some() {
-                "Sync is configured. Use the titlebar Sync button to run an immediate check."
-                    .into()
+                "Sync is configured. Use the titlebar Sync button to run an immediate check.".into()
             } else {
                 "Sync is configured. Use the titlebar Sync button to run an immediate check. Diagnostics appear here if sync needs attention."
                     .into()
@@ -330,8 +332,10 @@ pub(super) fn silently_restore_vault_session_from_runtime_key(
     let recovery_attempt = (|| -> Result<VaultSnapshot> {
         let encrypted_snapshot = load_encrypted_cache(vault.cache_root().as_path(), &vault_id)?
             .ok_or_else(|| anyhow!("encrypted cache is unavailable"))?;
-        let snapshot =
-            normalize_snapshot_secret_refs(decrypt_snapshot(&encrypted_snapshot, &runtime_vault_key)?);
+        let snapshot = normalize_snapshot_secret_refs(decrypt_snapshot(
+            &encrypted_snapshot,
+            &runtime_vault_key,
+        )?);
         apply_vault_snapshot_to_shell(
             state,
             &snapshot,
@@ -552,8 +556,11 @@ pub(super) fn recover_local_vault_from_primary_remote(
         &UiPreferences::from(&*state),
     )?;
     if shell_has_materialized_local_data(state) {
-        let merge_remote_snapshot =
-            prepare_remote_snapshot_for_merge(&VaultSnapshot::default(), &local_snapshot, &remote_snapshot);
+        let merge_remote_snapshot = prepare_remote_snapshot_for_merge(
+            &VaultSnapshot::default(),
+            &local_snapshot,
+            &remote_snapshot,
+        );
         let merge_result = merge_snapshots(MergeInput {
             base: VaultSnapshot::default(),
             local: local_snapshot.clone(),
@@ -597,7 +604,9 @@ pub(super) fn recover_local_vault_from_primary_remote(
         };
         let mirror_providers = build_mirror_providers(&bundle, vault, credential_store)?;
         let engine = SyncEngine::new(provider, mirror_providers);
-        let report = engine.sync(request).map_err(|err| anyhow!(err.to_string()))?;
+        let report = engine
+            .sync(request)
+            .map_err(|err| anyhow!(err.to_string()))?;
 
         bundle.vault_id = remote_head.vault_id.clone();
         store_encrypted_cache(
@@ -829,8 +838,11 @@ pub(super) fn prepare_remote_snapshot_for_merge(
     remote: &VaultSnapshot,
 ) -> VaultSnapshot {
     let mut remote = remote.clone();
-    let asset_id_remap =
-        concurrent_addition_asset_id_remap(&base.asset_catalog, &local.asset_catalog, &remote.asset_catalog);
+    let asset_id_remap = concurrent_addition_asset_id_remap(
+        &base.asset_catalog,
+        &local.asset_catalog,
+        &remote.asset_catalog,
+    );
     if !asset_id_remap.is_empty() {
         apply_remote_asset_id_remap(&mut remote, &asset_id_remap);
     }
@@ -910,12 +922,20 @@ pub(super) fn next_merge_collision_id(occupied: &BTreeSet<String>, original: &st
     }
 }
 
-pub(super) fn apply_remote_asset_id_remap(snapshot: &mut VaultSnapshot, remap: &BTreeMap<String, String>) {
+pub(super) fn apply_remote_asset_id_remap(
+    snapshot: &mut VaultSnapshot,
+    remap: &BTreeMap<String, String>,
+) {
     snapshot.asset_catalog.root_ids = snapshot
         .asset_catalog
         .root_ids
         .iter()
-        .map(|node_id| remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()))
+        .map(|node_id| {
+            remap
+                .get(node_id)
+                .cloned()
+                .unwrap_or_else(|| node_id.clone())
+        })
         .collect();
     snapshot.asset_catalog.nodes = snapshot
         .asset_catalog
@@ -923,14 +943,22 @@ pub(super) fn apply_remote_asset_id_remap(snapshot: &mut VaultSnapshot, remap: &
         .iter()
         .map(|(node_id, node)| {
             let mut node = node.clone();
-            node.id = remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone());
+            node.id = remap
+                .get(node_id)
+                .cloned()
+                .unwrap_or_else(|| node_id.clone());
             node.parent_id = node
                 .parent_id
                 .and_then(|parent_id| remap.get(&parent_id).cloned().or(Some(parent_id)));
             node.child_ids = node
                 .child_ids
                 .iter()
-                .map(|child_id| remap.get(child_id).cloned().unwrap_or_else(|| child_id.clone()))
+                .map(|child_id| {
+                    remap
+                        .get(child_id)
+                        .cloned()
+                        .unwrap_or_else(|| child_id.clone())
+                })
                 .collect();
             match &mut node.payload {
                 VaultAssetPayload::Folder | VaultAssetPayload::SnippetPackage => {}
@@ -957,7 +985,10 @@ pub(super) fn apply_remote_asset_id_remap(snapshot: &mut VaultSnapshot, remap: &
         .iter()
         .map(|(node_id, bundle)| {
             (
-                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
+                remap
+                    .get(node_id)
+                    .cloned()
+                    .unwrap_or_else(|| node_id.clone()),
                 bundle.clone(),
             )
         })
@@ -968,19 +999,30 @@ pub(super) fn apply_remote_asset_id_remap(snapshot: &mut VaultSnapshot, remap: &
         .iter()
         .map(|(node_id, metadata)| {
             (
-                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
+                remap
+                    .get(node_id)
+                    .cloned()
+                    .unwrap_or_else(|| node_id.clone()),
                 metadata.clone(),
             )
         })
         .collect();
 }
 
-pub(super) fn apply_remote_keychain_id_remap(snapshot: &mut VaultSnapshot, remap: &BTreeMap<String, String>) {
+pub(super) fn apply_remote_keychain_id_remap(
+    snapshot: &mut VaultSnapshot,
+    remap: &BTreeMap<String, String>,
+) {
     snapshot.keychain_catalog.root_ids = snapshot
         .keychain_catalog
         .root_ids
         .iter()
-        .map(|node_id| remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()))
+        .map(|node_id| {
+            remap
+                .get(node_id)
+                .cloned()
+                .unwrap_or_else(|| node_id.clone())
+        })
         .collect();
     snapshot.keychain_catalog.nodes = snapshot
         .keychain_catalog
@@ -988,14 +1030,22 @@ pub(super) fn apply_remote_keychain_id_remap(snapshot: &mut VaultSnapshot, remap
         .iter()
         .map(|(node_id, node)| {
             let mut node = node.clone();
-            node.id = remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone());
+            node.id = remap
+                .get(node_id)
+                .cloned()
+                .unwrap_or_else(|| node_id.clone());
             node.parent_id = node
                 .parent_id
                 .and_then(|parent_id| remap.get(&parent_id).cloned().or(Some(parent_id)));
             node.child_ids = node
                 .child_ids
                 .iter()
-                .map(|child_id| remap.get(child_id).cloned().unwrap_or_else(|| child_id.clone()))
+                .map(|child_id| {
+                    remap
+                        .get(child_id)
+                        .cloned()
+                        .unwrap_or_else(|| child_id.clone())
+                })
                 .collect();
             match &mut node.payload {
                 KeychainNodePayload::Folder => {}
@@ -1016,7 +1066,10 @@ pub(super) fn apply_remote_keychain_id_remap(snapshot: &mut VaultSnapshot, remap
         .iter()
         .map(|(node_id, bundle)| {
             (
-                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
+                remap
+                    .get(node_id)
+                    .cloned()
+                    .unwrap_or_else(|| node_id.clone()),
                 bundle.clone(),
             )
         })
@@ -1026,7 +1079,10 @@ pub(super) fn apply_remote_keychain_id_remap(snapshot: &mut VaultSnapshot, remap
         .iter()
         .map(|(node_id, bundle)| {
             (
-                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
+                remap
+                    .get(node_id)
+                    .cloned()
+                    .unwrap_or_else(|| node_id.clone()),
                 bundle.clone(),
             )
         })
@@ -1037,7 +1093,10 @@ pub(super) fn apply_remote_keychain_id_remap(snapshot: &mut VaultSnapshot, remap
         .iter()
         .map(|(node_id, metadata)| {
             (
-                remap.get(node_id).cloned().unwrap_or_else(|| node_id.clone()),
+                remap
+                    .get(node_id)
+                    .cloned()
+                    .unwrap_or_else(|| node_id.clone()),
                 metadata.clone(),
             )
         })
@@ -1098,7 +1157,12 @@ pub(super) fn sync_local_vault(
         .build_provider_for_vault(&primary_remote, vault.root_dir.as_path())?;
     let primary_head = primary_provider
         .read_head()
-        .map_err(|err| anyhow!("failed to inspect primary remote `{}`: {err}", primary_remote.remote_id))?
+        .map_err(|err| {
+            anyhow!(
+                "failed to inspect primary remote `{}`: {err}",
+                primary_remote.remote_id
+            )
+        })?
         .head;
     let base_snapshot = vault
         .decrypted_snapshot
@@ -1145,20 +1209,29 @@ pub(super) fn sync_local_vault(
         }
         SyncAction::PullOnly => {
             let remote_head = primary_head.ok_or_else(|| {
-                anyhow!("primary remote `{}` is missing a readable head", primary_remote.remote_id)
-            })?;
-            let remote_revision = primary_provider.read_revision(&remote_head).map_err(|err| {
                 anyhow!(
-                    "failed to read primary revision `{}` from remote `{}`: {err}",
-                    remote_head.vault_revision,
+                    "primary remote `{}` is missing a readable head",
                     primary_remote.remote_id
                 )
             })?;
+            let remote_revision = primary_provider
+                .read_revision(&remote_head)
+                .map_err(|err| {
+                    anyhow!(
+                        "failed to read primary revision `{}` from remote `{}`: {err}",
+                        remote_head.vault_revision,
+                        primary_remote.remote_id
+                    )
+                })?;
             let remote_snapshot = normalize_snapshot_secret_refs(decrypt_snapshot(
                 &remote_revision.encrypted_snapshot,
                 &vault_key,
             )?);
-            clear_vault_decrypted_state(state, vault.decrypted_snapshot.as_ref(), credential_store)?;
+            clear_vault_decrypted_state(
+                state,
+                vault.decrypted_snapshot.as_ref(),
+                credential_store,
+            )?;
             apply_vault_snapshot_to_shell(
                 state,
                 &remote_snapshot,
@@ -1207,15 +1280,20 @@ pub(super) fn sync_local_vault(
 
     if matches!(decision.action, SyncAction::MergeThenPush) {
         let remote_head = primary_head.clone().ok_or_else(|| {
-            anyhow!("primary remote `{}` is missing a readable head", primary_remote.remote_id)
-        })?;
-        let remote_revision = primary_provider.read_revision(&remote_head).map_err(|err| {
             anyhow!(
-                "failed to read primary revision `{}` from remote `{}`: {err}",
-                remote_head.vault_revision,
+                "primary remote `{}` is missing a readable head",
                 primary_remote.remote_id
             )
         })?;
+        let remote_revision = primary_provider
+            .read_revision(&remote_head)
+            .map_err(|err| {
+                anyhow!(
+                    "failed to read primary revision `{}` from remote `{}`: {err}",
+                    remote_head.vault_revision,
+                    primary_remote.remote_id
+                )
+            })?;
         let remote_snapshot = normalize_snapshot_secret_refs(decrypt_snapshot(
             &remote_revision.encrypted_snapshot,
             &vault_key,
@@ -1318,7 +1396,10 @@ pub(super) fn sync_local_vault(
                     )
                 }
             } else {
-                format!("Sync completed. Primary is now at {}.", report.primary_revision)
+                format!(
+                    "Sync completed. Primary is now at {}.",
+                    report.primary_revision
+                )
             };
             if report.is_mirror_degraded() {
                 let mirror_degraded_message = format!(
@@ -1330,10 +1411,8 @@ pub(super) fn sync_local_vault(
                         .unwrap_or("unknown mirror failure")
                 );
                 state.vault_panel_state_mut().primary_status_label = primary_status.clone();
-                state.sync_modal_state_mut().status_text = format!(
-                    "{} {}",
-                    sync_status, mirror_degraded_message
-                );
+                state.sync_modal_state_mut().status_text =
+                    format!("{} {}", sync_status, mirror_degraded_message);
             } else {
                 state.vault_panel_state_mut().primary_status_label = primary_status;
                 state.sync_modal_state_mut().status_text = sync_status;
@@ -1520,7 +1599,9 @@ pub(super) fn mark_local_vault_dirty_and_arm_sync(
     let bootstrap_state_path = vault.bootstrap_state_path();
     if let Some(local_state) = vault.local_state.as_mut() {
         local_state.last_local_change_at = Some(next_local_change_timestamp(local_state));
-        if let Err(err) = save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state) {
+        if let Err(err) =
+            save_local_vault_bootstrap_state(bootstrap_state_path.as_path(), local_state)
+        {
             tracing::error!(
                 target: "app.vault",
                 error = %err,
@@ -1528,8 +1609,7 @@ pub(super) fn mark_local_vault_dirty_and_arm_sync(
             );
         }
     }
-    state.sync_modal_state_mut().status_text =
-        "Local changes queued for background sync.".into();
+    state.sync_modal_state_mut().status_text = "Local changes queued for background sync.".into();
 
     if vault_background_sync_ready(vault) {
         sync_debounce_timer.start(

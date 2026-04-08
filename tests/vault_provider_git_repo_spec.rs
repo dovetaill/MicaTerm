@@ -1,5 +1,5 @@
-use std::fs;
 use std::ffi::OsString;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
@@ -24,7 +24,10 @@ use uuid::Uuid;
 static PATH_ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn sample_root(label: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("mica-term-git-repo-provider-{label}-{}", Uuid::new_v4()))
+    std::env::temp_dir().join(format!(
+        "mica-term-git-repo-provider-{label}-{}",
+        Uuid::new_v4()
+    ))
 }
 
 fn sample_remote_bare_repo(label: &str) -> PathBuf {
@@ -170,7 +173,8 @@ fn sample_write_request(
 
 fn sample_provider(remote: &BootstrapRemoteConfig, cache_dir: PathBuf) -> GitRepoProvider {
     GitRepoProvider::new(
-        GitRepoProviderConfig::from_bootstrap_remote(remote, cache_dir).expect("build git repo config"),
+        GitRepoProviderConfig::from_bootstrap_remote(remote, cache_dir)
+            .expect("build git repo config"),
     )
     .expect("build git repo provider")
 }
@@ -251,7 +255,9 @@ fn git_repo_provider_reads_remote_head_from_repo_branch() {
     let reader = sample_provider(&reader_remote, sample_cache_dir("reader-provider"));
     let request = sample_write_request("rev-0001", None, "device-a");
 
-    writer.write_revision(&request).expect("seed git repo remote");
+    writer
+        .write_revision(&request)
+        .expect("seed git repo remote");
 
     let head = reader
         .read_head()
@@ -286,8 +292,14 @@ fn git_repo_provider_round_trip_does_not_require_system_git() {
         Some(inline_https_credentials()),
         GitHostKind::Gitee,
     );
-    let writer = sample_provider(&writer_remote, sample_cache_dir("without-system-git-writer"));
-    let reader = sample_provider(&reader_remote, sample_cache_dir("without-system-git-reader"));
+    let writer = sample_provider(
+        &writer_remote,
+        sample_cache_dir("without-system-git-writer"),
+    );
+    let reader = sample_provider(
+        &reader_remote,
+        sample_cache_dir("without-system-git-reader"),
+    );
     let request = sample_write_request("rev-0001", None, "device-a");
     let _missing_git = MissingGitPathGuard::install();
 
@@ -362,11 +374,19 @@ fn git_repo_provider_rejects_non_fast_forward_push() {
         .write_revision(&sample_write_request("rev-0001", None, "device-a"))
         .expect("seed initial revision");
     provider_b
-        .write_revision(&sample_write_request("rev-0002", Some("rev-0001"), "device-b"))
+        .write_revision(&sample_write_request(
+            "rev-0002",
+            Some("rev-0001"),
+            "device-b",
+        ))
         .expect("advance remote head");
 
     let err = provider_a
-        .write_revision(&sample_write_request("rev-0003", Some("rev-0001"), "device-a"))
+        .write_revision(&sample_write_request(
+            "rev-0003",
+            Some("rev-0001"),
+            "device-a",
+        ))
         .expect_err("stale push should conflict");
 
     assert!(err.to_string().contains("non-fast-forward"));

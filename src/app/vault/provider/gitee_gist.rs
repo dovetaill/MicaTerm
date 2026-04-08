@@ -407,7 +407,9 @@ impl VaultProvider for GiteeGistProvider {
     fn prune_revisions(&self, keep_latest: usize, live_head: &VaultHead) -> Result<()> {
         let gist = self.load_gist_document(self.config.access_token())?;
         let retained = retained_revision_ids(
-            gist.files.keys().filter_map(|name| revision_id_from_payload_file(name.as_str())),
+            gist.files
+                .keys()
+                .filter_map(|name| revision_id_from_payload_file(name.as_str())),
             keep_latest,
             live_head.vault_revision.as_str(),
         );

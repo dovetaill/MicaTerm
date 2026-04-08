@@ -51,7 +51,10 @@ struct InlineGitCredentialMaterial {
 }
 
 impl GitRepoProviderConfig {
-    pub fn from_bootstrap_remote(remote: &BootstrapRemoteConfig, cache_dir: PathBuf) -> Result<Self> {
+    pub fn from_bootstrap_remote(
+        remote: &BootstrapRemoteConfig,
+        cache_dir: PathBuf,
+    ) -> Result<Self> {
         if remote.provider != ProviderKind::GitRepo {
             return Err(anyhow!(
                 "bootstrap remote `{}` is not a Git repo provider",
@@ -85,12 +88,10 @@ impl GitRepoProviderConfig {
         let inline_credentials =
             decode_inline_credentials(remote.credential_ref.as_deref(), remote.auth_kind);
         let auth = match git_auth_mode_for_provider_auth(remote.auth_kind)? {
-            crate::app::vault::auth::git::GitAuthMode::HttpsCredentials => {
-                build_https_auth_plan(
-                    inline_credentials.https_username.as_str(),
-                    inline_credentials.https_secret.as_str(),
-                )?
-            }
+            crate::app::vault::auth::git::GitAuthMode::HttpsCredentials => build_https_auth_plan(
+                inline_credentials.https_username.as_str(),
+                inline_credentials.https_secret.as_str(),
+            )?,
             crate::app::vault::auth::git::GitAuthMode::SshKey => build_ssh_auth_plan(
                 inline_credentials.ssh_private_key.as_str(),
                 Some(inline_credentials.ssh_passphrase.as_str()),
@@ -217,7 +218,10 @@ impl GitRepoProvider {
         let mut config = repo.config().context("failed to open git repo config")?;
         let fetch_key = format!("remote.{REMOTE_NAME}.fetch");
         config
-            .set_str(fetch_key.as_str(), format!("+{}", self.fetch_refspec()).as_str())
+            .set_str(
+                fetch_key.as_str(),
+                format!("+{}", self.fetch_refspec()).as_str(),
+            )
             .with_context(|| format!("failed to configure `{fetch_key}`"))?;
         Ok(())
     }
@@ -225,34 +229,32 @@ impl GitRepoProvider {
     fn remote_callbacks(&self) -> RemoteCallbacks<'static> {
         let auth = self.config.auth.clone();
         let mut callbacks = RemoteCallbacks::new();
-        callbacks.credentials(move |_url, username_from_url, allowed| {
-            match &auth {
-                GitTransportAuthPlan::HttpsCredentials { username, secret } => {
-                    if allowed.contains(CredentialType::USERNAME)
-                        && !allowed.contains(CredentialType::USER_PASS_PLAINTEXT)
-                    {
-                        Cred::username(username.as_str())
-                    } else {
-                        Cred::userpass_plaintext(username.as_str(), secret.as_str())
-                    }
+        callbacks.credentials(move |_url, username_from_url, allowed| match &auth {
+            GitTransportAuthPlan::HttpsCredentials { username, secret } => {
+                if allowed.contains(CredentialType::USERNAME)
+                    && !allowed.contains(CredentialType::USER_PASS_PLAINTEXT)
+                {
+                    Cred::username(username.as_str())
+                } else {
+                    Cred::userpass_plaintext(username.as_str(), secret.as_str())
                 }
-                GitTransportAuthPlan::SshKey {
-                    private_key,
-                    passphrase,
-                } => {
-                    let username = username_from_url.unwrap_or("git");
-                    if allowed.contains(CredentialType::USERNAME)
-                        && !allowed.contains(CredentialType::SSH_KEY)
-                    {
-                        Cred::username(username)
-                    } else {
-                        Cred::ssh_key_from_memory(
-                            username,
-                            None,
-                            private_key.as_str(),
-                            passphrase.as_deref(),
-                        )
-                    }
+            }
+            GitTransportAuthPlan::SshKey {
+                private_key,
+                passphrase,
+            } => {
+                let username = username_from_url.unwrap_or("git");
+                if allowed.contains(CredentialType::USERNAME)
+                    && !allowed.contains(CredentialType::SSH_KEY)
+                {
+                    Cred::username(username)
+                } else {
+                    Cred::ssh_key_from_memory(
+                        username,
+                        None,
+                        private_key.as_str(),
+                        passphrase.as_deref(),
+                    )
                 }
             }
         });
@@ -290,13 +292,13 @@ impl GitRepoProvider {
                 }
                 match self.lookup_fetched_branch_oid(repo)? {
                     Some(remote_oid) => {
-                    repo.reference(
-                        self.tracking_ref().as_str(),
-                        remote_oid,
-                        true,
-                        "mica-term update git primary tracking ref",
-                    )
-                    .context("failed to update Git tracking ref")?;
+                        repo.reference(
+                            self.tracking_ref().as_str(),
+                            remote_oid,
+                            true,
+                            "mica-term update git primary tracking ref",
+                        )
+                        .context("failed to update Git tracking ref")?;
                         Ok(true)
                     }
                     None => Ok(false),
@@ -331,7 +333,11 @@ impl GitRepoProvider {
         format!("refs/remotes/{}/{}", REMOTE_NAME, self.config.branch)
     }
 
-    fn resolve_commit<'repo>(&self, repo: &'repo Repository, git_ref: &str) -> Result<git2::Commit<'repo>> {
+    fn resolve_commit<'repo>(
+        &self,
+        repo: &'repo Repository,
+        git_ref: &str,
+    ) -> Result<git2::Commit<'repo>> {
         repo.revparse_single(git_ref)
             .with_context(|| format!("failed to resolve git revision `{git_ref}`"))?
             .peel_to_commit()
@@ -343,7 +349,11 @@ impl GitRepoProvider {
         self.read_head_from_commit(repo, &commit)
     }
 
-    fn read_head_from_commit(&self, repo: &Repository, commit: &git2::Commit<'_>) -> Result<VaultHead> {
+    fn read_head_from_commit(
+        &self,
+        repo: &Repository,
+        commit: &git2::Commit<'_>,
+    ) -> Result<VaultHead> {
         let bytes = self.read_file_from_commit(repo, commit, HEAD_FILE_NAME)?;
         serde_json::from_slice(bytes.as_slice()).context("failed to decode git repo vault head")
     }
@@ -394,7 +404,9 @@ impl GitRepoProvider {
 
     fn find_commit_for_revision(&self, repo: &Repository, revision: &str) -> Result<Oid> {
         let tracking_ref = self.tracking_ref();
-        let mut walk = repo.revwalk().context("failed to create Git revision walk")?;
+        let mut walk = repo
+            .revwalk()
+            .context("failed to create Git revision walk")?;
         walk.push_ref(tracking_ref.as_str()).with_context(|| {
             format!(
                 "failed to walk tracking ref `{}` for `{}`",
@@ -477,7 +489,9 @@ impl GitRepoProvider {
             .context("failed to stage vault snapshot")?;
         index.write().context("failed to persist Git index")?;
         let tree_oid = index.write_tree().context("failed to write Git tree")?;
-        let tree = repo.find_tree(tree_oid).context("failed to load Git tree")?;
+        let tree = repo
+            .find_tree(tree_oid)
+            .context("failed to load Git tree")?;
         let signature = Signature::now(COMMITTER_NAME, COMMITTER_EMAIL)
             .context("failed to build Git signature")?;
         let commit_message = format!("vault-revision: {}", request.head.vault_revision);
@@ -495,7 +509,14 @@ impl GitRepoProvider {
         };
         let parents = parent_commit.iter().collect::<Vec<_>>();
         let commit_oid = repo
-            .commit(None, &signature, &signature, commit_message.as_str(), &tree, &parents)
+            .commit(
+                None,
+                &signature,
+                &signature,
+                commit_message.as_str(),
+                &tree,
+                &parents,
+            )
             .context("failed to create Git commit")?;
         repo.reference(
             self.local_branch_ref().as_str(),

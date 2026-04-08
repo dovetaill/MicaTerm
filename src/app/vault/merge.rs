@@ -5,8 +5,8 @@ use crate::app::keychain::model::{
 };
 use crate::app::ssh::credentials::StoredSshSecretBundle;
 use crate::app::vault::model::{
-    VaultAssetCatalog, VaultAssetNode, VaultAssetPayload, VaultKnownHostEntry, VaultNodeMergeMetadata,
-    VaultSnapshot,
+    VaultAssetCatalog, VaultAssetNode, VaultAssetPayload, VaultKnownHostEntry,
+    VaultNodeMergeMetadata, VaultSnapshot,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -317,7 +317,12 @@ fn decide_asset_node(
         },
         (Some(local), _, false, true) => {
             if base.is_some() && base != Some(local) {
-                conflict_asset(node_id, local.clone(), local_meta, "local modified while remote deleted")
+                conflict_asset(
+                    node_id,
+                    local.clone(),
+                    local_meta,
+                    "local modified while remote deleted",
+                )
             } else {
                 NodeDecision {
                     node: None,
@@ -328,7 +333,12 @@ fn decide_asset_node(
         }
         (_, Some(remote), true, false) => {
             if base.is_some() && base != Some(remote) {
-                conflict_asset(node_id, remote.clone(), remote_meta, "local deleted while remote modified")
+                conflict_asset(
+                    node_id,
+                    remote.clone(),
+                    remote_meta,
+                    "local deleted while remote modified",
+                )
             } else {
                 NodeDecision {
                     node: None,
@@ -339,7 +349,11 @@ fn decide_asset_node(
         }
         (None, None, true, true) => NodeDecision {
             node: None,
-            metadata: Some(prefer_deleted_asset_metadata(&local_meta, &remote_meta, &base_meta)),
+            metadata: Some(prefer_deleted_asset_metadata(
+                &local_meta,
+                &remote_meta,
+                &base_meta,
+            )),
             conflict: None,
         },
         (Some(local), None, false, false) => NodeDecision {
@@ -394,7 +408,11 @@ fn decide_keychain_node(
     match (local, remote, local_deleted, remote_deleted) {
         (Some(local), Some(remote), false, false) if local == remote => NodeDecision {
             node: Some(local.clone()),
-            metadata: Some(prefer_keychain_metadata(&local_meta, &remote_meta, &base_meta)),
+            metadata: Some(prefer_keychain_metadata(
+                &local_meta,
+                &remote_meta,
+                &base_meta,
+            )),
             conflict: None,
         },
         (Some(local), _, false, true) => {
@@ -431,27 +449,47 @@ fn decide_keychain_node(
         }
         (None, None, true, true) => NodeDecision {
             node: None,
-            metadata: Some(prefer_deleted_keychain_metadata(&local_meta, &remote_meta, &base_meta)),
+            metadata: Some(prefer_deleted_keychain_metadata(
+                &local_meta,
+                &remote_meta,
+                &base_meta,
+            )),
             conflict: None,
         },
         (Some(local), None, false, false) => NodeDecision {
             node: Some(local.clone()),
-            metadata: Some(prefer_keychain_metadata(&local_meta, &base_meta, &remote_meta)),
+            metadata: Some(prefer_keychain_metadata(
+                &local_meta,
+                &base_meta,
+                &remote_meta,
+            )),
             conflict: None,
         },
         (None, Some(remote), false, false) => NodeDecision {
             node: Some(remote.clone()),
-            metadata: Some(prefer_keychain_metadata(&remote_meta, &base_meta, &local_meta)),
+            metadata: Some(prefer_keychain_metadata(
+                &remote_meta,
+                &base_meta,
+                &local_meta,
+            )),
             conflict: None,
         },
         (Some(local), Some(remote), false, false) if base == Some(local) => NodeDecision {
             node: Some(remote.clone()),
-            metadata: Some(prefer_keychain_metadata(&remote_meta, &local_meta, &base_meta)),
+            metadata: Some(prefer_keychain_metadata(
+                &remote_meta,
+                &local_meta,
+                &base_meta,
+            )),
             conflict: None,
         },
         (Some(local), Some(remote), false, false) if base == Some(remote) => NodeDecision {
             node: Some(local.clone()),
-            metadata: Some(prefer_keychain_metadata(&local_meta, &remote_meta, &base_meta)),
+            metadata: Some(prefer_keychain_metadata(
+                &local_meta,
+                &remote_meta,
+                &base_meta,
+            )),
             conflict: None,
         },
         (Some(local), Some(_remote), false, false) => conflict_keychain(
@@ -649,7 +687,10 @@ where
         };
         let parent_id = parent_of(node);
         if let Some(parent_id) = parent_id.filter(|parent_id| available.contains(parent_id)) {
-            child_map.entry(parent_id).or_default().push(node_id.clone());
+            child_map
+                .entry(parent_id)
+                .or_default()
+                .push(node_id.clone());
         } else {
             root_ids.push(node_id.clone());
         }

@@ -18,12 +18,8 @@ use mica_term::app::ssh::credentials::{
     CredentialStore, MemoryCredentialStore, StoredSshSecretBundle, persist_secret_bundle,
 };
 use mica_term::app::ssh::profile::ConnectionProfile;
-use mica_term::app::ssh::runtime::{
-    SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput,
-};
-use mica_term::app::ssh::session_manager::{
-    SessionRuntimeControl, SessionRuntimeLauncher,
-};
+use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput};
+use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::vault::bootstrap::{
     LocalVaultBootstrapState, load_local_vault_bootstrap_state, load_runtime_vault_key,
 };
@@ -32,14 +28,12 @@ use mica_term::app::vault::crypto::{
     decrypt_snapshot, encrypt_snapshot, generate_vault_key, wrap_vault_key,
 };
 use mica_term::app::vault::model::{
-    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind,
-    CompressionKind, KdfConfig, PackLayout, PackRef, ProviderAuthKind, ProviderKind,
-    RemoteRole, SnapshotSyncPreferences, VaultAssetPayload, VaultHead, VaultManifest,
+    BootstrapBundle, BootstrapRemoteConfig, BootstrapRemoteLocator, CipherKind, CompressionKind,
+    KdfConfig, PackLayout, PackRef, ProviderAuthKind, ProviderKind, RemoteRole,
+    SnapshotSyncPreferences, VaultAssetPayload, VaultHead, VaultManifest,
 };
 use mica_term::app::vault::provider::mock::MockVaultProvider;
-use mica_term::app::vault::provider::{
-    ProviderCapabilities, ProviderRevision, VaultProvider,
-};
+use mica_term::app::vault::provider::{ProviderCapabilities, ProviderRevision, VaultProvider};
 use mica_term::app::vault::snapshot::export_vault_snapshot;
 use mica_term::app::window_effects::default_platform_window_effects;
 use mica_term::shell::assets::{
@@ -462,9 +456,10 @@ impl AttachMergeCase {
     }
 
     fn cached_snapshot(&self) -> mica_term::app::vault::model::VaultSnapshot {
-        let runtime_vault_key = load_runtime_vault_key(self.credential_store.as_ref(), "vault-main")
-            .expect("load runtime vault key")
-            .expect("runtime key should be present");
+        let runtime_vault_key =
+            load_runtime_vault_key(self.credential_store.as_ref(), "vault-main")
+                .expect("load runtime vault key")
+                .expect("runtime key should be present");
         let encrypted = load_encrypted_cache(&self.temp_root.join("cache"), "vault-main")
             .expect("load encrypted cache")
             .expect("cached snapshot should be present");
@@ -547,22 +542,14 @@ fn attach_time_merge_keeps_local_and_remote_assets_when_bootstrap_state_is_missi
         case.app.get_sync_modal_error_text(),
         cached_hosts
     );
-    assert!(snapshot
-        .asset_catalog
-        .nodes
-        .values()
-        .any(|node| matches!(
-            &node.payload,
-            VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.12"
-        )));
-    assert!(snapshot
-        .asset_catalog
-        .nodes
-        .values()
-        .any(|node| matches!(
-            &node.payload,
-            VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.99"
-        )));
+    assert!(snapshot.asset_catalog.nodes.values().any(|node| matches!(
+        &node.payload,
+        VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.12"
+    )));
+    assert!(snapshot.asset_catalog.nodes.values().any(|node| matches!(
+        &node.payload,
+        VaultAssetPayload::SshConnection(spec) if spec.host == "10.0.0.99"
+    )));
 }
 
 #[test]
@@ -626,7 +613,8 @@ fn attach_time_merge_remaps_remote_keychain_ids_and_keeps_secret_ownership() {
         remote_store.as_ref(),
         "rev-0004",
     );
-    case.primary.set_remote_head(Some(remote_revision.head.clone()));
+    case.primary
+        .set_remote_head(Some(remote_revision.head.clone()));
     case.primary.set_remote_revision(Some(remote_revision));
 
     case.complete_attach();
@@ -650,7 +638,10 @@ fn attach_time_merge_remaps_remote_keychain_ids_and_keeps_secret_ownership() {
         .expect("remote host should be present after merge");
     match &remote_host.payload {
         VaultAssetPayload::SshConnection(spec) => {
-            assert_eq!(spec.keychain_identity_id.as_deref(), Some(remote_identity_id));
+            assert_eq!(
+                spec.keychain_identity_id.as_deref(),
+                Some(remote_identity_id)
+            );
         }
         other => panic!("unexpected remote host payload: {other:?}"),
     }
@@ -663,7 +654,10 @@ fn attach_time_merge_remaps_remote_keychain_ids_and_keeps_secret_ownership() {
     match &remote_identity.payload {
         KeychainNodePayload::Identity(spec) => {
             assert_eq!(spec.ssh_key_id.as_deref(), Some(remote_key_id));
-            assert_eq!(spec.credential_ref.as_deref(), Some(remote_identity_ref.as_str()));
+            assert_eq!(
+                spec.credential_ref.as_deref(),
+                Some(remote_identity_ref.as_str())
+            );
         }
         other => panic!("unexpected remote identity payload: {other:?}"),
     }
@@ -675,15 +669,24 @@ fn attach_time_merge_remaps_remote_keychain_ids_and_keeps_secret_ownership() {
         .expect("remapped remote key");
     match &remote_key.payload {
         KeychainNodePayload::SshKey(spec) => {
-            assert_eq!(spec.credential_ref.as_deref(), Some(remote_key_ref.as_str()));
+            assert_eq!(
+                spec.credential_ref.as_deref(),
+                Some(remote_key_ref.as_str())
+            );
         }
         other => panic!("unexpected remote key payload: {other:?}"),
     }
 
     assert!(snapshot.keychain_catalog.nodes.contains_key("identity-1"));
     assert!(snapshot.keychain_catalog.nodes.contains_key("key-1"));
-    assert!(snapshot
-        .keychain_identity_secret_bundles
-        .contains_key(remote_identity_id));
-    assert!(snapshot.keychain_key_secret_bundles.contains_key(remote_key_id));
+    assert!(
+        snapshot
+            .keychain_identity_secret_bundles
+            .contains_key(remote_identity_id)
+    );
+    assert!(
+        snapshot
+            .keychain_key_secret_bundles
+            .contains_key(remote_key_id)
+    );
 }
