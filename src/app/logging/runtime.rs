@@ -5,6 +5,7 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
 
 use crate::app::runtime_profile::AppRuntimeProfile;
+use crate::app::terminal_presenter::TerminalPresenterCacheStats;
 
 use super::cleanup::{CleanupPolicy, cleanup_logging_dirs};
 use super::config::AppLoggingConfig;
@@ -18,6 +19,10 @@ pub struct AppLoggingRuntime {
 pub struct TestLoggingRuntime {
     pub dispatch: tracing::Dispatch,
     pub guard: WorkerGuard,
+}
+
+pub fn memory_diagnostics_enabled() -> bool {
+    AppLoggingConfig::from_env().memory_diagnostics_enabled()
 }
 
 pub fn emit_runtime_profile_metadata(profile: AppRuntimeProfile) {
@@ -45,6 +50,101 @@ pub fn emit_app_root_metadata(paths: &LoggingPaths) {
         logs_dir = %paths.logs_dir.display(),
         crash_dir = %paths.crash_dir.display(),
         "resolved app root directories"
+    );
+}
+
+pub fn emit_terminal_memory_startup_snapshot(
+    enabled: bool,
+    profile: AppRuntimeProfile,
+    stats: TerminalPresenterCacheStats,
+) {
+    if !enabled {
+        return;
+    }
+
+    tracing::debug!(
+        target: "app.memory",
+        event = "startup-snapshot",
+        build_flavor = ?profile.build_flavor,
+        terminal_render_mode = profile.terminal_render_mode_label(),
+        terminal_subsystem_mode = profile.terminal_subsystem_mode_label(),
+        previous_frame_rows = stats.previous_frame_rows,
+        previous_shaped_rows = stats.previous_shaped_rows,
+        shaped_row_cache_entries = stats.shaped_row_cache_entries,
+        shaped_row_cache_capacity = stats.shaped_row_cache_capacity,
+        mono_glyph_cache_entries = stats.mono_glyph_cache_entries,
+        color_glyph_cache_entries = stats.color_glyph_cache_entries,
+        glyph_raster_cache_entries = stats.glyph_raster_cache_entries,
+        prepared_row_cache_entries = stats.prepared_row_cache_entries,
+        scene_image_mono_glyph_cache_entries = stats.scene_image_mono_glyph_cache_entries,
+        scene_image_color_glyph_cache_entries = stats.scene_image_color_glyph_cache_entries,
+        scene_image_last_base_pixels_bytes = stats.scene_image_last_base_pixels_bytes,
+        scene_image_working_pixels_bytes = stats.scene_image_working_pixels_bytes,
+        "terminal memory startup snapshot"
+    );
+}
+
+pub fn emit_terminal_memory_surface_refresh(
+    enabled: bool,
+    reason: &str,
+    render_mode: &str,
+    seqno: u64,
+    stats: TerminalPresenterCacheStats,
+) {
+    if !enabled {
+        return;
+    }
+
+    tracing::debug!(
+        target: "app.memory",
+        event = "surface-refresh",
+        reason,
+        render_mode,
+        seqno,
+        previous_frame_rows = stats.previous_frame_rows,
+        previous_shaped_rows = stats.previous_shaped_rows,
+        shaped_row_cache_entries = stats.shaped_row_cache_entries,
+        shaped_row_cache_capacity = stats.shaped_row_cache_capacity,
+        mono_glyph_cache_entries = stats.mono_glyph_cache_entries,
+        color_glyph_cache_entries = stats.color_glyph_cache_entries,
+        glyph_raster_cache_entries = stats.glyph_raster_cache_entries,
+        prepared_row_cache_entries = stats.prepared_row_cache_entries,
+        scene_image_mono_glyph_cache_entries = stats.scene_image_mono_glyph_cache_entries,
+        scene_image_color_glyph_cache_entries = stats.scene_image_color_glyph_cache_entries,
+        scene_image_last_base_pixels_bytes = stats.scene_image_last_base_pixels_bytes,
+        scene_image_working_pixels_bytes = stats.scene_image_working_pixels_bytes,
+        "terminal memory surface refresh"
+    );
+}
+
+pub fn emit_terminal_memory_trim_request(enabled: bool, pending_output_bytes: usize) {
+    if !enabled {
+        return;
+    }
+
+    tracing::debug!(
+        target: "app.memory",
+        event = "trim-request",
+        pending_output_bytes,
+        "terminal memory trim request"
+    );
+}
+
+pub fn emit_terminal_memory_trim_executed(
+    enabled: bool,
+    pending_output_bytes: usize,
+    trim_succeeded: bool,
+) {
+    if !enabled {
+        return;
+    }
+
+    tracing::debug!(
+        target: "app.memory",
+        event = "trim-executed",
+        pending_output_bytes,
+        trim_succeeded,
+        "terminal memory trim executed"
     );
 }
 

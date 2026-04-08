@@ -1,7 +1,7 @@
 //! Platform helpers for trimming retained process memory after large idle output bursts.
 
 #[cfg(windows)]
-pub fn trim_process_working_set() {
+pub fn trim_process_working_set() -> bool {
     use windows_sys::Win32::System::ProcessStatus::K32EmptyWorkingSet;
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
@@ -10,8 +10,13 @@ pub fn trim_process_working_set() {
     let trimmed = unsafe { K32EmptyWorkingSet(GetCurrentProcess()) };
     if trimmed == 0 {
         tracing::debug!(target: "app.memory", "working set trim request was ignored");
+        false
+    } else {
+        true
     }
 }
 
 #[cfg(not(windows))]
-pub fn trim_process_working_set() {}
+pub fn trim_process_working_set() -> bool {
+    false
+}

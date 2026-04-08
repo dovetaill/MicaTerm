@@ -7,6 +7,7 @@ use crate::app::ssh::runtime::TerminalSurfaceState;
 use crate::app::terminal_atlas::TerminalAtlasSelection;
 use crate::app::terminal_presenter::{
     PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter,
+    TerminalPresenterCacheStats,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -42,6 +43,14 @@ impl TerminalRendererHost {
 
     pub fn default_cell_size(&self) -> (u32, u32) {
         self.presenter.default_cell_size()
+    }
+
+    pub fn cache_stats(&self) -> TerminalPresenterCacheStats {
+        self.presenter.cache_stats()
+    }
+
+    pub fn clear_transient_caches(&mut self) {
+        self.presenter.clear_transient_caches();
     }
 
     pub fn present(

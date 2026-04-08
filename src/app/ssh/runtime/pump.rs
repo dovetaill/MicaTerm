@@ -9,6 +9,10 @@ use tokio::sync::mpsc;
 use tokio::time::{Sleep, sleep};
 use uuid::Uuid;
 
+use crate::app::logging::runtime::{
+    emit_terminal_memory_trim_executed, emit_terminal_memory_trim_request,
+    memory_diagnostics_enabled,
+};
 use crate::app::ssh::shell_integration::runtime_shell_events;
 
 use super::auth::RuntimeClientHandler;
@@ -30,6 +34,7 @@ pub(super) async fn run_channel_pump(
     _transport_chain_guard: TransportChainGuard,
 ) {
     let mut command_channel_open = true;
+    let memory_diagnostics = memory_diagnostics_enabled();
     let mut dirty_notifier = SurfaceDirtyNotifier::default();
     let mut dirty_timer: Option<std::pin::Pin<Box<Sleep>>> = None;
     let mut dirty_timer_interval: Option<std::time::Duration> = None;
@@ -224,8 +229,15 @@ pub(super) async fn run_channel_pump(
             }
             () = async { if let Some(timer) = working_set_trim_timer.as_mut() { timer.await } }, if working_set_trim_timer.is_some() => {
                 working_set_trim_timer = None;
+                let pending_output_bytes = working_set_trim_scheduler.pending_output_bytes();
                 if working_set_trim_scheduler.trim_due() {
-                    crate::app::memory::trim_process_working_set();
+                    emit_terminal_memory_trim_request(memory_diagnostics, pending_output_bytes);
+                    let trim_succeeded = crate::app::memory::trim_process_working_set();
+                    emit_terminal_memory_trim_executed(
+                        memory_diagnostics,
+                        pending_output_bytes,
+                        trim_succeeded,
+                    );
                 }
             }
         }
@@ -289,6 +301,10 @@ struct WorkingSetTrimScheduler {
 }
 
 impl WorkingSetTrimScheduler {
+    fn pending_output_bytes(&self) -> usize {
+        self.pending_output_bytes
+    }
+
     fn record_output(&mut self, bytes: usize) {
         self.pending_output_bytes = self.pending_output_bytes.saturating_add(bytes);
     }

@@ -2577,6 +2577,7 @@ fn sync_workspace_session_state_with_manager(
 fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &ShellViewModel) {
     let profile = WORKSPACE_RUNTIME_PROFILE
         .with(|profile| (*profile.borrow()).unwrap_or_else(AppRuntimeProfile::packaged));
+    let memory_diagnostics = crate::app::logging::runtime::memory_diagnostics_enabled();
     let scale_factor = window_scale_factor(window);
     window.set_workspace_session_device_scale_factor(scale_factor);
     if state.active_workspace_terminal_surface().is_some()
@@ -2605,6 +2606,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         let mut native_frame_presented = false;
         let mut next_render_mode = None;
         let mut next_surface_seqno = None;
+        let mut memory_stats = crate::app::terminal_presenter::TerminalPresenterCacheStats::default();
         WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
             let mut host = host.borrow_mut();
             let Some(host) = host.as_mut() else {
@@ -2681,6 +2683,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
                     next_render_mode = Some(TerminalRenderMode::Bitmap);
                 }
             }
+            memory_stats = host.cache_stats();
         });
         if native_frame_presented {
             clear_workspace_session_cursor_overlay(window);
@@ -2719,6 +2722,13 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         }
         if let Some(next_render_mode) = next_render_mode {
             window.set_workspace_session_render_mode(next_render_mode.as_str().into());
+            crate::app::logging::runtime::emit_terminal_memory_surface_refresh(
+                memory_diagnostics,
+                "surface-refresh",
+                next_render_mode.as_str(),
+                surface.seqno as u64,
+                memory_stats,
+            );
         }
     } else {
         let preset = terminal_theme_preset;
@@ -3803,6 +3813,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
         *surface.borrow_mut() = None;
     });
+    crate::app::logging::runtime::emit_terminal_memory_startup_snapshot(
+        crate::app::logging::runtime::memory_diagnostics_enabled(),
+        profile,
+        crate::app::terminal_presenter::TerminalPresenterCacheStats::default(),
+    );
 
     apply_restored_window_size(window, default_window_size());
     windowing::bind_windows_window_state_tracking(
