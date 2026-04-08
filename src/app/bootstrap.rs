@@ -2420,6 +2420,13 @@ fn release_workspace_terminal_renderer_resources() {
     });
 }
 
+fn workspace_terminal_renderer_resources_retained() -> bool {
+    let host_retained = WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| host.borrow().is_some());
+    let native_surface_retained =
+        WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| surface.borrow().is_some());
+    host_retained || native_surface_retained
+}
+
 fn update_workspace_terminal_idle_cache_shrink(
     has_active_surface: bool,
     surface_disappeared: bool,
@@ -2434,7 +2441,8 @@ fn update_workspace_terminal_idle_cache_shrink(
         return;
     }
 
-    if surface_disappeared {
+    let retained_renderer_resources = workspace_terminal_renderer_resources_retained();
+    if surface_disappeared || (no_surface_since.is_none() && retained_renderer_resources) {
         clear_workspace_terminal_transient_caches(
             memory_diagnostics,
             "close-shrink",
@@ -2829,6 +2837,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
             0xff00_0000 | preset.background,
         ));
         clear_workspace_native_terminal_frame(window);
+        release_workspace_terminal_renderer_resources();
         window.set_workspace_session_mouse_grabbed(false);
         window.set_workspace_session_viewport_offset_lines(0);
         window.set_workspace_session_viewport_max_offset_lines(0);
@@ -6300,6 +6309,12 @@ mod tests {
                 "bitmap"
             );
             assert_eq!(window.get_workspace_session_visible_lines().row_count(), 0);
+            WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+                assert!(
+                    host.borrow().is_none(),
+                    "clearing the last active workspace terminal surface should also release the shared presenter host so terminal caches do not stay resident after the UI has no surface left to render"
+                );
+            });
         });
     }
 
@@ -6418,6 +6433,39 @@ mod tests {
         assert!(
             idle_cache_shrunk,
             "once the no-surface threshold elapses the idle shrink path should mark itself complete until an active surface returns"
+        );
+    }
+
+    #[test]
+    fn idle_cache_shrink_arms_when_surface_was_cleared_before_timer_observed_transition() {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = Some(TerminalRendererHost::new(
+                Box::new(SizedPresenter((10, 22))),
+                TerminalRenderMode::Bitmap,
+            ));
+        });
+
+        let now = Instant::now();
+        let mut no_surface_since = None;
+        let mut idle_cache_shrunk = false;
+
+        update_workspace_terminal_idle_cache_shrink(
+            false,
+            false,
+            now,
+            &mut no_surface_since,
+            &mut idle_cache_shrunk,
+            false,
+        );
+
+        assert_eq!(
+            no_surface_since,
+            Some(now),
+            "when the UI already cleared the active terminal surface before the timer tick runs, retained renderer resources should still arm the no-surface idle timer so close-triggered memory release is not skipped in real tab-close flows"
+        );
+        assert!(
+            !idle_cache_shrunk,
+            "arming the delayed no-surface shrink from retained renderer resources should only schedule the later release, not mark the idle shrink complete immediately"
         );
     }
 
