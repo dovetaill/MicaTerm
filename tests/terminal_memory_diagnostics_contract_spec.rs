@@ -33,3 +33,18 @@ fn readme_documents_windows_memory_diagnostics_repro_flow() {
         "README should document the close-shrink and idle-shrink memory events so field diagnostics can distinguish immediate surface-clear cleanup from delayed no-surface cleanup"
     );
 }
+
+#[test]
+fn native_renderer_field_verification_defaults_lower_glyph_caps_to_256() {
+    let content = fs::read_to_string("src/app/terminal_renderer/wgpu_renderer.rs")
+        .expect("read wgpu renderer source");
+
+    assert!(
+        content.contains("const DEFAULT_MONO_GLYPH_CACHE_LIMIT: usize = 256;"),
+        "field verification builds should lower the default mono glyph cache cap to 256 so Windows repros can hit the deferred reset path without synthetic stress tooling"
+    );
+    assert!(
+        content.contains("const DEFAULT_GLYPH_RASTER_CACHE_LIMIT: usize = 256;"),
+        "field verification builds should lower the default glyph raster cache cap to 256 so real-world repro logs can surface cache-reset events sooner"
+    );
+}

@@ -285,3 +285,6 @@ bash "$PROJECT_DIR/build-desktop.sh"
 
 [[ -f "$PROJECT_DIR/out/mica-term-x86_64-pc-windows-msvc-debug.zip" ]]
 [[ -f "$PROJECT_DIR/out/mica-term-x86_64-pc-windows-msvc-debug/mica-term.exe" ]]
+[[ ! -e "$PROJECT_DIR/out/mica-term-x86_64-pc-windows-msvc-debug/README.md" ]]
+[[ ! -e "$PROJECT_DIR/out/mica-term-x86_64-pc-windows-msvc-debug/OFL.txt" ]]
+[[ ! -e "$PROJECT_DIR/out/mica-term-x86_64-pc-windows-msvc-debug/mica-term.ico" ]]

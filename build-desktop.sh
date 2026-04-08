@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Packages the current target binary into dist/ with icon and archive metadata.
+# Packages the current target binary into dist/ with a minimal distributable layout.
 
 set -euo pipefail
 
@@ -9,8 +9,6 @@ PROFILE="${PROFILE:-release}"
 APP_NAME="${APP_NAME:-$(awk -F'"' '/^name = / { print $2; exit }' "$ROOT_DIR/Cargo.toml")}"
 BIN_NAME="${BIN_NAME:-$APP_NAME}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
-ICON_PATH="$ROOT_DIR/assets/icons/windows/mica-term.ico"
-DEFAULT_TERMINAL_FONT_OFL_PATH="$ROOT_DIR/assets/fonts/Fusion-JetBrainsMapleMono/OFL.txt"
 PACKAGE_FLAVOR_SUFFIX="${PACKAGE_FLAVOR_SUFFIX:-}"
 ARCHIVE_STEM="${APP_NAME}-${TARGET}-${PROFILE}${PACKAGE_FLAVOR_SUFFIX}"
 
@@ -446,18 +444,6 @@ mkdir -p "$DIST_DIR"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 cp "$BIN_PATH" "$STAGE_DIR/"
-
-if [[ -f "$ROOT_DIR/readme.md" ]]; then
-  cp "$ROOT_DIR/readme.md" "$STAGE_DIR/README.md"
-fi
-
-if [[ "$TARGET" == *windows* && -f "$ICON_PATH" ]]; then
-  cp "$ICON_PATH" "$STAGE_DIR/"
-fi
-
-if [[ -f "$DEFAULT_TERMINAL_FONT_OFL_PATH" ]]; then
-  cp "$DEFAULT_TERMINAL_FONT_OFL_PATH" "$STAGE_DIR/OFL.txt"
-fi
 
 if [[ "$TARGET" == *windows* && "${MICA_TERM_PACKAGE_PORTABLE:-0}" == "1" ]]; then
   : > "$STAGE_DIR/.mica-term-portable"

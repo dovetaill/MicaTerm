@@ -184,9 +184,9 @@ struct PreparedRowArtifacts {
     underline_runs: Vec<PreparedUnderlineRun>,
 }
 
-const DEFAULT_MONO_GLYPH_CACHE_LIMIT: usize = 2048;
+const DEFAULT_MONO_GLYPH_CACHE_LIMIT: usize = 256;
 const DEFAULT_COLOR_GLYPH_CACHE_LIMIT: usize = 256;
-const DEFAULT_GLYPH_RASTER_CACHE_LIMIT: usize = 2048;
+const DEFAULT_GLYPH_RASTER_CACHE_LIMIT: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct WgpuRendererCacheLimits {
