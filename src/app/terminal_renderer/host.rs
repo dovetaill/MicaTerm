@@ -49,6 +49,10 @@ impl TerminalRendererHost {
         self.presenter.cache_stats()
     }
 
+    pub fn cache_reset_generation(&self) -> u64 {
+        self.presenter.cache_reset_generation()
+    }
+
     pub fn clear_transient_caches(&mut self) {
         self.presenter.clear_transient_caches();
     }

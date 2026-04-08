@@ -184,6 +184,43 @@ struct PreparedRowArtifacts {
     underline_runs: Vec<PreparedUnderlineRun>,
 }
 
+const DEFAULT_MONO_GLYPH_CACHE_LIMIT: usize = 2048;
+const DEFAULT_COLOR_GLYPH_CACHE_LIMIT: usize = 256;
+const DEFAULT_GLYPH_RASTER_CACHE_LIMIT: usize = 2048;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WgpuRendererCacheLimits {
+    mono_glyph_cache_entries: usize,
+    color_glyph_cache_entries: usize,
+    glyph_raster_cache_entries: usize,
+}
+
+impl Default for WgpuRendererCacheLimits {
+    fn default() -> Self {
+        Self {
+            mono_glyph_cache_entries: DEFAULT_MONO_GLYPH_CACHE_LIMIT,
+            color_glyph_cache_entries: DEFAULT_COLOR_GLYPH_CACHE_LIMIT,
+            glyph_raster_cache_entries: DEFAULT_GLYPH_RASTER_CACHE_LIMIT,
+        }
+    }
+}
+
+impl WgpuRendererCacheLimits {
+    fn sanitized(self) -> Self {
+        Self {
+            mono_glyph_cache_entries: self.mono_glyph_cache_entries.max(1),
+            color_glyph_cache_entries: self.color_glyph_cache_entries.max(1),
+            glyph_raster_cache_entries: self.glyph_raster_cache_entries.max(1),
+        }
+    }
+
+    fn exceeded_by(self, stats: WgpuRendererCacheStats) -> bool {
+        stats.mono_glyph_cache_entries > self.mono_glyph_cache_entries
+            || stats.color_glyph_cache_entries > self.color_glyph_cache_entries
+            || stats.glyph_raster_cache_entries > self.glyph_raster_cache_entries
+    }
+}
+
 #[derive(Default)]
 pub struct WgpuTerminalRenderer {
     atlas: GlyphAtlas,
@@ -194,6 +231,9 @@ pub struct WgpuTerminalRenderer {
     last_frame_fingerprint: Option<u64>,
     next_frame_token: u64,
     next_color_slot: u32,
+    cache_limits: WgpuRendererCacheLimits,
+    pending_cache_reset: bool,
+    cache_reset_generation: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -213,6 +253,21 @@ impl WgpuTerminalRenderer {
         Ok(Self::new())
     }
 
+    pub fn new_with_cache_limits_for_test(
+        mono_glyph_cache_entries: usize,
+        color_glyph_cache_entries: usize,
+        glyph_raster_cache_entries: usize,
+    ) -> Result<Self> {
+        let mut renderer = Self::default();
+        renderer.cache_limits = WgpuRendererCacheLimits {
+            mono_glyph_cache_entries,
+            color_glyph_cache_entries,
+            glyph_raster_cache_entries,
+        }
+        .sanitized();
+        Ok(renderer)
+    }
+
     pub fn glyph_raster_cache_entry_count(&self) -> usize {
         self.glyph_raster_cache.len()
     }
@@ -225,6 +280,10 @@ impl WgpuTerminalRenderer {
         self.previous_prepared_rows.len()
     }
 
+    pub fn cache_reset_generation(&self) -> u64 {
+        self.cache_reset_generation
+    }
+
     pub fn cache_stats(&self) -> WgpuRendererCacheStats {
         WgpuRendererCacheStats {
             mono_glyph_cache_entries: self.atlas.entry_count(),
@@ -235,6 +294,11 @@ impl WgpuTerminalRenderer {
     }
 
     pub fn clear_transient_caches(&mut self) {
+        self.pending_cache_reset = false;
+        self.clear_glyph_caches();
+    }
+
+    fn clear_glyph_caches(&mut self) {
         self.atlas.clear();
         self.color_glyph_cache.clear();
         self.glyph_raster_cache.clear();
@@ -244,11 +308,22 @@ impl WgpuTerminalRenderer {
         self.next_color_slot = 0;
     }
 
+    fn apply_pending_cache_reset(&mut self) {
+        if !self.pending_cache_reset {
+            return;
+        }
+
+        self.pending_cache_reset = false;
+        self.cache_reset_generation = self.cache_reset_generation.saturating_add(1);
+        self.clear_glyph_caches();
+    }
+
     pub fn prepare(
         &mut self,
         frame: &ShapedTerminalFrame,
         fonts: &mut dyn FontSystem,
     ) -> Result<PreparedNativeFrame> {
+        self.apply_pending_cache_reset();
         let mut monochrome_glyphs_prepared = 0usize;
         let mut color_glyphs_prepared = 0usize;
         let mut background_runs = Vec::new();
@@ -328,6 +403,9 @@ impl WgpuTerminalRenderer {
             monochrome_glyphs_prepared,
             color_glyphs_prepared,
         };
+        if self.cache_limits.exceeded_by(self.cache_stats()) {
+            self.pending_cache_reset = true;
+        }
 
         Ok(PreparedNativeFrame {
             frame_token: self.next_frame_token,

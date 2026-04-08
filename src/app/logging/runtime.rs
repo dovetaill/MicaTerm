@@ -162,6 +162,35 @@ pub fn emit_terminal_memory_cache_clear(
     );
 }
 
+pub fn emit_terminal_memory_cache_reset(
+    enabled: bool,
+    reason: &str,
+    render_mode: &str,
+    generation: u64,
+    stats: TerminalPresenterCacheStats,
+) {
+    if !enabled {
+        return;
+    }
+
+    tracing::debug!(
+        target: "app.memory",
+        event = "cache-reset",
+        reason,
+        render_mode,
+        generation,
+        mono_glyph_cache_entries = stats.mono_glyph_cache_entries,
+        color_glyph_cache_entries = stats.color_glyph_cache_entries,
+        glyph_raster_cache_entries = stats.glyph_raster_cache_entries,
+        prepared_row_cache_entries = stats.prepared_row_cache_entries,
+        scene_image_mono_glyph_cache_entries = stats.scene_image_mono_glyph_cache_entries,
+        scene_image_color_glyph_cache_entries = stats.scene_image_color_glyph_cache_entries,
+        scene_image_last_base_pixels_bytes = stats.scene_image_last_base_pixels_bytes,
+        scene_image_working_pixels_bytes = stats.scene_image_working_pixels_bytes,
+        "terminal memory cache reset"
+    );
+}
+
 pub fn emit_terminal_memory_trim_request(enabled: bool, pending_output_bytes: usize) {
     if !enabled {
         return;

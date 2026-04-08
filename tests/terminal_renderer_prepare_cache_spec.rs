@@ -296,3 +296,54 @@ fn native_renderer_clear_transient_caches_drops_prepared_and_glyph_state() -> Re
 
     Ok(())
 }
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn native_renderer_bounds_glyph_caches_after_pressure_triggers_reset() -> Result<()> {
+    let mut font_system = CountingRasterFontSystem::new()?;
+    let loaded_font = font_system.load_font(&FontRequest::default())?;
+    let mut renderer = WgpuTerminalRenderer::new_with_cache_limits_for_test(4, 2, 4)?;
+
+    for (seqno, text) in [(1u64, "ab"), (2, "cd"), (3, "ef")] {
+        let frame = ShapedTerminalFrame {
+            seqno,
+            font: loaded_font.clone(),
+            rows: shape_rows(&mut font_system, &loaded_font, &[build_ascii_row(0, text)])?,
+        };
+        renderer.prepare(&frame, &mut font_system)?;
+    }
+
+    assert_eq!(
+        renderer.cache_reset_generation(),
+        0,
+        "crossing the glyph cache cap should stage a reset for the next prepare instead of invalidating the frame that is currently being built"
+    );
+    assert!(
+        renderer.glyph_raster_cache_entry_count() > 4,
+        "without the deferred reset the accumulated glyph raster cache would continue growing past the configured cap"
+    );
+
+    let recovery_frame = ShapedTerminalFrame {
+        seqno: 4,
+        font: loaded_font.clone(),
+        rows: shape_rows(&mut font_system, &loaded_font, &[build_ascii_row(0, "ab")])?,
+    };
+    renderer.prepare(&recovery_frame, &mut font_system)?;
+
+    let stats = renderer.cache_stats();
+    assert_eq!(
+        renderer.cache_reset_generation(),
+        1,
+        "the next prepare after crossing the glyph cache cap should apply the deferred renderer cache reset before rebuilding the visible frame"
+    );
+    assert!(
+        stats.mono_glyph_cache_entries <= 4,
+        "monochrome atlas entries should stay bounded after the deferred reset rehydrates only the visible glyphs"
+    );
+    assert!(
+        stats.glyph_raster_cache_entries <= 4,
+        "glyph raster cache entries should stay bounded after the deferred reset rehydrates only the visible glyphs"
+    );
+
+    Ok(())
+}

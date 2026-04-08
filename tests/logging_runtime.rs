@@ -6,9 +6,9 @@ use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::{
     build_test_logging_runtime, emit_app_root_metadata, emit_runtime_profile_metadata,
-    emit_terminal_memory_cache_clear, emit_terminal_memory_startup_snapshot,
-    emit_terminal_memory_surface_refresh, emit_terminal_memory_trim_executed,
-    emit_terminal_memory_trim_request,
+    emit_terminal_memory_cache_clear, emit_terminal_memory_cache_reset,
+    emit_terminal_memory_startup_snapshot, emit_terminal_memory_surface_refresh,
+    emit_terminal_memory_trim_executed, emit_terminal_memory_trim_request,
 };
 use mica_term::app::runtime_profile::AppRuntimeProfile;
 use mica_term::app::terminal_presenter::TerminalPresenterCacheStats;
@@ -190,6 +190,13 @@ fn terminal_memory_diagnostics_remain_quiet_when_disabled() {
             TerminalPresenterCacheStats::default(),
             TerminalPresenterCacheStats::default(),
         );
+        emit_terminal_memory_cache_reset(
+            false,
+            "glyph-cache-cap",
+            "bitmap",
+            1,
+            TerminalPresenterCacheStats::default(),
+        );
         emit_terminal_memory_trim_request(false, 1024 * 1024);
         emit_terminal_memory_trim_executed(false, 1024 * 1024, true);
     });
@@ -200,6 +207,7 @@ fn terminal_memory_diagnostics_remain_quiet_when_disabled() {
     assert!(!content.contains("terminal memory startup snapshot"));
     assert!(!content.contains("terminal memory surface refresh"));
     assert!(!content.contains("terminal memory cache shrink"));
+    assert!(!content.contains("terminal memory cache reset"));
     assert!(!content.contains("terminal memory trim request"));
     assert!(!content.contains("terminal memory trim executed"));
 }
@@ -246,6 +254,7 @@ fn terminal_memory_diagnostics_emit_when_enabled() {
             stats,
             shrunk_stats,
         );
+        emit_terminal_memory_cache_reset(true, "glyph-cache-cap", "bitmap", 1, shrunk_stats);
         emit_terminal_memory_trim_request(true, 1024 * 1024);
         emit_terminal_memory_trim_executed(true, 1024 * 1024, true);
     });
@@ -256,6 +265,10 @@ fn terminal_memory_diagnostics_emit_when_enabled() {
     assert!(content.contains("terminal memory startup snapshot"));
     assert!(content.contains("terminal memory surface refresh"));
     assert!(content.contains("terminal memory cache shrink"));
+    assert!(content.contains("terminal memory cache reset"));
+    assert!(content.contains("cache-reset"));
+    assert!(content.contains("reason=\"glyph-cache-cap\""));
+    assert!(content.contains("generation=1"));
     assert!(content.contains("idle-shrink"));
     assert!(content.contains("reason=\"no-active-surface-idle\""));
     assert!(content.contains("terminal memory trim request"));

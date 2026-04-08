@@ -359,6 +359,10 @@ pub trait TerminalPresenter {
         TerminalPresenterCacheStats::default()
     }
 
+    fn cache_reset_generation(&self) -> u64 {
+        0
+    }
+
     fn clear_transient_caches(&mut self) {}
 }
 
@@ -551,6 +555,10 @@ impl TerminalPresenter for WindowsNativePresenter {
         self.shaped_row_cache.clear();
         self.renderer.clear_transient_caches();
     }
+
+    fn cache_reset_generation(&self) -> u64 {
+        self.renderer.cache_reset_generation()
+    }
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -561,6 +569,7 @@ pub struct WindowsSceneImagePresenter {
     font_system: DirectWriteFontSystem,
     shaper: TerminalTextShaper,
     renderer: WgpuTerminalRenderer,
+    last_renderer_cache_reset_generation: u64,
     scene_renderer: SceneImageTerminalRenderer,
     base_font_request: FontRequest,
     loaded_font: LoadedFont,
@@ -581,6 +590,7 @@ impl WindowsSceneImagePresenter {
             font_system,
             shaper: TerminalTextShaper,
             renderer: WgpuTerminalRenderer::new(),
+            last_renderer_cache_reset_generation: 0,
             scene_renderer: SceneImageTerminalRenderer::default(),
             base_font_request: request,
             loaded_font,
@@ -598,6 +608,7 @@ impl WindowsSceneImagePresenter {
         self.previous_shaped_rows = None;
         self.shaped_row_cache.clear();
         self.scene_renderer.clear();
+        self.last_renderer_cache_reset_generation = self.renderer.cache_reset_generation();
         Ok(())
     }
 }
@@ -641,6 +652,11 @@ impl TerminalPresenter for WindowsSceneImagePresenter {
             options,
         )?;
         let _ = prepare_diagnostics;
+        let cache_reset_generation = self.renderer.cache_reset_generation();
+        if cache_reset_generation != self.last_renderer_cache_reset_generation {
+            self.scene_renderer.clear_transient_caches();
+            self.last_renderer_cache_reset_generation = cache_reset_generation;
+        }
         let bitmap = self.scene_renderer.render(&frame)?;
         Ok(PresentedTerminalFrame::Bitmap(bitmap))
     }
@@ -682,6 +698,11 @@ impl TerminalPresenter for WindowsSceneImagePresenter {
         self.shaped_row_cache.clear();
         self.renderer.clear_transient_caches();
         self.scene_renderer.clear_transient_caches();
+        self.last_renderer_cache_reset_generation = self.renderer.cache_reset_generation();
+    }
+
+    fn cache_reset_generation(&self) -> u64 {
+        self.renderer.cache_reset_generation()
     }
 }
 
