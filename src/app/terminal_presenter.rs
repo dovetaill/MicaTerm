@@ -27,7 +27,7 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 #[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_scene_image::{SceneImageRenderDiagnostics, SceneImageTerminalRenderer};
+use crate::app::terminal_scene_image::SceneImageTerminalRenderer;
 use crate::app::terminal_semantic::{SemanticInputOverlay, SemanticOutputOverlay};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_semantic::{detect_input_line_overlays, detect_output_block_overlays};
@@ -469,7 +469,7 @@ impl TerminalPresenter for WindowsNativePresenter {
             surface,
             options,
         )?;
-        log_native_present_diagnostics(surface, diagnostics);
+        let _ = diagnostics;
         Ok(PresentedTerminalFrame::Native(Box::new(frame)))
     }
 
@@ -565,10 +565,8 @@ impl TerminalPresenter for WindowsSceneImagePresenter {
             surface,
             options,
         )?;
+        let _ = prepare_diagnostics;
         let bitmap = self.scene_renderer.render(&frame)?;
-        if let Some(scene_diagnostics) = self.scene_renderer.last_render_diagnostics() {
-            log_scene_image_present_diagnostics(surface, prepare_diagnostics, scene_diagnostics);
-        }
         Ok(PresentedTerminalFrame::Bitmap(bitmap))
     }
 
@@ -820,60 +818,6 @@ fn rebased_shaped_row(
         run.row = row_index;
     }
     reused
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-fn log_native_present_diagnostics(surface: &SurfaceState, diagnostics: TerminalPrepareDiagnostics) {
-    tracing::debug!(
-        target: "app.terminal.perf",
-        render_path = "retained-native-surface",
-        seqno = surface.seqno as u64,
-        viewport_offset_lines = diagnostics.viewport_offset_lines,
-        prepare_native_terminal_frame_us = diagnostics.prepare_native_terminal_frame_us,
-        model_frame_us = diagnostics.model_frame_us,
-        shape_rows_us = diagnostics.shape_rows_us,
-        renderer_prepare_us = diagnostics.renderer_prepare_us,
-        shaped_row_count = diagnostics.shaped_row_count,
-        reused_shaped_row_count = diagnostics.reused_shaped_row_count,
-        fresh_shaped_row_count = diagnostics.fresh_shaped_row_count,
-        dirty_row_count = diagnostics.dirty_row_count,
-        prepared_row_reuse_count = diagnostics.prepared_row_reuse_count,
-        glyph_raster_cache_entry_count = diagnostics.glyph_raster_cache_entry_count,
-        "prepared retained native terminal frame"
-    );
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-fn log_scene_image_present_diagnostics(
-    surface: &SurfaceState,
-    prepare_diagnostics: TerminalPrepareDiagnostics,
-    scene_diagnostics: SceneImageRenderDiagnostics,
-) {
-    tracing::debug!(
-        target: "app.terminal.perf",
-        render_path = "scene-image",
-        seqno = surface.seqno as u64,
-        viewport_offset_lines = prepare_diagnostics.viewport_offset_lines,
-        prepare_native_terminal_frame_us = prepare_diagnostics.prepare_native_terminal_frame_us,
-        model_frame_us = prepare_diagnostics.model_frame_us,
-        shape_rows_us = prepare_diagnostics.shape_rows_us,
-        renderer_prepare_us = prepare_diagnostics.renderer_prepare_us,
-        shaped_row_count = prepare_diagnostics.shaped_row_count,
-        reused_shaped_row_count = prepare_diagnostics.reused_shaped_row_count,
-        fresh_shaped_row_count = prepare_diagnostics.fresh_shaped_row_count,
-        dirty_row_count = prepare_diagnostics.dirty_row_count,
-        prepared_row_reuse_count = prepare_diagnostics.prepared_row_reuse_count,
-        glyph_raster_cache_entry_count = prepare_diagnostics.glyph_raster_cache_entry_count,
-        scene_image_render_us = scene_diagnostics.scene_image_render_us,
-        scene_image_base_raster_us = scene_diagnostics.base_raster_us,
-        scene_image_overlay_compose_us = scene_diagnostics.overlay_compose_us,
-        scene_image_reuse_mode = scene_diagnostics.reuse_mode,
-        scene_image_fallback_reason = scene_diagnostics.fallback_reason.unwrap_or("none"),
-        incremental_scroll_delta_rows = scene_diagnostics.incremental_scroll_delta_rows,
-        dirty_edge_row_count = scene_diagnostics.dirty_edge_row_count,
-        bitmap_render_count = scene_diagnostics.bitmap_render_count,
-        "presented scene-image terminal frame"
-    );
 }
 
 #[cfg(feature = "terminal-native-renderer")]

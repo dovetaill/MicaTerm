@@ -179,7 +179,7 @@ fn renderer_hot_paths_consume_terminal_frame_snapshot_contract() {
 }
 
 #[test]
-fn presenter_and_scene_image_paths_expose_perf_breakdown_diagnostics() {
+fn presenter_and_scene_image_paths_keep_perf_diagnostics_without_runtime_log_spam() {
     let presenter_source = fs::read_to_string("src/app/terminal_presenter.rs")
         .expect("read terminal presenter source");
     let scene_image_source = fs::read_to_string("src/app/terminal_scene_image.rs")
@@ -194,16 +194,17 @@ fn presenter_and_scene_image_paths_expose_perf_breakdown_diagnostics() {
         "reused_shaped_row_count",
         "prepared_row_reuse_count",
         "glyph_raster_cache_entry_count",
-        "target: \"app.terminal.perf\"",
-        "scene_image_render_us",
-        "scene_image_base_raster_us",
-        "scene_image_fallback_reason",
     ] {
         assert!(
             presenter_source.contains(expected),
-            "presenter perf instrumentation should expose `{expected}` so runtime logs can show whether prepare_native_terminal_frame or downstream raster work is actually dominating scroll latency"
+            "presenter perf instrumentation should expose `{expected}` so prepare-path regressions remain observable without forcing the release build to emit per-frame runtime log spam"
         );
     }
+
+    assert!(
+        !presenter_source.contains("app.terminal.perf"),
+        "presenter source should stop emitting per-frame app.terminal.perf logs once the scroll tuning is considered good enough for release builds"
+    );
 
     for expected in [
         "pub struct SceneImageRenderDiagnostics",
@@ -218,7 +219,7 @@ fn presenter_and_scene_image_paths_expose_perf_breakdown_diagnostics() {
     ] {
         assert!(
             scene_image_source.contains(expected),
-            "scene-image renderer should expose `{expected}` so incremental scroll reuse and raster timings stay observable while we chase scroll smoothness regressions"
+            "scene-image renderer should expose `{expected}` so incremental scroll reuse and raster timings stay observable even after runtime perf logging is disabled by default"
         );
     }
 }
