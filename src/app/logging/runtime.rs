@@ -3,9 +3,7 @@
 use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
-use uuid::Uuid;
 
-use crate::app::memory::ProcessMemorySnapshot;
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::terminal_presenter::TerminalPresenterCacheStats;
 
@@ -97,103 +95,6 @@ pub fn emit_terminal_memory_cache_clear(
         after_scene_image_last_base_pixels_bytes = after.scene_image_last_base_pixels_bytes,
         after_scene_image_working_pixels_bytes = after.scene_image_working_pixels_bytes,
         "terminal memory cache shrink"
-    );
-}
-
-pub fn emit_terminal_memory_trim_threshold_crossed(
-    enabled: bool,
-    session_id: Uuid,
-    chunk_bytes: usize,
-    pending_output_bytes: usize,
-    trim_threshold_bytes: usize,
-    idle_interval_ms: u64,
-) {
-    if !enabled {
-        return;
-    }
-
-    tracing::debug!(
-        target: "app.memory",
-        event = "trim-threshold-crossed",
-        session_id = session_id.to_string(),
-        chunk_bytes,
-        pending_output_bytes,
-        trim_threshold_bytes,
-        idle_interval_ms,
-        "terminal memory trim threshold crossed"
-    );
-}
-
-pub fn emit_terminal_memory_trim_request(
-    enabled: bool,
-    session_id: Uuid,
-    pending_output_bytes: usize,
-    before: Option<ProcessMemorySnapshot>,
-) {
-    if !enabled {
-        return;
-    }
-
-    tracing::debug!(
-        target: "app.memory",
-        event = "trim-request",
-        session_id = session_id.to_string(),
-        pending_output_bytes,
-        before_working_set_bytes = before.map(|snapshot| snapshot.working_set_bytes),
-        before_peak_working_set_bytes = before.map(|snapshot| snapshot.peak_working_set_bytes),
-        before_pagefile_usage_bytes = before.map(|snapshot| snapshot.pagefile_usage_bytes),
-        before_private_usage_bytes = before.map(|snapshot| snapshot.private_usage_bytes),
-        "terminal memory trim request"
-    );
-}
-
-pub fn emit_terminal_memory_trim_executed(
-    enabled: bool,
-    session_id: Uuid,
-    pending_output_bytes: usize,
-    trim_succeeded: bool,
-    before: Option<ProcessMemorySnapshot>,
-    after: Option<ProcessMemorySnapshot>,
-) {
-    if !enabled {
-        return;
-    }
-
-    tracing::debug!(
-        target: "app.memory",
-        event = "trim-executed",
-        session_id = session_id.to_string(),
-        pending_output_bytes,
-        trim_succeeded,
-        before_working_set_bytes = before.map(|snapshot| snapshot.working_set_bytes),
-        before_peak_working_set_bytes = before.map(|snapshot| snapshot.peak_working_set_bytes),
-        before_pagefile_usage_bytes = before.map(|snapshot| snapshot.pagefile_usage_bytes),
-        before_private_usage_bytes = before.map(|snapshot| snapshot.private_usage_bytes),
-        after_working_set_bytes = after.map(|snapshot| snapshot.working_set_bytes),
-        after_peak_working_set_bytes = after.map(|snapshot| snapshot.peak_working_set_bytes),
-        after_pagefile_usage_bytes = after.map(|snapshot| snapshot.pagefile_usage_bytes),
-        after_private_usage_bytes = after.map(|snapshot| snapshot.private_usage_bytes),
-        "terminal memory trim executed"
-    );
-}
-
-pub fn emit_terminal_memory_trim_skipped(
-    enabled: bool,
-    session_id: Uuid,
-    pending_output_bytes: usize,
-    trim_threshold_bytes: usize,
-) {
-    if !enabled {
-        return;
-    }
-
-    tracing::debug!(
-        target: "app.memory",
-        event = "trim-skipped",
-        session_id = session_id.to_string(),
-        pending_output_bytes,
-        trim_threshold_bytes,
-        "terminal memory trim skipped"
     );
 }
 

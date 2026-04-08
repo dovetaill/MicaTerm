@@ -15,9 +15,12 @@ pub fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
     };
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
-    let mut counters = PROCESS_MEMORY_COUNTERS_EX::default();
-    // SAFETY: GetCurrentProcess returns a valid pseudo-handle and the buffer lives
-    // for the duration of the call.
+    // SAFETY: zeroed is valid for this plain-old-data Win32 struct, and we
+    // immediately populate the required `cb` size field before the API call.
+    let mut counters: PROCESS_MEMORY_COUNTERS_EX = unsafe { std::mem::zeroed() };
+    counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
+    // SAFETY: GetCurrentProcess returns a valid pseudo-handle and the buffer
+    // lives for the duration of the call.
     let ok = unsafe {
         K32GetProcessMemoryInfo(
             GetCurrentProcess(),
