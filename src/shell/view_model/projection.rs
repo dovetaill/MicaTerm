@@ -131,6 +131,15 @@ impl ShellViewModel {
         self.settings_modal_state.open
     }
 
+    pub fn settings_modal_terminal_scrollback_limit(&self) -> usize {
+        self.settings_modal_state.terminal_scrollback_limit
+    }
+
+    pub fn settings_modal_terminal_active_idle_shrink_enabled(&self) -> bool {
+        self.settings_modal_state
+            .terminal_active_idle_shrink_enabled
+    }
+
     pub fn start_sync_feedback(&mut self, text: impl Into<String>) {
         self.sync_feedback_state.text = text.into();
         self.sync_feedback_state.running = true;
@@ -163,6 +172,15 @@ impl ShellViewModel {
     pub fn close_settings_modal(&mut self) {
         self.settings_modal_state.open = false;
         self.show_global_menu = false;
+    }
+
+    pub fn set_settings_modal_terminal_scrollback_limit(&mut self, value: i32) {
+        let value = value.max(1) as usize;
+        self.settings_modal_state.terminal_scrollback_limit = value;
+    }
+
+    pub fn set_settings_modal_terminal_active_idle_shrink_enabled(&mut self, value: bool) {
+        self.settings_modal_state.terminal_active_idle_shrink_enabled = value;
     }
 
     pub fn open_sync_modal(&mut self) {

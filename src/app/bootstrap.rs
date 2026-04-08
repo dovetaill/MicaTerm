@@ -3834,6 +3834,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     initial_view_model.theme_mode = prefs.theme_mode;
     initial_view_model.is_always_on_top = prefs.always_on_top;
     initial_view_model.set_right_panel_view(RightPanelView::from_id(&prefs.right_panel_view));
+    initial_view_model
+        .set_settings_modal_terminal_scrollback_limit(prefs.terminal_scrollback_limit as i32);
+    initial_view_model.set_settings_modal_terminal_active_idle_shrink_enabled(
+        prefs.terminal_active_idle_shrink_enabled,
+    );
     let vault_root_dir = vault_runtime
         .root_dir
         .clone()

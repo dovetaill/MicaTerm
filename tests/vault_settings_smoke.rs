@@ -99,6 +99,46 @@ fn selecting_settings_panel_does_not_persist_the_legacy_vault_preference() {
 }
 
 #[test]
+fn settings_modal_exposes_default_terminal_preferences() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_open_settings_panel_requested();
+
+    assert_eq!(app.get_settings_modal_terminal_scrollback_limit(), 1500);
+    assert!(app.get_settings_modal_terminal_active_idle_shrink_enabled());
+}
+
+#[test]
+fn settings_modal_terminal_preferences_update_window_state_and_persist() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_path = std::env::temp_dir()
+        .join("mica-term")
+        .join("tests")
+        .join("settings-modal-terminal-preferences.json");
+    let _ = std::fs::remove_file(&temp_path);
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, Some(UiPreferencesStore::new(temp_path.clone())));
+
+    app.invoke_open_settings_panel_requested();
+    app.invoke_settings_modal_terminal_scrollback_limit_changed(3000);
+    app.invoke_settings_modal_terminal_active_idle_shrink_enabled_changed(false);
+
+    assert_eq!(app.get_settings_modal_terminal_scrollback_limit(), 3000);
+    assert!(!app.get_settings_modal_terminal_active_idle_shrink_enabled());
+
+    let content = fs::read_to_string(&temp_path).expect("read persisted ui preferences");
+    assert!(content.contains("\"terminal_scrollback_limit\": 3000"));
+    assert!(content.contains("\"terminal_active_idle_shrink_enabled\": false"));
+
+    let _ = std::fs::remove_file(temp_path);
+}
+
+#[test]
 fn formal_ui_no_longer_contains_vault_right_panel_entry() {
     let source = fs::read_to_string("ui/shell/right-panel.slint").unwrap();
 

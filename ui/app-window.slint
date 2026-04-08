@@ -35,6 +35,8 @@ export component AppWindow inherits Window {
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
     in-out property <bool> sync-modal-open: false;
     in-out property <bool> settings-modal-open: false;
+    in-out property <int> settings-modal-terminal-scrollback-limit: 1500;
+    in-out property <bool> settings-modal-terminal-active-idle-shrink-enabled: true;
     in-out property <string> sync-modal-mode: "not-configured";
     in-out property <string> sync-modal-title: "Sync Settings";
     in-out property <string> sync-modal-headline: "";
@@ -325,6 +327,8 @@ export component AppWindow inherits Window {
     callback sync-modal-draft-changed(string, string);
     callback sync-modal-toggle-changed(string, bool);
     callback settings-modal-close-requested();
+    callback settings-modal-terminal-scrollback-limit-changed(int);
+    callback settings-modal-terminal-active-idle-shrink-enabled-changed(bool);
     callback open-settings-panel-requested();
     callback open-appearance-panel-requested();
     callback open-sftp-panel-requested();
@@ -1269,9 +1273,19 @@ export component AppWindow inherits Window {
             y: 0px;
             width: settings-modal-shell.content-width;
             height: settings-modal-shell.content-height;
+            terminal-scrollback-limit: root.settings-modal-terminal-scrollback-limit;
+            terminal-active-idle-shrink-enabled: root.settings-modal-terminal-active-idle-shrink-enabled;
 
             close-requested => {
                 root.settings-modal-close-requested();
+            }
+
+            terminal-scrollback-limit-changed(value) => {
+                root.settings-modal-terminal-scrollback-limit-changed(value);
+            }
+
+            terminal-active-idle-shrink-enabled-changed(value) => {
+                root.settings-modal-terminal-active-idle-shrink-enabled-changed(value);
             }
 
             drag-requested(pointer-x, pointer-y) => {

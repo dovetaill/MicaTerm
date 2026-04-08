@@ -7,6 +7,10 @@ export component SettingsModal inherits Rectangle {
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
+    in property <int> terminal-scrollback-limit: 1500;
+    in property <bool> terminal-active-idle-shrink-enabled: true;
+    callback terminal-scrollback-limit-changed(int);
+    callback terminal-active-idle-shrink-enabled-changed(bool);
 
     background: ThemeTokens.assets-surface;
     border-radius: 0px;
@@ -80,6 +84,112 @@ export component SettingsModal inherits Rectangle {
                 color: ThemeTokens.text-primary;
                 opacity: 0.74;
                 wrap: word-wrap;
+            }
+
+            scrollback-label := Text {
+                x: 20px;
+                y: 96px;
+                width: parent.width - 40px;
+                text: "Scrollback limit";
+                color: ThemeTokens.text-primary;
+                opacity: 0.82;
+            }
+
+            scrollback-value := Text {
+                x: 20px;
+                y: 124px;
+                width: parent.width - 40px;
+                text: root.terminal-scrollback-limit + " lines";
+                color: ThemeTokens.text-primary;
+                font-size: 16px;
+                font-weight: 600;
+            }
+
+            scrollback-dec := Rectangle {
+                x: 20px;
+                y: 156px;
+                width: 120px;
+                height: 32px;
+                border-radius: 6px;
+                background: ThemeTokens.control-hover-surface;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "-500";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    clicked => {
+                        root.terminal-scrollback-limit-changed(
+                            root.terminal-scrollback-limit > 500
+                                ? root.terminal-scrollback-limit - 500
+                                : 1
+                        );
+                    }
+                }
+            }
+
+            scrollback-inc := Rectangle {
+                x: 152px;
+                y: 156px;
+                width: 120px;
+                height: 32px;
+                border-radius: 6px;
+                background: ThemeTokens.control-hover-surface;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "+500";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    clicked => {
+                        root.terminal-scrollback-limit-changed(root.terminal-scrollback-limit + 500);
+                    }
+                }
+            }
+
+            idle-label := Text {
+                x: 20px;
+                y: 208px;
+                width: parent.width - 40px;
+                text: "Active idle cache shrink";
+                color: ThemeTokens.text-primary;
+                opacity: 0.82;
+            }
+
+            idle-toggle := Rectangle {
+                x: 20px;
+                y: 236px;
+                width: 252px;
+                height: 32px;
+                border-radius: 6px;
+                background: ThemeTokens.control-hover-surface;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.terminal-active-idle-shrink-enabled ? "Enabled" : "Disabled";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    clicked => {
+                        root.terminal-active-idle-shrink-enabled-changed(
+                            !root.terminal-active-idle-shrink-enabled
+                        );
+                    }
+                }
             }
         }
     }

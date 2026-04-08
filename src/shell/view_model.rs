@@ -259,9 +259,21 @@ pub struct SyncFeedbackViewState {
     pub running: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsModalViewState {
     pub open: bool,
+    pub terminal_scrollback_limit: usize,
+    pub terminal_active_idle_shrink_enabled: bool,
+}
+
+impl Default for SettingsModalViewState {
+    fn default() -> Self {
+        Self {
+            open: false,
+            terminal_scrollback_limit: 1500,
+            terminal_active_idle_shrink_enabled: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

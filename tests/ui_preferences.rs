@@ -16,6 +16,14 @@ fn ui_preferences_default_to_dark_and_not_pinned() {
 }
 
 #[test]
+fn ui_preferences_default_terminal_settings_match_memory_plan() {
+    let prefs = UiPreferences::default();
+
+    assert_eq!(prefs.terminal_scrollback_limit, 1500);
+    assert!(prefs.terminal_active_idle_shrink_enabled);
+}
+
+#[test]
 fn ui_preferences_roundtrip_theme_and_pin_state() {
     let temp_path = std::env::temp_dir()
         .join("mica-term")
@@ -27,6 +35,28 @@ fn ui_preferences_roundtrip_theme_and_pin_state() {
         theme_mode: ThemeMode::Light,
         always_on_top: true,
         right_panel_view: "vault".into(),
+        ..UiPreferences::default()
+    };
+
+    store.save(&prefs).unwrap();
+    let loaded = store.load_or_default().unwrap();
+
+    assert_eq!(loaded, prefs);
+    let _ = std::fs::remove_file(temp_path);
+}
+
+#[test]
+fn ui_preferences_roundtrip_terminal_settings() {
+    let temp_path = std::env::temp_dir()
+        .join("mica-term")
+        .join("tests")
+        .join("ui-preferences-terminal-settings-roundtrip.json");
+
+    let store = UiPreferencesStore::new(temp_path.clone());
+    let prefs = UiPreferences {
+        terminal_scrollback_limit: 3000,
+        terminal_active_idle_shrink_enabled: false,
+        ..UiPreferences::default()
     };
 
     store.save(&prefs).unwrap();

@@ -43,6 +43,12 @@ pub(super) fn sync_top_status_bar_state(
     window.set_is_window_active(state.is_window_active);
     window.set_is_window_always_on_top(state.is_always_on_top);
     window.set_settings_modal_open(state.settings_modal_open());
+    window.set_settings_modal_terminal_scrollback_limit(
+        i32::try_from(state.settings_modal_terminal_scrollback_limit()).unwrap_or(i32::MAX),
+    );
+    window.set_settings_modal_terminal_active_idle_shrink_enabled(
+        state.settings_modal_terminal_active_idle_shrink_enabled(),
+    );
     window.set_sync_feedback_text(state.sync_feedback_state().text.clone().into());
     window.set_sync_feedback_sequence(state.sync_feedback_state().sequence);
     window.set_sync_feedback_running(state.sync_feedback_state().running);
@@ -80,6 +86,30 @@ pub(super) fn bind_shell_chrome_callbacks(
         let mut state = state.borrow_mut();
         state.close_settings_modal();
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(effects);
+    window.on_settings_modal_terminal_scrollback_limit_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_settings_modal_terminal_scrollback_limit(value);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(effects);
+    window.on_settings_modal_terminal_active_idle_shrink_enabled_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_settings_modal_terminal_active_idle_shrink_enabled(value);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        save_ui_preferences(&store_ref, &state);
     });
 
     let state = Rc::clone(view_model);

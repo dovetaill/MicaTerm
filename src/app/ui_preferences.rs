@@ -19,6 +19,10 @@ pub struct UiPreferences {
     pub always_on_top: bool,
     #[serde(default = "default_right_panel_view")]
     pub right_panel_view: String,
+    #[serde(default = "default_terminal_scrollback_limit")]
+    pub terminal_scrollback_limit: usize,
+    #[serde(default = "default_terminal_active_idle_shrink_enabled")]
+    pub terminal_active_idle_shrink_enabled: bool,
 }
 
 fn default_theme_mode() -> ThemeMode {
@@ -29,12 +33,22 @@ fn default_right_panel_view() -> String {
     RightPanelView::Sftp.id().into()
 }
 
+fn default_terminal_scrollback_limit() -> usize {
+    1500
+}
+
+fn default_terminal_active_idle_shrink_enabled() -> bool {
+    true
+}
+
 impl Default for UiPreferences {
     fn default() -> Self {
         Self {
             theme_mode: ThemeMode::Dark,
             always_on_top: false,
             right_panel_view: default_right_panel_view(),
+            terminal_scrollback_limit: default_terminal_scrollback_limit(),
+            terminal_active_idle_shrink_enabled: default_terminal_active_idle_shrink_enabled(),
         }
     }
 }
@@ -80,6 +94,9 @@ impl From<&ShellViewModel> for UiPreferences {
             theme_mode: value.theme_mode,
             always_on_top: value.is_always_on_top,
             right_panel_view: value.right_panel_view_id().into(),
+            terminal_scrollback_limit: value.settings_modal_terminal_scrollback_limit(),
+            terminal_active_idle_shrink_enabled:
+                value.settings_modal_terminal_active_idle_shrink_enabled(),
         }
     }
 }
@@ -106,5 +123,7 @@ pub fn ui_preferences_from_snapshot(snapshot: &SnapshotUiPreferences) -> UiPrefe
         theme_mode,
         always_on_top: snapshot.always_on_top.unwrap_or(false),
         right_panel_view: default_right_panel_view(),
+        terminal_scrollback_limit: default_terminal_scrollback_limit(),
+        terminal_active_idle_shrink_enabled: default_terminal_active_idle_shrink_enabled(),
     }
 }
