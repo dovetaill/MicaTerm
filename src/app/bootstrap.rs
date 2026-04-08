@@ -2411,6 +2411,15 @@ fn clear_workspace_terminal_transient_caches(
     );
 }
 
+fn release_workspace_terminal_renderer_resources() {
+    WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+        host.borrow_mut().take();
+    });
+    WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
+        surface.borrow_mut().take();
+    });
+}
+
 fn update_workspace_terminal_idle_cache_shrink(
     has_active_surface: bool,
     surface_disappeared: bool,
@@ -2451,6 +2460,7 @@ fn update_workspace_terminal_idle_cache_shrink(
         "idle-shrink",
         "no-active-surface-idle",
     );
+    release_workspace_terminal_renderer_resources();
     *idle_cache_shrunk = true;
 }
 
@@ -6409,6 +6419,36 @@ mod tests {
             idle_cache_shrunk,
             "once the no-surface threshold elapses the idle shrink path should mark itself complete until an active surface returns"
         );
+    }
+
+    #[test]
+    fn idle_cache_shrink_releases_workspace_terminal_host_after_threshold() {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = Some(TerminalRendererHost::new(
+                Box::new(SizedPresenter((10, 22))),
+                TerminalRenderMode::Bitmap,
+            ));
+        });
+
+        let now = Instant::now();
+        let mut no_surface_since = Some(now);
+        let mut idle_cache_shrunk = false;
+
+        update_workspace_terminal_idle_cache_shrink(
+            false,
+            false,
+            now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
+            &mut no_surface_since,
+            &mut idle_cache_shrunk,
+            false,
+        );
+
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            assert!(
+                host.borrow().is_none(),
+                "after the no-surface idle threshold elapses, the workspace terminal presenter host should be dropped so terminal font/render state does not stay resident indefinitely"
+            );
+        });
     }
 
     #[test]

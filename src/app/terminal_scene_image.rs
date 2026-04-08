@@ -135,6 +135,7 @@ impl SceneImageTerminalRenderer {
         self.last_base_bitmap_frame = None;
         self.last_bitmap_fingerprint = None;
         self.last_bitmap_frame = None;
+        self.working_pixels = Vec::new();
         self.last_render_diagnostics = None;
     }
 
@@ -1191,4 +1192,35 @@ fn overlay_composition_is_noop(frame: &NativeTerminalFrame) -> bool {
     !presentable.selection_overlay.active
         && !presentable.underline_overlay.visible
         && !presentable.ime_preview_overlay.active
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clear_releases_scene_image_working_pixels() {
+        let mut renderer = SceneImageTerminalRenderer::default();
+        renderer.working_pixels = vec![
+            Rgba8Pixel {
+                r: 1,
+                g: 2,
+                b: 3,
+                a: 4,
+            };
+            16
+        ];
+
+        renderer.clear();
+
+        assert!(
+            renderer.working_pixels.is_empty(),
+            "clearing scene-image caches should also release the retained overlay working buffer so closing the last terminal can drop viewport-sized pixel storage"
+        );
+        assert_eq!(
+            renderer.working_pixels.capacity(),
+            0,
+            "clearing scene-image caches should drop the working buffer allocation instead of only resetting its logical length"
+        );
+    }
 }
