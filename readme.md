@@ -120,6 +120,7 @@ PowerShell example:
 cd .\dist\mica-term-x86_64-pc-windows-msvc-release-skia
 ni .mica-term-portable -ItemType File -Force
 $env:MICA_TERM_LOG = "debug"
+$env:MICA_TERM_MEMORY_DIAGNOSTICS = "1"
 .\mica-term.exe
 ```
 
@@ -131,6 +132,7 @@ Expected output location:
 Notes:
 
 - `MICA_TERM_LOG=debug` enables `ui.theme` and `app.window` diagnostics.
+- `MICA_TERM_MEMORY_DIAGNOSTICS=1` enables opt-in terminal memory diagnostics for startup, trim, scroll, and session-close investigations.
 - Without `MICA_TERM_LOG=debug`, only error-level events are persisted.
 - Windows builds use daily log rotation, so the file name includes the current date.
 
