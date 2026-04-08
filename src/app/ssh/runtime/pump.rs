@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::app::logging::runtime::{
     emit_terminal_memory_trim_executed, emit_terminal_memory_trim_request,
+    emit_terminal_memory_trim_skipped, emit_terminal_memory_trim_threshold_crossed,
     memory_diagnostics_enabled,
 };
 use crate::app::ssh::shell_integration::runtime_shell_events;
@@ -188,7 +189,23 @@ pub(super) async fn run_channel_pump(
                         }
                         if !parsed.sanitized_bytes.is_empty() {
                             apply_remote_output(&terminal, &parsed.sanitized_bytes);
+                            let previous_pending_bytes =
+                                working_set_trim_scheduler.pending_output_bytes();
                             working_set_trim_scheduler.record_output(parsed.sanitized_bytes.len());
+                            let pending_output_bytes =
+                                working_set_trim_scheduler.pending_output_bytes();
+                            if previous_pending_bytes < WORKING_SET_TRIM_MIN_OUTPUT_BYTES
+                                && pending_output_bytes >= WORKING_SET_TRIM_MIN_OUTPUT_BYTES
+                            {
+                                emit_terminal_memory_trim_threshold_crossed(
+                                    memory_diagnostics,
+                                    session_id,
+                                    parsed.sanitized_bytes.len(),
+                                    pending_output_bytes,
+                                    WORKING_SET_TRIM_MIN_OUTPUT_BYTES,
+                                    WORKING_SET_TRIM_IDLE_INTERVAL.as_millis() as u64,
+                                );
+                            }
                             working_set_trim_timer =
                                 Some(Box::pin(sleep(WORKING_SET_TRIM_IDLE_INTERVAL)));
                             let now = Instant::now();
@@ -231,12 +248,29 @@ pub(super) async fn run_channel_pump(
                 working_set_trim_timer = None;
                 let pending_output_bytes = working_set_trim_scheduler.pending_output_bytes();
                 if working_set_trim_scheduler.trim_due() {
-                    emit_terminal_memory_trim_request(memory_diagnostics, pending_output_bytes);
+                    let before_snapshot = crate::app::memory::current_process_memory_snapshot();
+                    emit_terminal_memory_trim_request(
+                        memory_diagnostics,
+                        session_id,
+                        pending_output_bytes,
+                        before_snapshot,
+                    );
                     let trim_succeeded = crate::app::memory::trim_process_working_set();
+                    let after_snapshot = crate::app::memory::current_process_memory_snapshot();
                     emit_terminal_memory_trim_executed(
                         memory_diagnostics,
+                        session_id,
                         pending_output_bytes,
                         trim_succeeded,
+                        before_snapshot,
+                        after_snapshot,
+                    );
+                } else {
+                    emit_terminal_memory_trim_skipped(
+                        memory_diagnostics,
+                        session_id,
+                        pending_output_bytes,
+                        WORKING_SET_TRIM_MIN_OUTPUT_BYTES,
                     );
                 }
             }

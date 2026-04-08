@@ -2,15 +2,18 @@
 
 use std::fs;
 
+use mica_term::app::memory::ProcessMemorySnapshot;
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
 use mica_term::app::logging::runtime::{
     build_test_logging_runtime, emit_app_root_metadata, emit_runtime_profile_metadata,
     emit_terminal_memory_cache_clear, emit_terminal_memory_trim_executed,
-    emit_terminal_memory_trim_request,
+    emit_terminal_memory_trim_request, emit_terminal_memory_trim_skipped,
+    emit_terminal_memory_trim_threshold_crossed,
 };
 use mica_term::app::runtime_profile::AppRuntimeProfile;
 use mica_term::app::terminal_presenter::TerminalPresenterCacheStats;
+use uuid::Uuid;
 
 #[test]
 fn logging_runtime_writes_error_but_filters_debug_by_default() {
@@ -177,16 +180,34 @@ fn terminal_memory_diagnostics_remain_quiet_when_disabled() {
             TerminalPresenterCacheStats::default(),
             TerminalPresenterCacheStats::default(),
         );
-        emit_terminal_memory_trim_request(false, 1024 * 1024);
-        emit_terminal_memory_trim_executed(false, 1024 * 1024, true);
+        emit_terminal_memory_trim_threshold_crossed(
+            false,
+            Uuid::nil(),
+            256 * 1024,
+            1024 * 1024,
+            1024 * 1024,
+            2000,
+        );
+        emit_terminal_memory_trim_request(false, Uuid::nil(), 1024 * 1024, None);
+        emit_terminal_memory_trim_executed(
+            false,
+            Uuid::nil(),
+            1024 * 1024,
+            true,
+            None,
+            None,
+        );
+        emit_terminal_memory_trim_skipped(false, Uuid::nil(), 256 * 1024, 1024 * 1024);
     });
 
     drop(runtime.guard);
 
     let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
     assert!(!content.contains("terminal memory cache shrink"));
+    assert!(!content.contains("trim-threshold-crossed"));
     assert!(!content.contains("terminal memory trim request"));
     assert!(!content.contains("terminal memory trim executed"));
+    assert!(!content.contains("terminal memory trim skipped"));
 }
 
 #[test]
@@ -219,6 +240,19 @@ fn terminal_memory_diagnostics_emit_when_enabled() {
         glyph_raster_cache_entries: 2,
         ..TerminalPresenterCacheStats::default()
     };
+    let session_id = Uuid::new_v4();
+    let before_snapshot = ProcessMemorySnapshot {
+        working_set_bytes: 160 * 1024 * 1024,
+        peak_working_set_bytes: 161 * 1024 * 1024,
+        pagefile_usage_bytes: 170 * 1024 * 1024,
+        private_usage_bytes: 140 * 1024 * 1024,
+    };
+    let after_snapshot = ProcessMemorySnapshot {
+        working_set_bytes: 30 * 1024 * 1024,
+        peak_working_set_bytes: 161 * 1024 * 1024,
+        pagefile_usage_bytes: 120 * 1024 * 1024,
+        private_usage_bytes: 110 * 1024 * 1024,
+    };
 
     tracing::dispatcher::with_default(&runtime.dispatch, || {
         emit_terminal_memory_cache_clear(
@@ -229,8 +263,29 @@ fn terminal_memory_diagnostics_emit_when_enabled() {
             stats,
             shrunk_stats,
         );
-        emit_terminal_memory_trim_request(true, 1024 * 1024);
-        emit_terminal_memory_trim_executed(true, 1024 * 1024, true);
+        emit_terminal_memory_trim_threshold_crossed(
+            true,
+            session_id,
+            256 * 1024,
+            1024 * 1024,
+            1024 * 1024,
+            2000,
+        );
+        emit_terminal_memory_trim_request(
+            true,
+            session_id,
+            1024 * 1024,
+            Some(before_snapshot),
+        );
+        emit_terminal_memory_trim_executed(
+            true,
+            session_id,
+            1024 * 1024,
+            true,
+            Some(before_snapshot),
+            Some(after_snapshot),
+        );
+        emit_terminal_memory_trim_skipped(true, session_id, 256 * 1024, 1024 * 1024);
     });
 
     drop(runtime.guard);
@@ -239,11 +294,17 @@ fn terminal_memory_diagnostics_emit_when_enabled() {
     assert!(content.contains("terminal memory cache shrink"));
     assert!(content.contains("idle-shrink"));
     assert!(content.contains("reason=\"no-active-surface-idle\""));
+    assert!(content.contains("trim-threshold-crossed"));
+    assert!(content.contains(&session_id.to_string()));
     assert!(content.contains("terminal memory trim request"));
     assert!(content.contains("terminal memory trim executed"));
+    assert!(content.contains("terminal memory trim skipped"));
     assert!(content.contains("before_shaped_row_cache_entries=12"));
     assert!(content.contains("before_glyph_raster_cache_entries=24"));
     assert!(content.contains("before_scene_image_working_pixels_bytes=4096"));
+    assert!(content.contains("before_working_set_bytes=167772160"));
     assert!(content.contains("after_shaped_row_cache_entries=1"));
     assert!(content.contains("after_glyph_raster_cache_entries=2"));
+    assert!(content.contains("after_working_set_bytes=31457280"));
+    assert!(content.contains("trim_threshold_bytes=1048576"));
 }
