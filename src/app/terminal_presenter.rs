@@ -454,7 +454,7 @@ pub struct WindowsNativePresenter {
 #[cfg(feature = "terminal-native-renderer")]
 impl WindowsNativePresenter {
     pub fn new() -> Result<Self> {
-        let request = FontRequest::default();
+        let request = FontRequest::windows_default();
         let mut font_system = DirectWriteFontSystem::new()?;
         let loaded_font = font_system.load_font(&request)?;
 
@@ -582,7 +582,7 @@ pub struct WindowsSceneImagePresenter {
 #[cfg(feature = "terminal-native-renderer")]
 impl WindowsSceneImagePresenter {
     pub fn new() -> Result<Self> {
-        let request = FontRequest::default();
+        let request = FontRequest::windows_default();
         let mut font_system = DirectWriteFontSystem::new()?;
         let loaded_font = font_system.load_scene_image_font(&request)?;
 

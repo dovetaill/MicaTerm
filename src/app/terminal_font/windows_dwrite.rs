@@ -17,10 +17,11 @@ use crate::app::system_font_database::load_system_font_database;
 use crate::app::terminal_emoji::{EmojiRenderOutcome, EmojiSprite, TerminalEmojiRenderer};
 use crate::app::terminal_font::backend::{
     ColorGlyphRaster, DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY, DEFAULT_TERMINAL_FONT_FAMILY,
-    DEFAULT_TERMINAL_FONT_SIZE_PX, DEFAULT_TERMINAL_LINE_HEIGHT, FontFaceKey, FontFallbackFace,
-    FontMetrics, FontRenderProfile, FontRequest, FontSystem, GlyphRasterRequest, LoadedFont,
-    LoadedFontKey, OpenTypeFeatureSet, RasterizedGlyph, ShapedGlyph, ShapedGlyphRun,
-    TextShapingRequest, shape_text_with_rustybuzz, shape_text_with_rustybuzz_features,
+    FontFaceKey, FontFallbackFace, FontMetrics, FontRenderProfile, FontRequest, FontSystem,
+    GlyphRasterRequest, LoadedFont, LoadedFontKey, OpenTypeFeatureSet, RasterizedGlyph,
+    ShapedGlyph, ShapedGlyphRun, TextShapingRequest, WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX,
+    WINDOWS_DEFAULT_TERMINAL_LINE_HEIGHT, shape_text_with_rustybuzz,
+    shape_text_with_rustybuzz_features,
 };
 use crate::app::terminal_font::windows_fallback::{
     WindowsFontFallbackResolver, contains_color_glyph_text,
@@ -33,7 +34,8 @@ const SARASA_TERM_SC_FONT_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
 const DEFAULT_FACE_KEY: FontFaceKey = FontFaceKey(1);
 const DEFAULT_FACE_INDEX: u32 = 0;
-const MIN_CELL_HEIGHT_PX: f32 = DEFAULT_TERMINAL_FONT_SIZE_PX * DEFAULT_TERMINAL_LINE_HEIGHT;
+const MIN_CELL_HEIGHT_PX: f32 =
+    WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX * WINDOWS_DEFAULT_TERMINAL_LINE_HEIGHT;
 
 #[derive(Clone)]
 struct LoadedFaceRecord {

@@ -89,8 +89,8 @@ fn bitmap_and_native_font_sources_point_at_windows_terminal_defaults() {
         "Windows fallback resolution should explicitly include Sarasa Term SC and Segoe UI Emoji behind the primary JetBrains Mono face"
     );
     assert!(
-        presenter_source.contains("let request = FontRequest::default();"),
-        "presenters should source their default typography from the shared FontRequest contract instead of hard-coding per-path font sizes"
+        presenter_source.contains("let request = FontRequest::windows_default();"),
+        "Windows presenters should source their default typography from the Windows FontRequest contract instead of hard-coding per-path font sizes or changing Linux/macOS defaults"
     );
 }
 

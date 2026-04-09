@@ -18,6 +18,10 @@ pub const WINDOWS_DEFAULT_TERMINAL_FONT_CHAIN: &[&str] = &[
 ];
 pub const DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 14.0;
 pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.5;
+pub const WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 15.0;
+pub const WINDOWS_DEFAULT_TERMINAL_CELL_HEIGHT_PX: u32 = 23;
+pub const WINDOWS_DEFAULT_TERMINAL_LINE_HEIGHT: f32 =
+    WINDOWS_DEFAULT_TERMINAL_CELL_HEIGHT_PX as f32 / WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX;
 pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 0.0;
 pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = "Medium";
 
@@ -61,6 +65,15 @@ pub struct FontRenderProfileKey {
 pub struct FontRequest {
     pub family_name: Option<String>,
     pub px_size: f32,
+}
+
+impl FontRequest {
+    pub fn windows_default() -> Self {
+        Self {
+            family_name: Some(DEFAULT_TERMINAL_FONT_FAMILY.to_string()),
+            px_size: WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX,
+        }
+    }
 }
 
 impl Default for FontRequest {

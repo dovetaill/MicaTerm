@@ -113,6 +113,24 @@ fn scene_image_and_native_presenters_share_default_line_box_contract() -> Result
 }
 
 #[test]
+fn windows_presenters_default_to_a_more_readable_text_line_box() -> Result<()> {
+    let native = WindowsNativePresenter::new()?;
+    let scene_image = WindowsSceneImagePresenter::new()?;
+
+    assert_eq!(
+        native.default_cell_size().1,
+        scene_image.default_cell_size().1,
+        "both Windows presenters should start from the same default line box so bitmap and retained-native paths feel equally readable"
+    );
+    assert!(
+        native.default_cell_size().1 >= 23,
+        "Windows terminal defaults should reserve at least a 23px row box so 15px-class body text reads less cramped than the old 21px box"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn emoji_clusters_are_not_treated_as_blank_terminal_cells() -> Result<()> {
     let surface = render_surface(4, 12, "🦀\r\n");
     let mut renderer = atlas_renderer_with_fake_color_emoji()?;
