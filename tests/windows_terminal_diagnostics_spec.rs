@@ -5,9 +5,13 @@ use mica_term::app::terminal_renderer::diagnostics::{
     NativeTerminalSurfaceGlyphBoundsTrace, NativeTerminalSurfaceWindowsTextDiagnostics,
 };
 use mica_term::app::windows_frame::{
-    native_surface_baseline_px, native_surface_font_chain, native_surface_glyph_bounds_trace,
-    native_surface_pixel_alignment, native_surface_render_target_alpha_mode,
-    native_surface_scale_factor_percent, native_surface_text_antialias_mode,
+    native_surface_baseline_px, native_surface_clear_type_level_per_mille,
+    native_surface_enhanced_contrast_per_mille, native_surface_font_chain,
+    native_surface_gamma_per_mille, native_surface_glyph_bounds_trace,
+    native_surface_pixel_alignment, native_surface_pixel_geometry,
+    native_surface_render_target_alpha_mode, native_surface_rendering_mode,
+    native_surface_rendering_params_source, native_surface_scale_factor_percent,
+    native_surface_text_antialias_mode,
 };
 
 #[test]
@@ -24,6 +28,12 @@ fn diagnostics_contract_exposes_windows_text_rendering_trace_fields() {
         "pub host_redraw_replay_count: u64",
         "pub text_antialias_mode: Option<&'static str>",
         "pub render_target_alpha_mode: Option<&'static str>",
+        "pub rendering_params_source: Option<&'static str>",
+        "pub rendering_mode: Option<&'static str>",
+        "pub pixel_geometry: Option<&'static str>",
+        "pub gamma_per_mille: Option<u32>",
+        "pub enhanced_contrast_per_mille: Option<u32>",
+        "pub clear_type_level_per_mille: Option<u32>",
         "pub font_chain: Vec<String>",
         "pub baseline_px: Option<i32>",
         "pub pixel_alignment: Option<&'static str>",
@@ -52,6 +62,12 @@ fn windows_backend_source_publishes_windows_text_rendering_snapshot() {
         "windows_text: Some(",
         "text_antialias_mode:",
         "render_target_alpha_mode:",
+        "rendering_params_source:",
+        "rendering_mode:",
+        "pixel_geometry:",
+        "gamma_per_mille:",
+        "enhanced_contrast_per_mille:",
+        "clear_type_level_per_mille:",
         "font_chain:",
         "baseline_px:",
         "pixel_alignment:",
@@ -71,6 +87,12 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
         windows_text: Some(NativeTerminalSurfaceWindowsTextDiagnostics {
             text_antialias_mode: Some("cleartype"),
             render_target_alpha_mode: Some("ignore"),
+            rendering_params_source: Some("monitor-custom"),
+            rendering_mode: Some("cleartype-natural"),
+            pixel_geometry: Some("rgb"),
+            gamma_per_mille: Some(2200),
+            enhanced_contrast_per_mille: Some(750),
+            clear_type_level_per_mille: Some(1000),
             font_chain: vec!["JetBrains Mono".into(), "Sarasa Term SC".into()],
             baseline_px: Some(14),
             pixel_alignment: Some("pixel-snapped"),
@@ -104,6 +126,24 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
         native_surface_render_target_alpha_mode(&diagnostics),
         Some("ignore")
     );
+    assert_eq!(
+        native_surface_rendering_params_source(&diagnostics),
+        Some("monitor-custom")
+    );
+    assert_eq!(
+        native_surface_rendering_mode(&diagnostics),
+        Some("cleartype-natural")
+    );
+    assert_eq!(native_surface_pixel_geometry(&diagnostics), Some("rgb"));
+    assert_eq!(native_surface_gamma_per_mille(&diagnostics), Some(2200));
+    assert_eq!(
+        native_surface_enhanced_contrast_per_mille(&diagnostics),
+        Some(750)
+    );
+    assert_eq!(
+        native_surface_clear_type_level_per_mille(&diagnostics),
+        Some(1000)
+    );
     assert_eq!(native_surface_baseline_px(&diagnostics), Some(14));
     assert_eq!(
         native_surface_pixel_alignment(&diagnostics),
@@ -135,6 +175,12 @@ fn bootstrap_source_installs_native_terminal_diagnostics_trace_hook() {
         "fn trace_workspace_native_terminal_diagnostics(",
         "native_surface_text_antialias_mode(&diagnostics)",
         "native_surface_render_target_alpha_mode(&diagnostics)",
+        "native_surface_rendering_params_source(&diagnostics)",
+        "native_surface_rendering_mode(&diagnostics)",
+        "native_surface_pixel_geometry(&diagnostics)",
+        "native_surface_gamma_per_mille(&diagnostics)",
+        "native_surface_enhanced_contrast_per_mille(&diagnostics)",
+        "native_surface_clear_type_level_per_mille(&diagnostics)",
         "native_surface_font_chain(&diagnostics)",
         "native_surface_glyph_bounds_trace(&diagnostics)",
         "scheduled_present_count = diagnostics.scheduled_present_count",

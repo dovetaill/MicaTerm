@@ -37,15 +37,21 @@ use windows::Win32::Graphics::Direct2D::Common::{
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
     D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_OPACITY_MASK_CONTENT_GRAPHICS,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE, D2D1CreateFactory,
-    ID2D1Bitmap, ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE,
+    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Bitmap, ID2D1DCRenderTarget,
+    ID2D1Factory, ID2D1SolidColorBrush,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
     DWRITE_FONT_WEIGHT_REGULAR, DWRITE_GLYPH_OFFSET, DWRITE_GLYPH_RUN,
-    DWRITE_MEASURING_MODE_NATURAL, DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection,
-    IDWriteFontFace,
+    DWRITE_MEASURING_MODE_NATURAL, DWRITE_PIXEL_GEOMETRY, DWRITE_PIXEL_GEOMETRY_BGR,
+    DWRITE_PIXEL_GEOMETRY_FLAT, DWRITE_PIXEL_GEOMETRY_RGB, DWRITE_RENDERING_MODE,
+    DWRITE_RENDERING_MODE_ALIASED, DWRITE_RENDERING_MODE_CLEARTYPE_GDI_CLASSIC,
+    DWRITE_RENDERING_MODE_CLEARTYPE_GDI_NATURAL, DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL,
+    DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC, DWRITE_RENDERING_MODE_DEFAULT,
+    DWRITE_RENDERING_MODE_OUTLINE, DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection,
+    IDWriteFontFace, IDWriteRenderingParams,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM};
@@ -82,6 +88,7 @@ pub struct WindowsDirectWriteTextRendererState {
     font_collection: Option<IDWriteFontCollection>,
     #[cfg(target_os = "windows")]
     font_faces: HashMap<FontFaceKey, IDWriteFontFace>,
+    rendering_params_snapshot: Option<WindowsDirectWriteRenderingParamsSnapshot>,
 }
 
 impl Default for WindowsDirectWriteTextRendererState {
@@ -95,8 +102,19 @@ impl Default for WindowsDirectWriteTextRendererState {
             font_collection: None,
             #[cfg(target_os = "windows")]
             font_faces: HashMap::new(),
+            rendering_params_snapshot: None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WindowsDirectWriteRenderingParamsSnapshot {
+    source: &'static str,
+    rendering_mode: &'static str,
+    pixel_geometry: &'static str,
+    gamma_per_mille: u32,
+    enhanced_contrast_per_mille: u32,
+    clear_type_level_per_mille: u32,
 }
 
 #[derive(Default)]
@@ -239,6 +257,7 @@ impl WindowsNativeSurfaceState {
             if let Some(renderer) = self.directwrite_text_renderer.as_mut() {
                 renderer.ready = false;
                 renderer.active_path = "bitmap-mask-compat";
+                renderer.rendering_params_snapshot = None;
             }
         }
     }
@@ -269,6 +288,7 @@ impl WindowsNativeSurfaceState {
             factory: Some(factory),
             font_collection: Some(font_collection),
             font_faces: HashMap::new(),
+            rendering_params_snapshot: None,
         });
 
         Ok(())
@@ -344,6 +364,7 @@ impl WindowsNativeSurfaceState {
             } else {
                 "bitmap-mask-compat"
             };
+            renderer.rendering_params_snapshot = None;
         }
         for bitmap in self.monochrome_glyph_bitmaps.values_mut() {
             bitmap.generation = 0;
@@ -368,6 +389,144 @@ impl WindowsNativeSurfaceState {
         self.last_drawn_underline_runs = 0;
         self.last_drawn_cursor_overlay_visible = false;
         self.last_drawn_ime_preview_active = false;
+    }
+
+    fn mark_directwrite_text_path(&mut self, active_path: &'static str) {
+        if let Some(renderer) = self.directwrite_text_renderer.as_mut() {
+            renderer.active_path = active_path;
+            if active_path != "directwrite-d2d" {
+                renderer.rendering_params_snapshot = None;
+            }
+        }
+    }
+
+    fn mark_directwrite_text_fallback(&mut self) {
+        self.mark_directwrite_text_path("bitmap-mask-compat");
+    }
+
+    #[cfg(target_os = "windows")]
+    fn snapshot_directwrite_rendering_params(
+        source: &'static str,
+        params: &IDWriteRenderingParams,
+    ) -> WindowsDirectWriteRenderingParamsSnapshot {
+        WindowsDirectWriteRenderingParamsSnapshot {
+            source,
+            rendering_mode: Self::directwrite_rendering_mode_name(unsafe {
+                params.GetRenderingMode()
+            }),
+            pixel_geometry: Self::directwrite_pixel_geometry_name(unsafe {
+                params.GetPixelGeometry()
+            }),
+            gamma_per_mille: Self::scale_rendering_param_to_per_mille(unsafe { params.GetGamma() }),
+            enhanced_contrast_per_mille: Self::scale_rendering_param_to_per_mille(unsafe {
+                params.GetEnhancedContrast()
+            }),
+            clear_type_level_per_mille: Self::scale_rendering_param_to_per_mille(unsafe {
+                params.GetClearTypeLevel()
+            }),
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn create_directwrite_rendering_params(
+        factory: &IDWriteFactory,
+        host_hwnd: isize,
+    ) -> Option<(
+        IDWriteRenderingParams,
+        WindowsDirectWriteRenderingParamsSnapshot,
+    )> {
+        let monitor = unsafe { MonitorFromWindow(HWND(host_hwnd as _), MONITOR_DEFAULTTONEAREST) };
+        let (base_params, base_source) = if monitor.0.is_null() {
+            (
+                unsafe { factory.CreateRenderingParams().ok()? },
+                "system-default",
+            )
+        } else {
+            unsafe { factory.CreateMonitorRenderingParams(monitor).ok() }
+                .map(|params| (params, "monitor-default"))
+                .or_else(|| {
+                    unsafe { factory.CreateRenderingParams().ok() }
+                        .map(|params| (params, "system-default"))
+                })?
+        };
+        let gamma = unsafe { base_params.GetGamma() };
+        let enhanced_contrast = unsafe { base_params.GetEnhancedContrast() };
+        let clear_type_level = unsafe { base_params.GetClearTypeLevel() };
+        let pixel_geometry = unsafe { base_params.GetPixelGeometry() };
+        let rendering_mode = unsafe { base_params.GetRenderingMode() };
+        let tuned_enhanced_contrast =
+            Self::tuned_directwrite_enhanced_contrast(enhanced_contrast, pixel_geometry);
+
+        if (tuned_enhanced_contrast - enhanced_contrast).abs() >= 0.001 {
+            if let Ok(custom_params) = unsafe {
+                factory.CreateCustomRenderingParams(
+                    gamma,
+                    tuned_enhanced_contrast,
+                    clear_type_level,
+                    pixel_geometry,
+                    rendering_mode,
+                )
+            } {
+                return Some((
+                    custom_params.clone(),
+                    Self::snapshot_directwrite_rendering_params(
+                        match base_source {
+                            "monitor-default" => "monitor-custom-contrast",
+                            _ => "system-custom-contrast",
+                        },
+                        &custom_params,
+                    ),
+                ));
+            }
+        }
+
+        Some((
+            base_params.clone(),
+            Self::snapshot_directwrite_rendering_params(base_source, &base_params),
+        ))
+    }
+
+    #[cfg(target_os = "windows")]
+    fn tuned_directwrite_enhanced_contrast(
+        enhanced_contrast: f32,
+        pixel_geometry: DWRITE_PIXEL_GEOMETRY,
+    ) -> f32 {
+        if pixel_geometry == DWRITE_PIXEL_GEOMETRY_FLAT {
+            return enhanced_contrast;
+        }
+
+        // Keep monitor-provided gamma/ClearType values intact and only lift softer
+        // defaults slightly so terminal stems read cleaner without changing metrics.
+        enhanced_contrast.max(0.65).min(1.0)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn scale_rendering_param_to_per_mille(value: f32) -> u32 {
+        (value.max(0.0) * 1000.0).round() as u32
+    }
+
+    #[cfg(target_os = "windows")]
+    fn directwrite_pixel_geometry_name(pixel_geometry: DWRITE_PIXEL_GEOMETRY) -> &'static str {
+        match pixel_geometry {
+            DWRITE_PIXEL_GEOMETRY_FLAT => "flat",
+            DWRITE_PIXEL_GEOMETRY_RGB => "rgb",
+            DWRITE_PIXEL_GEOMETRY_BGR => "bgr",
+            _ => "unknown",
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn directwrite_rendering_mode_name(rendering_mode: DWRITE_RENDERING_MODE) -> &'static str {
+        match rendering_mode {
+            DWRITE_RENDERING_MODE_DEFAULT => "default",
+            DWRITE_RENDERING_MODE_ALIASED => "aliased",
+            DWRITE_RENDERING_MODE_CLEARTYPE_GDI_CLASSIC => "cleartype-gdi-classic",
+            DWRITE_RENDERING_MODE_CLEARTYPE_GDI_NATURAL => "cleartype-gdi-natural",
+            DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL => "cleartype-natural",
+            DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC => "cleartype-natural-symmetric",
+            DWRITE_RENDERING_MODE_OUTLINE => "outline",
+            _ => "unknown",
+        }
     }
 
     fn release_bound_dc(&mut self) {
@@ -743,9 +902,11 @@ impl WindowsNativeSurfaceState {
                 Vec::with_capacity(frame.frame.presentable_frame.monochrome_glyph_draws.len());
             for draw in &frame.frame.presentable_frame.monochrome_glyph_draws {
                 if draw.glyph_id > u16::MAX as u32 {
+                    self.mark_directwrite_text_fallback();
                     return;
                 }
                 let Some(font_face) = self.resolve_directwrite_font_face(draw) else {
+                    self.mark_directwrite_text_fallback();
                     return;
                 };
                 drawable_glyphs.push((draw, font_face, draw.glyph_id as u16));
@@ -754,29 +915,37 @@ impl WindowsNativeSurfaceState {
                 return;
             }
 
-            let text_rendering_params = self
+            let (text_rendering_params, rendering_params_snapshot) = self
                 .directwrite_text_renderer
                 .as_ref()
                 .and_then(|renderer| renderer.factory.as_ref())
-                .and_then(|factory| {
-                    let monitor = unsafe {
-                        MonitorFromWindow(HWND(host_hwnd as _), MONITOR_DEFAULTTONEAREST)
-                    };
-                    if monitor.0.is_null() {
-                        unsafe { factory.CreateRenderingParams().ok() }
+                .and_then(|factory| Self::create_directwrite_rendering_params(factory, host_hwnd))
+                .map(|(params, snapshot)| (Some(params), Some(snapshot)))
+                .unwrap_or((None, None));
+            let text_antialias_mode = rendering_params_snapshot
+                .as_ref()
+                .map(|snapshot| {
+                    if snapshot.pixel_geometry == "flat" || snapshot.clear_type_level_per_mille == 0
+                    {
+                        D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE
                     } else {
-                        unsafe { factory.CreateMonitorRenderingParams(monitor).ok() }
+                        D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE
                     }
-                });
+                })
+                .unwrap_or(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
 
             unsafe {
-                render_target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+                render_target.SetTextAntialiasMode(text_antialias_mode);
                 render_target.SetTextRenderingParams(text_rendering_params.as_ref());
+            }
+            if let Some(renderer) = self.directwrite_text_renderer.as_mut() {
+                renderer.rendering_params_snapshot = rendering_params_snapshot;
             }
 
             for (draw, font_face, glyph_index) in drawable_glyphs {
                 self.ensure_brush(draw.fg_rgba);
                 let Some(brush) = self.brush_for(draw.fg_rgba) else {
+                    self.mark_directwrite_text_fallback();
                     return;
                 };
 
@@ -814,9 +983,7 @@ impl WindowsNativeSurfaceState {
             }
 
             self.last_directwrite_text_drawn = true;
-            if let Some(renderer) = self.directwrite_text_renderer.as_mut() {
-                renderer.active_path = "directwrite-d2d";
-            }
+            self.mark_directwrite_text_path("directwrite-d2d");
         }
     }
 
@@ -1115,6 +1282,12 @@ impl WindowsNativeSurfaceState {
         NativeTerminalSurfaceWindowsTextDiagnostics {
             text_antialias_mode: Some(self.active_text_antialias_mode()),
             render_target_alpha_mode: Some(self.active_render_target_alpha_mode()),
+            rendering_params_source: self.active_rendering_params_source(),
+            rendering_mode: self.active_rendering_mode(),
+            pixel_geometry: self.active_pixel_geometry(),
+            gamma_per_mille: self.active_gamma_per_mille(),
+            enhanced_contrast_per_mille: self.active_enhanced_contrast_per_mille(),
+            clear_type_level_per_mille: self.active_clear_type_level_per_mille(),
             font_chain: self.active_font_chain(),
             baseline_px: self.active_baseline_px(),
             pixel_alignment: Some(self.active_pixel_alignment()),
@@ -1126,15 +1299,81 @@ impl WindowsNativeSurfaceState {
     }
 
     fn active_text_antialias_mode(&self) -> &'static str {
-        if self.active_text_renderer_path() == Some("directwrite-d2d") {
-            "cleartype"
+        if self.active_text_renderer_path() != Some("directwrite-d2d") {
+            return "bitmap-mask-compat";
+        }
+
+        if self.active_pixel_geometry() == Some("flat")
+            || self.active_clear_type_level_per_mille() == Some(0)
+        {
+            "grayscale"
         } else {
-            "bitmap-mask-compat"
+            "cleartype"
         }
     }
 
     fn active_render_target_alpha_mode(&self) -> &'static str {
         "ignore"
+    }
+
+    fn active_rendering_params_source(&self) -> Option<&'static str> {
+        if self.active_text_renderer_path() != Some("directwrite-d2d") {
+            return None;
+        }
+        self.directwrite_text_renderer
+            .as_ref()
+            .and_then(|renderer| renderer.rendering_params_snapshot)
+            .map(|snapshot| snapshot.source)
+    }
+
+    fn active_rendering_mode(&self) -> Option<&'static str> {
+        if self.active_text_renderer_path() != Some("directwrite-d2d") {
+            return None;
+        }
+        self.directwrite_text_renderer
+            .as_ref()
+            .and_then(|renderer| renderer.rendering_params_snapshot)
+            .map(|snapshot| snapshot.rendering_mode)
+    }
+
+    fn active_pixel_geometry(&self) -> Option<&'static str> {
+        if self.active_text_renderer_path() != Some("directwrite-d2d") {
+            return None;
+        }
+        self.directwrite_text_renderer
+            .as_ref()
+            .and_then(|renderer| renderer.rendering_params_snapshot)
+            .map(|snapshot| snapshot.pixel_geometry)
+    }
+
+    fn active_gamma_per_mille(&self) -> Option<u32> {
+        if self.active_text_renderer_path() != Some("directwrite-d2d") {
+            return None;
+        }
+        self.directwrite_text_renderer
+            .as_ref()
+            .and_then(|renderer| renderer.rendering_params_snapshot)
+            .map(|snapshot| snapshot.gamma_per_mille)
+    }
+
+    fn active_enhanced_contrast_per_mille(&self) -> Option<u32> {
+        if self.active_text_renderer_path() != Some("directwrite-d2d") {
+            return None;
+        }
+        self.directwrite_text_renderer
+            .as_ref()
+            .and_then(|renderer| renderer.rendering_params_snapshot)
+            .map(|snapshot| snapshot.enhanced_contrast_per_mille)
+    }
+
+    fn active_clear_type_level_per_mille(&self) -> Option<u32> {
+        if self.active_text_renderer_path() != Some("directwrite-d2d") {
+            return None;
+        }
+        self.directwrite_text_renderer
+            .as_ref()
+            .and_then(|renderer| renderer.rendering_params_snapshot)
+            .map(|snapshot| snapshot.clear_type_level_per_mille)
     }
 
     fn active_font_chain(&self) -> Vec<String> {

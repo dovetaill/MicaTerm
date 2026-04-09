@@ -88,6 +88,60 @@ pub fn native_surface_render_target_alpha_mode(
         .and_then(|text| text.render_target_alpha_mode)
 }
 
+pub fn native_surface_rendering_params_source(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<&'static str> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.rendering_params_source)
+}
+
+pub fn native_surface_rendering_mode(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<&'static str> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.rendering_mode)
+}
+
+pub fn native_surface_pixel_geometry(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<&'static str> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.pixel_geometry)
+}
+
+pub fn native_surface_gamma_per_mille(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<u32> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.gamma_per_mille)
+}
+
+pub fn native_surface_enhanced_contrast_per_mille(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<u32> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.enhanced_contrast_per_mille)
+}
+
+pub fn native_surface_clear_type_level_per_mille(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<u32> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.clear_type_level_per_mille)
+}
+
 pub fn native_surface_font_chain(
     diagnostics: &NativeTerminalSurfaceDiagnostics,
 ) -> Option<&[String]> {

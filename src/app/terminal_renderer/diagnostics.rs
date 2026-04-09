@@ -21,6 +21,12 @@ pub struct NativeTerminalSurfaceGlyphBoundsTrace {
 pub struct NativeTerminalSurfaceWindowsTextDiagnostics {
     pub text_antialias_mode: Option<&'static str>,
     pub render_target_alpha_mode: Option<&'static str>,
+    pub rendering_params_source: Option<&'static str>,
+    pub rendering_mode: Option<&'static str>,
+    pub pixel_geometry: Option<&'static str>,
+    pub gamma_per_mille: Option<u32>,
+    pub enhanced_contrast_per_mille: Option<u32>,
+    pub clear_type_level_per_mille: Option<u32>,
     pub font_chain: Vec<String>,
     pub baseline_px: Option<i32>,
     pub pixel_alignment: Option<&'static str>,

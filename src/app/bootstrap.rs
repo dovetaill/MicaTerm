@@ -148,9 +148,12 @@ use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
 };
 use crate::app::windows_frame::{
-    native_surface_baseline_px, native_surface_dpi_x, native_surface_dpi_y,
-    native_surface_font_chain, native_surface_glyph_bounds_trace, native_surface_pixel_alignment,
-    native_surface_render_target_alpha_mode, native_surface_scale_factor_percent,
+    native_surface_baseline_px, native_surface_clear_type_level_per_mille, native_surface_dpi_x,
+    native_surface_dpi_y, native_surface_enhanced_contrast_per_mille, native_surface_font_chain,
+    native_surface_gamma_per_mille, native_surface_glyph_bounds_trace,
+    native_surface_pixel_alignment, native_surface_pixel_geometry,
+    native_surface_render_target_alpha_mode, native_surface_rendering_mode,
+    native_surface_rendering_params_source, native_surface_scale_factor_percent,
     native_surface_text_antialias_mode, native_surface_text_renderer_path,
 };
 use crate::shell::assets::{
@@ -2374,6 +2377,15 @@ fn trace_workspace_native_terminal_diagnostics(window: &AppWindow) {
         text_antialias_mode = native_surface_text_antialias_mode(&diagnostics).unwrap_or("unknown"),
         render_target_alpha_mode = native_surface_render_target_alpha_mode(&diagnostics)
             .unwrap_or("unknown"),
+        rendering_params_source = native_surface_rendering_params_source(&diagnostics)
+            .unwrap_or("unknown"),
+        rendering_mode = native_surface_rendering_mode(&diagnostics).unwrap_or("unknown"),
+        pixel_geometry = native_surface_pixel_geometry(&diagnostics).unwrap_or("unknown"),
+        gamma_per_mille = native_surface_gamma_per_mille(&diagnostics).unwrap_or_default(),
+        enhanced_contrast_per_mille = native_surface_enhanced_contrast_per_mille(&diagnostics)
+            .unwrap_or_default(),
+        clear_type_level_per_mille = native_surface_clear_type_level_per_mille(&diagnostics)
+            .unwrap_or_default(),
         scheduled_present_count = diagnostics.scheduled_present_count,
         host_redraw_request_count = diagnostics.host_redraw_request_count,
         host_redraw_replay_count = diagnostics.host_redraw_replay_count,

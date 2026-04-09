@@ -46,6 +46,56 @@ fn windows_native_text_renderer_source_uses_monitor_aware_clear_type_contract() 
             "windows native text path should reference `{expected}` so ClearType-friendly rendering uses monitor-aware params on an opaque target"
         );
     }
+
+    for expected in [
+        "CreateCustomRenderingParams",
+        "GetGamma()",
+        "GetEnhancedContrast()",
+        "GetClearTypeLevel()",
+        "GetPixelGeometry()",
+        "GetRenderingMode()",
+    ] {
+        assert!(
+            windows_backend_source.contains(expected),
+            "windows native text path should reference `{expected}` so monitor params can be inspected and, when needed, promoted into explicit DirectWrite rendering params instead of leaving the chain under-specified"
+        );
+    }
+}
+
+#[test]
+fn windows_native_text_renderer_source_tracks_true_fallback_path_when_directwrite_bails() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows native backend");
+
+    for expected in [
+        "fn mark_directwrite_text_fallback(",
+        "self.mark_directwrite_text_fallback();",
+    ] {
+        assert!(
+            windows_backend_source.contains(expected),
+            "windows native text renderer should reference `{expected}` so diagnostics stop claiming the directwrite path stayed active after the draw stage bails out to bitmap fallback"
+        );
+    }
+}
+
+#[test]
+fn windows_native_text_renderer_source_avoids_duplicate_directwrite_rendering_mode_alias_arms() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows native backend");
+
+    for forbidden in [
+        "DWRITE_RENDERING_MODE_GDI_CLASSIC =>",
+        "DWRITE_RENDERING_MODE_GDI_NATURAL =>",
+        "DWRITE_RENDERING_MODE_NATURAL =>",
+        "DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC =>",
+    ] {
+        assert!(
+            !windows_backend_source.contains(forbidden),
+            "windows native text renderer should avoid `{forbidden}` because the windows crate aliases these values to the ClearType constants and the extra match arms trigger unreachable-pattern warnings in Windows builds"
+        );
+    }
 }
 
 #[test]
