@@ -180,7 +180,8 @@ impl ShellViewModel {
     }
 
     pub fn set_settings_modal_terminal_active_idle_shrink_enabled(&mut self, value: bool) {
-        self.settings_modal_state.terminal_active_idle_shrink_enabled = value;
+        self.settings_modal_state
+            .terminal_active_idle_shrink_enabled = value;
     }
 
     pub fn open_sync_modal(&mut self) {

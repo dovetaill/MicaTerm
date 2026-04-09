@@ -23,7 +23,7 @@ use crate::theme::ThemeMode;
 
 const DEFAULT_TERMINAL_ROWS: usize = 24;
 const DEFAULT_TERMINAL_COLS: usize = 80;
-const TERMINAL_SCROLLBACK_LINES: usize = 3_500;
+const DEFAULT_TERMINAL_SCROLLBACK_LINES: usize = 1_500;
 const FILTERED_EXACT_BANNER: &str =
     "Activate the web console with: systemctl enable --now cockpit.socket";
 
@@ -40,9 +40,12 @@ pub struct WeztermTerminalCoreAdapter {
 }
 
 impl WeztermTerminalCoreAdapter {
-    pub fn new(rows: usize, cols: usize) -> Self {
+    pub fn new(rows: usize, cols: usize, scrollback_lines: usize) -> Self {
         let writer = SharedWriteBuffer::default();
-        let config = Arc::new(SessionTerminalConfig::new(ThemeMode::Dark));
+        let config = Arc::new(SessionTerminalConfig::new(
+            ThemeMode::Dark,
+            scrollback_lines.max(1),
+        ));
         let terminal = Terminal::new(
             TerminalSize {
                 rows,
@@ -699,13 +702,18 @@ pub fn encode_named_key_input(
         return Ok(None);
     };
 
-    let mut session = WeztermTerminalCoreAdapter::new(DEFAULT_TERMINAL_ROWS, DEFAULT_TERMINAL_COLS);
+    let mut session = WeztermTerminalCoreAdapter::new(
+        DEFAULT_TERMINAL_ROWS,
+        DEFAULT_TERMINAL_COLS,
+        DEFAULT_TERMINAL_SCROLLBACK_LINES,
+    );
     let bytes = session.send_key_down(key, key_modifiers(alt, ctrl, shift))?;
     Ok(Some(bytes))
 }
 
 #[derive(Debug)]
 struct SessionTerminalConfig {
+    scrollback_lines: usize,
     state: Mutex<SessionTerminalConfigState>,
 }
 
@@ -716,8 +724,9 @@ struct SessionTerminalConfigState {
 }
 
 impl SessionTerminalConfig {
-    fn new(theme_mode: ThemeMode) -> Self {
+    fn new(theme_mode: ThemeMode, scrollback_lines: usize) -> Self {
         Self {
+            scrollback_lines: scrollback_lines.max(1),
             state: Mutex::new(SessionTerminalConfigState {
                 theme_mode,
                 generation: 0,
@@ -752,7 +761,7 @@ impl TerminalConfiguration for SessionTerminalConfig {
     }
 
     fn scrollback_size(&self) -> usize {
-        TERMINAL_SCROLLBACK_LINES
+        self.scrollback_lines.max(1)
     }
 
     fn color_palette(&self) -> ColorPalette {

@@ -131,7 +131,7 @@ fn surface_projection_exposes_scrollback_metadata() {
 #[test]
 fn terminal_session_preserves_deeper_scrollback_history_for_large_bursts() {
     let mut session = TerminalSession::new(4, 20);
-    let configured_scrollback_lines = 3_500usize;
+    let configured_scrollback_lines = 1_500usize;
     let transcript = (0..9000)
         .map(|line| format!("{line:04}\r\n"))
         .collect::<String>();
@@ -153,6 +153,70 @@ fn terminal_session_preserves_deeper_scrollback_history_for_large_bursts() {
     assert!(
         first_visible_line >= expected_floor,
         "bounded scrollback should retain only the newest configured history window when a burst exceeds the cap"
+    );
+}
+
+#[test]
+fn terminal_session_uses_configured_scrollback_limit_for_large_bursts() {
+    let configured_scrollback_lines = 1_500usize;
+    let mut session = TerminalSession::new_with_scrollback(4, 20, configured_scrollback_lines);
+    let transcript = (0..9000)
+        .map(|line| format!("{line:04}\r\n"))
+        .collect::<String>();
+
+    session.apply_remote_bytes(transcript.as_bytes());
+    session.scroll_viewport_lines(20_000);
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    let first_visible = snapshot
+        .visible_lines
+        .iter()
+        .find(|line| !line.is_empty())
+        .expect("top retained scrollback line");
+    let first_visible_line = first_visible
+        .parse::<usize>()
+        .expect("parse retained scrollback line number");
+    let expected_floor = 9_000usize.saturating_sub(configured_scrollback_lines + 4);
+
+    assert!(
+        first_visible_line >= expected_floor,
+        "configured scrollback should retain only the newest configured history window when a burst exceeds the cap"
+    );
+}
+
+#[test]
+fn terminal_session_retains_more_history_when_scrollback_limit_is_larger() {
+    let transcript = (0..9000)
+        .map(|line| format!("{line:04}\r\n"))
+        .collect::<String>();
+    let mut lower = TerminalSession::new_with_scrollback(4, 20, 1_500);
+    let mut higher = TerminalSession::new_with_scrollback(4, 20, 3_000);
+
+    lower.apply_remote_bytes(transcript.as_bytes());
+    higher.apply_remote_bytes(transcript.as_bytes());
+    lower.scroll_viewport_lines(20_000);
+    higher.scroll_viewport_lines(20_000);
+
+    let lower_snapshot = lower.surface_state(Uuid::new_v4());
+    let higher_snapshot = higher.surface_state(Uuid::new_v4());
+    let lower_first = lower_snapshot
+        .visible_lines
+        .iter()
+        .find(|line| !line.is_empty())
+        .expect("top retained line in lower scrollback")
+        .parse::<usize>()
+        .expect("parse lower first visible line");
+    let higher_first = higher_snapshot
+        .visible_lines
+        .iter()
+        .find(|line| !line.is_empty())
+        .expect("top retained line in higher scrollback")
+        .parse::<usize>()
+        .expect("parse higher first visible line");
+
+    assert!(
+        higher_first <= lower_first,
+        "a larger scrollback cap should preserve older lines than a smaller cap"
     );
 }
 

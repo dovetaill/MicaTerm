@@ -16,8 +16,8 @@ pub use contracts::{
     TerminalSurfaceSignature, TerminalSurfaceState,
 };
 pub use terminal::{
-    TerminalSession, encode_named_key_input, extract_current_working_directory_from_osc7,
-    negotiated_terminal_environment,
+    DEFAULT_TERMINAL_SCROLLBACK_LINES, TerminalSession, encode_named_key_input,
+    extract_current_working_directory_from_osc7, negotiated_terminal_environment,
 };
 
 use self::auth::ConnectionProgressReporter;
@@ -26,6 +26,7 @@ use self::sftp_backend::RusshSftpBackend;
 use self::terminal::{apply_remote_output, await_channel_success, negotiate_terminal_environment};
 use self::transport::{connect_target_handle_for_profile, ssh_client_config};
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -49,6 +50,34 @@ const SURFACE_DIRTY_NOTIFICATION_INTERVAL: Duration = Duration::from_millis(40);
 const INPUT_ACTIVE_SURFACE_DIRTY_WINDOW: Duration = Duration::from_millis(160);
 const WORKING_SET_TRIM_IDLE_INTERVAL: Duration = Duration::from_secs(2);
 const WORKING_SET_TRIM_MIN_OUTPUT_BYTES: usize = 1024 * 1024;
+
+#[derive(Clone, Debug)]
+pub struct TerminalRuntimeDefaults {
+    scrollback_lines: Arc<AtomicUsize>,
+}
+
+impl Default for TerminalRuntimeDefaults {
+    fn default() -> Self {
+        Self::new(DEFAULT_TERMINAL_SCROLLBACK_LINES)
+    }
+}
+
+impl TerminalRuntimeDefaults {
+    pub fn new(scrollback_lines: usize) -> Self {
+        Self {
+            scrollback_lines: Arc::new(AtomicUsize::new(scrollback_lines.max(1))),
+        }
+    }
+
+    pub fn scrollback_lines(&self) -> usize {
+        self.scrollback_lines.load(Ordering::Relaxed).max(1)
+    }
+
+    pub fn set_scrollback_lines(&self, scrollback_lines: usize) {
+        self.scrollback_lines
+            .store(scrollback_lines.max(1), Ordering::Relaxed);
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionRuntimeEvent {
@@ -94,6 +123,7 @@ impl SshSessionRuntime {
             attempt_id,
             event_tx,
             Arc::new(SystemCredentialStore),
+            TerminalRuntimeDefaults::default(),
         )
         .await
     }
@@ -104,6 +134,7 @@ impl SshSessionRuntime {
         attempt_id: Uuid,
         event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
         credential_store: Arc<dyn CredentialStore>,
+        terminal_defaults: TerminalRuntimeDefaults,
     ) -> Result<Self> {
         let mut progress = ConnectionProgressReporter::new(
             attempt_id,
@@ -116,9 +147,10 @@ impl SshSessionRuntime {
             format!("Resolving connection profile for {}", profile.name),
             "Target",
         );
-        let terminal = Arc::new(Mutex::new(TerminalSession::new(
+        let terminal = Arc::new(Mutex::new(TerminalSession::new_with_scrollback(
             DEFAULT_TERMINAL_ROWS,
             DEFAULT_TERMINAL_COLS,
+            terminal_defaults.scrollback_lines(),
         )));
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let config = Arc::new(ssh_client_config());
@@ -373,5 +405,21 @@ mod tests {
             visible_lines_from_rows(&rows),
             vec!["top".to_string(), String::new(), "bottom".to_string()]
         );
+    }
+
+    #[test]
+    fn terminal_runtime_defaults_store_clamps_scrollback_to_positive_values() {
+        let defaults = TerminalRuntimeDefaults::default();
+
+        assert_eq!(
+            defaults.scrollback_lines(),
+            DEFAULT_TERMINAL_SCROLLBACK_LINES
+        );
+
+        defaults.set_scrollback_lines(3000);
+        assert_eq!(defaults.scrollback_lines(), 3000);
+
+        defaults.set_scrollback_lines(0);
+        assert_eq!(defaults.scrollback_lines(), 1);
     }
 }

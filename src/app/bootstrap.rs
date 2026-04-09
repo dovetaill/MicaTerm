@@ -75,8 +75,8 @@ use crate::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, SshAut
 use crate::app::ssh::proxy::resolve_proxy_chain;
 use crate::app::ssh::runtime::{
     SessionRuntimeEvent, SshSessionRuntime, TerminalKeyEvent, TerminalMouseButton,
-    TerminalMouseEventKind, TerminalMouseInput, TerminalSurfaceState, UnknownHostKeyError,
-    load_optional_stored_secret_bundle, stored_secret_lookup_message,
+    TerminalMouseEventKind, TerminalMouseInput, TerminalRuntimeDefaults, TerminalSurfaceState,
+    UnknownHostKeyError, load_optional_stored_secret_bundle, stored_secret_lookup_message,
 };
 use crate::app::ssh::session_manager::{
     EnhancedSessionState, OpenSessionMode, SessionHandle, SessionManager, SessionRuntimeControl,
@@ -179,6 +179,7 @@ use russh::keys::{Algorithm, PrivateKey, PublicKey};
 #[derive(Clone)]
 struct ShellSessionBridge {
     manager: SessionManager,
+    terminal_defaults: TerminalRuntimeDefaults,
 }
 
 const MAX_SSH_PROXY_CHAIN_DEPTH: usize = 8;
@@ -325,6 +326,7 @@ enum NativeTerminalClipboardShortcut {
 #[derive(Clone)]
 struct LiveSessionRuntimeLauncher {
     credential_store: Arc<dyn CredentialStore>,
+    terminal_defaults: TerminalRuntimeDefaults,
 }
 
 pub trait VaultProviderFactory: Send + Sync {
@@ -454,6 +456,7 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
         let credential_store = Arc::clone(&self.credential_store);
+        let terminal_defaults = self.terminal_defaults.clone();
         Box::pin(async move {
             let session = SshSessionRuntime::connect_with_credential_store(
                 profile,
@@ -461,6 +464,7 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
                 attempt_id,
                 event_tx,
                 credential_store,
+                terminal_defaults,
             )
             .await?;
             Ok(Box::new(session) as Box<dyn SessionRuntimeControl>)
@@ -472,6 +476,7 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
         profile: ConnectionProfile,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
         let credential_store = Arc::clone(&self.credential_store);
+        let terminal_defaults = self.terminal_defaults.clone();
         Box::pin(async move {
             let (event_tx, _event_rx) = mpsc::unbounded_channel();
             let runtime = SshSessionRuntime::connect_with_credential_store(
@@ -480,6 +485,7 @@ impl SessionRuntimeLauncher for LiveSessionRuntimeLauncher {
                 Uuid::new_v4(),
                 event_tx,
                 credential_store,
+                terminal_defaults,
             )
             .await?;
             runtime.disconnect()?;
@@ -668,11 +674,16 @@ pub fn build_shared_app_credential_store_for_paths(
 fn build_session_bridge(
     runtime_handle: tokio::runtime::Handle,
     credential_store: Arc<dyn CredentialStore>,
+    terminal_defaults: TerminalRuntimeDefaults,
 ) -> Rc<ShellSessionBridge> {
     Rc::new(ShellSessionBridge {
+        terminal_defaults: terminal_defaults.clone(),
         manager: SessionManager::new_with_launcher(
             runtime_handle,
-            Arc::new(LiveSessionRuntimeLauncher { credential_store }),
+            Arc::new(LiveSessionRuntimeLauncher {
+                credential_store,
+                terminal_defaults,
+            }),
         ),
     })
 }
@@ -2427,6 +2438,74 @@ fn workspace_terminal_renderer_resources_retained() -> bool {
     host_retained || native_surface_retained
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WorkspaceTerminalActiveSurfaceFingerprint {
+    session_id: Uuid,
+    seqno: usize,
+    viewport_offset_lines: u32,
+}
+
+impl WorkspaceTerminalActiveSurfaceFingerprint {
+    fn from_surface(surface: &TerminalSurfaceState) -> Self {
+        Self {
+            session_id: surface.session_id,
+            seqno: surface.seqno,
+            viewport_offset_lines: surface.viewport_offset_lines,
+        }
+    }
+}
+
+fn update_workspace_terminal_active_idle_cache_shrink(
+    active_surface: Option<&TerminalSurfaceState>,
+    enabled: bool,
+    now: Instant,
+    active_surface_fingerprint: &mut Option<WorkspaceTerminalActiveSurfaceFingerprint>,
+    active_surface_since: &mut Option<Instant>,
+    active_idle_cache_shrunk: &mut bool,
+    memory_diagnostics: bool,
+) {
+    if !enabled {
+        active_surface_fingerprint.take();
+        active_surface_since.take();
+        *active_idle_cache_shrunk = false;
+        return;
+    }
+
+    let Some(active_surface) = active_surface else {
+        active_surface_fingerprint.take();
+        active_surface_since.take();
+        *active_idle_cache_shrunk = false;
+        return;
+    };
+
+    let next_fingerprint = WorkspaceTerminalActiveSurfaceFingerprint::from_surface(active_surface);
+    if active_surface_fingerprint.as_ref() != Some(&next_fingerprint) {
+        *active_surface_fingerprint = Some(next_fingerprint);
+        *active_surface_since = Some(now);
+        *active_idle_cache_shrunk = false;
+        return;
+    }
+
+    let Some(active_surface_since_at) = *active_surface_since else {
+        *active_surface_since = Some(now);
+        *active_idle_cache_shrunk = false;
+        return;
+    };
+    if *active_idle_cache_shrunk
+        || now.duration_since(active_surface_since_at)
+            < Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS)
+    {
+        return;
+    }
+
+    clear_workspace_terminal_transient_caches(
+        memory_diagnostics,
+        "active-idle-shrink",
+        "active-surface-idle",
+    );
+    *active_idle_cache_shrunk = true;
+}
+
 fn update_workspace_terminal_idle_cache_shrink(
     has_active_surface: bool,
     surface_disappeared: bool,
@@ -3611,6 +3690,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher(
     let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
         Ok(runtime) => {
             let session_bridge = Rc::new(ShellSessionBridge {
+                terminal_defaults: TerminalRuntimeDefaults::default(),
                 manager: SessionManager::new_with_launcher(runtime.handle(), launcher),
             });
             (Some(runtime), Some(session_bridge))
@@ -3693,6 +3773,7 @@ pub fn bind_top_status_bar_with_injected_services_and_vault_runtime(
     let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
         Ok(runtime) => {
             let session_bridge = Rc::new(ShellSessionBridge {
+                terminal_defaults: TerminalRuntimeDefaults::default(),
                 manager: SessionManager::new_with_launcher(runtime.handle(), launcher),
             });
             (Some(runtime), Some(session_bridge))
@@ -3731,8 +3812,12 @@ pub fn bind_top_status_bar_with_store_and_profile_and_effects(
     match AppAsyncRuntime::new() {
         Ok(runtime) => {
             let credential_store = shared_app_credential_store();
-            let session_bridge =
-                build_session_bridge(runtime.handle(), Arc::clone(&credential_store));
+            let terminal_defaults = TerminalRuntimeDefaults::default();
+            let session_bridge = build_session_bridge(
+                runtime.handle(),
+                Arc::clone(&credential_store),
+                terminal_defaults,
+            );
             bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 window,
                 store,
@@ -3834,6 +3919,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     initial_view_model.theme_mode = prefs.theme_mode;
     initial_view_model.is_always_on_top = prefs.always_on_top;
     initial_view_model.set_right_panel_view(RightPanelView::from_id(&prefs.right_panel_view));
+    if let Some(session_bridge) = session_bridge.as_ref() {
+        session_bridge
+            .terminal_defaults
+            .set_scrollback_lines(prefs.terminal_scrollback_limit);
+    }
     initial_view_model
         .set_settings_modal_terminal_scrollback_limit(prefs.terminal_scrollback_limit as i32);
     initial_view_model.set_settings_modal_terminal_active_idle_shrink_enabled(
@@ -3944,6 +4034,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let scroll_thumb_drag_timer = Rc::new(Timer::default());
     let deferred_scroll_thumb_drag =
         Rc::new(RefCell::new(DeferredWorkspaceScrollThumbDrag::default()));
+    let workspace_terminal_active_surface_fingerprint = Rc::new(RefCell::new(
+        None::<WorkspaceTerminalActiveSurfaceFingerprint>,
+    ));
+    let workspace_terminal_active_surface_since = Rc::new(RefCell::new(None::<Instant>));
+    let workspace_terminal_active_idle_cache_shrunk = Rc::new(RefCell::new(false));
     let workspace_terminal_no_surface_since = Rc::new(RefCell::new(None::<Instant>));
     let workspace_terminal_idle_cache_shrunk = Rc::new(RefCell::new(false));
     if let Some(session_bridge_ref) = session_bridge.as_ref() {
@@ -3953,6 +4048,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
         let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
         let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
+        let workspace_terminal_active_surface_fingerprint_ref =
+            Rc::clone(&workspace_terminal_active_surface_fingerprint);
+        let workspace_terminal_active_surface_since_ref =
+            Rc::clone(&workspace_terminal_active_surface_since);
+        let workspace_terminal_active_idle_cache_shrunk_ref =
+            Rc::clone(&workspace_terminal_active_idle_cache_shrunk);
         let workspace_terminal_no_surface_since_ref =
             Rc::clone(&workspace_terminal_no_surface_since);
         let workspace_terminal_idle_cache_shrunk_ref =
@@ -4022,7 +4123,24 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             }
 
             let now = Instant::now();
-            let has_active_surface = state.active_workspace_terminal_surface().is_some();
+            let active_surface = state.active_workspace_terminal_surface();
+            let has_active_surface = active_surface.is_some();
+            let active_idle_shrink_enabled =
+                state.settings_modal_terminal_active_idle_shrink_enabled();
+            let mut active_surface_fingerprint =
+                workspace_terminal_active_surface_fingerprint_ref.borrow_mut();
+            let mut active_surface_since = workspace_terminal_active_surface_since_ref.borrow_mut();
+            let mut active_idle_cache_shrunk =
+                workspace_terminal_active_idle_cache_shrunk_ref.borrow_mut();
+            update_workspace_terminal_active_idle_cache_shrink(
+                active_surface,
+                active_idle_shrink_enabled,
+                now,
+                &mut active_surface_fingerprint,
+                &mut active_surface_since,
+                &mut active_idle_cache_shrunk,
+                memory_diagnostics,
+            );
             let mut no_surface_since = workspace_terminal_no_surface_since_ref.borrow_mut();
             let mut idle_cache_shrunk = workspace_terminal_idle_cache_shrunk_ref.borrow_mut();
             update_workspace_terminal_idle_cache_shrink(
@@ -5703,8 +5821,11 @@ fn bind_top_status_bar_with_profile_and_async_handle(
     match async_runtime_handle {
         Some(async_runtime_handle) => {
             let credential_store = shared_app_credential_store();
-            let session_bridge =
-                build_session_bridge(async_runtime_handle.clone(), Arc::clone(&credential_store));
+            let session_bridge = build_session_bridge(
+                async_runtime_handle.clone(),
+                Arc::clone(&credential_store),
+                TerminalRuntimeDefaults::default(),
+            );
             bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 window,
                 store,
@@ -5768,6 +5889,10 @@ mod tests {
 
     struct FailingPresenter;
     struct SizedPresenter((u32, u32));
+    struct CacheTrackingPresenter {
+        cached_rows: usize,
+        clear_calls: usize,
+    }
 
     #[test]
     fn deferred_workspace_projection_refresh_gate_coalesces_redundant_requests() {
@@ -5928,6 +6053,34 @@ mod tests {
 
         fn default_cell_size(&self) -> (u32, u32) {
             self.0
+        }
+    }
+
+    impl TerminalPresenter for CacheTrackingPresenter {
+        fn present(
+            &mut self,
+            _surface: &TerminalSurfaceState,
+            _options: TerminalPresentationOptions,
+        ) -> Result<PresentedTerminalFrame> {
+            Err(anyhow!(
+                "cache tracking presenter is only used for cache-shrink helper tests"
+            ))
+        }
+
+        fn default_cell_size(&self) -> (u32, u32) {
+            (10, 22)
+        }
+
+        fn cache_stats(&self) -> crate::app::terminal_presenter::TerminalPresenterCacheStats {
+            crate::app::terminal_presenter::TerminalPresenterCacheStats {
+                previous_frame_rows: self.cached_rows,
+                ..Default::default()
+            }
+        }
+
+        fn clear_transient_caches(&mut self) {
+            self.cached_rows = 0;
+            self.clear_calls += 1;
         }
     }
 
@@ -6502,6 +6655,209 @@ mod tests {
                 "after the no-surface idle threshold elapses, the workspace terminal presenter host should be dropped so terminal font/render state does not stay resident indefinitely"
             );
         });
+    }
+
+    #[test]
+    fn active_idle_cache_shrink_clears_transient_caches_without_releasing_visible_host() {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = Some(TerminalRendererHost::new(
+                Box::new(CacheTrackingPresenter {
+                    cached_rows: 12,
+                    clear_calls: 0,
+                }),
+                TerminalRenderMode::Bitmap,
+            ));
+        });
+
+        let now = Instant::now();
+        let surface = TerminalSurfaceState::from_visible_lines(
+            Uuid::new_v4(),
+            7,
+            24,
+            80,
+            vec!["welcome".into()],
+        );
+        let mut active_surface_fingerprint = None;
+        let mut active_surface_since = None;
+        let mut active_idle_cache_shrunk = false;
+
+        update_workspace_terminal_active_idle_cache_shrink(
+            Some(&surface),
+            true,
+            now,
+            &mut active_surface_fingerprint,
+            &mut active_surface_since,
+            &mut active_idle_cache_shrunk,
+            false,
+        );
+        update_workspace_terminal_active_idle_cache_shrink(
+            Some(&surface),
+            true,
+            now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
+            &mut active_surface_fingerprint,
+            &mut active_surface_since,
+            &mut active_idle_cache_shrunk,
+            false,
+        );
+
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            let host = host.borrow();
+            let host = host
+                .as_ref()
+                .expect("active idle shrink should keep the visible host resident");
+            assert_eq!(
+                host.cache_stats().previous_frame_rows,
+                0,
+                "active idle shrink should clear presenter transient caches once the visible surface stays stable past the threshold"
+            );
+        });
+        assert_eq!(active_surface_since, Some(now));
+        assert!(
+            active_idle_cache_shrunk,
+            "after the active idle threshold elapses the helper should mark the visible surface as shrunk until the surface changes again"
+        );
+    }
+
+    #[test]
+    fn active_idle_cache_shrink_resets_when_surface_changes_before_threshold() {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = Some(TerminalRendererHost::new(
+                Box::new(CacheTrackingPresenter {
+                    cached_rows: 12,
+                    clear_calls: 0,
+                }),
+                TerminalRenderMode::Bitmap,
+            ));
+        });
+
+        let now = Instant::now();
+        let first_surface = TerminalSurfaceState::from_visible_lines(
+            Uuid::new_v4(),
+            7,
+            24,
+            80,
+            vec!["welcome".into()],
+        );
+        let mut second_surface = first_surface.clone();
+        second_surface.seqno += 1;
+        second_surface.viewport_offset_lines = 3;
+        let reset_at = now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS / 2);
+        let before_threshold_again =
+            reset_at + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS / 2);
+        let mut active_surface_fingerprint = None;
+        let mut active_surface_since = None;
+        let mut active_idle_cache_shrunk = false;
+
+        update_workspace_terminal_active_idle_cache_shrink(
+            Some(&first_surface),
+            true,
+            now,
+            &mut active_surface_fingerprint,
+            &mut active_surface_since,
+            &mut active_idle_cache_shrunk,
+            false,
+        );
+        update_workspace_terminal_active_idle_cache_shrink(
+            Some(&second_surface),
+            true,
+            reset_at,
+            &mut active_surface_fingerprint,
+            &mut active_surface_since,
+            &mut active_idle_cache_shrunk,
+            false,
+        );
+        update_workspace_terminal_active_idle_cache_shrink(
+            Some(&second_surface),
+            true,
+            before_threshold_again,
+            &mut active_surface_fingerprint,
+            &mut active_surface_since,
+            &mut active_idle_cache_shrunk,
+            false,
+        );
+
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            let host = host.borrow();
+            let host = host
+                .as_ref()
+                .expect("surface changes before the threshold should keep the host resident");
+            assert_eq!(
+                host.cache_stats().previous_frame_rows,
+                12,
+                "changing seqno or viewport before the threshold should reset the active idle timer instead of clearing caches immediately"
+            );
+        });
+        assert_eq!(
+            active_surface_since,
+            Some(reset_at),
+            "when the visible surface changes the active idle timer should restart from that newer surface fingerprint"
+        );
+        assert!(
+            !active_idle_cache_shrunk,
+            "surface changes before the threshold should prevent the active idle shrink from marking itself complete"
+        );
+    }
+
+    #[test]
+    fn active_idle_cache_shrink_stays_disabled_when_preference_is_off() {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = Some(TerminalRendererHost::new(
+                Box::new(CacheTrackingPresenter {
+                    cached_rows: 12,
+                    clear_calls: 0,
+                }),
+                TerminalRenderMode::Bitmap,
+            ));
+        });
+
+        let now = Instant::now();
+        let surface = TerminalSurfaceState::from_visible_lines(
+            Uuid::new_v4(),
+            7,
+            24,
+            80,
+            vec!["welcome".into()],
+        );
+        let mut active_surface_fingerprint = None;
+        let mut active_surface_since = None;
+        let mut active_idle_cache_shrunk = false;
+
+        update_workspace_terminal_active_idle_cache_shrink(
+            Some(&surface),
+            false,
+            now,
+            &mut active_surface_fingerprint,
+            &mut active_surface_since,
+            &mut active_idle_cache_shrunk,
+            false,
+        );
+        update_workspace_terminal_active_idle_cache_shrink(
+            Some(&surface),
+            false,
+            now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
+            &mut active_surface_fingerprint,
+            &mut active_surface_since,
+            &mut active_idle_cache_shrunk,
+            false,
+        );
+
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            let host = host.borrow();
+            let host = host
+                .as_ref()
+                .expect("disabling active idle shrink should not release the host");
+            assert_eq!(
+                host.cache_stats().previous_frame_rows,
+                12,
+                "the active idle shrink preference should suppress cache clearing even after the idle threshold elapses"
+            );
+        });
+        assert!(active_surface_fingerprint.is_none());
+        assert!(active_surface_since.is_none());
+        assert!(
+            !active_idle_cache_shrunk,
+            "with the preference disabled the helper should stay inert and leave its shrink marker cleared"
+        );
     }
 
     #[test]

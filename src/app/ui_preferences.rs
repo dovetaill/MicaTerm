@@ -95,8 +95,8 @@ impl From<&ShellViewModel> for UiPreferences {
             always_on_top: value.is_always_on_top,
             right_panel_view: value.right_panel_view_id().into(),
             terminal_scrollback_limit: value.settings_modal_terminal_scrollback_limit(),
-            terminal_active_idle_shrink_enabled:
-                value.settings_modal_terminal_active_idle_shrink_enabled(),
+            terminal_active_idle_shrink_enabled: value
+                .settings_modal_terminal_active_idle_shrink_enabled(),
         }
     }
 }

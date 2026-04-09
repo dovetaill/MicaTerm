@@ -263,6 +263,8 @@ fn seed_locked_vault_runtime(
             theme_mode: mica_term::theme::ThemeMode::Light,
             always_on_top: true,
             right_panel_view: "appearance".into(),
+            terminal_scrollback_limit: 1500,
+            terminal_active_idle_shrink_enabled: true,
         },
     )
     .expect("export seeded snapshot");

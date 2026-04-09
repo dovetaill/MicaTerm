@@ -8383,6 +8383,28 @@ fn bootstrap_tracks_no_surface_idle_before_terminal_cache_shrink() {
 }
 
 #[test]
+fn bootstrap_tracks_active_surface_idle_before_terminal_cache_shrink() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("update_workspace_terminal_active_idle_cache_shrink("),
+        "bootstrap should route visible-surface idle shrink through a dedicated helper so the active-window path can reset independently from the no-surface shrink lifecycle"
+    );
+    assert!(
+        bootstrap_source.contains("workspace_terminal_active_surface_since"),
+        "bootstrap should track when the visible terminal surface last changed so stable seqno and viewport windows can trigger an active idle cache shrink"
+    );
+    assert!(
+        bootstrap_source.contains("settings_modal_terminal_active_idle_shrink_enabled()"),
+        "bootstrap should gate the active idle shrink path behind the persisted settings toggle from the titlebar settings modal"
+    );
+    assert!(
+        bootstrap_source.contains("\"active-surface-idle\""),
+        "bootstrap should label the visible-surface idle shrink reason so memory diagnostics can distinguish it from no-surface cleanup"
+    );
+}
+
+#[test]
 fn no_surface_terminal_shell_chrome_tracks_catppuccin_theme_toggle() {
     i_slint_backend_testing::init_no_event_loop();
 

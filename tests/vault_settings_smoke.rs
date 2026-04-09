@@ -1,10 +1,9 @@
 //! Smoke coverage for the formal titlebar Sync entry and non-vault Settings contract.
 
-use std::fs;
-
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store;
 use mica_term::app::ui_preferences::UiPreferencesStore;
+use std::fs;
 
 #[test]
 fn settings_action_no_longer_routes_right_panel_to_sync_and_vault() {

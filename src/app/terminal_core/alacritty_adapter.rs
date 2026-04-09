@@ -22,8 +22,6 @@ use crate::app::terminal_core::{
 use crate::app::terminal_theme::preset_for_theme_mode;
 use crate::theme::{ThemeMode, terminal_palette_spec};
 
-const TERMINAL_SCROLLBACK_LINES: usize = 3_500;
-
 pub struct AlacrittyTerminalCoreAdapter {
     term: Term<VoidListener>,
     parser: Processor,
@@ -33,10 +31,10 @@ pub struct AlacrittyTerminalCoreAdapter {
 }
 
 impl AlacrittyTerminalCoreAdapter {
-    pub fn new(rows: usize, cols: usize) -> Self {
+    pub fn new(rows: usize, cols: usize, scrollback_lines: usize) -> Self {
         let dimensions = AlacrittyDimensions::new(rows, cols);
         let config = Config {
-            scrolling_history: TERMINAL_SCROLLBACK_LINES,
+            scrolling_history: scrollback_lines.max(1),
             ..Config::default()
         };
 

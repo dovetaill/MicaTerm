@@ -92,10 +92,16 @@ pub(super) fn bind_shell_chrome_callbacks(
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
     window.on_settings_modal_terminal_scrollback_limit_changed(move |value| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.set_settings_modal_terminal_scrollback_limit(value);
+        if let Some(session_bridge) = session_bridge_ref.as_deref() {
+            session_bridge
+                .terminal_defaults
+                .set_scrollback_lines(state.settings_modal_terminal_scrollback_limit());
+        }
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
     });
