@@ -197,6 +197,9 @@ type WorkspaceTerminalPresenterFactory =
 #[cfg(test)]
 #[allow(non_camel_case_types)]
 type TEST_WORKSPACE_TERMINAL_HOST_FACTORY = WorkspaceTerminalPresenterFactory;
+#[cfg(test)]
+#[allow(non_camel_case_types)]
+type TEST_WORKSPACE_PROCESS_MEMORY_TRIMMER = dyn FnMut() -> bool;
 
 thread_local! {
     static WORKSPACE_TERMINAL_RENDERER_HOST: RefCell<Option<TerminalRendererHost>> = const {
@@ -210,6 +213,10 @@ thread_local! {
     };
     #[cfg(test)]
     static WORKSPACE_TEST_TERMINAL_PRESENTER_FACTORY: RefCell<Option<Box<TEST_WORKSPACE_TERMINAL_HOST_FACTORY>>> = const {
+        RefCell::new(None)
+    };
+    #[cfg(test)]
+    static WORKSPACE_TEST_PROCESS_MEMORY_TRIMMER_HOOK: RefCell<Option<Box<TEST_WORKSPACE_PROCESS_MEMORY_TRIMMER>>> = const {
         RefCell::new(None)
     };
 }
@@ -2438,6 +2445,23 @@ fn workspace_terminal_renderer_resources_retained() -> bool {
     host_retained || native_surface_retained
 }
 
+#[cfg(test)]
+fn trim_workspace_process_memory() -> bool {
+    WORKSPACE_TEST_PROCESS_MEMORY_TRIMMER_HOOK.with(|hook| {
+        let mut hook = hook.borrow_mut();
+        if let Some(trim) = hook.as_mut() {
+            trim()
+        } else {
+            crate::app::memory::trim_process_working_set()
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn trim_workspace_process_memory() -> bool {
+    crate::app::memory::trim_process_working_set()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct WorkspaceTerminalActiveSurfaceFingerprint {
     session_id: Uuid,
@@ -2548,6 +2572,7 @@ fn update_workspace_terminal_idle_cache_shrink(
         "no-active-surface-idle",
     );
     release_workspace_terminal_renderer_resources();
+    let _ = trim_workspace_process_memory();
     *idle_cache_shrunk = true;
 }
 
@@ -3738,6 +3763,28 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_an
     );
 }
 
+pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_terminal_defaults(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    effects: Rc<dyn PlatformWindowEffects>,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+    credential_store: Arc<dyn CredentialStore>,
+    terminal_defaults: TerminalRuntimeDefaults,
+) {
+    bind_top_status_bar_with_injected_services_and_vault_runtime_and_terminal_defaults(
+        window,
+        store,
+        effects,
+        asset_repo,
+        launcher,
+        credential_store,
+        Arc::new(LivePrivateKeyImporter),
+        VaultRuntimeOptions::default(),
+        terminal_defaults,
+    );
+}
+
 pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer(
     window: &AppWindow,
     store: Option<UiPreferencesStore>,
@@ -3747,7 +3794,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_an
     credential_store: Arc<dyn CredentialStore>,
     private_key_importer: Arc<dyn PrivateKeyImporter>,
 ) {
-    bind_top_status_bar_with_injected_services_and_vault_runtime(
+    bind_top_status_bar_with_injected_services_and_vault_runtime_and_terminal_defaults(
         window,
         store,
         effects,
@@ -3756,6 +3803,7 @@ pub fn bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_an
         credential_store,
         private_key_importer,
         VaultRuntimeOptions::default(),
+        TerminalRuntimeDefaults::default(),
     );
 }
 
@@ -3770,10 +3818,35 @@ pub fn bind_top_status_bar_with_injected_services_and_vault_runtime(
     private_key_importer: Arc<dyn PrivateKeyImporter>,
     vault_runtime: VaultRuntimeOptions,
 ) {
+    bind_top_status_bar_with_injected_services_and_vault_runtime_and_terminal_defaults(
+        window,
+        store,
+        effects,
+        asset_repo,
+        launcher,
+        credential_store,
+        private_key_importer,
+        vault_runtime,
+        TerminalRuntimeDefaults::default(),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn bind_top_status_bar_with_injected_services_and_vault_runtime_and_terminal_defaults(
+    window: &AppWindow,
+    store: Option<UiPreferencesStore>,
+    effects: Rc<dyn PlatformWindowEffects>,
+    asset_repo: Option<Rc<dyn AssetCatalogRepository>>,
+    launcher: Arc<dyn SessionRuntimeLauncher>,
+    credential_store: Arc<dyn CredentialStore>,
+    private_key_importer: Arc<dyn PrivateKeyImporter>,
+    vault_runtime: VaultRuntimeOptions,
+    terminal_defaults: TerminalRuntimeDefaults,
+) {
     let (session_runtime_guard, session_bridge) = match AppAsyncRuntime::new() {
         Ok(runtime) => {
             let session_bridge = Rc::new(ShellSessionBridge {
-                terminal_defaults: TerminalRuntimeDefaults::default(),
+                terminal_defaults,
                 manager: SessionManager::new_with_launcher(runtime.handle(), launcher),
             });
             (Some(runtime), Some(session_bridge))
@@ -6000,6 +6073,20 @@ mod tests {
         result
     }
 
+    fn with_workspace_process_memory_trimmer_for_test<T>(
+        trimmer: Box<TEST_WORKSPACE_PROCESS_MEMORY_TRIMMER>,
+        body: impl FnOnce() -> T,
+    ) -> T {
+        WORKSPACE_TEST_PROCESS_MEMORY_TRIMMER_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(trimmer);
+        });
+        let result = body();
+        WORKSPACE_TEST_PROCESS_MEMORY_TRIMMER_HOOK.with(|hook| {
+            hook.borrow_mut().take();
+        });
+        result
+    }
+
     impl SessionRuntimeControl for NoopRuntimeControl {
         fn disconnect(&self) -> Result<()> {
             Ok(())
@@ -6655,6 +6742,45 @@ mod tests {
                 "after the no-surface idle threshold elapses, the workspace terminal presenter host should be dropped so terminal font/render state does not stay resident indefinitely"
             );
         });
+    }
+
+    #[test]
+    fn idle_cache_shrink_trims_process_working_set_after_no_surface_threshold() {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = Some(TerminalRendererHost::new(
+                Box::new(SizedPresenter((10, 22))),
+                TerminalRenderMode::Bitmap,
+            ));
+        });
+
+        let now = Instant::now();
+        let mut no_surface_since = Some(now);
+        let mut idle_cache_shrunk = false;
+        let trim_calls = Rc::new(RefCell::new(0usize));
+        let trim_calls_ref = Rc::clone(&trim_calls);
+
+        with_workspace_process_memory_trimmer_for_test(
+            Box::new(move || {
+                *trim_calls_ref.borrow_mut() += 1;
+                true
+            }),
+            || {
+                update_workspace_terminal_idle_cache_shrink(
+                    false,
+                    false,
+                    now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
+                    &mut no_surface_since,
+                    &mut idle_cache_shrunk,
+                    false,
+                );
+            },
+        );
+
+        assert_eq!(
+            *trim_calls.borrow(),
+            1,
+            "once the workspace stays without an active surface past the idle threshold, bootstrap should also request a process working-set trim so Windows can drop resident pages after renderer resources are released"
+        );
     }
 
     #[test]

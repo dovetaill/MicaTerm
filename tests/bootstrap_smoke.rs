@@ -25,6 +25,7 @@ use mica_term::app::bootstrap::{
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store,
     bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_private_key_importer,
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_terminal_defaults,
     build_shared_app_credential_store_for_paths, default_window_size,
 };
 use mica_term::app::keychain::KeychainCatalog;
@@ -46,8 +47,8 @@ use mica_term::app::ssh::known_hosts::{
 };
 use mica_term::app::ssh::profile::{ConnectionProfile, ConnectionProxyProfile, SshAuthMethod};
 use mica_term::app::ssh::runtime::{
-    SessionRuntimeEvent, TerminalKeyEvent, TerminalKeyKind, TerminalMouseInput, TerminalSession,
-    TerminalSurfaceState, UnknownHostKeyError,
+    SessionRuntimeEvent, TerminalKeyEvent, TerminalKeyKind, TerminalMouseInput,
+    TerminalRuntimeDefaults, TerminalSession, TerminalSurfaceState, UnknownHostKeyError,
 };
 use mica_term::app::ssh::session_manager::{
     EnhancementPolicy, SessionManager, SessionRuntimeControl, SessionRuntimeLauncher,
@@ -365,6 +366,17 @@ struct RecordingLauncherState {
 #[derive(Clone)]
 struct RecordingLauncher {
     state: Arc<Mutex<RecordingLauncherState>>,
+}
+
+#[derive(Default)]
+struct ObservingScrollbackLauncherState {
+    launch_scrollback_lines: Vec<usize>,
+}
+
+#[derive(Clone)]
+struct ObservingScrollbackLauncher {
+    state: Arc<Mutex<ObservingScrollbackLauncherState>>,
+    terminal_defaults: TerminalRuntimeDefaults,
 }
 
 #[derive(Clone)]
@@ -1836,6 +1848,45 @@ impl SessionRuntimeLauncher for RecordingLauncher {
                 .push(profile);
             Ok(())
         })
+    }
+}
+
+impl SessionRuntimeLauncher for ObservingScrollbackLauncher {
+    fn launch(
+        &self,
+        _profile: ConnectionProfile,
+        session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = Arc::clone(&self.state);
+        let terminal_defaults = self.terminal_defaults.clone();
+        Box::pin(async move {
+            state
+                .lock()
+                .expect("lock observing scrollback launcher state")
+                .launch_scrollback_lines
+                .push(terminal_defaults.scrollback_lines());
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(
+                TerminalSurfaceState::from_visible_lines(
+                    session_id,
+                    1,
+                    24,
+                    80,
+                    vec!["welcome to mica-term".into()],
+                ),
+            ));
+            Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
     }
 }
 
@@ -6427,6 +6478,59 @@ fn launcher_picker_activation_restores_native_terminal_surface_rect() {
         app.get_workspace_session_surface_seqno() > 0,
         "saved ssh picker activation should stage a terminal payload together with the restored host mode so the revived geometry is backed by a real frame"
     );
+}
+
+#[test]
+fn settings_modal_scrollback_flows_into_newly_launched_saved_ssh_session() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_path = std::env::temp_dir()
+        .join("mica-term")
+        .join("tests")
+        .join("settings-modal-new-session-scrollback.json");
+    let _ = std::fs::remove_file(&temp_path);
+
+    let terminal_defaults = TerminalRuntimeDefaults::default();
+    let launcher_state = Arc::new(Mutex::new(ObservingScrollbackLauncherState::default()));
+    let launcher = Arc::new(ObservingScrollbackLauncher {
+        state: Arc::clone(&launcher_state),
+        terminal_defaults: terminal_defaults.clone(),
+    });
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store_and_terminal_defaults(
+        &app,
+        Some(mica_term::app::ui_preferences::UiPreferencesStore::new(
+            temp_path.clone(),
+        )),
+        default_platform_window_effects(),
+        None,
+        launcher,
+        Arc::new(MemoryCredentialStore::default()),
+        terminal_defaults,
+    );
+
+    let ssh_id = create_root_ssh(&app, "DB Admin", "10.0.0.24");
+
+    app.invoke_open_settings_panel_requested();
+    app.invoke_settings_modal_terminal_scrollback_limit_changed(3000);
+    app.invoke_asset_activated(ssh_id.into());
+    settle_terminal_projection();
+
+    assert_eq!(
+        launcher_state
+            .lock()
+            .expect("lock observing scrollback launcher state")
+            .launch_scrollback_lines,
+        vec![3000],
+        "after changing the settings modal scrollback limit, the next saved SSH session launched through the real asset activation flow should observe that updated runtime default"
+    );
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_workspace_session_host_mode().as_str(), "terminal");
+
+    let content = fs::read_to_string(&temp_path).expect("read persisted ui preferences");
+    assert!(content.contains("\"terminal_scrollback_limit\": 3000"));
+
+    let _ = std::fs::remove_file(temp_path);
 }
 
 #[test]
