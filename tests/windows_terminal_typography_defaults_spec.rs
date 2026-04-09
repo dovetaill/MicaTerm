@@ -13,8 +13,8 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
 
     assert!(
         backend_source
-            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Cascadia Mono\";"),
-        "backend should set Cascadia Mono as the shared terminal default family"
+            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"JetBrains Mono\";"),
+        "backend should set JetBrains Mono as the shared terminal default family"
     );
     assert!(
         backend_source.contains("pub const DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 14.0;"),
@@ -29,12 +29,12 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
         "backend should keep terminal letter spacing at zero"
     );
     assert!(
-        backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Regular\";"),
-        "backend should keep terminal weight on Regular"
+        backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Medium\";"),
+        "backend should move terminal weight to Medium"
     );
     assert!(
         backend_source.contains("pub const WINDOWS_DEFAULT_TERMINAL_FONT_CHAIN: &[&str] = &[")
-            && backend_source.contains("\"Cascadia Mono\"")
+            && backend_source.contains("\"JetBrains Mono\"")
             && backend_source.contains("\"Sarasa Term SC\"")
             && backend_source.contains("\"Segoe UI Emoji\""),
         "backend should expose the explicit Windows terminal font chain contract"
@@ -56,7 +56,7 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
                 || fallback_source.contains("DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY"))
             && (fallback_source.contains("\"Segoe UI Emoji\"")
                 || fallback_source.contains("DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY")),
-        "Windows fallback source should align with the Cascadia -> Sarasa -> Segoe UI Emoji chain"
+        "Windows fallback source should align with the JetBrains Mono -> Sarasa -> Segoe UI Emoji chain"
     );
     assert!(
         fallback_source.contains("'\\u{ff00}'..='\\u{ffef}'"),

@@ -271,8 +271,8 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         .expect("read dwrite font backend");
 
     assert!(
-        atlas_source.contains("assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf"),
-        "atlas renderer should point at the bundled Cascadia Mono default face"
+        atlas_source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf"),
+        "atlas renderer should point at the bundled JetBrains Mono medium default face"
     );
     assert!(
         atlas_source.contains("const TERMINAL_FONT_SIZE_PX: f32 = DEFAULT_TERMINAL_FONT_SIZE_PX;"),
@@ -344,8 +344,8 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         "shared typography defaults should keep terminal letter spacing at zero"
     );
     assert!(
-        font_backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Regular\";"),
-        "shared typography defaults should keep the default terminal weight on Regular"
+        font_backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Medium\";"),
+        "shared typography defaults should move the default terminal weight to Medium"
     );
     assert!(
         font_backend_source.contains("const GLYPH_ALPHA_GAIN: f32 = 1.0;"),

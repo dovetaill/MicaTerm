@@ -8,7 +8,7 @@ use rustybuzz::{BufferClusterLevel, Face, Feature, UnicodeBuffer, shape};
 #[cfg(feature = "terminal-native-renderer")]
 use std::str::FromStr;
 
-pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = "Cascadia Mono";
+pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = "JetBrains Mono";
 pub const DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY: &str = "Sarasa Term SC";
 pub const DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY: &str = "Segoe UI Emoji";
 pub const WINDOWS_DEFAULT_TERMINAL_FONT_CHAIN: &[&str] = &[
@@ -19,7 +19,7 @@ pub const WINDOWS_DEFAULT_TERMINAL_FONT_CHAIN: &[&str] = &[
 pub const DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 14.0;
 pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.5;
 pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 0.0;
-pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = "Regular";
+pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = "Medium";
 
 const GLYPH_COVERAGE_GAMMA: f32 = 1.0;
 const GLYPH_ALPHA_GAIN: f32 = 1.0;

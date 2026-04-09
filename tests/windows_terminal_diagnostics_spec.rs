@@ -71,7 +71,7 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
         windows_text: Some(NativeTerminalSurfaceWindowsTextDiagnostics {
             text_antialias_mode: Some("cleartype"),
             render_target_alpha_mode: Some("ignore"),
-            font_chain: vec!["Cascadia Mono".into(), "Sarasa Term SC".into()],
+            font_chain: vec!["JetBrains Mono".into(), "Sarasa Term SC".into()],
             baseline_px: Some(14),
             pixel_alignment: Some("pixel-snapped"),
             dpi_x: Some(144),
@@ -113,7 +113,7 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
     assert_eq!(
         native_surface_font_chain(&diagnostics).map(|chain| chain.to_vec()),
         Some(vec![
-            "Cascadia Mono".to_string(),
+            "JetBrains Mono".to_string(),
             "Sarasa Term SC".to_string()
         ])
     );

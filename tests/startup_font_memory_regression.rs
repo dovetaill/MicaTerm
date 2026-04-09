@@ -15,10 +15,10 @@ fn startup_path_drops_legacy_terminal_font_imports() {
 }
 
 #[test]
-fn bundled_terminal_font_contract_uses_cascadia_and_sarasa_assets() {
+fn bundled_terminal_font_contract_uses_jetbrains_and_sarasa_assets() {
     assert!(
-        Path::new("assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf").exists(),
-        "the bundled terminal font contract should ship Cascadia Mono for the default Latin path"
+        Path::new("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf").exists(),
+        "the bundled terminal font contract should ship JetBrains Mono Medium for the default Latin path"
     );
     assert!(
         Path::new("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf").exists(),

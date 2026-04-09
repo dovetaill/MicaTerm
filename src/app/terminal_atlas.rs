@@ -1,4 +1,4 @@
-//! Renders the active terminal grid into a single image surface using the bundled Cascadia Mono atlas font.
+//! Renders the active terminal grid into a single image surface using the bundled JetBrains Mono atlas font.
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -21,8 +21,8 @@ use crate::app::terminal_font::backend::{
     DEFAULT_TERMINAL_FONT_SIZE_PX, FontRenderProfile, map_glyph_coverage_to_alpha,
 };
 
-const CASCADIA_MONO_FONT_BYTES: &[u8] =
-    include_bytes!("../../assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf");
+const JETBRAINS_MONO_FONT_BYTES: &[u8] =
+    include_bytes!("../../assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf");
 const TERMINAL_FONT_SIZE_PX: f32 = DEFAULT_TERMINAL_FONT_SIZE_PX;
 const MIN_CELL_WIDTH_PX: u32 = 8;
 const MIN_CELL_HEIGHT_PX: u32 = 20;
@@ -212,10 +212,10 @@ impl TerminalAtlasRenderer {
     }
 
     fn with_emoji_renderer(emoji_renderer: TerminalEmojiRenderer) -> Result<Self> {
-        let font = FontArc::try_from_slice(CASCADIA_MONO_FONT_BYTES)
-            .map_err(|error| anyhow!("failed to load bundled Cascadia Mono font: {error}"))?;
-        let swash_font = SwashFontRef::from_index(CASCADIA_MONO_FONT_BYTES, 0)
-            .ok_or_else(|| anyhow!("failed to load bundled Cascadia Mono font into swash"))?;
+        let font = FontArc::try_from_slice(JETBRAINS_MONO_FONT_BYTES)
+            .map_err(|error| anyhow!("failed to load bundled JetBrains Mono font: {error}"))?;
+        let swash_font = SwashFontRef::from_index(JETBRAINS_MONO_FONT_BYTES, 0)
+            .ok_or_else(|| anyhow!("failed to load bundled JetBrains Mono font into swash"))?;
         let logical_metrics = compute_terminal_metrics(&font, TERMINAL_FONT_SIZE_PX);
         Ok(Self {
             font,

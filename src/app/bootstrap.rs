@@ -2125,9 +2125,8 @@ fn ensure_workspace_terminal_presenter(
                         );
                         (
                             Box::new(
-                                BitmapAtlasPresenter::new().expect(
-                                    "bundled Fusion JetBrains Maple Mono presenter should initialize after fallback",
-                                ),
+                                BitmapAtlasPresenter::new()
+                                    .expect("bundled bitmap presenter should initialize after fallback"),
                             ) as Box<dyn TerminalPresenter>,
                             TerminalRenderMode::Bitmap,
                         )

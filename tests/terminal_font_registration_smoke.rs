@@ -17,12 +17,12 @@ fn app_window_has_no_legacy_terminal_font_imports() {
 #[test]
 fn terminal_font_assets_switch_to_windows_terminal_bundle() {
     assert!(
-        Path::new("assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf").exists(),
-        "the Windows terminal default bundle should ship a Cascadia Mono regular face"
+        Path::new("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf").exists(),
+        "the Windows terminal default bundle should ship a JetBrains Mono medium face"
     );
     assert!(
-        Path::new("assets/fonts/CascadiaMono/LICENSE.txt").exists(),
-        "the Cascadia Mono bundle should ship the upstream license text"
+        Path::new("assets/fonts/JetBrainsMono/OFL.txt").exists(),
+        "the JetBrains Mono bundle should ship the upstream OFL text"
     );
     assert!(
         Path::new("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf").exists(),
@@ -31,6 +31,14 @@ fn terminal_font_assets_switch_to_windows_terminal_bundle() {
     assert!(
         Path::new("assets/fonts/SarasaTermSC/LICENSE.txt").exists(),
         "the Sarasa Term SC bundle should ship the upstream license text"
+    );
+    assert!(
+        Path::new("assets/fonts/SarasaUiSC/SarasaUiSC-Regular.ttf").exists(),
+        "the Slint UI bundle should ship a Sarasa UI SC regular face"
+    );
+    assert!(
+        Path::new("assets/fonts/SarasaUiSC/LICENSE.txt").exists(),
+        "the Sarasa UI SC bundle should ship the upstream license text"
     );
 }
 
@@ -57,13 +65,17 @@ fn bitmap_and_native_font_sources_point_at_windows_terminal_defaults() {
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read presenter");
 
     assert!(
-        atlas_source.contains("assets/fonts/CascadiaMono/CascadiaMono-Regular.ttf"),
-        "bitmap atlas should load the bundled Cascadia Mono face as the default Latin terminal font"
+        atlas_source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf"),
+        "bitmap atlas should load the bundled JetBrains Mono medium face as the default Latin terminal font"
     );
     assert!(
         backend_source
-            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Cascadia Mono\";"),
-        "font backend should move the default terminal family to Cascadia Mono"
+            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"JetBrains Mono\";"),
+        "font backend should move the default terminal family to JetBrains Mono"
+    );
+    assert!(
+        backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Medium\";"),
+        "font backend should move the shared terminal default weight to Medium"
     );
     assert!(
         backend_source.contains("family_name: Some(DEFAULT_TERMINAL_FONT_FAMILY.to_string())"),
@@ -74,7 +86,7 @@ fn bitmap_and_native_font_sources_point_at_windows_terminal_defaults() {
             || fallback_source.contains("DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY"))
             && (fallback_source.contains("\"Segoe UI Emoji\"")
                 || fallback_source.contains("DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY")),
-        "Windows fallback resolution should explicitly include Sarasa Term SC and Segoe UI Emoji behind the primary Cascadia Mono face"
+        "Windows fallback resolution should explicitly include Sarasa Term SC and Segoe UI Emoji behind the primary JetBrains Mono face"
     );
     assert!(
         presenter_source.contains("let request = FontRequest::default();"),

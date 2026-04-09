@@ -1,4 +1,6 @@
 // Root desktop window that composes chrome, sidebars, workspace content, overlays, and resize grips.
+import "../assets/fonts/SarasaUiSC/SarasaUiSC-Regular.ttf";
+import "../assets/fonts/SarasaUiSC/SarasaUiSC-SemiBold.ttf";
 import { AssetsCreateMenu } from "components/assets-create-menu.slint";
 import { AssetsContextMenuItem } from "components/assets-context-menu-column.slint";
 import { AssetsContextMenuOverlay } from "components/assets-context-menu-overlay.slint";
@@ -19,6 +21,7 @@ import { SshHostKeyConfirmModal } from "components/ssh-host-key-confirm-modal.sl
 import { StatusPill } from "components/status-pill.slint";
 import { WorkspacePasteWarningModal } from "components/workspace-paste-warning-modal.slint";
 import { ThemeTokens } from "theme/tokens.slint";
+import { AppTypography } from "theme/typography.slint";
 import { TitlebarTooltip } from "components/titlebar-tooltip.slint";
 import { WindowResizeGrips } from "components/window-resize-grips.slint";
 import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "welcome/quick-launch-types.slint";
@@ -32,6 +35,9 @@ import { TransferCenter } from "shell/transfer-center.slint";
 import { WorkspacePane } from "shell/workspace-pane.slint";
 
 export component AppWindow inherits Window {
+    default-font-family: AppTypography.ui-font-family;
+    default-font-weight: AppTypography.ui-font-weight-regular;
+
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
     in-out property <bool> sync-modal-open: false;
     in-out property <bool> settings-modal-open: false;

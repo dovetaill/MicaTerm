@@ -1,6 +1,7 @@
 // Global menu surface opened from the navigation button in the custom titlebar.
 
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 component MenuActionItem inherits Rectangle {
     in property <string> label;
@@ -19,6 +20,8 @@ component MenuActionItem inherits Rectangle {
         width: parent.width - 24px;
         height: parent.height;
         text: root.label;
+        font-family: AppTypography.ui-font-family;
+        font-weight: AppTypography.ui-font-weight-regular;
         color: touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
         vertical-alignment: center;
     }
