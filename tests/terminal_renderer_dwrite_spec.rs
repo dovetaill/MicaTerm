@@ -107,8 +107,8 @@ fn windows_text_engine_source_exposes_fallback_and_feature_contracts() {
         "Windows text stack should define a dedicated font locator"
     );
     assert!(
-        locator_source.contains("load_system_fonts"),
-        "Windows font locator should load system fonts instead of relying only on a hard-coded family list"
+        locator_source.contains("pub fn from_database("),
+        "Windows font locator should build from a shared system font database instead of always scanning fonts inside its constructor"
     );
     assert!(
         fallback_source.contains("pub struct WindowsFontFallbackResolver"),
@@ -166,6 +166,45 @@ fn windows_text_engine_source_exposes_fallback_and_feature_contracts() {
     assert!(
         shaper_source.contains("source_byte_range") && shaper_source.contains("clusters"),
         "terminal shaper should remap fallback subrun byte ranges back onto segmented terminal clusters"
+    );
+}
+
+#[test]
+fn windows_font_backend_lazy_init_contract_is_present() {
+    let locator_source =
+        fs::read_to_string("src/app/terminal_font/windows_locator.rs").expect("read locator");
+    let emoji_source =
+        fs::read_to_string("src/app/terminal_emoji.rs").expect("read terminal emoji");
+    let dwrite_source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
+        .expect("read windows dwrite font backend");
+
+    assert!(
+        dwrite_source.contains("locator: Option<WindowsFontLocator>"),
+        "DirectWriteFontSystem should keep the locator lazy so startup does not eagerly scan system fonts"
+    );
+    assert!(
+        dwrite_source.contains("emoji_renderer: Option<TerminalEmojiRenderer>"),
+        "DirectWriteFontSystem should keep the emoji renderer lazy so startup does not eagerly build its font database"
+    );
+    assert!(
+        dwrite_source.contains("system_font_database: Option<Arc<Database>>"),
+        "DirectWriteFontSystem should cache a shared system font database so locator and emoji paths do not scan fonts twice"
+    );
+    assert!(
+        dwrite_source.contains("fn ensure_system_font_database(&mut self) -> Arc<Database>"),
+        "DirectWriteFontSystem should expose an on-demand system font database accessor"
+    );
+    assert!(
+        !locator_source.contains("database.load_system_fonts();"),
+        "WindowsFontLocator should stop loading system fonts internally once the shared database owns that scan"
+    );
+    assert!(
+        emoji_source.contains("pub fn from_database("),
+        "terminal emoji rendering should accept a shared font database instead of forcing an internal scan"
+    );
+    assert!(
+        !emoji_source.contains("database.load_system_fonts();"),
+        "TerminalEmojiRenderer should stop loading system fonts internally once the shared database owns that scan"
     );
 }
 

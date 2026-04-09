@@ -6,12 +6,14 @@ use std::sync::Arc;
 
 use ab_glyph::{Font, FontArc, FontVec, GlyphId, PxScale, ScaleFont};
 use anyhow::{Result, anyhow};
+use fontdb::Database;
 use swash::FontRef as SwashFontRef;
 use swash::scale::image::Content as SwashContent;
 use swash::scale::{Render, ScaleContext, Source};
 use swash::zeno::{Format as SwashFormat, Vector as SwashVector};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::app::system_font_database::load_system_font_database;
 use crate::app::terminal_emoji::{EmojiRenderOutcome, EmojiSprite, TerminalEmojiRenderer};
 use crate::app::terminal_font::backend::{
     ColorGlyphRaster, DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY, DEFAULT_TERMINAL_FONT_FAMILY,
@@ -43,9 +45,10 @@ struct LoadedFaceRecord {
 
 pub struct DirectWriteFontSystem {
     scale_context: ScaleContext,
-    locator: WindowsFontLocator,
+    system_font_database: Option<Arc<Database>>,
+    locator: Option<WindowsFontLocator>,
     fallback_resolver: WindowsFontFallbackResolver,
-    emoji_renderer: TerminalEmojiRenderer,
+    emoji_renderer: Option<TerminalEmojiRenderer>,
     color_glyph_rasters: HashMap<(LoadedFontKey, FontFaceKey, u32), ColorGlyphRaster>,
     faces: HashMap<FontFaceKey, LoadedFaceRecord>,
     family_face_keys: HashMap<String, FontFaceKey>,
@@ -71,15 +74,16 @@ impl DirectWriteFontSystem {
 
         Ok(Self {
             scale_context: ScaleContext::new(),
-            locator: WindowsFontLocator::new(),
+            system_font_database: None,
+            locator: None,
             fallback_resolver: WindowsFontFallbackResolver::new(),
-            emoji_renderer: TerminalEmojiRenderer::new(),
+            emoji_renderer: None,
             color_glyph_rasters: HashMap::new(),
             faces,
             family_face_keys,
             next_face_key: DEFAULT_FACE_KEY.0.saturating_add(1),
             #[cfg(target_os = "windows")]
-            directwrite: directwrite_native::DirectWriteContext::new().ok(),
+            directwrite: None,
         })
     }
 
@@ -87,9 +91,14 @@ impl DirectWriteFontSystem {
         OpenTypeFeatureSet::common_terminal_features()
     }
 
-    pub fn discover_fallback_chain(&self, font: &LoadedFont, text: &str) -> Vec<String> {
+    pub fn discover_fallback_chain(&mut self, font: &LoadedFont, text: &str) -> Vec<String> {
+        self.ensure_locator_initialized();
+        let locator = self
+            .locator
+            .as_ref()
+            .expect("locator should be initialized on demand");
         self.fallback_resolver.discover_fallback_families(
-            &self.locator,
+            locator,
             font.family_name().unwrap_or(DEFAULT_TERMINAL_FONT_FAMILY),
             text,
         )
@@ -225,7 +234,7 @@ impl DirectWriteFontSystem {
         }
 
         let face_data = self
-            .locator
+            .ensure_locator()
             .resolve_face_data(family_name)
             .or_else(|| fallback_face_data_for_family(family_name))
             .ok_or_else(|| anyhow!("failed to resolve terminal font family `{family_name}`"))?;
@@ -257,15 +266,17 @@ impl DirectWriteFontSystem {
             .ok_or_else(|| anyhow!("unknown DirectWrite face key: {}", face_key.0))
     }
 
-    fn load_metrics(&self, face_key: FontFaceKey, px_size: f32) -> Result<FontMetrics> {
+    fn load_metrics(&mut self, face_key: FontFaceKey, px_size: f32) -> Result<FontMetrics> {
         let face = self.face_record(face_key)?;
+        #[cfg(target_os = "windows")]
+        let face_family_name = face.family_name.clone();
         #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
         let mut metrics = fallback_metrics_from_face(face, px_size);
 
         #[cfg(target_os = "windows")]
-        if let Some(directwrite) = &self.directwrite
+        if let Some(directwrite) = self.ensure_directwrite()
             && let Ok(native_metrics) =
-                directwrite.metrics_for_family(face.family_name.as_str(), px_size)
+                directwrite.metrics_for_family(face_family_name.as_str(), px_size)
         {
             metrics.units_per_em = native_metrics.units_per_em;
             metrics.ascent_px = native_metrics.ascent_px;
@@ -276,6 +287,50 @@ impl DirectWriteFontSystem {
         }
 
         Ok(metrics)
+    }
+
+    fn ensure_system_font_database(&mut self) -> Arc<Database> {
+        if let Some(database) = &self.system_font_database {
+            return Arc::clone(database);
+        }
+
+        let database = Arc::new(load_system_font_database());
+        self.system_font_database = Some(Arc::clone(&database));
+        database
+    }
+
+    fn ensure_locator_initialized(&mut self) {
+        if self.locator.is_none() {
+            let database = self.ensure_system_font_database();
+            self.locator = Some(WindowsFontLocator::from_database(database));
+        }
+    }
+
+    fn ensure_locator(&mut self) -> &WindowsFontLocator {
+        self.ensure_locator_initialized();
+        self.locator
+            .as_ref()
+            .expect("locator should be initialized on demand")
+    }
+
+    fn ensure_emoji_renderer(&mut self) -> &TerminalEmojiRenderer {
+        if self.emoji_renderer.is_none() {
+            let database = self.ensure_system_font_database();
+            self.emoji_renderer = Some(TerminalEmojiRenderer::from_database(database));
+        }
+
+        self.emoji_renderer
+            .as_ref()
+            .expect("emoji renderer should be initialized on demand")
+    }
+
+    #[cfg(target_os = "windows")]
+    fn ensure_directwrite(&mut self) -> Option<&directwrite_native::DirectWriteContext> {
+        if self.directwrite.is_none() {
+            self.directwrite = directwrite_native::DirectWriteContext::new().ok();
+        }
+
+        self.directwrite.as_ref()
     }
 }
 
@@ -404,8 +459,13 @@ impl FontSystem for DirectWriteFontSystem {
 
         for (byte_start, grapheme) in request.text.grapheme_indices(true) {
             let byte_end = byte_start + grapheme.len();
+            self.ensure_locator_initialized();
+            let locator = self
+                .locator
+                .as_ref()
+                .expect("locator should be initialized on demand");
             let family_name = self.fallback_resolver.resolve_family_for_text(
-                &self.locator,
+                locator,
                 primary_family.as_str(),
                 grapheme,
             );
@@ -505,16 +565,17 @@ impl DirectWriteFontSystem {
     ) -> Option<Vec<ShapedGlyph>> {
         let (cell_width_px, cell_height_px) = font.cell_size_px();
         let span = color_glyph_cell_span(text);
-        let sprite =
-            match self
-                .emoji_renderer
-                .rasterize_cluster(text, span, cell_width_px, cell_height_px)
-            {
-                EmojiRenderOutcome::Sprite(sprite) => sprite,
-                EmojiRenderOutcome::VisibleFallback { .. } => {
-                    procedural_color_glyph_sprite(text, span, cell_width_px, cell_height_px)
-                }
-            };
+        let sprite = match self.ensure_emoji_renderer().rasterize_cluster(
+            text,
+            span,
+            cell_width_px,
+            cell_height_px,
+        ) {
+            EmojiRenderOutcome::Sprite(sprite) => sprite,
+            EmojiRenderOutcome::VisibleFallback { .. } => {
+                procedural_color_glyph_sprite(text, span, cell_width_px, cell_height_px)
+            }
+        };
         let synthetic_glyph_id = synthetic_color_glyph_id(text);
         self.color_glyph_rasters.insert(
             (font.cache_key(), resolved_face.face_key, synthetic_glyph_id),

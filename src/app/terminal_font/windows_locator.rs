@@ -1,6 +1,7 @@
 //! Windows font-family discovery helper backed by the local system font database.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use fontdb::{Database, Family, Query, Stretch, Style, Weight};
 
@@ -13,16 +14,13 @@ pub struct ResolvedFontFaceData {
 }
 
 pub struct WindowsFontLocator {
-    database: Database,
+    database: Arc<Database>,
     families_by_lowercase: BTreeMap<String, String>,
     family_scan_order: Vec<String>,
 }
 
 impl WindowsFontLocator {
-    pub fn new() -> Self {
-        let mut database = Database::new();
-        database.load_system_fonts();
-
+    pub fn from_database(database: Arc<Database>) -> Self {
         let mut families_by_lowercase = BTreeMap::new();
         let mut family_scan_order = Vec::new();
 
@@ -93,11 +91,5 @@ impl WindowsFontLocator {
         self.families_by_lowercase
             .get(&family_name.to_ascii_lowercase())
             .cloned()
-    }
-}
-
-impl Default for WindowsFontLocator {
-    fn default() -> Self {
-        Self::new()
     }
 }

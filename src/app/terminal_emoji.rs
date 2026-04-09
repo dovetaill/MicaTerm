@@ -1,5 +1,7 @@
 //! Classifies terminal clusters that need color emoji rendering and resolves preferred emoji fonts.
 
+use std::sync::{Arc, OnceLock};
+
 use fontdb::{Database, ID};
 use swash::FontRef;
 use swash::scale::image::Content;
@@ -7,6 +9,8 @@ use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::shape::ShapeContext;
 use swash::text::Script;
 use unicode_properties::UnicodeEmoji;
+
+use crate::app::system_font_database::load_system_font_database;
 
 const VISIBLE_EMOJI_FALLBACK_TEXT: &str = "\u{fffd}";
 
@@ -84,7 +88,8 @@ struct BlitRgbaGlyphRequest<'a> {
 }
 
 enum ResolverSource {
-    Database(Database),
+    SystemDatabase(OnceLock<Arc<Database>>),
+    Database(Arc<Database>),
     Fixed(EmojiFontResolution),
 }
 
@@ -96,6 +101,13 @@ impl TerminalEmojiRenderer {
     pub fn new() -> Self {
         Self::with_backend(
             TerminalEmojiResolver::new(),
+            Box::new(SwashEmojiRasterizerBackend),
+        )
+    }
+
+    pub fn from_database(database: Arc<Database>) -> Self {
+        Self::with_backend(
+            TerminalEmojiResolver::from_shared_database(database),
             Box::new(SwashEmojiRasterizerBackend),
         )
     }
@@ -166,14 +178,16 @@ impl Default for TerminalEmojiRenderer {
 
 impl TerminalEmojiResolver {
     pub fn new() -> Self {
-        let mut database = Database::new();
-        database.load_system_fonts();
         Self {
-            source: ResolverSource::Database(database),
+            source: ResolverSource::SystemDatabase(OnceLock::new()),
         }
     }
 
     pub fn from_database(database: Database) -> Self {
+        Self::from_shared_database(Arc::new(database))
+    }
+
+    pub fn from_shared_database(database: Arc<Database>) -> Self {
         Self {
             source: ResolverSource::Database(database),
         }
@@ -186,17 +200,35 @@ impl TerminalEmojiResolver {
     }
 
     pub fn resolve_preferred_font(&self) -> EmojiFontResolution {
+        match self.database() {
+            Some(database) => resolve_preferred_font_in_database(database),
+            None => match &self.source {
+                ResolverSource::Fixed(resolution) => resolution.clone(),
+                ResolverSource::SystemDatabase(_) | ResolverSource::Database(_) => {
+                    EmojiFontResolution::VisibleFallback {
+                        replacement_text: VISIBLE_EMOJI_FALLBACK_TEXT.to_string(),
+                        reason: EmojiFallbackReason::MissingPreferredFont,
+                    }
+                }
+            },
+        }
+    }
+
+    fn database(&self) -> Option<&Database> {
         match &self.source {
-            ResolverSource::Database(database) => resolve_preferred_font_in_database(database),
-            ResolverSource::Fixed(resolution) => resolution.clone(),
+            ResolverSource::SystemDatabase(database) => Some(
+                database
+                    .get_or_init(|| Arc::new(load_system_font_database()))
+                    .as_ref(),
+            ),
+            ResolverSource::Database(database) => Some(database.as_ref()),
+            ResolverSource::Fixed(_) => None,
         }
     }
 
     fn with_face_data<T>(&self, face_id: ID, f: impl FnOnce(&[u8], u32) -> T) -> Option<T> {
-        match &self.source {
-            ResolverSource::Database(database) => database.with_face_data(face_id, f),
-            ResolverSource::Fixed(_) => None,
-        }
+        self.database()
+            .and_then(|database| database.with_face_data(face_id, f))
     }
 }
 

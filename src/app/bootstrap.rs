@@ -2401,8 +2401,7 @@ fn clear_workspace_native_terminal_frame(window: &AppWindow) {
     clear_workspace_retained_native_terminal_surface(window);
 }
 
-fn clear_workspace_terminal_transient_caches(
-) {
+fn clear_workspace_terminal_transient_caches() {
     WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
         let mut host = host.borrow_mut();
         if let Some(host) = host.as_mut() {
@@ -2558,11 +2557,7 @@ fn update_workspace_terminal_idle_cache_shrink(
     let retained_renderer_resources = workspace_terminal_renderer_resources_retained();
     if surface_disappeared || (no_surface_since.is_none() && retained_renderer_resources) {
         clear_workspace_terminal_transient_caches();
-        rearm_workspace_terminal_no_surface_idle_shrink(
-            now,
-            no_surface_since,
-            idle_cache_shrunk,
-        );
+        rearm_workspace_terminal_no_surface_idle_shrink(now, no_surface_since, idle_cache_shrunk);
         return;
     }
 
@@ -5371,7 +5366,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     cols,
                 );
             }
-            let has_active_surface_after_close = state.active_workspace_terminal_surface().is_some();
+            let has_active_surface_after_close =
+                state.active_workspace_terminal_surface().is_some();
             if had_active_surface && !has_active_surface_after_close {
                 rearm_workspace_terminal_no_surface_idle_shrink(
                     Instant::now(),
@@ -6621,7 +6617,7 @@ mod tests {
             false,
             now,
             &mut no_surface_since,
-            &mut idle_cache_shrunk
+            &mut idle_cache_shrunk,
         );
 
         assert!(
@@ -6650,7 +6646,7 @@ mod tests {
             true,
             now,
             &mut no_surface_since,
-            &mut idle_cache_shrunk
+            &mut idle_cache_shrunk,
         );
 
         assert_eq!(
@@ -6680,7 +6676,7 @@ mod tests {
             false,
             now + Duration::from_millis(1),
             &mut no_surface_since,
-            &mut idle_cache_shrunk
+            &mut idle_cache_shrunk,
         );
 
         assert!(
@@ -6709,7 +6705,7 @@ mod tests {
             false,
             now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
             &mut no_surface_since,
-            &mut idle_cache_shrunk
+            &mut idle_cache_shrunk,
         );
 
         assert_eq!(
@@ -6742,7 +6738,7 @@ mod tests {
             false,
             now,
             &mut no_surface_since,
-            &mut idle_cache_shrunk
+            &mut idle_cache_shrunk,
         );
 
         assert_eq!(
@@ -6775,7 +6771,7 @@ mod tests {
             false,
             now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
             &mut no_surface_since,
-            &mut idle_cache_shrunk
+            &mut idle_cache_shrunk,
         );
 
         WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
@@ -6813,7 +6809,7 @@ mod tests {
                     false,
                     now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
                     &mut no_surface_since,
-                    &mut idle_cache_shrunk
+                    &mut idle_cache_shrunk,
                 );
             },
         );
@@ -6852,7 +6848,7 @@ mod tests {
                     false,
                     now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
                     &mut no_surface_since,
-                    &mut idle_cache_shrunk
+                    &mut idle_cache_shrunk,
                 );
             },
         );
@@ -6918,7 +6914,7 @@ mod tests {
             now,
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk
+            &mut active_idle_cache_shrunk,
         );
         update_workspace_terminal_active_idle_cache_shrink(
             Some(&surface),
@@ -6926,7 +6922,7 @@ mod tests {
             now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk
+            &mut active_idle_cache_shrunk,
         );
 
         WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
@@ -6983,7 +6979,7 @@ mod tests {
             now,
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk
+            &mut active_idle_cache_shrunk,
         );
         update_workspace_terminal_active_idle_cache_shrink(
             Some(&second_surface),
@@ -6991,7 +6987,7 @@ mod tests {
             reset_at,
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk
+            &mut active_idle_cache_shrunk,
         );
         update_workspace_terminal_active_idle_cache_shrink(
             Some(&second_surface),
@@ -6999,7 +6995,7 @@ mod tests {
             before_threshold_again,
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk
+            &mut active_idle_cache_shrunk,
         );
 
         WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
@@ -7054,7 +7050,7 @@ mod tests {
             now,
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk
+            &mut active_idle_cache_shrunk,
         );
         update_workspace_terminal_active_idle_cache_shrink(
             Some(&surface),
@@ -7062,7 +7058,7 @@ mod tests {
             now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk
+            &mut active_idle_cache_shrunk,
         );
 
         WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
