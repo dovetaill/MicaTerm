@@ -10,11 +10,15 @@ use termwiz::input::{KeyCode, Modifiers as KeyModifiers};
 use uuid::Uuid;
 
 use crate::app::terminal_core::{
-    TerminalCoreAdapter, TerminalCoreKind, TerminalFrameSnapshot, create_terminal_core_adapter,
+    SelectionState, TerminalCoreAdapter, TerminalCoreKind, TerminalFrameSnapshot, ViewportState,
+    create_terminal_core_adapter,
 };
 use crate::theme::ThemeMode;
 
-use super::{TerminalKeyEvent, TerminalMouseInput, TerminalRowState, TerminalSurfaceState};
+use super::{
+    TerminalCursorShape, TerminalCursorState, TerminalKeyEvent, TerminalMouseInput,
+    TerminalRowState, TerminalSurfaceState,
+};
 
 pub(super) fn apply_remote_output(terminal: &Arc<Mutex<TerminalSession>>, bytes: &[u8]) {
     if let Ok(mut terminal) = terminal.lock() {
@@ -152,6 +156,117 @@ pub struct TerminalSession {
 
 pub const DEFAULT_TERMINAL_SCROLLBACK_LINES: usize = 1_500;
 
+struct ReleasedTerminalCoreAdapter {
+    seqno: usize,
+    rows: u32,
+    cols: u32,
+    default_fg_rgba: u32,
+    default_bg_rgba: u32,
+    row_bg_even_rgba: u32,
+    row_bg_odd_rgba: u32,
+    cursor_fg_rgba: u32,
+    cursor_bg_rgba: u32,
+}
+
+impl ReleasedTerminalCoreAdapter {
+    fn from_snapshot(snapshot: TerminalFrameSnapshot) -> Self {
+        Self {
+            seqno: snapshot.seqno,
+            rows: snapshot.rows,
+            cols: snapshot.cols,
+            default_fg_rgba: snapshot.default_fg_rgba,
+            default_bg_rgba: snapshot.default_bg_rgba,
+            row_bg_even_rgba: snapshot.row_bg_even_rgba,
+            row_bg_odd_rgba: snapshot.row_bg_odd_rgba,
+            cursor_fg_rgba: snapshot.cursor.fg_rgba,
+            cursor_bg_rgba: snapshot.cursor.bg_rgba,
+        }
+    }
+
+    fn blank_snapshot(&self) -> TerminalFrameSnapshot {
+        TerminalFrameSnapshot {
+            seqno: self.seqno,
+            rows: self.rows.max(1),
+            cols: self.cols.max(1),
+            default_fg_rgba: self.default_fg_rgba,
+            default_bg_rgba: self.default_bg_rgba,
+            row_bg_even_rgba: self.row_bg_even_rgba,
+            row_bg_odd_rgba: self.row_bg_odd_rgba,
+            viewport: ViewportState {
+                offset_lines: 0,
+                max_offset_lines: 0,
+                at_bottom: true,
+            },
+            visible_rows: Vec::new(),
+            visible_lines: Vec::new(),
+            cells: Vec::new(),
+            cursor: TerminalCursorState {
+                row: 0,
+                col: 0,
+                visible: false,
+                blinking: false,
+                shape: TerminalCursorShape::Block,
+                fg_rgba: self.cursor_fg_rgba,
+                bg_rgba: self.cursor_bg_rgba,
+            },
+            selection: SelectionState::default(),
+            alternate_screen_active: false,
+            mouse_grabbed: false,
+            bracketed_paste_enabled: false,
+        }
+    }
+}
+
+impl TerminalCoreAdapter for ReleasedTerminalCoreAdapter {
+    fn sequence_number(&self) -> usize {
+        self.seqno
+    }
+
+    fn apply_remote_bytes(&mut self, _bytes: &[u8]) {}
+
+    fn screen_text(&self) -> String {
+        String::new()
+    }
+
+    fn visible_rows(&self) -> Vec<TerminalRowState> {
+        Vec::new()
+    }
+
+    fn visible_lines(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn frame_snapshot(&self) -> TerminalFrameSnapshot {
+        self.blank_snapshot()
+    }
+
+    fn resize(&mut self, rows: usize, cols: usize) {
+        self.rows = rows.max(1) as u32;
+        self.cols = cols.max(1) as u32;
+        self.seqno = self.seqno.saturating_add(1);
+    }
+
+    fn set_theme_mode(&mut self, _mode: ThemeMode) {}
+
+    fn scroll_viewport_lines(&mut self, _delta: i32) {}
+
+    fn send_key_down(&mut self, _key: KeyCode, _modifiers: KeyModifiers) -> Result<Vec<u8>> {
+        Ok(Vec::new())
+    }
+
+    fn send_key_event(&mut self, _event: TerminalKeyEvent) -> Result<Vec<u8>> {
+        Ok(Vec::new())
+    }
+
+    fn send_mouse_input(&mut self, _event: TerminalMouseInput) -> Result<Vec<u8>> {
+        Ok(Vec::new())
+    }
+
+    fn encode_paste(&mut self, _text: &str) -> Result<Vec<u8>> {
+        Ok(Vec::new())
+    }
+}
+
 impl TerminalSession {
     pub fn new(rows: usize, cols: usize) -> Self {
         Self::new_with_scrollback(rows, cols, DEFAULT_TERMINAL_SCROLLBACK_LINES)
@@ -191,6 +306,11 @@ impl TerminalSession {
 
     pub fn with_core(core: Box<dyn TerminalCoreAdapter>) -> Self {
         Self { core }
+    }
+
+    pub fn release_memory(&mut self) {
+        let snapshot = self.core.frame_snapshot();
+        self.core = Box::new(ReleasedTerminalCoreAdapter::from_snapshot(snapshot));
     }
 
     pub fn sequence_number(&self) -> usize {

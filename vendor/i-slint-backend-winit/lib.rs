@@ -78,6 +78,10 @@ mod renderer {
             Ok(())
         }
 
+        fn purge_memory_resources(&self) -> Result<(), PlatformError> {
+            Ok(())
+        }
+
         fn suspend(&self) -> Result<(), PlatformError>;
 
         // Got winit::Event::Resumed
@@ -983,6 +987,14 @@ pub trait WinitWindowAfterDrawHook: private::WinitWindowAccessorSealed {
     );
 }
 
+/// This helper trait can be used to ask the active winit renderer to purge retained backend
+/// caches without tearing down the window itself.
+pub trait WinitWindowMemoryPurge: private::WinitWindowAccessorSealed {
+    /// Requests the underlying winit renderer to drop retained backend caches if supported.
+    /// If this window is not backed by winit, this function succeeds as a no-op.
+    fn purge_winit_renderer_memory(&self) -> Result<(), PlatformError>;
+}
+
 impl WinitWindowAccessor for i_slint_core::api::Window {
     fn has_winit_window(&self) -> bool {
         i_slint_core::window::WindowInner::from_pub(self)
@@ -1052,6 +1064,20 @@ impl WinitWindowAfterDrawHook for i_slint_core::api::Window {
         {
             adapter.after_draw_hook.set(Some(Box::new(callback)));
         }
+    }
+}
+
+impl WinitWindowMemoryPurge for i_slint_core::api::Window {
+    fn purge_winit_renderer_memory(&self) -> Result<(), PlatformError> {
+        if let Some(adapter) = i_slint_core::window::WindowInner::from_pub(self)
+            .window_adapter()
+            .internal(i_slint_core::InternalToken)
+            .and_then(|wa| (wa as &dyn core::any::Any).downcast_ref::<WinitWindowAdapter>())
+        {
+            adapter.renderer().purge_memory_resources()?;
+        }
+
+        Ok(())
     }
 }
 

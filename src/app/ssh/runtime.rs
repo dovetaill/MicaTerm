@@ -307,6 +307,15 @@ impl SshSessionRuntime {
         Ok(terminal.surface_state(self.session_id))
     }
 
+    pub fn release_terminal_memory(&self) -> Result<()> {
+        let mut terminal = self
+            .terminal
+            .lock()
+            .map_err(|_| anyhow!("failed to lock terminal for memory release"))?;
+        terminal.release_memory();
+        Ok(())
+    }
+
     pub fn disconnect(&self) -> Result<()> {
         self.command_tx
             .send(RuntimeCommand::Disconnect)
@@ -317,6 +326,10 @@ impl SshSessionRuntime {
 impl SessionRuntimeControl for SshSessionRuntime {
     fn disconnect(&self) -> Result<()> {
         SshSessionRuntime::disconnect(self)
+    }
+
+    fn release_terminal_memory(&self) -> Result<()> {
+        SshSessionRuntime::release_terminal_memory(self)
     }
 
     fn send_text_input(&self, text: String) -> Result<()> {

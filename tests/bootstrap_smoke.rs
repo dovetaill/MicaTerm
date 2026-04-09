@@ -8484,6 +8484,10 @@ fn bootstrap_tracks_no_surface_idle_before_terminal_cache_shrink() {
         bootstrap_source.contains("\"idle-shrink\""),
         "bootstrap should label the delayed no-surface shrink path so diagnostics can distinguish it from the immediate close-driven shrink"
     );
+    assert!(
+        bootstrap_source.contains("purge_workspace_backend_memory(window);"),
+        "bootstrap should request a Slint backend purge from the delayed no-surface shrink path so renderer-global caches can be reclaimed before falling back to a working-set trim"
+    );
 }
 
 #[test]

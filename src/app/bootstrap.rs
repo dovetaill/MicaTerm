@@ -200,6 +200,9 @@ type TEST_WORKSPACE_TERMINAL_HOST_FACTORY = WorkspaceTerminalPresenterFactory;
 #[cfg(test)]
 #[allow(non_camel_case_types)]
 type TEST_WORKSPACE_PROCESS_MEMORY_TRIMMER = dyn FnMut() -> bool;
+#[cfg(test)]
+#[allow(non_camel_case_types)]
+type TEST_WORKSPACE_BACKEND_MEMORY_PURGER = dyn FnMut() -> bool;
 
 thread_local! {
     static WORKSPACE_TERMINAL_RENDERER_HOST: RefCell<Option<TerminalRendererHost>> = const {
@@ -217,6 +220,10 @@ thread_local! {
     };
     #[cfg(test)]
     static WORKSPACE_TEST_PROCESS_MEMORY_TRIMMER_HOOK: RefCell<Option<Box<TEST_WORKSPACE_PROCESS_MEMORY_TRIMMER>>> = const {
+        RefCell::new(None)
+    };
+    #[cfg(test)]
+    static WORKSPACE_TEST_BACKEND_MEMORY_PURGER_HOOK: RefCell<Option<Box<TEST_WORKSPACE_BACKEND_MEMORY_PURGER>>> = const {
         RefCell::new(None)
     };
 }
@@ -2462,6 +2469,31 @@ fn trim_workspace_process_memory() -> bool {
     crate::app::memory::trim_process_working_set()
 }
 
+#[cfg(test)]
+fn purge_workspace_backend_memory(window: Option<&AppWindow>) -> bool {
+    WORKSPACE_TEST_BACKEND_MEMORY_PURGER_HOOK.with(|hook| {
+        let mut hook = hook.borrow_mut();
+        if let Some(purger) = hook.as_mut() {
+            purger()
+        } else {
+            window.is_some_and(|window| {
+                use i_slint_backend_winit::WinitWindowMemoryPurge;
+
+                window.window().purge_winit_renderer_memory().is_ok()
+            })
+        }
+    })
+}
+
+#[cfg(not(test))]
+fn purge_workspace_backend_memory(window: Option<&AppWindow>) -> bool {
+    window.is_some_and(|window| {
+        use i_slint_backend_winit::WinitWindowMemoryPurge;
+
+        window.window().purge_winit_renderer_memory().is_ok()
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct WorkspaceTerminalActiveSurfaceFingerprint {
     session_id: Uuid,
@@ -2530,7 +2562,17 @@ fn update_workspace_terminal_active_idle_cache_shrink(
     *active_idle_cache_shrunk = true;
 }
 
+fn rearm_workspace_terminal_no_surface_idle_shrink(
+    now: Instant,
+    no_surface_since: &mut Option<Instant>,
+    idle_cache_shrunk: &mut bool,
+) {
+    *no_surface_since = Some(now);
+    *idle_cache_shrunk = false;
+}
+
 fn update_workspace_terminal_idle_cache_shrink(
+    window: Option<&AppWindow>,
     has_active_surface: bool,
     surface_disappeared: bool,
     now: Instant,
@@ -2551,8 +2593,7 @@ fn update_workspace_terminal_idle_cache_shrink(
             "close-shrink",
             "surface-cleared",
         );
-        *no_surface_since = Some(now);
-        *idle_cache_shrunk = false;
+        rearm_workspace_terminal_no_surface_idle_shrink(now, no_surface_since, idle_cache_shrunk);
         return;
     }
 
@@ -2572,6 +2613,7 @@ fn update_workspace_terminal_idle_cache_shrink(
         "no-active-surface-idle",
     );
     release_workspace_terminal_renderer_resources();
+    let _ = purge_workspace_backend_memory(window);
     let _ = trim_workspace_process_memory();
     *idle_cache_shrunk = true;
 }
@@ -4217,6 +4259,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             let mut no_surface_since = workspace_terminal_no_surface_since_ref.borrow_mut();
             let mut idle_cache_shrunk = workspace_terminal_idle_cache_shrunk_ref.borrow_mut();
             update_workspace_terminal_idle_cache_shrink(
+                Some(&window),
                 has_active_surface,
                 surface_disappeared,
                 now,
@@ -5338,10 +5381,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_bridge_ref = session_bridge.clone();
     let session_runtime_guard_ref = session_runtime_guard.clone();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let workspace_terminal_no_surface_since_ref = Rc::clone(&workspace_terminal_no_surface_since);
+    let workspace_terminal_idle_cache_shrunk_ref = Rc::clone(&workspace_terminal_idle_cache_shrunk);
     window.on_workspace_tab_close_requested(move |session_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let had_active_surface = state.active_workspace_terminal_surface().is_some();
         if close_session_by_id(
             &mut state,
             session_bridge_ref.as_deref(),
@@ -5363,6 +5409,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     cols,
                 );
             }
+            if had_active_surface && state.active_workspace_terminal_surface().is_none() {
+                rearm_workspace_terminal_no_surface_idle_shrink(
+                    Instant::now(),
+                    &mut workspace_terminal_no_surface_since_ref.borrow_mut(),
+                    &mut workspace_terminal_idle_cache_shrunk_ref.borrow_mut(),
+                );
+            }
             sync_workspace_tabs_with_manager(
                 &window,
                 &state,
@@ -5378,6 +5431,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_bridge_ref = session_bridge.clone();
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let workspace_terminal_no_surface_since_ref = Rc::clone(&workspace_terminal_no_surface_since);
+    let workspace_terminal_idle_cache_shrunk_ref = Rc::clone(&workspace_terminal_idle_cache_shrunk);
     window.on_workspace_session_local_action_requested(move |action_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -5410,6 +5465,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 else {
                     return;
                 };
+                let had_active_surface = state.active_workspace_terminal_surface().is_some();
                 if close_session_by_id(
                     &mut state,
                     session_bridge_ref.as_deref(),
@@ -5429,6 +5485,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                             Some(session_bridge),
                             rows,
                             cols,
+                        );
+                    }
+                    if had_active_surface && state.active_workspace_terminal_surface().is_none() {
+                        rearm_workspace_terminal_no_surface_idle_shrink(
+                            Instant::now(),
+                            &mut workspace_terminal_no_surface_since_ref.borrow_mut(),
+                            &mut workspace_terminal_idle_cache_shrunk_ref.borrow_mut(),
                         );
                     }
                     sync_workspace_tabs_with_manager(
@@ -6087,6 +6150,20 @@ mod tests {
         result
     }
 
+    fn with_workspace_backend_memory_purger_for_test<T>(
+        purger: Box<TEST_WORKSPACE_BACKEND_MEMORY_PURGER>,
+        body: impl FnOnce() -> T,
+    ) -> T {
+        WORKSPACE_TEST_BACKEND_MEMORY_PURGER_HOOK.with(|hook| {
+            *hook.borrow_mut() = Some(purger);
+        });
+        let result = body();
+        WORKSPACE_TEST_BACKEND_MEMORY_PURGER_HOOK.with(|hook| {
+            hook.borrow_mut().take();
+        });
+        result
+    }
+
     impl SessionRuntimeControl for NoopRuntimeControl {
         fn disconnect(&self) -> Result<()> {
             Ok(())
@@ -6574,6 +6651,7 @@ mod tests {
         let mut idle_cache_shrunk = false;
 
         update_workspace_terminal_idle_cache_shrink(
+            None,
             false,
             false,
             now,
@@ -6603,6 +6681,7 @@ mod tests {
         let mut idle_cache_shrunk = true;
 
         update_workspace_terminal_idle_cache_shrink(
+            None,
             false,
             true,
             now,
@@ -6633,6 +6712,7 @@ mod tests {
         let mut idle_cache_shrunk = true;
 
         update_workspace_terminal_idle_cache_shrink(
+            None,
             true,
             false,
             now + Duration::from_millis(1),
@@ -6662,6 +6742,7 @@ mod tests {
         let mut idle_cache_shrunk = false;
 
         update_workspace_terminal_idle_cache_shrink(
+            None,
             false,
             false,
             now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
@@ -6695,6 +6776,7 @@ mod tests {
         let mut idle_cache_shrunk = false;
 
         update_workspace_terminal_idle_cache_shrink(
+            None,
             false,
             false,
             now,
@@ -6728,6 +6810,7 @@ mod tests {
         let mut idle_cache_shrunk = false;
 
         update_workspace_terminal_idle_cache_shrink(
+            None,
             false,
             false,
             now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
@@ -6766,6 +6849,7 @@ mod tests {
             }),
             || {
                 update_workspace_terminal_idle_cache_shrink(
+                    None,
                     false,
                     false,
                     now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
@@ -6780,6 +6864,70 @@ mod tests {
             *trim_calls.borrow(),
             1,
             "once the workspace stays without an active surface past the idle threshold, bootstrap should also request a process working-set trim so Windows can drop resident pages after renderer resources are released"
+        );
+    }
+
+    #[test]
+    fn idle_cache_shrink_requests_backend_purge_after_no_surface_threshold() {
+        WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+            *host.borrow_mut() = Some(TerminalRendererHost::new(
+                Box::new(SizedPresenter((10, 22))),
+                TerminalRenderMode::Bitmap,
+            ));
+        });
+
+        let now = Instant::now();
+        let mut no_surface_since = Some(now);
+        let mut idle_cache_shrunk = false;
+        let purge_calls = Rc::new(RefCell::new(0usize));
+        let purge_calls_ref = Rc::clone(&purge_calls);
+
+        with_workspace_backend_memory_purger_for_test(
+            Box::new(move || {
+                *purge_calls_ref.borrow_mut() += 1;
+                true
+            }),
+            || {
+                update_workspace_terminal_idle_cache_shrink(
+                    None,
+                    false,
+                    false,
+                    now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
+                    &mut no_surface_since,
+                    &mut idle_cache_shrunk,
+                    false,
+                );
+            },
+        );
+
+        assert_eq!(
+            *purge_calls.borrow(),
+            1,
+            "once the workspace stays without an active surface past the idle threshold, bootstrap should also request a Slint backend purge so renderer-global caches can be reclaimed before only trimming the process working set"
+        );
+    }
+
+    #[test]
+    fn rearm_workspace_terminal_no_surface_idle_shrink_resets_the_delayed_trim_window() {
+        let first_seen = Instant::now();
+        let rearmed_at = first_seen + Duration::from_millis(25);
+        let mut no_surface_since = Some(first_seen);
+        let mut idle_cache_shrunk = true;
+
+        rearm_workspace_terminal_no_surface_idle_shrink(
+            rearmed_at,
+            &mut no_surface_since,
+            &mut idle_cache_shrunk,
+        );
+
+        assert_eq!(
+            no_surface_since,
+            Some(rearmed_at),
+            "manual close paths that already cleared the renderer host should still stamp a fresh no-surface timestamp so the delayed process trim can run from the actual tab-close moment"
+        );
+        assert!(
+            !idle_cache_shrunk,
+            "re-arming the no-surface idle window should clear the completion flag so the delayed trim can fire again after the close transition"
         );
     }
 

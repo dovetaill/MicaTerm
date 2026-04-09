@@ -55,6 +55,7 @@ struct RuntimeBackedLauncher;
 #[derive(Clone)]
 struct TrackingLauncher {
     disconnects: Arc<AtomicUsize>,
+    terminal_releases: Arc<AtomicUsize>,
 }
 
 #[derive(Clone, Default)]
@@ -90,6 +91,7 @@ struct SurfacePullLauncher {
 #[derive(Clone)]
 struct DelayedTrackingLauncher {
     disconnects: Arc<AtomicUsize>,
+    terminal_releases: Arc<AtomicUsize>,
     ready_delay: Duration,
 }
 
@@ -105,6 +107,7 @@ struct EnhancedStateLauncher;
 #[derive(Clone)]
 struct TrackingRuntimeControl {
     disconnects: Arc<AtomicUsize>,
+    terminal_releases: Arc<AtomicUsize>,
 }
 
 #[derive(Clone)]
@@ -214,8 +217,11 @@ impl FakeLauncher {
 }
 
 impl TrackingLauncher {
-    fn new(disconnects: Arc<AtomicUsize>) -> Self {
-        Self { disconnects }
+    fn new(disconnects: Arc<AtomicUsize>, terminal_releases: Arc<AtomicUsize>) -> Self {
+        Self {
+            disconnects,
+            terminal_releases,
+        }
     }
 }
 
@@ -238,9 +244,14 @@ impl SurfacePullLauncher {
 }
 
 impl DelayedTrackingLauncher {
-    fn new(disconnects: Arc<AtomicUsize>, ready_delay: Duration) -> Self {
+    fn new(
+        disconnects: Arc<AtomicUsize>,
+        terminal_releases: Arc<AtomicUsize>,
+        ready_delay: Duration,
+    ) -> Self {
         Self {
             disconnects,
+            terminal_releases,
             ready_delay,
         }
     }
@@ -268,6 +279,7 @@ impl SessionRuntimeLauncher for EnhancedStateLauncher {
             ));
             Ok(Box::new(TrackingRuntimeControl {
                 disconnects: Arc::new(AtomicUsize::new(0)),
+                terminal_releases: Arc::new(AtomicUsize::new(0)),
             }) as Box<dyn SessionRuntimeControl>)
         })
     }
@@ -296,6 +308,7 @@ impl SessionRuntimeLauncher for FakeLauncher {
                     tokio::time::sleep(Duration::from_millis(25)).await;
                     Ok(Box::new(TrackingRuntimeControl {
                         disconnects: Arc::new(AtomicUsize::new(0)),
+                        terminal_releases: Arc::new(AtomicUsize::new(0)),
                     }) as Box<dyn SessionRuntimeControl>)
                 }
                 FakeLauncherBehavior::FailImmediately => {
@@ -363,8 +376,12 @@ impl SessionRuntimeLauncher for TrackingLauncher {
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
         let disconnects = Arc::clone(&self.disconnects);
+        let terminal_releases = Arc::clone(&self.terminal_releases);
         Box::pin(async move {
-            Ok(Box::new(TrackingRuntimeControl { disconnects }) as Box<dyn SessionRuntimeControl>)
+            Ok(Box::new(TrackingRuntimeControl {
+                disconnects,
+                terminal_releases,
+            }) as Box<dyn SessionRuntimeControl>)
         })
     }
 
@@ -410,10 +427,14 @@ impl SessionRuntimeLauncher for DelayedTrackingLauncher {
     ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
     {
         let disconnects = Arc::clone(&self.disconnects);
+        let terminal_releases = Arc::clone(&self.terminal_releases);
         let ready_delay = self.ready_delay;
         Box::pin(async move {
             tokio::time::sleep(ready_delay).await;
-            Ok(Box::new(TrackingRuntimeControl { disconnects }) as Box<dyn SessionRuntimeControl>)
+            Ok(Box::new(TrackingRuntimeControl {
+                disconnects,
+                terminal_releases,
+            }) as Box<dyn SessionRuntimeControl>)
         })
     }
 
@@ -505,6 +526,11 @@ impl SessionRuntimeLauncher for SurfacePullLauncher {
 impl SessionRuntimeControl for TrackingRuntimeControl {
     fn disconnect(&self) -> Result<()> {
         self.disconnects.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn release_terminal_memory(&self) -> Result<()> {
+        self.terminal_releases.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -1634,6 +1660,7 @@ fn opening_slow_ssh_session_returns_before_runtime_attaches() {
         runtime.handle(),
         Arc::new(DelayedTrackingLauncher::new(
             Arc::clone(&disconnects),
+            Arc::new(AtomicUsize::new(0)),
             Duration::from_millis(250),
         )),
     );
@@ -3103,7 +3130,10 @@ fn disconnect_session_issues_runtime_disconnect() {
     let disconnects = Arc::new(AtomicUsize::new(0));
     let manager = SessionManager::new_with_launcher(
         runtime.handle(),
-        Arc::new(TrackingLauncher::new(Arc::clone(&disconnects))),
+        Arc::new(TrackingLauncher::new(
+            Arc::clone(&disconnects),
+            Arc::new(AtomicUsize::new(0)),
+        )),
     );
 
     let handle = manager
@@ -3398,9 +3428,13 @@ fn session_manager_populates_initial_surface_from_runtime_control_snapshot() {
 fn close_session_issues_runtime_disconnect_before_removal() {
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let disconnects = Arc::new(AtomicUsize::new(0));
+    let terminal_releases = Arc::new(AtomicUsize::new(0));
     let manager = SessionManager::new_with_launcher(
         runtime.handle(),
-        Arc::new(TrackingLauncher::new(Arc::clone(&disconnects))),
+        Arc::new(TrackingLauncher::new(
+            Arc::clone(&disconnects),
+            Arc::clone(&terminal_releases),
+        )),
     );
 
     let handle = manager
@@ -3419,6 +3453,7 @@ fn close_session_issues_runtime_disconnect_before_removal() {
         .expect("close session");
 
     assert_eq!(disconnects.load(Ordering::SeqCst), 1);
+    assert_eq!(terminal_releases.load(Ordering::SeqCst), 1);
     assert!(manager.session(handle.session_id).is_none());
 }
 
@@ -3426,10 +3461,12 @@ fn close_session_issues_runtime_disconnect_before_removal() {
 fn close_session_before_runtime_ready_disconnects_when_control_arrives() {
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let disconnects = Arc::new(AtomicUsize::new(0));
+    let terminal_releases = Arc::new(AtomicUsize::new(0));
     let manager = SessionManager::new_with_launcher(
         runtime.handle(),
         Arc::new(DelayedTrackingLauncher::new(
             Arc::clone(&disconnects),
+            Arc::clone(&terminal_releases),
             Duration::from_millis(25),
         )),
     );
@@ -3450,6 +3487,7 @@ fn close_session_before_runtime_ready_disconnects_when_control_arrives() {
     });
 
     assert_eq!(disconnects.load(Ordering::SeqCst), 1);
+    assert_eq!(terminal_releases.load(Ordering::SeqCst), 1);
     assert!(manager.session(handle.session_id).is_none());
 }
 

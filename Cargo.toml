@@ -95,6 +95,7 @@ i-slint-backend-testing = "1.15.1"
 
 [patch.crates-io]
 i-slint-backend-winit = { path = "vendor/i-slint-backend-winit" }
+i-slint-renderer-skia = { path = "vendor/i-slint-renderer-skia" }
 dirs-sys = { path = "vendor/dirs-sys" }
 muda = { path = "vendor/muda" }
 winit = { path = "vendor/winit" }

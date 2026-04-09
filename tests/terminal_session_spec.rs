@@ -221,6 +221,36 @@ fn terminal_session_retains_more_history_when_scrollback_limit_is_larger() {
 }
 
 #[test]
+fn terminal_session_release_memory_drops_scrollback_and_visible_content() {
+    let mut session = TerminalSession::new_with_scrollback(4, 20, 3_000);
+    let transcript = (0..9000)
+        .map(|line| format!("{line:04}\r\n"))
+        .collect::<String>();
+
+    session.apply_remote_bytes(transcript.as_bytes());
+    session.scroll_viewport_lines(20_000);
+    assert!(
+        session
+            .surface_state(Uuid::new_v4())
+            .visible_lines
+            .iter()
+            .any(|line| !line.is_empty()),
+        "sanity check: the pre-release snapshot should still carry terminal content from the large scrollback burst"
+    );
+
+    session.release_memory();
+
+    let snapshot = session.surface_state(Uuid::new_v4());
+    assert!(
+        snapshot.visible_lines.is_empty(),
+        "releasing terminal memory should drop retained visible text so closed sessions no longer pin large scrollback heaps in memory"
+    );
+    assert_eq!(snapshot.viewport_offset_lines, 0);
+    assert_eq!(snapshot.viewport_max_offset_lines, 0);
+    assert!(snapshot.viewport_at_bottom);
+}
+
+#[test]
 fn terminal_session_surface_projection_survives_large_burst_near_live_tail() {
     let mut session = TerminalSession::new(24, 80);
     let transcript = (0..9000)

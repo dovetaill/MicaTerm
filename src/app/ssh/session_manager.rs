@@ -101,6 +101,9 @@ pub struct SessionHandle {
 
 pub trait SessionRuntimeControl: Send {
     fn disconnect(&self) -> Result<()>;
+    fn release_terminal_memory(&self) -> Result<()> {
+        Ok(())
+    }
     fn send_text_input(&self, text: String) -> Result<()>;
     fn send_key_input(&self, event: TerminalKeyEvent) -> Result<()>;
     fn send_mouse_input(&self, event: TerminalMouseInput) -> Result<()>;
@@ -124,6 +127,12 @@ pub trait SessionRuntimeControl: Send {
 
 type LaunchFuture =
     Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>;
+
+fn release_and_disconnect_runtime_control(runtime_control: Box<dyn SessionRuntimeControl>) {
+    // Drop scrollback/terminal state before the network-side graceful disconnect finishes.
+    let _ = runtime_control.release_terminal_memory();
+    let _ = runtime_control.disconnect();
+}
 type ProbeFuture = Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
 
 pub trait SessionRuntimeLauncher: Send + Sync {
@@ -441,7 +450,7 @@ impl SessionManager {
         };
 
         if let Some(runtime_control) = runtime_control {
-            let _ = runtime_control.disconnect();
+            release_and_disconnect_runtime_control(runtime_control);
         }
 
         self.spawn_session_attempt(session_id, profile, attempt_id);
@@ -471,7 +480,7 @@ impl SessionManager {
         };
 
         if let Some(runtime_control) = runtime_control {
-            let _ = runtime_control.disconnect();
+            release_and_disconnect_runtime_control(runtime_control);
         }
 
         Some(updated)
@@ -519,7 +528,7 @@ impl SessionManager {
         };
 
         if let Some(runtime_control) = runtime_control {
-            let _ = runtime_control.disconnect();
+            release_and_disconnect_runtime_control(runtime_control);
         }
 
         Some(updated)
@@ -702,7 +711,7 @@ impl SessionManager {
         };
 
         if let Some(runtime_control) = runtime_control {
-            let _ = runtime_control.disconnect();
+            release_and_disconnect_runtime_control(runtime_control);
         }
 
         Some(removed)
@@ -1192,7 +1201,7 @@ fn attach_runtime_control(
     };
 
     if should_disconnect && let Some(runtime_control) = runtime_control {
-        let _ = runtime_control.disconnect();
+        release_and_disconnect_runtime_control(runtime_control);
         return;
     }
 

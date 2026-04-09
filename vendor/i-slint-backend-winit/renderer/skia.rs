@@ -161,6 +161,10 @@ impl super::WinitCompatibleRenderer for WinitSkiaRenderer {
         &self.renderer
     }
 
+    fn purge_memory_resources(&self) -> Result<(), PlatformError> {
+        self.renderer.purge_memory_resources()
+    }
+
     fn suspend(&self) -> Result<(), PlatformError> {
         self.renderer.set_pre_present_callback(None);
         self.renderer.suspend()
