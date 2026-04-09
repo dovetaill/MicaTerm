@@ -4,6 +4,7 @@ use anyhow::Result;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
 
+use crate::app::memory::ProcessMemorySnapshot;
 use crate::app::runtime_profile::AppRuntimeProfile;
 use crate::app::terminal_presenter::TerminalPresenterCacheStats;
 
@@ -95,6 +96,111 @@ pub fn emit_terminal_memory_cache_clear(
         after_scene_image_last_base_pixels_bytes = after.scene_image_last_base_pixels_bytes,
         after_scene_image_working_pixels_bytes = after.scene_image_working_pixels_bytes,
         "terminal memory cache shrink"
+    );
+}
+
+pub fn emit_terminal_memory_cleanup_result(
+    enabled: bool,
+    event: &str,
+    reason: &str,
+    no_surface_idle_ms: u128,
+    backend_purge_attempted: bool,
+    backend_purge_succeeded: bool,
+    process_trim_attempted: bool,
+    process_trim_succeeded: bool,
+    before: Option<ProcessMemorySnapshot>,
+    after: Option<ProcessMemorySnapshot>,
+) {
+    if !enabled {
+        return;
+    }
+
+    let before = before.unwrap_or_default();
+    let after = after.unwrap_or_default();
+
+    tracing::debug!(
+        target: "app.memory",
+        event,
+        reason,
+        no_surface_idle_ms,
+        before_snapshot_available = before != ProcessMemorySnapshot::default(),
+        after_snapshot_available = after != ProcessMemorySnapshot::default(),
+        backend_purge_attempted,
+        backend_purge_succeeded,
+        process_trim_attempted,
+        process_trim_succeeded,
+        before_working_set_bytes = before.working_set_bytes,
+        before_peak_working_set_bytes = before.peak_working_set_bytes,
+        before_pagefile_usage_bytes = before.pagefile_usage_bytes,
+        before_private_usage_bytes = before.private_usage_bytes,
+        after_working_set_bytes = after.working_set_bytes,
+        after_peak_working_set_bytes = after.peak_working_set_bytes,
+        after_pagefile_usage_bytes = after.pagefile_usage_bytes,
+        after_private_usage_bytes = after.private_usage_bytes,
+        "terminal memory cleanup result"
+    );
+}
+
+pub fn emit_terminal_memory_idle_transition(
+    enabled: bool,
+    event: &str,
+    reason: &str,
+    no_surface_idle_ms: u128,
+    idle_threshold_ms: u64,
+    renderer_resources_retained: bool,
+    idle_cache_shrunk: bool,
+) {
+    if !enabled {
+        return;
+    }
+
+    tracing::debug!(
+        target: "app.memory",
+        event,
+        reason,
+        no_surface_idle_ms,
+        idle_threshold_ms,
+        renderer_resources_retained,
+        idle_cache_shrunk,
+        "terminal memory idle transition"
+    );
+}
+
+pub fn emit_terminal_memory_surface_transition(
+    enabled: bool,
+    event: &str,
+    reason: &str,
+    had_active_surface: bool,
+    has_active_surface: bool,
+    surface_disappeared: bool,
+    session_id: Option<&str>,
+) {
+    if !enabled {
+        return;
+    }
+
+    if let Some(session_id) = session_id {
+        tracing::debug!(
+            target: "app.memory",
+            event,
+            reason,
+            had_active_surface,
+            has_active_surface,
+            surface_disappeared,
+            session_id,
+            "terminal memory surface transition"
+        );
+        return;
+    }
+
+    tracing::debug!(
+        target: "app.memory",
+        event,
+        reason,
+        had_active_surface,
+        has_active_surface,
+        surface_disappeared,
+        "terminal memory surface transition"
     );
 }
 
