@@ -40,7 +40,7 @@ Update existing terminal tests so they expect:
 "Sarasa Term SC"
 "Medium"
 "JetBrainsMono-Medium.ttf"
-"SarasaTermSC-Medium.ttf"
+"SarasaTermSC-Regular.ttf"
 ```
 
 **Step 2: Run test to verify it fails**
@@ -147,12 +147,12 @@ git add assets/fonts/SarasaUiSC build.rs ui/theme/typography.slint ui/app-window
 git commit -m "feat: apply sarasa ui sc to the shell"
 ```
 
-### Task 3: Switch the terminal renderer contract to JetBrains Mono Medium plus Sarasa Term SC Medium
+### Task 3: Switch the terminal renderer contract to JetBrains Mono Medium plus Sarasa Term SC fallback
 
 **Files:**
 - Create: `assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf`
 - Create: `assets/fonts/JetBrainsMono/OFL.txt`
-- Modify: `assets/fonts/SarasaTermSC/` (replace/add `SarasaTermSC-Medium.ttf` and keep license)
+- Modify: `assets/fonts/SarasaTermSC/` (keep `SarasaTermSC-Regular.ttf` and the existing license)
 - Modify: `src/app/terminal_font/backend.rs`
 - Modify: `src/app/terminal_font/mod.rs`
 - Modify: `src/app/terminal_font/windows_dwrite.rs`
@@ -174,7 +174,7 @@ Update the terminal tests so they assert the new bundled contract:
 assert!(backend_source.contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"JetBrains Mono\";"));
 assert!(backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Medium\";"));
 assert!(atlas_source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf"));
-assert!(dwrite_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Medium.ttf"));
+assert!(dwrite_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"));
 ```
 
 **Step 2: Run test to verify it fails**
@@ -190,7 +190,7 @@ Expected: FAIL because the codebase still points at `Cascadia Mono` and `Regular
 **Step 3: Write minimal implementation**
 
 - Vendor `JetBrainsMono-Medium.ttf` and `OFL.txt`.
-- Vendor `SarasaTermSC-Medium.ttf` and keep the Sarasa license.
+- Keep `SarasaTermSC-Regular.ttf` as the bundled CJK fallback and retain the Sarasa license.
 - Update the shared terminal constants in `src/app/terminal_font/backend.rs`.
 - Update all bundled font byte includes and fallback metadata in:
   - `src/app/terminal_font/windows_dwrite.rs`

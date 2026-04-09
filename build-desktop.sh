@@ -79,6 +79,23 @@ require_cargo_xwin() {
     fail "Linux-host Windows MSVC packaging requires cargo-xwin. Install it with: cargo install cargo-xwin"
 }
 
+stage_bundled_font_licenses() {
+  local stage_dir="$1"
+  local license_root="$stage_dir/licenses/fonts"
+
+  mkdir -p \
+    "$license_root/JetBrainsMono" \
+    "$license_root/SarasaTermSC" \
+    "$license_root/SarasaUiSC"
+
+  cp "$ROOT_DIR/assets/fonts/JetBrainsMono/OFL.txt" \
+    "$license_root/JetBrainsMono/OFL.txt"
+  cp "$ROOT_DIR/assets/fonts/SarasaTermSC/LICENSE.txt" \
+    "$license_root/SarasaTermSC/LICENSE.txt"
+  cp "$ROOT_DIR/assets/fonts/SarasaUiSC/LICENSE.txt" \
+    "$license_root/SarasaUiSC/LICENSE.txt"
+}
+
 WINDOWS_MSVC_TOOL_SHIM_DIR=""
 WINDOWS_MSVC_LIB_SHIM_DIR=""
 
@@ -444,6 +461,7 @@ mkdir -p "$DIST_DIR"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 cp "$BIN_PATH" "$STAGE_DIR/"
+stage_bundled_font_licenses "$STAGE_DIR"
 
 if [[ "$TARGET" == *windows* && "${MICA_TERM_PACKAGE_PORTABLE:-0}" == "1" ]]; then
   : > "$STAGE_DIR/.mica-term-portable"

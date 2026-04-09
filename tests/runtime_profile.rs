@@ -161,11 +161,23 @@ fn desktop_packaging_script_copies_default_terminal_font_license() {
     let content = fs::read_to_string("build-desktop.sh").expect("read build-desktop script");
 
     assert!(
-        content.contains("assets/fonts/Fusion-JetBrainsMapleMono/OFL.txt"),
-        "desktop packaging should copy the bundled Fusion-JetBrainsMapleMono OFL into the staged package"
+        content.contains("assets/fonts/JetBrainsMono/OFL.txt"),
+        "desktop packaging should copy the bundled JetBrains Mono OFL into the staged package"
     );
     assert!(
-        content.contains("OFL.txt"),
-        "desktop packaging should preserve the upstream OFL filename in packaged artifacts"
+        content.contains("assets/fonts/SarasaTermSC/LICENSE.txt"),
+        "desktop packaging should copy the bundled Sarasa Term SC license into the staged package"
+    );
+    assert!(
+        content.contains("assets/fonts/SarasaUiSC/LICENSE.txt"),
+        "desktop packaging should copy the bundled Sarasa UI SC license into the staged package"
+    );
+    assert!(
+        content.contains("licenses/fonts"),
+        "desktop packaging should stage bundled font licenses under a dedicated licenses/fonts tree"
+    );
+    assert!(
+        content.contains("JetBrainsMono/OFL.txt"),
+        "desktop packaging should preserve the upstream OFL filename inside the staged font license bundle"
     );
 }

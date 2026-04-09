@@ -46,7 +46,9 @@ The terminal fallback chain should become:
 The actual bundled assets should align with that contract:
 
 - `JetBrainsMono-Medium.ttf`
-- `SarasaTermSC-Medium.ttf`
+- `SarasaTermSC-Regular.ttf`
+
+`Sarasa Term SC` remains the CJK fallback, but the SC package does not ship a true `Medium` weight. Keep the bundled fallback honest and conservative by using `Regular` instead of pretending a nonexistent `Medium` exists.
 
 Bold terminal text should continue to use the existing explicit bold path / synthetic embolden flow, rather than changing the global default to Semibold.
 
