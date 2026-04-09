@@ -64,3 +64,79 @@ fn atlas_renderer_dependency_contract_uses_ab_glyph_instead_of_fontdue() {
         "terminal atlas source should no longer build on fontdue"
     );
 }
+
+#[test]
+fn slint_font_crates_are_vendored_for_startup_memory_work() {
+    assert!(
+        Path::new("vendor/i-slint-common/sharedfontique.rs").exists(),
+        "startup font tuning should vendor i-slint-common locally so the shared font collection can be patched without relying on crates.io defaults"
+    );
+    assert!(
+        Path::new("vendor/i-slint-core/graphics.rs").exists(),
+        "startup font tuning should vendor i-slint-core locally so runtime font queries can switch to a primary-then-system lookup path"
+    );
+}
+
+#[test]
+fn startup_primary_font_collection_disables_eager_system_font_scan() {
+    let source = fs::read_to_string("vendor/i-slint-common/sharedfontique.rs")
+        .expect("read vendored sharedfontique source");
+
+    assert!(
+        source.contains("system_fonts: false"),
+        "the startup primary font collection should disable eager system font enumeration so startup private/commit is not dominated by the system catalog"
+    );
+    assert!(
+        source.contains("include_bytes!(\"sharedfontique/DejaVuSans.ttf\")"),
+        "the startup primary font collection should seed a bundled DejaVu Sans face so common UI text can resolve before any system-font fallback work"
+    );
+    assert!(
+        source.contains("GenericFamily::SystemUi"),
+        "the startup primary font collection should map the bundled face onto generic UI families instead of depending on system fonts at startup"
+    );
+}
+
+#[test]
+fn startup_font_source_exposes_lazy_system_collection_helper() {
+    let source = fs::read_to_string("vendor/i-slint-common/sharedfontique.rs")
+        .expect("read vendored sharedfontique source");
+
+    assert!(
+        source.contains("pub static SYSTEM_COLLECTION"),
+        "the startup font source should expose a dedicated lazy system collection so system font enumeration is deferred until an actual miss needs it"
+    );
+    assert!(
+        source.contains("pub fn get_system_collection() -> Collection"),
+        "the startup font source should expose an accessor for the lazy system collection instead of forcing every startup query through the eager shared collection"
+    );
+}
+
+#[test]
+fn startup_font_query_uses_primary_then_system_fallback() {
+    let source =
+        fs::read_to_string("vendor/i-slint-core/graphics.rs").expect("read vendored graphics");
+
+    assert!(
+        source.contains("let mut collection = sharedfontique::get_collection();"),
+        "startup font queries should keep the lightweight primary collection as the first lookup path"
+    );
+    assert!(
+        source.contains("let mut system_collection = sharedfontique::get_system_collection();"),
+        "startup font queries should only touch the system-backed collection after the primary startup collection misses"
+    );
+}
+
+#[test]
+fn startup_sharedparley_context_stays_on_primary_collection() {
+    let source = fs::read_to_string("vendor/i-slint-core/textlayout/sharedparley.rs")
+        .expect("read vendored sharedparley source");
+
+    assert!(
+        source.contains("sharedfontique::COLLECTION.inner.clone()"),
+        "the startup sharedparley font context should stay pinned to the lightweight primary collection so first-frame layout does not eagerly enumerate system fonts"
+    );
+    assert!(
+        !source.contains("get_system_collection"),
+        "the startup sharedparley font context should not wire the lazy system collection into the always-on layout context"
+    );
+}

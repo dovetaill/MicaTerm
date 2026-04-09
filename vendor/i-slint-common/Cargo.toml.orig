@@ -1,0 +1,30 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+[package]
+name = "i-slint-common"
+description = "Helper crate for sharing code & data structures between i-slint-core and slint-compiler"
+authors.workspace = true
+documentation.workspace = true
+edition = "2024"
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[features]
+default = []
+shared-fontique = ["dep:fontique", "dep:ttf-parser"]
+color-parsing = []
+fontconfig-dlopen = ["fontique?/fontconfig-dlopen"]
+
+[dependencies]
+ttf-parser = { workspace = true, optional = true }
+fontique = { workspace = true, optional = true }
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--generate-link-to-definition"]
