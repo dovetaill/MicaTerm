@@ -53,12 +53,7 @@ pub fn trim_process_working_set() -> bool {
     // SAFETY: GetCurrentProcess returns a pseudo-handle for the current process,
     // which is valid for the duration of this call.
     let trimmed = unsafe { K32EmptyWorkingSet(GetCurrentProcess()) };
-    if trimmed == 0 {
-        tracing::debug!(target: "app.memory", "working set trim request was ignored");
-        false
-    } else {
-        true
-    }
+    trimmed != 0
 }
 
 #[cfg(not(windows))]

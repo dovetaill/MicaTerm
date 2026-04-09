@@ -2402,38 +2402,13 @@ fn clear_workspace_native_terminal_frame(window: &AppWindow) {
 }
 
 fn clear_workspace_terminal_transient_caches(
-    memory_diagnostics: bool,
-    event: &'static str,
-    reason: &'static str,
 ) {
-    let (render_mode, before, after) = WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
+    WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
         let mut host = host.borrow_mut();
-        let render_mode = host
-            .as_ref()
-            .map(|host| host.render_mode_label())
-            .unwrap_or("uninitialized");
-        let before = host
-            .as_ref()
-            .map(|host| host.cache_stats())
-            .unwrap_or_default();
         if let Some(host) = host.as_mut() {
             host.clear_transient_caches();
         }
-        let after = host
-            .as_ref()
-            .map(|host| host.cache_stats())
-            .unwrap_or_default();
-        (render_mode, before, after)
     });
-
-    crate::app::logging::runtime::emit_terminal_memory_cache_clear(
-        memory_diagnostics,
-        event,
-        reason,
-        render_mode,
-        before,
-        after,
-    );
 }
 
 fn release_workspace_terminal_renderer_resources() {
@@ -2518,7 +2493,6 @@ fn update_workspace_terminal_active_idle_cache_shrink(
     active_surface_fingerprint: &mut Option<WorkspaceTerminalActiveSurfaceFingerprint>,
     active_surface_since: &mut Option<Instant>,
     active_idle_cache_shrunk: &mut bool,
-    memory_diagnostics: bool,
 ) {
     if !enabled {
         active_surface_fingerprint.take();
@@ -2554,11 +2528,7 @@ fn update_workspace_terminal_active_idle_cache_shrink(
         return;
     }
 
-    clear_workspace_terminal_transient_caches(
-        memory_diagnostics,
-        "active-idle-shrink",
-        "active-surface-idle",
-    );
+    clear_workspace_terminal_transient_caches();
     *active_idle_cache_shrunk = true;
 }
 
@@ -2566,21 +2536,9 @@ fn rearm_workspace_terminal_no_surface_idle_shrink(
     now: Instant,
     no_surface_since: &mut Option<Instant>,
     idle_cache_shrunk: &mut bool,
-    memory_diagnostics: bool,
-    reason: &str,
-    renderer_resources_retained: bool,
 ) {
     *no_surface_since = Some(now);
     *idle_cache_shrunk = false;
-    crate::app::logging::runtime::emit_terminal_memory_idle_transition(
-        memory_diagnostics,
-        "idle-shrink-armed",
-        reason,
-        0,
-        WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS,
-        renderer_resources_retained,
-        *idle_cache_shrunk,
-    );
 }
 
 fn update_workspace_terminal_idle_cache_shrink(
@@ -2590,42 +2548,20 @@ fn update_workspace_terminal_idle_cache_shrink(
     now: Instant,
     no_surface_since: &mut Option<Instant>,
     idle_cache_shrunk: &mut bool,
-    memory_diagnostics: bool,
 ) {
     if has_active_surface {
-        if let Some(no_surface_since_at) = no_surface_since.take() {
-            crate::app::logging::runtime::emit_terminal_memory_idle_transition(
-                memory_diagnostics,
-                "idle-shrink-cancelled",
-                "active-surface-restored",
-                now.duration_since(no_surface_since_at).as_millis(),
-                WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS,
-                workspace_terminal_renderer_resources_retained(),
-                *idle_cache_shrunk,
-            );
-        }
+        no_surface_since.take();
         *idle_cache_shrunk = false;
         return;
     }
 
     let retained_renderer_resources = workspace_terminal_renderer_resources_retained();
     if surface_disappeared || (no_surface_since.is_none() && retained_renderer_resources) {
-        clear_workspace_terminal_transient_caches(
-            memory_diagnostics,
-            "close-shrink",
-            "surface-cleared",
-        );
+        clear_workspace_terminal_transient_caches();
         rearm_workspace_terminal_no_surface_idle_shrink(
             now,
             no_surface_since,
             idle_cache_shrunk,
-            memory_diagnostics,
-            if surface_disappeared {
-                "surface-disappeared"
-            } else {
-                "renderer-resources-retained"
-            },
-            retained_renderer_resources,
         );
         return;
     }
@@ -2640,38 +2576,10 @@ fn update_workspace_terminal_idle_cache_shrink(
         return;
     }
 
-    clear_workspace_terminal_transient_caches(
-        memory_diagnostics,
-        "idle-shrink",
-        "no-active-surface-idle",
-    );
-    let no_surface_idle_ms = now.duration_since(no_surface_since_at).as_millis();
-    let before_process_memory = if memory_diagnostics {
-        crate::app::memory::current_process_memory_snapshot()
-    } else {
-        None
-    };
+    clear_workspace_terminal_transient_caches();
     release_workspace_terminal_renderer_resources();
-    let backend_purge_attempted = window.is_some();
-    let backend_purge_succeeded = purge_workspace_backend_memory(window);
-    let process_trim_succeeded = trim_workspace_process_memory();
-    let after_process_memory = if memory_diagnostics {
-        crate::app::memory::current_process_memory_snapshot()
-    } else {
-        None
-    };
-    crate::app::logging::runtime::emit_terminal_memory_cleanup_result(
-        memory_diagnostics,
-        "idle-shrink-cleanup",
-        "no-active-surface-idle",
-        no_surface_idle_ms,
-        backend_purge_attempted,
-        backend_purge_succeeded,
-        true,
-        process_trim_succeeded,
-        before_process_memory,
-        after_process_memory,
-    );
+    let _ = purge_workspace_backend_memory(window);
+    let _ = trim_workspace_process_memory();
     *idle_cache_shrunk = true;
 }
 
@@ -4230,7 +4138,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             Rc::clone(&workspace_terminal_no_surface_since);
         let workspace_terminal_idle_cache_shrunk_ref =
             Rc::clone(&workspace_terminal_idle_cache_shrunk);
-        let memory_diagnostics = crate::app::logging::runtime::memory_diagnostics_enabled();
         session_projection_timer.start(TimerMode::Repeated, Duration::from_millis(50), move || {
             let Some(window) = handle.upgrade() else {
                 return;
@@ -4242,17 +4149,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             let surface_disappeared = projection_delta.surface_changed
                 && had_active_surface
                 && state.active_workspace_terminal_surface().is_none();
-            if projection_delta.surface_changed {
-                crate::app::logging::runtime::emit_terminal_memory_surface_transition(
-                    memory_diagnostics,
-                    "surface-visibility-transition",
-                    "projection-sync",
-                    had_active_surface,
-                    state.active_workspace_terminal_surface().is_some(),
-                    surface_disappeared,
-                    None,
-                );
-            }
             let should_clear_pending_paste = pending_workspace_paste_warning_ref
                 .borrow()
                 .as_ref()
@@ -4322,7 +4218,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 &mut active_surface_fingerprint,
                 &mut active_surface_since,
                 &mut active_idle_cache_shrunk,
-                memory_diagnostics,
             );
             let mut no_surface_since = workspace_terminal_no_surface_since_ref.borrow_mut();
             let mut idle_cache_shrunk = workspace_terminal_idle_cache_shrunk_ref.borrow_mut();
@@ -4333,7 +4228,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 now,
                 &mut no_surface_since,
                 &mut idle_cache_shrunk,
-                memory_diagnostics,
             );
         });
     }
@@ -5078,7 +4972,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         save_quick_launch_preferences_from_state(&quick_launch_store_ref, &state);
     });
 
-    let memory_diagnostics = crate::app::logging::runtime::memory_diagnostics_enabled();
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
@@ -5479,23 +5372,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 );
             }
             let has_active_surface_after_close = state.active_workspace_terminal_surface().is_some();
-            crate::app::logging::runtime::emit_terminal_memory_surface_transition(
-                memory_diagnostics,
-                "tab-close-transition",
-                "workspace-tab-close-requested",
-                had_active_surface,
-                has_active_surface_after_close,
-                had_active_surface && !has_active_surface_after_close,
-                Some(session_id.as_str()),
-            );
             if had_active_surface && !has_active_surface_after_close {
                 rearm_workspace_terminal_no_surface_idle_shrink(
                     Instant::now(),
                     &mut workspace_terminal_no_surface_since_ref.borrow_mut(),
                     &mut workspace_terminal_idle_cache_shrunk_ref.borrow_mut(),
-                    memory_diagnostics,
-                    "workspace-tab-close-requested",
-                    workspace_terminal_renderer_resources_retained(),
                 );
             }
             sync_workspace_tabs_with_manager(
@@ -5571,23 +5452,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     }
                     let has_active_surface_after_close =
                         state.active_workspace_terminal_surface().is_some();
-                    crate::app::logging::runtime::emit_terminal_memory_surface_transition(
-                        memory_diagnostics,
-                        "tab-close-transition",
-                        "workspace-close-tab-action",
-                        had_active_surface,
-                        has_active_surface_after_close,
-                        had_active_surface && !has_active_surface_after_close,
-                        Some(session_id.as_str()),
-                    );
                     if had_active_surface && !has_active_surface_after_close {
                         rearm_workspace_terminal_no_surface_idle_shrink(
                             Instant::now(),
                             &mut workspace_terminal_no_surface_since_ref.borrow_mut(),
                             &mut workspace_terminal_idle_cache_shrunk_ref.borrow_mut(),
-                            memory_diagnostics,
-                            "workspace-close-tab-action",
-                            workspace_terminal_renderer_resources_retained(),
                         );
                     }
                     sync_workspace_tabs_with_manager(
@@ -6752,8 +6621,7 @@ mod tests {
             false,
             now,
             &mut no_surface_since,
-            &mut idle_cache_shrunk,
-            false,
+            &mut idle_cache_shrunk
         );
 
         assert!(
@@ -6782,8 +6650,7 @@ mod tests {
             true,
             now,
             &mut no_surface_since,
-            &mut idle_cache_shrunk,
-            false,
+            &mut idle_cache_shrunk
         );
 
         assert_eq!(
@@ -6813,8 +6680,7 @@ mod tests {
             false,
             now + Duration::from_millis(1),
             &mut no_surface_since,
-            &mut idle_cache_shrunk,
-            false,
+            &mut idle_cache_shrunk
         );
 
         assert!(
@@ -6843,8 +6709,7 @@ mod tests {
             false,
             now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
             &mut no_surface_since,
-            &mut idle_cache_shrunk,
-            false,
+            &mut idle_cache_shrunk
         );
 
         assert_eq!(
@@ -6877,8 +6742,7 @@ mod tests {
             false,
             now,
             &mut no_surface_since,
-            &mut idle_cache_shrunk,
-            false,
+            &mut idle_cache_shrunk
         );
 
         assert_eq!(
@@ -6911,8 +6775,7 @@ mod tests {
             false,
             now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
             &mut no_surface_since,
-            &mut idle_cache_shrunk,
-            false,
+            &mut idle_cache_shrunk
         );
 
         WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
@@ -6950,8 +6813,7 @@ mod tests {
                     false,
                     now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
                     &mut no_surface_since,
-                    &mut idle_cache_shrunk,
-                    false,
+                    &mut idle_cache_shrunk
                 );
             },
         );
@@ -6990,8 +6852,7 @@ mod tests {
                     false,
                     now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
                     &mut no_surface_since,
-                    &mut idle_cache_shrunk,
-                    false,
+                    &mut idle_cache_shrunk
                 );
             },
         );
@@ -7014,9 +6875,6 @@ mod tests {
             rearmed_at,
             &mut no_surface_since,
             &mut idle_cache_shrunk,
-            false,
-            "test-rearm",
-            false,
         );
 
         assert_eq!(
@@ -7060,8 +6918,7 @@ mod tests {
             now,
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk,
-            false,
+            &mut active_idle_cache_shrunk
         );
         update_workspace_terminal_active_idle_cache_shrink(
             Some(&surface),
@@ -7069,8 +6926,7 @@ mod tests {
             now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk,
-            false,
+            &mut active_idle_cache_shrunk
         );
 
         WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
@@ -7127,8 +6983,7 @@ mod tests {
             now,
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk,
-            false,
+            &mut active_idle_cache_shrunk
         );
         update_workspace_terminal_active_idle_cache_shrink(
             Some(&second_surface),
@@ -7136,8 +6991,7 @@ mod tests {
             reset_at,
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk,
-            false,
+            &mut active_idle_cache_shrunk
         );
         update_workspace_terminal_active_idle_cache_shrink(
             Some(&second_surface),
@@ -7145,8 +6999,7 @@ mod tests {
             before_threshold_again,
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk,
-            false,
+            &mut active_idle_cache_shrunk
         );
 
         WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
@@ -7201,8 +7054,7 @@ mod tests {
             now,
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk,
-            false,
+            &mut active_idle_cache_shrunk
         );
         update_workspace_terminal_active_idle_cache_shrink(
             Some(&surface),
@@ -7210,8 +7062,7 @@ mod tests {
             now + Duration::from_millis(WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS + 1),
             &mut active_surface_fingerprint,
             &mut active_surface_since,
-            &mut active_idle_cache_shrunk,
-            false,
+            &mut active_idle_cache_shrunk
         );
 
         WORKSPACE_TERMINAL_RENDERER_HOST.with(|host| {
