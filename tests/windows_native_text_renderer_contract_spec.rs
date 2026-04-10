@@ -101,6 +101,7 @@ fn windows_native_text_renderer_source_can_build_directwrite_faces_for_bundled_f
     for expected in [
         "CreateInMemoryFontFileLoader",
         "CreateInMemoryFontFileReference",
+        "RegisterFontFileLoader",
         "DWRITE_FONT_FACE_TYPE_TRUETYPE",
     ] {
         assert!(

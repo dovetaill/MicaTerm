@@ -816,8 +816,9 @@ impl WindowsNativeSurfaceState {
             };
             let presentable_frame = &frame.frame.presentable_frame;
             let clip_rect = terminal_clip_rect(frame.rect);
-            self.ensure_brush(presentable_frame.default_bg_rgba);
-            if let Some(brush) = self.brush_for(presentable_frame.default_bg_rgba) {
+            let default_bg_rgba = opaque_surface_fill_rgba(presentable_frame.default_bg_rgba);
+            self.ensure_brush(default_bg_rgba);
+            if let Some(brush) = self.brush_for(default_bg_rgba) {
                 unsafe {
                     render_target.FillRectangle(&clip_rect, &brush);
                 }
@@ -828,6 +829,7 @@ impl WindowsNativeSurfaceState {
                 } else {
                     presentable_frame.row_bg_odd_rgba
                 };
+                let row_rgba = opaque_surface_fill_rgba(row_rgba);
                 self.ensure_brush(row_rgba);
                 if let (Some(row_rect), Some(brush)) = (
                     row_background_rect(frame.rect, row, frame.frame.cell_height_px),
@@ -839,7 +841,8 @@ impl WindowsNativeSurfaceState {
                 }
             }
             for run in &frame.frame.presentable_frame.background_runs {
-                self.ensure_brush(run.bg_rgba);
+                let bg_rgba = opaque_surface_fill_rgba(run.bg_rgba);
+                self.ensure_brush(bg_rgba);
                 if let (Some(run_rect), Some(brush)) = (
                     cell_span_rect(
                         frame.rect,
@@ -849,7 +852,7 @@ impl WindowsNativeSurfaceState {
                         frame.frame.cell_width_px,
                         frame.frame.cell_height_px,
                     ),
-                    self.brush_for(run.bg_rgba),
+                    self.brush_for(bg_rgba),
                 ) {
                     unsafe {
                         render_target.FillRectangle(&run_rect, &brush);
@@ -879,14 +882,44 @@ impl WindowsNativeSurfaceState {
         family_name: &str,
     ) -> Option<IDWriteFontFace> {
         let font_bytes = Self::bundled_directwrite_font_bytes(family_name)?;
+        let host_hwnd = self.host_hwnd.unwrap_or_default();
+        let surface_hwnd = self.surface_hwnd.unwrap_or_default();
         let renderer = self.directwrite_text_renderer.as_mut()?;
         let factory = renderer.factory.as_ref()?.clone();
 
         let loader = if let Some(loader) = renderer.in_memory_font_file_loader.as_ref() {
             loader.clone()
         } else {
-            let factory5: IDWriteFactory5 = factory.cast().ok()?;
-            let loader = unsafe { factory5.CreateInMemoryFontFileLoader().ok()? };
+            let factory5: IDWriteFactory5 = factory.cast().ok().or_else(|| {
+                tracing::debug!(
+                    target: "app.terminal",
+                    family_name,
+                    host_hwnd,
+                    surface_hwnd,
+                    "DirectWrite bundled font path could not acquire IDWriteFactory5"
+                );
+                None
+            })?;
+            let loader = unsafe { factory5.CreateInMemoryFontFileLoader().ok() }.or_else(|| {
+                tracing::debug!(
+                    target: "app.terminal",
+                    family_name,
+                    host_hwnd,
+                    surface_hwnd,
+                    "DirectWrite bundled font path could not create in-memory font file loader"
+                );
+                None
+            })?;
+            if unsafe { factory.RegisterFontFileLoader(&loader) }.is_err() {
+                tracing::debug!(
+                    target: "app.terminal",
+                    family_name,
+                    host_hwnd,
+                    surface_hwnd,
+                    "DirectWrite bundled font path could not register font file loader"
+                );
+                return None;
+            }
             renderer.in_memory_font_file_loader = Some(loader.clone());
             loader
         };
@@ -902,8 +935,18 @@ impl WindowsNativeSurfaceState {
                         u32::try_from(font_bytes.len()).ok()?,
                         None::<&windows::core::IUnknown>,
                     )
-                    .ok()?
-            };
+                    .ok()
+            }
+            .or_else(|| {
+                tracing::debug!(
+                    target: "app.terminal",
+                    family_name,
+                    host_hwnd,
+                    surface_hwnd,
+                    "DirectWrite bundled font path could not create in-memory font file reference"
+                );
+                None
+            })?;
             renderer
                 .in_memory_font_files
                 .insert(face_key, font_file.clone());
@@ -917,8 +960,18 @@ impl WindowsNativeSurfaceState {
                     0,
                     DWRITE_FONT_SIMULATIONS_NONE,
                 )
-                .ok()?
-        };
+                .ok()
+        }
+        .or_else(|| {
+            tracing::debug!(
+                target: "app.terminal",
+                family_name,
+                host_hwnd,
+                surface_hwnd,
+                "DirectWrite bundled font path could not create font face"
+            );
+            None
+        })?;
         renderer.font_faces.insert(face_key, font_face.clone());
         Some(font_face)
     }
@@ -1942,6 +1995,11 @@ fn d2d_color_from_rgba(rgba: u32) -> D2D1_COLOR_F {
         b: (rgba & 0xff) as f32 / 255.0,
         a: ((rgba >> 24) & 0xff) as f32 / 255.0,
     }
+}
+
+#[cfg(target_os = "windows")]
+fn opaque_surface_fill_rgba(rgba: u32) -> u32 {
+    0xff00_0000 | (rgba & 0x00ff_ffff)
 }
 
 #[cfg(target_os = "windows")]

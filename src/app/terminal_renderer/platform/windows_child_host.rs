@@ -16,7 +16,7 @@ impl WindowsChildSurfaceHost {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{
             CreateWindowExW, HMENU, SW_SHOWNA, ShowWindow, WINDOW_EX_STYLE, WS_CHILD,
-            WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_VISIBLE,
+            WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_DISABLED, WS_VISIBLE,
         };
         use windows::core::{PCWSTR, w};
 
@@ -27,7 +27,7 @@ impl WindowsChildSurfaceHost {
                 WINDOW_EX_STYLE::default(),
                 w!("MicaTermRetainedNativeChildHost"),
                 PCWSTR::null(),
-                WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE,
+                WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_DISABLED | WS_VISIBLE,
                 rect.x,
                 rect.y,
                 rect.width.max(1),
@@ -146,9 +146,7 @@ fn ensure_retained_native_child_host_class() -> Result<()> {
     if atom == 0 {
         let error = unsafe { GetLastError() };
         if error != ERROR_CLASS_ALREADY_EXISTS {
-            anyhow::bail!(
-                "failed to register retained-native child host window class: {error:?}"
-            );
+            anyhow::bail!("failed to register retained-native child host window class: {error:?}");
         }
     }
 
