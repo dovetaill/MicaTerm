@@ -1054,6 +1054,10 @@ fn windows_backend_source_exposes_background_and_monochrome_draw_contract() {
         "windows backend should clip drawing to the retained terminal surface rect"
     );
     assert!(
+        windows_backend_source.contains("presentOptions: D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS"),
+        "child-HWND presents should retain previous contents between clipped redraws, otherwise overlay-only or damage-rect redraws can expose undefined background behind DirectWrite text"
+    );
+    assert!(
         windows_backend_source.contains("PopAxisAlignedClip();"),
         "windows backend should release the terminal clip after drawing the retained frame"
     );
