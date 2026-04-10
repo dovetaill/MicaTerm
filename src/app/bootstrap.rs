@@ -1959,6 +1959,7 @@ fn sync_saved_ssh_picker_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_open_saved_ssh_modal_open(state.saved_ssh_picker_open());
     window.set_open_saved_ssh_modal_query(state.saved_ssh_picker_query().into());
     window.set_open_saved_ssh_modal_items(ModelRc::new(VecModel::from(items)));
+    sync_workspace_native_terminal_surface_geometry(window);
 }
 
 fn slint_color_from_rgba(rgba: u32) -> Color {
@@ -2269,7 +2270,23 @@ fn window_scale_factor(window: &AppWindow) -> f32 {
     window.window().scale_factor().max(1.0)
 }
 
+fn workspace_blocks_native_terminal_surface(window: &AppWindow) -> bool {
+    window.get_sync_modal_open()
+        || window.get_settings_modal_open()
+        || window.get_asset_modal_open()
+        || window.get_asset_rename_modal_open()
+        || window.get_asset_delete_confirm_modal_open()
+        || window.get_ssh_host_key_modal_open()
+        || window.get_workspace_paste_warning_modal_open()
+        || window.get_open_saved_ssh_modal_open()
+        || window.get_sftp_remote_file_modal_open()
+}
+
 fn workspace_native_terminal_rect(window: &AppWindow) -> NativeTerminalSurfaceRect {
+    if workspace_blocks_native_terminal_surface(window) {
+        return NativeTerminalSurfaceRect::default();
+    }
+
     let scale_factor = window_scale_factor(window);
     NativeTerminalSurfaceRect {
         x: (window.get_layout_workspace_session_native_surface_x() * scale_factor).round() as i32,
@@ -2373,8 +2390,9 @@ fn trace_workspace_native_terminal_diagnostics(window: &AppWindow) {
         })
         .unwrap_or_default();
 
-    tracing::trace!(
+    tracing::debug!(
         target: "app.terminal",
+        modal_blocking_native_surface = workspace_blocks_native_terminal_surface(window),
         host_hwnd = diagnostics.host_hwnd.unwrap_or_default(),
         surface_hwnd = diagnostics.surface_hwnd.unwrap_or_default(),
         surface_visible = diagnostics.surface_visible.unwrap_or(false),

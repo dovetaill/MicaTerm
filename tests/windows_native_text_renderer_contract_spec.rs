@@ -79,8 +79,11 @@ fn windows_native_text_renderer_source_tracks_true_fallback_path_when_directwrit
             .expect("read windows native backend");
 
     for expected in [
-        "fn mark_directwrite_text_fallback(",
-        "self.mark_directwrite_text_fallback();",
+        "fn mark_directwrite_text_fallback(&mut self, reason: &'static str)",
+        "fallback_reason = reason",
+        "self.mark_directwrite_text_fallback(\"glyph-id-overflow\")",
+        "self.mark_directwrite_text_fallback(\"font-face-unresolved\")",
+        "self.mark_directwrite_text_fallback(\"missing-text-brush\")",
     ] {
         assert!(
             windows_backend_source.contains(expected),

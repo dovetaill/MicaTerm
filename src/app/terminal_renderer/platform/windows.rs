@@ -418,7 +418,16 @@ impl WindowsNativeSurfaceState {
         }
     }
 
-    fn mark_directwrite_text_fallback(&mut self) {
+    fn mark_directwrite_text_fallback(&mut self, reason: &'static str) {
+        if self.active_text_renderer_path() != Some("bitmap-mask-compat") {
+            tracing::debug!(
+                target: "app.terminal",
+                fallback_reason = reason,
+                host_hwnd = self.host_hwnd.unwrap_or_default(),
+                surface_hwnd = self.surface_hwnd.unwrap_or_default(),
+                "DirectWrite text path fell back to bitmap-mask-compat"
+            );
+        }
         self.mark_directwrite_text_path("bitmap-mask-compat");
     }
 
@@ -906,11 +915,11 @@ impl WindowsNativeSurfaceState {
                 Vec::with_capacity(frame.frame.presentable_frame.monochrome_glyph_draws.len());
             for draw in &frame.frame.presentable_frame.monochrome_glyph_draws {
                 if draw.glyph_id > u16::MAX as u32 {
-                    self.mark_directwrite_text_fallback();
+                    self.mark_directwrite_text_fallback("glyph-id-overflow");
                     return;
                 }
                 let Some(font_face) = self.resolve_directwrite_font_face(draw) else {
-                    self.mark_directwrite_text_fallback();
+                    self.mark_directwrite_text_fallback("font-face-unresolved");
                     return;
                 };
                 drawable_glyphs.push((draw, font_face, draw.glyph_id as u16));
@@ -949,7 +958,7 @@ impl WindowsNativeSurfaceState {
             for (draw, font_face, glyph_index) in drawable_glyphs {
                 self.ensure_brush(draw.fg_rgba);
                 let Some(brush) = self.brush_for(draw.fg_rgba) else {
-                    self.mark_directwrite_text_fallback();
+                    self.mark_directwrite_text_fallback("missing-text-brush");
                     return;
                 };
 
@@ -1561,6 +1570,16 @@ impl WindowsNativeSurfaceBackend {
             self.destroy_child_surface_window();
             match WindowsChildSurfaceHost::create(host_hwnd, self.state.window_rect) {
                 Ok(child_surface_host) => {
+                    tracing::debug!(
+                        target: "app.terminal",
+                        host_hwnd,
+                        surface_hwnd = child_surface_host.surface_hwnd,
+                        x = self.state.window_rect.x,
+                        y = self.state.window_rect.y,
+                        width = self.state.window_rect.width,
+                        height = self.state.window_rect.height,
+                        "created retained-native child HWND host"
+                    );
                     self.state.surface_hwnd = Some(child_surface_host.surface_hwnd);
                     self.child_surface_host = Some(child_surface_host);
                     self.state.mark_render_target_dirty();
@@ -1587,25 +1606,39 @@ impl WindowsNativeSurfaceBackend {
             && self.state.window_rect.width > 0
             && self.state.window_rect.height > 0;
 
+        if !should_show {
+            if let Some(child_surface_host) = self.child_surface_host.as_ref() {
+                tracing::debug!(
+                    target: "app.terminal",
+                    host_hwnd = self.state.host_hwnd.unwrap_or_default(),
+                    surface_hwnd = child_surface_host.surface_hwnd,
+                    attached = self.state.attached,
+                    x = self.state.window_rect.x,
+                    y = self.state.window_rect.y,
+                    width = self.state.window_rect.width,
+                    height = self.state.window_rect.height,
+                    "tearing down retained-native child HWND because the surface is not visible"
+                );
+            }
+            self.destroy_child_surface_window();
+            return;
+        }
+
         let Some(child_surface_host) = self.child_surface_host.as_mut() else {
             self.state.surface_hwnd = None;
             return;
         };
 
-        if should_show {
-            if let Err(err) = child_surface_host.sync_rect(self.state.window_rect) {
-                tracing::warn!(
-                    target: "app.terminal",
-                    error = %err,
-                    "failed to sync retained-native child HWND rect"
-                );
-                self.destroy_child_surface_window();
-                return;
-            }
-            child_surface_host.set_visible(true);
-        } else {
-            child_surface_host.set_visible(false);
+        if let Err(err) = child_surface_host.sync_rect(self.state.window_rect) {
+            tracing::warn!(
+                target: "app.terminal",
+                error = %err,
+                "failed to sync retained-native child HWND rect"
+            );
+            self.destroy_child_surface_window();
+            return;
         }
+        child_surface_host.set_visible(true);
 
         self.state.surface_hwnd =
             (child_surface_host.surface_hwnd != 0).then_some(child_surface_host.surface_hwnd);
@@ -1614,6 +1647,12 @@ impl WindowsNativeSurfaceBackend {
 
     fn destroy_child_surface_window(&mut self) {
         if let Some(mut child_surface_host) = self.child_surface_host.take() {
+            tracing::debug!(
+                target: "app.terminal",
+                host_hwnd = self.state.host_hwnd.unwrap_or_default(),
+                surface_hwnd = child_surface_host.surface_hwnd,
+                "destroying retained-native child HWND host"
+            );
             child_surface_host.destroy();
         }
         self.state.surface_hwnd = None;

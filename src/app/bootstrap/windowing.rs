@@ -143,6 +143,7 @@ pub(super) fn sync_sync_modal_state(window: &AppWindow, state: &ShellViewModel) 
     window.set_sync_modal_primary_revision_text(modal.primary_revision_text.clone().into());
     window.set_sync_modal_remote_status_text(modal.remote_status_text.clone().into());
     window.set_sync_modal_remote_status_loading(modal.remote_status_loading);
+    super::sync_workspace_native_terminal_surface_geometry(window);
 }
 
 pub(super) fn sync_ssh_host_key_modal_state(window: &AppWindow, state: &ShellViewModel) {
@@ -158,6 +159,7 @@ pub(super) fn sync_ssh_host_key_modal_state(window: &AppWindow, state: &ShellVie
             window.set_ssh_host_key_modal_fingerprint("".into());
         }
     }
+    super::sync_workspace_native_terminal_surface_geometry(window);
 }
 
 pub(super) fn sync_workspace_paste_warning_modal_state(
@@ -183,6 +185,7 @@ pub(super) fn sync_workspace_paste_warning_modal_state(
             window.set_workspace_paste_warning_text("".into());
         }
     }
+    super::sync_workspace_native_terminal_surface_geometry(window);
 }
 
 pub(super) fn bind_windowing_callbacks(

@@ -676,6 +676,7 @@ pub(super) fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel)
             clear_asset_ssh_modal_fields(window);
         }
     }
+    super::sync_workspace_native_terminal_surface_geometry(window);
 }
 
 fn sync_ssh_proxy_target_options(window: &AppWindow, labels: Vec<String>) {

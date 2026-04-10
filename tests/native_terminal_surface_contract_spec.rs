@@ -1484,6 +1484,15 @@ fn windows_backend_source_exposes_child_hwnd_present_contract() {
         "windows backend should destroy the child HWND during detach so retained-native host state does not leak after the pane disappears"
     );
     assert!(
+        child_host_source.contains("RegisterClassW(")
+            || child_host_source.contains("WNDCLASSW"),
+        "windows child-host helper should register a dedicated window class instead of borrowing a stock control class so retained-native D2D output owns a predictable Win32 surface"
+    );
+    assert!(
+        !child_host_source.contains("w!(\"STATIC\")"),
+        "windows child-host helper should stop creating retained-native presenters as stock STATIC controls because those controls can carry class behavior that fights D2D child-surface ownership"
+    );
+    assert!(
         !windows_backend_source.contains("GetDC(HWND(host_hwnd as _))"),
         "windows backend should stop acquiring a host-window DC once retained-native output is isolated behind a child HWND"
     );
@@ -1648,5 +1657,18 @@ fn x11_platform_backend_source_exposes_backend_selection_contract() {
     assert!(
         native_surface_source.contains("create_platform_native_surface_backend()"),
         "native surface bridge should keep using the shared platform backend factory when X11 support lands"
+    );
+}
+
+#[test]
+fn windows_backend_source_tears_down_child_surface_when_not_visible() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+
+    assert!(
+        windows_backend_source.contains("if !should_show {")
+            && windows_backend_source.contains("self.destroy_child_surface_window();"),
+        "windows backend should tear down the retained-native child HWND whenever the pane is hidden or modal-blocked so Slint overlays cannot race a stale child window that only received a best-effort hide request"
     );
 }

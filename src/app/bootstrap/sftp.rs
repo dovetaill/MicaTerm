@@ -72,6 +72,7 @@ pub(super) fn sync_sftp_remote_file_modal_state(window: &AppWindow, state: &Shel
     window.set_sftp_remote_file_modal_status_text(editor.status_text.clone().into());
     window.set_sftp_remote_file_modal_error_text(editor.error_text.clone().into());
     window.set_sftp_remote_file_modal_can_save(state.sftp_remote_file_editor_can_save());
+    super::sync_workspace_native_terminal_surface_geometry(window);
 }
 
 pub(super) fn sftp_panel_entry_type_label(kind: SftpDirectoryEntryKind) -> &'static str {

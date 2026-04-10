@@ -52,6 +52,7 @@ pub(super) fn sync_top_status_bar_state(
     window.set_sync_feedback_text(state.sync_feedback_state().text.clone().into());
     window.set_sync_feedback_sequence(state.sync_feedback_state().sequence);
     window.set_sync_feedback_running(state.sync_feedback_state().running);
+    super::sync_workspace_native_terminal_surface_geometry(window);
 }
 
 pub(super) fn bind_shell_chrome_callbacks(

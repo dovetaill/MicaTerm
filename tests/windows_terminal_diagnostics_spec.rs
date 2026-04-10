@@ -197,12 +197,13 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
 }
 
 #[test]
-fn bootstrap_source_installs_native_terminal_diagnostics_trace_hook() {
+fn bootstrap_source_installs_native_terminal_diagnostics_debug_hook() {
     let bootstrap_source =
         fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap source");
 
     for expected in [
         "fn trace_workspace_native_terminal_diagnostics(",
+        "tracing::debug!(",
         "native_surface_text_antialias_mode(&diagnostics)",
         "native_surface_render_target_alpha_mode(&diagnostics)",
         "native_surface_rendering_params_source(&diagnostics)",
@@ -213,6 +214,7 @@ fn bootstrap_source_installs_native_terminal_diagnostics_trace_hook() {
         "native_surface_clear_type_level_per_mille(&diagnostics)",
         "native_surface_font_chain(&diagnostics)",
         "native_surface_glyph_bounds_trace(&diagnostics)",
+        "modal_blocking_native_surface = workspace_blocks_native_terminal_surface(window)",
         "host_hwnd = diagnostics.host_hwnd.unwrap_or_default()",
         "surface_hwnd = diagnostics.surface_hwnd.unwrap_or_default()",
         "surface_visible = diagnostics.surface_visible.unwrap_or(false)",
@@ -224,7 +226,81 @@ fn bootstrap_source_installs_native_terminal_diagnostics_trace_hook() {
     ] {
         assert!(
             bootstrap_source.contains(expected),
-            "bootstrap should wire `{expected}` into the native terminal diagnostics hook so Task 6 observability is reachable through the existing workspace bridge"
+            "bootstrap should wire `{expected}` into the debug-level native terminal diagnostics hook so retained-native child-host regressions are inspectable from packaged runs"
+        );
+    }
+}
+
+#[test]
+fn bootstrap_source_hides_retained_native_child_surface_while_blocking_modals_are_open() {
+    let bootstrap_source =
+        fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap source");
+
+    for expected in [
+        "fn workspace_blocks_native_terminal_surface(window: &AppWindow) -> bool",
+        "window.get_sync_modal_open()",
+        "window.get_settings_modal_open()",
+        "window.get_asset_modal_open()",
+        "window.get_asset_rename_modal_open()",
+        "window.get_asset_delete_confirm_modal_open()",
+        "window.get_ssh_host_key_modal_open()",
+        "window.get_workspace_paste_warning_modal_open()",
+        "window.get_open_saved_ssh_modal_open()",
+        "window.get_sftp_remote_file_modal_open()",
+        "if workspace_blocks_native_terminal_surface(window) {",
+        "return NativeTerminalSurfaceRect::default();",
+    ] {
+        assert!(
+            bootstrap_source.contains(expected),
+            "bootstrap should keep `{expected}` so retained-native child HWNDs are hidden whenever a blocking modal takes the workspace input plane"
+        );
+    }
+}
+
+#[test]
+fn modal_state_sync_paths_force_immediate_native_surface_geometry_refresh() {
+    let bootstrap_source =
+        fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap source");
+    let assets_keychain_source = fs::read_to_string("src/app/bootstrap/assets_keychain.rs")
+        .expect("read assets keychain source");
+    let shell_chrome_source = fs::read_to_string("src/app/bootstrap/shell_chrome.rs")
+        .expect("read shell chrome source");
+    let sftp_source =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read sftp source");
+    let windowing_source =
+        fs::read_to_string("src/app/bootstrap/windowing.rs").expect("read windowing source");
+
+    assert!(
+        bootstrap_source.contains("window.set_open_saved_ssh_modal_open(state.saved_ssh_picker_open());")
+            && bootstrap_source.contains("sync_workspace_native_terminal_surface_geometry(window);"),
+        "bootstrap should refresh retained-native child HWND geometry immediately after syncing the open-saved-ssh modal so a stale child surface cannot stay above the blocking overlay until the next terminal frame"
+    );
+
+    for (source, expected, label) in [
+        (
+            &assets_keychain_source,
+            "super::sync_workspace_native_terminal_surface_geometry(window);",
+            "asset modal sync",
+        ),
+        (
+            &shell_chrome_source,
+            "super::sync_workspace_native_terminal_surface_geometry(window);",
+            "settings modal sync",
+        ),
+        (
+            &sftp_source,
+            "super::sync_workspace_native_terminal_surface_geometry(window);",
+            "sftp remote file modal sync",
+        ),
+        (
+            &windowing_source,
+            "super::sync_workspace_native_terminal_surface_geometry(window);",
+            "windowing modal sync",
+        ),
+    ] {
+        assert!(
+            source.contains(expected),
+            "{label} should force an immediate retained-native geometry refresh when blocking modal state changes so child HWND visibility does not wait for a later layout or terminal-present tick"
         );
     }
 }
