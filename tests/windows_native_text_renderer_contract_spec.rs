@@ -93,6 +93,24 @@ fn windows_native_text_renderer_source_tracks_true_fallback_path_when_directwrit
 }
 
 #[test]
+fn windows_native_text_renderer_source_can_build_directwrite_faces_for_bundled_fonts() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows native backend");
+
+    for expected in [
+        "CreateInMemoryFontFileLoader",
+        "CreateInMemoryFontFileReference",
+        "DWRITE_FONT_FACE_TYPE_TRUETYPE",
+    ] {
+        assert!(
+            windows_backend_source.contains(expected),
+            "windows native text renderer should reference `{expected}` so bundled terminal fonts like JetBrains Mono and Sarasa Term SC can stay on the DirectWrite path even when they are not installed in the system font collection"
+        );
+    }
+}
+
+#[test]
 fn windows_native_text_renderer_source_avoids_duplicate_directwrite_rendering_mode_alias_arms() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")

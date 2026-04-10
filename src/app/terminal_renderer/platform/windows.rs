@@ -9,7 +9,9 @@ use crate::AppWindow;
 #[cfg(target_os = "windows")]
 use crate::app::ssh::runtime::TerminalCursorShape;
 #[cfg(target_os = "windows")]
-use crate::app::terminal_font::FontFaceKey;
+use crate::app::terminal_font::{
+    DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY, DEFAULT_TERMINAL_FONT_FAMILY, FontFaceKey,
+};
 use crate::app::terminal_renderer::diagnostics::{
     NativeTerminalSurfaceGlyphBoundsTrace, NativeTerminalSurfaceWindowsTextDiagnostics,
 };
@@ -44,15 +46,16 @@ use windows::Win32::Graphics::Direct2D::{
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-    DWRITE_FONT_WEIGHT_REGULAR, DWRITE_GLYPH_OFFSET, DWRITE_GLYPH_RUN,
-    DWRITE_MEASURING_MODE_NATURAL, DWRITE_PIXEL_GEOMETRY, DWRITE_PIXEL_GEOMETRY_BGR,
-    DWRITE_PIXEL_GEOMETRY_FLAT, DWRITE_PIXEL_GEOMETRY_RGB, DWRITE_RENDERING_MODE,
-    DWRITE_RENDERING_MODE_ALIASED, DWRITE_RENDERING_MODE_CLEARTYPE_GDI_CLASSIC,
-    DWRITE_RENDERING_MODE_CLEARTYPE_GDI_NATURAL, DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL,
-    DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC, DWRITE_RENDERING_MODE_DEFAULT,
-    DWRITE_RENDERING_MODE_OUTLINE, DWriteCreateFactory, IDWriteFactory, IDWriteFontCollection,
-    IDWriteFontFace, IDWriteRenderingParams,
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_FACE_TYPE_TRUETYPE, DWRITE_FONT_SIMULATIONS_NONE,
+    DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_REGULAR,
+    DWRITE_GLYPH_OFFSET, DWRITE_GLYPH_RUN, DWRITE_MEASURING_MODE_NATURAL, DWRITE_PIXEL_GEOMETRY,
+    DWRITE_PIXEL_GEOMETRY_BGR, DWRITE_PIXEL_GEOMETRY_FLAT, DWRITE_PIXEL_GEOMETRY_RGB,
+    DWRITE_RENDERING_MODE, DWRITE_RENDERING_MODE_ALIASED,
+    DWRITE_RENDERING_MODE_CLEARTYPE_GDI_CLASSIC, DWRITE_RENDERING_MODE_CLEARTYPE_GDI_NATURAL,
+    DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL, DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC,
+    DWRITE_RENDERING_MODE_DEFAULT, DWRITE_RENDERING_MODE_OUTLINE, DWriteCreateFactory,
+    IDWriteFactory, IDWriteFactory5, IDWriteFontCollection, IDWriteFontFace, IDWriteFontFile,
+    IDWriteInMemoryFontFileLoader, IDWriteRenderingParams,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM};
@@ -61,7 +64,14 @@ use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow}
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 #[cfg(target_os = "windows")]
-use windows::core::PCWSTR;
+use windows::core::{Interface, PCWSTR};
+
+#[cfg(target_os = "windows")]
+const BUNDLED_JETBRAINS_MONO_FONT_BYTES: &[u8] =
+    include_bytes!("../../../../assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf");
+#[cfg(target_os = "windows")]
+const BUNDLED_SARASA_TERM_SC_FONT_BYTES: &[u8] =
+    include_bytes!("../../../../assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
 
 #[derive(Default)]
 pub struct WindowsD2DFactoryState {
@@ -87,6 +97,10 @@ pub struct WindowsDirectWriteTextRendererState {
     font_collection: Option<IDWriteFontCollection>,
     #[cfg(target_os = "windows")]
     font_faces: HashMap<FontFaceKey, IDWriteFontFace>,
+    #[cfg(target_os = "windows")]
+    in_memory_font_file_loader: Option<IDWriteInMemoryFontFileLoader>,
+    #[cfg(target_os = "windows")]
+    in_memory_font_files: HashMap<FontFaceKey, IDWriteFontFile>,
     rendering_params_snapshot: Option<WindowsDirectWriteRenderingParamsSnapshot>,
 }
 
@@ -101,6 +115,10 @@ impl Default for WindowsDirectWriteTextRendererState {
             font_collection: None,
             #[cfg(target_os = "windows")]
             font_faces: HashMap::new(),
+            #[cfg(target_os = "windows")]
+            in_memory_font_file_loader: None,
+            #[cfg(target_os = "windows")]
+            in_memory_font_files: HashMap::new(),
             rendering_params_snapshot: None,
         }
     }
@@ -281,6 +299,8 @@ impl WindowsNativeSurfaceState {
             factory: Some(factory),
             font_collection: Some(font_collection),
             font_faces: HashMap::new(),
+            in_memory_font_file_loader: None,
+            in_memory_font_files: HashMap::new(),
             rendering_params_snapshot: None,
         });
 
@@ -842,16 +862,88 @@ impl WindowsNativeSurfaceState {
     }
 
     #[cfg(target_os = "windows")]
+    fn bundled_directwrite_font_bytes(family_name: &str) -> Option<&'static [u8]> {
+        if family_name.eq_ignore_ascii_case(DEFAULT_TERMINAL_FONT_FAMILY) {
+            return Some(BUNDLED_JETBRAINS_MONO_FONT_BYTES);
+        }
+
+        family_name
+            .eq_ignore_ascii_case(DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY)
+            .then_some(BUNDLED_SARASA_TERM_SC_FONT_BYTES)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn try_resolve_bundled_directwrite_font_face(
+        &mut self,
+        face_key: FontFaceKey,
+        family_name: &str,
+    ) -> Option<IDWriteFontFace> {
+        let font_bytes = Self::bundled_directwrite_font_bytes(family_name)?;
+        let renderer = self.directwrite_text_renderer.as_mut()?;
+        let factory = renderer.factory.as_ref()?.clone();
+
+        let loader = if let Some(loader) = renderer.in_memory_font_file_loader.as_ref() {
+            loader.clone()
+        } else {
+            let factory5: IDWriteFactory5 = factory.cast().ok()?;
+            let loader = unsafe { factory5.CreateInMemoryFontFileLoader().ok()? };
+            renderer.in_memory_font_file_loader = Some(loader.clone());
+            loader
+        };
+
+        let font_file = if let Some(font_file) = renderer.in_memory_font_files.get(&face_key) {
+            font_file.clone()
+        } else {
+            let font_file = unsafe {
+                loader
+                    .CreateInMemoryFontFileReference(
+                        &factory,
+                        font_bytes.as_ptr().cast(),
+                        u32::try_from(font_bytes.len()).ok()?,
+                        None::<&windows::core::IUnknown>,
+                    )
+                    .ok()?
+            };
+            renderer
+                .in_memory_font_files
+                .insert(face_key, font_file.clone());
+            font_file
+        };
+        let font_face = unsafe {
+            factory
+                .CreateFontFace(
+                    DWRITE_FONT_FACE_TYPE_TRUETYPE,
+                    &[Some(font_file)],
+                    0,
+                    DWRITE_FONT_SIMULATIONS_NONE,
+                )
+                .ok()?
+        };
+        renderer.font_faces.insert(face_key, font_face.clone());
+        Some(font_face)
+    }
+
+    #[cfg(target_os = "windows")]
     fn resolve_directwrite_font_face(
         &mut self,
         draw: &PreparedMonochromeGlyphDraw,
     ) -> Option<IDWriteFontFace> {
         self.ensure_directwrite_text_renderer();
-        let renderer = self.directwrite_text_renderer.as_mut()?;
-        if let Some(font_face) = renderer.font_faces.get(&draw.face_key) {
-            return Some(font_face.clone());
+        if let Some(font_face) = self
+            .directwrite_text_renderer
+            .as_ref()
+            .and_then(|renderer| renderer.font_faces.get(&draw.face_key).cloned())
+        {
+            return Some(font_face);
         }
 
+        if let Some(font_face) =
+            self.try_resolve_bundled_directwrite_font_face(draw.face_key, &draw.font_family_name)
+        {
+            return Some(font_face);
+        }
+
+        let renderer = self.directwrite_text_renderer.as_mut()?;
         let font_collection = renderer.font_collection.as_ref()?;
         let family_name_utf16 = draw
             .font_family_name
