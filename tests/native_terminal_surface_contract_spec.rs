@@ -1672,3 +1672,21 @@ fn windows_backend_source_tears_down_child_surface_when_not_visible() {
         "windows backend should tear down the retained-native child HWND whenever the pane is hidden or modal-blocked so Slint overlays cannot race a stale child window that only received a best-effort hide request"
     );
 }
+
+#[test]
+fn windows_child_host_source_keeps_parent_terminal_input_route_alive() {
+    let child_host_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows_child_host.rs")
+            .expect("read windows child host helper");
+
+    assert!(
+        child_host_source.contains("WM_NCHITTEST")
+            && child_host_source.contains("HTTRANSPARENT"),
+        "retained-native child HWND host should return HTTRANSPARENT for hit-testing so the parent Slint terminal surface keeps receiving mouse input instead of the child presenter swallowing clicks and selection gestures"
+    );
+    assert!(
+        child_host_source.contains("WM_MOUSEACTIVATE")
+            && child_host_source.contains("MA_NOACTIVATE"),
+        "retained-native child HWND host should refuse activation on mouse input so keyboard focus stays on the parent terminal input path until child-HWND input ownership is implemented deliberately"
+    );
+}

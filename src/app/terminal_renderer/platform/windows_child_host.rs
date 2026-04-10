@@ -165,10 +165,13 @@ extern "system" fn retained_native_child_host_wndproc(
     use windows::Win32::Foundation::LRESULT;
     use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
     use windows::Win32::UI::WindowsAndMessaging::{
-        DefWindowProcW, WM_ERASEBKGND, WM_PAINT,
+        DefWindowProcW, HTTRANSPARENT, MA_NOACTIVATE, WM_ERASEBKGND, WM_MOUSEACTIVATE,
+        WM_NCHITTEST, WM_PAINT,
     };
 
     match msg {
+        WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
+        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_ERASEBKGND => LRESULT(1),
         WM_PAINT => {
             let mut paint = PAINTSTRUCT::default();
