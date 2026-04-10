@@ -919,7 +919,9 @@ export component TerminalSessionHost inherits Rectangle {
             clip: true;
             border-width: 1px;
             border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.panel-surface;
+            background: root.session-render-mode == "native"
+                ? root.session-default-bg
+                : ThemeTokens.panel-surface;
 
             blank-surface := Rectangle {
                 x: root.terminal-surface-origin-x();

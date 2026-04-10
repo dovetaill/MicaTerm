@@ -82,3 +82,16 @@ fn native_mode_keeps_host_cursor_overlay_scoped_to_bitmap_presentations() {
         "host-side cursor visuals should stay scoped to bitmap mode so native mode does not double-draw the cursor overlay"
     );
 }
+
+#[test]
+fn native_mode_keeps_host_surface_backdrop_opaque_behind_child_presenter() {
+    let host_source =
+        fs::read_to_string("ui/shell/terminal-session-host.slint").expect("read terminal host");
+
+    assert!(
+        host_source.contains("background: root.session-render-mode == \"native\"")
+            && host_source.contains("? root.session-default-bg")
+            && host_source.contains(": ThemeTokens.panel-surface;"),
+        "native mode should keep an opaque host-side terminal backdrop behind the retained child HWND so screenshot/composition gaps do not read as terminal transparency"
+    );
+}
