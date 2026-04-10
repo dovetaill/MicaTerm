@@ -7,11 +7,12 @@ use mica_term::app::terminal_renderer::diagnostics::{
 use mica_term::app::windows_frame::{
     native_surface_baseline_px, native_surface_clear_type_level_per_mille,
     native_surface_enhanced_contrast_per_mille, native_surface_font_chain,
-    native_surface_gamma_per_mille, native_surface_glyph_bounds_trace,
+    native_surface_gamma_per_mille, native_surface_glyph_bounds_trace, native_surface_host_hwnd,
     native_surface_pixel_alignment, native_surface_pixel_geometry,
-    native_surface_render_target_alpha_mode, native_surface_rendering_mode,
-    native_surface_rendering_params_source, native_surface_scale_factor_percent,
-    native_surface_text_antialias_mode,
+    native_surface_render_target_alpha_mode, native_surface_render_target_ready,
+    native_surface_rendering_mode, native_surface_rendering_params_source,
+    native_surface_scale_factor_percent, native_surface_surface_hwnd,
+    native_surface_surface_visible, native_surface_text_antialias_mode,
 };
 
 #[test]
@@ -23,6 +24,10 @@ fn diagnostics_contract_exposes_windows_text_rendering_trace_fields() {
         "pub struct NativeTerminalSurfaceWindowsTextDiagnostics",
         "pub struct NativeTerminalSurfaceGlyphBoundsTrace",
         "pub windows_text: Option<NativeTerminalSurfaceWindowsTextDiagnostics>",
+        "pub host_hwnd: Option<isize>",
+        "pub surface_hwnd: Option<isize>",
+        "pub surface_visible: Option<bool>",
+        "pub render_target_ready: Option<bool>",
         "pub scheduled_present_count: u64",
         "pub host_redraw_request_count: u64",
         "pub host_redraw_replay_count: u64",
@@ -60,6 +65,10 @@ fn windows_backend_source_publishes_windows_text_rendering_snapshot() {
     for expected in [
         "GetDpiForWindow",
         "windows_text: Some(",
+        "host_hwnd:",
+        "surface_hwnd:",
+        "surface_visible:",
+        "render_target_ready:",
         "text_antialias_mode:",
         "render_target_alpha_mode:",
         "rendering_params_source:",
@@ -82,8 +91,25 @@ fn windows_backend_source_publishes_windows_text_rendering_snapshot() {
 }
 
 #[test]
+fn windows_backend_source_projects_child_local_glyph_bounds_into_host_coordinates() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows backend");
+
+    assert!(
+        windows_backend_source.contains("self.window_rect.x.saturating_add(draw.dest_x_px)")
+            && windows_backend_source.contains("self.window_rect.y.saturating_add(draw.dest_y_px)"),
+        "windows backend diagnostics should project child-local glyph draws back into host-window coordinates so child-HWND rendering stays debuggable from the shell frame"
+    );
+}
+
+#[test]
 fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
     let diagnostics = NativeTerminalSurfaceDiagnostics {
+        host_hwnd: Some(0x1234),
+        surface_hwnd: Some(0x5678),
+        surface_visible: Some(true),
+        render_target_ready: Some(true),
         windows_text: Some(NativeTerminalSurfaceWindowsTextDiagnostics {
             text_antialias_mode: Some("cleartype"),
             render_target_alpha_mode: Some("ignore"),
@@ -118,6 +144,10 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
         ..Default::default()
     };
 
+    assert_eq!(native_surface_host_hwnd(&diagnostics), Some(0x1234));
+    assert_eq!(native_surface_surface_hwnd(&diagnostics), Some(0x5678));
+    assert_eq!(native_surface_surface_visible(&diagnostics), Some(true));
+    assert_eq!(native_surface_render_target_ready(&diagnostics), Some(true));
     assert_eq!(
         native_surface_text_antialias_mode(&diagnostics),
         Some("cleartype")
@@ -183,6 +213,10 @@ fn bootstrap_source_installs_native_terminal_diagnostics_trace_hook() {
         "native_surface_clear_type_level_per_mille(&diagnostics)",
         "native_surface_font_chain(&diagnostics)",
         "native_surface_glyph_bounds_trace(&diagnostics)",
+        "host_hwnd = diagnostics.host_hwnd.unwrap_or_default()",
+        "surface_hwnd = diagnostics.surface_hwnd.unwrap_or_default()",
+        "surface_visible = diagnostics.surface_visible.unwrap_or(false)",
+        "render_target_ready = diagnostics.render_target_ready.unwrap_or(false)",
         "scheduled_present_count = diagnostics.scheduled_present_count",
         "host_redraw_request_count = diagnostics.host_redraw_request_count",
         "host_redraw_replay_count = diagnostics.host_redraw_replay_count",

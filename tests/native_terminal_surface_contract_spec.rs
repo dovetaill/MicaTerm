@@ -423,16 +423,16 @@ fn software_winit_sources_expose_after_draw_present_contract() {
         "winit window adapter should run the after-draw hook immediately after renderer.render() finishes so same-HWND native surfaces can repaint on top of the host surface"
     );
     assert!(
-        native_surface_source.contains("host_surface_invalidated: bool"),
-        "native surface bridge should track when the Slint host surface has just repainted over the retained native plane"
+        native_surface_source.contains("host_redraw_sync_pending: bool"),
+        "native surface bridge should track when the shell redraw still owes the child HWND a synchronization replay without implying same-HWND overpaint ownership"
     );
     assert!(
-        native_surface_source.contains("state.host_surface_invalidated = true;"),
-        "native surface bridge should mark the host surface invalidated before replaying retained native content from after-draw hooks"
+        native_surface_source.contains("state.host_redraw_sync_pending = true;"),
+        "native surface bridge should mark a host-redraw sync hint before replaying retained native content from after-draw hooks"
     );
     assert!(
         native_surface_source
-            .contains("if !state.dirty && !state.damage_tracker.has_damage() && !state.host_surface_invalidated"),
+            .contains("if !state.dirty && !state.damage_tracker.has_damage() && !state.host_redraw_sync_pending"),
         "native surface draw gate should allow a retained frame replay after host redraw even when no new terminal frame arrived"
     );
 }
@@ -467,6 +467,32 @@ fn present_drivers_invoke_immediate_native_repaint_before_requesting_host_redraw
     assert!(
         native_surface_source.contains("state.pending_host_redraw.clear();"),
         "native surface should clear the host redraw gate only after the shell redraw replay hook runs so repeated immediate presents before that point collapse into one host redraw request"
+    );
+}
+
+#[test]
+fn rendering_notifier_path_treats_host_redraw_as_child_surface_sync_hint() {
+    let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
+        .expect("read native surface");
+    let present_driver_source = fs::read_to_string("src/app/terminal_renderer/present_driver.rs")
+        .expect("read present driver");
+
+    assert!(
+        native_surface_source.contains("host_redraw_sync_pending: bool"),
+        "native surface scheduling should track host redraw as a child-surface sync hint instead of assuming the shell repaint directly owns native terminal visibility"
+    );
+    assert!(
+        native_surface_source.contains("state.host_redraw_sync_pending = true;"),
+        "after-draw replay should mark a child-surface sync hint before replaying retained-native content"
+    );
+    assert!(
+        !native_surface_source.contains("host_surface_invalidated"),
+        "native surface scheduling should stop encoding same-HWND overpaint assumptions once the child HWND owns visible terminal output"
+    );
+    assert!(
+        present_driver_source.contains("host redraw stays a synchronization hint")
+            && present_driver_source.contains("child HWND owns visible terminal output"),
+        "present driver docs should describe host redraw as a synchronization hint now that the child HWND, not the shell redraw, owns visible retained-native pixels"
     );
 }
 
@@ -891,6 +917,10 @@ fn windows_backend_source_exposes_d2d_lifecycle_contract() {
         "windows backend should define an explicit HWND render-target lifecycle state"
     );
     assert!(
+        windows_backend_source.contains("ID2D1HwndRenderTarget"),
+        "windows backend should carry a child-surface HWND render target contract instead of a host-window DC target"
+    );
+    assert!(
         windows_backend_source.contains("pub d2d_factory: Option<WindowsD2DFactoryState>"),
         "windows native surface state should retain D2D factory ownership instead of only HWND and frame token bookkeeping"
     );
@@ -918,6 +948,14 @@ fn windows_backend_source_exposes_d2d_lifecycle_contract() {
     assert!(
         windows_backend_source.contains("fn ensure_hwnd_render_target(&mut self)"),
         "windows backend should expose a helper that ensures an HWND render target exists before present"
+    );
+    assert!(
+        windows_backend_source.contains("CreateHwndRenderTarget"),
+        "windows backend should create a child-owned HWND render target instead of binding Direct2D to the host window DC"
+    );
+    assert!(
+        !windows_backend_source.contains("CreateDCRenderTarget"),
+        "windows backend should stop creating a DC render target once retained-native output owns its own child HWND"
     );
     assert!(
         windows_backend_source.contains("fn clear_device_resources(&mut self)"),
@@ -1417,88 +1455,91 @@ fn windows_backend_source_exposes_lazy_host_hwnd_reacquire_contract() {
 }
 
 #[test]
-fn windows_backend_source_exposes_same_hwnd_present_contract() {
+fn windows_backend_source_exposes_child_hwnd_present_contract() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows platform backend");
+    let child_host_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows_child_host.rs")
+            .expect("read windows child-host helper");
 
     assert!(
         windows_backend_source.contains("host_hwnd: Option<isize>"),
-        "windows backend should retain the top-level host HWND so Direct2D can bind to the real application window"
+        "windows backend should retain the top-level host HWND so the child presenter can stay parented to the real shell window"
     );
     assert!(
-        !windows_backend_source.contains("surface_hwnd: Option<isize>"),
-        "windows backend should stop storing a second child surface HWND once the native terminal is painted into the host window itself"
+        windows_backend_source.contains("surface_hwnd: Option<isize>"),
+        "windows backend should retain a dedicated child surface HWND so retained-native rendering stops drawing through the host window DC"
     );
     assert!(
-        !windows_backend_source.contains("CreateWindowExW("),
-        "windows backend should stop creating a dedicated child HWND because it visually floats above the Slint shell and causes overlay artifacts"
+        child_host_source.contains("CreateWindowExW("),
+        "windows backend should create a dedicated child HWND so retained-native output owns its own presentation boundary"
     );
     assert!(
-        !windows_backend_source.contains("SetWindowPos("),
-        "windows backend should stop moving a dedicated child HWND around when the terminal rect changes"
+        child_host_source.contains("SetWindowPos("),
+        "windows backend should move the child HWND whenever the pane rect changes"
     );
     assert!(
-        !windows_backend_source.contains("DestroyWindow("),
-        "windows backend should no longer destroy a dedicated child HWND during detach because the host HWND remains owned by the shell"
+        child_host_source.contains("DestroyWindow("),
+        "windows backend should destroy the child HWND during detach so retained-native host state does not leak after the pane disappears"
     );
     assert!(
-        windows_backend_source.contains("let Some(hwnd) = self.host_hwnd else {"),
-        "windows backend render-target creation should bind Direct2D straight to the host HWND"
+        !windows_backend_source.contains("GetDC(HWND(host_hwnd as _))"),
+        "windows backend should stop acquiring a host-window DC once retained-native output is isolated behind a child HWND"
     );
     assert!(
-        windows_backend_source.contains("fn window_bind_rect(&self) -> Option<RECT>"),
-        "windows backend should bind the Direct2D DC render target to the terminal sub-rect of the host window instead of presenting across the full shell HWND"
+        !windows_backend_source.contains("render_target.BindDC("),
+        "windows backend should stop binding a Direct2D DC target to the host window once a child HWND owns presentation"
     );
     assert!(
         windows_backend_source.contains("self.rect = NativeTerminalSurfaceRect {")
             && windows_backend_source.contains("x: 0,")
             && windows_backend_source.contains("y: 0,"),
-        "windows backend should keep retained frame drawing in terminal-local coordinates while the bound DC rect anchors presentation inside the host window"
+        "windows backend should keep retained frame drawing in child-local coordinates even though the diagnostics later project those bounds back into host coordinates"
     );
 }
 
 #[test]
-fn windows_backend_source_exposes_host_window_present_contract() {
+fn windows_backend_source_exposes_child_surface_window_lifecycle_contract() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows platform backend");
 
     assert!(
         windows_backend_source.contains("pub window_rect: NativeTerminalSurfaceRect"),
-        "windows backend state should retain the Slint-reported terminal rect even when the render target is bound to the host window"
+        "windows backend state should retain the Slint-reported terminal rect so the child HWND can stay aligned with the terminal pane"
     );
     assert!(
         windows_backend_source.contains("host_hwnd: Option<isize>"),
-        "windows backend should retain the top-level host HWND for same-window Direct2D presentation"
+        "windows backend should retain the top-level host HWND so the child presenter can stay attached to the shell window"
     );
     assert!(
-        windows_backend_source.contains("fn sync_host_surface_rect(&mut self)"),
-        "windows backend should expose a helper that keeps the retained terminal rect in host-window coordinates"
+        windows_backend_source.contains("fn ensure_child_surface_window(&mut self)"),
+        "windows backend should expose a helper that lazily creates the retained-native child host window"
     );
     assert!(
-        !windows_backend_source.contains("fn ensure_child_surface_window(&mut self)"),
-        "windows backend should stop exposing child-HWND helpers once the native terminal is rendered into the shell window itself"
+        windows_backend_source.contains("fn sync_child_surface_window_rect(&mut self)"),
+        "windows backend should expose a helper that keeps the child host window aligned with the pane rect"
     );
     assert!(
-        !windows_backend_source.contains("fn sync_child_surface_window_rect(&mut self)"),
-        "windows backend should stop maintaining child-window geometry once presentation happens in the host window"
+        windows_backend_source.contains("fn destroy_child_surface_window(&mut self)"),
+        "windows backend should expose a helper that tears down the child host window during detach or parent HWND changes"
     );
     assert!(
-        !windows_backend_source.contains("fn destroy_child_surface_window(&mut self)"),
-        "windows backend should stop carrying child-window teardown helpers in the same-HWND integration path"
+        windows_backend_source.contains("self.ensure_child_surface_window();"),
+        "windows backend should ensure the child host exists during attach and present before using retained-native state"
     );
     assert!(
-        windows_backend_source.contains("self.state.sync_host_surface_rect();"),
-        "windows backend should resync the retained terminal rect whenever layout geometry changes or the host HWND becomes available"
+        windows_backend_source.contains("self.sync_child_surface_window_rect();"),
+        "windows backend should resync child-host geometry whenever layout updates or host HWND resolution changes"
     );
     assert!(
         windows_backend_source.contains("retained_frame.rect = self.state.rect;"),
-        "windows backend should thread the terminal-local rect into retained frames while BindDC anchors output to the host window region"
+        "windows backend should keep threading child-local rects into retained frames while the child host owns visible presentation"
     );
     assert!(
-        !windows_backend_source.contains("self.state.destroy_child_surface_window();"),
-        "windows backend detach path should no longer tear down a synthetic child window because the host HWND belongs to the Slint shell"
+        windows_backend_source.contains("self.destroy_child_surface_window();"),
+        "windows backend detach path should tear down the retained-native child HWND when the backend detaches from the shell"
     );
 }
 

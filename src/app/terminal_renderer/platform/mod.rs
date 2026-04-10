@@ -4,6 +4,8 @@ pub mod backend;
 pub mod wayland;
 #[cfg(feature = "terminal-native-renderer")]
 pub mod windows;
+#[cfg(feature = "terminal-native-renderer")]
+pub mod windows_child_host;
 #[cfg(not(feature = "terminal-native-renderer"))]
 pub mod windows_stub;
 pub mod x11;

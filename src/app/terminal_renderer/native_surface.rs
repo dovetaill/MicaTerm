@@ -34,7 +34,7 @@ struct NativeTerminalSurfaceState {
     latest_diagnostics: NativeTerminalSurfaceDiagnostics,
     damage_tracker: NativeFrameDamageTracker,
     surface_alive: bool,
-    host_surface_invalidated: bool,
+    host_redraw_sync_pending: bool,
     dirty: bool,
     pending_present: PendingPresentGate,
     pending_host_redraw: PendingPresentGate,
@@ -74,7 +74,7 @@ impl NativeTerminalSurfaceState {
             latest_diagnostics: NativeTerminalSurfaceDiagnostics::default(),
             damage_tracker: NativeFrameDamageTracker::default(),
             surface_alive: true,
-            host_surface_invalidated: false,
+            host_redraw_sync_pending: false,
             dirty: false,
             pending_present: PendingPresentGate::default(),
             pending_host_redraw: PendingPresentGate::default(),
@@ -291,12 +291,12 @@ fn draw_retained_frame(state: &mut NativeTerminalSurfaceState) {
     if !state.surface_alive {
         return;
     }
-    if !state.dirty && !state.damage_tracker.has_damage() && !state.host_surface_invalidated {
+    if !state.dirty && !state.damage_tracker.has_damage() && !state.host_redraw_sync_pending {
         return;
     }
     let damage = state.damage_tracker.take_damage().unwrap_or_default();
     let damage = if matches!(damage.kind, NativeSurfaceDamageKind::None)
-        && (state.dirty || state.host_surface_invalidated)
+        && (state.dirty || state.host_redraw_sync_pending)
     {
         NativeSurfaceDamage {
             kind: NativeSurfaceDamageKind::Full,
@@ -311,7 +311,7 @@ fn draw_retained_frame(state: &mut NativeTerminalSurfaceState) {
         state.last_drawn_frame_token = 0;
     }
     state.backend.present(damage);
-    state.host_surface_invalidated = false;
+    state.host_redraw_sync_pending = false;
     state.dirty = false;
     refresh_diagnostics(state);
 }
@@ -319,7 +319,7 @@ fn draw_retained_frame(state: &mut NativeTerminalSurfaceState) {
 fn replay_after_host_redraw(state: &mut NativeTerminalSurfaceState) {
     state.pending_host_redraw.clear();
     state.host_redraw_replay_count = state.host_redraw_replay_count.saturating_add(1);
-    state.host_surface_invalidated = true;
+    state.host_redraw_sync_pending = true;
     draw_retained_frame(state);
 }
 
@@ -335,7 +335,7 @@ fn teardown_native_surface(state: &mut NativeTerminalSurfaceState) {
     state.damage_tracker.clear();
     clear_retained_frame(state);
     state.dirty = false;
-    state.host_surface_invalidated = false;
+    state.host_redraw_sync_pending = false;
     state.pending_present.clear();
     state.pending_host_redraw.clear();
     state.backend.detach();

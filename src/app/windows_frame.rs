@@ -61,7 +61,32 @@ pub fn resolve_host_window_hwnd(window: &AppWindow) -> Option<isize> {
 pub fn native_surface_diagnostics_hwnd(
     diagnostics: &NativeTerminalSurfaceDiagnostics,
 ) -> Option<isize> {
-    diagnostics.hwnd
+    diagnostics
+        .surface_hwnd
+        .or(diagnostics.hwnd)
+        .or(diagnostics.host_hwnd)
+}
+
+pub fn native_surface_host_hwnd(diagnostics: &NativeTerminalSurfaceDiagnostics) -> Option<isize> {
+    diagnostics.host_hwnd
+}
+
+pub fn native_surface_surface_hwnd(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<isize> {
+    diagnostics.surface_hwnd
+}
+
+pub fn native_surface_surface_visible(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<bool> {
+    diagnostics.surface_visible
+}
+
+pub fn native_surface_render_target_ready(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<bool> {
+    diagnostics.render_target_ready
 }
 
 pub fn native_surface_text_renderer_path(
@@ -201,6 +226,8 @@ pub fn native_surface_glyph_bounds_trace(
 
 pub fn native_surface_is_attached(diagnostics: &NativeTerminalSurfaceDiagnostics) -> bool {
     diagnostics.hwnd.is_some()
+        || diagnostics.surface_hwnd.is_some()
+        || diagnostics.host_hwnd.is_some()
 }
 
 pub fn point_hits_outer_resize_band(

@@ -38,9 +38,8 @@ fn run_with_profile_accepts_external_async_handle_for_ssh_services() {
         "run_with_profile should explicitly accept the async runtime handle used by shell services"
     );
     assert!(
-        content.contains(
-            "let session_bridge =\n                build_session_bridge(async_runtime_handle.clone(),"
-        ),
+        content.contains("let session_bridge = build_session_bridge(")
+            && content.contains("async_runtime_handle.clone(),"),
         "run_with_profile should thread the supplied runtime handle into session bridge construction"
     );
     assert!(
@@ -74,6 +73,40 @@ fn bootstrap_logs_terminal_subsystem_and_render_fallback_labels() {
     assert!(
         content.contains("fallback_render_mode = TerminalRenderMode::Bitmap.as_str()"),
         "bootstrap should keep fallback render mode labels visible in diagnostics when a presenter downgrade happens"
+    );
+}
+
+#[test]
+fn native_surface_diagnostics_smoke_reports_child_host_relationship() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let diagnostics_source =
+        fs::read_to_string("src/app/terminal_renderer/diagnostics.rs").expect("read diagnostics");
+    let windows_frame_source =
+        fs::read_to_string("src/app/windows_frame.rs").expect("read windows frame");
+
+    assert!(
+        bootstrap_source.contains("window_scale_factor(window)"),
+        "bootstrap should keep logging the live window scale factor so child-host geometry stays debuggable in physical pixels"
+    );
+    assert!(
+        bootstrap_source.contains("host_hwnd = diagnostics.host_hwnd.unwrap_or_default()")
+            && bootstrap_source
+                .contains("surface_hwnd = diagnostics.surface_hwnd.unwrap_or_default()")
+            && bootstrap_source
+                .contains("surface_visible = diagnostics.surface_visible.unwrap_or(false)")
+            && bootstrap_source
+                .contains("render_target_ready = diagnostics.render_target_ready.unwrap_or(false)"),
+        "bootstrap diagnostics should log the host/child HWND relationship plus child visibility and target readiness"
+    );
+    assert!(
+        diagnostics_source.contains("pub host_hwnd: Option<isize>")
+            && diagnostics_source.contains("pub surface_hwnd: Option<isize>"),
+        "native surface diagnostics should expose dedicated host and child HWND fields"
+    );
+    assert!(
+        windows_frame_source.contains("pub fn native_surface_host_hwnd(")
+            && windows_frame_source.contains("pub fn native_surface_surface_hwnd("),
+        "windows frame helpers should expose stable accessors for host and child HWND diagnostics"
     );
 }
 

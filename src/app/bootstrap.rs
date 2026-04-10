@@ -150,11 +150,13 @@ use crate::app::windows_frame::{
 use crate::app::windows_frame::{
     native_surface_baseline_px, native_surface_clear_type_level_per_mille, native_surface_dpi_x,
     native_surface_dpi_y, native_surface_enhanced_contrast_per_mille, native_surface_font_chain,
-    native_surface_gamma_per_mille, native_surface_glyph_bounds_trace,
+    native_surface_gamma_per_mille, native_surface_glyph_bounds_trace, native_surface_host_hwnd,
     native_surface_pixel_alignment, native_surface_pixel_geometry,
-    native_surface_render_target_alpha_mode, native_surface_rendering_mode,
-    native_surface_rendering_params_source, native_surface_scale_factor_percent,
-    native_surface_text_antialias_mode, native_surface_text_renderer_path,
+    native_surface_render_target_alpha_mode, native_surface_render_target_ready,
+    native_surface_rendering_mode, native_surface_rendering_params_source,
+    native_surface_scale_factor_percent, native_surface_surface_hwnd,
+    native_surface_surface_visible, native_surface_text_antialias_mode,
+    native_surface_text_renderer_path,
 };
 use crate::shell::assets::{
     AssetDisclosureState, AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec,
@@ -2373,6 +2375,10 @@ fn trace_workspace_native_terminal_diagnostics(window: &AppWindow) {
 
     tracing::trace!(
         target: "app.terminal",
+        host_hwnd = diagnostics.host_hwnd.unwrap_or_default(),
+        surface_hwnd = diagnostics.surface_hwnd.unwrap_or_default(),
+        surface_visible = diagnostics.surface_visible.unwrap_or(false),
+        render_target_ready = diagnostics.render_target_ready.unwrap_or(false),
         text_renderer_path = native_surface_text_renderer_path(&diagnostics).unwrap_or("unknown"),
         text_antialias_mode = native_surface_text_antialias_mode(&diagnostics).unwrap_or("unknown"),
         render_target_alpha_mode = native_surface_render_target_alpha_mode(&diagnostics)
@@ -2396,6 +2402,12 @@ fn trace_workspace_native_terminal_diagnostics(window: &AppWindow) {
         diagnostics_scale_factor_percent = native_surface_scale_factor_percent(&diagnostics)
             .unwrap_or_default(),
         host_scale_factor = window_scale_factor(window),
+        diagnostics_host_hwnd = native_surface_host_hwnd(&diagnostics).unwrap_or_default(),
+        diagnostics_surface_hwnd = native_surface_surface_hwnd(&diagnostics).unwrap_or_default(),
+        diagnostics_surface_visible = native_surface_surface_visible(&diagnostics)
+            .unwrap_or(false),
+        diagnostics_render_target_ready = native_surface_render_target_ready(&diagnostics)
+            .unwrap_or(false),
         font_chain = %font_chain,
         glyph_bounds = %glyph_bounds,
         "workspace native terminal diagnostics snapshot"

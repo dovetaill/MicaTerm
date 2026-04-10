@@ -26,6 +26,16 @@ fn windows_native_text_renderer_source_exposes_directwrite_primary_text_path() {
         windows_backend_source.contains("DrawGlyphRun("),
         "Task 4 should issue DirectWrite glyph-run drawing instead of relying only on FillOpacityMask monochrome blits"
     );
+    assert!(
+        windows_backend_source.contains("ID2D1HwndRenderTarget")
+            || windows_backend_source.contains("CreateHwndRenderTarget"),
+        "child-host retained-native text rendering should target a child-owned HWND render target instead of a host-window DC binding path"
+    );
+    assert!(
+        !windows_backend_source.contains("GetDC(HWND(host_hwnd as _))")
+            && !windows_backend_source.contains("BindDC(hdc, &bind_rect)"),
+        "child-host retained-native text rendering should stop binding Direct2D to the host window DC"
+    );
 }
 
 #[test]
@@ -162,5 +172,13 @@ fn native_surface_rollout_sources_document_default_and_rollback_paths() {
     assert!(
         readme_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface"),
         "readme should document the retained native surface bring-up switch so packaged Windows mainline can stay on the visible scene-image path by default"
+    );
+    assert!(
+        readme_source.contains("child HWND") || readme_source.contains("child host"),
+        "readme should describe the retained-native Windows presenter as a dedicated child host window instead of leaving the architecture ambiguous"
+    );
+    assert!(
+        !readme_source.contains("same-HWND native surface"),
+        "readme should stop documenting the retired same-HWND DC overlay architecture now that child-host retained-native is the approved direction"
     );
 }
