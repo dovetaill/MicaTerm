@@ -1738,3 +1738,43 @@ fn windows_child_host_source_keeps_parent_terminal_input_route_alive() {
         "retained-native child HWND host should refuse activation on mouse input so keyboard focus stays on the parent terminal input path until child-HWND input ownership is implemented deliberately"
     );
 }
+
+#[test]
+fn windows_child_host_source_paints_opaque_fallback_background() {
+    let child_host_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows_child_host.rs")
+            .expect("read windows child host helper");
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows backend");
+
+    assert!(
+        child_host_source.contains("pub fn set_background_rgba(&self, rgba: u32)")
+            && child_host_source.contains("SetWindowLongPtrW")
+            && child_host_source.contains("InvalidateRect"),
+        "retained-native child HWND host should expose a background-color setter that invalidates the child window so native fallback paint never leaves a freshly created or resized surface visually transparent"
+    );
+    assert!(
+        child_host_source.contains("fn paint_retained_native_child_host_background(")
+            && child_host_source.contains("WM_ERASEBKGND => {")
+            && child_host_source.contains("WM_PAINT => {"),
+        "retained-native child HWND host should actively paint an opaque fallback background during WM_ERASEBKGND and WM_PAINT instead of validating an unpainted child surface that can show through the translucent shell window"
+    );
+    assert!(
+        windows_backend_source.contains("child_surface_host.set_background_rgba("),
+        "windows backend should feed the current terminal default background into the retained child HWND so fallback GDI paints match the active terminal surface"
+    );
+}
+
+#[test]
+fn windows_host_frame_source_clips_child_surfaces_for_native_terminal() {
+    let windows_frame_source =
+        fs::read_to_string("src/app/windows_frame.rs").expect("read windows frame source");
+
+    assert!(
+        windows_frame_source.contains("WS_CLIPCHILDREN")
+            && windows_frame_source.contains("SetWindowLongPtrW")
+            && windows_frame_source.contains("GWL_STYLE"),
+        "windows host frame adapter should force WS_CLIPCHILDREN onto the top-level host HWND so parent Mica/Skia repaints cannot redraw through the retained native child terminal surface"
+    );
+}

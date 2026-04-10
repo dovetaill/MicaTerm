@@ -101,6 +101,33 @@ impl WindowsChildSurfaceHost {
     pub fn set_visible(&self, _visible: bool) {}
 
     #[cfg(target_os = "windows")]
+    pub fn set_background_rgba(&self, rgba: u32) {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::Graphics::Gdi::InvalidateRect;
+        use windows::Win32::UI::WindowsAndMessaging::{GWLP_USERDATA, SetWindowLongPtrW};
+
+        if self.surface_hwnd == 0 {
+            return;
+        }
+
+        unsafe {
+            let _ = SetWindowLongPtrW(
+                HWND(self.surface_hwnd as _),
+                GWLP_USERDATA,
+                isize::try_from(opaque_background_rgba(rgba)).unwrap_or_default(),
+            );
+            let _ = InvalidateRect(
+                HWND(self.surface_hwnd as _),
+                None,
+                false,
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub fn set_background_rgba(&self, _rgba: u32) {}
+
+    #[cfg(target_os = "windows")]
     pub fn destroy(&mut self) {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::DestroyWindow;
@@ -161,7 +188,7 @@ extern "system" fn retained_native_child_host_wndproc(
     lparam: windows::Win32::Foundation::LPARAM,
 ) -> windows::Win32::Foundation::LRESULT {
     use windows::Win32::Foundation::LRESULT;
-    use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT};
+    use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, HDC, PAINTSTRUCT};
     use windows::Win32::UI::WindowsAndMessaging::{
         DefWindowProcW, HTTRANSPARENT, MA_NOACTIVATE, WM_ERASEBKGND, WM_MOUSEACTIVATE,
         WM_NCHITTEST, WM_PAINT,
@@ -170,15 +197,75 @@ extern "system" fn retained_native_child_host_wndproc(
     match msg {
         WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
-        WM_ERASEBKGND => LRESULT(1),
+        WM_ERASEBKGND => {
+            let hdc = HDC(wparam.0 as _);
+            if hdc.0 as usize != 0 {
+                paint_retained_native_child_host_background(hwnd, hdc);
+            }
+            LRESULT(1)
+        }
         WM_PAINT => {
             let mut paint = PAINTSTRUCT::default();
             unsafe {
-                BeginPaint(hwnd, &mut paint);
+                let hdc = BeginPaint(hwnd, &mut paint);
+                paint_retained_native_child_host_background(hwnd, hdc);
                 let _ = EndPaint(hwnd, &paint);
             }
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn retained_native_child_host_background_rgba(hwnd: windows::Win32::Foundation::HWND) -> u32 {
+    use windows::Win32::UI::WindowsAndMessaging::{GWLP_USERDATA, GetWindowLongPtrW};
+
+    let stored = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+    let stored = u32::try_from(stored.max(0)).unwrap_or_default();
+    if stored == 0 {
+        0xff11_1821
+    } else {
+        opaque_background_rgba(stored)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn opaque_background_rgba(rgba: u32) -> u32 {
+    0xff00_0000 | (rgba & 0x00ff_ffff)
+}
+
+#[cfg(target_os = "windows")]
+fn paint_retained_native_child_host_background(
+    hwnd: windows::Win32::Foundation::HWND,
+    hdc: windows::Win32::Graphics::Gdi::HDC,
+) {
+    use windows::Win32::Foundation::{COLORREF, RECT};
+    use windows::Win32::Graphics::Gdi::{
+        CreateSolidBrush, DeleteObject, FillRect,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+
+    let mut rect = RECT::default();
+    if unsafe { GetClientRect(hwnd, &mut rect) }.is_err() {
+        return;
+    }
+
+    let rgba = retained_native_child_host_background_rgba(hwnd);
+    let red = rgba >> 16 & 0xff;
+    let green = rgba >> 8 & 0xff;
+    let blue = rgba & 0xff;
+    let brush = unsafe {
+        CreateSolidBrush(COLORREF(
+            red | (green << 8) | (blue << 16),
+        ))
+    };
+    if brush.0.is_null() {
+        return;
+    }
+
+    unsafe {
+        let _ = FillRect(hdc, &rect, brush);
+        let _ = DeleteObject(brush);
     }
 }

@@ -451,6 +451,8 @@ pub fn install_window_frame_adapter(
         return;
     };
 
+    ensure_window_clips_child_surfaces(hwnd);
+
     unsafe {
         // Reuse the same property-backed state across updates so geometry changes do not require
         // re-registering the subclass each time the titlebar layout shifts.
@@ -489,6 +491,32 @@ pub fn install_window_frame_adapter(
                 drop(Box::from_raw(geometry as *mut WindowFrameState));
             }
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn ensure_window_clips_child_surfaces(hwnd: windows_sys::Win32::Foundation::HWND) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_STYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOACTIVATE,
+        SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_CLIPCHILDREN,
+    };
+
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+        if style & WS_CLIPCHILDREN != 0 {
+            return;
+        }
+
+        let _ = SetWindowLongPtrW(hwnd, GWL_STYLE, (style | WS_CLIPCHILDREN) as isize);
+        let _ = SetWindowPos(
+            hwnd,
+            core::ptr::null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
     }
 }
 

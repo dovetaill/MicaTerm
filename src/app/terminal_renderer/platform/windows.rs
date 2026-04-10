@@ -1676,6 +1676,20 @@ pub struct WindowsNativeSurfaceBackend {
 }
 
 impl WindowsNativeSurfaceBackend {
+    fn child_surface_background_rgba(&self) -> u32 {
+        self.state
+            .retained_frame
+            .as_ref()
+            .map(|frame| 0xff00_0000 | (frame.frame.presentable_frame.default_bg_rgba & 0x00ff_ffff))
+            .unwrap_or(0xff11_1821)
+    }
+
+    fn sync_child_surface_background_rgba(&self) {
+        if let Some(child_surface_host) = self.child_surface_host.as_ref() {
+            child_surface_host.set_background_rgba(self.child_surface_background_rgba());
+        }
+    }
+
     fn resolve_host_hwnd(window: &AppWindow) -> Option<isize> {
         resolve_host_window_hwnd(window)
     }
@@ -1728,6 +1742,7 @@ impl WindowsNativeSurfaceBackend {
                     );
                     self.state.surface_hwnd = Some(child_surface_host.surface_hwnd);
                     self.child_surface_host = Some(child_surface_host);
+                    self.sync_child_surface_background_rgba();
                     self.state.mark_render_target_dirty();
                 }
                 Err(err) => {
@@ -1770,6 +1785,7 @@ impl WindowsNativeSurfaceBackend {
             return;
         }
 
+        let background_rgba = self.child_surface_background_rgba();
         let Some(child_surface_host) = self.child_surface_host.as_mut() else {
             self.state.surface_hwnd = None;
             return;
@@ -1785,6 +1801,7 @@ impl WindowsNativeSurfaceBackend {
             return;
         }
         child_surface_host.set_visible(true);
+        child_surface_host.set_background_rgba(background_rgba);
 
         self.state.surface_hwnd =
             (child_surface_host.surface_hwnd != 0).then_some(child_surface_host.surface_hwnd);
@@ -1843,6 +1860,7 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
             retained_frame.rect = self.state.rect;
             retained_frame
         });
+        self.sync_child_surface_background_rgba();
     }
 
     fn present(&mut self, damage: NativeSurfaceDamage) {
