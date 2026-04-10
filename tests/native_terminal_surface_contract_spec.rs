@@ -1325,7 +1325,9 @@ fn windows_backend_source_clips_present_to_damage_rect() {
 
     assert!(
         windows_backend_source
-            .contains("let present_rect = resolved_present_rect(self.state.rect, damage);"),
+            .contains("let present_rect = translate_rect_to_surface_local(")
+            && windows_backend_source
+                .contains("resolved_present_rect(self.state.rect, damage),"),
         "windows backend should resolve a present clip rect from the damage payload before starting a draw pass"
     );
     assert!(

@@ -1861,8 +1861,15 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         let Some(frame) = self.state.retained_frame.clone() else {
             return;
         };
+        let present_rect = translate_rect_to_surface_local(
+            self.state.rect,
+            resolved_present_rect(self.state.rect, damage),
+        );
+        let frame = RetainedNativeTerminalSurfaceFrame {
+            frame: frame.frame,
+            rect: surface_client_rect(frame.rect),
+        };
         let frame = &frame;
-        let present_rect = resolved_present_rect(self.state.rect, damage);
 
         #[cfg(target_os = "windows")]
         if !self.state.begin_frame(present_rect) {
@@ -1953,6 +1960,32 @@ fn resolved_present_rect(
     }
 }
 
+fn surface_client_rect(surface_rect: NativeTerminalSurfaceRect) -> NativeTerminalSurfaceRect {
+    NativeTerminalSurfaceRect {
+        x: 0,
+        y: 0,
+        width: surface_rect.width,
+        height: surface_rect.height,
+    }
+}
+
+fn translate_rect_to_surface_local(
+    surface_rect: NativeTerminalSurfaceRect,
+    rect: NativeTerminalSurfaceRect,
+) -> NativeTerminalSurfaceRect {
+    if surface_rect.width <= 0 || surface_rect.height <= 0 || rect.width <= 0 || rect.height <= 0 {
+        return surface_client_rect(surface_rect);
+    }
+
+    let local = NativeTerminalSurfaceRect {
+        x: (i64::from(rect.x) - i64::from(surface_rect.x)).max(0) as i32,
+        y: (i64::from(rect.y) - i64::from(surface_rect.y)).max(0) as i32,
+        width: rect.width,
+        height: rect.height,
+    };
+    intersect_present_rect(surface_client_rect(surface_rect), local)
+}
+
 fn intersect_present_rect(
     surface_rect: NativeTerminalSurfaceRect,
     damage_rect: NativeTerminalSurfaceRect,
@@ -1985,6 +2018,92 @@ fn intersect_present_rect(
             width: right.saturating_sub(left),
             height: bottom.saturating_sub(top),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        NativeTerminalSurfaceRect, intersect_present_rect, surface_client_rect,
+        translate_rect_to_surface_local,
+    };
+
+    #[test]
+    fn child_surface_client_rect_rebases_origin_to_zero() {
+        let surface_rect = NativeTerminalSurfaceRect {
+            x: 374,
+            y: 92,
+            width: 560,
+            height: 552,
+        };
+
+        assert_eq!(
+            surface_client_rect(surface_rect),
+            NativeTerminalSurfaceRect {
+                x: 0,
+                y: 0,
+                width: 560,
+                height: 552,
+            },
+            "child HWND render targets should draw in their own client coordinates instead of reusing the parent-relative placement origin"
+        );
+    }
+
+    #[test]
+    fn child_surface_damage_rect_translates_into_local_coordinates() {
+        let surface_rect = NativeTerminalSurfaceRect {
+            x: 374,
+            y: 92,
+            width: 560,
+            height: 552,
+        };
+        let damage_rect = NativeTerminalSurfaceRect {
+            x: 414,
+            y: 136,
+            width: 80,
+            height: 44,
+        };
+
+        assert_eq!(
+            translate_rect_to_surface_local(surface_rect, damage_rect),
+            NativeTerminalSurfaceRect {
+                x: 40,
+                y: 44,
+                width: 80,
+                height: 44,
+            },
+            "overlay-only presents should clip against child-local coordinates so the visible child surface is repainted instead of an off-window parent-space region"
+        );
+    }
+
+    #[test]
+    fn child_surface_local_translation_clamps_to_client_bounds() {
+        let surface_rect = NativeTerminalSurfaceRect {
+            x: 374,
+            y: 92,
+            width: 560,
+            height: 552,
+        };
+        let overflow_rect = NativeTerminalSurfaceRect {
+            x: 900,
+            y: 620,
+            width: 120,
+            height: 80,
+        };
+
+        assert_eq!(
+            translate_rect_to_surface_local(surface_rect, overflow_rect),
+            intersect_present_rect(
+                surface_client_rect(surface_rect),
+                NativeTerminalSurfaceRect {
+                    x: 526,
+                    y: 528,
+                    width: 120,
+                    height: 80,
+                },
+            ),
+            "translated damage should remain clipped to the child client area even when the original rect overflows the surface edge"
+        );
     }
 }
 
