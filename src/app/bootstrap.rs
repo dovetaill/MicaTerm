@@ -198,6 +198,7 @@ const WORKSPACE_INPUT_PROJECTION_DEBOUNCE_MS: u64 = 12;
 const WORKSPACE_SCROLL_VIEWPORT_PROJECTION_DEBOUNCE_MS: u64 = 4;
 const WORKSPACE_SCROLL_THUMB_DRAG_PROJECTION_DEBOUNCE_MS: u64 = 8;
 const WORKSPACE_TERMINAL_IDLE_CACHE_SHRINK_MS: u64 = 1_000;
+const WORKSPACE_TERMINAL_CURSOR_BLINK_INTERVAL_MS: u64 = 520;
 
 #[cfg(test)]
 type WorkspaceTerminalPresenterFactory =
@@ -217,6 +218,12 @@ thread_local! {
         RefCell::new(None)
     };
     static WORKSPACE_NATIVE_TERMINAL_SURFACE: RefCell<Option<NativeTerminalSurface>> = const {
+        RefCell::new(None)
+    };
+    static WORKSPACE_NATIVE_CURSOR_BLINK_STATE: RefCell<Option<WorkspaceNativeCursorBlinkState>> = const {
+        RefCell::new(None)
+    };
+    static WORKSPACE_NATIVE_CURSOR_BLINK_TIMER: RefCell<Option<Rc<Timer>>> = const {
         RefCell::new(None)
     };
     static WORKSPACE_RUNTIME_PROFILE: RefCell<Option<AppRuntimeProfile>> = const {
@@ -2319,6 +2326,7 @@ fn clear_workspace_retained_native_terminal_surface(window: &AppWindow) {
             surface.clear_frame();
         }
     });
+    clear_workspace_native_cursor_blink_state();
 }
 
 fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerminalFrame) {
@@ -2532,6 +2540,104 @@ impl WorkspaceTerminalActiveSurfaceFingerprint {
             viewport_offset_lines: surface.viewport_offset_lines,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WorkspaceNativeCursorBlinkFingerprint {
+    session_id: Uuid,
+    surface_seqno: usize,
+}
+
+impl WorkspaceNativeCursorBlinkFingerprint {
+    fn from_surface(surface: &TerminalSurfaceState) -> Self {
+        Self {
+            session_id: surface.session_id,
+            surface_seqno: surface.seqno,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WorkspaceNativeCursorBlinkState {
+    fingerprint: WorkspaceNativeCursorBlinkFingerprint,
+    visible: bool,
+}
+
+fn clear_workspace_native_cursor_blink_state() {
+    WORKSPACE_NATIVE_CURSOR_BLINK_STATE.with(|blink_state| {
+        blink_state.borrow_mut().take();
+    });
+}
+
+fn workspace_native_cursor_overlay_visible(
+    surface: &TerminalSurfaceState,
+    blink_state: &mut Option<WorkspaceNativeCursorBlinkState>,
+) -> bool {
+    if !surface.cursor.visible {
+        blink_state.take();
+        return false;
+    }
+    if !surface.cursor.blinking {
+        blink_state.take();
+        return true;
+    }
+
+    let fingerprint = WorkspaceNativeCursorBlinkFingerprint::from_surface(surface);
+    match blink_state {
+        Some(state) if state.fingerprint == fingerprint => state.visible,
+        _ => {
+            *blink_state = Some(WorkspaceNativeCursorBlinkState {
+                fingerprint,
+                visible: true,
+            });
+            true
+        }
+    }
+}
+
+fn workspace_native_cursor_overlay_visible_for_surface(surface: &TerminalSurfaceState) -> bool {
+    WORKSPACE_NATIVE_CURSOR_BLINK_STATE.with(|blink_state| {
+        let mut blink_state = blink_state.borrow_mut();
+        workspace_native_cursor_overlay_visible(surface, &mut blink_state)
+    })
+}
+
+fn advance_workspace_native_cursor_blink_state(
+    active_surface: Option<&TerminalSurfaceState>,
+    blink_state: &mut Option<WorkspaceNativeCursorBlinkState>,
+) -> bool {
+    let Some(surface) = active_surface else {
+        blink_state.take();
+        return false;
+    };
+    if !surface.cursor.visible || !surface.cursor.blinking {
+        blink_state.take();
+        return false;
+    }
+
+    let fingerprint = WorkspaceNativeCursorBlinkFingerprint::from_surface(surface);
+    match blink_state {
+        Some(state) if state.fingerprint == fingerprint => {
+            state.visible = !state.visible;
+            true
+        }
+        _ => {
+            *blink_state = Some(WorkspaceNativeCursorBlinkState {
+                fingerprint,
+                visible: true,
+            });
+            false
+        }
+    }
+}
+
+fn advance_workspace_native_cursor_blink_phase(
+    active_surface: Option<&TerminalSurfaceState>,
+) -> bool {
+    WORKSPACE_NATIVE_CURSOR_BLINK_STATE.with(|blink_state| {
+        let mut blink_state = blink_state.borrow_mut();
+        advance_workspace_native_cursor_blink_state(active_surface, &mut blink_state)
+    })
 }
 
 fn update_workspace_terminal_active_idle_cache_shrink(
@@ -2894,7 +3000,10 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
                     next_render_mode = Some(TerminalRenderMode::Bitmap);
                 }
                 Ok(PresentedTerminalFrame::Native(frame)) => {
-                    let frame = *frame;
+                    let mut frame = *frame;
+                    let cursor_overlay_visible =
+                        workspace_native_cursor_overlay_visible_for_surface(surface);
+                    frame.presentable_frame.cursor_overlay.visible = cursor_overlay_visible;
                     let presentable_frame = frame.presentable_frame.clone();
                     native_frame_presented = true;
                     let scale_factor = window_scale_factor(window);
@@ -2974,6 +3083,7 @@ fn sync_workspace_terminal_surface_projection_only(window: &AppWindow, state: &S
         }
     } else {
         let preset = terminal_theme_preset;
+        clear_workspace_native_cursor_blink_state();
         window.set_workspace_session_rows(24);
         window.set_workspace_session_cols(80);
         window.set_workspace_session_cursor_row(0);
@@ -4156,6 +4266,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         DeferredWorkspaceProjectionRefreshGate::default(),
     ));
     let scroll_thumb_drag_timer = Rc::new(Timer::default());
+    let native_cursor_blink_timer = Rc::new(Timer::default());
     let deferred_scroll_thumb_drag =
         Rc::new(RefCell::new(DeferredWorkspaceScrollThumbDrag::default()));
     let workspace_terminal_active_surface_fingerprint = Rc::new(RefCell::new(
@@ -4165,6 +4276,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_terminal_active_idle_cache_shrunk = Rc::new(RefCell::new(false));
     let workspace_terminal_no_surface_since = Rc::new(RefCell::new(None::<Instant>));
     let workspace_terminal_idle_cache_shrunk = Rc::new(RefCell::new(false));
+    WORKSPACE_NATIVE_CURSOR_BLINK_TIMER.with(|timer| {
+        *timer.borrow_mut() = Some(Rc::clone(&native_cursor_blink_timer));
+    });
     if let Some(session_bridge_ref) = session_bridge.as_ref() {
         let state = Rc::clone(&view_model);
         let handle = window.as_weak();
@@ -4274,6 +4388,35 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 &mut idle_cache_shrunk,
             );
         });
+    }
+    {
+        let state = Rc::clone(&view_model);
+        let handle = window.as_weak();
+        native_cursor_blink_timer.start(
+            TimerMode::Repeated,
+            Duration::from_millis(WORKSPACE_TERMINAL_CURSOR_BLINK_INTERVAL_MS),
+            move || {
+                let Some(window) = handle.upgrade() else {
+                    clear_workspace_native_cursor_blink_state();
+                    WORKSPACE_NATIVE_CURSOR_BLINK_TIMER.with(|timer| {
+                        timer.borrow_mut().take();
+                    });
+                    return;
+                };
+                if window.get_workspace_session_render_mode().as_str()
+                    != TerminalRenderMode::Native.as_str()
+                {
+                    clear_workspace_native_cursor_blink_state();
+                    return;
+                }
+                let state = state.borrow();
+                if advance_workspace_native_cursor_blink_phase(
+                    state.active_workspace_terminal_surface(),
+                ) {
+                    sync_workspace_terminal_surface_projection_only(&window, &state);
+                }
+            },
+        );
     }
 
     let vault_sync_scheduler = Rc::new(RefCell::new(VaultSyncSchedulerState::default()));
@@ -6128,6 +6271,9 @@ mod tests {
         WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
             *surface.borrow_mut() = None;
         });
+        WORKSPACE_NATIVE_CURSOR_BLINK_STATE.with(|blink_state| {
+            blink_state.borrow_mut().take();
+        });
         let result = with_workspace_terminal_presenter_factory_for_test(
             Box::new(|_profile| {
                 Ok((
@@ -6142,6 +6288,9 @@ mod tests {
         });
         WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
             *surface.borrow_mut() = None;
+        });
+        WORKSPACE_NATIVE_CURSOR_BLINK_STATE.with(|blink_state| {
+            blink_state.borrow_mut().take();
         });
         result
     }
@@ -7126,6 +7275,147 @@ mod tests {
         assert!(
             !active_idle_cache_shrunk,
             "with the preference disabled the helper should stay inert and leave its shrink marker cleared"
+        );
+    }
+
+    #[test]
+    fn native_cursor_blink_state_resets_visible_when_surface_seqno_changes() {
+        let session_id = Uuid::new_v4();
+        let mut surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 7, 24, 80, vec!["$".into()]);
+        surface.cursor.visible = true;
+        surface.cursor.blinking = true;
+
+        let mut blink_state = None;
+
+        assert!(
+            workspace_native_cursor_overlay_visible(&surface, &mut blink_state),
+            "the first native frame for a blinking cursor should publish the overlay as visible before any blink timer ticks"
+        );
+        assert!(
+            advance_workspace_native_cursor_blink_state(Some(&surface), &mut blink_state),
+            "the blink timer should be able to toggle the current native cursor phase once the initial state is established"
+        );
+        assert_eq!(
+            blink_state,
+            Some(WorkspaceNativeCursorBlinkState {
+                fingerprint: WorkspaceNativeCursorBlinkFingerprint {
+                    session_id,
+                    surface_seqno: 7,
+                },
+                visible: false,
+            }),
+            "after one native blink tick the stored phase should flip to hidden for the current surface fingerprint"
+        );
+
+        let mut next_surface = surface.clone();
+        next_surface.seqno = 8;
+
+        assert!(
+            workspace_native_cursor_overlay_visible(&next_surface, &mut blink_state),
+            "publishing a newer native surface seqno should reset the blink phase to visible so fresh terminal activity does not keep the cursor hidden"
+        );
+        assert_eq!(
+            blink_state,
+            Some(WorkspaceNativeCursorBlinkState {
+                fingerprint: WorkspaceNativeCursorBlinkFingerprint {
+                    session_id,
+                    surface_seqno: 8,
+                },
+                visible: true,
+            }),
+            "seqno changes should replace the old blink fingerprint and restore a visible cursor phase for the new frame"
+        );
+    }
+
+    #[test]
+    fn native_cursor_blink_state_clears_for_hidden_or_steady_cursor() {
+        let session_id = Uuid::new_v4();
+        let mut blinking_surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 7, 24, 80, vec!["$".into()]);
+        blinking_surface.cursor.visible = true;
+        blinking_surface.cursor.blinking = true;
+        let mut blink_state = None;
+        assert!(workspace_native_cursor_overlay_visible(
+            &blinking_surface,
+            &mut blink_state
+        ));
+
+        let mut hidden_surface = blinking_surface.clone();
+        hidden_surface.cursor.visible = false;
+        assert!(
+            !workspace_native_cursor_overlay_visible(&hidden_surface, &mut blink_state),
+            "hidden native cursors should suppress the overlay immediately instead of reusing a stale blink phase"
+        );
+        assert!(
+            blink_state.is_none(),
+            "hidden native cursors should also clear the retained blink state so a later visible frame starts from a known phase"
+        );
+
+        assert!(workspace_native_cursor_overlay_visible(
+            &blinking_surface,
+            &mut blink_state
+        ));
+        let mut steady_surface = blinking_surface.clone();
+        steady_surface.cursor.blinking = false;
+        assert!(
+            workspace_native_cursor_overlay_visible(&steady_surface, &mut blink_state),
+            "non-blinking native cursors should remain visible rather than inheriting the animated blink phase"
+        );
+        assert!(
+            blink_state.is_none(),
+            "steady native cursors should clear the blink state because no timer-driven phase should remain armed"
+        );
+    }
+
+    #[test]
+    fn native_cursor_blink_state_only_toggles_for_the_matching_surface() {
+        let session_id = Uuid::new_v4();
+        let mut surface =
+            TerminalSurfaceState::from_visible_lines(session_id, 7, 24, 80, vec!["$".into()]);
+        surface.cursor.visible = true;
+        surface.cursor.blinking = true;
+
+        let mut blink_state = None;
+        assert!(workspace_native_cursor_overlay_visible(
+            &surface,
+            &mut blink_state
+        ));
+        assert!(
+            advance_workspace_native_cursor_blink_state(Some(&surface), &mut blink_state),
+            "matching native blink state should toggle on each timer tick"
+        );
+        assert_eq!(
+            blink_state.as_ref().map(|state| state.visible),
+            Some(false),
+            "after the first matching tick the blink phase should be hidden"
+        );
+
+        let mut other_surface = surface.clone();
+        other_surface.seqno += 1;
+        assert!(
+            !advance_workspace_native_cursor_blink_state(Some(&other_surface), &mut blink_state),
+            "a timer tick that sees a newer surface fingerprint should reset state instead of toggling the stale phase"
+        );
+        assert_eq!(
+            blink_state,
+            Some(WorkspaceNativeCursorBlinkState {
+                fingerprint: WorkspaceNativeCursorBlinkFingerprint {
+                    session_id,
+                    surface_seqno: 8,
+                },
+                visible: true,
+            }),
+            "stale native blink state should be replaced with a visible phase for the newer surface fingerprint"
+        );
+
+        assert!(
+            !advance_workspace_native_cursor_blink_state(None, &mut blink_state),
+            "without an active native surface the blink timer should stay inert instead of toggling an orphaned phase"
+        );
+        assert!(
+            blink_state.is_none(),
+            "losing the active native surface should clear any retained blink phase"
         );
     }
 

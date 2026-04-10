@@ -874,6 +874,28 @@ fn bootstrap_source_clears_host_cursor_when_native_frame_is_active() {
 }
 
 #[test]
+fn native_cursor_blink_source_is_driven_from_bootstrap_timer() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("struct WorkspaceNativeCursorBlinkState"),
+        "bootstrap should keep native cursor blink phase in Rust so the retained child-HWND path can blink independently of the bitmap-only Slint cursor timer"
+    );
+    assert!(
+        bootstrap_source.contains("native_cursor_blink_timer.start(")
+            && bootstrap_source
+                .contains("Duration::from_millis(WORKSPACE_TERMINAL_CURSOR_BLINK_INTERVAL_MS)"),
+        "bootstrap should drive native cursor blinking from a repeated Rust timer because the Slint cursor timer is intentionally bitmap-only"
+    );
+    assert!(
+        bootstrap_source.contains("workspace_native_cursor_overlay_visible_for_surface(surface)")
+            && bootstrap_source
+                .contains("frame.presentable_frame.cursor_overlay.visible = cursor_overlay_visible;"),
+        "native presentation should override the retained cursor overlay visibility from the bootstrap-managed blink phase before presenting the frame"
+    );
+}
+
+#[test]
 fn retained_native_frame_sources_expose_background_display_list_contract() {
     let segmentation_source = fs::read_to_string("src/app/terminal_layout/run_segmentation.rs")
         .expect("read run segmentation");
@@ -1488,8 +1510,7 @@ fn windows_backend_source_exposes_child_hwnd_present_contract() {
         "windows backend should destroy the child HWND during detach so retained-native host state does not leak after the pane disappears"
     );
     assert!(
-        child_host_source.contains("RegisterClassW(")
-            || child_host_source.contains("WNDCLASSW"),
+        child_host_source.contains("RegisterClassW(") || child_host_source.contains("WNDCLASSW"),
         "windows child-host helper should register a dedicated window class instead of borrowing a stock control class so retained-native D2D output owns a predictable Win32 surface"
     );
     assert!(
@@ -1706,8 +1727,7 @@ fn windows_child_host_source_keeps_parent_terminal_input_route_alive() {
             .expect("read windows child host helper");
 
     assert!(
-        child_host_source.contains("WM_NCHITTEST")
-            && child_host_source.contains("HTTRANSPARENT"),
+        child_host_source.contains("WM_NCHITTEST") && child_host_source.contains("HTTRANSPARENT"),
         "retained-native child HWND host should return HTTRANSPARENT for hit-testing so the parent Slint terminal surface keeps receiving mouse input instead of the child presenter swallowing clicks and selection gestures"
     );
     assert!(
