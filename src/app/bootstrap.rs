@@ -2290,7 +2290,12 @@ fn workspace_native_terminal_rect(window: &AppWindow) -> NativeTerminalSurfaceRe
     let scale_factor = window_scale_factor(window);
     NativeTerminalSurfaceRect {
         x: (window.get_layout_workspace_session_native_surface_x() * scale_factor).round() as i32,
-        y: (window.get_layout_workspace_session_native_surface_y() * scale_factor).round() as i32,
+        // The exported workspace terminal y is relative to the body host; child HWND geometry
+        // needs client-area coordinates, so fold the custom titlebar height back in here.
+        y: ((window.get_layout_titlebar_height()
+            + window.get_layout_workspace_session_native_surface_y())
+            * scale_factor)
+            .round() as i32,
         width: (window.get_layout_workspace_session_native_surface_width() * scale_factor).round()
             as i32,
         height: (window.get_layout_workspace_session_native_surface_height() * scale_factor).round()

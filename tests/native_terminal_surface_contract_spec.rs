@@ -1590,6 +1590,28 @@ fn bootstrap_source_exposes_native_surface_scale_factor_bridge_contract() {
 }
 
 #[test]
+fn bootstrap_source_offsets_native_surface_y_by_titlebar_height() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let rect_block = block_between(
+        &bootstrap_source,
+        "fn workspace_native_terminal_rect(window: &AppWindow) -> NativeTerminalSurfaceRect {",
+        "\n}\n\nfn sync_workspace_native_terminal_surface_geometry(window: &AppWindow) {",
+    );
+
+    let titlebar = rect_block
+        .find("window.get_layout_titlebar_height()")
+        .expect("titlebar height in native rect calculation");
+    let surface_y = rect_block
+        .find("window.get_layout_workspace_session_native_surface_y()")
+        .expect("surface y in native rect calculation");
+
+    assert!(
+        titlebar < surface_y,
+        "native child-HWND y should include the custom titlebar offset before projecting the workspace terminal y into client coordinates, otherwise the retained surface drifts upward into the tab strip"
+    );
+}
+
+#[test]
 fn wayland_platform_backend_source_exposes_backend_selection_contract() {
     assert!(
         Path::new("src/app/terminal_renderer/platform/wayland.rs").exists(),
