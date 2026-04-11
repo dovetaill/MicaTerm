@@ -1,4 +1,8 @@
 use std::fs;
+use std::path::Path;
+
+#[path = "support/retired_windows_subsystem.rs"]
+mod retired_windows_subsystem;
 
 #[test]
 fn windows_native_text_renderer_source_exposes_directwrite_primary_text_path() {
@@ -170,37 +174,22 @@ fn native_surface_diagnostics_source_exposes_text_renderer_path() {
 }
 
 #[test]
-fn native_surface_rollout_sources_document_default_and_rollback_paths() {
+fn native_surface_rollout_sources_remove_legacy_windows_rollback_paths() {
     let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
         .expect("read native surface");
     let presenter_source =
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
-    let scene_image_source =
-        fs::read_to_string("src/app/terminal_scene_image.rs").expect("read scene image");
-    let readme_source = fs::read_to_string("readme.md").expect("read readme");
 
     assert!(
-        native_surface_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface"),
-        "native surface source should document the explicit retained-native-surface bring-up switch now that packaged Windows mainline now defaults to the retained-native presenter"
+        !native_surface_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface"),
+        "native surface source should stop documenting a retained-native subsystem override once Windows no longer exposes terminal subsystem switching"
     );
     assert!(
-        presenter_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
-        "terminal presenter source should document the scene-image rollback knob while packaged Windows mainline now defaults to the retained-native presenter"
+        !presenter_source.contains(&retired_windows_subsystem::retired_rollout_env_snippet()),
+        "terminal presenter source should stop documenting the retired Windows rollback knob once that subsystem is deleted"
     );
     assert!(
-        scene_image_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
-        "scene-image renderer source should document that packaged Windows mainline only uses the scene-owned image path for explicit rollback or verification runs via the scene-image override"
-    );
-    assert!(
-        readme_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
-        "readme should document the subsystem override contract now that packaged Windows mainline defaults to retained-native and scene-image is the rollback path"
-    );
-    assert!(
-        readme_source.contains("child HWND") || readme_source.contains("child host"),
-        "readme should describe the retained-native Windows presenter as a dedicated child host window instead of leaving the architecture ambiguous"
-    );
-    assert!(
-        !readme_source.contains("same-HWND native surface"),
-        "readme should stop documenting the retired same-HWND DC overlay architecture now that child-host retained-native is the approved direction"
+        !Path::new(&retired_windows_subsystem::retired_module_path()).exists(),
+        "the retired Windows software renderer source should be deleted once retained-native is the only supported Windows path"
     );
 }

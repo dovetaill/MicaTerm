@@ -20,12 +20,13 @@ use mica_term::app::terminal_layout::run_segmentation::RunCluster;
 use mica_term::app::terminal_layout::{GlyphRun, PositionedGlyph, ShapedRow, TextStyleKey};
 use mica_term::app::terminal_presenter::{
     PresentedTerminalFrame, TerminalPresentationOptions, TerminalPresenter, WindowsNativePresenter,
-    WindowsSceneImagePresenter,
 };
 #[cfg(feature = "terminal-native-renderer")]
 use mica_term::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
 use slint::Rgba8Pixel;
 use std::fs;
+#[path = "support/retired_windows_subsystem.rs"]
+mod retired_windows_subsystem;
 use uuid::Uuid;
 
 fn render_surface(rows: usize, cols: usize, text: &str) -> TerminalSurfaceState {
@@ -89,45 +90,42 @@ fn native_presenter_reloads_font_metrics_when_raster_scale_changes() -> Result<(
     Ok(())
 }
 
-#[test]
-fn scene_image_and_native_presenters_share_default_line_box_contract() -> Result<()> {
-    let mut native = WindowsNativePresenter::new()?;
-    let mut scene_image = WindowsSceneImagePresenter::new()?;
-
-    assert_eq!(
-        native.default_cell_size().1,
-        scene_image.default_cell_size().1,
-        "native and scene-image presenters should share the same default line box so packaged and retained-native Windows paths keep dense text spacing aligned"
-    );
-
-    native.set_raster_scale(1.5);
-    scene_image.set_raster_scale(1.5);
-
-    assert_eq!(
-        native.default_cell_size().1,
-        scene_image.default_cell_size().1,
-        "native and scene-image presenters should keep the same scaled line box after DPI/raster-scale changes"
-    );
-
-    Ok(())
-}
 
 #[test]
-fn windows_presenters_default_to_a_more_readable_text_line_box() -> Result<()> {
+fn windows_native_presenter_keeps_a_more_readable_text_line_box() -> Result<()> {
     let native = WindowsNativePresenter::new()?;
-    let scene_image = WindowsSceneImagePresenter::new()?;
 
-    assert_eq!(
-        native.default_cell_size().1,
-        scene_image.default_cell_size().1,
-        "both Windows presenters should start from the same default line box so bitmap and retained-native paths feel equally readable"
-    );
     assert!(
         native.default_cell_size().1 >= 23,
         "Windows terminal defaults should reserve at least a 23px row box so 15px-class body text reads less cramped than the old 21px box"
     );
 
     Ok(())
+}
+
+#[test]
+fn windows_terminal_sources_remove_legacy_windows_presenter_plumbing() {
+    let presenter_source =
+        fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let mod_source = fs::read_to_string("src/app/mod.rs").expect("read app mod");
+
+    assert!(
+        !presenter_source.contains(&retired_windows_subsystem::retired_presenter_name()),
+        "terminal presenter source should stop defining the retired Windows software presenter once retained-native is the only live Windows path"
+    );
+    assert!(
+        !bootstrap_source.contains(&retired_windows_subsystem::retired_builder_name()),
+        "bootstrap should stop referencing the retired Windows presenter builder once retained-native is the only live Windows path"
+    );
+    assert!(
+        !bootstrap_source.contains(&format!("TerminalCompositionMode::{}", retired_windows_subsystem::retired_pascal_name())),
+        "bootstrap should stop branching on the retired Windows composition mode once subsystem switching is removed"
+    );
+    assert!(
+        !mod_source.contains(&retired_windows_subsystem::retired_mod_export()),
+        "app module exports should stop exposing the retired Windows renderer module once that subsystem is deleted"
+    );
 }
 
 #[test]

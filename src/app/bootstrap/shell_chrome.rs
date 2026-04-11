@@ -9,10 +9,12 @@ fn native_window_appearance_request_for_workspace(
     let profile = super::WORKSPACE_RUNTIME_PROFILE
         .with(|profile| (*profile.borrow()).unwrap_or_else(AppRuntimeProfile::packaged));
 
-    if matches!(
-        profile.terminal_subsystem_mode(),
-        crate::app::runtime_profile::TerminalSubsystemMode::RetainedNativeSurface
-    ) {
+    if profile.prefers_native_terminal_renderer()
+        && matches!(
+            profile.build_flavor,
+            AppBuildFlavor::WindowsMainline | AppBuildFlavor::WindowsSoftwareCompat
+        )
+    {
         request.backdrop = crate::app::window_effects::BackdropPreference::None;
     }
 

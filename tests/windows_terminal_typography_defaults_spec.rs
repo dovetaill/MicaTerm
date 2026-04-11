@@ -1,3 +1,6 @@
+#[path = "support/retired_windows_subsystem.rs"]
+mod retired_windows_subsystem;
+
 use std::fs;
 
 #[test]
@@ -93,7 +96,11 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
         dwrite_source.contains("WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX")
             && dwrite_source.contains("WINDOWS_DEFAULT_TERMINAL_LINE_HEIGHT")
             && dwrite_source.contains("let cell_height_px = line_height.max(MIN_CELL_HEIGHT_PX);"),
-        "DirectWrite metrics should keep the native line box aligned with the Windows-specific minimum readability floor so retained-native and scene-image paths do not diverge on dense text spacing"
+        "DirectWrite metrics should keep the native line box aligned with the Windows-specific minimum readability floor so the live and retired Windows paths never diverge on dense text spacing"
+    );
+    assert!(
+        !dwrite_source.contains(&retired_windows_subsystem::retired_font_loader_name()),
+        "DirectWrite defaults should stop exposing a retired Windows font-loading entrypoint once retained-native is the only supported Windows path"
     );
     assert!(
         presenter_source.contains("let request = FontRequest::windows_default();"),

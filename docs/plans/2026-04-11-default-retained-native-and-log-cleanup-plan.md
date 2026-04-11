@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Make packaged Windows builds default to `retained-native-surface` and remove the noisy retained-native diagnostics trace logging while preserving manual env overrides.
+**Goal:** Keep packaged Windows builds on the retained-native path and remove the noisy retained-native diagnostics trace logging while aligning current docs and scripts with the retained-native-only Windows contract.
 
-**Architecture:** Keep the runtime-profile override model intact, but change the packaged Windows default emitted by the build script from `scene-image` to `retained-native-surface`. Remove the high-frequency diagnostics trace from bootstrap and update the source-level contract tests that currently assert the old packaged default and the debug hook source.
+**Architecture:** Keep the runtime profile on the retained-native path, remove the high-frequency diagnostics trace from bootstrap, and update current scripts/docs/source-level contract tests so they describe retained-native as the only live Windows subsystem.
 
 **Tech Stack:** Rust, cargo tests, shell build script, vendored Slint/winit integration already present in the repo.
 
@@ -21,7 +21,7 @@
 - Modify: `tests/windows_terminal_diagnostics_spec.rs`
 
 **Step 1: Write the failing test updates**
-- Change script/runtime-profile expectations from packaged `scene-image` to packaged `retained-native-surface`.
+- Change script/runtime-profile expectations to retained-native-only Windows behavior.
 - Remove the source-level expectation that bootstrap keeps the noisy retained-native diagnostics debug hook.
 
 **Step 2: Run tests to verify they fail**
@@ -33,7 +33,7 @@ Run:
 - `bash tests/build_win_x64_script_smoke.sh`
 - `bash tests/windows_terminal_native_mode_contract_smoke.sh`
 
-Expected: failures that still reference `scene-image` and the diagnostics hook.
+Expected: failures that still reference the removed Windows subsystem wording and the diagnostics hook.
 
 ### Task 2: Implement the minimal packaged-default change
 
@@ -41,10 +41,10 @@ Expected: failures that still reference `scene-image` and the diagnostics hook.
 - Modify: `build-win-x64.sh`
 
 **Step 1: Change the packaged subsystem default**
-- Update the exported packaged subsystem value from `scene-image` to `retained-native-surface`.
+- Remove the exported packaged subsystem value so the wrapper no longer advertises a second Windows subsystem selector.
 
 **Step 2: Keep runtime override behavior unchanged**
-- Do not remove `MICA_TERM_TERMINAL_SUBSYSTEM`; leave manual override support intact.
+- Do not add any new Windows subsystem selector; the live contract stays retained-native-only.
 
 **Step 3: Run the targeted tests**
 Run:
@@ -88,7 +88,7 @@ Run:
 - `bash tests/windows_terminal_native_mode_contract_smoke.sh`
 - `./build-win-x64.sh`
 
-Expected: all pass, and the packaged build defaults to retained-native without requiring a manual subsystem env var.
+Expected: all pass, and the packaged build stays on retained-native without a Windows subsystem selector.
 
 ### Task 5: Commit
 
@@ -98,7 +98,7 @@ Expected: all pass, and the packaged build defaults to retained-native without r
 **Step 1: Commit**
 ```bash
 git add build-win-x64.sh src/app/bootstrap.rs tests/bootstrap_profile_smoke.rs tests/build_win_x64_script_smoke.sh tests/runtime_profile.rs tests/terminal_scrollback_spec.rs tests/windows_terminal_diagnostics_spec.rs tests/windows_terminal_native_mode_contract_smoke.sh docs/plans/2026-04-11-default-retained-native-and-log-cleanup-plan.md
-git commit -m "fix: default packaged windows terminal to retained-native"
+git commit -m "docs: align retained-native-only windows packaging contract"
 ```
 
 
@@ -107,9 +107,9 @@ git commit -m "fix: default packaged windows terminal to retained-native"
 Status: completed on 2026-04-11.
 
 What landed:
-- packaged Windows `build-win-x64.sh` now emits `MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM=retained-native-surface`, so direct packaged launches no longer require a manual `MICA_TERM_TERMINAL_SUBSYSTEM` export to reach the retained-native child HWND path
-- bootstrap removed the per-frame retained-native diagnostics trace hook, but kept the underlying diagnostics data model and the manual env override contract intact
-- runtime/source docs and contract tests were updated so `scene-image` is now documented as the rollback / verification override rather than the packaged default
+- packaged Windows `build-win-x64.sh` now stays on the retained-native child HWND path without exporting a second Windows subsystem selector
+- bootstrap removed the per-frame retained-native diagnostics trace hook while keeping the underlying diagnostics data model intact
+- runtime/source docs and contract tests were updated so retained-native is described as the only live Windows subsystem
 
 Slint note:
 - this follow-up did not change upstream Slint and did not add a new fork branch; it stays on the existing vendored Slint baseline already patched in this repo

@@ -110,10 +110,6 @@ impl DirectWriteFontSystem {
         self.load_font_with_profile(request, FontRenderProfile::windows_native_default())
     }
 
-    pub fn load_scene_image_font(&mut self, request: &FontRequest) -> Result<LoadedFont> {
-        self.load_font_with_profile(request, FontRenderProfile::bitmap_default())
-    }
-
     fn load_font_with_profile(
         &mut self,
         request: &FontRequest,
@@ -803,24 +799,11 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn scene_image_font_loading_uses_bitmap_render_profile() -> Result<()> {
-        let mut fonts = DirectWriteFontSystem::new()?;
-        let loaded_font = fonts.load_scene_image_font(&FontRequest::default())?;
-
-        assert_eq!(
-            loaded_font.render_profile(),
-            FontRenderProfile::bitmap_default(),
-            "scene-image presentation should switch to bitmap-style mask tuning because the final glyphs are composited back into the Slint scene"
-        );
-
-        Ok(())
-    }
 
     #[test]
     fn font_loading_publishes_a_baseline_inside_the_cell_box() -> Result<()> {
         let mut fonts = DirectWriteFontSystem::new()?;
-        let loaded_font = fonts.load_scene_image_font(&FontRequest::default())?;
+        let loaded_font = fonts.load_native_font(&FontRequest::default())?;
         let metrics = loaded_font.metrics();
 
         assert!(

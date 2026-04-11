@@ -26,8 +26,6 @@ use crate::app::terminal_renderer::wgpu_renderer::{
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_renderer::{ShapedTerminalFrame, WgpuTerminalRenderer};
-#[cfg(feature = "terminal-native-renderer")]
-use crate::app::terminal_scene_image::{SceneImageCacheStats, SceneImageTerminalRenderer};
 use crate::app::terminal_semantic::{SemanticInputOverlay, SemanticOutputOverlay};
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_semantic::{detect_input_line_overlays, detect_output_block_overlays};
@@ -204,10 +202,6 @@ pub struct TerminalPresenterCacheStats {
     pub color_glyph_cache_entries: usize,
     pub glyph_raster_cache_entries: usize,
     pub prepared_row_cache_entries: usize,
-    pub scene_image_mono_glyph_cache_entries: usize,
-    pub scene_image_color_glyph_cache_entries: usize,
-    pub scene_image_last_base_pixels_bytes: usize,
-    pub scene_image_working_pixels_bytes: usize,
 }
 
 #[cfg(feature = "terminal-native-renderer")]
@@ -561,150 +555,6 @@ impl TerminalPresenter for WindowsNativePresenter {
     }
 }
 
-#[cfg(feature = "terminal-native-renderer")]
-/// Scene-image presenter for Windows software compatibility and explicit
-/// `MICA_TERM_TERMINAL_SUBSYSTEM=scene-image` rollback/verification runs while packaged
-/// Windows mainline defaults to the retained-native child HWND presenter.
-pub struct WindowsSceneImagePresenter {
-    font_system: DirectWriteFontSystem,
-    shaper: TerminalTextShaper,
-    renderer: WgpuTerminalRenderer,
-    last_renderer_cache_reset_generation: u64,
-    scene_renderer: SceneImageTerminalRenderer,
-    base_font_request: FontRequest,
-    loaded_font: LoadedFont,
-    raster_scale: f32,
-    previous_frame: Option<TerminalModelFrame>,
-    previous_shaped_rows: Option<Vec<crate::app::terminal_layout::ShapedRow>>,
-    shaped_row_cache: PresenterShapedRowCache,
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-impl WindowsSceneImagePresenter {
-    pub fn new() -> Result<Self> {
-        let request = FontRequest::windows_default();
-        let mut font_system = DirectWriteFontSystem::new()?;
-        let loaded_font = font_system.load_scene_image_font(&request)?;
-
-        Ok(Self {
-            font_system,
-            shaper: TerminalTextShaper,
-            renderer: WgpuTerminalRenderer::new(),
-            last_renderer_cache_reset_generation: 0,
-            scene_renderer: SceneImageTerminalRenderer::default(),
-            base_font_request: request,
-            loaded_font,
-            raster_scale: 1.0,
-            previous_frame: None,
-            previous_shaped_rows: None,
-            shaped_row_cache: PresenterShapedRowCache::default(),
-        })
-    }
-
-    fn reload_loaded_font_for_scale(&mut self, scale_factor: f32) -> Result<()> {
-        let request = scaled_terminal_font_request(&self.base_font_request, scale_factor);
-        self.loaded_font = self.font_system.load_scene_image_font(&request)?;
-        self.previous_frame = None;
-        self.previous_shaped_rows = None;
-        self.shaped_row_cache.clear();
-        self.scene_renderer.clear();
-        self.last_renderer_cache_reset_generation = self.renderer.cache_reset_generation();
-        Ok(())
-    }
-}
-
-#[cfg(feature = "terminal-native-renderer")]
-impl TerminalPresenter for WindowsSceneImagePresenter {
-    fn set_raster_scale(&mut self, scale_factor: f32) {
-        let next_scale = scale_factor.max(1.0);
-        if (next_scale - self.raster_scale).abs() < 0.01 {
-            return;
-        }
-
-        if let Err(err) = self.reload_loaded_font_for_scale(next_scale) {
-            tracing::warn!(
-                target: "app.terminal",
-                error = %err,
-                scale_factor = next_scale,
-                "failed to reload scene-image terminal font metrics for raster scale change"
-            );
-            return;
-        }
-
-        self.raster_scale = next_scale;
-    }
-
-    fn present(
-        &mut self,
-        surface: &SurfaceState,
-        options: TerminalPresentationOptions,
-    ) -> Result<PresentedTerminalFrame> {
-        // software 包必须把终端像素放回 Slint scene，否则 overlay 一定会被整窗 post-pass 盖掉。
-        let (frame, prepare_diagnostics) = prepare_native_terminal_frame_with_diagnostics(
-            &mut self.font_system,
-            &mut self.shaper,
-            &mut self.renderer,
-            &self.loaded_font,
-            &mut self.previous_frame,
-            &mut self.previous_shaped_rows,
-            &mut self.shaped_row_cache,
-            surface,
-            options,
-        )?;
-        let _ = prepare_diagnostics;
-        let cache_reset_generation = self.renderer.cache_reset_generation();
-        if cache_reset_generation != self.last_renderer_cache_reset_generation {
-            self.scene_renderer.clear_transient_caches();
-            self.last_renderer_cache_reset_generation = cache_reset_generation;
-        }
-        let bitmap = self.scene_renderer.render(&frame)?;
-        Ok(PresentedTerminalFrame::Bitmap(bitmap))
-    }
-
-    fn default_cell_size(&self) -> (u32, u32) {
-        self.loaded_font.cell_size_px()
-    }
-
-    fn cache_stats(&self) -> TerminalPresenterCacheStats {
-        let renderer_stats: WgpuRendererCacheStats = self.renderer.cache_stats();
-        let scene_stats: SceneImageCacheStats = self.scene_renderer.cache_stats();
-        TerminalPresenterCacheStats {
-            previous_frame_rows: self
-                .previous_frame
-                .as_ref()
-                .map(|frame| frame.rows.len())
-                .unwrap_or_default(),
-            previous_shaped_rows: self
-                .previous_shaped_rows
-                .as_ref()
-                .map(|rows| rows.len())
-                .unwrap_or_default(),
-            shaped_row_cache_entries: self.shaped_row_cache.len(),
-            shaped_row_cache_capacity: self.shaped_row_cache.capacity(),
-            mono_glyph_cache_entries: renderer_stats.mono_glyph_cache_entries,
-            color_glyph_cache_entries: renderer_stats.color_glyph_cache_entries,
-            glyph_raster_cache_entries: renderer_stats.glyph_raster_cache_entries,
-            prepared_row_cache_entries: renderer_stats.prepared_row_cache_entries,
-            scene_image_mono_glyph_cache_entries: scene_stats.monochrome_glyph_cache_entries,
-            scene_image_color_glyph_cache_entries: scene_stats.color_glyph_cache_entries,
-            scene_image_last_base_pixels_bytes: scene_stats.last_base_pixels_bytes,
-            scene_image_working_pixels_bytes: scene_stats.working_pixels_bytes,
-        }
-    }
-
-    fn clear_transient_caches(&mut self) {
-        self.previous_frame = None;
-        self.previous_shaped_rows = None;
-        self.shaped_row_cache.clear();
-        self.renderer.clear_transient_caches();
-        self.scene_renderer.clear_transient_caches();
-        self.last_renderer_cache_reset_generation = self.renderer.cache_reset_generation();
-    }
-
-    fn cache_reset_generation(&self) -> u64 {
-        self.renderer.cache_reset_generation()
-    }
-}
 
 #[cfg(feature = "terminal-native-renderer")]
 #[allow(dead_code)]

@@ -31,17 +31,7 @@ pub enum GraphicsApiRequirement {
     Direct3D,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TerminalCompositionMode {
-    SceneImage,
-    PostRenderNativeSurface,
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TerminalSubsystemMode {
-    SceneImage,
-    RetainedNativeSurface,
-}
 
 impl TerminalRenderMode {
     pub fn as_str(self) -> &'static str {
@@ -69,14 +59,6 @@ impl GraphicsApiRequirement {
     }
 }
 
-impl TerminalSubsystemMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::SceneImage => "scene-image",
-            Self::RetainedNativeSurface => "retained-native-surface",
-        }
-    }
-}
 
 impl RendererMode {
     pub fn renderer_name(self) -> &'static str {
@@ -102,28 +84,6 @@ const WINDOWS_MAINLINE_RENDERER_FALLBACK_CHAIN: &[RendererMode] = &[
     RendererMode::Software,
 ];
 const SOFTWARE_RENDERER_FALLBACK_CHAIN: &[RendererMode] = &[RendererMode::Software];
-fn runtime_terminal_subsystem_override() -> Option<TerminalSubsystemMode> {
-    match std::env::var("MICA_TERM_TERMINAL_SUBSYSTEM")
-        .ok()
-        .as_deref()
-    {
-        Some("scene-image") => Some(TerminalSubsystemMode::SceneImage),
-        Some("native-surface") | Some("retained-native-surface") => {
-            Some(TerminalSubsystemMode::RetainedNativeSurface)
-        }
-        _ => None,
-    }
-}
-
-fn packaged_terminal_subsystem_override() -> Option<TerminalSubsystemMode> {
-    match option_env!("MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM") {
-        Some("scene-image") => Some(TerminalSubsystemMode::SceneImage),
-        Some("native-surface") | Some("retained-native-surface") => {
-            Some(TerminalSubsystemMode::RetainedNativeSurface)
-        }
-        _ => None,
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppRuntimeProfile {
@@ -152,10 +112,8 @@ impl AppRuntimeProfile {
         }
     }
 
-    /// Packaged Windows mainline keeps the native terminal renderer while
-    /// retained-native becomes the default terminal subsystem.
-    /// Manual overrides still remain available for packaged Windows verification and rollback
-    /// coverage, including explicit scene-image bring-up.
+    /// Packaged Windows mainline keeps the native terminal renderer on the
+    /// retained-native presentation path.
     pub fn mainline_native() -> Self {
         Self::mainline()
     }
@@ -259,30 +217,6 @@ impl AppRuntimeProfile {
         self.native_present_path
     }
 
-    pub fn terminal_subsystem_mode(self) -> TerminalSubsystemMode {
-        if let Some(terminal_subsystem_mode) = runtime_terminal_subsystem_override() {
-            return terminal_subsystem_mode;
-        }
-        if let Some(terminal_subsystem_mode) = packaged_terminal_subsystem_override() {
-            return terminal_subsystem_mode;
-        }
-        match self.build_flavor {
-            AppBuildFlavor::WindowsSoftwareCompat => TerminalSubsystemMode::SceneImage,
-            AppBuildFlavor::Development | AppBuildFlavor::WindowsMainline => {
-                TerminalSubsystemMode::RetainedNativeSurface
-            }
-        }
-    }
-
-    pub fn terminal_composition_mode(self) -> TerminalCompositionMode {
-        match self.terminal_subsystem_mode() {
-            TerminalSubsystemMode::SceneImage => TerminalCompositionMode::SceneImage,
-            TerminalSubsystemMode::RetainedNativeSurface => {
-                TerminalCompositionMode::PostRenderNativeSurface
-            }
-        }
-    }
-
     pub fn prefers_native_terminal_renderer(self) -> bool {
         matches!(self.terminal_render_mode, TerminalRenderMode::Native)
     }
@@ -293,10 +227,6 @@ impl AppRuntimeProfile {
 
     pub fn native_present_path_label(self) -> &'static str {
         self.native_present_path().as_str()
-    }
-
-    pub fn terminal_subsystem_mode_label(self) -> &'static str {
-        self.terminal_subsystem_mode().as_str()
     }
 
     fn with_native_present_path(mut self, native_present_path: NativePresentPath) -> Self {

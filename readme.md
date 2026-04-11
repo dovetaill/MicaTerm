@@ -66,17 +66,14 @@ Notes:
   - Alacritty adapter path is experimental and not the default runtime core; real `alacritty_terminal` core now exists behind the experimental adapter boundary, so the experimental Alacritty path now binds to the real upstream core rather than staying a WezTerm wrapper seam
   - Rio remains an architectural reference rather than migrated runtime code
 - Windows-first native renderer:
-  - packaged `windows-mainline` builds now default to the retained-native child HWND presenter after the Windows host-transparency fix landed
-  - set `MICA_TERM_TERMINAL_SUBSYSTEM=scene-image` to force the legacy scene-owned image path for rollback / verification; `retained-native-surface` is now the packaged default and uses a dedicated child HWND / child host presenter boundary
+  - packaged `windows-mainline` builds ship the retained-native child HWND presenter as the live Windows terminal path
+  - packaged `windows-software-compat` builds keep the software host renderer, but the visible terminal path is still retained-native
   - the retired same-HWND DC overlay path is no longer part of the retained-native design
   - if native presenter setup fails, runtime falls back to the bitmap presenter instead of leaving the terminal blank
-  - `app.terminal` diagnostics log the selected terminal subsystem, requested render mode, active presenter mode, and fallback transitions during packaged bring-up
-- Default-switch gate:
-  - packaged default has switched to retained-native after the packaged Windows verification gate closed
-  - the gate still includes blank-frame regression closure, rollback/feature-flag coverage, fast scrollback perf, typography sign-off, and Catppuccin palette sign-off on real packaged runs
+  - `app.terminal` diagnostics log the requested render mode, active presenter mode, and fallback transitions during packaged bring-up
 - Platform support matrix:
-  - Windows mainline: scene-image presenter by default, with the retained native surface kept behind an explicit bring-up switch
-  - Windows software compatibility: scene-image presenter
+  - Windows mainline: retained-native presenter
+  - Windows software compatibility: retained-native presenter on the software host renderer
   - Linux/macOS: bitmap presenter today; Linux/macOS native renderer follow-up work is still pending
 - Migration scope today:
   - text shaping and frame preparation are split behind the presenter boundary

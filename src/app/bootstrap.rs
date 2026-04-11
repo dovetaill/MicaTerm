@@ -52,7 +52,7 @@ use crate::app::keychain::{
 use crate::app::quick_launch_preferences::{
     QuickLaunchPreferences, QuickLaunchPreferencesStore, retain_known_ssh_asset_ids,
 };
-use crate::app::runtime_profile::{AppRuntimeProfile, TerminalCompositionMode, TerminalRenderMode};
+use crate::app::runtime_profile::{AppBuildFlavor, AppRuntimeProfile, TerminalRenderMode};
 use crate::app::sftp::{
     SftpBrowserController, SftpBrowserLoadRequest, SftpBrowserSessionState, SftpDirectoryEntryKind,
     SftpFollowMode, SftpPanelMode, SftpSessionBindingState,
@@ -2045,24 +2045,8 @@ where
 fn build_workspace_terminal_presenter(
     profile: AppRuntimeProfile,
 ) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)> {
-    let terminal_subsystem_mode = profile.terminal_subsystem_mode();
-    tracing::info!(
-        target: "app.terminal",
-        ?terminal_subsystem_mode,
-        terminal_subsystem = profile.terminal_subsystem_mode_label(),
-        "selected workspace terminal subsystem"
-    );
     if profile.prefers_native_terminal_renderer() {
-        return match profile.terminal_composition_mode() {
-            TerminalCompositionMode::SceneImage => Ok((
-                build_scene_image_terminal_presenter()?,
-                TerminalRenderMode::Bitmap,
-            )),
-            TerminalCompositionMode::PostRenderNativeSurface => Ok((
-                build_native_terminal_presenter()?,
-                TerminalRenderMode::Native,
-            )),
-        };
+        return Ok((build_native_terminal_presenter()?, TerminalRenderMode::Native));
     }
 
     Ok((
@@ -2076,13 +2060,6 @@ fn build_native_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
     Ok(Box::new(WindowsNativePresenter::new()?))
 }
 
-#[cfg(feature = "terminal-native-renderer")]
-fn build_scene_image_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
-    Ok(Box::new(
-        crate::app::terminal_presenter::WindowsSceneImagePresenter::new()?,
-    ))
-}
-
 #[cfg(not(feature = "terminal-native-renderer"))]
 fn build_native_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
     Err(anyhow!(
@@ -2090,12 +2067,6 @@ fn build_native_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
     ))
 }
 
-#[cfg(not(feature = "terminal-native-renderer"))]
-fn build_scene_image_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
-    Err(anyhow!(
-        "scene-image terminal renderer is unavailable in this build"
-    ))
-}
 
 fn resolve_workspace_terminal_presenter(
     profile: AppRuntimeProfile,
@@ -2141,7 +2112,6 @@ fn ensure_workspace_terminal_presenter(
             host.set_raster_scale(scale_factor);
             tracing::info!(
                 target: "app.terminal",
-                terminal_subsystem = profile.terminal_subsystem_mode_label(),
                 requested_render_mode = profile.terminal_render_mode_label(),
                 active_render_mode = active_render_mode.as_str(),
                 native_present_path = profile.native_present_path_label(),
@@ -6090,10 +6060,12 @@ impl Drop for ScopedWindowCreationEnvOverride {
 fn window_creation_env_override_for_profile(
     profile: AppRuntimeProfile,
 ) -> Option<ScopedWindowCreationEnvOverride> {
-    if matches!(
-        profile.terminal_subsystem_mode(),
-        crate::app::runtime_profile::TerminalSubsystemMode::RetainedNativeSurface
-    ) {
+    if profile.prefers_native_terminal_renderer()
+        && matches!(
+            profile.build_flavor,
+            AppBuildFlavor::WindowsMainline | AppBuildFlavor::WindowsSoftwareCompat
+        )
+    {
         Some(ScopedWindowCreationEnvOverride::set(
             FORCE_OPAQUE_HOST_WINDOW_ENV,
             "1",
@@ -6638,7 +6610,7 @@ mod tests {
             assert_eq!(
                 window.get_workspace_session_native_frame_token(),
                 0,
-                "scene-image and bitmap composition paths should keep the native frame token cleared"
+                "bitmap presentation paths should keep the native frame token cleared"
             );
             assert_eq!(initial_surface_seqno, 1);
             assert_eq!(
@@ -6675,7 +6647,7 @@ mod tests {
             assert_eq!(
                 window.get_workspace_session_native_frame_token(),
                 0,
-                "scene-image and bitmap composition paths should keep the native frame token cleared while surface seqno tracks the visible frame"
+                "bitmap presentation paths should keep the native frame token cleared while surface seqno tracks the visible frame"
             );
             assert_ne!(
                 window.get_workspace_session_surface_seqno(),
@@ -6733,7 +6705,7 @@ mod tests {
             assert_eq!(
                 window.get_workspace_session_native_frame_token(),
                 0,
-                "scene-image and bitmap composition paths should keep the native frame token cleared even after publishing a visible terminal frame"
+                "bitmap presentation paths should keep the native frame token cleared even after publishing a visible terminal frame"
             );
             assert_eq!(window.get_workspace_session_surface_seqno(), 1);
             assert_eq!(

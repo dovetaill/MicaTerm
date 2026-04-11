@@ -1,5 +1,8 @@
 //! Source-level guards for terminal runtime performance-sensitive paths.
 
+#[path = "support/retired_windows_subsystem.rs"]
+mod retired_windows_subsystem;
+
 use std::fs;
 
 fn block_between<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
@@ -179,11 +182,9 @@ fn renderer_hot_paths_consume_terminal_frame_snapshot_contract() {
 }
 
 #[test]
-fn presenter_and_scene_image_paths_keep_perf_diagnostics_without_runtime_log_spam() {
+fn presenter_perf_diagnostics_remain_without_retired_windows_renderer_contracts() {
     let presenter_source = fs::read_to_string("src/app/terminal_presenter.rs")
         .expect("read terminal presenter source");
-    let scene_image_source =
-        fs::read_to_string("src/app/terminal_scene_image.rs").expect("read scene image source");
 
     for expected in [
         "struct TerminalPrepareDiagnostics",
@@ -205,23 +206,10 @@ fn presenter_and_scene_image_paths_keep_perf_diagnostics_without_runtime_log_spa
         !presenter_source.contains("app.terminal.perf"),
         "presenter source should stop emitting per-frame app.terminal.perf logs once the scroll tuning is considered good enough for release builds"
     );
-
-    for expected in [
-        "pub struct SceneImageRenderDiagnostics",
-        "pub fn last_render_diagnostics(&self)",
-        "incremental_scroll_render_count",
-        "dirty_edge_row_raster_count",
-        "base_raster_us",
-        "overlay_compose_us",
-        "fallback_reason",
-        "detect_incremental_scroll_delta(",
-        "render_incremental_base_pixels(",
-    ] {
-        assert!(
-            scene_image_source.contains(expected),
-            "scene-image renderer should expose `{expected}` so incremental scroll reuse and raster timings stay observable even after runtime perf logging is disabled by default"
-        );
-    }
+    assert!(
+        !presenter_source.contains(&retired_windows_subsystem::retired_render_diagnostics_name()),
+        "presenter source should stop referencing retired Windows render diagnostics once that subsystem is deleted"
+    );
 }
 
 #[test]
@@ -258,11 +246,9 @@ fn presenter_sources_expose_scrollback_row_shape_reuse_contract() {
 }
 
 #[test]
-fn presenter_and_scene_image_sources_expose_cache_stats_and_clear_hooks() {
+fn presenter_cache_stats_drop_retired_windows_fields_but_keep_clear_hooks() {
     let presenter_source = fs::read_to_string("src/app/terminal_presenter.rs")
         .expect("read terminal presenter source");
-    let scene_image_source =
-        fs::read_to_string("src/app/terminal_scene_image.rs").expect("read scene image source");
 
     for expected in [
         "pub struct TerminalPresenterCacheStats",
@@ -275,16 +261,14 @@ fn presenter_and_scene_image_sources_expose_cache_stats_and_clear_hooks() {
         );
     }
 
-    for expected in [
-        "pub struct SceneImageCacheStats",
-        "pub fn cache_stats(&self) -> SceneImageCacheStats",
-        "pub fn clear_transient_caches(&mut self)",
-    ] {
-        assert!(
-            scene_image_source.contains(expected),
-            "scene-image renderer should expose `{expected}` so retained bitmap and glyph caches are observable and shrinkable after scroll-heavy sessions close"
-        );
-    }
+    assert!(
+        !presenter_source.contains(&retired_windows_subsystem::retired_cache_field("mono_glyph_cache_entries")),
+        "terminal presenter cache stats should stop exposing retired Windows glyph cache counters once that subsystem is deleted"
+    );
+    assert!(
+        !presenter_source.contains(&retired_windows_subsystem::retired_cache_field("working_pixels_bytes")),
+        "terminal presenter cache stats should stop exposing retired Windows working-pixel bytes once that subsystem is deleted"
+    );
 }
 
 #[test]

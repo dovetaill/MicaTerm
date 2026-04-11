@@ -2,7 +2,7 @@
 # Thin wrapper around the Windows x64 Skia GPU mainline package used by CI and manual packaging.
 # Packaged terminal subsystem: retained-native-surface.
 # Packaged Skia builds now default to the repaired retained-native child-HWND
-# presenter while still keeping explicit scene-image rollback via env override.
+# presenter with no alternate Windows subsystem selector.
 
 set -euo pipefail
 
@@ -20,7 +20,7 @@ Default target:
   supported hosts: Windows MSVC shell/Git Bash or Linux + cargo-xwin + clang
   packaged renderer: winit-skia
   packaged terminal renderer: native
-  packaged terminal subsystem: retained-native-surface
+  live Windows terminal path: retained-native child HWND
   packaged native present path: event-loop
   expected primary text path: directwrite-d2d
   compatibility text fallback path: bitmap-mask-compat
@@ -57,7 +57,6 @@ export CARGO_FEATURES="slint-renderer-skia,terminal-native-renderer"
 export MICA_TERM_BUILD_FLAVOR="windows-mainline"
 export MICA_TERM_PACKAGE_RENDERER="skia"
 export MICA_TERM_PACKAGE_TERMINAL_RENDERER="native"
-export MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM="retained-native-surface"
 export MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH="event-loop"
 export MICA_TERM_EXPECTED_TEXT_RENDERER_PATH="directwrite-d2d"
 export MICA_TERM_TEXT_RENDERER_FALLBACK_PATH="bitmap-mask-compat"

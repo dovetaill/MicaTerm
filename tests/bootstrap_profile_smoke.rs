@@ -2,6 +2,9 @@
 
 use std::fs;
 
+#[path = "support/retired_windows_subsystem.rs"]
+mod retired_windows_subsystem;
+
 use mica_term::app::runtime_profile::AppRuntimeProfile;
 
 #[test]
@@ -49,26 +52,30 @@ fn run_with_profile_accepts_external_async_handle_for_ssh_services() {
 }
 
 #[test]
-fn build_win_x64_wrapper_defaults_packaged_windows_to_retained_native_surface() {
+fn build_win_x64_wrapper_keeps_retained_native_as_the_only_live_windows_subsystem() {
     let content = fs::read_to_string("build-win-x64.sh").expect("read build wrapper");
 
     assert!(
-        content.contains("export MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM=\"scene-image\""),
-        "build-win-x64.sh should pin packaged Windows mainline builds to the retained-native-surface terminal subsystem now that packaged Windows mainline defaults to the repaired child-HWND presenter path"
+        !content.contains(&retired_windows_subsystem::retired_kebab_name()),
+        "build-win-x64.sh should stop documenting or exporting the retired Windows software presenter as a live packaged path"
     );
     assert!(
-        content.contains("packaged terminal subsystem: retained-native-surface"),
-        "build-win-x64.sh help text should describe the retained-native-surface packaged default so packaging output matches the runtime path users should expect"
+        !content.contains("MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM"),
+        "build-win-x64.sh should stop exporting a packaged terminal subsystem override once retained-native is the only supported Windows path"
+    );
+    assert!(
+        content.contains("retained-native"),
+        "build-win-x64.sh help text should continue describing retained-native as the live packaged Windows path"
     );
 }
 
 #[test]
-fn bootstrap_logs_terminal_subsystem_and_render_fallback_labels() {
+fn bootstrap_logs_render_fallback_labels_without_terminal_subsystem_switching() {
     let content = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
-        content.contains("terminal_subsystem = profile.terminal_subsystem_mode_label()"),
-        "bootstrap should include the selected terminal subsystem label in render-fallback diagnostics so packaged retained-native-surface and manual scene-image override bring-up logs are distinguishable"
+        !content.contains("terminal_subsystem = profile.terminal_subsystem_mode_label()"),
+        "bootstrap should stop logging a terminal subsystem label once Windows exposes only the retained-native path"
     );
     assert!(
         content.contains("fallback_render_mode = TerminalRenderMode::Bitmap.as_str()"),
@@ -89,14 +96,11 @@ fn native_surface_diagnostics_smoke_reports_child_host_relationship() {
         "bootstrap should keep logging the live window scale factor so child-host geometry stays debuggable in physical pixels"
     );
     assert!(
-        bootstrap_source.contains("host_hwnd = diagnostics.host_hwnd.unwrap_or_default()")
-            && bootstrap_source
-                .contains("surface_hwnd = diagnostics.surface_hwnd.unwrap_or_default()")
-            && bootstrap_source
-                .contains("surface_visible = diagnostics.surface_visible.unwrap_or(false)")
-            && bootstrap_source
-                .contains("render_target_ready = diagnostics.render_target_ready.unwrap_or(false)"),
-        "bootstrap diagnostics should log the host/child HWND relationship plus child visibility and target readiness"
+        !bootstrap_source.contains("host_hwnd = diagnostics.host_hwnd.unwrap_or_default()")
+            && !bootstrap_source.contains("surface_hwnd = diagnostics.surface_hwnd.unwrap_or_default()")
+            && !bootstrap_source.contains("surface_visible = diagnostics.surface_visible.unwrap_or(false)")
+            && !bootstrap_source.contains("render_target_ready = diagnostics.render_target_ready.unwrap_or(false)"),
+        "bootstrap should not emit per-frame host/child HWND diagnostics logs once the retained-native trace spam is retired"
     );
     assert!(
         diagnostics_source.contains("pub host_hwnd: Option<isize>")
@@ -156,24 +160,24 @@ fn readme_states_current_terminal_core_and_reference_boundaries_honestly() {
 }
 
 #[test]
-fn readme_keeps_default_switch_blocked_on_packaged_verification_gate() {
+fn readme_describes_retained_native_as_the_only_live_windows_subsystem() {
     let readme = fs::read_to_string("readme.md").expect("read readme");
 
     assert!(
-        readme.contains("default switch remains gated on packaged Windows verification"),
-        "readme should state that the terminal default switch is still gated instead of implying the migration is already complete"
+        !readme.contains(&format!("{} presenter", retired_windows_subsystem::retired_kebab_name())),
+        "readme should stop describing the retired Windows software presenter as a live path once retained-native is the only supported Windows path"
     );
     assert!(
-        readme.contains("fast scrollback perf"),
-        "readme should call out fast scrollback perf as part of the packaged verification gate before any default switch"
+        !readme.contains(&retired_windows_subsystem::retired_rollout_env_snippet()),
+        "readme should stop documenting a retired Windows subsystem override once that path is deleted"
     );
     assert!(
-        readme.contains("typography sign-off"),
-        "readme should call out typography sign-off as part of the packaged verification gate before any default switch"
+        readme.contains("retained-native"),
+        "readme should describe retained-native as the live Windows terminal path"
     );
     assert!(
-        readme.contains("Catppuccin palette sign-off"),
-        "readme should call out Catppuccin palette sign-off as part of the packaged verification gate before any default switch"
+        readme.contains("Windows mainline") && readme.contains("Windows software compatibility"),
+        "readme should keep both Windows package flavors documented while describing retained-native as the live subsystem"
     );
 }
 
@@ -182,10 +186,34 @@ fn terminal_renderer_readme_documents_runtime_fallback_diagnostics() {
     let content = fs::read_to_string("readme.md").expect("read readme");
 
     assert!(
-        content.contains("selected terminal subsystem")
-            && content.contains("requested render mode")
+        !content.contains("selected terminal subsystem"),
+        "readme should stop documenting a selected terminal subsystem diagnostic once Windows no longer exposes subsystem switching"
+    );
+    assert!(
+        content.contains("requested render mode")
             && content.contains("active presenter mode")
             && content.contains("fallback transitions"),
-        "readme should describe the runtime diagnostics emitted for terminal subsystem selection and presenter fallback transitions so packaged bring-up has an explicit debugging contract"
+        "readme should describe the runtime diagnostics emitted for requested render mode, active presenter mode, and fallback transitions"
+    );
+}
+
+#[test]
+fn current_cleanup_plan_describes_retained_native_only_windows_path() {
+    let plan = fs::read_to_string(
+        "docs/plans/2026-04-11-default-retained-native-and-log-cleanup-plan.md",
+    )
+    .expect("read retained-native cleanup plan");
+
+    assert!(
+        !plan.contains(&retired_windows_subsystem::retired_kebab_name()),
+        "the current retained-native cleanup plan should stop describing the retired Windows software presenter as a live path"
+    );
+    assert!(
+        !plan.contains("MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM"),
+        "the current retained-native cleanup plan should stop describing the removed packaged terminal subsystem override"
+    );
+    assert!(
+        plan.contains("retained-native"),
+        "the current retained-native cleanup plan should describe retained-native as the live Windows path"
     );
 }

@@ -9,6 +9,8 @@ use mica_term::app::terminal_semantic::{
     detect_output_block_overlays,
 };
 use std::fs;
+#[path = "support/retired_windows_subsystem.rs"]
+mod retired_windows_subsystem;
 use uuid::Uuid;
 
 fn semantic_surface(lines: &[&str]) -> TerminalSurfaceState {
@@ -229,10 +231,6 @@ fn renderer_migration_docs_describe_windows_native_status_and_native_only_shippi
         "verification notes should include the Windows-first native renderer verification status"
     );
     assert!(
-        mainline_build.contains("MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM=\"scene-image\""),
-        "the primary Windows build wrapper should pin packaged mainline to the retained-native terminal subsystem now that packaged Windows defaults to the repaired child-HWND path"
-    );
-    assert!(
         mainline_build.contains("MICA_TERM_PACKAGE_TERMINAL_RENDERER=\"native\""),
         "the primary Windows build wrapper should package the native terminal renderer"
     );
@@ -243,5 +241,32 @@ fn renderer_migration_docs_describe_windows_native_status_and_native_only_shippi
     assert!(
         software_build.contains("MICA_TERM_PACKAGE_TERMINAL_RENDERER=\"native\""),
         "the software compatibility wrapper should package the native terminal renderer"
+    );
+}
+
+#[test]
+fn runtime_profile_source_keeps_windows_terminal_native_only() {
+    let runtime_profile =
+        fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
+
+    assert!(
+        !runtime_profile.contains("pub enum TerminalCompositionMode"),
+        "runtime profile should stop exposing a terminal composition mode once Windows no longer supports multiple terminal subsystem paths"
+    );
+    assert!(
+        !runtime_profile.contains("pub enum TerminalSubsystemMode"),
+        "runtime profile should stop exposing a terminal subsystem mode once retained-native is the only supported Windows subsystem"
+    );
+    assert!(
+        !runtime_profile.contains("MICA_TERM_TERMINAL_SUBSYSTEM"),
+        "runtime profile should stop parsing runtime terminal subsystem overrides once the retired Windows software path is removed"
+    );
+    assert!(
+        !runtime_profile.contains("MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM"),
+        "runtime profile should stop parsing packaged terminal subsystem overrides once the retired Windows software path is removed"
+    );
+    assert!(
+        !runtime_profile.contains(&retired_windows_subsystem::retired_subsystem_match_expr()),
+        "runtime profile should stop accepting the retired Windows software path as a supported terminal subsystem"
     );
 }

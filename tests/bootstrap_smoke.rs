@@ -197,20 +197,28 @@ fn runtime_profile_source_defaults_windows_mainline_to_retained_native_terminal_
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
-        runtime_profile_source.contains("pub enum TerminalSubsystemMode"),
-        "runtime profile should expose an explicit terminal subsystem mode once the retained native surface path becomes the default mainline stack"
+        !runtime_profile_source.contains("pub enum TerminalSubsystemMode"),
+        "runtime profile should stop exposing a separate terminal subsystem enum once retained-native is the only live Windows path"
     );
     assert!(
-        runtime_profile_source.contains("RetainedNativeSurface"),
-        "runtime profile should name the retained native surface as the default terminal subsystem mode"
+        !runtime_profile_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM"),
+        "runtime profile should stop parsing runtime subsystem overrides once the retired Windows path is removed"
     );
     assert!(
-        runtime_profile_source.contains("std::env::var(\"MICA_TERM_TERMINAL_SUBSYSTEM\")"),
-        "runtime profile should keep a runtime rollback switch so bring-up can temporarily restore the scene-image terminal subsystem"
+        runtime_profile_source.contains("WindowsSoftwareCompat"),
+        "runtime profile should keep the software compatibility flavor even after Windows collapses to one terminal path"
     );
     assert!(
-        bootstrap_source.contains("profile.terminal_subsystem_mode()"),
-        "bootstrap should thread the terminal subsystem mode through presenter selection so the rollback switch still reaches the scene-image path"
+        runtime_profile_source.contains("prefers_native_terminal_renderer"),
+        "runtime profile should expose a native-renderer preference helper after subsystem switching is removed"
+    );
+    assert!(
+        !bootstrap_source.contains("profile.terminal_subsystem_mode()"),
+        "bootstrap should stop threading a separate subsystem selector once retained-native is the only live Windows path"
+    );
+    assert!(
+        bootstrap_source.contains("profile.prefers_native_terminal_renderer()"),
+        "bootstrap should choose the Windows presenter path from the native-renderer preference helper"
     );
 }
 
@@ -7685,7 +7693,7 @@ fn opening_right_panel_clamps_terminal_surface_width_before_pty_resize_roundtrip
     );
     assert!(
         app.get_layout_workspace_session_native_surface_width() < before,
-        "terminal surface width should clamp to the shrunken content viewport immediately instead of waiting for a later PTY resize roundtrip, otherwise the scene-image path flashes and hit-testing drifts under the right panel"
+        "terminal surface width should clamp to the shrunken content viewport immediately instead of waiting for a later PTY resize roundtrip, otherwise the software path flashes and hit-testing drifts under the right panel"
     );
 }
 
@@ -8463,8 +8471,8 @@ fn bootstrap_clears_terminal_renderer_caches_when_no_surface_remains() {
         "bootstrap should route terminal cache shrink through a lifecycle helper so close-driven and idle-driven shrink paths can share cache diagnostics"
     );
     assert!(
-        bootstrap_source.contains("\"close-shrink\""),
-        "bootstrap should label the immediate shrink event that runs when the active workspace surface disappears"
+        bootstrap_source.contains("rearm_workspace_terminal_no_surface_idle_shrink("),
+        "bootstrap should re-arm the no-surface idle timer when the active workspace surface disappears so the delayed cleanup path can still run later"
     );
 }
 
@@ -8481,8 +8489,8 @@ fn bootstrap_tracks_no_surface_idle_before_terminal_cache_shrink() {
         "bootstrap should track how long the workspace has been without an active terminal surface before firing the idle cache shrink path"
     );
     assert!(
-        bootstrap_source.contains("\"idle-shrink\""),
-        "bootstrap should label the delayed no-surface shrink path so diagnostics can distinguish it from the immediate close-driven shrink"
+        bootstrap_source.contains("release_workspace_terminal_renderer_resources();"),
+        "bootstrap should release retained renderer resources from the delayed no-surface shrink path after the idle threshold elapses"
     );
     assert!(
         bootstrap_source.contains("purge_workspace_backend_memory(window);"),
@@ -8507,8 +8515,8 @@ fn bootstrap_tracks_active_surface_idle_before_terminal_cache_shrink() {
         "bootstrap should gate the active idle shrink path behind the persisted settings toggle from the titlebar settings modal"
     );
     assert!(
-        bootstrap_source.contains("\"active-surface-idle\""),
-        "bootstrap should label the visible-surface idle shrink reason so memory diagnostics can distinguish it from no-surface cleanup"
+        bootstrap_source.contains("WorkspaceTerminalActiveSurfaceFingerprint::from_surface(active_surface)"),
+        "bootstrap should fingerprint the visible surface before the idle shrink fires so only unchanged frames trigger the delayed cache clear"
     );
 }
 

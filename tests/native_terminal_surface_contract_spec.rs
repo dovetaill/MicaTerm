@@ -3,6 +3,9 @@
 use std::fs;
 use std::path::Path;
 
+#[path = "support/retired_windows_subsystem.rs"]
+mod retired_windows_subsystem;
+
 fn block_between<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
     let start_index = source.find(start).expect("start marker");
     let rest = &source[start_index..];
@@ -49,11 +52,11 @@ fn terminal_session_host_source_exposes_native_render_contract() {
     );
     assert!(
         host_source.contains("function snap-length-to-device-pixel(value: length) -> length"),
-        "terminal session host should expose a device-pixel snapping helper so the scene-image terminal box can land on integer physical pixels under fractional DPI"
+        "terminal session host should expose a device-pixel snapping helper so the software-backed terminal box can land on integer physical pixels under fractional DPI"
     );
     assert!(
         host_source.contains("clip: true;"),
-        "terminal session host should clip the terminal surface frame so stale grid geometry cannot momentarily paint over sibling UI during scene-image resize races"
+        "terminal session host should clip the terminal surface frame so stale grid geometry cannot momentarily paint over sibling UI during software-surface resize races"
     );
     assert!(
         host_source.contains("width: root.snapped-terminal-visible-grid-width();"),
@@ -65,12 +68,12 @@ fn terminal_session_host_source_exposes_native_render_contract() {
     );
     assert!(
         host_source.contains("blank-surface := Rectangle {") && host_source.contains("clip: true;"),
-        "terminal session host should make the blank surface itself a clipped viewport so oversized scene-image frames are cropped instead of being rescaled during layout races"
+        "terminal session host should make the blank surface itself a clipped viewport so oversized software-surface frames are cropped instead of being rescaled during layout races"
     );
     assert!(
         host_source.contains("x: root.terminal-surface-origin-x();")
             && host_source.contains("y: root.terminal-surface-origin-y();"),
-        "terminal session host should snap the scene-image terminal origin onto device pixels instead of anchoring the bitmap at unsnapped logical padding offsets"
+        "terminal session host should snap the software terminal origin onto device pixels instead of anchoring the bitmap at unsnapped logical padding offsets"
     );
     assert!(
         host_source.contains(
@@ -84,12 +87,12 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         host_source.contains("function scrollbar-track-y() -> length {\n        return root.terminal-surface-origin-y();\n    }")
             && host_source.contains("x: root.scrollbar-track-x();")
             && host_source.contains("y: root.scrollbar-track-y();"),
-        "terminal session host should anchor terminal overlays to the snapped surface origin so scrollbars and viewport affordances do not drift against the scene-image viewport"
+        "terminal session host should anchor terminal overlays to the snapped surface origin so scrollbars and viewport affordances do not drift against the software viewport"
     );
     assert!(
         host_source.contains("root.terminal-surface-origin-x() + self.mouse-x,")
             && host_source.contains("root.terminal-surface-origin-y() + self.mouse-y,"),
-        "terminal session host should open the context menu from the snapped surface origin so right-click affordances stay aligned with high-DPI scene-image coordinates"
+        "terminal session host should open the context menu from the snapped surface origin so right-click affordances stay aligned with high-DPI software-surface coordinates"
     );
     assert!(
         host_source.contains("width: root.snapped-terminal-visible-grid-width();")
@@ -98,11 +101,11 @@ fn terminal_session_host_source_exposes_native_render_contract() {
     );
     assert!(
         host_source.contains("width: root.terminal-grid-width();"),
-        "scene-image bitmap content should keep the frame-owned grid width so sidebar resizes crop stale frames instead of horizontally squeezing glyphs"
+        "software bitmap content should keep the frame-owned grid width so sidebar resizes crop stale frames instead of horizontally squeezing glyphs"
     );
     assert!(
         host_source.contains("height: root.terminal-grid-height();"),
-        "scene-image bitmap content should keep the frame-owned grid height so vertical viewport changes crop stale frames instead of vertically squeezing rows"
+        "software bitmap content should keep the frame-owned grid height so vertical viewport changes crop stale frames instead of vertically squeezing rows"
     );
     assert!(
         host_source.contains("width: parent.width;")
@@ -121,7 +124,7 @@ fn bitmap_host_selection_source_exposes_local_overlay_contract() {
         host_source.contains("function selection-overlay-active() -> bool")
             && host_source
                 .contains("root.session-render-mode == \"bitmap\" && root.selection-active"),
-        "terminal session host should expose a bitmap-only local selection overlay gate so drag selection can repaint immediately without waiting for a Rust-side scene-image redraw"
+        "terminal session host should expose a bitmap-only local selection overlay gate so drag selection can repaint immediately without waiting for a Rust-side software redraw"
     );
     assert!(
         host_source.contains("selection-overlay-single-row := Rectangle {")
@@ -142,7 +145,7 @@ fn bitmap_host_selection_source_exposes_local_overlay_contract() {
     );
     assert!(
         bootstrap_source.contains("if workspace_session_uses_host_selection_overlay(&window) {"),
-        "selection-changed callback should skip Rust-side scene-image syncs when the Slint host owns the live bitmap selection overlay"
+        "selection-changed callback should skip Rust-side software-surface syncs when the Slint host owns the live bitmap selection overlay"
     );
     assert!(
         bootstrap_source
@@ -169,7 +172,7 @@ fn workspace_and_window_sources_thread_native_render_contract() {
     assert!(
         workspace_source
             .contains("in property <float> workspace-session-device-scale-factor: 1.0;"),
-        "workspace pane should carry the workspace terminal device scale factor so the session host can snap scene-image layout onto physical pixels"
+        "workspace pane should carry the workspace terminal device scale factor so the session host can snap software-surface layout onto physical pixels"
     );
     assert!(
         workspace_source.contains("in property <int> workspace-session-native-frame-token: 0;"),
@@ -236,8 +239,8 @@ fn runtime_profile_source_exposes_terminal_render_mode_contract() {
         "runtime profile should keep a native terminal render mode contract for logging and packaging metadata"
     );
     assert!(
-        runtime_profile_source.contains("retained-native becomes the default terminal subsystem"),
-        "runtime profile docs should note that packaged Windows mainline keeps the native renderer while retained-native becomes the default terminal subsystem"
+        runtime_profile_source.contains("retained-native presentation path"),
+        "runtime profile docs should note that packaged Windows mainline keeps the native renderer on the retained-native presentation path"
     );
     assert!(
         runtime_profile_source.contains("native-first Windows software profile"),
@@ -543,21 +546,19 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     let presenter_source =
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
 
+    let app_mod_source = fs::read_to_string("src/app/mod.rs").expect("read app mod");
+
     assert!(
-        runtime_profile_source.contains("pub enum TerminalCompositionMode"),
-        "runtime profile should define an explicit terminal composition mode so Windows software packages can move visible terminal pixels back into the Slint scene"
+        !runtime_profile_source.contains(&retired_windows_subsystem::retired_pascal_name()),
+        "runtime profile should stop naming the retired Windows software path once that subsystem is deleted"
     );
     assert!(
-        runtime_profile_source.contains("SceneImage"),
-        "runtime profile should keep a scene-owned image composition mode for software builds where overlays must stay above terminal content"
+        !bootstrap_source.contains(&retired_windows_subsystem::retired_builder_name()),
+        "bootstrap should stop referencing the retired Windows presenter builder once retained-native is the only live Windows path"
     );
     assert!(
-        runtime_profile_source.contains("PostRenderNativeSurface"),
-        "runtime profile should preserve an explicit post-render native surface mode for the remaining whole-window overlay path"
-    );
-    assert!(
-        bootstrap_source.contains("profile.terminal_composition_mode()"),
-        "bootstrap should branch on an explicit terminal composition mode instead of routing every native-quality frame through NativeTerminalSurface"
+        !bootstrap_source.contains(&format!("TerminalCompositionMode::{}", retired_windows_subsystem::retired_pascal_name())),
+        "bootstrap should stop branching on the retired Windows composition mode once subsystem switching is removed"
     );
     let install_presenter_block = block_between(
         &bootstrap_source,
@@ -574,20 +575,20 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         "presenter installation should not proactively blank the scene image before sync_workspace_session_state publishes the first frame"
     );
     assert!(
-        bootstrap_source.contains("TerminalCompositionMode::SceneImage"),
-        "bootstrap should recognize the scene-image composition mode when selecting the visible Windows software terminal path"
-    );
-    assert!(
         bootstrap_source.contains("TerminalRenderMode::Bitmap"),
-        "bootstrap should keep using the Slint image composition path when the software runtime selects scene-image terminal composition"
+        "bootstrap should keep using the Slint image composition path when the generic bitmap fallback becomes active"
     );
     assert!(
-        presenter_source.contains("pub struct WindowsSceneImagePresenter"),
-        "terminal presenter should define a dedicated Windows scene-image presenter instead of forcing software builds through the whole-window native surface path"
+        !presenter_source.contains(&format!("pub struct {}", retired_windows_subsystem::retired_presenter_name())),
+        "terminal presenter should stop defining the retired Windows software presenter once retained-native is the only live Windows path"
     );
     assert!(
-        presenter_source.contains("SceneImageTerminalRenderer"),
-        "terminal presenter should use a dedicated scene-image renderer for native-quality glyph output inside the Slint scene"
+        !presenter_source.contains(&retired_windows_subsystem::retired_renderer_name()),
+        "terminal presenter should stop depending on the retired Windows software renderer once that subsystem is deleted"
+    );
+    assert!(
+        !app_mod_source.contains(&retired_windows_subsystem::retired_mod_export()),
+        "app module exports should stop exposing the retired Windows renderer module once that subsystem is deleted"
     );
     assert!(
         bootstrap_source.contains("window.set_workspace_session_surface_image(frame.image);"),
@@ -595,17 +596,17 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     );
     assert!(
         bootstrap_source.contains("window.set_workspace_session_native_frame_token(0);"),
-        "bitmap or scene-image composition paths should clear the native frame token so hit-testing and overlay logic do not treat the software scene as a retained native surface"
+        "bitmap presentation paths should clear the native frame token so hit-testing and overlay logic do not treat the software scene as a retained native surface"
     );
     assert!(
         bootstrap_source.contains("window.set_workspace_session_cell_width(")
             && bootstrap_source.contains("frame.cell_width_px as f32 / scale_factor"),
-        "scene-image composition should project the renderer cell width back into Slint logical units from the same frame that produced the visible pixels"
+        "bitmap composition should project the renderer cell width back into Slint logical units from the same frame that produced the visible pixels"
     );
     assert!(
         bootstrap_source.contains("window.set_workspace_session_cell_height(")
             && bootstrap_source.contains("frame.cell_height_px as f32 / scale_factor"),
-        "scene-image composition should project the renderer cell height back into Slint logical units from the same frame that produced the visible pixels"
+        "bitmap composition should project the renderer cell height back into Slint logical units from the same frame that produced the visible pixels"
     );
     assert!(
         !bootstrap_source.contains(
@@ -713,7 +714,7 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
     );
     assert!(
         !native_block.contains("window.set_workspace_session_surface_image(Image::default());"),
-        "native path should stop blanking the scene-image payload before the retained surface is ready so bitmap-to-native switches do not flash an empty frame in the host"
+        "native path should stop blanking the software payload before the retained surface is ready so bitmap-to-native switches do not flash an empty frame in the host"
     );
     assert!(
         native_present < workspace_render_mode,
@@ -777,65 +778,34 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
 }
 
 #[test]
-fn windows_mainline_direct3d_source_routes_terminal_subsystem_explicitly_with_packaged_scene_image_default()
- {
+fn windows_runtime_profile_source_drops_terminal_subsystem_switching() {
     let runtime_profile_source =
         fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
-    let composition_block = block_between(
-        &runtime_profile_source,
-        "pub fn terminal_composition_mode(self) -> TerminalCompositionMode {",
-        "\n    pub fn prefers_native_terminal_renderer(self) -> bool {",
-    );
 
     assert!(
-        runtime_profile_source.contains("pub enum TerminalSubsystemMode"),
-        "runtime profile should expose a terminal subsystem mode once Windows mainline switches to the retained native surface by default"
+        !runtime_profile_source.contains("pub enum TerminalSubsystemMode"),
+        "runtime profile should stop exposing a terminal subsystem mode once retained-native is the only supported Windows path"
     );
     assert!(
-        runtime_profile_source.contains("RetainedNativeSurface"),
-        "runtime profile should make the retained native surface an explicit subsystem mode instead of hiding the default behind render-mode heuristics"
+        !runtime_profile_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM"),
+        "runtime profile should stop parsing runtime terminal subsystem overrides once the retired Windows software path is removed"
     );
     assert!(
-        runtime_profile_source.contains("std::env::var(\"MICA_TERM_TERMINAL_SUBSYSTEM\")"),
-        "runtime profile should keep a runtime rollback switch so bring-up can force the scene-image subsystem without rebuilding"
+        !runtime_profile_source.contains("MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM"),
+        "runtime profile should stop parsing packaged terminal subsystem overrides once the retired Windows software path is removed"
     );
     assert!(
-        runtime_profile_source.contains("option_env!(\"MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM\")"),
-        "runtime profile should keep a packaged terminal subsystem override so build wrappers can pin packaged Windows mainline to the scene-image presenter until retained native surface verification is complete"
-    );
-    assert!(
-        runtime_profile_source
-            .contains("pub fn terminal_subsystem_mode(self) -> TerminalSubsystemMode"),
-        "runtime profile should expose the selected terminal subsystem mode so bootstrap can log and route the packaged retained-native default versus manual scene-image override bring-up path explicitly"
-    );
-    assert!(
-        composition_block
-            .contains("TerminalSubsystemMode::SceneImage => TerminalCompositionMode::SceneImage"),
-        "scene-image composition should remain the explicit packaged presenter path while the retained native surface stays behind a bring-up switch"
-    );
-    assert!(
-        composition_block.contains("TerminalSubsystemMode::RetainedNativeSurface => {")
-            && composition_block.contains("TerminalCompositionMode::PostRenderNativeSurface"),
-        "runtime profile should keep the retained native surface composition route available behind the explicit subsystem mode"
-    );
-    assert!(
-        !composition_block.contains(
-            "AppBuildFlavor::WindowsMainline if self.prefers_direct3d() => {\n                TerminalCompositionMode::SceneImage"
-        ),
-        "Windows mainline should route composition entirely through terminal_subsystem_mode instead of hard-coding scene-image by build flavor"
-    );
-    assert!(
-        bootstrap_source.contains("profile.terminal_subsystem_mode()"),
-        "bootstrap should consult the terminal subsystem mode explicitly so packaged builds default to retained-native-surface while still supporting an explicit scene-image override"
+        !bootstrap_source.contains("profile.terminal_subsystem_mode()"),
+        "bootstrap should stop consulting a terminal subsystem mode once retained-native is the only supported Windows path"
     );
     assert!(
         bootstrap_source.contains("requested_render_mode = profile.terminal_render_mode_label()"),
-        "workspace presenter initialization should log the requested render mode so packaged runtime diagnostics can distinguish profile intent from the active presenter that actually got installed"
+        "workspace presenter initialization should keep logging the requested render mode so packaged runtime diagnostics can distinguish profile intent from the active presenter that actually got installed"
     );
     assert!(
         bootstrap_source.contains("active_render_mode = active_render_mode.as_str()"),
-        "workspace presenter initialization should log the active presenter mode so packaged runtime diagnostics can show whether bootstrap installed bitmap or native presentation"
+        "workspace presenter initialization should keep logging the active presenter mode so packaged runtime diagnostics can show whether bootstrap installed bitmap or native presentation"
     );
 }
 
@@ -1617,7 +1587,7 @@ fn bootstrap_source_exposes_native_surface_scale_factor_bridge_contract() {
     assert!(
         bootstrap_source
             .contains("window.set_workspace_session_device_scale_factor(scale_factor);"),
-        "bootstrap should thread the live window scale factor into the Slint workspace session contract so the scene-image host can snap terminal origin and viewport lengths onto physical pixels"
+        "bootstrap should thread the live window scale factor into the Slint workspace session contract so the software host can snap terminal origin and viewport lengths onto physical pixels"
     );
 }
 

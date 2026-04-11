@@ -3,6 +3,9 @@
 use std::fs;
 use std::path::Path;
 
+#[path = "support/retired_windows_subsystem.rs"]
+mod retired_windows_subsystem;
+
 #[test]
 fn windows_dwrite_font_backend_source_exposes_rasterization_contract() {
     let source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
@@ -358,7 +361,7 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
     assert!(font_backend_source.contains("px_size: DEFAULT_TERMINAL_FONT_SIZE_PX,"));
     assert!(
         dwrite_source.contains("let cell_height_px = line_height.max(MIN_CELL_HEIGHT_PX);"),
-        "DirectWrite metrics should honor the shared minimum terminal line-height contract in the native path as well as the scene-image path"
+        "DirectWrite metrics should honor the shared minimum terminal line-height contract across both the live and retired Windows paths"
     );
 }
 
@@ -384,7 +387,7 @@ fn terminal_presenter_threads_presentable_native_frame_state() {
     );
     assert!(
         presenter_source.contains("fn scaled_terminal_font_request("),
-        "terminal presenters should share one font-request scaling helper so scene-image and retained-native typography tuning cannot drift"
+        "terminal presenters should share one font-request scaling helper so the live and retired Windows typography tuning cannot drift"
     );
     assert!(
         presenter_source.contains("NativeSelectionFrameState"),
@@ -619,8 +622,8 @@ fn windows_presenter_installation_prefers_native_while_packaged_contract_default
         "runtime profile should still distinguish the Windows mainline build flavor when deciding native-first terminal installation"
     );
     assert!(
-        runtime_profile_source.contains("retained-native becomes the default terminal subsystem"),
-        "runtime profile docs should make it explicit that packaged Windows mainline keeps the native renderer while retained-native becomes the default terminal subsystem"
+        runtime_profile_source.contains("retained-native presentation path"),
+        "runtime profile docs should make it explicit that packaged Windows mainline keeps the native renderer on the retained-native presentation path"
     );
     assert!(
         runtime_profile_source.contains("native-first Windows software profile"),
@@ -969,7 +972,7 @@ fn windows_native_renderer_source_threads_fractional_x_phase_into_raster_request
     );
     assert!(
         dwrite_source.contains(".offset(SwashVector::new(request.fractional_offset_x(), 0.0))"),
-        "windows dwrite rasterization should feed the renderer-provided fractional x phase into swash so hinted grayscale glyphs stay sharp on scene-image and native paths"
+        "windows dwrite rasterization should feed the renderer-provided fractional x phase into swash so hinted grayscale glyphs stay sharp across both the live and retired Windows paths"
     );
     assert!(
         renderer_source.contains("split_fractional_offset")
@@ -1365,23 +1368,19 @@ fn font_backend_source_exposes_bitmap_render_profile_defaults() {
 }
 
 #[test]
-fn windows_scene_image_presenter_uses_bitmap_tuned_font_loading_contract() {
+fn windows_native_font_loading_contract_drops_retired_windows_entrypoint() {
     let dwrite_source =
         fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite backend");
     let presenter_source =
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
 
     assert!(
-        dwrite_source.contains("pub fn load_scene_image_font"),
-        "windows dwrite backend should expose a dedicated scene-image font loading entrypoint so bitmap-composited glyph tuning does not get forced through the direct-native profile"
+        !dwrite_source.contains(&format!("pub fn {}", retired_windows_subsystem::retired_font_loader_name())),
+        "windows dwrite backend should stop exposing a dedicated retired Windows font-loading entrypoint once retained-native is the only supported Windows path"
     );
     assert!(
-        dwrite_source.contains("FontRenderProfile::bitmap_default()"),
-        "scene-image font loading should reuse the bitmap render profile because the final glyph masks are composited back into the Slint scene instead of being scanned out directly"
-    );
-    assert!(
-        presenter_source.contains("font_system.load_scene_image_font(&request)?"),
-        "Windows scene-image presenter should load fonts through the bitmap-tuned scene-image entrypoint so software builds stop using the direct-native glyph mask profile"
+        !presenter_source.contains(&format!("font_system.{}(&request)?", retired_windows_subsystem::retired_font_loader_name())),
+        "terminal presenter source should stop loading fonts through a retired Windows entrypoint once that subsystem is deleted"
     );
 }
 
@@ -1443,7 +1442,7 @@ fn native_font_metrics_source_exposes_explicit_baseline_contract() {
 
     assert!(
         backend_source.contains("pub baseline_px: f32"),
-        "font metrics should expose an explicit baseline_px field so native and scene-image presentation stop reverse-engineering row baselines from raw ascent metrics"
+        "font metrics should expose an explicit baseline_px field so the live and retired Windows paths stop reverse-engineering row baselines from raw ascent metrics"
     );
     assert!(
         dwrite_source.contains("let baseline_px =") && dwrite_source.contains("baseline_px,"),
@@ -1451,7 +1450,7 @@ fn native_font_metrics_source_exposes_explicit_baseline_contract() {
     );
     assert!(
         renderer_source.contains("frame.font.metrics().baseline_px.round() as i32"),
-        "native renderer should read the loaded-font baseline contract directly so hinted glyph placement stays stable across native and scene-image composition paths"
+        "native renderer should read the loaded-font baseline contract directly so hinted glyph placement stays stable across the live and retired Windows composition paths"
     );
     assert!(
         !renderer_source.contains("frame.font.metrics().ascent_px.round() as i32"),

@@ -2,9 +2,11 @@
 
 use std::fs;
 
+#[path = "support/retired_windows_subsystem.rs"]
+mod retired_windows_subsystem;
+
 use mica_term::app::runtime_profile::{
     AppBuildFlavor, AppRuntimeProfile, GraphicsApiRequirement, NativePresentPath, RendererMode,
-    TerminalCompositionMode, TerminalSubsystemMode,
 };
 
 #[test]
@@ -56,7 +58,6 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
     assert!(content.contains("option_env!(\"MICA_TERM_BUILD_FLAVOR\")"));
     assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_RENDERER\")"));
     assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_TERMINAL_RENDERER\")"));
-    assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM\")"));
     assert!(content.contains("option_env!(\"MICA_TERM_PACKAGE_NATIVE_PRESENT_PATH\")"));
     assert!(content.contains("WindowsSoftwareCompat"));
     assert!(content.contains("Skia"));
@@ -64,36 +65,33 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
     assert!(content.contains("Software"));
     assert!(content.contains("Some(\"skia\")"));
     assert!(content.contains("pub enum NativePresentPath"));
-    assert!(content.contains("pub enum TerminalCompositionMode"));
-    assert!(content.contains("SceneImage"));
-    assert!(content.contains("PostRenderNativeSurface"));
     assert!(content.contains("RenderingNotifier"));
     assert!(content.contains("EventLoop"));
     assert!(content.contains("pub fn native_present_path(self) -> NativePresentPath"));
-    assert!(content.contains("pub fn terminal_composition_mode(self) -> TerminalCompositionMode"));
     assert!(content.contains("pub fn native_present_path_label(self) -> &'static str"));
     assert!(content.contains("pub enum GraphicsApiRequirement"));
     assert!(
         content.contains("pub fn preferred_graphics_api(self) -> Option<GraphicsApiRequirement>")
     );
-    assert!(content.contains("pub enum TerminalSubsystemMode"));
-    assert!(content.contains("RetainedNativeSurface"));
-    assert!(content.contains("std::env::var(\"MICA_TERM_TERMINAL_SUBSYSTEM\")"));
-    assert!(content.contains("pub fn terminal_subsystem_mode(self) -> TerminalSubsystemMode"));
-    assert!(content.contains("pub fn terminal_subsystem_mode_label(self) -> &'static str"));
     assert!(content.contains("pub fn renderer_fallback_chain(self) -> &'static [RendererMode]"));
     assert!(content.contains("TerminalRenderMode::Bitmap"));
     assert!(content.contains("TerminalRenderMode::Native"));
     assert!(content.contains("Some(\"bitmap\")"));
     assert!(content.contains("Some(\"native\")"));
-    assert!(content.contains("Some(\"scene-image\")"));
-    assert!(content.contains("Some(\"retained-native-surface\")"));
     assert!(content.contains("Self::mainline_native()"));
     assert!(content.contains("Self::software_compat()"));
     assert!(content.contains("pub fn prefers_direct3d(self) -> bool"));
-    assert!(content.contains("retained-native becomes the default terminal subsystem"));
-    assert!(content.contains("Manual overrides still remain available for packaged Windows verification"));
-    assert!(content.contains("rollback"));
+    assert!(content.contains("pub fn prefers_native_terminal_renderer(self) -> bool"));
+    assert!(!content.contains(&retired_windows_subsystem::retired_pascal_name()));
+    assert!(!content.contains(&retired_windows_subsystem::retired_kebab_name()));
+    assert!(!content.contains("MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM"));
+    assert!(!content.contains("MICA_TERM_TERMINAL_SUBSYSTEM"));
+    assert!(!content.contains("pub enum TerminalCompositionMode"));
+    assert!(!content.contains("pub enum TerminalSubsystemMode"));
+    assert!(!content.contains("pub fn terminal_composition_mode(self) -> TerminalCompositionMode"));
+    assert!(!content.contains("pub fn terminal_subsystem_mode(self) -> TerminalSubsystemMode"));
+    assert!(!content.contains("pub fn terminal_subsystem_mode_label(self) -> 'static str"));
+    assert!(!content.contains(&retired_windows_subsystem::retired_subsystem_match_expr()));
     assert!(content.contains("native-first Windows software profile"));
 }
 
@@ -109,32 +107,18 @@ fn software_compat_profile_prefers_native_terminal_renderer() {
     );
     assert_eq!(profile.terminal_render_mode_label(), "native");
     assert_eq!(profile.native_present_path_label(), "rendering-notifier");
-    assert_eq!(
-        profile.terminal_composition_mode(),
-        TerminalCompositionMode::SceneImage
-    );
     assert!(profile.prefers_native_terminal_renderer());
     assert_eq!(profile.preferred_graphics_api(), None);
     assert_eq!(profile.renderer_fallback_chain(), &[RendererMode::Software]);
 }
 
 #[test]
-fn mainline_profile_defaults_to_retained_native_surface_with_scene_image_rollback_available() {
+fn mainline_profile_keeps_retained_native_terminal_settings() {
     let profile = AppRuntimeProfile::mainline();
 
-    assert_eq!(
-        profile.terminal_subsystem_mode(),
-        TerminalSubsystemMode::RetainedNativeSurface
-    );
-    assert_eq!(
-        profile.terminal_composition_mode(),
-        TerminalCompositionMode::PostRenderNativeSurface,
-        "mainline builds should default to the retained native surface once the new terminal subsystem becomes the primary execution path"
-    );
-    assert_eq!(
-        profile.terminal_subsystem_mode_label(),
-        "retained-native-surface"
-    );
+    assert!(profile.prefers_native_terminal_renderer());
+    assert_eq!(profile.terminal_render_mode_label(), "native");
+    assert_eq!(profile.native_present_path_label(), "rendering-notifier");
 }
 
 #[test]
