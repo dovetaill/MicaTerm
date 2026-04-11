@@ -431,6 +431,12 @@ fn software_winit_sources_expose_after_draw_present_contract() {
         "native surface bridge should mark a host-redraw sync hint before replaying retained native content from after-draw hooks"
     );
     assert!(
+        native_surface_source.contains("effective_present_damage(")
+            && native_surface_source.contains("if host_redraw_sync_pending")
+            && native_surface_source.contains("kind: NativeSurfaceDamageKind::Full,"),
+        "after-draw child-surface replays should promote any pending overlay-only damage into a full repaint, otherwise host redraws can leave most of the retained child HWND visually stale or transparent"
+    );
+    assert!(
         native_surface_source
             .contains("if !state.dirty && !state.damage_tracker.has_damage() && !state.host_redraw_sync_pending"),
         "native surface draw gate should allow a retained frame replay after host redraw even when no new terminal frame arrived"
@@ -889,8 +895,9 @@ fn native_cursor_blink_source_is_driven_from_bootstrap_timer() {
     );
     assert!(
         bootstrap_source.contains("workspace_native_cursor_overlay_visible_for_surface(surface)")
-            && bootstrap_source
-                .contains("frame.presentable_frame.cursor_overlay.visible = cursor_overlay_visible;"),
+            && bootstrap_source.contains(
+                "frame.presentable_frame.cursor_overlay.visible = cursor_overlay_visible;"
+            ),
         "native presentation should override the retained cursor overlay visibility from the bootstrap-managed blink phase before presenting the frame"
     );
 }
@@ -1324,10 +1331,8 @@ fn windows_backend_source_clips_present_to_damage_rect() {
             .expect("read windows native surface backend");
 
     assert!(
-        windows_backend_source
-            .contains("let present_rect = translate_rect_to_surface_local(")
-            && windows_backend_source
-                .contains("resolved_present_rect(self.state.rect, damage),"),
+        windows_backend_source.contains("let present_rect = translate_rect_to_surface_local(")
+            && windows_backend_source.contains("resolved_present_rect(self.state.rect, damage),"),
         "windows backend should resolve a present clip rect from the damage payload before starting a draw pass"
     );
     assert!(
@@ -1740,7 +1745,7 @@ fn windows_child_host_source_keeps_parent_terminal_input_route_alive() {
 }
 
 #[test]
-fn windows_child_host_source_paints_opaque_fallback_background() {
+fn windows_child_host_source_limits_opaque_fallback_background_to_bootstrap_frames() {
     let child_host_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows_child_host.rs")
             .expect("read windows child host helper");
@@ -1751,18 +1756,22 @@ fn windows_child_host_source_paints_opaque_fallback_background() {
     assert!(
         child_host_source.contains("pub fn set_background_rgba(&self, rgba: u32)")
             && child_host_source.contains("SetWindowLongPtrW")
-            && child_host_source.contains("InvalidateRect"),
-        "retained-native child HWND host should expose a background-color setter that invalidates the child window so native fallback paint never leaves a freshly created or resized surface visually transparent"
+            && child_host_source.contains("GWLP_USERDATA"),
+        "retained-native child HWND host should expose a background-color setter that persists the fallback color alongside the host-owned paint state so native fallback paint can match the terminal palette without forcing unconditional GDI redraws forever"
     );
     assert!(
-        child_host_source.contains("fn paint_retained_native_child_host_background(")
-            && child_host_source.contains("WM_ERASEBKGND => {")
-            && child_host_source.contains("WM_PAINT => {"),
-        "retained-native child HWND host should actively paint an opaque fallback background during WM_ERASEBKGND and WM_PAINT instead of validating an unpainted child surface that can show through the translucent shell window"
+        child_host_source.contains("pub fn set_fallback_paint_enabled(&self, enabled: bool)")
+            && child_host_source
+                .contains("retained_native_child_host_fallback_paint_enabled(hwnd)")
+            && child_host_source
+                .contains("if retained_native_child_host_fallback_paint_enabled(hwnd) {"),
+        "retained-native child HWND host should gate WM_ERASEBKGND and WM_PAINT fallback fills behind an explicit enable bit so GDI only paints the surface before the first native frame or after device-loss, instead of covering active Direct2D content every frame"
     );
     assert!(
-        windows_backend_source.contains("child_surface_host.set_background_rgba("),
-        "windows backend should feed the current terminal default background into the retained child HWND so fallback GDI paints match the active terminal surface"
+        windows_backend_source.contains("child_surface_host.set_background_rgba(")
+            && windows_backend_source.contains("child_surface_host.set_fallback_paint_enabled(")
+            && windows_backend_source.contains("self.state.fallback_paint_required = false;"),
+        "windows backend should keep the fallback color in sync, re-enable fallback paint while the native surface still owes its first frame, and disable fallback painting again once a Direct2D EndDraw successfully presents the retained frame"
     );
 }
 

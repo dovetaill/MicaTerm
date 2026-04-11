@@ -11,6 +11,9 @@ use std::rc::Rc;
 use std::rc::Weak;
 use std::sync::Arc;
 
+#[cfg(target_os = "windows")]
+const FORCE_OPAQUE_HOST_WINDOW_ENV: &str = "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW";
+
 use euclid::approxeq::ApproxEq;
 
 #[cfg(muda)]
@@ -479,6 +482,11 @@ impl WinitWindowAdapter {
             apply_scale_factor_to_logical_sizes_in_attributes(&mut window_attributes, sf as f64)
         }
 
+        #[cfg(target_os = "windows")]
+        if std::env::var_os(FORCE_OPAQUE_HOST_WINDOW_ENV).is_some() {
+            window_attributes = window_attributes.with_transparent(false);
+        }
+
         // Work around issue with menu bar appearing translucent in fullscreen (#8793)
         #[cfg(all(muda, target_os = "windows"))]
         if self.menubar.borrow().is_some() {
@@ -617,6 +625,11 @@ impl WinitWindowAdapter {
 
     pub(crate) fn window_attributes() -> Result<WindowAttributes, PlatformError> {
         let mut attrs = WindowAttributes::default().with_transparent(true).with_visible(false);
+
+        #[cfg(target_os = "windows")]
+        if std::env::var_os(FORCE_OPAQUE_HOST_WINDOW_ENV).is_some() {
+            attrs = attrs.with_transparent(false);
+        }
 
         attrs = attrs.with_title("Slint Window".to_string());
 

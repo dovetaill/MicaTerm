@@ -14,7 +14,8 @@ use mica_term::AppWindow;
 use mica_term::app::bootstrap::{
     PrivateKeyImporter, VaultProviderFactory, VaultRuntimeOptions,
     bind_top_status_bar_with_injected_services_and_vault_runtime, bind_top_status_bar_with_store,
-    bind_top_status_bar_with_store_and_effects, runtime_window_title,
+    bind_top_status_bar_with_store_and_effects,
+    bind_top_status_bar_with_store_and_profile_and_effects, runtime_window_title,
 };
 use mica_term::app::logging::config::{AppLogMode, AppLoggingConfig};
 use mica_term::app::logging::paths::{LoggingPaths, LoggingRootSource};
@@ -32,9 +33,9 @@ use mica_term::app::vault::model::{
 use mica_term::app::vault::provider::mock::MockVaultProvider;
 use mica_term::app::vault::provider::{ProviderCapabilities, VaultProvider};
 use mica_term::app::window_effects::{
-    BackdropApplyStatus, NativeWindowAppearanceRequest, NativeWindowCornerPreference,
-    NativeWindowTheme, PlatformWindowEffects, WindowAppearanceSyncReport,
-    default_platform_window_effects,
+    BackdropApplyStatus, BackdropPreference, NativeWindowAppearanceRequest,
+    NativeWindowCornerPreference, NativeWindowTheme, PlatformWindowEffects,
+    WindowAppearanceSyncReport, default_platform_window_effects,
 };
 use mica_term::shell::metrics::ShellMetrics;
 use slint::platform::{PointerEventButton, WindowEvent};
@@ -423,6 +424,27 @@ fn settings_no_longer_routes_into_vault_flow() {
     app.invoke_open_settings_panel_requested();
 
     assert_ne!(app.get_right_panel_view().as_str(), "vault");
+}
+
+#[test]
+fn retained_native_terminal_bind_disables_backdrop_composition() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let requests = Rc::new(RefCell::new(Vec::new()));
+    let effects = Rc::new(RecordingWindowEffects::new(Rc::clone(&requests)));
+
+    bind_top_status_bar_with_store_and_profile_and_effects(
+        &app,
+        None,
+        AppRuntimeProfile::mainline(),
+        effects,
+        None,
+    );
+
+    let requests = requests.borrow();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].backdrop, BackdropPreference::None);
 }
 
 #[test]

@@ -2,6 +2,23 @@
 
 use super::*;
 
+fn native_window_appearance_request_for_workspace(
+    theme_mode: ThemeMode,
+) -> crate::app::window_effects::NativeWindowAppearanceRequest {
+    let mut request = build_native_window_appearance_request(theme_mode, window_appearance());
+    let profile = super::WORKSPACE_RUNTIME_PROFILE
+        .with(|profile| (*profile.borrow()).unwrap_or_else(AppRuntimeProfile::packaged));
+
+    if matches!(
+        profile.terminal_subsystem_mode(),
+        crate::app::runtime_profile::TerminalSubsystemMode::RetainedNativeSurface
+    ) {
+        request.backdrop = crate::app::window_effects::BackdropPreference::None;
+    }
+
+    request
+}
+
 pub(super) fn sync_theme_and_window_effects(
     window: &AppWindow,
     state: &ShellViewModel,
@@ -10,7 +27,7 @@ pub(super) fn sync_theme_and_window_effects(
     window.set_dark_mode(state.theme_mode == ThemeMode::Dark);
     window.window().request_redraw();
 
-    let request = build_native_window_appearance_request(state.theme_mode, window_appearance());
+    let request = native_window_appearance_request_for_workspace(state.theme_mode);
     let report = effects.apply_to_app_window(window, &request);
 
     if matches!(

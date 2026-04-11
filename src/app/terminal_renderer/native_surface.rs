@@ -295,16 +295,12 @@ fn draw_retained_frame(state: &mut NativeTerminalSurfaceState) {
         return;
     }
     let damage = state.damage_tracker.take_damage().unwrap_or_default();
-    let damage = if matches!(damage.kind, NativeSurfaceDamageKind::None)
-        && (state.dirty || state.host_redraw_sync_pending)
-    {
-        NativeSurfaceDamage {
-            kind: NativeSurfaceDamageKind::Full,
-            rect: state.rect,
-        }
-    } else {
-        damage
-    };
+    let damage = effective_present_damage(
+        state.rect,
+        damage,
+        state.dirty,
+        state.host_redraw_sync_pending,
+    );
     if let Some(retained_frame) = state.retained_frame.as_ref() {
         state.last_drawn_frame_token = retained_frame.frame.frame_token;
     } else {
@@ -321,6 +317,22 @@ fn replay_after_host_redraw(state: &mut NativeTerminalSurfaceState) {
     state.host_redraw_replay_count = state.host_redraw_replay_count.saturating_add(1);
     state.host_redraw_sync_pending = true;
     draw_retained_frame(state);
+}
+
+fn effective_present_damage(
+    rect: NativeTerminalSurfaceRect,
+    damage: NativeSurfaceDamage,
+    dirty: bool,
+    host_redraw_sync_pending: bool,
+) -> NativeSurfaceDamage {
+    if host_redraw_sync_pending || (dirty && matches!(damage.kind, NativeSurfaceDamageKind::None)) {
+        NativeSurfaceDamage {
+            kind: NativeSurfaceDamageKind::Full,
+            rect,
+        }
+    } else {
+        damage
+    }
 }
 
 fn clear_retained_frame(state: &mut NativeTerminalSurfaceState) {
@@ -352,7 +364,9 @@ fn refresh_diagnostics(state: &mut NativeTerminalSurfaceState) {
 
 #[cfg(test)]
 mod tests {
-    use super::PendingPresentGate;
+    use super::{PendingPresentGate, effective_present_damage};
+    use crate::app::terminal_renderer::damage::{NativeSurfaceDamage, NativeSurfaceDamageKind};
+    use crate::app::terminal_renderer::platform::NativeTerminalSurfaceRect;
 
     #[test]
     fn pending_present_gate_coalesces_redundant_schedule_requests() {
@@ -374,6 +388,78 @@ mod tests {
         assert!(
             gate.mark_scheduled(),
             "after a draw pass consumes the pending redraw, the next frame update should be able to schedule another present"
+        );
+    }
+
+    #[test]
+    fn host_redraw_sync_promotes_overlay_damage_to_full_repaint() {
+        let rect = NativeTerminalSurfaceRect {
+            x: 374,
+            y: 92,
+            width: 560,
+            height: 552,
+        };
+        let overlay_damage = NativeSurfaceDamage {
+            kind: NativeSurfaceDamageKind::OverlayOnly,
+            rect: NativeTerminalSurfaceRect {
+                x: 414,
+                y: 136,
+                width: 80,
+                height: 44,
+            },
+        };
+
+        assert_eq!(
+            effective_present_damage(rect, overlay_damage, false, true),
+            NativeSurfaceDamage {
+                kind: NativeSurfaceDamageKind::Full,
+                rect,
+            },
+            "after a host redraw, child-HWND native presents should repaint the full terminal surface instead of preserving an overlay-only clip that can leave the rest of the child area visually stale or transparent"
+        );
+    }
+
+    #[test]
+    fn dirty_present_without_damage_promotes_to_full_repaint() {
+        let rect = NativeTerminalSurfaceRect {
+            x: 374,
+            y: 92,
+            width: 560,
+            height: 552,
+        };
+
+        assert_eq!(
+            effective_present_damage(rect, NativeSurfaceDamage::default(), true, false),
+            NativeSurfaceDamage {
+                kind: NativeSurfaceDamageKind::Full,
+                rect,
+            },
+            "dirty retained frames without a concrete damage payload should still repaint the full child HWND surface"
+        );
+    }
+
+    #[test]
+    fn overlay_damage_stays_scoped_without_host_redraw_sync() {
+        let rect = NativeTerminalSurfaceRect {
+            x: 374,
+            y: 92,
+            width: 560,
+            height: 552,
+        };
+        let overlay_damage = NativeSurfaceDamage {
+            kind: NativeSurfaceDamageKind::OverlayOnly,
+            rect: NativeTerminalSurfaceRect {
+                x: 414,
+                y: 136,
+                width: 80,
+                height: 44,
+            },
+        };
+
+        assert_eq!(
+            effective_present_damage(rect, overlay_damage, false, false),
+            overlay_damage,
+            "when no host redraw replay is pending, overlay-only updates should keep their narrow damage rect"
         );
     }
 }

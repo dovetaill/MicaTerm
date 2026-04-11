@@ -177,6 +177,7 @@ pub struct WindowsNativeSurfaceState {
     pub attached: bool,
     pub host_hwnd: Option<isize>,
     pub surface_hwnd: Option<isize>,
+    pub fallback_paint_required: bool,
     pub window_rect: NativeTerminalSurfaceRect,
     pub rect: NativeTerminalSurfaceRect,
     pub retained_frame: Option<RetainedNativeTerminalSurfaceFrame>,
@@ -217,6 +218,7 @@ impl WindowsNativeSurfaceState {
     }
 
     fn mark_render_target_dirty(&mut self) {
+        self.fallback_paint_required = true;
         self.render_target_dirty = true;
     }
 
@@ -388,6 +390,7 @@ impl WindowsNativeSurfaceState {
 
     fn clear_device_resources(&mut self) {
         self.hwnd_render_target = None;
+        self.fallback_paint_required = true;
         self.render_target_dirty = true;
         self.last_directwrite_text_drawn = false;
         for brush in self.d2d_brushes.values_mut() {
@@ -1680,13 +1683,21 @@ impl WindowsNativeSurfaceBackend {
         self.state
             .retained_frame
             .as_ref()
-            .map(|frame| 0xff00_0000 | (frame.frame.presentable_frame.default_bg_rgba & 0x00ff_ffff))
+            .map(|frame| {
+                0xff00_0000 | (frame.frame.presentable_frame.default_bg_rgba & 0x00ff_ffff)
+            })
             .unwrap_or(0xff11_1821)
     }
 
     fn sync_child_surface_background_rgba(&self) {
         if let Some(child_surface_host) = self.child_surface_host.as_ref() {
             child_surface_host.set_background_rgba(self.child_surface_background_rgba());
+        }
+    }
+
+    fn set_child_surface_fallback_paint_enabled(&self, enabled: bool) {
+        if let Some(child_surface_host) = self.child_surface_host.as_ref() {
+            child_surface_host.set_fallback_paint_enabled(enabled);
         }
     }
 
@@ -1742,7 +1753,9 @@ impl WindowsNativeSurfaceBackend {
                     );
                     self.state.surface_hwnd = Some(child_surface_host.surface_hwnd);
                     self.child_surface_host = Some(child_surface_host);
+                    self.state.fallback_paint_required = true;
                     self.sync_child_surface_background_rgba();
+                    self.set_child_surface_fallback_paint_enabled(true);
                     self.state.mark_render_target_dirty();
                 }
                 Err(err) => {
@@ -1802,6 +1815,7 @@ impl WindowsNativeSurfaceBackend {
         }
         child_surface_host.set_visible(true);
         child_surface_host.set_background_rgba(background_rgba);
+        child_surface_host.set_fallback_paint_enabled(self.state.fallback_paint_required);
 
         self.state.surface_hwnd =
             (child_surface_host.surface_hwnd != 0).then_some(child_surface_host.surface_hwnd);
@@ -1827,6 +1841,7 @@ impl WindowsNativeSurfaceBackend {
 impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
     fn attach(&mut self, window: &AppWindow) -> Result<()> {
         self.state.attached = true;
+        self.state.fallback_paint_required = true;
         self.host_window = Some(window.as_weak());
         self.resolve_host_hwnd_if_needed();
         self.ensure_child_surface_window();
@@ -1840,6 +1855,7 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         }
         if self.state.window_rect != rect {
             self.state.window_rect = rect;
+            self.state.fallback_paint_required = true;
             self.resolve_host_hwnd_if_needed();
             self.ensure_child_surface_window();
             self.sync_child_surface_window_rect();
@@ -1860,7 +1876,11 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
             retained_frame.rect = self.state.rect;
             retained_frame
         });
+        if self.state.retained_frame.is_none() {
+            self.state.fallback_paint_required = true;
+        }
         self.sync_child_surface_background_rgba();
+        self.set_child_surface_fallback_paint_enabled(self.state.fallback_paint_required);
     }
 
     fn present(&mut self, damage: NativeSurfaceDamage) {
@@ -1876,6 +1896,7 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
             return;
         }
         self.state.ensure_hwnd_render_target();
+        self.set_child_surface_fallback_paint_enabled(self.state.fallback_paint_required);
         let Some(frame) = self.state.retained_frame.clone() else {
             return;
         };
@@ -1909,6 +1930,10 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         #[cfg(target_os = "windows")]
         if self.state.end_frame() {
             self.state.last_presented_frame_token = frame.frame.frame_token;
+            self.state.fallback_paint_required = false;
+            self.set_child_surface_fallback_paint_enabled(false);
+        } else {
+            self.set_child_surface_fallback_paint_enabled(self.state.fallback_paint_required);
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -1962,6 +1987,7 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         self.state.window_rect = NativeTerminalSurfaceRect::default();
         self.state.rect = NativeTerminalSurfaceRect::default();
         self.state.render_target_generation = 0;
+        self.state.fallback_paint_required = false;
         self.state.render_target_dirty = false;
         self.state.last_prepared_frame_token = 0;
         self.state.last_presented_frame_token = 0;

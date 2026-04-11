@@ -263,16 +263,17 @@ fn modal_state_sync_paths_force_immediate_native_surface_geometry_refresh() {
         fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap source");
     let assets_keychain_source = fs::read_to_string("src/app/bootstrap/assets_keychain.rs")
         .expect("read assets keychain source");
-    let shell_chrome_source = fs::read_to_string("src/app/bootstrap/shell_chrome.rs")
-        .expect("read shell chrome source");
-    let sftp_source =
-        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read sftp source");
+    let shell_chrome_source =
+        fs::read_to_string("src/app/bootstrap/shell_chrome.rs").expect("read shell chrome source");
+    let sftp_source = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read sftp source");
     let windowing_source =
         fs::read_to_string("src/app/bootstrap/windowing.rs").expect("read windowing source");
 
     assert!(
-        bootstrap_source.contains("window.set_open_saved_ssh_modal_open(state.saved_ssh_picker_open());")
-            && bootstrap_source.contains("sync_workspace_native_terminal_surface_geometry(window);"),
+        bootstrap_source
+            .contains("window.set_open_saved_ssh_modal_open(state.saved_ssh_picker_open());")
+            && bootstrap_source
+                .contains("sync_workspace_native_terminal_surface_geometry(window);"),
         "bootstrap should refresh retained-native child HWND geometry immediately after syncing the open-saved-ssh modal so a stale child surface cannot stay above the blocking overlay until the next terminal frame"
     );
 

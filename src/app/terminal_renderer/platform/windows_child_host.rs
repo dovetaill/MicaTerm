@@ -12,6 +12,42 @@ pub struct WindowsChildSurfaceHost {
 
 impl WindowsChildSurfaceHost {
     #[cfg(target_os = "windows")]
+    fn update_fallback_paint_state(&self, rgba: Option<u32>, enabled: Option<bool>) {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::Graphics::Gdi::InvalidateRect;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GWLP_USERDATA, GetWindowLongPtrW, SetWindowLongPtrW,
+        };
+
+        if self.surface_hwnd == 0 {
+            return;
+        }
+
+        let hwnd = HWND(self.surface_hwnd as _);
+        let stored = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+        let current_state = u64::try_from(stored.max(0)).unwrap_or_default();
+        let current_rgba = retained_native_child_host_background_rgba(hwnd);
+        let current_enabled = retained_native_child_host_fallback_paint_enabled(hwnd);
+        let next_rgba = rgba.map(opaque_background_rgba).unwrap_or(current_rgba);
+        let next_enabled = enabled.unwrap_or(current_enabled);
+        let next_state = encode_retained_native_child_host_state(next_rgba, next_enabled);
+        if next_state == current_state {
+            return;
+        }
+
+        unsafe {
+            let _ = SetWindowLongPtrW(
+                hwnd,
+                GWLP_USERDATA,
+                isize::try_from(next_state).unwrap_or_default(),
+            );
+            if current_enabled != next_enabled || (next_enabled && current_rgba != next_rgba) {
+                let _ = InvalidateRect(hwnd, None, false);
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
     pub fn create(parent_hwnd: isize, rect: NativeTerminalSurfaceRect) -> Result<Self> {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::UI::WindowsAndMessaging::{
@@ -102,30 +138,19 @@ impl WindowsChildSurfaceHost {
 
     #[cfg(target_os = "windows")]
     pub fn set_background_rgba(&self, rgba: u32) {
-        use windows::Win32::Foundation::HWND;
-        use windows::Win32::Graphics::Gdi::InvalidateRect;
-        use windows::Win32::UI::WindowsAndMessaging::{GWLP_USERDATA, SetWindowLongPtrW};
-
-        if self.surface_hwnd == 0 {
-            return;
-        }
-
-        unsafe {
-            let _ = SetWindowLongPtrW(
-                HWND(self.surface_hwnd as _),
-                GWLP_USERDATA,
-                isize::try_from(opaque_background_rgba(rgba)).unwrap_or_default(),
-            );
-            let _ = InvalidateRect(
-                HWND(self.surface_hwnd as _),
-                None,
-                false,
-            );
-        }
+        self.update_fallback_paint_state(Some(rgba), None);
     }
 
     #[cfg(not(target_os = "windows"))]
     pub fn set_background_rgba(&self, _rgba: u32) {}
+
+    #[cfg(target_os = "windows")]
+    pub fn set_fallback_paint_enabled(&self, enabled: bool) {
+        self.update_fallback_paint_state(None, Some(enabled));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub fn set_fallback_paint_enabled(&self, _enabled: bool) {}
 
     #[cfg(target_os = "windows")]
     pub fn destroy(&mut self) {
@@ -199,7 +224,7 @@ extern "system" fn retained_native_child_host_wndproc(
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
         WM_ERASEBKGND => {
             let hdc = HDC(wparam.0 as _);
-            if hdc.0 as usize != 0 {
+            if retained_native_child_host_fallback_paint_enabled(hwnd) && hdc.0 as usize != 0 {
                 paint_retained_native_child_host_background(hwnd, hdc);
             }
             LRESULT(1)
@@ -208,7 +233,9 @@ extern "system" fn retained_native_child_host_wndproc(
             let mut paint = PAINTSTRUCT::default();
             unsafe {
                 let hdc = BeginPaint(hwnd, &mut paint);
-                paint_retained_native_child_host_background(hwnd, hdc);
+                if retained_native_child_host_fallback_paint_enabled(hwnd) {
+                    paint_retained_native_child_host_background(hwnd, hdc);
+                }
                 let _ = EndPaint(hwnd, &paint);
             }
             LRESULT(0)
@@ -222,7 +249,8 @@ fn retained_native_child_host_background_rgba(hwnd: windows::Win32::Foundation::
     use windows::Win32::UI::WindowsAndMessaging::{GWLP_USERDATA, GetWindowLongPtrW};
 
     let stored = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
-    let stored = u32::try_from(stored.max(0)).unwrap_or_default();
+    let stored = u64::try_from(stored.max(0)).unwrap_or_default();
+    let stored = u32::try_from(stored >> 1).unwrap_or_default();
     if stored == 0 {
         0xff11_1821
     } else {
@@ -231,8 +259,24 @@ fn retained_native_child_host_background_rgba(hwnd: windows::Win32::Foundation::
 }
 
 #[cfg(target_os = "windows")]
+fn retained_native_child_host_fallback_paint_enabled(
+    hwnd: windows::Win32::Foundation::HWND,
+) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GWLP_USERDATA, GetWindowLongPtrW};
+
+    let stored = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+    let stored = u64::try_from(stored.max(0)).unwrap_or_default();
+    if stored == 0 { true } else { stored & 1 != 0 }
+}
+
+#[cfg(target_os = "windows")]
 fn opaque_background_rgba(rgba: u32) -> u32 {
     0xff00_0000 | (rgba & 0x00ff_ffff)
+}
+
+#[cfg(target_os = "windows")]
+fn encode_retained_native_child_host_state(rgba: u32, enabled: bool) -> u64 {
+    (u64::from(opaque_background_rgba(rgba)) << 1) | u64::from(enabled)
 }
 
 #[cfg(target_os = "windows")]
@@ -241,9 +285,7 @@ fn paint_retained_native_child_host_background(
     hdc: windows::Win32::Graphics::Gdi::HDC,
 ) {
     use windows::Win32::Foundation::{COLORREF, RECT};
-    use windows::Win32::Graphics::Gdi::{
-        CreateSolidBrush, DeleteObject, FillRect,
-    };
+    use windows::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, FillRect};
     use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
 
     let mut rect = RECT::default();
@@ -255,11 +297,7 @@ fn paint_retained_native_child_host_background(
     let red = rgba >> 16 & 0xff;
     let green = rgba >> 8 & 0xff;
     let blue = rgba & 0xff;
-    let brush = unsafe {
-        CreateSolidBrush(COLORREF(
-            red | (green << 8) | (blue << 16),
-        ))
-    };
+    let brush = unsafe { CreateSolidBrush(COLORREF(red | (green << 8) | (blue << 16))) };
     if brush.0.is_null() {
         return;
     }

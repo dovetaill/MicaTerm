@@ -52,7 +52,9 @@ use crate::app::keychain::{
 use crate::app::quick_launch_preferences::{
     QuickLaunchPreferences, QuickLaunchPreferencesStore, retain_known_ssh_asset_ids,
 };
-use crate::app::runtime_profile::{AppRuntimeProfile, TerminalCompositionMode, TerminalRenderMode};
+use crate::app::runtime_profile::{
+    AppRuntimeProfile, TerminalCompositionMode, TerminalRenderMode, TerminalSubsystemMode,
+};
 use crate::app::sftp::{
     SftpBrowserController, SftpBrowserLoadRequest, SftpBrowserSessionState, SftpDirectoryEntryKind,
     SftpFollowMode, SftpPanelMode, SftpSessionBindingState,
@@ -6145,11 +6147,72 @@ pub fn run() -> Result<()> {
     run_with_profile(AppRuntimeProfile::mainline(), async_runtime.handle())
 }
 
+const FORCE_OPAQUE_HOST_WINDOW_ENV: &str = "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW";
+
+struct ScopedWindowCreationEnvOverride {
+    key: &'static str,
+    previous_value: Option<std::ffi::OsString>,
+}
+
+impl ScopedWindowCreationEnvOverride {
+    fn set(key: &'static str, value: &'static str) -> Self {
+        let previous_value = std::env::var_os(key);
+        // Window creation reads this process env synchronously during AppWindow::new().
+        unsafe {
+            std::env::set_var(key, value);
+        }
+        Self {
+            key,
+            previous_value,
+        }
+    }
+}
+
+impl Drop for ScopedWindowCreationEnvOverride {
+    fn drop(&mut self) {
+        // Restore the process env immediately after the main window is created.
+        unsafe {
+            if let Some(previous_value) = self.previous_value.as_ref() {
+                std::env::set_var(self.key, previous_value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+}
+
+fn window_creation_env_override_for_profile(
+    profile: AppRuntimeProfile,
+) -> Option<ScopedWindowCreationEnvOverride> {
+    #[cfg(target_os = "windows")]
+    {
+        if matches!(
+            profile.terminal_subsystem_mode(),
+            TerminalSubsystemMode::RetainedNativeSurface
+        ) {
+            return Some(ScopedWindowCreationEnvOverride::set(
+                FORCE_OPAQUE_HOST_WINDOW_ENV,
+                "1",
+            ));
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = profile;
+
+    None
+}
+
 pub fn run_with_profile(
     profile: AppRuntimeProfile,
     async_runtime_handle: tokio::runtime::Handle,
 ) -> Result<()> {
-    let window = AppWindow::new()?;
+    let window = {
+        let window_creation_env_override = window_creation_env_override_for_profile(profile);
+        let window = AppWindow::new()?;
+        drop(window_creation_env_override);
+        window
+    };
     window.set_window_title(runtime_window_title(profile).into());
     bind_top_status_bar_with_profile_and_async_handle(&window, profile, Some(async_runtime_handle));
     window.run()?;
