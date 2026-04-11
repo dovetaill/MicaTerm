@@ -24,7 +24,7 @@ grep -F 'native_surface_text_antialias_mode' "$FRAME_FILE" >/dev/null
 grep -F 'native_surface_render_target_alpha_mode' "$FRAME_FILE" >/dev/null
 grep -F 'native_surface_font_chain' "$FRAME_FILE" >/dev/null
 grep -F 'native_surface_glyph_bounds_trace' "$FRAME_FILE" >/dev/null
-grep -F 'trace_workspace_native_terminal_diagnostics' "$BOOTSTRAP_FILE" >/dev/null
+! grep -F 'trace_workspace_native_terminal_diagnostics' "$BOOTSTRAP_FILE" >/dev/null
 grep -F 'layout-maximize-button-x' "$TITLEBAR" >/dev/null
 grep -F 'layout-titlebar-maximize-button-x' "$APP_FILE" >/dev/null
 

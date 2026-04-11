@@ -604,7 +604,7 @@ fn native_renderer_sources_expose_draw_ready_text_payloads() {
 }
 
 #[test]
-fn windows_presenter_installation_prefers_native_while_packaged_contract_keeps_scene_image_default()
+fn windows_presenter_installation_prefers_native_while_packaged_contract_defaults_to_retained_native()
 {
     let runtime_profile_source =
         fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
@@ -619,8 +619,8 @@ fn windows_presenter_installation_prefers_native_while_packaged_contract_keeps_s
         "runtime profile should still distinguish the Windows mainline build flavor when deciding native-first terminal installation"
     );
     assert!(
-        runtime_profile_source.contains("scene-image remains the default terminal subsystem"),
-        "runtime profile docs should make it explicit that packaged Windows mainline keeps the native renderer while scene-image remains the default terminal subsystem"
+        runtime_profile_source.contains("retained-native becomes the default terminal subsystem"),
+        "runtime profile docs should make it explicit that packaged Windows mainline keeps the native renderer while retained-native becomes the default terminal subsystem"
     );
     assert!(
         runtime_profile_source.contains("native-first Windows software profile"),
@@ -844,28 +844,33 @@ fn windows_backend_source_consumes_retained_color_glyph_and_overlay_payloads() {
 }
 
 #[test]
-fn windows_backend_source_hardens_device_loss_and_detach_present_contract() {
+fn windows_backend_source_hardens_device_loss_and_child_surface_present_contract() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows platform backend");
 
     assert!(
-        windows_backend_source
-            .contains("if self.state.host_hwnd.is_none() {\n            return;\n        }")
-            && windows_backend_source
-                .contains("factory.CreateDCRenderTarget(&render_target_properties)")
-            && windows_backend_source.contains("render_target.BindDC("),
-        "windows backend present path should bail out once the host HWND disappears and otherwise bind Direct2D to the host window DC instead of depending on a separate child HWND"
+        windows_backend_source.contains("self.resolve_host_hwnd_if_needed();")
+            && windows_backend_source.contains("self.ensure_child_surface_window();")
+            && windows_backend_source.contains(
+                "if self.state.host_hwnd.is_none() || self.state.surface_hwnd.is_none() {
+            return;
+        }"
+            )
+            && windows_backend_source.contains("self.state.ensure_hwnd_render_target();"),
+        "windows backend present path should bail out once the host or child HWND disappears and otherwise recreate the dedicated child-surface Direct2D target instead of rebinding to the host window DC"
     );
     assert!(
         windows_backend_source.contains("fn end_frame(&mut self) -> bool"),
         "windows backend should report whether the Direct2D draw pass actually completed so lifecycle bookkeeping can ignore device-loss frames"
     );
     assert!(
-        windows_backend_source.contains(
-            "if self.state.end_frame() {\n            self.state.last_presented_frame_token = frame.frame.frame_token;\n        }"
-        ),
-        "windows backend should advance last_presented_frame_token only after EndDraw succeeds"
+        windows_backend_source.contains("if self.state.end_frame() {")
+            && windows_backend_source
+                .contains("self.state.last_presented_frame_token = frame.frame.frame_token;")
+            && windows_backend_source.contains("self.state.fallback_paint_required = false;")
+            && windows_backend_source.contains("self.set_child_surface_fallback_paint_enabled(false);"),
+        "windows backend should advance last_presented_frame_token and clear child-surface fallback paint only after EndDraw succeeds"
     );
 }
 

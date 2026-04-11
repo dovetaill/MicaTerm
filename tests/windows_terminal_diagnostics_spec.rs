@@ -197,13 +197,13 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
 }
 
 #[test]
-fn bootstrap_source_installs_native_terminal_diagnostics_debug_hook() {
+fn bootstrap_source_no_longer_installs_native_terminal_diagnostics_debug_hook() {
     let bootstrap_source =
         fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap source");
 
-    for expected in [
+    for unexpected in [
         "fn trace_workspace_native_terminal_diagnostics(",
-        "tracing::debug!(",
+        "workspace native terminal diagnostics snapshot",
         "native_surface_text_antialias_mode(&diagnostics)",
         "native_surface_render_target_alpha_mode(&diagnostics)",
         "native_surface_rendering_params_source(&diagnostics)",
@@ -222,11 +222,10 @@ fn bootstrap_source_installs_native_terminal_diagnostics_debug_hook() {
         "scheduled_present_count = diagnostics.scheduled_present_count",
         "host_redraw_request_count = diagnostics.host_redraw_request_count",
         "host_redraw_replay_count = diagnostics.host_redraw_replay_count",
-        "window_scale_factor(window)",
     ] {
         assert!(
-            bootstrap_source.contains(expected),
-            "bootstrap should wire `{expected}` into the debug-level native terminal diagnostics hook so retained-native child-host regressions are inspectable from packaged runs"
+            !bootstrap_source.contains(unexpected),
+            "bootstrap should no longer keep the noisy retained-native diagnostics debug hook now that the transparency issue is fixed and normal launches should not spam per-frame diagnostics"
         );
     }
 }
@@ -236,7 +235,7 @@ fn bootstrap_source_hides_retained_native_child_surface_while_blocking_modals_ar
     let bootstrap_source =
         fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap source");
 
-    for expected in [
+    for unexpected in [
         "fn workspace_blocks_native_terminal_surface(window: &AppWindow) -> bool",
         "window.get_sync_modal_open()",
         "window.get_settings_modal_open()",
@@ -251,8 +250,8 @@ fn bootstrap_source_hides_retained_native_child_surface_while_blocking_modals_ar
         "return NativeTerminalSurfaceRect::default();",
     ] {
         assert!(
-            bootstrap_source.contains(expected),
-            "bootstrap should keep `{expected}` so retained-native child HWNDs are hidden whenever a blocking modal takes the workspace input plane"
+            bootstrap_source.contains(unexpected),
+            "bootstrap should keep `{unexpected}` so retained-native child HWNDs are hidden whenever a blocking modal takes the workspace input plane"
         );
     }
 }

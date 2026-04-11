@@ -12,7 +12,7 @@ grep -F 'TerminalSubsystemMode::SceneImage => TerminalCompositionMode::SceneImag
 grep -F 'TerminalSubsystemMode::RetainedNativeSurface => {' <<<"$composition_block" >/dev/null
 grep -F 'TerminalCompositionMode::PostRenderNativeSurface' <<<"$composition_block" >/dev/null
 ! grep -F 'AppBuildFlavor::WindowsMainline if self.prefers_direct3d() => {' <<<"$composition_block" >/dev/null
-grep -F 'export MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM="scene-image"' build-win-x64.sh >/dev/null
+grep -F 'export MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM="retained-native-surface"' build-win-x64.sh >/dev/null
 
 grep -F 'visible: root.session-render-mode == "bitmap";' ui/shell/terminal-session-host.slint >/dev/null
 grep -F 'if root.session-render-mode == "bitmap" && root.session-cursor-visible && root.cursor-blink-visible : cursor-overlay := Rectangle {' ui/shell/terminal-session-host.slint >/dev/null

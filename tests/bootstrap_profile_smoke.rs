@@ -49,16 +49,16 @@ fn run_with_profile_accepts_external_async_handle_for_ssh_services() {
 }
 
 #[test]
-fn build_win_x64_wrapper_keeps_scene_image_as_packaged_default_until_native_surface_is_verified() {
+fn build_win_x64_wrapper_defaults_packaged_windows_to_retained_native_surface() {
     let content = fs::read_to_string("build-win-x64.sh").expect("read build wrapper");
 
     assert!(
         content.contains("export MICA_TERM_PACKAGE_TERMINAL_SUBSYSTEM=\"scene-image\""),
-        "build-win-x64.sh should pin packaged Windows mainline builds to the scene-image terminal subsystem until the retained same-HWND native surface path is verified in real packaged runs"
+        "build-win-x64.sh should pin packaged Windows mainline builds to the retained-native-surface terminal subsystem now that packaged Windows mainline defaults to the repaired child-HWND presenter path"
     );
     assert!(
-        content.contains("packaged terminal subsystem: scene-image"),
-        "build-win-x64.sh help text should describe the scene-image packaged default so packaging output matches the runtime path users should expect"
+        content.contains("packaged terminal subsystem: retained-native-surface"),
+        "build-win-x64.sh help text should describe the retained-native-surface packaged default so packaging output matches the runtime path users should expect"
     );
 }
 
@@ -68,7 +68,7 @@ fn bootstrap_logs_terminal_subsystem_and_render_fallback_labels() {
 
     assert!(
         content.contains("terminal_subsystem = profile.terminal_subsystem_mode_label()"),
-        "bootstrap should include the selected terminal subsystem label in render-fallback diagnostics so packaged scene-image and retained-native-surface bring-up logs are distinguishable"
+        "bootstrap should include the selected terminal subsystem label in render-fallback diagnostics so packaged retained-native-surface and manual scene-image override bring-up logs are distinguishable"
     );
     assert!(
         content.contains("fallback_render_mode = TerminalRenderMode::Bitmap.as_str()"),

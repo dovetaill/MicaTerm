@@ -52,9 +52,7 @@ use crate::app::keychain::{
 use crate::app::quick_launch_preferences::{
     QuickLaunchPreferences, QuickLaunchPreferencesStore, retain_known_ssh_asset_ids,
 };
-use crate::app::runtime_profile::{
-    AppRuntimeProfile, TerminalCompositionMode, TerminalRenderMode, TerminalSubsystemMode,
-};
+use crate::app::runtime_profile::{AppRuntimeProfile, TerminalCompositionMode, TerminalRenderMode};
 use crate::app::sftp::{
     SftpBrowserController, SftpBrowserLoadRequest, SftpBrowserSessionState, SftpDirectoryEntryKind,
     SftpFollowMode, SftpPanelMode, SftpSessionBindingState,
@@ -91,7 +89,7 @@ use crate::app::terminal_presenter::{
     BitmapAtlasPresenter, NativeTerminalFrame, PresentedTerminalFrame, TerminalPresenter,
 };
 use crate::app::terminal_renderer::{
-    NativeTerminalSurface, NativeTerminalSurfaceDiagnostics, NativeTerminalSurfaceRect,
+    NativeTerminalSurface, NativeTerminalSurfaceRect,
     TerminalRendererHost, TerminalRendererHostOptions,
 };
 use crate::app::terminal_theme::{
@@ -148,17 +146,6 @@ use crate::app::windowing::{
 #[cfg(target_os = "windows")]
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
-};
-use crate::app::windows_frame::{
-    native_surface_baseline_px, native_surface_clear_type_level_per_mille, native_surface_dpi_x,
-    native_surface_dpi_y, native_surface_enhanced_contrast_per_mille, native_surface_font_chain,
-    native_surface_gamma_per_mille, native_surface_glyph_bounds_trace, native_surface_host_hwnd,
-    native_surface_pixel_alignment, native_surface_pixel_geometry,
-    native_surface_render_target_alpha_mode, native_surface_render_target_ready,
-    native_surface_rendering_mode, native_surface_rendering_params_source,
-    native_surface_scale_factor_percent, native_surface_surface_hwnd,
-    native_surface_surface_visible, native_surface_text_antialias_mode,
-    native_surface_text_renderer_path,
 };
 use crate::shell::assets::{
     AssetDisclosureState, AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec,
@@ -2359,92 +2346,6 @@ fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerm
             surface.present(frame);
         }
     });
-    trace_workspace_native_terminal_diagnostics(window);
-}
-
-fn workspace_native_terminal_diagnostics_snapshot() -> Option<NativeTerminalSurfaceDiagnostics> {
-    WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
-        surface
-            .borrow()
-            .as_ref()
-            .map(NativeTerminalSurface::diagnostics_snapshot)
-    })
-}
-
-fn trace_workspace_native_terminal_diagnostics(window: &AppWindow) {
-    let Some(diagnostics) = workspace_native_terminal_diagnostics_snapshot() else {
-        return;
-    };
-
-    let font_chain = native_surface_font_chain(&diagnostics)
-        .map(|chain| chain.join(" -> "))
-        .unwrap_or_default();
-    let glyph_bounds = native_surface_glyph_bounds_trace(&diagnostics)
-        .map(|trace| {
-            trace
-                .iter()
-                .map(|glyph| {
-                    format!(
-                        "#{}@r{}c{}-{} screen=({},{} {}x{}) visible=({},{} {}x{})",
-                        glyph.glyph_id,
-                        glyph.row,
-                        glyph.start_col,
-                        glyph.end_col,
-                        glyph.screen_left_px,
-                        glyph.screen_top_px,
-                        glyph.screen_width_px,
-                        glyph.screen_height_px,
-                        glyph.visible_left_px,
-                        glyph.visible_top_px,
-                        glyph.visible_width_px,
-                        glyph.visible_height_px
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(" | ")
-        })
-        .unwrap_or_default();
-
-    tracing::debug!(
-        target: "app.terminal",
-        modal_blocking_native_surface = workspace_blocks_native_terminal_surface(window),
-        host_hwnd = diagnostics.host_hwnd.unwrap_or_default(),
-        surface_hwnd = diagnostics.surface_hwnd.unwrap_or_default(),
-        surface_visible = diagnostics.surface_visible.unwrap_or(false),
-        render_target_ready = diagnostics.render_target_ready.unwrap_or(false),
-        text_renderer_path = native_surface_text_renderer_path(&diagnostics).unwrap_or("unknown"),
-        text_antialias_mode = native_surface_text_antialias_mode(&diagnostics).unwrap_or("unknown"),
-        render_target_alpha_mode = native_surface_render_target_alpha_mode(&diagnostics)
-            .unwrap_or("unknown"),
-        rendering_params_source = native_surface_rendering_params_source(&diagnostics)
-            .unwrap_or("unknown"),
-        rendering_mode = native_surface_rendering_mode(&diagnostics).unwrap_or("unknown"),
-        pixel_geometry = native_surface_pixel_geometry(&diagnostics).unwrap_or("unknown"),
-        gamma_per_mille = native_surface_gamma_per_mille(&diagnostics).unwrap_or_default(),
-        enhanced_contrast_per_mille = native_surface_enhanced_contrast_per_mille(&diagnostics)
-            .unwrap_or_default(),
-        clear_type_level_per_mille = native_surface_clear_type_level_per_mille(&diagnostics)
-            .unwrap_or_default(),
-        scheduled_present_count = diagnostics.scheduled_present_count,
-        host_redraw_request_count = diagnostics.host_redraw_request_count,
-        host_redraw_replay_count = diagnostics.host_redraw_replay_count,
-        baseline_px = native_surface_baseline_px(&diagnostics).unwrap_or_default(),
-        pixel_alignment = native_surface_pixel_alignment(&diagnostics).unwrap_or("unknown"),
-        dpi_x = native_surface_dpi_x(&diagnostics).unwrap_or_default(),
-        dpi_y = native_surface_dpi_y(&diagnostics).unwrap_or_default(),
-        diagnostics_scale_factor_percent = native_surface_scale_factor_percent(&diagnostics)
-            .unwrap_or_default(),
-        host_scale_factor = window_scale_factor(window),
-        diagnostics_host_hwnd = native_surface_host_hwnd(&diagnostics).unwrap_or_default(),
-        diagnostics_surface_hwnd = native_surface_surface_hwnd(&diagnostics).unwrap_or_default(),
-        diagnostics_surface_visible = native_surface_surface_visible(&diagnostics)
-            .unwrap_or(false),
-        diagnostics_render_target_ready = native_surface_render_target_ready(&diagnostics)
-            .unwrap_or(false),
-        font_chain = %font_chain,
-        glyph_bounds = %glyph_bounds,
-        "workspace native terminal diagnostics snapshot"
-    );
 }
 
 fn clear_workspace_session_cursor_overlay(window: &AppWindow) {
@@ -6147,13 +6048,16 @@ pub fn run() -> Result<()> {
     run_with_profile(AppRuntimeProfile::mainline(), async_runtime.handle())
 }
 
+#[cfg(target_os = "windows")]
 const FORCE_OPAQUE_HOST_WINDOW_ENV: &str = "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW";
 
+#[cfg(target_os = "windows")]
 struct ScopedWindowCreationEnvOverride {
     key: &'static str,
     previous_value: Option<std::ffi::OsString>,
 }
 
+#[cfg(target_os = "windows")]
 impl ScopedWindowCreationEnvOverride {
     fn set(key: &'static str, value: &'static str) -> Self {
         let previous_value = std::env::var_os(key);
@@ -6168,6 +6072,7 @@ impl ScopedWindowCreationEnvOverride {
     }
 }
 
+#[cfg(target_os = "windows")]
 impl Drop for ScopedWindowCreationEnvOverride {
     fn drop(&mut self) {
         // Restore the process env immediately after the main window is created.
@@ -6181,25 +6086,27 @@ impl Drop for ScopedWindowCreationEnvOverride {
     }
 }
 
+#[cfg(target_os = "windows")]
 fn window_creation_env_override_for_profile(
     profile: AppRuntimeProfile,
 ) -> Option<ScopedWindowCreationEnvOverride> {
-    #[cfg(target_os = "windows")]
-    {
-        if matches!(
-            profile.terminal_subsystem_mode(),
-            TerminalSubsystemMode::RetainedNativeSurface
-        ) {
-            return Some(ScopedWindowCreationEnvOverride::set(
-                FORCE_OPAQUE_HOST_WINDOW_ENV,
-                "1",
-            ));
-        }
+    if matches!(
+        profile.terminal_subsystem_mode(),
+        crate::app::runtime_profile::TerminalSubsystemMode::RetainedNativeSurface
+    ) {
+        Some(ScopedWindowCreationEnvOverride::set(
+            FORCE_OPAQUE_HOST_WINDOW_ENV,
+            "1",
+        ))
+    } else {
+        None
     }
+}
 
-    #[cfg(not(target_os = "windows"))]
-    let _ = profile;
-
+#[cfg(not(target_os = "windows"))]
+fn window_creation_env_override_for_profile(
+    _profile: AppRuntimeProfile,
+) -> Option<()> {
     None
 }
 
@@ -6210,7 +6117,7 @@ pub fn run_with_profile(
     let window = {
         let window_creation_env_override = window_creation_env_override_for_profile(profile);
         let window = AppWindow::new()?;
-        drop(window_creation_env_override);
+        let _ = window_creation_env_override;
         window
     };
     window.set_window_title(runtime_window_title(profile).into());

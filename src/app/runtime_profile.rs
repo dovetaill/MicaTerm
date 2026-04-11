@@ -153,11 +153,9 @@ impl AppRuntimeProfile {
     }
 
     /// Packaged Windows mainline keeps the native terminal renderer while
-    /// scene-image remains the default terminal subsystem until the retained
-    /// native surface is verified in real packaged runs.
-    /// The default switch remains gated on packaged Windows verification,
-    /// including rollback coverage, fast scrollback perf, typography sign-off,
-    /// and Catppuccin palette sign-off.
+    /// retained-native becomes the default terminal subsystem.
+    /// Manual overrides still remain available for packaged Windows verification and rollback
+    /// coverage, including explicit scene-image bring-up.
     pub fn mainline_native() -> Self {
         Self::mainline()
     }

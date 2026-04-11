@@ -91,8 +91,9 @@ fn runtime_profile_source_exposes_packaged_env_contract() {
     assert!(content.contains("Self::mainline_native()"));
     assert!(content.contains("Self::software_compat()"));
     assert!(content.contains("pub fn prefers_direct3d(self) -> bool"));
-    assert!(content.contains("scene-image remains the default terminal subsystem"));
-    assert!(content.contains("default switch remains gated on packaged Windows verification"));
+    assert!(content.contains("retained-native becomes the default terminal subsystem"));
+    assert!(content.contains("Manual overrides still remain available for packaged Windows verification"));
+    assert!(content.contains("rollback"));
     assert!(content.contains("native-first Windows software profile"));
 }
 

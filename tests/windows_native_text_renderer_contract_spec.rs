@@ -181,19 +181,19 @@ fn native_surface_rollout_sources_document_default_and_rollback_paths() {
 
     assert!(
         native_surface_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface"),
-        "native surface source should document the explicit retained-native-surface bring-up switch now that packaged Windows mainline defaults back to the scene-image presenter"
+        "native surface source should document the explicit retained-native-surface bring-up switch now that packaged Windows mainline now defaults to the retained-native presenter"
     );
     assert!(
-        presenter_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface"),
-        "terminal presenter source should document the retained native surface as the explicit bring-up switch while scene-image remains the packaged default"
+        presenter_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
+        "terminal presenter source should document the scene-image rollback knob while packaged Windows mainline now defaults to the retained-native presenter"
     );
     assert!(
-        scene_image_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface"),
-        "scene-image renderer source should document that packaged Windows mainline stays on the scene-owned image path unless the retained native surface bring-up switch is enabled"
+        scene_image_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
+        "scene-image renderer source should document that packaged Windows mainline only uses the scene-owned image path for explicit rollback or verification runs via the scene-image override"
     );
     assert!(
-        readme_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=retained-native-surface"),
-        "readme should document the retained native surface bring-up switch so packaged Windows mainline can stay on the visible scene-image path by default"
+        readme_source.contains("MICA_TERM_TERMINAL_SUBSYSTEM=scene-image"),
+        "readme should document the subsystem override contract now that packaged Windows mainline defaults to retained-native and scene-image is the rollback path"
     );
     assert!(
         readme_source.contains("child HWND") || readme_source.contains("child host"),

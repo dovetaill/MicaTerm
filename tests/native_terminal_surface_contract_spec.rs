@@ -236,8 +236,8 @@ fn runtime_profile_source_exposes_terminal_render_mode_contract() {
         "runtime profile should keep a native terminal render mode contract for logging and packaging metadata"
     );
     assert!(
-        runtime_profile_source.contains("scene-image remains the default terminal subsystem"),
-        "runtime profile docs should note that packaged Windows mainline keeps the native renderer while scene-image remains the default terminal subsystem"
+        runtime_profile_source.contains("retained-native becomes the default terminal subsystem"),
+        "runtime profile docs should note that packaged Windows mainline keeps the native renderer while retained-native becomes the default terminal subsystem"
     );
     assert!(
         runtime_profile_source.contains("native-first Windows software profile"),
@@ -807,7 +807,7 @@ fn windows_mainline_direct3d_source_routes_terminal_subsystem_explicitly_with_pa
     assert!(
         runtime_profile_source
             .contains("pub fn terminal_subsystem_mode(self) -> TerminalSubsystemMode"),
-        "runtime profile should expose the selected terminal subsystem mode so bootstrap can log and route the packaged scene-image default versus retained-native-surface bring-up path explicitly"
+        "runtime profile should expose the selected terminal subsystem mode so bootstrap can log and route the packaged retained-native default versus manual scene-image override bring-up path explicitly"
     );
     assert!(
         composition_block
@@ -827,7 +827,7 @@ fn windows_mainline_direct3d_source_routes_terminal_subsystem_explicitly_with_pa
     );
     assert!(
         bootstrap_source.contains("profile.terminal_subsystem_mode()"),
-        "bootstrap should consult the terminal subsystem mode explicitly so packaged builds keep the scene-image presenter by default while retained-native-surface stays opt-in"
+        "bootstrap should consult the terminal subsystem mode explicitly so packaged builds default to retained-native-surface while still supporting an explicit scene-image override"
     );
     assert!(
         bootstrap_source.contains("requested_render_mode = profile.terminal_render_mode_label()"),
