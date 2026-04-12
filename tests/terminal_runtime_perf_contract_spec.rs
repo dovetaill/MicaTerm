@@ -262,11 +262,15 @@ fn presenter_cache_stats_drop_retired_windows_fields_but_keep_clear_hooks() {
     }
 
     assert!(
-        !presenter_source.contains(&retired_windows_subsystem::retired_cache_field("mono_glyph_cache_entries")),
+        !presenter_source.contains(&retired_windows_subsystem::retired_cache_field(
+            "mono_glyph_cache_entries"
+        )),
         "terminal presenter cache stats should stop exposing retired Windows glyph cache counters once that subsystem is deleted"
     );
     assert!(
-        !presenter_source.contains(&retired_windows_subsystem::retired_cache_field("working_pixels_bytes")),
+        !presenter_source.contains(&retired_windows_subsystem::retired_cache_field(
+            "working_pixels_bytes"
+        )),
         "terminal presenter cache stats should stop exposing retired Windows working-pixel bytes once that subsystem is deleted"
     );
 }

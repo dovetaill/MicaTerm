@@ -97,9 +97,12 @@ fn native_surface_diagnostics_smoke_reports_child_host_relationship() {
     );
     assert!(
         !bootstrap_source.contains("host_hwnd = diagnostics.host_hwnd.unwrap_or_default()")
-            && !bootstrap_source.contains("surface_hwnd = diagnostics.surface_hwnd.unwrap_or_default()")
-            && !bootstrap_source.contains("surface_visible = diagnostics.surface_visible.unwrap_or(false)")
-            && !bootstrap_source.contains("render_target_ready = diagnostics.render_target_ready.unwrap_or(false)"),
+            && !bootstrap_source
+                .contains("surface_hwnd = diagnostics.surface_hwnd.unwrap_or_default()")
+            && !bootstrap_source
+                .contains("surface_visible = diagnostics.surface_visible.unwrap_or(false)")
+            && !bootstrap_source
+                .contains("render_target_ready = diagnostics.render_target_ready.unwrap_or(false)"),
         "bootstrap should not emit per-frame host/child HWND diagnostics logs once the retained-native trace spam is retired"
     );
     assert!(
@@ -164,7 +167,10 @@ fn readme_describes_retained_native_as_the_only_live_windows_subsystem() {
     let readme = fs::read_to_string("readme.md").expect("read readme");
 
     assert!(
-        !readme.contains(&format!("{} presenter", retired_windows_subsystem::retired_kebab_name())),
+        !readme.contains(&format!(
+            "{} presenter",
+            retired_windows_subsystem::retired_kebab_name()
+        )),
         "readme should stop describing the retired Windows software presenter as a live path once retained-native is the only supported Windows path"
     );
     assert!(
@@ -199,10 +205,9 @@ fn terminal_renderer_readme_documents_runtime_fallback_diagnostics() {
 
 #[test]
 fn current_cleanup_plan_describes_retained_native_only_windows_path() {
-    let plan = fs::read_to_string(
-        "docs/plans/2026-04-11-default-retained-native-and-log-cleanup-plan.md",
-    )
-    .expect("read retained-native cleanup plan");
+    let plan =
+        fs::read_to_string("docs/plans/2026-04-11-default-retained-native-and-log-cleanup-plan.md")
+            .expect("read retained-native cleanup plan");
 
     assert!(
         !plan.contains(&retired_windows_subsystem::retired_kebab_name()),

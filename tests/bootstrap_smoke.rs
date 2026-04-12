@@ -8515,7 +8515,8 @@ fn bootstrap_tracks_active_surface_idle_before_terminal_cache_shrink() {
         "bootstrap should gate the active idle shrink path behind the persisted settings toggle from the titlebar settings modal"
     );
     assert!(
-        bootstrap_source.contains("WorkspaceTerminalActiveSurfaceFingerprint::from_surface(active_surface)"),
+        bootstrap_source
+            .contains("WorkspaceTerminalActiveSurfaceFingerprint::from_surface(active_surface)"),
         "bootstrap should fingerprint the visible surface before the idle shrink fires so only unchanged frames trigger the delayed cache clear"
     );
 }

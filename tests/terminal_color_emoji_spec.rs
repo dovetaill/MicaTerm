@@ -90,7 +90,6 @@ fn native_presenter_reloads_font_metrics_when_raster_scale_changes() -> Result<(
     Ok(())
 }
 
-
 #[test]
 fn windows_native_presenter_keeps_a_more_readable_text_line_box() -> Result<()> {
     let native = WindowsNativePresenter::new()?;
@@ -119,7 +118,10 @@ fn windows_terminal_sources_remove_legacy_windows_presenter_plumbing() {
         "bootstrap should stop referencing the retired Windows presenter builder once retained-native is the only live Windows path"
     );
     assert!(
-        !bootstrap_source.contains(&format!("TerminalCompositionMode::{}", retired_windows_subsystem::retired_pascal_name())),
+        !bootstrap_source.contains(&format!(
+            "TerminalCompositionMode::{}",
+            retired_windows_subsystem::retired_pascal_name()
+        )),
         "bootstrap should stop branching on the retired Windows composition mode once subsystem switching is removed"
     );
     assert!(

@@ -31,8 +31,6 @@ pub enum GraphicsApiRequirement {
     Direct3D,
 }
 
-
-
 impl TerminalRenderMode {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -58,7 +56,6 @@ impl GraphicsApiRequirement {
         }
     }
 }
-
 
 impl RendererMode {
     pub fn renderer_name(self) -> &'static str {

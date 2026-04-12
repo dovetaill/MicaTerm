@@ -608,7 +608,7 @@ fn native_renderer_sources_expose_draw_ready_text_payloads() {
 
 #[test]
 fn windows_presenter_installation_prefers_native_while_packaged_contract_defaults_to_retained_native()
-{
+ {
     let runtime_profile_source =
         fs::read_to_string("src/app/runtime_profile.rs").expect("read runtime profile");
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
@@ -872,7 +872,8 @@ fn windows_backend_source_hardens_device_loss_and_child_surface_present_contract
             && windows_backend_source
                 .contains("self.state.last_presented_frame_token = frame.frame.frame_token;")
             && windows_backend_source.contains("self.state.fallback_paint_required = false;")
-            && windows_backend_source.contains("self.set_child_surface_fallback_paint_enabled(false);"),
+            && windows_backend_source
+                .contains("self.set_child_surface_fallback_paint_enabled(false);"),
         "windows backend should advance last_presented_frame_token and clear child-surface fallback paint only after EndDraw succeeds"
     );
 }
@@ -1375,11 +1376,17 @@ fn windows_native_font_loading_contract_drops_retired_windows_entrypoint() {
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read terminal presenter");
 
     assert!(
-        !dwrite_source.contains(&format!("pub fn {}", retired_windows_subsystem::retired_font_loader_name())),
+        !dwrite_source.contains(&format!(
+            "pub fn {}",
+            retired_windows_subsystem::retired_font_loader_name()
+        )),
         "windows dwrite backend should stop exposing a dedicated retired Windows font-loading entrypoint once retained-native is the only supported Windows path"
     );
     assert!(
-        !presenter_source.contains(&format!("font_system.{}(&request)?", retired_windows_subsystem::retired_font_loader_name())),
+        !presenter_source.contains(&format!(
+            "font_system.{}(&request)?",
+            retired_windows_subsystem::retired_font_loader_name()
+        )),
         "terminal presenter source should stop loading fonts through a retired Windows entrypoint once that subsystem is deleted"
     );
 }

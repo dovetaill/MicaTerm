@@ -555,7 +555,6 @@ impl TerminalPresenter for WindowsNativePresenter {
     }
 }
 
-
 #[cfg(feature = "terminal-native-renderer")]
 #[allow(dead_code)]
 fn prepare_native_terminal_frame(
