@@ -171,6 +171,7 @@ export component TerminalSessionHost inherits Rectangle {
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
     callback mouse-input(string, string, int, int, bool, bool, bool);
+    callback context-menu-open-changed(bool);
     callback welcome-quick-launch-asset-selected(string);
     callback welcome-quick-launch-search-changed(string);
     callback welcome-quick-launch-connect-requested(string);
@@ -200,7 +201,7 @@ export component TerminalSessionHost inherits Rectangle {
     private property <bool> selection-drag-active: false;
     private property <bool> scrollbar-thumb-drag-active: false;
     private property <bool> cursor-blink-visible: true;
-    private property <bool> terminal-context-menu-open: false;
+    in-out property <bool> context-menu-open: false;
     private property <length> terminal-context-menu-x: 12px;
     private property <length> terminal-context-menu-y: 12px;
     private property <bool> connection-progress-diagnostics-expanded: false;
@@ -441,6 +442,14 @@ export component TerminalSessionHost inherits Rectangle {
         }
     }
 
+    function schedule-surface-resize() {
+        if root.mode != "terminal" {
+            surface-resize-coalesce-timer.stop();
+            return;
+        }
+        surface-resize-coalesce-timer.restart();
+    }
+
     function clear-selection() {
         root.selection-anchor-row = -1;
         root.selection-anchor-col = -1;
@@ -482,7 +491,7 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function close-context-menu() {
-        root.terminal-context-menu-open = false;
+        root.context-menu-open = false;
     }
 
     function has-selection() -> bool {
@@ -568,7 +577,7 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     function open-context-menu(pointer-x: length, pointer-y: length) {
-        root.terminal-context-menu-open = true;
+        root.context-menu-open = true;
         root.terminal-context-menu-x = min(
             max(12px, pointer-x),
             max(12px, root.width - root.terminal-menu-width() - 12px),
@@ -619,7 +628,9 @@ export component TerminalSessionHost inherits Rectangle {
         root.clear-selection();
         root.connection-progress-diagnostics-expanded = false;
         if root.mode == "terminal" {
-            root.emit-surface-resize();
+            root.schedule-surface-resize();
+        } else {
+            surface-resize-coalesce-timer.stop();
         }
     }
 
@@ -628,7 +639,7 @@ export component TerminalSessionHost inherits Rectangle {
         root.clear-selection();
         root.connection-progress-diagnostics-expanded = false;
         if root.mode == "terminal" && root.session-id != "" {
-            root.emit-surface-resize();
+            root.schedule-surface-resize();
         }
     }
 
@@ -641,19 +652,23 @@ export component TerminalSessionHost inherits Rectangle {
     }
 
     changed width => {
-        root.emit-surface-resize();
+        root.schedule-surface-resize();
     }
 
     changed height => {
-        root.emit-surface-resize();
+        root.schedule-surface-resize();
     }
 
     changed terminal-cell-width => {
-        root.emit-surface-resize();
+        root.schedule-surface-resize();
     }
 
     changed terminal-cell-height => {
-        root.emit-surface-resize();
+        root.schedule-surface-resize();
+    }
+
+    changed context-menu-open => {
+        root.context-menu-open-changed(root.context-menu-open);
     }
 
     cursor-blink-timer := Timer {
@@ -668,6 +683,15 @@ export component TerminalSessionHost inherits Rectangle {
                 root.cursor-blink-visible = !root.cursor-blink-visible;
                 self.restart();
             }
+        }
+    }
+
+    surface-resize-coalesce-timer := Timer {
+        interval: 48ms;
+        running: false;
+
+        triggered => {
+            root.emit-surface-resize();
         }
     }
 
@@ -1193,7 +1217,7 @@ export component TerminalSessionHost inherits Rectangle {
                 }
             }
 
-            if root.terminal-context-menu-open : terminal-context-menu-dismiss-layer := TouchArea {
+            if root.context-menu-open : terminal-context-menu-dismiss-layer := TouchArea {
                 width: parent.width;
                 height: parent.height;
 
@@ -1204,7 +1228,7 @@ export component TerminalSessionHost inherits Rectangle {
                 }
             }
 
-            if root.terminal-context-menu-open : terminal-context-menu := Rectangle {
+            if root.context-menu-open : terminal-context-menu := Rectangle {
                 x: root.terminal-context-menu-x;
                 y: root.terminal-context-menu-y;
                 width: root.terminal-menu-width();

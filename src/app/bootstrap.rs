@@ -89,8 +89,8 @@ use crate::app::terminal_presenter::{
     BitmapAtlasPresenter, NativeTerminalFrame, PresentedTerminalFrame, TerminalPresenter,
 };
 use crate::app::terminal_renderer::{
-    NativeTerminalSurface, NativeTerminalSurfaceRect,
-    TerminalRendererHost, TerminalRendererHostOptions,
+    NativeTerminalSurface, NativeTerminalSurfaceRect, TerminalRendererHost,
+    TerminalRendererHostOptions,
 };
 use crate::app::terminal_theme::{
     TerminalThemePreset, preset_for_theme_mode, selection_overlay_rgba,
@@ -2046,7 +2046,10 @@ fn build_workspace_terminal_presenter(
     profile: AppRuntimeProfile,
 ) -> Result<(Box<dyn TerminalPresenter>, TerminalRenderMode)> {
     if profile.prefers_native_terminal_renderer() {
-        return Ok((build_native_terminal_presenter()?, TerminalRenderMode::Native));
+        return Ok((
+            build_native_terminal_presenter()?,
+            TerminalRenderMode::Native,
+        ));
     }
 
     Ok((
@@ -2066,7 +2069,6 @@ fn build_native_terminal_presenter() -> Result<Box<dyn TerminalPresenter>> {
         "native terminal renderer is unavailable in this build"
     ))
 }
-
 
 fn resolve_workspace_terminal_presenter(
     profile: AppRuntimeProfile,
@@ -2249,7 +2251,9 @@ fn workspace_blocks_native_terminal_surface(window: &AppWindow) -> bool {
 }
 
 fn workspace_native_terminal_rect(window: &AppWindow) -> NativeTerminalSurfaceRect {
-    if workspace_blocks_native_terminal_surface(window) {
+    if workspace_blocks_native_terminal_surface(window)
+        || window.get_workspace_session_context_menu_open()
+    {
         return NativeTerminalSurfaceRect::default();
     }
 
@@ -2267,6 +2271,11 @@ fn workspace_native_terminal_rect(window: &AppWindow) -> NativeTerminalSurfaceRe
         height: (window.get_layout_workspace_session_native_surface_height() * scale_factor).round()
             as i32,
     }
+}
+
+fn should_forward_workspace_terminal_resize(window: &AppWindow, rows: i32, cols: i32) -> bool {
+    let _ = window;
+    rows > 0 && cols > 0
 }
 
 fn sync_workspace_native_terminal_surface_geometry(window: &AppWindow) {
@@ -5721,7 +5730,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let session_bridge_ref = session_bridge.clone();
+    let window_handle = window.as_weak();
     window.on_workspace_session_resize_requested(move |rows, cols| {
+        let Some(window) = window_handle.upgrade() else {
+            return;
+        };
+        if !should_forward_workspace_terminal_resize(&window, rows, cols) {
+            return;
+        }
         let state = state.borrow();
         workspace_terminal::forward_active_workspace_resize(
             &state,
@@ -5729,6 +5745,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             rows,
             cols,
         );
+    });
+
+    let window_handle = window.as_weak();
+    window.on_workspace_session_context_menu_open_changed(move |_open| {
+        let Some(window) = window_handle.upgrade() else {
+            return;
+        };
+        sync_workspace_native_terminal_surface_geometry(&window);
     });
 
     let state = Rc::clone(&view_model);
@@ -6076,9 +6100,7 @@ fn window_creation_env_override_for_profile(
 }
 
 #[cfg(not(target_os = "windows"))]
-fn window_creation_env_override_for_profile(
-    _profile: AppRuntimeProfile,
-) -> Option<()> {
+fn window_creation_env_override_for_profile(_profile: AppRuntimeProfile) -> Option<()> {
     None
 }
 

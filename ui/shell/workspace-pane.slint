@@ -66,6 +66,7 @@ export component WorkspacePane inherits Rectangle {
     in-out property <int> workspace-session-selection-start-col: -1;
     in-out property <int> workspace-session-selection-end-row: -1;
     in-out property <int> workspace-session-selection-end-col: -1;
+    in-out property <bool> workspace-session-context-menu-open: false;
     out property <length> layout-workspace-session-native-surface-x:
         content-host.x + session-host.native-surface-x;
     out property <length> layout-workspace-session-native-surface-y:
@@ -90,6 +91,7 @@ export component WorkspacePane inherits Rectangle {
     callback scroll-thumb-drag-requested(float);
     callback scroll-jump-requested(float);
     callback mouse-input(string, string, int, int, bool, bool, bool);
+    callback context-menu-open-changed(bool);
     callback welcome-quick-launch-asset-selected(string);
     callback welcome-quick-launch-search-changed(string);
     callback welcome-quick-launch-connect-requested(string);
@@ -184,6 +186,7 @@ export component WorkspacePane inherits Rectangle {
                 selection-start-col <=> root.workspace-session-selection-start-col;
                 selection-end-row <=> root.workspace-session-selection-end-row;
                 selection-end-col <=> root.workspace-session-selection-end-col;
+                context-menu-open <=> root.workspace-session-context-menu-open;
 
                 text-input(text) => {
                     root.text-input(text);
@@ -235,6 +238,10 @@ export component WorkspacePane inherits Rectangle {
 
                 mouse-input(kind, button, row, col, shift, ctrl, alt) => {
                     root.mouse-input(kind, button, row, col, shift, ctrl, alt);
+                }
+
+                context-menu-open-changed(open) => {
+                    root.context-menu-open-changed(open);
                 }
 
                 welcome-quick-launch-asset-selected(asset-id) => {

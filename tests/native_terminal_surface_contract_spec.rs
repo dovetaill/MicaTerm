@@ -557,7 +557,10 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         "bootstrap should stop referencing the retired Windows presenter builder once retained-native is the only live Windows path"
     );
     assert!(
-        !bootstrap_source.contains(&format!("TerminalCompositionMode::{}", retired_windows_subsystem::retired_pascal_name())),
+        !bootstrap_source.contains(&format!(
+            "TerminalCompositionMode::{}",
+            retired_windows_subsystem::retired_pascal_name()
+        )),
         "bootstrap should stop branching on the retired Windows composition mode once subsystem switching is removed"
     );
     let install_presenter_block = block_between(
@@ -579,7 +582,10 @@ fn windows_software_sources_expose_scene_owned_terminal_composition_contract() {
         "bootstrap should keep using the Slint image composition path when the generic bitmap fallback becomes active"
     );
     assert!(
-        !presenter_source.contains(&format!("pub struct {}", retired_windows_subsystem::retired_presenter_name())),
+        !presenter_source.contains(&format!(
+            "pub struct {}",
+            retired_windows_subsystem::retired_presenter_name()
+        )),
         "terminal presenter should stop defining the retired Windows software presenter once retained-native is the only live Windows path"
     );
     assert!(
@@ -1711,6 +1717,60 @@ fn windows_child_host_source_keeps_parent_terminal_input_route_alive() {
         child_host_source.contains("WM_MOUSEACTIVATE")
             && child_host_source.contains("MA_NOACTIVATE"),
         "retained-native child HWND host should refuse activation on mouse input so keyboard focus stays on the parent terminal input path until child-HWND input ownership is implemented deliberately"
+    );
+    assert!(
+        child_host_source.contains("WM_RBUTTONDOWN")
+            && child_host_source.contains("WM_RBUTTONUP")
+            && child_host_source.contains("WM_CONTEXTMENU")
+            && child_host_source.contains("MapWindowPoints")
+            && child_host_source.contains("PostMessageW"),
+        "retained-native child HWND host should forward right-button and context-menu messages back to the parent terminal surface so selection copy/paste menus keep working even while the child window owns the visible native pixels"
+    );
+}
+
+#[test]
+fn terminal_resize_source_coalesces_restore_bursts_and_ignores_minimized_resizes() {
+    let terminal_host_source = fs::read_to_string("ui/shell/terminal-session-host.slint")
+        .expect("read terminal session host");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let app_window_source = fs::read_to_string("ui/app-window.slint").expect("read app window");
+    let workspace_pane_source =
+        fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
+
+    assert!(
+        terminal_host_source.contains("surface-resize-coalesce-timer := Timer")
+            && terminal_host_source.contains("interval: 48ms;")
+            && terminal_host_source.contains("function schedule-surface-resize()"),
+        "terminal host should coalesce restore-time resize bursts so embedded TUIs do not see every transient minimize/layout collapse size"
+    );
+    assert!(
+        terminal_host_source.contains("root.schedule-surface-resize();")
+            && !terminal_host_source
+                .contains("changed width => {\n        root.emit-surface-resize();\n    }"),
+        "terminal host should restart the resize debounce timer instead of forwarding width changes immediately during collapse and restore"
+    );
+    assert!(
+        bootstrap_source.contains(
+            "fn should_forward_workspace_terminal_resize(window: &AppWindow, rows: i32, cols: i32) -> bool"
+        ) && bootstrap_source.contains("rows > 0 && cols > 0")
+            && !bootstrap_source.contains("window.window().is_minimized() || !window.window().is_visible()")
+            && !bootstrap_source.contains(
+                "window.get_workspace_session_surface_seqno() > 0 && (rows <= 1 || cols <= 1)"
+            ),
+        "bootstrap should stop swallowing legitimate terminal resizes after the window restores, because that trap leaves the live session frozen at the default 80x24 grid"
+    );
+    assert!(
+        terminal_host_source.contains("in-out property <bool> context-menu-open: false;")
+            && terminal_host_source.contains("changed context-menu-open => {")
+            && workspace_pane_source
+                .contains("context-menu-open <=> root.workspace-session-context-menu-open;")
+            && app_window_source.contains(
+                "workspace-session-context-menu-open <=> root.workspace-session-context-menu-open;"
+            )
+            && bootstrap_source
+                .contains("window.on_workspace_session_context_menu_open_changed(move |_open| {")
+            && bootstrap_source.contains("window.get_workspace_session_context_menu_open()"),
+        "terminal context menu state should propagate from the Slint terminal host back into bootstrap so the retained native child surface can be hidden while the menu is open instead of covering the menu"
     );
 }
 

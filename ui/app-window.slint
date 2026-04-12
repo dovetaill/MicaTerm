@@ -260,6 +260,7 @@ export component AppWindow inherits Window {
     in-out property <int> workspace-session-selection-start-col: -1;
     in-out property <int> workspace-session-selection-end-row: -1;
     in-out property <int> workspace-session-selection-end-col: -1;
+    in-out property <bool> workspace-session-context-menu-open: false;
     in-out property <bool> assets-context-menu-open: false;
     in-out property <length> assets-context-menu-anchor-x: 0px;
     in-out property <length> assets-context-menu-anchor-y: 0px;
@@ -409,6 +410,7 @@ export component AppWindow inherits Window {
     callback workspace-session-scroll-thumb-drag-requested(float);
     callback workspace-session-scroll-jump-requested(float);
     callback workspace-session-mouse-input(string, string, int, int, bool, bool, bool);
+    callback workspace-session-context-menu-open-changed(bool);
     callback welcome-quick-launch-asset-selected(string);
     callback welcome-quick-launch-search-changed(string);
     callback welcome-quick-launch-connect-requested(string);
@@ -774,6 +776,7 @@ export component AppWindow inherits Window {
                         workspace-session-selection-start-col <=> root.workspace-session-selection-start-col;
                         workspace-session-selection-end-row <=> root.workspace-session-selection-end-row;
                         workspace-session-selection-end-col <=> root.workspace-session-selection-end-col;
+                        workspace-session-context-menu-open <=> root.workspace-session-context-menu-open;
 
                         workspace-tab-selected(session-id) => {
                             root.workspace-tab-selected(session-id);
@@ -837,6 +840,10 @@ export component AppWindow inherits Window {
 
                         mouse-input(kind, button, row, col, shift, ctrl, alt) => {
                             root.workspace-session-mouse-input(kind, button, row, col, shift, ctrl, alt);
+                        }
+
+                        context-menu-open-changed(open) => {
+                            root.workspace-session-context-menu-open-changed(open);
                         }
 
                         welcome-quick-launch-asset-selected(asset-id) => {

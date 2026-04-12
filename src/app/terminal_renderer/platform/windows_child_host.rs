@@ -215,13 +215,29 @@ extern "system" fn retained_native_child_host_wndproc(
     use windows::Win32::Foundation::LRESULT;
     use windows::Win32::Graphics::Gdi::{BeginPaint, EndPaint, HDC, PAINTSTRUCT};
     use windows::Win32::UI::WindowsAndMessaging::{
-        DefWindowProcW, HTTRANSPARENT, MA_NOACTIVATE, WM_ERASEBKGND, WM_MOUSEACTIVATE,
-        WM_NCHITTEST, WM_PAINT,
+        DefWindowProcW, HTTRANSPARENT, MA_NOACTIVATE, WM_CONTEXTMENU, WM_ERASEBKGND,
+        WM_MOUSEACTIVATE, WM_NCHITTEST, WM_PAINT, WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP,
     };
 
     match msg {
         WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
         WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_RBUTTONDOWN | WM_RBUTTONUP | WM_RBUTTONDBLCLK => {
+            if let Some(result) =
+                retained_native_child_host_forward_client_mouse_message(hwnd, msg, wparam, lparam)
+            {
+                return result;
+            }
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
+        WM_CONTEXTMENU => {
+            if let Some(result) =
+                retained_native_child_host_forward_context_menu_message(hwnd, msg, wparam, lparam)
+            {
+                return result;
+            }
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
         WM_ERASEBKGND => {
             let hdc = HDC(wparam.0 as _);
             if retained_native_child_host_fallback_paint_enabled(hwnd) && hdc.0 as usize != 0 {
@@ -242,6 +258,71 @@ extern "system" fn retained_native_child_host_wndproc(
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
+}
+
+#[cfg(target_os = "windows")]
+fn retained_native_child_host_forward_client_mouse_message(
+    hwnd: windows::Win32::Foundation::HWND,
+    msg: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> Option<windows::Win32::Foundation::LRESULT> {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::Graphics::Gdi::MapWindowPoints;
+    use windows::Win32::UI::WindowsAndMessaging::{GetParent, PostMessageW};
+
+    let parent = unsafe { GetParent(hwnd).ok()? };
+    let mut points = [retained_native_child_host_point_from_lparam(lparam)];
+    unsafe {
+        MapWindowPoints(hwnd, parent, &mut points);
+        PostMessageW(
+            parent,
+            msg,
+            wparam,
+            retained_native_child_host_point_to_lparam(points[0]),
+        )
+        .ok()?;
+    }
+    Some(LRESULT(0))
+}
+
+#[cfg(target_os = "windows")]
+fn retained_native_child_host_forward_context_menu_message(
+    hwnd: windows::Win32::Foundation::HWND,
+    msg: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> Option<windows::Win32::Foundation::LRESULT> {
+    use windows::Win32::Foundation::LRESULT;
+    use windows::Win32::UI::WindowsAndMessaging::{GetParent, PostMessageW};
+
+    let parent = unsafe { GetParent(hwnd).ok()? };
+    unsafe { PostMessageW(parent, msg, wparam, lparam).ok()? };
+    Some(LRESULT(0))
+}
+
+#[cfg(target_os = "windows")]
+fn retained_native_child_host_point_from_lparam(
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::POINT {
+    use windows::Win32::Foundation::POINT;
+
+    let raw = lparam.0 as u32;
+    POINT {
+        x: (raw & 0xffff) as u16 as i16 as i32,
+        y: ((raw >> 16) & 0xffff) as u16 as i16 as i32,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn retained_native_child_host_point_to_lparam(
+    point: windows::Win32::Foundation::POINT,
+) -> windows::Win32::Foundation::LPARAM {
+    use windows::Win32::Foundation::LPARAM;
+
+    let x = (point.x as u16 as u32) & 0xffff;
+    let y = ((point.y as u16 as u32) & 0xffff) << 16;
+    LPARAM((x | y) as isize)
 }
 
 #[cfg(target_os = "windows")]
