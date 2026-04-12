@@ -27,6 +27,7 @@ pub struct NativeTerminalSurfaceWindowsTextDiagnostics {
     pub gamma_per_mille: Option<u32>,
     pub enhanced_contrast_per_mille: Option<u32>,
     pub clear_type_level_per_mille: Option<u32>,
+    pub fallback_reason: Option<&'static str>,
     pub font_chain: Vec<String>,
     pub baseline_px: Option<i32>,
     pub pixel_alignment: Option<&'static str>,

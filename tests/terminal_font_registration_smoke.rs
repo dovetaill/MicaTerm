@@ -21,6 +21,10 @@ fn terminal_font_assets_switch_to_windows_terminal_bundle() {
         "the Windows terminal default bundle should ship a JetBrains Mono medium face"
     );
     assert!(
+        Path::new("assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf").exists(),
+        "the Windows native DirectWrite body path should ship a JetBrains Mono regular face for the lighter industry-standard optical weight"
+    );
+    assert!(
         Path::new("assets/fonts/JetBrainsMono/OFL.txt").exists(),
         "the JetBrains Mono bundle should ship the upstream OFL text"
     );
@@ -74,12 +78,16 @@ fn bitmap_and_native_font_sources_point_at_windows_terminal_defaults() {
         "font backend should move the default terminal family to JetBrains Mono"
     );
     assert!(
+        !backend_source.contains("WINDOWS_DEFAULT_TERMINAL_FONT_FAMILY"),
+        "font backend should not replace the Windows terminal body family with a different default face when the product requirement is to keep JetBrains Mono"
+    );
+    assert!(
         backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Medium\";"),
         "font backend should move the shared terminal default weight to Medium"
     );
     assert!(
         backend_source.contains("family_name: Some(DEFAULT_TERMINAL_FONT_FAMILY.to_string())"),
-        "default font requests should explicitly target the shared terminal family contract"
+        "font requests should explicitly target the shared default family contract"
     );
     assert!(
         (fallback_source.contains("\"Sarasa Term SC\"")

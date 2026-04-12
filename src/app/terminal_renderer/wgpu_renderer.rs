@@ -43,6 +43,12 @@ pub struct PreparedMonochromeGlyphUploadPayload {
     pub coverage: Vec<u8>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreparedMonochromeGlyphVisualFit {
+    BodyText,
+    GridSymbol,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedMonochromeGlyphDraw {
     pub row: u32,
@@ -64,6 +70,7 @@ pub struct PreparedMonochromeGlyphDraw {
     pub dest_x_px: i32,
     pub dest_y_px: i32,
     pub fg_rgba: u32,
+    pub visual_fit: PreparedMonochromeGlyphVisualFit,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -154,6 +161,7 @@ enum PreparedClusterGlyphKind {
         visible_top_px: i32,
         visible_width_px: u32,
         visible_height_px: u32,
+        visual_fit: PreparedMonochromeGlyphVisualFit,
     },
     Color {
         cache_entry: ColorGlyphCacheEntry,
@@ -515,6 +523,7 @@ impl WgpuTerminalRenderer {
                 let cluster_start = run.glyphs[glyph_index].cluster;
                 let (glyph_start_col, glyph_end_col) =
                     glyph_cell_span(run, cluster_start).unwrap_or((run.start_col(), run.end_col()));
+                let visual_fit = glyph_cluster_visual_fit(run, cluster_start);
                 let glyph_span_rect = glyph_cell_span_rect(
                     row.row,
                     glyph_start_col,
@@ -653,6 +662,7 @@ impl WgpuTerminalRenderer {
                                         visible_top_px: rasterized.visible_top_px,
                                         visible_width_px: rasterized.visible_width_px,
                                         visible_height_px: rasterized.visible_height_px,
+                                        visual_fit,
                                     },
                                 });
                                 cluster_pen_x_subpx += monochrome_glyph_advance_px_f32(
@@ -728,6 +738,7 @@ impl WgpuTerminalRenderer {
                                 visible_top_px: rasterized.visible_top_px,
                                 visible_width_px: rasterized.visible_width_px,
                                 visible_height_px: rasterized.visible_height_px,
+                                visual_fit,
                             },
                         });
                         cluster_pen_x_subpx += monochrome_glyph_advance_px_f32(
@@ -762,6 +773,7 @@ impl WgpuTerminalRenderer {
                             visible_top_px,
                             visible_width_px,
                             visible_height_px,
+                            visual_fit,
                         } => artifacts
                             .monochrome_glyph_draws
                             .push(PreparedMonochromeGlyphDraw {
@@ -784,6 +796,7 @@ impl WgpuTerminalRenderer {
                                 dest_x_px,
                                 dest_y_px: glyph.raw_dest_y_px,
                                 fg_rgba,
+                                visual_fit,
                             }),
                         PreparedClusterGlyphKind::Color {
                             cache_entry,
@@ -939,6 +952,44 @@ fn glyph_cell_span(run: &GlyphRun, cluster_start: u32) -> Option<(u32, u32)> {
     let cluster_start = (cluster_start as usize).min(run.text.len());
     let cluster_end = next_cluster_boundary(&run.clusters, cluster_start).unwrap_or(run.text.len());
     clusters_to_cell_span(&run.clusters, cluster_start..cluster_end)
+}
+
+fn glyph_cluster_text(run: &GlyphRun, cluster_start: u32) -> Option<&str> {
+    if run.clusters.is_empty() {
+        return None;
+    }
+
+    let cluster_start = (cluster_start as usize).min(run.text.len());
+    let cluster_end = next_cluster_boundary(&run.clusters, cluster_start).unwrap_or(run.text.len());
+    run.text.get(cluster_start..cluster_end)
+}
+
+fn glyph_cluster_visual_fit(
+    run: &GlyphRun,
+    cluster_start: u32,
+) -> PreparedMonochromeGlyphVisualFit {
+    let Some(cluster_text) = glyph_cluster_text(run, cluster_start) else {
+        return PreparedMonochromeGlyphVisualFit::BodyText;
+    };
+
+    if cluster_text.chars().all(is_grid_fitted_symbol) {
+        PreparedMonochromeGlyphVisualFit::GridSymbol
+    } else {
+        PreparedMonochromeGlyphVisualFit::BodyText
+    }
+}
+
+fn is_grid_fitted_symbol(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{2500}'..='\u{257f}'
+            | '\u{2580}'..='\u{259f}'
+            | '\u{2800}'..='\u{28ff}'
+            | '\u{e0a0}'..='\u{e0d4}'
+            | '\u{ee00}'..='\u{ee0b}'
+            | '\u{f5d0}'..='\u{f60d}'
+            | '\u{1fb00}'..='\u{1fbff}'
+    )
 }
 
 fn next_cluster_boundary(clusters: &[RunCluster], cluster_start: usize) -> Option<usize> {

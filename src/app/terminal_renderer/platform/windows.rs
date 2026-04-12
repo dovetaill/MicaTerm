@@ -66,14 +66,12 @@ use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow}
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 #[cfg(target_os = "windows")]
 use windows::core::{Interface, PCWSTR};
-
 #[cfg(target_os = "windows")]
 const BUNDLED_JETBRAINS_MONO_FONT_BYTES: &[u8] =
-    include_bytes!("../../../../assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf");
+    include_bytes!("../../../../assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf");
 #[cfg(target_os = "windows")]
 const BUNDLED_SARASA_TERM_SC_FONT_BYTES: &[u8] =
     include_bytes!("../../../../assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
-
 #[derive(Default)]
 pub struct WindowsD2DFactoryState {
     pub ready: bool,
@@ -133,6 +131,15 @@ struct WindowsDirectWriteRenderingParamsSnapshot {
     gamma_per_mille: u32,
     enhanced_contrast_per_mille: u32,
     clear_type_level_per_mille: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WindowsDirectWriteTextTraceState {
+    text_renderer_path: &'static str,
+    rendering_params_source: Option<&'static str>,
+    pixel_geometry: Option<&'static str>,
+    enhanced_contrast_per_mille: Option<u32>,
+    fallback_reason: Option<&'static str>,
 }
 
 #[derive(Default)]
@@ -199,8 +206,10 @@ pub struct WindowsNativeSurfaceState {
     pub last_drawn_cursor_overlay_visible: bool,
     pub last_drawn_ime_preview_active: bool,
     pub last_directwrite_text_drawn: bool,
+    pub last_directwrite_fallback_reason: Option<&'static str>,
     pub last_prepared_frame_token: u64,
     pub last_presented_frame_token: u64,
+    last_text_trace_state: Option<WindowsDirectWriteTextTraceState>,
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -273,6 +282,8 @@ impl WindowsNativeSurfaceState {
                 renderer.active_path = "bitmap-mask-compat";
                 renderer.rendering_params_snapshot = None;
             }
+            self.last_directwrite_fallback_reason = Some("renderer-init-failed");
+            self.trace_directwrite_text_path_state();
         }
     }
 
@@ -431,6 +442,8 @@ impl WindowsNativeSurfaceState {
         self.last_drawn_underline_runs = 0;
         self.last_drawn_cursor_overlay_visible = false;
         self.last_drawn_ime_preview_active = false;
+        self.last_directwrite_fallback_reason = None;
+        self.last_text_trace_state = None;
     }
 
     fn mark_directwrite_text_path(&mut self, active_path: &'static str) {
@@ -440,9 +453,13 @@ impl WindowsNativeSurfaceState {
                 renderer.rendering_params_snapshot = None;
             }
         }
+        if active_path == "directwrite-d2d" {
+            self.last_directwrite_fallback_reason = None;
+        }
     }
 
     fn mark_directwrite_text_fallback(&mut self, reason: &'static str) {
+        self.last_directwrite_fallback_reason = Some(reason);
         if self.active_text_renderer_path() != Some("bitmap-mask-compat") {
             tracing::debug!(
                 target: "app.terminal",
@@ -453,6 +470,32 @@ impl WindowsNativeSurfaceState {
             );
         }
         self.mark_directwrite_text_path("bitmap-mask-compat");
+        self.trace_directwrite_text_path_state();
+    }
+
+    fn trace_directwrite_text_path_state(&mut self) {
+        let next_state = WindowsDirectWriteTextTraceState {
+            text_renderer_path: self
+                .active_text_renderer_path()
+                .unwrap_or("bitmap-mask-compat"),
+            rendering_params_source: self.active_rendering_params_source(),
+            pixel_geometry: self.active_pixel_geometry(),
+            enhanced_contrast_per_mille: self.active_enhanced_contrast_per_mille(),
+            fallback_reason: self.active_text_fallback_reason(),
+        };
+        if self.last_text_trace_state == Some(next_state) {
+            return;
+        }
+        self.last_text_trace_state = Some(next_state);
+        tracing::info!(
+            target: "app.terminal",
+            text_renderer_path = self.active_text_renderer_path().unwrap_or("bitmap-mask-compat"),
+            rendering_params_source = self.active_rendering_params_source().unwrap_or("none"),
+            pixel_geometry = self.active_pixel_geometry().unwrap_or("unknown"),
+            enhanced_contrast_per_mille = self.active_enhanced_contrast_per_mille().unwrap_or(0),
+            fallback_reason = self.active_text_fallback_reason().unwrap_or("none"),
+            "native terminal text renderer state changed"
+        );
     }
 
     #[cfg(target_os = "windows")]
@@ -1103,7 +1146,6 @@ impl WindowsNativeSurfaceState {
             if let Some(renderer) = self.directwrite_text_renderer.as_mut() {
                 renderer.rendering_params_snapshot = rendering_params_snapshot;
             }
-
             for (draw, font_face, glyph_index) in drawable_glyphs {
                 self.ensure_brush(draw.fg_rgba);
                 let Some(brush) = self.brush_for(draw.fg_rgba) else {
@@ -1146,6 +1188,7 @@ impl WindowsNativeSurfaceState {
 
             self.last_directwrite_text_drawn = true;
             self.mark_directwrite_text_path("directwrite-d2d");
+            self.trace_directwrite_text_path_state();
         }
     }
 
@@ -1450,6 +1493,7 @@ impl WindowsNativeSurfaceState {
             gamma_per_mille: self.active_gamma_per_mille(),
             enhanced_contrast_per_mille: self.active_enhanced_contrast_per_mille(),
             clear_type_level_per_mille: self.active_clear_type_level_per_mille(),
+            fallback_reason: self.active_text_fallback_reason(),
             font_chain: self.active_font_chain(),
             baseline_px: self.active_baseline_px(),
             pixel_alignment: Some(self.active_pixel_alignment()),
@@ -1526,6 +1570,10 @@ impl WindowsNativeSurfaceState {
             .as_ref()
             .and_then(|renderer| renderer.rendering_params_snapshot)
             .map(|snapshot| snapshot.enhanced_contrast_per_mille)
+    }
+
+    fn active_text_fallback_reason(&self) -> Option<&'static str> {
+        self.last_directwrite_fallback_reason
     }
 
     fn active_clear_type_level_per_mille(&self) -> Option<u32> {

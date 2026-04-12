@@ -13,6 +13,7 @@ use mica_term::app::windows_frame::{
     native_surface_rendering_mode, native_surface_rendering_params_source,
     native_surface_scale_factor_percent, native_surface_surface_hwnd,
     native_surface_surface_visible, native_surface_text_antialias_mode,
+    native_surface_text_fallback_reason,
 };
 
 #[test]
@@ -39,6 +40,7 @@ fn diagnostics_contract_exposes_windows_text_rendering_trace_fields() {
         "pub gamma_per_mille: Option<u32>",
         "pub enhanced_contrast_per_mille: Option<u32>",
         "pub clear_type_level_per_mille: Option<u32>",
+        "pub fallback_reason: Option<&'static str>",
         "pub font_chain: Vec<String>",
         "pub baseline_px: Option<i32>",
         "pub pixel_alignment: Option<&'static str>",
@@ -77,6 +79,7 @@ fn windows_backend_source_publishes_windows_text_rendering_snapshot() {
         "gamma_per_mille:",
         "enhanced_contrast_per_mille:",
         "clear_type_level_per_mille:",
+        "fallback_reason:",
         "font_chain:",
         "baseline_px:",
         "pixel_alignment:",
@@ -119,6 +122,7 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
             gamma_per_mille: Some(2200),
             enhanced_contrast_per_mille: Some(750),
             clear_type_level_per_mille: Some(1000),
+            fallback_reason: Some("font-face-unresolved"),
             font_chain: vec!["JetBrains Mono".into(), "Sarasa Term SC".into()],
             baseline_px: Some(14),
             pixel_alignment: Some("pixel-snapped"),
@@ -173,6 +177,10 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
     assert_eq!(
         native_surface_clear_type_level_per_mille(&diagnostics),
         Some(1000)
+    );
+    assert_eq!(
+        native_surface_text_fallback_reason(&diagnostics),
+        Some("font-face-unresolved")
     );
     assert_eq!(native_surface_baseline_px(&diagnostics), Some(14));
     assert_eq!(

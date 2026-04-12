@@ -77,6 +77,27 @@ fn windows_native_text_renderer_source_uses_monitor_aware_clear_type_contract() 
 }
 
 #[test]
+fn windows_native_text_renderer_source_keeps_body_text_visual_fit_subtle() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows native backend");
+
+    assert!(
+        windows_backend_source.contains("enhanced_contrast.max(0.65).min(1.0)"),
+        "windows native text tuning should restore the original 0.65 floor-only ClearType fit until runtime diagnostics prove which Windows path is actually rendering body text"
+    );
+    assert!(
+        !windows_backend_source.contains("enhanced_contrast.clamp(0.55, 0.92)"),
+        "windows native text tuning should remove the temporary clamp-based visual-fit experiment so further spacing work starts from the known baseline"
+    );
+    assert!(
+        windows_backend_source.contains("let glyph_advances = [draw.advance_px.max(0) as f32];")
+            && windows_backend_source.contains("advanceOffset: 0.0,"),
+        "windows native text tuning should keep DrawGlyphRun advances and offsets locked to the prepared grid contract so cursor, selection, hit testing, and scrollback alignment stay unchanged"
+    );
+}
+
+#[test]
 fn windows_native_text_renderer_source_tracks_true_fallback_path_when_directwrite_bails() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
@@ -92,6 +113,61 @@ fn windows_native_text_renderer_source_tracks_true_fallback_path_when_directwrit
         assert!(
             windows_backend_source.contains(expected),
             "windows native text renderer should reference `{expected}` so diagnostics stop claiming the directwrite path stayed active after the draw stage bails out to bitmap fallback"
+        );
+    }
+}
+
+#[test]
+fn windows_native_text_renderer_source_logs_runtime_text_path_transitions_without_frame_spam() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows native backend");
+
+    for expected in [
+        "fn trace_directwrite_text_path_state(&mut self)",
+        "text_renderer_path = self.active_text_renderer_path().unwrap_or(\"bitmap-mask-compat\")",
+        "fallback_reason = self.active_text_fallback_reason().unwrap_or(\"none\")",
+        "pixel_geometry = self.active_pixel_geometry().unwrap_or(\"unknown\")",
+        "enhanced_contrast_per_mille = self.active_enhanced_contrast_per_mille().unwrap_or(0)",
+    ] {
+        assert!(
+            windows_backend_source.contains(expected),
+            "windows native text renderer should reference `{expected}` so runtime logs show the real active text path and rendering params only when they materially change"
+        );
+    }
+}
+
+#[test]
+fn windows_native_text_renderer_source_adds_visual_breathing_room_without_touching_grid_metrics() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows native backend");
+
+    for expected in [
+        "assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf",
+        "fontEmSize: draw.font_em_size_px.max(1) as f32,",
+        "let glyph_advances = [draw.advance_px.max(0) as f32];",
+        "advanceOffset: 0.0,",
+    ] {
+        assert!(
+            windows_backend_source.contains(expected),
+            "windows native text renderer should reference `{expected}` so Windows body text stays on the same grid contract while switching to the bundled Regular optical-weight face"
+        );
+    }
+    for forbidden in [
+        "assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf",
+        "const WINDOWS_BODY_TEXT_VISUAL_EM_SIZE_SCALE: f32 = 0.96;",
+        "const WINDOWS_BODY_TEXT_VISUAL_LETTER_SPACING_PX: f32 = 0.6;",
+        "fn body_text_visual_font_em_size_px(draw: &PreparedMonochromeGlyphDraw) -> f32",
+        "fn body_text_visual_transform(",
+        "fn centered_scale_transform(",
+        "let visual_transform = Self::body_text_visual_transform(",
+        "let font_em_size = Self::body_text_visual_font_em_size_px(draw);",
+        "render_target.SetTransform(&glyph_transform);",
+    ] {
+        assert!(
+            !windows_backend_source.contains(forbidden),
+            "windows native text renderer should remove `{forbidden}` so the old shrink-to-breathe experiment is gone once the native path switches to the Regular body-text face"
         );
     }
 }

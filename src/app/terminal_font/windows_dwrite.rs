@@ -29,7 +29,7 @@ use crate::app::terminal_font::windows_fallback::{
 use crate::app::terminal_font::windows_locator::{ResolvedFontFaceData, WindowsFontLocator};
 
 const JETBRAINS_MONO_FONT_BYTES: &[u8] =
-    include_bytes!("../../../assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf");
+    include_bytes!("../../../assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf");
 const SARASA_TERM_SC_FONT_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
 const DEFAULT_FACE_KEY: FontFaceKey = FontFaceKey(1);
@@ -231,10 +231,8 @@ impl DirectWriteFontSystem {
             return self.fallback_face_for_key(face_key);
         }
 
-        let face_data = self
-            .ensure_locator()
-            .resolve_face_data(family_name)
-            .or_else(|| fallback_face_data_for_family(family_name))
+        let face_data = fallback_face_data_for_family(family_name)
+            .or_else(|| self.ensure_locator().resolve_face_data(family_name))
             .ok_or_else(|| anyhow!("failed to resolve terminal font family `{family_name}`"))?;
 
         let face_key = FontFaceKey(self.next_face_key);
@@ -357,7 +355,7 @@ fn fallback_face_data_for_family(family_name: &str) -> Option<ResolvedFontFaceDa
     if family_name.eq_ignore_ascii_case(DEFAULT_TERMINAL_FONT_FAMILY) {
         return Some(ResolvedFontFaceData {
             family_name: DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
-            post_script_name: "JetBrainsMono-Medium".to_string(),
+            post_script_name: "JetBrainsMono-Regular".to_string(),
             face_index: DEFAULT_FACE_INDEX,
             font_data: JETBRAINS_MONO_FONT_BYTES.to_vec(),
         });
@@ -798,7 +796,6 @@ mod tests {
 
         Ok(())
     }
-
 
     #[test]
     fn font_loading_publishes_a_baseline_inside_the_cell_box() -> Result<()> {

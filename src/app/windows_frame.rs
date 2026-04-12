@@ -158,6 +158,15 @@ pub fn native_surface_enhanced_contrast_per_mille(
         .and_then(|text| text.enhanced_contrast_per_mille)
 }
 
+pub fn native_surface_text_fallback_reason(
+    diagnostics: &NativeTerminalSurfaceDiagnostics,
+) -> Option<&'static str> {
+    diagnostics
+        .windows_text
+        .as_ref()
+        .and_then(|text| text.fallback_reason)
+}
+
 pub fn native_surface_clear_type_level_per_mille(
     diagnostics: &NativeTerminalSurfaceDiagnostics,
 ) -> Option<u32> {

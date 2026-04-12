@@ -22,6 +22,10 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
         "backend should set JetBrains Mono as the shared terminal default family"
     );
     assert!(
+        !backend_source.contains("WINDOWS_DEFAULT_TERMINAL_FONT_FAMILY"),
+        "backend should not override the Windows terminal body family to a different face when the product requirement is to keep the existing JetBrains Mono + Sarasa chain"
+    );
+    assert!(
         backend_source.contains("pub const DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 14.0;"),
         "backend should expose a 14px default terminal font size"
     );
@@ -51,7 +55,7 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
     );
     assert!(
         backend_source.contains("pub const WINDOWS_DEFAULT_TERMINAL_FONT_CHAIN: &[&str] = &[")
-            && backend_source.contains("\"JetBrains Mono\"")
+            && backend_source.contains("DEFAULT_TERMINAL_FONT_FAMILY")
             && backend_source.contains("\"Sarasa Term SC\"")
             && backend_source.contains("\"Segoe UI Emoji\""),
         "backend should expose the explicit Windows terminal font chain contract"
@@ -63,6 +67,8 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
     );
     assert!(
         backend_source.contains("pub fn windows_default() -> Self")
+            && backend_source
+                .contains("family_name: Some(DEFAULT_TERMINAL_FONT_FAMILY.to_string())")
             && backend_source.contains("px_size: WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX,"),
         "font requests should expose a Windows-specific default constructor so only the Windows presenters pick up the larger body size"
     );
@@ -93,6 +99,11 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
         "DirectWrite fallback should keep a bundled Sarasa Term SC face available when packaged Windows builds cannot resolve the system CJK family"
     );
     assert!(
+        dwrite_source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf")
+            && !dwrite_source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf"),
+        "Windows DirectWrite body text should stay on the JetBrains Mono family chain while loading the bundled Regular optical-weight face instead of the denser Medium build"
+    );
+    assert!(
         dwrite_source.contains("WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX")
             && dwrite_source.contains("WINDOWS_DEFAULT_TERMINAL_LINE_HEIGHT")
             && dwrite_source.contains("let cell_height_px = line_height.max(MIN_CELL_HEIGHT_PX);"),
@@ -105,5 +116,15 @@ fn backend_source_exposes_windows_terminal_typography_defaults() {
     assert!(
         presenter_source.contains("let request = FontRequest::windows_default();"),
         "Windows presenters should source their default request from the Windows-only typography contract instead of changing global defaults"
+    );
+    assert!(
+        dwrite_source.contains("fallback_face_data_for_family(family_name)")
+            && dwrite_source
+                .contains(".or_else(|| self.ensure_locator().resolve_face_data(family_name))"),
+        "DirectWrite font loading should prefer bundled face data before consulting the system locator so shaping, rasterization, and DrawGlyphRun stay on the same font bytes and never decode ASCII glyph ids against a different Cascadia build"
+    );
+    assert!(
+        dwrite_source.contains("post_script_name: \"JetBrainsMono-Regular\".to_string()"),
+        "Windows DirectWrite fallback metadata should identify the bundled JetBrains Mono Regular face explicitly so diagnostics and native font resolution stay on the same optical-weight path"
     );
 }
