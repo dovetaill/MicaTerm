@@ -1012,7 +1012,13 @@ impl GlyphRenderer for SkiaItemRenderer<'_> {
         else {
             return;
         };
-        let font = skia_safe::Font::from_typeface(type_face, font_size.get());
+        let mut font = skia_safe::Font::from_typeface(type_face, font_size.get());
+        #[cfg(target_os = "windows")]
+        {
+            font.set_subpixel(true);
+            font.set_edging(skia_safe::font::Edging::SubpixelAntiAlias);
+            font.set_hinting(skia_safe::FontHinting::Slight);
+        }
 
         let (glyph_ids, glyph_positions): (Vec<_>, Vec<_>) = glyphs_it
             .into_iter()

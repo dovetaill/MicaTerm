@@ -44,7 +44,9 @@ use crate::app::assets_catalog::{
     catalog_to_asset_trees,
 };
 use crate::app::async_runtime::AppAsyncRuntime;
-use crate::app::font_diagnostics::{configure_ui_font_fallbacks, log_ui_shell_font_diagnostics};
+use crate::app::font_diagnostics::{
+    configure_ui_font_fallbacks, log_ui_shell_font_diagnostics, log_ui_text_renderer_diagnostics,
+};
 use crate::app::keychain::{
     KeychainCatalog, KeychainCatalogRepository, KeychainNodePayload, RedbKeychainCatalogStore,
     derive_public_key_material_from_private_key, derive_public_key_material_from_public_key,
@@ -6221,6 +6223,7 @@ pub fn run_with_profile(
     async_runtime_handle: tokio::runtime::Handle,
 ) -> Result<()> {
     configure_ui_font_fallbacks();
+    log_ui_text_renderer_diagnostics();
     let window = {
         let window_creation_env_override = window_creation_env_override_for_profile(profile);
         let window = AppWindow::new()?;

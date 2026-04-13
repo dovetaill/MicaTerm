@@ -27,7 +27,9 @@ fn font_diagnostics_module_defines_explicit_ui_and_terminal_font_contracts() {
         "source",
         "configure_ui_font_fallbacks",
         "log_ui_shell_font_diagnostics",
+        "log_ui_text_renderer_diagnostics",
         "log_terminal_font_diagnostics",
+        "terminal_letter_spacing_px",
     ] {
         assert!(
             diagnostics_source.contains(expected),
@@ -50,7 +52,9 @@ fn bootstrap_and_presenters_emit_explicit_font_resolution_logs() {
     for expected in [
         "configure_ui_font_fallbacks();",
         "log_ui_shell_font_diagnostics(",
+        "log_ui_text_renderer_diagnostics(",
         "\"ui shell font resolution established\"",
+        "\"ui text renderer configuration established\"",
         "\"terminal font resolution established\"",
         "\"native terminal font chain changed\"",
     ] {

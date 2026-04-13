@@ -6,7 +6,7 @@ use fontdb::{Database, Query, Stretch, Style, Weight};
 use slint::fontique_07::{fontique, shared_collection};
 
 use crate::app::system_font_database::load_system_font_database;
-use crate::app::terminal_font::DEFAULT_TERMINAL_FONT_WEIGHT;
+use crate::app::terminal_font::{DEFAULT_TERMINAL_FONT_WEIGHT, DEFAULT_TERMINAL_LETTER_SPACING_PX};
 
 pub const UI_FONT_FAMILY: &str = "MiSans";
 pub const UI_FONT_DEFAULT_WEIGHT: i32 = 400;
@@ -217,6 +217,22 @@ pub(crate) fn log_ui_shell_font_diagnostics() {
     }
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) fn log_ui_text_renderer_diagnostics() {
+    tracing::info!(
+        target: "app.renderer",
+        ui_text_renderer = "slint-skia",
+        ui_text_antialias_mode = "subpixel",
+        ui_text_hinting = "slight",
+        ui_surface_pixel_geometry = "rgb-horizontal",
+        ui_surface_uses_device_independent_fonts = true,
+        "ui text renderer configuration established"
+    );
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn log_ui_text_renderer_diagnostics() {}
+
 pub(crate) fn bitmap_terminal_font_resolution_snapshot() -> TerminalFontResolutionSnapshot {
     let primary = bundled_font_match_diagnostic(
         TERMINAL_PRIMARY_FAMILY,
@@ -259,6 +275,7 @@ pub(crate) fn log_terminal_font_diagnostics(
         requested_weight = snapshot.requested_weight.as_str(),
         requested_style = snapshot.requested_style.as_str(),
         requested_size_px,
+        terminal_letter_spacing_px = DEFAULT_TERMINAL_LETTER_SPACING_PX,
         resolved_primary_family = snapshot.primary.resolved_family.as_str(),
         resolved_primary_fallback_family = snapshot.primary.fallback_family.as_deref().unwrap_or("none"),
         resolved_primary_post_script_name = snapshot.primary.post_script_name.as_deref().unwrap_or("unknown"),

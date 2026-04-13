@@ -5,6 +5,7 @@ use i_slint_core::api::{PhysicalSize as PhysicalWindowSize, Window};
 use i_slint_core::graphics::RequestedGraphicsAPI;
 use i_slint_core::partial_renderer::DirtyRegion;
 use i_slint_core::platform::PlatformError;
+use skia_safe::{PixelGeometry, SurfaceProps, SurfacePropsFlags};
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Duration;
@@ -190,6 +191,10 @@ impl SwapChain {
             };
             let backend_texture =
                 skia_safe::gpu::BackendRenderTarget::new_d3d((width, height), &texture_info);
+            let surface_props = SurfaceProps::new(
+                SurfacePropsFlags::USE_DEVICE_INDEPENDENT_FONTS,
+                PixelGeometry::RGBH,
+            );
 
             skia_safe::gpu::surfaces::wrap_backend_render_target(
                 gr_context,
@@ -197,7 +202,7 @@ impl SwapChain {
                 skia_safe::gpu::SurfaceOrigin::TopLeft,
                 skia_safe::ColorType::RGBA8888,
                 None,
-                None,
+                Some(&surface_props),
             )
             .ok_or_else(|| format!("unable to create d3d skia backend render target"))
         };
