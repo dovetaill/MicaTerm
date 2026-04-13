@@ -95,6 +95,7 @@ export component AssetsSidebar inherits Rectangle {
                     color: ThemeTokens.text-secondary;
                     font-size: 14px;
                     font-weight: AppTypography.ui-font-weight-medium;
+                    letter-spacing: 0.08px;
                     vertical-alignment: center;
                 }
 
@@ -280,7 +281,10 @@ export component AssetsSidebar inherits Rectangle {
                     x: 12px;
                     y: 12px;
                     width: parent.width - 24px;
-                    height: min(parent.height - 24px, root.console-asset-items.length * 28px);
+                    height: min(
+                        parent.height - 24px,
+                        root.console-asset-items.length * AppTypography.ui-sidebar-row-height,
+                    );
 
                     for item in root.console-asset-items : AssetNodeRow {
                         width: list-host.width;
@@ -396,7 +400,10 @@ export component AssetsSidebar inherits Rectangle {
                     x: 12px;
                     y: 12px;
                     width: parent.width - 24px;
-                    height: min(parent.height - 24px, root.snippet-asset-items.length * 28px);
+                    height: min(
+                        parent.height - 24px,
+                        root.snippet-asset-items.length * AppTypography.ui-sidebar-row-height,
+                    );
 
                     for item in root.snippet-asset-items : AssetNodeRow {
                         width: snippet-list-host.width;
@@ -512,7 +519,10 @@ export component AssetsSidebar inherits Rectangle {
                     x: 12px;
                     y: 12px;
                     width: parent.width - 24px;
-                    height: min(parent.height - 24px, root.keychain-asset-items.length * 28px);
+                    height: min(
+                        parent.height - 24px,
+                        root.keychain-asset-items.length * AppTypography.ui-sidebar-row-height,
+                    );
 
                     for item in root.keychain-asset-items : AssetNodeRow {
                         width: keychain-list-host.width;

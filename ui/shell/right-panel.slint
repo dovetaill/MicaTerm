@@ -68,8 +68,7 @@ component SftpHeaderCell inherits Rectangle {
         height: parent.height;
         text: root.label;
         font-family: AppTypography.ui-font-family;
-        color: ThemeTokens.text-primary;
-        opacity: 0.68;
+        color: ThemeTokens.text-secondary;
         font-size: AppTypography.ui-font-size-caption;
         font-weight: AppTypography.ui-font-weight-medium;
         horizontal-alignment: root.right-aligned ? right : left;
@@ -86,7 +85,6 @@ component SftpHeaderCell inherits Rectangle {
         text: root.active-sort-direction == "desc" ? "↓" : "↑";
         font-family: AppTypography.ui-font-family;
         color: ThemeTokens.text-primary;
-        opacity: 0.82;
         font-size: AppTypography.ui-font-size-caption;
         font-weight: 700;
         horizontal-alignment: center;
@@ -346,7 +344,9 @@ export component RightPanel inherits Rectangle {
                     width: parent.width - 20px;
                     height: parent.height;
                     single-line: true;
-                    font-size: 12px;
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    font-weight: AppTypography.ui-font-weight-regular;
                     vertical-alignment: center;
                     text: root.sftp-panel-path;
                     enabled: root.sftp-panel-actions-enabled;
@@ -616,8 +616,7 @@ export component RightPanel inherits Rectangle {
                     y: 28px;
                     width: parent.width - 140px;
                     text: root.sftp-status-copy();
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.68;
+                    color: ThemeTokens.text-secondary;
                     font-size: 11px;
                     overflow: elide;
                 }
@@ -709,8 +708,7 @@ export component RightPanel inherits Rectangle {
                         width: root.sftp-panel-type-column-width;
                         height: parent.height;
                         text: item.type_label;
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.72;
+                        color: ThemeTokens.text-secondary;
                         font-size: 11px;
                         vertical-alignment: center;
                         overflow: elide;
@@ -722,8 +720,7 @@ export component RightPanel inherits Rectangle {
                         width: root.sftp-panel-modified-column-width;
                         height: parent.height;
                         text: item.modified_label;
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.72;
+                        color: ThemeTokens.text-secondary;
                         font-size: 11px;
                         vertical-alignment: center;
                         overflow: elide;
@@ -735,8 +732,7 @@ export component RightPanel inherits Rectangle {
                         width: root.sftp-panel-size-column-width;
                         height: parent.height;
                         text: item.size_label;
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.72;
+                        color: ThemeTokens.text-secondary;
                         font-size: 11px;
                         horizontal-alignment: right;
                         vertical-alignment: center;

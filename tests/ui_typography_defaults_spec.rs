@@ -28,8 +28,8 @@ fn typography_theme_exposes_the_ui_font_contract() {
     assert!(source.contains("ui-font-weight-regular: 400;"));
     assert!(source.contains("ui-font-weight-medium: 500;"));
     assert!(source.contains("ui-font-weight-semibold: 600;"));
-    assert!(source.contains("ui-font-size-body: 13px;"));
-    assert!(source.contains("ui-font-size-caption: 12px;"));
+    assert!(source.contains("ui-font-size-body: 14px;"));
+    assert!(source.contains("ui-font-size-caption: 13px;"));
     assert!(!source.contains("SarasaUiSC"));
 }
 
@@ -55,7 +55,63 @@ fn popup_menu_uses_the_shared_ui_font_family() {
     assert!(source.contains("import { AppTypography } from \"../theme/typography.slint\";"));
     assert!(source.contains("font-family: AppTypography.ui-font-family;"));
     assert!(source.contains("font-size: AppTypography.ui-font-size-body;"));
-    assert!(source.contains("font-weight: AppTypography.ui-font-weight-regular;"));
+    assert!(source.contains("font-weight: AppTypography.ui-font-weight-medium;"));
+}
+
+#[test]
+fn shell_chrome_text_uses_medium_weight_and_roomier_rows() {
+    let active_tab = fs::read_to_string("ui/components/active-tab.slint").expect("read active tab");
+    let asset_row =
+        fs::read_to_string("ui/components/asset-node-row.slint").expect("read asset row");
+    let sidebar = fs::read_to_string("ui/shell/assets-sidebar.slint").expect("read assets sidebar");
+    let menu = fs::read_to_string("ui/components/titlebar-menu.slint").expect("read titlebar menu");
+
+    assert!(
+        active_tab.contains("font-weight: AppTypography.ui-font-weight-medium;"),
+        "tab labels should settle on MiSans Medium across active and inactive states so the shell chrome stops looking under-inked on Windows"
+    );
+    assert!(
+        active_tab.contains("letter-spacing: 0.08px;"),
+        "tab labels should add a slight positive tracking value so English and number-heavy titles stop looking cramped on Windows"
+    );
+    assert!(
+        asset_row.contains("font-weight: AppTypography.ui-font-weight-medium;"),
+        "asset tree labels should request MiSans Medium explicitly so dense Chinese labels stop collapsing into a washed-out regular weight"
+    );
+    assert!(
+        asset_row.contains("row-height: AppTypography.ui-sidebar-row-height;"),
+        "asset tree rows should use the shared sidebar row-height token so list geometry cannot silently drift away from the actual row box"
+    );
+    assert!(
+        sidebar.contains("letter-spacing: 0.08px;"),
+        "sidebar section headings should add a slight tracking bump so MiSans shell chrome keeps a cleaner rhythm at 14px"
+    );
+    assert!(
+        menu.contains("letter-spacing: 0.1px;"),
+        "menu labels should add a slight tracking bump so small mixed-language labels stop looking glued together"
+    );
+}
+
+#[test]
+fn assets_sidebar_list_height_tracks_the_shared_row_height() {
+    let typography = fs::read_to_string("ui/theme/typography.slint").expect("read typography");
+    let sidebar = fs::read_to_string("ui/shell/assets-sidebar.slint").expect("read assets sidebar");
+
+    assert!(
+        typography.contains("ui-sidebar-row-height: 30px;"),
+        "typography should expose a shared sidebar row-height token so shell list geometry and row geometry stay in lock-step"
+    );
+
+    for expected in [
+        "root.console-asset-items.length * AppTypography.ui-sidebar-row-height",
+        "root.snippet-asset-items.length * AppTypography.ui-sidebar-row-height",
+        "root.keychain-asset-items.length * AppTypography.ui-sidebar-row-height",
+    ] {
+        assert!(
+            sidebar.contains(expected),
+            "assets sidebar should size each list host with `{expected}` so the selected-row frame bottom is not clipped by stale 28px geometry"
+        );
+    }
 }
 
 #[test]

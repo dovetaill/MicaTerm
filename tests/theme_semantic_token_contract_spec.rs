@@ -31,6 +31,20 @@ fn semantic_theme_tokens_cover_shell_hierarchy_and_states() {
 }
 
 #[test]
+fn light_mode_text_tokens_raise_shell_contrast_for_small_misans_copy() {
+    let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
+
+    assert!(
+        tokens.contains("out property <brush> text-secondary: dark-mode ? #b9c3d0 : #3f4d5d;"),
+        "light-mode secondary text should move to a darker shell contrast so 14px MiSans body copy stops reading as gray haze on Windows"
+    );
+    assert!(
+        tokens.contains("out property <brush> text-muted: dark-mode ? #8794a6 : #5f7084;"),
+        "light-mode muted text should keep enough density for small MiSans captions instead of collapsing into low-contrast gray"
+    );
+}
+
+#[test]
 fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
     let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
     let active_tab = fs::read_to_string("ui/components/active-tab.slint").expect("read active tab");
@@ -87,5 +101,30 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
     assert!(
         theme_spec.contains("row_bg_even") && theme_spec.contains("row_bg_odd"),
         "terminal palette spec should continue to carry the subtle terminal row stripe contract for renderer-side background banding"
+    );
+}
+
+#[test]
+fn welcome_shell_copy_uses_token_colors_instead_of_opacity_fades() {
+    let welcome = fs::read_to_string("ui/welcome/welcome-view.slint").expect("read welcome view");
+    let quick_launch =
+        fs::read_to_string("ui/welcome/quick-launch-section.slint").expect("read quick launch");
+
+    assert!(
+        welcome.contains("color: ThemeTokens.text-secondary;"),
+        "welcome hero supporting copy should use a semantic secondary text token instead of fading primary text through opacity on a dark panel"
+    );
+    assert!(
+        !welcome.contains("opacity: 0.72;"),
+        "welcome hero supporting copy should stop using opacity fades because that pushes text through transparent compositing and makes MiSans look gray on Windows"
+    );
+    assert!(
+        quick_launch.contains("color: ThemeTokens.text-secondary;")
+            && quick_launch.contains("color: ThemeTokens.text-muted;"),
+        "recent-connections helper copy should use semantic secondary/muted tokens instead of washed-out primary text"
+    );
+    assert!(
+        !quick_launch.contains("opacity: 0.58;") && !quick_launch.contains("opacity: 0.54;"),
+        "quick-launch helper copy should not use low-opacity text on dark shell panels because that magnifies the muddy Windows UI text look"
     );
 }

@@ -176,7 +176,7 @@ impl<'a> SkiaItemRenderer<'a> {
             image.dimensions(),
             skia_safe::ColorType::RGBA8888,
             skia_safe::AlphaType::Premul,
-            None,
+            Some(skia_safe::ColorSpace::new_srgb()),
         );
 
         Self::brush_to_shader(
@@ -362,7 +362,7 @@ impl<'a> SkiaItemRenderer<'a> {
                 to_skia_size(&layer_size).to_ceil(),
                 skia_safe::ColorType::RGBA8888,
                 skia_safe::AlphaType::Premul,
-                None,
+                Some(skia_safe::ColorSpace::new_srgb()),
             );
             let mut surface = self.canvas.new_surface(&image_info, None)?;
             let canvas = surface.canvas();
@@ -729,7 +729,7 @@ impl ItemRenderer for SkiaItemRenderer<'_> {
                     shadow_size.to_ceil(),
                     skia_safe::ColorType::RGBA8888,
                     skia_safe::AlphaType::Premul,
-                    None,
+                    Some(skia_safe::ColorSpace::new_srgb()),
                 );
 
                 let rounded_rect = skia_safe::RRect::new_rect_xy(
@@ -845,7 +845,7 @@ impl ItemRenderer for SkiaItemRenderer<'_> {
                     skia_safe::ISize::new(width as i32, height as i32),
                     skia_safe::ColorType::RGBA8888,
                     skia_safe::AlphaType::Premul,
-                    None,
+                    Some(skia_safe::ColorSpace::new_srgb()),
                 );
                 cached_image = skia_safe::images::raster_from_data(
                     &image_info,
@@ -1015,9 +1015,11 @@ impl GlyphRenderer for SkiaItemRenderer<'_> {
         let mut font = skia_safe::Font::from_typeface(type_face, font_size.get());
         #[cfg(target_os = "windows")]
         {
+            // The shell is composited through translucent surfaces, so prefer grayscale AA plus
+            // subpixel positioning instead of forcing LCD color-fringe antialiasing.
             font.set_subpixel(true);
-            font.set_edging(skia_safe::font::Edging::SubpixelAntiAlias);
-            font.set_hinting(skia_safe::FontHinting::Slight);
+            font.set_edging(skia_safe::font::Edging::AntiAlias);
+            font.set_hinting(skia_safe::FontHinting::Normal);
         }
 
         let (glyph_ids, glyph_positions): (Vec<_>, Vec<_>) = glyphs_it

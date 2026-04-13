@@ -2,6 +2,7 @@
 
 import { ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "quick-launch-types.slint";
 import { QuickLaunchSection } from "quick-launch-section.slint";
 
@@ -111,8 +112,10 @@ export component WelcomeView inherits Rectangle {
                         y: 58px;
                         width: parent.width - 48px;
                         text: "Open a recent connection or browse saved SSH targets.";
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.72;
+                        color: ThemeTokens.text-secondary;
+                        font-family: AppTypography.ui-font-family;
+                        font-size: AppTypography.ui-font-size-body;
+                        font-weight: AppTypography.ui-font-weight-regular;
                     }
 
                     open-saved-ssh-button := LauncherPrimaryActionButton {

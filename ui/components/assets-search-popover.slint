@@ -1,6 +1,7 @@
 // Inline search control used by the assets sidebar header.
 
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 export component AssetsSearchPopover inherits Rectangle {
     in property <string> query: "";
@@ -42,10 +43,12 @@ export component AssetsSearchPopover inherits Rectangle {
 
         search-input := TextInput {
             x: 10px;
-            y: 5px;
+            y: 4px;
             width: parent.width - 20px;
-            height: 22px;
-            font-size: 13px;
+            height: 24px;
+            font-family: AppTypography.ui-font-family;
+            font-size: AppTypography.ui-font-size-body;
+            font-weight: AppTypography.ui-font-weight-regular;
             text: root.query;
             color: root.query == "" ? ThemeTokens.text-muted : ThemeTokens.text-primary;
             selection-background-color: ThemeTokens.focus-ring;

@@ -10,6 +10,25 @@ use crate::app::terminal_font::{DEFAULT_TERMINAL_FONT_WEIGHT, DEFAULT_TERMINAL_L
 
 pub const UI_FONT_FAMILY: &str = "MiSans";
 pub const UI_FONT_DEFAULT_WEIGHT: i32 = 400;
+pub const UI_CHROME_FONT_WEIGHT: i32 = 500;
+#[cfg(target_os = "windows")]
+pub const UI_BODY_FONT_SIZE_PX: f32 = 14.0;
+#[cfg(target_os = "windows")]
+pub const UI_CAPTION_FONT_SIZE_PX: f32 = 13.0;
+#[cfg(target_os = "windows")]
+pub const UI_CHROME_LETTER_SPACING_PX: f32 = 0.08;
+#[cfg(target_os = "windows")]
+pub const UI_TEXT_ANTIALIAS_MODE: &str = "grayscale";
+#[cfg(target_os = "windows")]
+pub const UI_TEXT_SUBPIXEL_POSITIONING: bool = true;
+#[cfg(target_os = "windows")]
+pub const UI_TEXT_HINTING: &str = "normal";
+#[cfg(target_os = "windows")]
+pub const UI_SURFACE_PIXEL_GEOMETRY: &str = "unknown";
+#[cfg(target_os = "windows")]
+pub const UI_SURFACE_COLOR_SPACE: &str = "srgb";
+#[cfg(target_os = "windows")]
+pub const UI_TEXT_RENDERING_POLICY: &str = "grayscale-on-composited-shell";
 pub const TERMINAL_PRIMARY_FAMILY: &str = "Sarasa Term SC Nerd";
 pub const TERMINAL_EMOJI_FALLBACK_FAMILY: &str = "Segoe UI Emoji";
 pub const UI_FALLBACK_FAMILIES: &[&str] =
@@ -160,6 +179,24 @@ pub(crate) fn log_ui_shell_font_diagnostics() {
     });
 
     let requested_match = latin.clone().unwrap_or_default();
+    let chrome_latin = resolve_ui_probe(
+        &mut collection,
+        UI_FONT_FAMILY,
+        UI_CHROME_FONT_WEIGHT,
+        requested_style,
+        "A",
+    );
+    let chrome_cjk = resolve_ui_probe(
+        &mut collection,
+        UI_FONT_FAMILY,
+        UI_CHROME_FONT_WEIGHT,
+        requested_style,
+        "界",
+    );
+    let chrome_requested_match = chrome_latin
+        .clone()
+        .or_else(|| chrome_cjk.clone())
+        .unwrap_or_default();
     let shell_probe_matches = [latin.as_ref(), cjk.as_ref()];
     let fallback_family = shell_probe_matches
         .iter()
@@ -185,6 +222,19 @@ pub(crate) fn log_ui_shell_font_diagnostics() {
         requested_style = "normal",
         resolved_style = requested_match.style,
         source = requested_match.source,
+        chrome_requested_weight = UI_CHROME_FONT_WEIGHT,
+        chrome_resolved_family = chrome_requested_match.resolved_family,
+        chrome_resolved_weight = chrome_requested_match.weight,
+        chrome_resolved_style = chrome_requested_match.style,
+        chrome_source = chrome_requested_match.source,
+        chrome_latin_family = chrome_latin
+            .as_ref()
+            .map(|diagnostic| diagnostic.resolved_family.as_str())
+            .unwrap_or("unresolved"),
+        chrome_cjk_family = chrome_cjk
+            .as_ref()
+            .map(|diagnostic| diagnostic.resolved_family.as_str())
+            .unwrap_or("unresolved"),
         latin_family = latin
             .as_ref()
             .map(|diagnostic| diagnostic.resolved_family.as_str())
@@ -222,10 +272,20 @@ pub(crate) fn log_ui_text_renderer_diagnostics() {
     tracing::info!(
         target: "app.renderer",
         ui_text_renderer = "slint-skia",
-        ui_text_antialias_mode = "subpixel",
-        ui_text_hinting = "slight",
-        ui_surface_pixel_geometry = "rgb-horizontal",
+        ui_text_antialias_mode = UI_TEXT_ANTIALIAS_MODE,
+        ui_text_subpixel_positioning = UI_TEXT_SUBPIXEL_POSITIONING,
+        ui_text_hinting = UI_TEXT_HINTING,
+        ui_surface_pixel_geometry = UI_SURFACE_PIXEL_GEOMETRY,
+        ui_surface_color_space = UI_SURFACE_COLOR_SPACE,
         ui_surface_uses_device_independent_fonts = true,
+        ui_default_font_weight = UI_FONT_DEFAULT_WEIGHT,
+        ui_chrome_font_weight = UI_CHROME_FONT_WEIGHT,
+        ui_body_font_size_px = UI_BODY_FONT_SIZE_PX,
+        ui_caption_font_size_px = UI_CAPTION_FONT_SIZE_PX,
+        ui_chrome_letter_spacing_px = UI_CHROME_LETTER_SPACING_PX,
+        ui_text_contrast = "default",
+        ui_text_gamma = "default",
+        ui_text_rendering_policy = UI_TEXT_RENDERING_POLICY,
         "ui text renderer configuration established"
     );
 }

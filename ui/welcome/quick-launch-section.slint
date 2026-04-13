@@ -1,4 +1,5 @@
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 import { QuickLaunchCardRow, QuickLaunchGroupRow } from "quick-launch-types.slint";
 import { QuickLaunchCard } from "quick-launch-card.slint";
 
@@ -28,9 +29,10 @@ export component QuickLaunchSection inherits Rectangle {
         y: 26px;
         width: parent.width;
         text: root.subtitle;
-        color: ThemeTokens.text-primary;
-        opacity: 0.58;
-        font-size: 12px;
+        color: ThemeTokens.text-secondary;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-caption;
+        font-weight: AppTypography.ui-font-weight-regular;
     }
 
     section-body := VerticalLayout {
@@ -53,8 +55,10 @@ export component QuickLaunchSection inherits Rectangle {
                 width: parent.width - 32px;
                 height: parent.height;
                 text: root.empty_text;
-                color: ThemeTokens.text-primary;
-                opacity: 0.54;
+                color: ThemeTokens.text-muted;
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-body;
+                font-weight: AppTypography.ui-font-weight-regular;
                 vertical-alignment: center;
                 wrap: word-wrap;
             }
@@ -102,9 +106,10 @@ export component QuickLaunchGroupSection inherits Rectangle {
         y: 26px;
         width: parent.width;
         text: "Saved SSH folders projected from the console asset tree";
-        color: ThemeTokens.text-primary;
-        opacity: 0.58;
-        font-size: 12px;
+        color: ThemeTokens.text-secondary;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-caption;
+        font-weight: AppTypography.ui-font-weight-regular;
     }
 
     groups-body := VerticalLayout {
@@ -127,8 +132,10 @@ export component QuickLaunchGroupSection inherits Rectangle {
                 width: parent.width - 32px;
                 height: parent.height;
                 text: "No folders with saved SSH connections.";
-                color: ThemeTokens.text-primary;
-                opacity: 0.54;
+                color: ThemeTokens.text-muted;
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-body;
+                font-weight: AppTypography.ui-font-weight-regular;
                 vertical-alignment: center;
             }
         }

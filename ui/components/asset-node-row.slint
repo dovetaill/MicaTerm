@@ -26,7 +26,7 @@ export component AssetNodeRow inherits Rectangle {
     private property <length> content-x: root.icon-x + 22px;
     private property <length> body-touch-x: root.indent + root.disclosure-width;
     private property <length> hint-width: root.path-hint == "" ? 0px : 96px;
-    private property <length> row-height: 28px;
+    private property <length> row-height: AppTypography.ui-sidebar-row-height;
     private property <image> chevron-right-icon: @image-url("../../assets/icons/fluent/chevron-right-20-regular.svg");
     private property <image> chevron-down-icon: @image-url("../../assets/icons/fluent/chevron-down-20-regular.svg");
     private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
@@ -112,6 +112,7 @@ export component AssetNodeRow inherits Rectangle {
         text: root.label;
         font-family: AppTypography.ui-font-family;
         font-size: AppTypography.ui-font-size-body;
+        font-weight: AppTypography.ui-font-weight-medium;
         color: ThemeTokens.text-primary;
         vertical-alignment: center;
     }
@@ -123,6 +124,7 @@ export component AssetNodeRow inherits Rectangle {
         height: parent.height;
         text: root.path-hint;
         font-family: AppTypography.ui-font-family;
+        font-weight: AppTypography.ui-font-weight-regular;
         color: ThemeTokens.text-muted;
         font-size: AppTypography.ui-font-size-caption;
         horizontal-alignment: right;

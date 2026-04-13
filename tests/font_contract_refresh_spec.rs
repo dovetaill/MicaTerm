@@ -41,12 +41,12 @@ fn terminal_font_contract_switches_to_sarasa_nerd_assets() {
 }
 
 #[test]
-fn ui_shell_default_weight_moves_to_misans_regular() {
+fn ui_shell_default_weight_moves_to_misans_medium() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
 
     assert!(
         app_window.contains("default-font-weight: AppTypography.ui-font-weight-regular;"),
-        "shell UI should default to MiSans regular so the Windows chrome stops looking slightly too heavy"
+        "shell UI should keep the global default on MiSans regular so text inputs do not all become unnecessarily heavy"
     );
     assert!(
         app_window.contains("default-font-size: AppTypography.ui-font-size-body;"),
@@ -66,12 +66,23 @@ fn ui_shell_diagnostics_ignore_expected_symbol_and_emoji_fallbacks() {
 }
 
 #[test]
-fn ui_shell_diagnostics_report_regular_request_weight() {
+fn ui_shell_diagnostics_report_medium_request_weight() {
     let diagnostics = fs::read_to_string("src/app/font_diagnostics.rs").expect("read diagnostics");
 
     assert!(
         diagnostics.contains("let requested_weight = 400;")
             || diagnostics.contains("const UI_FONT_DEFAULT_WEIGHT: i32 = 400;"),
-        "ui diagnostics should log the lighter MiSans regular shell request weight instead of still claiming medium"
+        "ui diagnostics should keep the default family probe on MiSans regular so generic text/input inheritance stays truthful"
+    );
+    assert!(
+        diagnostics.contains("ui_chrome_font_weight")
+            || diagnostics.contains("UI_CHROME_FONT_WEIGHT"),
+        "ui diagnostics should also expose the dedicated chrome weight so packaged Windows runs do not force people to infer why tabs and menus look heavier than generic body text"
+    );
+    assert!(
+        diagnostics.contains("chrome_requested_weight")
+            || diagnostics.contains("chrome_resolved_weight")
+            || diagnostics.contains("chrome_resolved_family"),
+        "ui diagnostics should log the actual medium-weight chrome probe so packaged Windows runs can verify the visible shell labels are really hitting the intended MiSans chrome face"
     );
 }

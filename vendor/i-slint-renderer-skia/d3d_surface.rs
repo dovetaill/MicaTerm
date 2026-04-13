@@ -191,9 +191,12 @@ impl SwapChain {
             };
             let backend_texture =
                 skia_safe::gpu::BackendRenderTarget::new_d3d((width, height), &texture_info);
+            // The shell UI is composited through translucent surfaces, so keep the main Skia
+            // target on grayscale-friendly text geometry instead of forcing LCD AA assumptions.
+            let surface_color_space = skia_safe::ColorSpace::new_srgb();
             let surface_props = SurfaceProps::new(
                 SurfacePropsFlags::USE_DEVICE_INDEPENDENT_FONTS,
-                PixelGeometry::RGBH,
+                PixelGeometry::Unknown,
             );
 
             skia_safe::gpu::surfaces::wrap_backend_render_target(
@@ -201,7 +204,7 @@ impl SwapChain {
                 &backend_texture,
                 skia_safe::gpu::SurfaceOrigin::TopLeft,
                 skia_safe::ColorType::RGBA8888,
-                None,
+                Some(surface_color_space),
                 Some(&surface_props),
             )
             .ok_or_else(|| format!("unable to create d3d skia backend render target"))
