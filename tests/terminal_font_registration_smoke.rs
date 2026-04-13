@@ -29,6 +29,10 @@ fn bundled_font_assets_cover_terminal_and_shell_contracts() {
         "the shell UI bundle should ship a MiSans regular face"
     );
     assert!(
+        Path::new("assets/fonts/MiSans/MiSans-Medium.ttf").exists(),
+        "the shell UI bundle should ship a MiSans medium face"
+    );
+    assert!(
         Path::new("assets/fonts/MiSans/LICENSE.txt").exists(),
         "the shell UI bundle should ship the upstream MiSans license text"
     );
@@ -164,6 +168,10 @@ fn build_script_watches_only_active_font_assets() {
     assert!(
         source.contains("assets/fonts/MiSans/MiSans-Regular.ttf"),
         "build script should watch the bundled MiSans regular asset"
+    );
+    assert!(
+        source.contains("assets/fonts/MiSans/MiSans-Medium.ttf"),
+        "build script should watch the bundled MiSans medium asset"
     );
     assert!(
         source.contains("assets/fonts/MiSans/MiSans-Semibold.ttf"),

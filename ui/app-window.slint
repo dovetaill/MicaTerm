@@ -1,5 +1,6 @@
 // Root desktop window that composes chrome, sidebars, workspace content, overlays, and resize grips.
 import "../assets/fonts/MiSans/MiSans-Regular.ttf";
+import "../assets/fonts/MiSans/MiSans-Medium.ttf";
 import "../assets/fonts/MiSans/MiSans-Semibold.ttf";
 import { AssetsCreateMenu } from "components/assets-create-menu.slint";
 import { AssetsContextMenuItem } from "components/assets-context-menu-column.slint";
@@ -36,7 +37,7 @@ import { WorkspacePane } from "shell/workspace-pane.slint";
 
 export component AppWindow inherits Window {
     default-font-family: AppTypography.ui-font-family;
-    default-font-weight: AppTypography.ui-font-weight-semibold;
+    default-font-weight: AppTypography.ui-font-weight-medium;
     default-font-size: AppTypography.ui-font-size-body;
 
     in-out property <bool> dark-mode <=> ThemeTokens.dark-mode;
