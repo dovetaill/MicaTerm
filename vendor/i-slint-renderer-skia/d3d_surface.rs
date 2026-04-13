@@ -11,7 +11,8 @@ use std::sync::Arc;
 use std::time::Duration;
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FACTORY_TYPE_SHARED, DWRITE_PIXEL_GEOMETRY_FLAT, DWriteCreateFactory, IDWriteFactory,
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_PIXEL_GEOMETRY, DWRITE_PIXEL_GEOMETRY_BGR,
+    DWRITE_PIXEL_GEOMETRY_FLAT, DWRITE_PIXEL_GEOMETRY_RGB, DWriteCreateFactory, IDWriteFactory,
 };
 use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
 use windows::Win32::Graphics::Dxgi::Common::DXGI_STANDARD_MULTISAMPLE_QUALITY_PATTERN;
@@ -56,7 +57,7 @@ fn shell_text_surface_props_flags() -> SurfacePropsFlags {
 }
 
 #[cfg(target_os = "windows")]
-fn shell_text_rendering_params(hwnd: HWND) -> Option<(f32, f32)> {
+fn shell_text_rendering_params(hwnd: HWND) -> Option<(DWRITE_PIXEL_GEOMETRY, f32, f32)> {
     let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).ok()? };
     let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
     let params = if monitor.0.is_null() {
@@ -74,12 +75,27 @@ fn shell_text_rendering_params(hwnd: HWND) -> Option<(f32, f32)> {
         enhanced_contrast.max(0.65).min(1.0)
     };
 
-    Some((text_contrast, gamma))
+    Some((pixel_geometry, text_contrast, gamma))
 }
 
 #[cfg(target_os = "windows")]
-fn shell_text_surface_props(pixel_geometry: PixelGeometry, hwnd: HWND) -> SurfaceProps {
-    if let Some((text_contrast, text_gamma)) = shell_text_rendering_params(hwnd) {
+fn shell_text_surface_pixel_geometry(hwnd: HWND) -> PixelGeometry {
+    if !shell_host_is_opaque() {
+        return PixelGeometry::Unknown;
+    }
+
+    match shell_text_rendering_params(hwnd).map(|(pixel_geometry, _, _)| pixel_geometry) {
+        Some(DWRITE_PIXEL_GEOMETRY_RGB) => PixelGeometry::RGBH,
+        Some(DWRITE_PIXEL_GEOMETRY_BGR) => PixelGeometry::BGRH,
+        _ => PixelGeometry::Unknown,
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn shell_text_surface_props(hwnd: HWND) -> SurfaceProps {
+    let pixel_geometry = shell_text_surface_pixel_geometry(hwnd);
+
+    if let Some((_, text_contrast, text_gamma)) = shell_text_rendering_params(hwnd) {
         SurfaceProps::new_with_text_properties(
             shell_text_surface_props_flags(),
             pixel_geometry,
@@ -258,12 +274,7 @@ impl SwapChain {
             let backend_texture =
                 skia_safe::gpu::BackendRenderTarget::new_d3d((width, height), &texture_info);
             let surface_color_space = skia_safe::ColorSpace::new_srgb();
-            let pixel_geometry = if shell_host_is_opaque() {
-                PixelGeometry::RGBH
-            } else {
-                PixelGeometry::Unknown
-            };
-            let surface_props = shell_text_surface_props(pixel_geometry, hwnd);
+            let surface_props = shell_text_surface_props(hwnd);
 
             skia_safe::gpu::surfaces::wrap_backend_render_target(
                 gr_context,

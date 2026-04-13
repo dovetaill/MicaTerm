@@ -349,7 +349,7 @@ impl<'a> SkiaItemRenderer<'a> {
             self.canvas.draw_image_with_sampling_options(
                 layer_image,
                 skia_safe::Point::default(),
-                skia_safe::sampling_options::FilterMode::Linear,
+                skia_safe::sampling_options::FilterMode::Nearest,
                 self.default_paint().as_ref(),
             );
         }

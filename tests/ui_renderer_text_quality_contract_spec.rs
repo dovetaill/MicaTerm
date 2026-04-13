@@ -50,21 +50,25 @@ fn vendored_slint_d3d_surface_switches_pixel_geometry_by_host_opacity() {
     for expected in [
         "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW",
         "fn shell_text_surface_props_flags() -> SurfacePropsFlags",
+        "fn shell_text_surface_pixel_geometry(",
         "fn shell_text_surface_props(",
         "SurfaceProps::new_with_text_properties(",
         "shell_text_rendering_params(hwnd)",
         "let surface_color_space = skia_safe::ColorSpace::new_srgb();",
-        "let surface_props = shell_text_surface_props(pixel_geometry, hwnd);",
+        "let surface_props = shell_text_surface_props(hwnd);",
+        "DWRITE_PIXEL_GEOMETRY_RGB",
+        "DWRITE_PIXEL_GEOMETRY_BGR",
         "SurfacePropsFlags::empty()",
         "SurfacePropsFlags::USE_DEVICE_INDEPENDENT_FONTS",
         "PixelGeometry::RGBH",
+        "PixelGeometry::BGRH",
         "PixelGeometry::Unknown",
         "Some(surface_color_space)",
         "Some(&surface_props)",
     ] {
         assert!(
             d3d_surface_source.contains(expected),
-            "vendored skia d3d surface should keep `{expected}` so Windows UI text rendering can expose RGB LCD geometry on an opaque host while selectively dropping device-independent font mode when small shell text needs the display-tuned path"
+            "vendored skia d3d surface should keep `{expected}` so Windows UI text rendering uses the monitor's real LCD stripe order instead of hard-wiring RGB geometry for every panel"
         );
     }
 }
@@ -76,6 +80,7 @@ fn ui_renderer_logs_dynamic_shell_text_policy() {
 
     for expected in [
         "ui_host_window_transparent",
+        "ui_system_pixel_geometry",
         "ui_text_antialias_mode = ui_text_antialias_mode()",
         "ui_text_subpixel_positioning = ui_text_subpixel_positioning()",
         "ui_surface_pixel_geometry = ui_surface_pixel_geometry()",
@@ -92,4 +97,17 @@ fn ui_renderer_logs_dynamic_shell_text_policy() {
             "ui renderer diagnostics should expose `{expected}` so packaged Windows runs can see whether the shell is on the opaque-host LCD path or the transparent-host grayscale fallback instead of guessing from screenshots"
         );
     }
+}
+
+#[test]
+fn vendored_slint_skia_layer_blending_keeps_cached_text_sharp_at_native_scale() {
+    let item_renderer_source = fs::read_to_string("vendor/i-slint-renderer-skia/itemrenderer.rs")
+        .expect("read skia item renderer");
+
+    assert!(
+        item_renderer_source.contains(
+            "self.canvas.draw_image_with_sampling_options(\n                layer_image,\n                skia_safe::Point::default(),\n                skia_safe::sampling_options::FilterMode::Nearest,"
+        ),
+        "vendored skia item renderer should draw cached shell layers back with nearest sampling so 1:1 text snapshots do not get softened by an unnecessary linear filter"
+    );
 }

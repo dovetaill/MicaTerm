@@ -6,7 +6,8 @@ use fontdb::{Database, Query, Stretch, Style, Weight};
 use slint::fontique_07::{fontique, shared_collection};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::DirectWrite::{
-    DWRITE_FACTORY_TYPE_SHARED, DWRITE_PIXEL_GEOMETRY_FLAT, DWriteCreateFactory, IDWriteFactory,
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_PIXEL_GEOMETRY, DWRITE_PIXEL_GEOMETRY_BGR,
+    DWRITE_PIXEL_GEOMETRY_FLAT, DWRITE_PIXEL_GEOMETRY_RGB, DWriteCreateFactory, IDWriteFactory,
 };
 
 use crate::app::system_font_database::load_system_font_database;
@@ -280,11 +281,35 @@ fn ui_host_window_transparent() -> bool {
 }
 
 #[cfg(target_os = "windows")]
+fn ui_system_rendering_params() -> Option<(DWRITE_PIXEL_GEOMETRY, f32, f32)> {
+    let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).ok()? };
+    let params = unsafe { factory.CreateRenderingParams().ok()? };
+    Some((
+        unsafe { params.GetPixelGeometry() },
+        unsafe { params.GetEnhancedContrast() },
+        unsafe { params.GetGamma() },
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn ui_system_pixel_geometry() -> &'static str {
+    match ui_system_rendering_params().map(|(pixel_geometry, _, _)| pixel_geometry) {
+        Some(DWRITE_PIXEL_GEOMETRY_RGB) => "rgb-horizontal",
+        Some(DWRITE_PIXEL_GEOMETRY_BGR) => "bgr-horizontal",
+        Some(DWRITE_PIXEL_GEOMETRY_FLAT) => "flat",
+        _ => "unknown",
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn ui_text_antialias_mode() -> &'static str {
     if ui_host_window_transparent() {
         "grayscale"
     } else {
-        "subpixel"
+        match ui_system_rendering_params().map(|(pixel_geometry, _, _)| pixel_geometry) {
+            Some(DWRITE_PIXEL_GEOMETRY_RGB | DWRITE_PIXEL_GEOMETRY_BGR) => "subpixel",
+            _ => "grayscale",
+        }
     }
 }
 
@@ -300,11 +325,7 @@ fn ui_surface_uses_device_independent_fonts() -> bool {
 
 #[cfg(target_os = "windows")]
 fn ui_text_rendering_params() -> Option<(f32, f32)> {
-    let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).ok()? };
-    let params = unsafe { factory.CreateRenderingParams().ok()? };
-    let gamma = unsafe { params.GetGamma() };
-    let enhanced_contrast = unsafe { params.GetEnhancedContrast() };
-    let pixel_geometry = unsafe { params.GetPixelGeometry() };
+    let (pixel_geometry, enhanced_contrast, gamma) = ui_system_rendering_params()?;
     let text_contrast = if pixel_geometry == DWRITE_PIXEL_GEOMETRY_FLAT {
         enhanced_contrast
     } else {
@@ -330,10 +351,9 @@ fn ui_text_gamma() -> String {
 
 #[cfg(target_os = "windows")]
 fn ui_text_hinting() -> &'static str {
-    if ui_host_window_transparent() {
-        "normal"
-    } else {
-        "slight"
+    match ui_text_antialias_mode() {
+        "subpixel" => "slight",
+        _ => "normal",
     }
 }
 
@@ -342,7 +362,11 @@ fn ui_surface_pixel_geometry() -> &'static str {
     if ui_host_window_transparent() {
         "unknown"
     } else {
-        "rgb-horizontal"
+        match ui_system_rendering_params().map(|(pixel_geometry, _, _)| pixel_geometry) {
+            Some(DWRITE_PIXEL_GEOMETRY_RGB) => "rgb-horizontal",
+            Some(DWRITE_PIXEL_GEOMETRY_BGR) => "bgr-horizontal",
+            _ => "unknown",
+        }
     }
 }
 
@@ -366,6 +390,7 @@ pub(crate) fn log_ui_text_renderer_diagnostics() {
         target: "app.renderer",
         ui_text_renderer = "slint-skia",
         ui_host_window_transparent = ui_host_window_transparent(),
+        ui_system_pixel_geometry = ui_system_pixel_geometry(),
         ui_text_antialias_mode = ui_text_antialias_mode(),
         ui_text_subpixel_positioning = ui_text_subpixel_positioning(),
         ui_text_hinting = ui_text_hinting(),
