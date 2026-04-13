@@ -252,6 +252,14 @@ pub struct WgpuRendererCacheStats {
     pub prepared_row_cache_entries: usize,
 }
 
+#[derive(Clone, Copy)]
+struct RowRenderMetrics {
+    cell_width_px: u32,
+    cell_height_px: u32,
+    baseline_px: i32,
+    font_em_size_px: u32,
+}
+
 impl WgpuTerminalRenderer {
     pub fn new() -> Self {
         Self::default()
@@ -266,14 +274,15 @@ impl WgpuTerminalRenderer {
         color_glyph_cache_entries: usize,
         glyph_raster_cache_entries: usize,
     ) -> Result<Self> {
-        let mut renderer = Self::default();
-        renderer.cache_limits = WgpuRendererCacheLimits {
-            mono_glyph_cache_entries,
-            color_glyph_cache_entries,
-            glyph_raster_cache_entries,
-        }
-        .sanitized();
-        Ok(renderer)
+        Ok(Self {
+            cache_limits: WgpuRendererCacheLimits {
+                mono_glyph_cache_entries,
+                color_glyph_cache_entries,
+                glyph_raster_cache_entries,
+            }
+            .sanitized(),
+            ..Default::default()
+        })
     }
 
     pub fn glyph_raster_cache_entry_count(&self) -> usize {
@@ -349,6 +358,12 @@ impl WgpuTerminalRenderer {
         let (cell_width_px, cell_height_px) = frame.font.cell_size_px();
         let baseline_px = frame.font.metrics().baseline_px.round() as i32;
         let font_em_size_px = frame.font.px_size().max(1.0).round() as u32;
+        let row_metrics = RowRenderMetrics {
+            cell_width_px,
+            cell_height_px,
+            baseline_px,
+            font_em_size_px,
+        };
         let previous_prepared_rows = std::mem::take(&mut self.previous_prepared_rows);
         let mut next_prepared_rows = HashMap::with_capacity(frame.rows.len());
         self.last_prepared_row_reuse_count = 0;
@@ -364,16 +379,8 @@ impl WgpuTerminalRenderer {
                     self.last_prepared_row_reuse_count.saturating_add(1);
                 cached_row.rebase_for_row(row.row, cell_height_px)
             } else {
-                let (fresh_row, row_monochrome_glyphs_prepared, row_color_glyphs_prepared) = self
-                    .prepare_row(
-                    frame,
-                    row,
-                    fonts,
-                    cell_width_px,
-                    cell_height_px,
-                    baseline_px,
-                    font_em_size_px,
-                )?;
+                let (fresh_row, row_monochrome_glyphs_prepared, row_color_glyphs_prepared) =
+                    self.prepare_row(frame, row, fonts, row_metrics)?;
                 monochrome_glyphs_prepared =
                     monochrome_glyphs_prepared.saturating_add(row_monochrome_glyphs_prepared);
                 color_glyphs_prepared =
@@ -488,11 +495,14 @@ impl WgpuTerminalRenderer {
         frame: &ShapedTerminalFrame,
         row: &ShapedRow,
         fonts: &mut dyn FontSystem,
-        cell_width_px: u32,
-        cell_height_px: u32,
-        baseline_px: i32,
-        font_em_size_px: u32,
+        metrics: RowRenderMetrics,
     ) -> Result<(PreparedRowArtifacts, usize, usize)> {
+        let RowRenderMetrics {
+            cell_width_px,
+            cell_height_px,
+            baseline_px,
+            font_em_size_px,
+        } = metrics;
         let row_top_px = (row.row as i32).saturating_mul(cell_height_px as i32);
         let mut monochrome_glyphs_prepared = 0usize;
         let mut color_glyphs_prepared = 0usize;

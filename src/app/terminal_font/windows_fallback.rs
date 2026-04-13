@@ -1,7 +1,7 @@
 //! Windows text fallback helper that discovers installed system families for mixed text.
 
 use crate::app::terminal_font::backend::{
-    DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY, DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY,
+    DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY, DEFAULT_TERMINAL_FONT_FAMILY,
 };
 use crate::app::terminal_font::windows_locator::WindowsFontLocator;
 
@@ -18,15 +18,6 @@ const SYMBOL_FALLBACK_CANDIDATES: &[&str] = &[
     "Symbola",
     "DejaVu Sans",
 ];
-const CJK_FALLBACK_CANDIDATES: &[&str] = &[
-    DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY,
-    "Microsoft YaHei UI",
-    "Microsoft JhengHei UI",
-    "Noto Sans CJK SC",
-    "WenQuanYi Zen Hei",
-    "DejaVu Sans",
-];
-
 pub struct WindowsFontFallbackResolver;
 
 impl WindowsFontFallbackResolver {
@@ -40,6 +31,7 @@ impl WindowsFontFallbackResolver {
         primary_family: &str,
         text: &str,
     ) -> Vec<String> {
+        let primary_family = normalize_primary_family(primary_family);
         let mut families = vec![primary_family.to_string()];
 
         if contains_color_glyph_text(text)
@@ -54,18 +46,6 @@ impl WindowsFontFallbackResolver {
             push_unique_family(&mut families, family_name);
         }
 
-        if contains_cjk_text(text)
-            && let Some(family_name) = locator.resolve_family(CJK_FALLBACK_CANDIDATES)
-        {
-            push_unique_family(&mut families, family_name);
-        }
-
-        if families.len() == 1
-            && let Some(family_name) = locator.first_distinct_family(&families)
-        {
-            push_unique_family(&mut families, family_name);
-        }
-
         families
     }
 
@@ -75,6 +55,8 @@ impl WindowsFontFallbackResolver {
         primary_family: &str,
         text: &str,
     ) -> String {
+        let primary_family = normalize_primary_family(primary_family);
+
         if contains_color_glyph_text(text) {
             return resolve_fallback_family(locator, primary_family, EMOJI_FALLBACK_CANDIDATES);
         }
@@ -82,7 +64,7 @@ impl WindowsFontFallbackResolver {
             return resolve_fallback_family(locator, primary_family, SYMBOL_FALLBACK_CANDIDATES);
         }
         if contains_cjk_text(text) {
-            return resolve_fallback_family(locator, primary_family, CJK_FALLBACK_CANDIDATES);
+            return primary_family.to_string();
         }
 
         primary_family.to_string()
@@ -145,7 +127,13 @@ fn resolve_fallback_family(
         return family_name;
     }
 
-    locator
-        .first_distinct_family(&[primary_family.to_string()])
-        .unwrap_or_else(|| primary_family.to_string())
+    primary_family.to_string()
+}
+
+fn normalize_primary_family(primary_family: &str) -> &str {
+    if primary_family.is_empty() {
+        DEFAULT_TERMINAL_FONT_FAMILY
+    } else {
+        primary_family
+    }
 }

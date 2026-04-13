@@ -5,9 +5,9 @@ mod xwin_link;
 
 fn main() {
     println!("cargo:rerun-if-changed=ui/fonts/SarasaTermSCNerd-Regular.ttf");
-    println!("cargo:rerun-if-changed=assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf");
-    println!("cargo:rerun-if-changed=assets/fonts/SarasaUiSC/SarasaUiSC-Regular.ttf");
-    println!("cargo:rerun-if-changed=assets/fonts/SarasaUiSC/SarasaUiSC-SemiBold.ttf");
+    println!("cargo:rerun-if-changed=assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
+    println!("cargo:rerun-if-changed=assets/fonts/MiSans/MiSans-Regular.ttf");
+    println!("cargo:rerun-if-changed=assets/fonts/MiSans/MiSans-Semibold.ttf");
     println!("cargo:rerun-if-env-changed=HOME");
     println!("cargo:rerun-if-env-changed=LIB");
     println!("cargo:rerun-if-env-changed=XWIN_CACHE_DIR");

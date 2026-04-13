@@ -16,20 +16,17 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::app::system_font_database::load_system_font_database;
 use crate::app::terminal_emoji::{EmojiRenderOutcome, EmojiSprite, TerminalEmojiRenderer};
 use crate::app::terminal_font::backend::{
-    ColorGlyphRaster, DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY, DEFAULT_TERMINAL_FONT_FAMILY,
-    FontFaceKey, FontFallbackFace, FontMetrics, FontRenderProfile, FontRequest, FontSystem,
-    GlyphRasterRequest, LoadedFont, LoadedFontKey, OpenTypeFeatureSet, RasterizedGlyph,
-    ShapedGlyph, ShapedGlyphRun, TextShapingRequest, WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX,
-    WINDOWS_DEFAULT_TERMINAL_LINE_HEIGHT, shape_text_with_rustybuzz,
-    shape_text_with_rustybuzz_features,
+    ColorGlyphRaster, DEFAULT_TERMINAL_FONT_FAMILY, FontFaceKey, FontFallbackFace, FontMetrics,
+    FontRenderProfile, FontRequest, FontSystem, GlyphRasterRequest, LoadedFont, LoadedFontKey,
+    OpenTypeFeatureSet, RasterizedGlyph, ShapedGlyph, ShapedGlyphRun, TextShapingRequest,
+    WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX, WINDOWS_DEFAULT_TERMINAL_LINE_HEIGHT,
+    shape_text_with_rustybuzz, shape_text_with_rustybuzz_features,
 };
 use crate::app::terminal_font::windows_fallback::{
     WindowsFontFallbackResolver, contains_color_glyph_text,
 };
 use crate::app::terminal_font::windows_locator::{ResolvedFontFaceData, WindowsFontLocator};
 
-const JETBRAINS_MONO_FONT_BYTES: &[u8] =
-    include_bytes!("../../../assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf");
 const SARASA_TERM_SC_FONT_BYTES: &[u8] =
     include_bytes!("../../../assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
 const DEFAULT_FACE_KEY: FontFaceKey = FontFaceKey(1);
@@ -63,7 +60,7 @@ impl DirectWriteFontSystem {
     pub fn new() -> Result<Self> {
         let bundled_face = build_face_record(
             DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
-            JETBRAINS_MONO_FONT_BYTES.to_vec(),
+            SARASA_TERM_SC_FONT_BYTES.to_vec(),
             DEFAULT_FACE_INDEX,
         )?;
         let mut faces = HashMap::new();
@@ -355,20 +352,13 @@ fn fallback_face_data_for_family(family_name: &str) -> Option<ResolvedFontFaceDa
     if family_name.eq_ignore_ascii_case(DEFAULT_TERMINAL_FONT_FAMILY) {
         return Some(ResolvedFontFaceData {
             family_name: DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
-            post_script_name: "JetBrainsMono-Regular".to_string(),
-            face_index: DEFAULT_FACE_INDEX,
-            font_data: JETBRAINS_MONO_FONT_BYTES.to_vec(),
-        });
-    }
-
-    family_name
-        .eq_ignore_ascii_case(DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY)
-        .then(|| ResolvedFontFaceData {
-            family_name: DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY.to_string(),
             post_script_name: "SarasaTermSC-Regular".to_string(),
             face_index: DEFAULT_FACE_INDEX,
             font_data: SARASA_TERM_SC_FONT_BYTES.to_vec(),
-        })
+        });
+    }
+
+    None
 }
 
 fn fallback_metrics_from_face(face: &LoadedFaceRecord, px_size: f32) -> FontMetrics {

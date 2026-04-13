@@ -85,7 +85,7 @@ impl EmojiRasterizerBackend for FakeAtlasEmojiBackend {
 }
 
 #[test]
-fn atlas_renderer_loads_jetbrains_mono_metrics_and_emits_a_surface_image() -> Result<()> {
+fn atlas_renderer_loads_sarasa_term_metrics_and_emits_a_surface_image() -> Result<()> {
     let surface = render_surface(4, 12, "hello cascadia\r\n");
     let mut renderer = TerminalAtlasRenderer::new()?;
 
@@ -94,7 +94,7 @@ fn atlas_renderer_loads_jetbrains_mono_metrics_and_emits_a_surface_image() -> Re
 
     assert_eq!(
         metrics.cell_width, 8,
-        "software atlas should expose the bundled JetBrains Mono atlas font on its measured 8px logical cell"
+        "software atlas should expose the bundled Sarasa Term SC atlas font on its measured 8px logical cell"
     );
     assert_eq!(
         metrics.cell_height, 20,
@@ -285,7 +285,7 @@ fn atlas_renderer_handles_cjk_and_nerd_font_cells_without_falling_back_to_blank_
     assert_eq!(
         rendered_icon.sprite_kind,
         ClusterSpriteKind::MonoAlpha,
-        "private-use Nerd Font cells must remain on the bundled Fusion mono sprite path"
+        "private-use Nerd Font cells must remain on a Sarasa-family-owned monochrome sprite path"
     );
     assert!(
         buffer.as_slice().iter().any(|pixel| {

@@ -274,8 +274,8 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         .expect("read dwrite font backend");
 
     assert!(
-        atlas_source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf"),
-        "atlas renderer should point at the bundled JetBrains Mono medium default face"
+        atlas_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
+        "atlas renderer should point at the bundled Sarasa Term SC default face"
     );
     assert!(
         atlas_source.contains("const TERMINAL_FONT_SIZE_PX: f32 = DEFAULT_TERMINAL_FONT_SIZE_PX;"),

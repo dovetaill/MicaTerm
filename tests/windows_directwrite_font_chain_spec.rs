@@ -22,6 +22,8 @@ fn cargo_manifest_enables_windows_directwrite_bindings_for_terminal_font_work() 
 fn windows_directwrite_source_uses_native_collection_and_fallback_mapping_contracts() {
     let source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
         .expect("read windows dwrite source");
+    let fallback_source = fs::read_to_string("src/app/terminal_font/windows_fallback.rs")
+        .expect("read windows fallback source");
 
     for expected in [
         "DWriteCreateFactory",
@@ -39,6 +41,23 @@ fn windows_directwrite_source_uses_native_collection_and_fallback_mapping_contra
             "windows dwrite backend should reference `{expected}` so face loading, metrics, and fallback mapping come from DirectWrite"
         );
     }
+
+    assert!(
+        source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
+        "windows dwrite backend should load the bundled Sarasa Term SC face as the primary terminal font source"
+    );
+    assert!(
+        !source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf"),
+        "windows dwrite backend should stop loading the bundled JetBrains Mono regular face as the primary terminal font source"
+    );
+    assert!(
+        fallback_source.contains("DEFAULT_TERMINAL_FONT_FAMILY"),
+        "windows fallback source should derive its primary family from the shared terminal font contract"
+    );
+    assert!(
+        !fallback_source.contains("JetBrains Mono"),
+        "windows fallback source should stop hard-coding JetBrains Mono once Sarasa owns the terminal text contract"
+    );
 }
 
 #[cfg(feature = "terminal-native-renderer")]

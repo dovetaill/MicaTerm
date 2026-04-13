@@ -13,7 +13,7 @@ pub enum WeztermFontIntegrationStage {
 
 /// Placeholder adapter for the first WezTerm font adoption phase.
 ///
-/// The current bundled default terminal font family remains JetBrains Mono.
+/// The current bundled default terminal font family follows the shared Sarasa contract.
 /// Later tasks will replace this with a concrete wrapper around `wezterm-font`
 /// shaping and rasterization primitives once the existing HarfBuzz dependency
 /// path has been replaced.

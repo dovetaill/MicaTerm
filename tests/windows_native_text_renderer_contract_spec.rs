@@ -144,17 +144,18 @@ fn windows_native_text_renderer_source_adds_visual_breathing_room_without_touchi
             .expect("read windows native backend");
 
     for expected in [
-        "assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf",
+        "assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf",
         "fontEmSize: draw.font_em_size_px.max(1) as f32,",
         "let glyph_advances = [draw.advance_px.max(0) as f32];",
         "advanceOffset: 0.0,",
     ] {
         assert!(
             windows_backend_source.contains(expected),
-            "windows native text renderer should reference `{expected}` so Windows body text stays on the same grid contract while switching to the bundled Regular optical-weight face"
+            "windows native text renderer should reference `{expected}` so Windows body text stays on the Sarasa-first bundled grid contract"
         );
     }
     for forbidden in [
+        "assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf",
         "assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf",
         "const WINDOWS_BODY_TEXT_VISUAL_EM_SIZE_SCALE: f32 = 0.96;",
         "const WINDOWS_BODY_TEXT_VISUAL_LETTER_SPACING_PX: f32 = 0.6;",
@@ -186,7 +187,7 @@ fn windows_native_text_renderer_source_can_build_directwrite_faces_for_bundled_f
     ] {
         assert!(
             windows_backend_source.contains(expected),
-            "windows native text renderer should reference `{expected}` so bundled terminal fonts like JetBrains Mono and Sarasa Term SC can stay on the DirectWrite path even when they are not installed in the system font collection"
+            "windows native text renderer should reference `{expected}` so bundled terminal fonts like Sarasa Term SC can stay on the DirectWrite path even when they are not installed in the system font collection"
         );
     }
 }

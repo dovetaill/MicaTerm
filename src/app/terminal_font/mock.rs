@@ -1,4 +1,4 @@
-//! Test-oriented font system backed by the bundled JetBrains Mono terminal font.
+//! Test-oriented font system backed by the bundled Sarasa Term SC terminal font.
 
 use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
 use anyhow::{Result, anyhow};
@@ -12,8 +12,8 @@ use crate::app::terminal_font::backend::{RasterizedGlyph, ShapedGlyph, shape_tex
 #[cfg(feature = "terminal-native-renderer")]
 use ab_glyph::{Glyph, GlyphId, point};
 
-const JETBRAINS_MONO_FONT_BYTES: &[u8] =
-    include_bytes!("../../../assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf");
+const SARASA_TERM_SC_FONT_BYTES: &[u8] =
+    include_bytes!("../../../assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
 const DEFAULT_FACE_KEY: FontFaceKey = FontFaceKey(1);
 #[cfg(feature = "terminal-native-renderer")]
 const DEFAULT_FACE_INDEX: u32 = 0;
@@ -25,17 +25,17 @@ pub struct MockFontSystem {
 }
 
 pub fn mock_font_system() -> MockFontSystem {
-    MockFontSystem::new().expect("bundled JetBrains Mono mock font system should initialize")
+    MockFontSystem::new().expect("bundled Sarasa Term SC mock font system should initialize")
 }
 
 impl MockFontSystem {
     pub fn new() -> Result<Self> {
-        let font = FontArc::try_from_slice(JETBRAINS_MONO_FONT_BYTES)
-            .map_err(|error| anyhow!("failed to load bundled JetBrains Mono font: {error}"))?;
+        let font = FontArc::try_from_slice(SARASA_TERM_SC_FONT_BYTES)
+            .map_err(|error| anyhow!("failed to load bundled Sarasa Term SC font: {error}"))?;
         Ok(Self {
             font,
             #[cfg(feature = "terminal-native-renderer")]
-            font_bytes: JETBRAINS_MONO_FONT_BYTES,
+            font_bytes: SARASA_TERM_SC_FONT_BYTES,
         })
     }
 }

@@ -15,18 +15,32 @@ fn startup_path_drops_legacy_terminal_font_imports() {
 }
 
 #[test]
-fn bundled_terminal_font_contract_uses_jetbrains_and_sarasa_assets() {
-    assert!(
-        Path::new("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf").exists(),
-        "the bundled terminal font contract should ship JetBrains Mono Medium for the default Latin path"
-    );
+fn bundled_terminal_font_contract_uses_sarasa_assets() {
     assert!(
         Path::new("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf").exists(),
-        "the bundled terminal font contract should ship Sarasa Term SC for the default CJK path"
+        "the bundled terminal font contract should ship Sarasa Term SC for the shared terminal path"
     );
     assert!(
         !Path::new("ui/fonts/IosevkaTerm-Regular.ttf").exists(),
         "the old Iosevka terminal font should stay removed from bundled assets"
+    );
+}
+
+#[test]
+fn readme_describes_current_bundled_shell_and_terminal_fonts() {
+    let content = fs::read_to_string("readme.md").expect("read readme");
+
+    assert!(
+        content.contains("MiSans"),
+        "readme should describe MiSans as the bundled shell UI family"
+    );
+    assert!(
+        content.contains("Sarasa Term SC"),
+        "readme should describe Sarasa Term SC as the bundled terminal family"
+    );
+    assert!(
+        !content.contains("ui/fonts/SarasaTermSCNerd-Regular.ttf"),
+        "readme should stop describing the retired SarasaTermSCNerd startup asset as the live terminal font"
     );
 }
 

@@ -67,9 +67,6 @@ use windows::Win32::UI::HiDpi::GetDpiForWindow;
 #[cfg(target_os = "windows")]
 use windows::core::{Interface, PCWSTR};
 #[cfg(target_os = "windows")]
-const BUNDLED_JETBRAINS_MONO_FONT_BYTES: &[u8] =
-    include_bytes!("../../../../assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf");
-#[cfg(target_os = "windows")]
 const BUNDLED_SARASA_TERM_SC_FONT_BYTES: &[u8] =
     include_bytes!("../../../../assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
 #[derive(Default)]
@@ -913,13 +910,9 @@ impl WindowsNativeSurfaceState {
 
     #[cfg(target_os = "windows")]
     fn bundled_directwrite_font_bytes(family_name: &str) -> Option<&'static [u8]> {
-        if family_name.eq_ignore_ascii_case(DEFAULT_TERMINAL_FONT_FAMILY) {
-            return Some(BUNDLED_JETBRAINS_MONO_FONT_BYTES);
-        }
-
-        family_name
-            .eq_ignore_ascii_case(DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY)
-            .then_some(BUNDLED_SARASA_TERM_SC_FONT_BYTES)
+        (family_name.eq_ignore_ascii_case(DEFAULT_TERMINAL_FONT_FAMILY)
+            || family_name.eq_ignore_ascii_case(DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY))
+        .then_some(BUNDLED_SARASA_TERM_SC_FONT_BYTES)
     }
 
     #[cfg(target_os = "windows")]

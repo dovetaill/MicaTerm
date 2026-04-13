@@ -1984,8 +1984,7 @@ fn terminal_selection_overlay_rgba(theme_mode: ThemeMode) -> u32 {
 }
 
 fn workspace_session_uses_host_selection_overlay(window: &AppWindow) -> bool {
-    window.get_workspace_session_render_mode()
-        == SharedString::from(TerminalRenderMode::Bitmap.as_str())
+    window.get_workspace_session_render_mode().as_str() == TerminalRenderMode::Bitmap.as_str()
 }
 
 fn active_workspace_terminal_selection(window: &AppWindow) -> Option<TerminalAtlasSelection> {
@@ -4082,7 +4081,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
     }
     let view_model = Rc::new(RefCell::new(initial_view_model));
-    let workspace_follow_tracker = Rc::new(RefCell::new(WorkspaceFollowTracker::default()));
+    let workspace_follow_tracker = Rc::new(RefCell::new(WorkspaceFollowTracker));
     let sftp_browser_controller = Rc::new(RefCell::new(SftpBrowserController::default()));
     let vault_session = Rc::new(RefCell::new(initial_vault_session));
     if let Some(session_bridge_ref) = session_bridge.as_ref()

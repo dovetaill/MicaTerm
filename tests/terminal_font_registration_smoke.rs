@@ -15,35 +15,34 @@ fn app_window_has_no_legacy_terminal_font_imports() {
 }
 
 #[test]
-fn terminal_font_assets_switch_to_windows_terminal_bundle() {
-    assert!(
-        Path::new("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf").exists(),
-        "the Windows terminal default bundle should ship a JetBrains Mono medium face"
-    );
-    assert!(
-        Path::new("assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf").exists(),
-        "the Windows native DirectWrite body path should ship a JetBrains Mono regular face for the lighter industry-standard optical weight"
-    );
-    assert!(
-        Path::new("assets/fonts/JetBrainsMono/OFL.txt").exists(),
-        "the JetBrains Mono bundle should ship the upstream OFL text"
-    );
+fn bundled_font_assets_cover_terminal_and_shell_contracts() {
     assert!(
         Path::new("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf").exists(),
-        "the Windows terminal default bundle should ship a Sarasa Term SC regular face"
+        "the terminal bundle should ship a Sarasa Term SC regular face"
     );
     assert!(
         Path::new("assets/fonts/SarasaTermSC/LICENSE.txt").exists(),
-        "the Sarasa Term SC bundle should ship the upstream license text"
+        "the terminal bundle should ship the upstream Sarasa license text"
     );
     assert!(
-        Path::new("assets/fonts/SarasaUiSC/SarasaUiSC-Regular.ttf").exists(),
-        "the Slint UI bundle should ship a Sarasa UI SC regular face"
+        Path::new("assets/fonts/MiSans/MiSans-Regular.ttf").exists(),
+        "the shell UI bundle should ship a MiSans regular face"
     );
     assert!(
-        Path::new("assets/fonts/SarasaUiSC/LICENSE.txt").exists(),
-        "the Sarasa UI SC bundle should ship the upstream license text"
+        Path::new("assets/fonts/MiSans/LICENSE.txt").exists(),
+        "the shell UI bundle should ship the upstream MiSans license text"
     );
+    for retired_family in [
+        "assets/fonts/JetBrainsMono",
+        "assets/fonts/CascadiaMono",
+        "assets/fonts/SarasaUiSC",
+        "assets/fonts/Fusion-JetBrainsMapleMono",
+    ] {
+        assert!(
+            !Path::new(retired_family).exists(),
+            "retired bundled font family `{retired_family}` should be removed from the repository"
+        );
+    }
 }
 
 #[test]
@@ -58,43 +57,79 @@ fn terminal_host_font_contract_drops_legacy_faces() {
 }
 
 #[test]
-fn bitmap_and_native_font_sources_point_at_windows_terminal_defaults() {
+fn terminal_shared_font_contract_switches_to_sarasa() {
     let atlas_source =
         fs::read_to_string("src/app/terminal_atlas.rs").expect("read terminal atlas");
     let backend_source =
         fs::read_to_string("src/app/terminal_font/backend.rs").expect("read font backend");
+    let mock_source = fs::read_to_string("src/app/terminal_font/mock.rs").expect("read mock");
     let fallback_source =
         fs::read_to_string("src/app/terminal_font/windows_fallback.rs").expect("read fallback");
     let presenter_source =
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read presenter");
+    let windows_renderer_source = fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+        .expect("read windows renderer");
 
     assert!(
-        atlas_source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf"),
-        "bitmap atlas should load the bundled JetBrains Mono medium face as the default Latin terminal font"
+        atlas_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
+        "bitmap atlas should load the bundled Sarasa Term SC face as the shared terminal font"
+    );
+    assert!(
+        !atlas_source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf"),
+        "bitmap atlas should stop loading the bundled JetBrains Mono atlas face"
     );
     assert!(
         backend_source
-            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"JetBrains Mono\";"),
-        "font backend should move the default terminal family to JetBrains Mono"
-    );
-    assert!(
-        !backend_source.contains("WINDOWS_DEFAULT_TERMINAL_FONT_FAMILY"),
-        "font backend should not replace the Windows terminal body family with a different default face when the product requirement is to keep JetBrains Mono"
+            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Sarasa Term SC\";"),
+        "font backend should set Sarasa Term SC as the shared terminal default family"
     );
     assert!(
         backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Medium\";"),
         "font backend should move the shared terminal default weight to Medium"
     );
     assert!(
+        backend_source.contains(
+            "pub const DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY: &str = DEFAULT_TERMINAL_FONT_FAMILY;"
+        ),
+        "the CJK fallback constant should collapse into the shared Sarasa terminal family"
+    );
+    assert!(
+        backend_source.contains("pub const WINDOWS_DEFAULT_TERMINAL_FONT_CHAIN: &[&str] = &[")
+            && backend_source.contains("DEFAULT_TERMINAL_FONT_FAMILY")
+            && backend_source.contains("DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY"),
+        "the Windows terminal font chain should keep the Sarasa primary family plus emoji fallback"
+    );
+    assert!(
         backend_source.contains("family_name: Some(DEFAULT_TERMINAL_FONT_FAMILY.to_string())"),
         "font requests should explicitly target the shared default family contract"
     );
     assert!(
+        !backend_source.contains("\"JetBrains Mono\""),
+        "font backend should stop advertising JetBrains Mono as the shared terminal primary family"
+    );
+    assert!(
+        mock_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
+        "mock font shaping should use the same bundled Sarasa terminal font as production defaults"
+    );
+    assert!(
+        !mock_source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf"),
+        "mock font shaping should stop loading the bundled JetBrains Mono face"
+    );
+    assert!(
+        windows_renderer_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
+        "Windows native text rendering should resolve the bundled Sarasa Term SC face for DirectWrite"
+    );
+    assert!(
+        !windows_renderer_source.contains("assets/fonts/JetBrainsMono"),
+        "Windows native text rendering should stop referencing the retired JetBrains Mono bundle"
+    );
+    assert!(
         (fallback_source.contains("\"Sarasa Term SC\"")
-            || fallback_source.contains("DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY"))
+            || fallback_source.contains("DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY")
+            || fallback_source.contains("DEFAULT_TERMINAL_FONT_FAMILY"))
             && (fallback_source.contains("\"Segoe UI Emoji\"")
                 || fallback_source.contains("DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY")),
-        "Windows fallback resolution should explicitly include Sarasa Term SC and Segoe UI Emoji behind the primary JetBrains Mono face"
+        "Windows fallback resolution should continue to reference Sarasa Term SC and Segoe UI Emoji while the shared terminal family changes"
     );
     assert!(
         presenter_source.contains("let request = FontRequest::windows_default();"),
@@ -117,6 +152,28 @@ fn legacy_terminal_font_module_is_removed() {
     assert!(
         !Path::new("src/app/terminal_font.rs").exists(),
         "the legacy lazy-registration terminal font module should stay removed"
+    );
+}
+
+#[test]
+fn build_script_watches_only_active_font_assets() {
+    let source = fs::read_to_string("build.rs").expect("read build script");
+
+    assert!(
+        source.contains("assets/fonts/MiSans/MiSans-Regular.ttf"),
+        "build script should watch the bundled MiSans regular asset"
+    );
+    assert!(
+        source.contains("assets/fonts/MiSans/MiSans-Semibold.ttf"),
+        "build script should watch the bundled MiSans semibold asset"
+    );
+    assert!(
+        source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
+        "build script should watch the bundled Sarasa Term SC asset used by the terminal renderer"
+    );
+    assert!(
+        !source.contains("assets/fonts/JetBrainsMono"),
+        "build script should stop watching the retired JetBrains Mono bundle"
     );
 }
 

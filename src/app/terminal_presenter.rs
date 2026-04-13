@@ -501,7 +501,7 @@ impl TerminalPresenter for WindowsNativePresenter {
         surface: &SurfaceState,
         options: TerminalPresentationOptions,
     ) -> Result<PresentedTerminalFrame> {
-        let (frame, diagnostics) = prepare_native_terminal_frame_with_diagnostics(
+        let mut context = NativeFramePreparationContext::new(
             &mut self.font_system,
             &mut self.shaper,
             &mut self.renderer,
@@ -509,9 +509,9 @@ impl TerminalPresenter for WindowsNativePresenter {
             &mut self.previous_frame,
             &mut self.previous_shaped_rows,
             &mut self.shaped_row_cache,
-            surface,
-            options,
-        )?;
+        );
+        let (frame, diagnostics) =
+            prepare_native_terminal_frame_with_diagnostics(&mut context, surface, options)?;
         let _ = diagnostics;
         Ok(PresentedTerminalFrame::Native(Box::new(frame)))
     }
@@ -539,7 +539,6 @@ impl TerminalPresenter for WindowsNativePresenter {
             color_glyph_cache_entries: renderer_stats.color_glyph_cache_entries,
             glyph_raster_cache_entries: renderer_stats.glyph_raster_cache_entries,
             prepared_row_cache_entries: renderer_stats.prepared_row_cache_entries,
-            ..TerminalPresenterCacheStats::default()
         }
     }
 
@@ -556,67 +555,78 @@ impl TerminalPresenter for WindowsNativePresenter {
 }
 
 #[cfg(feature = "terminal-native-renderer")]
+struct NativeFramePreparationContext<'a> {
+    font_system: &'a mut dyn FontSystem,
+    shaper: &'a mut TerminalTextShaper,
+    renderer: &'a mut WgpuTerminalRenderer,
+    loaded_font: &'a LoadedFont,
+    previous_frame: &'a mut Option<TerminalModelFrame>,
+    previous_shaped_rows: &'a mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
+    shaped_row_cache: &'a mut PresenterShapedRowCache,
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+impl<'a> NativeFramePreparationContext<'a> {
+    fn new(
+        font_system: &'a mut dyn FontSystem,
+        shaper: &'a mut TerminalTextShaper,
+        renderer: &'a mut WgpuTerminalRenderer,
+        loaded_font: &'a LoadedFont,
+        previous_frame: &'a mut Option<TerminalModelFrame>,
+        previous_shaped_rows: &'a mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
+        shaped_row_cache: &'a mut PresenterShapedRowCache,
+    ) -> Self {
+        Self {
+            font_system,
+            shaper,
+            renderer,
+            loaded_font,
+            previous_frame,
+            previous_shaped_rows,
+            shaped_row_cache,
+        }
+    }
+}
+
+#[cfg(feature = "terminal-native-renderer")]
 #[allow(dead_code)]
 fn prepare_native_terminal_frame(
-    font_system: &mut dyn FontSystem,
-    shaper: &mut TerminalTextShaper,
-    renderer: &mut WgpuTerminalRenderer,
-    loaded_font: &LoadedFont,
-    previous_frame: &mut Option<TerminalModelFrame>,
-    previous_shaped_rows: &mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
-    shaped_row_cache: &mut PresenterShapedRowCache,
+    context: &mut NativeFramePreparationContext<'_>,
     surface: &SurfaceState,
     options: TerminalPresentationOptions,
 ) -> Result<NativeTerminalFrame> {
-    Ok(prepare_native_terminal_frame_with_diagnostics(
-        font_system,
-        shaper,
-        renderer,
-        loaded_font,
-        previous_frame,
-        previous_shaped_rows,
-        shaped_row_cache,
-        surface,
-        options,
-    )?
-    .0)
+    Ok(prepare_native_terminal_frame_with_diagnostics(context, surface, options)?.0)
 }
 
 #[cfg(feature = "terminal-native-renderer")]
 fn prepare_native_terminal_frame_with_diagnostics(
-    font_system: &mut dyn FontSystem,
-    shaper: &mut TerminalTextShaper,
-    renderer: &mut WgpuTerminalRenderer,
-    loaded_font: &LoadedFont,
-    previous_frame: &mut Option<TerminalModelFrame>,
-    previous_shaped_rows: &mut Option<Vec<crate::app::terminal_layout::ShapedRow>>,
-    shaped_row_cache: &mut PresenterShapedRowCache,
+    context: &mut NativeFramePreparationContext<'_>,
     surface: &SurfaceState,
     options: TerminalPresentationOptions,
 ) -> Result<(NativeTerminalFrame, TerminalPrepareDiagnostics)> {
     let prepare_started = Instant::now();
     let model_started = Instant::now();
-    let frame_model = TerminalModelFrame::from_surface(surface, previous_frame.as_ref());
+    let frame_model = TerminalModelFrame::from_surface(surface, context.previous_frame.as_ref());
     let model_frame_us = model_started.elapsed().as_micros() as u64;
     let shape_started = Instant::now();
     let (rows, reused_shaped_row_count) = shape_rows_with_previous_cache(
         &frame_model,
-        previous_frame.as_ref(),
-        previous_shaped_rows.as_ref(),
-        shaped_row_cache,
-        shaper,
-        loaded_font,
-        font_system,
+        context.previous_frame.as_ref(),
+        context.previous_shaped_rows.as_ref(),
+        context.shaped_row_cache,
+        context.shaper,
+        context.loaded_font,
+        context.font_system,
     )?;
     let shape_rows_us = shape_started.elapsed().as_micros() as u64;
     let renderer_prepare_started = Instant::now();
-    let prepared = renderer.prepare(
+    let prepared = context.renderer.prepare(
         &ShapedTerminalFrame {
             seqno: frame_model.seqno as u64,
-            font: loaded_font.clone(),
+            font: context.loaded_font.clone(),
             rows: rows.clone(),
         },
-        font_system,
+        context.font_system,
     )?;
     let renderer_prepare_us = renderer_prepare_started.elapsed().as_micros() as u64;
     let selection = options.selection;
@@ -720,8 +730,8 @@ fn prepare_native_terminal_frame_with_diagnostics(
             color_glyphs_prepared: prepared.renderer_stats.color_glyphs_prepared,
         },
     };
-    *previous_shaped_rows = Some(rows);
-    *previous_frame = Some(frame_model);
+    *context.previous_shaped_rows = Some(rows);
+    *context.previous_frame = Some(frame_model);
 
     let shaped_row_count = presentable_frame.shaped_row_count;
     let dirty_row_count = presentable_frame.dirty_row_count;
@@ -735,8 +745,8 @@ fn prepare_native_terminal_frame_with_diagnostics(
         reused_shaped_row_count,
         fresh_shaped_row_count: shaped_row_count.saturating_sub(reused_shaped_row_count),
         dirty_row_count,
-        prepared_row_reuse_count: renderer.last_prepared_row_reuse_count(),
-        glyph_raster_cache_entry_count: renderer.glyph_raster_cache_entry_count(),
+        prepared_row_reuse_count: context.renderer.last_prepared_row_reuse_count(),
+        glyph_raster_cache_entry_count: context.renderer.glyph_raster_cache_entry_count(),
     };
 
     Ok((
@@ -986,7 +996,7 @@ mod tests {
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
-        prepare_native_terminal_frame(
+        let mut context = NativeFramePreparationContext::new(
             &mut font_system,
             &mut shaper,
             &mut renderer,
@@ -994,6 +1004,9 @@ mod tests {
             &mut previous_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
+        );
+        prepare_native_terminal_frame(
+            &mut context,
             &first_surface,
             TerminalPresentationOptions::default(),
         )?;
@@ -1004,13 +1017,7 @@ mod tests {
         );
 
         prepare_native_terminal_frame(
-            &mut font_system,
-            &mut shaper,
-            &mut renderer,
-            &loaded_font,
-            &mut previous_frame,
-            &mut previous_shaped_rows,
-            &mut shaped_row_cache,
+            &mut context,
             &second_surface,
             TerminalPresentationOptions::default(),
         )?;
@@ -1036,7 +1043,7 @@ mod tests {
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
-        prepare_native_terminal_frame(
+        let mut context = NativeFramePreparationContext::new(
             &mut font_system,
             &mut shaper,
             &mut renderer,
@@ -1044,18 +1051,15 @@ mod tests {
             &mut previous_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
+        );
+        prepare_native_terminal_frame(
+            &mut context,
             &first_surface,
             TerminalPresentationOptions::default(),
         )?;
 
         let (_, diagnostics) = prepare_native_terminal_frame_with_diagnostics(
-            &mut font_system,
-            &mut shaper,
-            &mut renderer,
-            &loaded_font,
-            &mut previous_frame,
-            &mut previous_shaped_rows,
-            &mut shaped_row_cache,
+            &mut context,
             &second_surface,
             TerminalPresentationOptions::default(),
         )?;
@@ -1085,7 +1089,7 @@ mod tests {
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
-        prepare_native_terminal_frame(
+        let mut context = NativeFramePreparationContext::new(
             &mut font_system,
             &mut shaper,
             &mut renderer,
@@ -1093,32 +1097,23 @@ mod tests {
             &mut previous_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
+        );
+        prepare_native_terminal_frame(
+            &mut context,
             &first_surface,
             TerminalPresentationOptions::default(),
         )?;
         assert_eq!(font_system.shape_text_runs_calls(), 3);
 
         prepare_native_terminal_frame(
-            &mut font_system,
-            &mut shaper,
-            &mut renderer,
-            &loaded_font,
-            &mut previous_frame,
-            &mut previous_shaped_rows,
-            &mut shaped_row_cache,
+            &mut context,
             &second_surface,
             TerminalPresentationOptions::default(),
         )?;
         assert_eq!(font_system.shape_text_runs_calls(), 6);
 
         prepare_native_terminal_frame(
-            &mut font_system,
-            &mut shaper,
-            &mut renderer,
-            &loaded_font,
-            &mut previous_frame,
-            &mut previous_shaped_rows,
-            &mut shaped_row_cache,
+            &mut context,
             &third_surface,
             TerminalPresentationOptions::default(),
         )?;
@@ -1145,7 +1140,7 @@ mod tests {
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
-        prepare_native_terminal_frame(
+        let mut context = NativeFramePreparationContext::new(
             &mut font_system,
             &mut shaper,
             &mut renderer,
@@ -1153,30 +1148,21 @@ mod tests {
             &mut previous_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
+        );
+        prepare_native_terminal_frame(
+            &mut context,
             &first_surface,
             TerminalPresentationOptions::default(),
         )?;
         prepare_native_terminal_frame(
-            &mut font_system,
-            &mut shaper,
-            &mut renderer,
-            &loaded_font,
-            &mut previous_frame,
-            &mut previous_shaped_rows,
-            &mut shaped_row_cache,
+            &mut context,
             &second_surface,
             TerminalPresentationOptions::default(),
         )?;
         assert_eq!(font_system.shape_text_runs_calls(), 6);
 
         prepare_native_terminal_frame(
-            &mut font_system,
-            &mut shaper,
-            &mut renderer,
-            &loaded_font,
-            &mut previous_frame,
-            &mut previous_shaped_rows,
-            &mut shaped_row_cache,
+            &mut context,
             &third_surface,
             TerminalPresentationOptions::default(),
         )?;
@@ -1204,7 +1190,7 @@ mod tests {
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
-        prepare_native_terminal_frame(
+        let mut context = NativeFramePreparationContext::new(
             &mut font_system,
             &mut shaper,
             &mut renderer,
@@ -1212,28 +1198,19 @@ mod tests {
             &mut previous_frame,
             &mut previous_shaped_rows,
             &mut shaped_row_cache,
+        );
+        prepare_native_terminal_frame(
+            &mut context,
             &first_surface,
             TerminalPresentationOptions::default(),
         )?;
         prepare_native_terminal_frame(
-            &mut font_system,
-            &mut shaper,
-            &mut renderer,
-            &loaded_font,
-            &mut previous_frame,
-            &mut previous_shaped_rows,
-            &mut shaped_row_cache,
+            &mut context,
             &second_surface,
             TerminalPresentationOptions::default(),
         )?;
         prepare_native_terminal_frame(
-            &mut font_system,
-            &mut shaper,
-            &mut renderer,
-            &loaded_font,
-            &mut previous_frame,
-            &mut previous_shaped_rows,
-            &mut shaped_row_cache,
+            &mut context,
             &third_surface,
             TerminalPresentationOptions::default(),
         )?;

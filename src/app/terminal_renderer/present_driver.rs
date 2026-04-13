@@ -30,10 +30,8 @@ impl RenderingNotifierPresentDriver {
 impl NativeSurfacePresentDriver for RenderingNotifierPresentDriver {
     fn schedule_present(&self, callback: NativeSurfacePresentCallback, request_host_redraw: bool) {
         callback();
-        if request_host_redraw {
-            if let Some(window) = self.window.upgrade() {
-                window.window().request_redraw();
-            }
+        if request_host_redraw && let Some(window) = self.window.upgrade() {
+            window.window().request_redraw();
         }
     }
 }
@@ -54,10 +52,8 @@ impl EventLoopPresentDriver {
 impl NativeSurfacePresentDriver for EventLoopPresentDriver {
     fn schedule_present(&self, callback: NativeSurfacePresentCallback, request_host_redraw: bool) {
         callback();
-        if request_host_redraw {
-            if let Some(window) = self.window.upgrade() {
-                window.window().request_redraw();
-            }
+        if request_host_redraw && let Some(window) = self.window.upgrade() {
+            window.window().request_redraw();
         }
     }
 }

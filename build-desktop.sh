@@ -84,16 +84,13 @@ stage_bundled_font_licenses() {
   local license_root="$stage_dir/licenses/fonts"
 
   mkdir -p \
-    "$license_root/JetBrainsMono" \
-    "$license_root/SarasaTermSC" \
-    "$license_root/SarasaUiSC"
+    "$license_root/MiSans" \
+    "$license_root/SarasaTermSC"
 
-  cp "$ROOT_DIR/assets/fonts/JetBrainsMono/OFL.txt" \
-    "$license_root/JetBrainsMono/OFL.txt"
+  cp "$ROOT_DIR/assets/fonts/MiSans/LICENSE.txt" \
+    "$license_root/MiSans/LICENSE.txt"
   cp "$ROOT_DIR/assets/fonts/SarasaTermSC/LICENSE.txt" \
     "$license_root/SarasaTermSC/LICENSE.txt"
-  cp "$ROOT_DIR/assets/fonts/SarasaUiSC/LICENSE.txt" \
-    "$license_root/SarasaUiSC/LICENSE.txt"
 }
 
 WINDOWS_MSVC_TOOL_SHIM_DIR=""
