@@ -55,20 +55,30 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         "terminal session host should expose a device-pixel snapping helper so the software-backed terminal box can land on integer physical pixels under fractional DPI"
     );
     assert!(
+        host_source.contains("function snapped-terminal-content-width() -> length")
+            && host_source.contains("function snapped-terminal-content-height() -> length"),
+        "terminal session host should expose snapped terminal-content viewport helpers so the host-owned terminal body can fill the pane even when the current grid is temporarily narrower than the available viewport"
+    );
+    assert!(
         host_source.contains("clip: true;"),
         "terminal session host should clip the terminal surface frame so stale grid geometry cannot momentarily paint over sibling UI during software-surface resize races"
     );
     assert!(
-        host_source.contains("width: root.snapped-terminal-visible-grid-width();"),
-        "terminal session host should size the blank terminal surface against a device-pixel-snapped visible grid width instead of the stale session grid width"
+        host_source.contains("out property <length> native-surface-width: root.snapped-terminal-content-width();"),
+        "terminal session host should export the native surface width from the snapped terminal-content viewport so the host-owned surface fills the pane instead of collapsing to the current grid width"
     );
     assert!(
-        host_source.contains("height: root.snapped-terminal-visible-grid-height();"),
-        "terminal session host should size the blank terminal surface against a device-pixel-snapped visible grid height instead of the stale session grid height"
+        host_source.contains("out property <length> native-surface-height: root.snapped-terminal-content-height();"),
+        "terminal session host should export the native surface height from the snapped terminal-content viewport so the host-owned surface fills the pane instead of collapsing to the current grid height"
     );
     assert!(
         host_source.contains("blank-surface := Rectangle {") && host_source.contains("clip: true;"),
         "terminal session host should make the blank surface itself a clipped viewport so oversized software-surface frames are cropped instead of being rescaled during layout races"
+    );
+    assert!(
+        host_source.contains("width: root.snapped-terminal-content-width();")
+            && host_source.contains("height: root.snapped-terminal-content-height();"),
+        "terminal session host should size the blank terminal surface against the snapped pane viewport so native host-owned presentation keeps the whole terminal body filled"
     );
     assert!(
         host_source.contains("x: root.terminal-surface-origin-x();")
@@ -95,17 +105,17 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         "terminal session host should open the context menu from the snapped surface origin so right-click affordances stay aligned with high-DPI software-surface coordinates"
     );
     assert!(
-        host_source.contains("width: root.snapped-terminal-visible-grid-width();")
-            && host_source.contains("height: root.snapped-terminal-visible-grid-height();"),
-        "terminal session host should snap the visible terminal viewport box onto device pixels so Slint does not have to map the bitmap through a half-pixel destination rect"
+        host_source.contains("width: root.session-render-mode == \"native\" ? parent.width : root.terminal-grid-width();")
+            && host_source.contains("height: root.session-render-mode == \"native\" ? parent.height : root.terminal-grid-height();"),
+        "native host-owned images should map onto the full pane viewport while bitmap fallback frames keep their grid-sized destination box so stale bitmap frames are cropped instead of stretched"
     );
     assert!(
-        host_source.contains("width: root.terminal-grid-width();"),
-        "software bitmap content should keep the frame-owned grid width so sidebar resizes crop stale frames instead of horizontally squeezing glyphs"
+        host_source.contains("width: root.session-render-mode == \"native\" ? parent.width : root.terminal-grid-width();"),
+        "software bitmap content should keep the frame-owned grid width on the bitmap fallback path so sidebar resizes crop stale frames instead of horizontally squeezing glyphs"
     );
     assert!(
-        host_source.contains("height: root.terminal-grid-height();"),
-        "software bitmap content should keep the frame-owned grid height so vertical viewport changes crop stale frames instead of vertically squeezing rows"
+        host_source.contains("height: root.session-render-mode == \"native\" ? parent.height : root.terminal-grid-height();"),
+        "software bitmap content should keep the frame-owned grid height on the bitmap fallback path so vertical viewport changes crop stale frames instead of vertically squeezing rows"
     );
     assert!(
         host_source.contains("width: parent.width;")
@@ -480,7 +490,7 @@ fn present_drivers_invoke_immediate_native_repaint_before_requesting_host_redraw
 }
 
 #[test]
-fn rendering_notifier_path_treats_host_redraw_as_child_surface_sync_hint() {
+fn rendering_notifier_path_treats_host_redraw_as_host_surface_sync_hint() {
     let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
         .expect("read native surface");
     let present_driver_source = fs::read_to_string("src/app/terminal_renderer/present_driver.rs")
@@ -496,12 +506,21 @@ fn rendering_notifier_path_treats_host_redraw_as_child_surface_sync_hint() {
     );
     assert!(
         !native_surface_source.contains("host_surface_invalidated"),
-        "native surface scheduling should stop encoding same-HWND overpaint assumptions once the child HWND owns visible terminal output"
+        "native surface scheduling should stop encoding same-HWND overpaint assumptions once the host surface owns visible terminal output"
     );
     assert!(
         present_driver_source.contains("host redraw stays a synchronization hint")
-            && present_driver_source.contains("child HWND owns visible terminal output"),
-        "present driver docs should describe host redraw as a synchronization hint now that the child HWND, not the shell redraw, owns visible retained-native pixels"
+            && present_driver_source.contains("host surface owns visible terminal output"),
+        "present driver docs should describe host redraw as a synchronization hint now that the host surface, not the shell redraw, owns visible retained-native pixels"
+    );
+    assert!(
+        native_surface_source.contains("install_after_draw_hook(&self.state);\n\n        if native_present_path != NativePresentPath::RenderingNotifier {"),
+        "native surface install path should keep a host-window after-draw replay hook armed even when the rendering-notifier path is selected, so same-HWND host-surface output still has a fallback replay point if the notifier does not fire"
+    );
+    assert!(
+        native_surface_source.contains("fn is_scheduled(&self) -> bool")
+            && native_surface_source.contains("if !state.pending_host_redraw.is_scheduled()"),
+        "native surface replay should guard duplicate after-draw/notifier callbacks so a fallback hook can coexist with rendering-notifier delivery without double-presenting every host frame"
     );
 }
 
@@ -906,7 +925,7 @@ fn retained_native_frame_sources_expose_background_display_list_contract() {
 }
 
 #[test]
-fn windows_backend_source_exposes_d2d_lifecycle_contract() {
+fn windows_backend_source_exposes_offscreen_d2d_lifecycle_contract() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows platform backend");
@@ -918,12 +937,17 @@ fn windows_backend_source_exposes_d2d_lifecycle_contract() {
         "windows backend should define an explicit D2D factory lifecycle state"
     );
     assert!(
-        windows_backend_source.contains("pub struct WindowsHwndRenderTargetState"),
-        "windows backend should define an explicit HWND render-target lifecycle state"
+        !windows_backend_source.contains("pub struct WindowsHwndRenderTargetState"),
+        "windows backend should stop defining an HWND render-target lifecycle state once visible presentation moves back to the host"
     );
     assert!(
-        windows_backend_source.contains("ID2D1HwndRenderTarget"),
-        "windows backend should carry a child-surface HWND render target contract instead of a host-window DC target"
+        windows_backend_source.contains("pub struct WindowsWicBitmapRenderTargetState"),
+        "windows backend should define an explicit WIC-backed offscreen render-target lifecycle state"
+    );
+    assert!(
+        windows_backend_source.contains("CreateWicBitmapRenderTarget")
+            && windows_backend_source.contains("IWICBitmap"),
+        "windows backend should create a WIC-backed offscreen Direct2D target instead of an HWND-bound render target"
     );
     assert!(
         windows_backend_source.contains("pub d2d_factory: Option<WindowsD2DFactoryState>"),
@@ -931,8 +955,8 @@ fn windows_backend_source_exposes_d2d_lifecycle_contract() {
     );
     assert!(
         windows_backend_source
-            .contains("pub hwnd_render_target: Option<WindowsHwndRenderTargetState>"),
-        "windows native surface state should retain HWND render-target ownership instead of only HWND and frame token bookkeeping"
+            .contains("pub wic_bitmap_render_target: Option<WindowsWicBitmapRenderTargetState>"),
+        "windows native surface state should retain WIC offscreen render-target ownership for host-owned presentation"
     );
     assert!(
         windows_backend_source.contains("pub render_target_generation: u64"),
@@ -940,39 +964,35 @@ fn windows_backend_source_exposes_d2d_lifecycle_contract() {
     );
     assert!(
         windows_backend_source.contains("pub render_target_dirty: bool"),
-        "windows backend should track whether the HWND render target needs rebuild after attach or rect changes"
+        "windows backend should track whether the offscreen render target needs rebuild after attach or rect changes"
     );
     assert!(
         windows_backend_source.contains("fn mark_render_target_dirty(&mut self)"),
-        "windows backend should expose a helper that marks the render target dirty when HWND, geometry, or retained resources change"
+        "windows backend should expose a helper that marks the offscreen render target dirty when geometry or retained resources change"
     );
     assert!(
         windows_backend_source.contains("fn ensure_d2d_factory(&mut self)"),
-        "windows backend should expose a helper that ensures D2D factory state exists before render-target creation"
+        "windows backend should expose a helper that ensures D2D factory state exists before offscreen target creation"
     );
     assert!(
-        windows_backend_source.contains("fn ensure_hwnd_render_target(&mut self)"),
-        "windows backend should expose a helper that ensures an HWND render target exists before present"
-    );
-    assert!(
-        windows_backend_source.contains("CreateHwndRenderTarget"),
-        "windows backend should create a child-owned HWND render target instead of binding Direct2D to the host window DC"
+        windows_backend_source.contains("fn ensure_wic_bitmap_render_target(&mut self)"),
+        "windows backend should expose a helper that ensures the WIC offscreen render target exists before present"
     );
     assert!(
         !windows_backend_source.contains("CreateDCRenderTarget"),
-        "windows backend should stop creating a DC render target once retained-native output owns its own child HWND"
+        "windows backend should stop creating a DC render target now that visible output is host-owned"
     );
     assert!(
         windows_backend_source.contains("fn clear_device_resources(&mut self)"),
-        "windows backend should expose a helper that clears render-target owned resources during recreate and detach"
+        "windows backend should expose a helper that clears offscreen-target owned resources during recreate and detach"
     );
     assert!(
         windows_backend_source.contains("self.state.mark_render_target_dirty();"),
-        "windows backend should mark the render target dirty when backend state changes"
+        "windows backend should mark the offscreen target dirty when backend state changes"
     );
     assert!(
-        windows_backend_source.contains("self.state.ensure_hwnd_render_target();"),
-        "windows backend present path should ensure the HWND render target exists before consuming retained frames"
+        windows_backend_source.contains("self.state.ensure_wic_bitmap_render_target();"),
+        "windows backend present path should ensure the offscreen target exists before consuming retained frames"
     );
     assert!(
         windows_frame_source.contains("use slint::ComponentHandle;"),
@@ -985,6 +1005,7 @@ fn windows_backend_source_exposes_background_and_monochrome_draw_contract() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows platform backend");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
         windows_backend_source.contains("pub struct WindowsD2DBrushState"),
@@ -1059,8 +1080,14 @@ fn windows_backend_source_exposes_background_and_monochrome_draw_contract() {
         "windows backend should clip drawing to the retained terminal surface rect"
     );
     assert!(
-        windows_backend_source.contains("presentOptions: D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS"),
-        "child-HWND presents should retain previous contents between clipped redraws, otherwise overlay-only or damage-rect redraws can expose undefined background behind DirectWrite text"
+        windows_backend_source.contains("CreateWicBitmapRenderTarget")
+            && windows_backend_source.contains("IWICBitmapLock"),
+        "windows backend should rasterize retained content through a WIC-backed offscreen target that can be read back into the host-owned image path"
+    );
+    assert!(
+        bootstrap_source.contains("window.set_workspace_session_surface_image(")
+            || bootstrap_source.contains("set_workspace_session_surface_image(frame.image);"),
+        "bootstrap should keep publishing a host-owned workspace terminal image so the offscreen native path has a visible scene sink"
     );
     assert!(
         windows_backend_source.contains("PopAxisAlignedClip();"),
@@ -1097,6 +1124,7 @@ fn windows_backend_source_exposes_color_glyph_and_overlay_draw_contract() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows platform backend");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
         windows_backend_source.contains("pub struct WindowsColorGlyphBitmapState"),
@@ -1179,8 +1207,10 @@ fn windows_backend_source_exposes_color_glyph_and_overlay_draw_contract() {
         "windows backend should bind DirectWrite rendering params onto the Direct2D text target before drawing glyph runs"
     );
     assert!(
-        windows_backend_source.contains("D2D1_ALPHA_MODE_IGNORE"),
-        "windows backend should keep the primary text draw target opaque so ClearType-friendly rendering does not go through a premultiplied-alpha text surface"
+        windows_backend_source.contains("CreateWicBitmapRenderTarget")
+            && windows_backend_source.contains("IWICBitmapLock")
+            && bootstrap_source.contains("window.set_workspace_session_surface_image("),
+        "windows host-owned path should rasterize native text into a WIC offscreen target and publish the resulting image back into the workspace session image contract"
     );
 }
 
@@ -1463,100 +1493,133 @@ fn windows_backend_source_exposes_lazy_host_hwnd_reacquire_contract() {
     );
 }
 
+
 #[test]
-fn windows_backend_source_exposes_child_hwnd_present_contract() {
+fn windows_host_owned_contract_rejects_placeholder_hwnd_render_target_surface() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows platform backend");
-    let child_host_source =
-        fs::read_to_string("src/app/terminal_renderer/platform/windows_child_host.rs")
-            .expect("read windows child-host helper");
+    let host_surface_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows_composition_surface.rs")
+            .expect("read windows host-surface helper");
 
     assert!(
-        windows_backend_source.contains("host_hwnd: Option<isize>"),
-        "windows backend should retain the top-level host HWND so the child presenter can stay parented to the real shell window"
+        !windows_backend_source.contains("WindowsChildSurfaceHost"),
+        "windows main path should reject child-HWND ownership once the host owns visible terminal presentation"
     );
     assert!(
-        windows_backend_source.contains("surface_hwnd: Option<isize>"),
-        "windows backend should retain a dedicated child surface HWND so retained-native rendering stops drawing through the host window DC"
+        !windows_backend_source.contains("created retained-native child HWND host"),
+        "windows main path should stop describing visible body lifecycle as child-HWND creation"
     );
     assert!(
-        child_host_source.contains("CreateWindowExW("),
-        "windows backend should create a dedicated child HWND so retained-native output owns its own presentation boundary"
+        !host_surface_source.contains("CreateHwndRenderTarget"),
+        "windows host-owned contract should reject the placeholder HWND render-target seam"
     );
     assert!(
-        child_host_source.contains("SetWindowPos("),
-        "windows backend should move the child HWND whenever the pane rect changes"
+        !host_surface_source.contains("ID2D1HwndRenderTarget"),
+        "windows host-owned contract should reject ID2D1HwndRenderTarget as the visible-body presentation owner"
     );
     assert!(
-        child_host_source.contains("DestroyWindow("),
-        "windows backend should destroy the child HWND during detach so retained-native host state does not leak after the pane disappears"
-    );
-    assert!(
-        child_host_source.contains("RegisterClassW(") || child_host_source.contains("WNDCLASSW"),
-        "windows child-host helper should register a dedicated window class instead of borrowing a stock control class so retained-native D2D output owns a predictable Win32 surface"
-    );
-    assert!(
-        !child_host_source.contains("w!(\"STATIC\")"),
-        "windows child-host helper should stop creating retained-native presenters as stock STATIC controls because those controls can carry class behavior that fights D2D child-surface ownership"
-    );
-    assert!(
-        !windows_backend_source.contains("GetDC(HWND(host_hwnd as _))"),
-        "windows backend should stop acquiring a host-window DC once retained-native output is isolated behind a child HWND"
-    );
-    assert!(
-        !windows_backend_source.contains("render_target.BindDC("),
-        "windows backend should stop binding a Direct2D DC target to the host window once a child HWND owns presentation"
-    );
-    assert!(
-        windows_backend_source.contains("self.rect = NativeTerminalSurfaceRect {")
-            && windows_backend_source.contains("x: 0,")
-            && windows_backend_source.contains("y: 0,"),
-        "windows backend should keep retained frame drawing in child-local coordinates even though the diagnostics later project those bounds back into host coordinates"
+        windows_backend_source.contains("text_renderer_path"),
+        "windows host-owned contract should keep native text renderer diagnostics visible while presentation ownership moves back to the host"
     );
 }
 
 #[test]
-fn windows_backend_source_exposes_child_surface_window_lifecycle_contract() {
+fn windows_backend_source_exposes_host_owned_present_contract() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
+    let native_surface_source = fs::read_to_string("src/app/terminal_renderer/native_surface.rs")
+        .expect("read native surface bridge");
+    let present_driver_source = fs::read_to_string("src/app/terminal_renderer/present_driver.rs")
+        .expect("read native surface present driver");
+
+    assert!(
+        windows_backend_source.contains("host_hwnd: Option<isize>"),
+        "windows backend should retain the top-level host HWND so native text diagnostics and host invalidation stay anchored to the real shell window"
+    );
+    assert!(
+        !windows_backend_source.contains("pub surface_hwnd: Option<isize>"),
+        "windows backend should stop tracking a dedicated child surface HWND once visible presentation moves back under host ownership"
+    );
+    assert!(
+        !windows_backend_source.contains("WindowsChildSurfaceHost"),
+        "windows backend main path should reject child-HWND ownership once the host owns visible terminal presentation"
+    );
+    assert!(
+        !windows_backend_source.contains("WindowsHwndRenderTargetState")
+            && !windows_backend_source.contains("hwnd_render_target: Option<WindowsHwndRenderTargetState>"),
+        "windows backend should stop modeling an HWND render target as the visible owner of terminal pixels"
+    );
+    assert!(
+        !windows_backend_source.contains("fn ensure_hwnd_render_target(&mut self)")
+            && !windows_backend_source.contains("fn try_ensure_hwnd_render_target(&mut self)"),
+        "windows backend should stop rebuilding a visible HWND render target now that the host owns final presentation"
+    );
+    assert!(
+        !windows_backend_source.contains("self.state.ensure_hwnd_render_target();"),
+        "windows backend present path should no longer require an HWND render target before drawing retained native content"
+    );
+    assert!(
+        native_surface_source.contains("pub fn update_terminal_rect(&self, rect: NativeTerminalSurfaceRect)"),
+        "native surface bridge should keep the host-owned rect sync seam while backend presentation ownership changes"
+    );
+    assert!(
+        !present_driver_source.contains("child HWND"),
+        "present driver docs should describe host-owned redraw synchronization instead of child-HWND replay ownership"
+    );
+    assert!(
+        windows_backend_source.contains("self.rect = self.window_rect;")
+            && windows_backend_source
+                .contains("let local = NativeTerminalSurfaceRect {")
+            && windows_backend_source
+                .contains("intersect_present_rect(surface_client_rect(surface_rect), local)"),
+        "windows backend should keep pane placement in host coordinates while translating damage into offscreen-local bitmap coordinates before clipping"
+    );
+}
+
+#[test]
+fn windows_backend_source_exposes_host_surface_lifecycle_contract() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows platform backend");
 
     assert!(
         windows_backend_source.contains("pub window_rect: NativeTerminalSurfaceRect"),
-        "windows backend state should retain the Slint-reported terminal rect so the child HWND can stay aligned with the terminal pane"
+        "windows backend state should retain the Slint-reported terminal rect so the host surface can stay aligned with the terminal pane"
     );
     assert!(
         windows_backend_source.contains("host_hwnd: Option<isize>"),
-        "windows backend should retain the top-level host HWND so the child presenter can stay attached to the shell window"
+        "windows backend should retain the top-level host HWND so the host surface can stay attached to the shell window"
     );
     assert!(
-        windows_backend_source.contains("fn ensure_child_surface_window(&mut self)"),
-        "windows backend should expose a helper that lazily creates the retained-native child host window"
+        windows_backend_source.contains("fn ensure_host_surface(&mut self)"),
+        "windows backend should expose a helper that lazily creates or attaches the retained-native host surface"
     );
     assert!(
-        windows_backend_source.contains("fn sync_child_surface_window_rect(&mut self)"),
-        "windows backend should expose a helper that keeps the child host window aligned with the pane rect"
+        windows_backend_source.contains("fn sync_host_surface_rect(&mut self)"),
+        "windows backend should expose a helper that keeps the host surface aligned with the pane rect"
     );
     assert!(
-        windows_backend_source.contains("fn destroy_child_surface_window(&mut self)"),
-        "windows backend should expose a helper that tears down the child host window during detach or parent HWND changes"
+        windows_backend_source.contains("fn destroy_host_surface(&mut self)"),
+        "windows backend should expose a helper that tears down the host surface during detach or host HWND changes"
     );
     assert!(
-        windows_backend_source.contains("self.ensure_child_surface_window();"),
-        "windows backend should ensure the child host exists during attach and present before using retained-native state"
+        windows_backend_source.contains("self.ensure_host_surface();"),
+        "windows backend should ensure the host surface exists during attach and present before using retained-native state"
     );
     assert!(
-        windows_backend_source.contains("self.sync_child_surface_window_rect();"),
-        "windows backend should resync child-host geometry whenever layout updates or host HWND resolution changes"
+        windows_backend_source.contains("self.sync_host_surface_rect();"),
+        "windows backend should resync host-surface geometry whenever layout updates or host HWND resolution changes"
     );
     assert!(
         windows_backend_source.contains("retained_frame.rect = self.state.rect;"),
-        "windows backend should keep threading child-local rects into retained frames while the child host owns visible presentation"
+        "windows backend should keep threading local surface rects into retained frames while the host surface owns visible presentation"
     );
     assert!(
-        windows_backend_source.contains("self.destroy_child_surface_window();"),
-        "windows backend detach path should tear down the retained-native child HWND when the backend detaches from the shell"
+        windows_backend_source.contains("self.destroy_host_surface();"),
+        "windows backend detach path should tear down the retained-native host surface when the backend detaches from the shell"
     );
 }
 
@@ -1616,6 +1679,31 @@ fn bootstrap_source_offsets_native_surface_y_by_titlebar_height() {
     assert!(
         titlebar < surface_y,
         "native child-HWND y should include the custom titlebar offset before projecting the workspace terminal y into client coordinates, otherwise the retained surface drifts upward into the tab strip"
+    );
+}
+
+#[test]
+fn bootstrap_source_backstops_native_terminal_resize_when_grid_lags_viewport() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains(
+            "fn workspace_native_terminal_resize_target("
+        ),
+        "bootstrap should define a native terminal resize-target helper so host viewport capacity can be compared against the active grid before presenting a retained native frame"
+    );
+    assert!(
+        bootstrap_source.contains("window.invoke_workspace_session_resize_requested("),
+        "bootstrap should re-emit a workspace terminal resize request when the native host viewport can fit more rows or columns than the currently projected grid"
+    );
+    assert!(
+        bootstrap_source.contains("slint::invoke_from_event_loop(move || {")
+            && bootstrap_source.contains("window.invoke_workspace_session_resize_requested(desired_rows, desired_cols);"),
+        "bootstrap should defer the viewport-driven resize backstop onto the Slint event loop instead of invoking the resize callback synchronously from the native present path, otherwise the callback re-enters bootstrap state while RefCell borrows are still active"
+    );
+    assert!(
+        bootstrap_source.contains("WORKSPACE_PENDING_NATIVE_TERMINAL_RESIZE"),
+        "bootstrap should debounce viewport-driven native resize backstops so every retained frame does not spam duplicate PTY resize requests while the remote side catches up"
     );
 }
 
@@ -1691,40 +1779,38 @@ fn x11_platform_backend_source_exposes_backend_selection_contract() {
 }
 
 #[test]
-fn windows_backend_source_tears_down_child_surface_when_not_visible() {
+fn windows_backend_source_tears_down_host_surface_when_not_visible() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows platform backend");
 
     assert!(
         windows_backend_source.contains("if !should_show {")
-            && windows_backend_source.contains("self.destroy_child_surface_window();"),
-        "windows backend should tear down the retained-native child HWND whenever the pane is hidden or modal-blocked so Slint overlays cannot race a stale child window that only received a best-effort hide request"
+            && windows_backend_source.contains("self.destroy_host_surface();"),
+        "windows backend should tear down the retained-native host surface whenever the pane is hidden or detached so stale presentation state cannot linger behind host-owned overlays"
     );
 }
 
 #[test]
-fn windows_child_host_source_keeps_parent_terminal_input_route_alive() {
-    let child_host_source =
-        fs::read_to_string("src/app/terminal_renderer/platform/windows_child_host.rs")
-            .expect("read windows child host helper");
+fn windows_platform_module_routes_main_path_through_host_surface() {
+    let platform_mod_source = fs::read_to_string("src/app/terminal_renderer/platform/mod.rs")
+        .expect("read windows platform module");
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows platform backend");
 
     assert!(
-        child_host_source.contains("WM_NCHITTEST") && child_host_source.contains("HTTRANSPARENT"),
-        "retained-native child HWND host should return HTTRANSPARENT for hit-testing so the parent Slint terminal surface keeps receiving mouse input instead of the child presenter swallowing clicks and selection gestures"
+        platform_mod_source.contains("pub mod windows_composition_surface;"),
+        "windows platform module should expose the composition-surface helper so the main backend can build against the host-surface seam"
     );
     assert!(
-        child_host_source.contains("WM_MOUSEACTIVATE")
-            && child_host_source.contains("MA_NOACTIVATE"),
-        "retained-native child HWND host should refuse activation on mouse input so keyboard focus stays on the parent terminal input path until child-HWND input ownership is implemented deliberately"
+        windows_backend_source.contains("windows_composition_surface"),
+        "windows backend should import the composition-surface helper instead of routing the main path through a child-HWND helper"
     );
     assert!(
-        child_host_source.contains("WM_RBUTTONDOWN")
-            && child_host_source.contains("WM_RBUTTONUP")
-            && child_host_source.contains("WM_CONTEXTMENU")
-            && child_host_source.contains("MapWindowPoints")
-            && child_host_source.contains("PostMessageW"),
-        "retained-native child HWND host should forward right-button and context-menu messages back to the parent terminal surface so selection copy/paste menus keep working even while the child window owns the visible native pixels"
+        !windows_backend_source.contains("created retained-native child HWND host")
+            && !windows_backend_source.contains("failed to create retained-native child HWND host"),
+        "windows backend should stop describing main-path lifecycle in terms of child-HWND creation once the host-surface seam takes over"
     );
 }
 
@@ -1769,39 +1855,33 @@ fn terminal_resize_source_coalesces_restore_bursts_and_ignores_minimized_resizes
             )
             && bootstrap_source
                 .contains("window.on_workspace_session_context_menu_open_changed(move |_open| {")
-            && bootstrap_source.contains("window.get_workspace_session_context_menu_open()"),
-        "terminal context menu state should propagate from the Slint terminal host back into bootstrap so the retained native child surface can be hidden while the menu is open instead of covering the menu"
+            && bootstrap_source.contains("sync_workspace_native_terminal_surface_geometry(&window);")
+            && !bootstrap_source.contains("|| window.get_workspace_session_context_menu_open()"),
+        "terminal context menu state should propagate from the Slint terminal host back into bootstrap so host-surface geometry can resync without collapsing the native terminal body while the menu is open"
     );
 }
 
 #[test]
-fn windows_child_host_source_limits_opaque_fallback_background_to_bootstrap_frames() {
-    let child_host_source =
-        fs::read_to_string("src/app/terminal_renderer/platform/windows_child_host.rs")
-            .expect("read windows child host helper");
-    let windows_backend_source =
-        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
-            .expect("read windows backend");
+fn windows_host_surface_helper_stays_presentation_only() {
+    let host_surface_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows_composition_surface.rs")
+            .expect("read windows host-surface helper");
 
     assert!(
-        child_host_source.contains("pub fn set_background_rgba(&self, rgba: u32)")
-            && child_host_source.contains("SetWindowLongPtrW")
-            && child_host_source.contains("GWLP_USERDATA"),
-        "retained-native child HWND host should expose a background-color setter that persists the fallback color alongside the host-owned paint state so native fallback paint can match the terminal palette without forcing unconditional GDI redraws forever"
+        !host_surface_source.contains("WM_NCHITTEST")
+            && !host_surface_source.contains("WM_MOUSEACTIVATE")
+            && !host_surface_source.contains("WM_CONTEXTMENU")
+            && !host_surface_source.contains("PostMessageW"),
+        "windows host-surface helper should stay focused on presentation ownership and avoid child-window input forwarding responsibilities"
     );
     assert!(
-        child_host_source.contains("pub fn set_fallback_paint_enabled(&self, enabled: bool)")
-            && child_host_source
-                .contains("retained_native_child_host_fallback_paint_enabled(hwnd)")
-            && child_host_source
-                .contains("if retained_native_child_host_fallback_paint_enabled(hwnd) {"),
-        "retained-native child HWND host should gate WM_ERASEBKGND and WM_PAINT fallback fills behind an explicit enable bit so GDI only paints the surface before the first native frame or after device-loss, instead of covering active Direct2D content every frame"
+        !host_surface_source.contains("CreateWindowExW("),
+        "windows host-surface helper should avoid creating a child window because the main terminal body is no longer hosted as a separate HWND"
     );
     assert!(
-        windows_backend_source.contains("child_surface_host.set_background_rgba(")
-            && windows_backend_source.contains("child_surface_host.set_fallback_paint_enabled(")
-            && windows_backend_source.contains("self.state.fallback_paint_required = false;"),
-        "windows backend should keep the fallback color in sync, re-enable fallback paint while the native surface still owes its first frame, and disable fallback painting again once a Direct2D EndDraw successfully presents the retained frame"
+        host_surface_source.contains("pub struct WindowsCompositionSurfaceHost")
+            && host_surface_source.contains("NativeTerminalSurfaceRect"),
+        "windows host-surface helper should keep a narrow composition-surface contract centered on the pane rect and host attachment state"
     );
 }
 

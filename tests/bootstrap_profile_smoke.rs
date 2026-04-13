@@ -84,6 +84,20 @@ fn bootstrap_logs_render_fallback_labels_without_terminal_subsystem_switching() 
 }
 
 #[test]
+fn bootstrap_profile_source_keeps_host_surface_geometry_sync_hook() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        bootstrap_source.contains("workspace_blocks_native_terminal_surface(window)"),
+        "bootstrap should keep an explicit helper for modal states that truly block the native terminal surface"
+    );
+    assert!(
+        bootstrap_source.contains("sync_workspace_native_terminal_surface_geometry"),
+        "bootstrap should keep the workspace native terminal geometry sync hook so host-surface layout stays authoritative during overlay transitions"
+    );
+}
+
+#[test]
 fn native_surface_diagnostics_smoke_reports_child_host_relationship() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
     let diagnostics_source =
@@ -98,22 +112,22 @@ fn native_surface_diagnostics_smoke_reports_child_host_relationship() {
     assert!(
         !bootstrap_source.contains("host_hwnd = diagnostics.host_hwnd.unwrap_or_default()")
             && !bootstrap_source
-                .contains("surface_hwnd = diagnostics.surface_hwnd.unwrap_or_default()")
+                .contains("host_surface_hwnd = diagnostics.host_surface_hwnd.unwrap_or_default()")
             && !bootstrap_source
-                .contains("surface_visible = diagnostics.surface_visible.unwrap_or(false)")
+                .contains("host_surface_visible = diagnostics.host_surface_visible.unwrap_or(false)")
             && !bootstrap_source
-                .contains("render_target_ready = diagnostics.render_target_ready.unwrap_or(false)"),
+                .contains("host_surface_ready = diagnostics.host_surface_ready.unwrap_or(false)"),
         "bootstrap should not emit per-frame host/child HWND diagnostics logs once the retained-native trace spam is retired"
     );
     assert!(
         diagnostics_source.contains("pub host_hwnd: Option<isize>")
-            && diagnostics_source.contains("pub surface_hwnd: Option<isize>"),
-        "native surface diagnostics should expose dedicated host and child HWND fields"
+            && diagnostics_source.contains("pub host_surface_hwnd: Option<isize>"),
+        "native surface diagnostics should expose dedicated host and host-surface HWND fields"
     );
     assert!(
         windows_frame_source.contains("pub fn native_surface_host_hwnd(")
-            && windows_frame_source.contains("pub fn native_surface_surface_hwnd("),
-        "windows frame helpers should expose stable accessors for host and child HWND diagnostics"
+            && windows_frame_source.contains("pub fn native_surface_host_surface_hwnd("),
+        "windows frame helpers should expose stable accessors for host and host-surface HWND diagnostics"
     );
 }
 

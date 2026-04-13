@@ -8,12 +8,12 @@ use mica_term::app::windows_frame::{
     native_surface_baseline_px, native_surface_clear_type_level_per_mille,
     native_surface_enhanced_contrast_per_mille, native_surface_font_chain,
     native_surface_gamma_per_mille, native_surface_glyph_bounds_trace, native_surface_host_hwnd,
+    native_surface_host_surface_hwnd, native_surface_host_surface_ready,
+    native_surface_host_surface_visible,
     native_surface_pixel_alignment, native_surface_pixel_geometry,
-    native_surface_render_target_alpha_mode, native_surface_render_target_ready,
-    native_surface_rendering_mode, native_surface_rendering_params_source,
-    native_surface_scale_factor_percent, native_surface_surface_hwnd,
-    native_surface_surface_visible, native_surface_text_antialias_mode,
-    native_surface_text_fallback_reason,
+    native_surface_render_target_alpha_mode, native_surface_rendering_mode,
+    native_surface_rendering_params_source, native_surface_scale_factor_percent,
+    native_surface_text_antialias_mode, native_surface_text_fallback_reason,
 };
 
 #[test]
@@ -26,9 +26,9 @@ fn diagnostics_contract_exposes_windows_text_rendering_trace_fields() {
         "pub struct NativeTerminalSurfaceGlyphBoundsTrace",
         "pub windows_text: Option<NativeTerminalSurfaceWindowsTextDiagnostics>",
         "pub host_hwnd: Option<isize>",
-        "pub surface_hwnd: Option<isize>",
-        "pub surface_visible: Option<bool>",
-        "pub render_target_ready: Option<bool>",
+        "pub host_surface_hwnd: Option<isize>",
+        "pub host_surface_visible: Option<bool>",
+        "pub host_surface_ready: Option<bool>",
         "pub scheduled_present_count: u64",
         "pub host_redraw_request_count: u64",
         "pub host_redraw_replay_count: u64",
@@ -59,6 +59,27 @@ fn diagnostics_contract_exposes_windows_text_rendering_trace_fields() {
 }
 
 #[test]
+fn diagnostics_contract_reframes_windows_state_around_host_surface() {
+    let diagnostics_source = fs::read_to_string("src/app/terminal_renderer/diagnostics.rs")
+        .expect("read diagnostics source");
+    let windows_frame_source =
+        fs::read_to_string("src/app/windows_frame.rs").expect("read windows frame");
+
+    assert!(
+        diagnostics_source.contains("host_surface"),
+        "windows diagnostics should start exposing host-surface state as the primary native terminal ownership contract"
+    );
+    assert!(
+        !diagnostics_source.contains("pub surface_hwnd: Option<isize>"),
+        "windows diagnostics should stop exposing surface_hwnd once the host-surface seam becomes the main presentation model"
+    );
+    assert!(
+        !windows_frame_source.contains("native_surface_surface_hwnd"),
+        "windows frame helpers should stop exposing child-surface HWND accessors once host-surface diagnostics take over"
+    );
+}
+
+#[test]
 fn windows_backend_source_publishes_windows_text_rendering_snapshot() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
@@ -68,9 +89,9 @@ fn windows_backend_source_publishes_windows_text_rendering_snapshot() {
         "GetDpiForWindow",
         "windows_text: Some(",
         "host_hwnd:",
-        "surface_hwnd:",
-        "surface_visible:",
-        "render_target_ready:",
+        "host_surface_hwnd",
+        "host_surface_visible",
+        "host_surface_ready",
         "text_antialias_mode:",
         "render_target_alpha_mode:",
         "rendering_params_source:",
@@ -110,9 +131,9 @@ fn windows_backend_source_projects_child_local_glyph_bounds_into_host_coordinate
 fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
     let diagnostics = NativeTerminalSurfaceDiagnostics {
         host_hwnd: Some(0x1234),
-        surface_hwnd: Some(0x5678),
-        surface_visible: Some(true),
-        render_target_ready: Some(true),
+        host_surface_hwnd: Some(0x5678),
+        host_surface_visible: Some(true),
+        host_surface_ready: Some(true),
         windows_text: Some(NativeTerminalSurfaceWindowsTextDiagnostics {
             text_antialias_mode: Some("cleartype"),
             render_target_alpha_mode: Some("ignore"),
@@ -149,9 +170,9 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
     };
 
     assert_eq!(native_surface_host_hwnd(&diagnostics), Some(0x1234));
-    assert_eq!(native_surface_surface_hwnd(&diagnostics), Some(0x5678));
-    assert_eq!(native_surface_surface_visible(&diagnostics), Some(true));
-    assert_eq!(native_surface_render_target_ready(&diagnostics), Some(true));
+    assert_eq!(native_surface_host_surface_hwnd(&diagnostics), Some(0x5678));
+    assert_eq!(native_surface_host_surface_visible(&diagnostics), Some(true));
+    assert_eq!(native_surface_host_surface_ready(&diagnostics), Some(true));
     assert_eq!(
         native_surface_text_antialias_mode(&diagnostics),
         Some("cleartype")
@@ -254,7 +275,7 @@ fn bootstrap_source_hides_retained_native_child_surface_while_blocking_modals_ar
         "window.get_workspace_paste_warning_modal_open()",
         "window.get_open_saved_ssh_modal_open()",
         "window.get_sftp_remote_file_modal_open()",
-        "if workspace_blocks_native_terminal_surface(window) {",
+        "if workspace_blocks_native_terminal_surface(window)",
         "return NativeTerminalSurfaceRect::default();",
     ] {
         assert!(

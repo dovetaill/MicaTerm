@@ -1,4 +1,4 @@
-//! Win32 child-HWND host used by the retained native terminal renderer.
+//! Historical Win32 child-HWND host retained only as a non-production reference during the host-surface migration.
 
 use anyhow::Result;
 

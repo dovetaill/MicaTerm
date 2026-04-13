@@ -128,6 +128,24 @@ fn bootstrap_source_threads_native_terminal_surface_contract() {
 }
 
 #[test]
+fn bootstrap_source_keeps_workspace_native_terminal_rect_stable_during_context_menus() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+
+    assert!(
+        !bootstrap_source.contains("|| window.get_workspace_session_context_menu_open()"),
+        "workspace context menus should not collapse the native terminal rect now that host-owned overlays layer over a stable terminal body"
+    );
+    assert!(
+        bootstrap_source.contains("workspace_blocks_native_terminal_surface(window)"),
+        "bootstrap should still gate native terminal visibility behind explicit blocking-modal checks"
+    );
+    assert!(
+        bootstrap_source.contains("sync_workspace_native_terminal_surface_geometry"),
+        "bootstrap should keep synchronizing native terminal geometry when workspace overlay state changes"
+    );
+}
+
+#[test]
 fn theme_toggle_keeps_terminal_refreshes_on_a_surface_local_contract() {
     let shell_chrome_source =
         fs::read_to_string("src/app/bootstrap/shell_chrome.rs").expect("read shell chrome");

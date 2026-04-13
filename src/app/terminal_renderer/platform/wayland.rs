@@ -40,6 +40,10 @@ impl PlatformNativeSurfaceBackend for WaylandNativeSurfaceBackend {
         }
     }
 
+    fn host_image_snapshot(&self) -> Option<slint::Image> {
+        None
+    }
+
     fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics {
         NativeTerminalSurfaceDiagnostics {
             last_prepared_frame_token: self

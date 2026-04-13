@@ -145,6 +145,15 @@ pub(super) async fn run_channel_pump(
                             terminal.resize(rows as usize, cols as usize);
                         }
                         if let Some(surface) = snapshot_terminal_surface(&terminal, session_id) {
+                            tracing::debug!(
+                                target: "app.terminal",
+                                requested_rows = rows,
+                                requested_cols = cols,
+                                surface_rows = surface.rows,
+                                surface_cols = surface.cols,
+                                surface_seqno = surface.seqno,
+                                "ssh runtime applied terminal resize before publishing surface"
+                            );
                             let _ = event_tx.send(SessionRuntimeEvent::SurfaceChanged(surface));
                         }
                         if let Err(err) = channel

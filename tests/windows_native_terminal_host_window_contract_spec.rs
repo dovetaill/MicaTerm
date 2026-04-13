@@ -23,3 +23,18 @@ fn bootstrap_sets_opaque_host_override_before_creating_retained_native_window() 
         "bootstrap should configure the Windows host-window transparency override before constructing the main Slint window so retained-native child HWND presentation is not forced under a transparent host shell"
     );
 }
+
+#[test]
+fn windows_host_window_contract_uses_host_surface_diagnostics_helpers() {
+    let windows_frame_source =
+        fs::read_to_string("src/app/windows_frame.rs").expect("read windows frame");
+
+    assert!(
+        windows_frame_source.contains("host_surface"),
+        "windows frame helpers should expose host-surface terminology once the host window owns the main native terminal surface"
+    );
+    assert!(
+        !windows_frame_source.contains("native_surface_surface_hwnd"),
+        "windows frame helpers should retire the child-HWND-specific helper name from the main diagnostics path"
+    );
+}

@@ -52,9 +52,9 @@ pub struct NativeTerminalSurfaceDrawCounters {
 pub struct NativeTerminalSurfaceDiagnostics {
     pub hwnd: Option<isize>,
     pub host_hwnd: Option<isize>,
-    pub surface_hwnd: Option<isize>,
-    pub surface_visible: Option<bool>,
-    pub render_target_ready: Option<bool>,
+    pub host_surface_hwnd: Option<isize>,
+    pub host_surface_visible: Option<bool>,
+    pub host_surface_ready: Option<bool>,
     pub text_renderer_path: Option<&'static str>,
     pub windows_text: Option<NativeTerminalSurfaceWindowsTextDiagnostics>,
     pub render_target_generation: u64,

@@ -12,33 +12,36 @@ fn windows_native_text_renderer_source_exposes_directwrite_primary_text_path() {
 
     assert!(
         windows_backend_source.contains("pub struct WindowsDirectWriteTextRendererState"),
-        "Task 4 should define explicit retained DirectWrite renderer state instead of hiding text draw mode behind the monochrome bitmap cache"
+        "Task 3 should define explicit retained DirectWrite renderer state instead of hiding text draw mode behind the monochrome bitmap cache"
     );
     assert!(
         windows_backend_source.contains("fn ensure_directwrite_text_renderer(&mut self)"),
-        "Task 4 should expose a helper that prepares the DirectWrite text renderer before the present pass"
+        "Task 3 should expose a helper that prepares the DirectWrite text renderer before the present pass"
     );
     assert!(
         windows_backend_source.contains("fn draw_directwrite_text("),
-        "Task 4 should expose a dedicated DirectWrite text stage for primary monochrome terminal text"
+        "Task 3 should expose a dedicated DirectWrite text stage for primary monochrome terminal text"
     );
     assert!(
         windows_backend_source.contains("fn resolve_directwrite_font_face("),
-        "Task 4 should resolve a real DirectWrite font face for each retained monochrome glyph draw"
+        "Task 3 should resolve a real DirectWrite font face for each retained monochrome glyph draw"
     );
     assert!(
         windows_backend_source.contains("DrawGlyphRun("),
-        "Task 4 should issue DirectWrite glyph-run drawing instead of relying only on FillOpacityMask monochrome blits"
+        "Task 3 should issue DirectWrite glyph-run drawing instead of relying only on FillOpacityMask monochrome blits"
     );
     assert!(
-        windows_backend_source.contains("ID2D1HwndRenderTarget")
-            || windows_backend_source.contains("CreateHwndRenderTarget"),
-        "child-host retained-native text rendering should target a child-owned HWND render target instead of a host-window DC binding path"
+        windows_backend_source.contains("CreateWicBitmapRenderTarget")
+            && windows_backend_source.contains("IWICBitmap")
+            && windows_backend_source.contains("IWICBitmapLock"),
+        "windows native text rendering should target a WIC-backed offscreen bitmap that can be handed back to the host-owned image path"
     );
     assert!(
         !windows_backend_source.contains("GetDC(HWND(host_hwnd as _))")
-            && !windows_backend_source.contains("BindDC(hdc, &bind_rect)"),
-        "child-host retained-native text rendering should stop binding Direct2D to the host window DC"
+            && !windows_backend_source.contains("BindDC(hdc, &bind_rect)")
+            && !windows_backend_source.contains("CreateHwndRenderTarget")
+            && !windows_backend_source.contains("ID2D1HwndRenderTarget"),
+        "windows native text rendering should stop binding Direct2D to either the host-window DC or a child-HWND render target once visible presentation is host-owned"
     );
 }
 
@@ -53,13 +56,19 @@ fn windows_native_text_renderer_source_uses_monitor_aware_clear_type_contract() 
         "SetTextRenderingParams(",
         "SetTextAntialiasMode(",
         "D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE",
-        "D2D1_ALPHA_MODE_IGNORE",
     ] {
         assert!(
             windows_backend_source.contains(expected),
-            "windows native text path should reference `{expected}` so ClearType-friendly rendering uses monitor-aware params on an opaque target"
+            "windows native text path should reference `{expected}` so ClearType-friendly rendering uses monitor-aware params on the offscreen native target"
         );
     }
+
+    assert!(
+        windows_backend_source.contains("CreateWicBitmapRenderTarget")
+            && windows_backend_source.contains("IWICBitmap")
+            && windows_backend_source.contains("IWICBitmapLock"),
+        "windows native text path should keep a WIC-backed offscreen render target that can be read back into host-owned pixels"
+    );
 
     for expected in [
         "CreateCustomRenderingParams",
