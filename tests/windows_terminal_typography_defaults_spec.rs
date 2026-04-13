@@ -44,8 +44,8 @@ fn backend_source_exposes_shared_terminal_typography_defaults() {
         "backend should keep the Windows line-height contract explicit from a 24px cell box so the larger 16px Semibold body text stays readable without drifting into a loose terminal"
     );
     assert!(
-        backend_source.contains("pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 1.25;"),
-        "backend should keep a tight explicit terminal letter spacing so dense Windows prompt output stops collapsing together without drifting back into over-tracked text"
+        backend_source.contains("pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 1.05;"),
+        "backend should keep a very tight explicit terminal letter spacing so dense Windows prompt output stays readable without drifting back into over-tracked text"
     );
     assert!(
         backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"SemiBold\";"),

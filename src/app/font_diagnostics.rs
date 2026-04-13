@@ -9,7 +9,7 @@ use crate::app::system_font_database::load_system_font_database;
 use crate::app::terminal_font::DEFAULT_TERMINAL_FONT_WEIGHT;
 
 pub const UI_FONT_FAMILY: &str = "MiSans";
-pub const UI_FONT_DEFAULT_WEIGHT: i32 = 500;
+pub const UI_FONT_DEFAULT_WEIGHT: i32 = 400;
 pub const TERMINAL_PRIMARY_FAMILY: &str = "Sarasa Term SC Nerd";
 pub const TERMINAL_EMOJI_FALLBACK_FAMILY: &str = "Segoe UI Emoji";
 pub const UI_FALLBACK_FAMILIES: &[&str] =

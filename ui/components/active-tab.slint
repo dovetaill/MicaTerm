@@ -41,7 +41,7 @@ export component ActiveTab inherits Rectangle {
         color: transparent;
         font-family: AppTypography.ui-font-family;
         font-size: AppTypography.ui-font-size-body;
-        font-weight: root.active ? AppTypography.ui-font-weight-semibold : AppTypography.ui-font-weight-medium;
+        font-weight: root.active ? AppTypography.ui-font-weight-medium : AppTypography.ui-font-weight-regular;
     }
 
     state-dot := Rectangle {
@@ -118,7 +118,7 @@ export component ActiveTab inherits Rectangle {
         font-family: AppTypography.ui-font-family;
         color: root.active ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
         font-size: AppTypography.ui-font-size-body;
-        font-weight: root.active ? AppTypography.ui-font-weight-semibold : AppTypography.ui-font-weight-medium;
+        font-weight: root.active ? AppTypography.ui-font-weight-medium : AppTypography.ui-font-weight-regular;
         vertical-alignment: center;
         overflow: elide;
     }
