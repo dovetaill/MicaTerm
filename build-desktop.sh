@@ -85,12 +85,12 @@ stage_bundled_font_licenses() {
 
   mkdir -p \
     "$license_root/MiSans" \
-    "$license_root/SarasaTermSC"
+    "$license_root/SarasaTermSCNerd"
 
   cp "$ROOT_DIR/assets/fonts/MiSans/LICENSE.txt" \
     "$license_root/MiSans/LICENSE.txt"
-  cp "$ROOT_DIR/assets/fonts/SarasaTermSC/LICENSE.txt" \
-    "$license_root/SarasaTermSC/LICENSE.txt"
+  cp "$ROOT_DIR/assets/fonts/SarasaTermSCNerd/LICENSE.txt" \
+    "$license_root/SarasaTermSCNerd/LICENSE.txt"
 }
 
 WINDOWS_MSVC_TOOL_SHIM_DIR=""

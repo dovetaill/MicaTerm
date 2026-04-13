@@ -1,6 +1,6 @@
 //! Staged Windows-native font backend contracts for terminal rasterization.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -13,22 +13,29 @@ use swash::scale::{Render, ScaleContext, Source};
 use swash::zeno::{Format as SwashFormat, Vector as SwashVector};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::app::font_diagnostics::{
+    FontFaceMatchDiagnostic, TerminalFontResolutionSnapshot, bundled_font_match_diagnostic,
+    terminal_chain_uses_unexpected_mix, unresolved_face_diagnostic,
+};
 use crate::app::system_font_database::load_system_font_database;
-use crate::app::terminal_emoji::{EmojiRenderOutcome, EmojiSprite, TerminalEmojiRenderer};
+use crate::app::terminal_emoji::{EmojiFallbackReason, EmojiRenderOutcome, TerminalEmojiRenderer};
 use crate::app::terminal_font::backend::{
-    ColorGlyphRaster, DEFAULT_TERMINAL_FONT_FAMILY, FontFaceKey, FontFallbackFace, FontMetrics,
-    FontRenderProfile, FontRequest, FontSystem, GlyphRasterRequest, LoadedFont, LoadedFontKey,
-    OpenTypeFeatureSet, RasterizedGlyph, ShapedGlyph, ShapedGlyphRun, TextShapingRequest,
-    WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX, WINDOWS_DEFAULT_TERMINAL_LINE_HEIGHT,
-    shape_text_with_rustybuzz, shape_text_with_rustybuzz_features,
+    ColorGlyphRaster, DEFAULT_TERMINAL_FONT_FAMILY, DEFAULT_TERMINAL_FONT_WEIGHT, FontFaceKey,
+    FontFallbackFace, FontMetrics, FontRenderProfile, FontRequest, FontSystem, GlyphRasterRequest,
+    LoadedFont, LoadedFontKey, OpenTypeFeatureSet, RasterizedGlyph, ShapedGlyph, ShapedGlyphRun,
+    TextShapingRequest, WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX,
+    WINDOWS_DEFAULT_TERMINAL_LINE_HEIGHT, shape_text_with_rustybuzz,
+    shape_text_with_rustybuzz_features, terminal_cell_width_px,
 };
 use crate::app::terminal_font::windows_fallback::{
     WindowsFontFallbackResolver, contains_color_glyph_text,
 };
-use crate::app::terminal_font::windows_locator::{ResolvedFontFaceData, WindowsFontLocator};
+use crate::app::terminal_font::windows_locator::{
+    ResolvedFontFaceData, ResolvedFontFaceSource, WindowsFontLocator,
+};
 
 const SARASA_TERM_SC_FONT_BYTES: &[u8] =
-    include_bytes!("../../../assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
+    include_bytes!("../../../assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf");
 const DEFAULT_FACE_KEY: FontFaceKey = FontFaceKey(1);
 const DEFAULT_FACE_INDEX: u32 = 0;
 const MIN_CELL_HEIGHT_PX: f32 =
@@ -40,6 +47,19 @@ struct LoadedFaceRecord {
     face_index: u32,
     font_data: Arc<Vec<u8>>,
     font: FontArc,
+    source: LoadedFaceSource,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoadedFaceSource {
+    Bundled,
+    System,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingShapedSubrun {
+    family_name: String,
+    source_byte_range: std::ops::Range<usize>,
 }
 
 pub struct DirectWriteFontSystem {
@@ -48,6 +68,7 @@ pub struct DirectWriteFontSystem {
     locator: Option<WindowsFontLocator>,
     fallback_resolver: WindowsFontFallbackResolver,
     emoji_renderer: Option<TerminalEmojiRenderer>,
+    logged_emoji_raster_fallbacks: HashSet<(String, String, EmojiFallbackReason)>,
     color_glyph_rasters: HashMap<(LoadedFontKey, FontFaceKey, u32), ColorGlyphRaster>,
     faces: HashMap<FontFaceKey, LoadedFaceRecord>,
     family_face_keys: HashMap<String, FontFaceKey>,
@@ -62,6 +83,7 @@ impl DirectWriteFontSystem {
             DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
             SARASA_TERM_SC_FONT_BYTES.to_vec(),
             DEFAULT_FACE_INDEX,
+            LoadedFaceSource::Bundled,
         )?;
         let mut faces = HashMap::new();
         faces.insert(DEFAULT_FACE_KEY, bundled_face);
@@ -77,6 +99,7 @@ impl DirectWriteFontSystem {
             locator: None,
             fallback_resolver: WindowsFontFallbackResolver::new(),
             emoji_renderer: None,
+            logged_emoji_raster_fallbacks: HashSet::new(),
             color_glyph_rasters: HashMap::new(),
             faces,
             family_face_keys,
@@ -91,16 +114,20 @@ impl DirectWriteFontSystem {
     }
 
     pub fn discover_fallback_chain(&mut self, font: &LoadedFont, text: &str) -> Vec<String> {
-        self.ensure_locator_initialized();
-        let locator = self
-            .locator
-            .as_ref()
-            .expect("locator should be initialized on demand");
-        self.fallback_resolver.discover_fallback_families(
-            locator,
-            font.family_name().unwrap_or(DEFAULT_TERMINAL_FONT_FAMILY),
-            text,
-        )
+        let primary_family = font.family_name().unwrap_or(DEFAULT_TERMINAL_FONT_FAMILY);
+        let mut families = vec![primary_family.to_string()];
+
+        for (_, grapheme) in text.grapheme_indices(true) {
+            let family_name = self.resolve_family_for_text(font, primary_family, grapheme);
+            if !families
+                .iter()
+                .any(|existing: &String| existing.eq_ignore_ascii_case(family_name.as_str()))
+            {
+                families.push(family_name);
+            }
+        }
+
+        families
     }
 
     pub fn load_native_font(&mut self, request: &FontRequest) -> Result<LoadedFont> {
@@ -238,6 +265,10 @@ impl DirectWriteFontSystem {
             face_data.family_name.clone(),
             face_data.font_data,
             face_data.face_index,
+            match face_data.source {
+                ResolvedFontFaceSource::Bundled => LoadedFaceSource::Bundled,
+                ResolvedFontFaceSource::System => LoadedFaceSource::System,
+            },
         )?;
         self.family_face_keys.insert(family_key, face_key);
         self.faces.insert(face_key, face_record);
@@ -317,6 +348,35 @@ impl DirectWriteFontSystem {
             .expect("emoji renderer should be initialized on demand")
     }
 
+    fn log_emoji_raster_fallback_once(
+        &mut self,
+        text: &str,
+        resolved_face: &FontFallbackFace,
+        reason: EmojiFallbackReason,
+    ) {
+        let fingerprint = (
+            text.to_string(),
+            resolved_face.family_name.clone(),
+            reason.clone(),
+        );
+        if !self.logged_emoji_raster_fallbacks.insert(fingerprint) {
+            return;
+        }
+
+        tracing::warn!(
+            target: "app.fonts",
+            text = %text,
+            resolved_family = resolved_face.family_name.as_str(),
+            ?reason,
+            "terminal emoji color rasterization failed; falling back to the monochrome glyph path"
+        );
+    }
+
+    #[doc(hidden)]
+    pub fn set_emoji_renderer_for_tests(&mut self, renderer: TerminalEmojiRenderer) {
+        self.emoji_renderer = Some(renderer);
+    }
+
     #[cfg(target_os = "windows")]
     fn ensure_directwrite(&mut self) -> Option<&directwrite_native::DirectWriteContext> {
         if self.directwrite.is_none() {
@@ -325,12 +385,133 @@ impl DirectWriteFontSystem {
 
         self.directwrite.as_ref()
     }
+
+    fn resolve_family_for_text(
+        &mut self,
+        font: &LoadedFont,
+        primary_family: &str,
+        text: &str,
+    ) -> String {
+        self.ensure_locator_initialized();
+        let locator = self
+            .locator
+            .as_ref()
+            .expect("locator should be initialized on demand");
+        let primary_supports_text = self.primary_face_supports_text(font, text);
+        self.fallback_resolver.resolve_family_for_text(
+            locator,
+            primary_family,
+            text,
+            primary_supports_text,
+        )
+    }
+
+    fn primary_face_supports_text(&self, font: &LoadedFont, text: &str) -> bool {
+        self.face_record(font.face_key())
+            .map(|face| Self::face_supports_text(face, text))
+            .unwrap_or(false)
+    }
+
+    fn face_supports_text(face: &LoadedFaceRecord, text: &str) -> bool {
+        text.chars()
+            .all(|ch| is_ignorable_text_char(ch) || face.font.glyph_id(ch).0 != 0)
+    }
+
+    pub(crate) fn resolution_snapshot(
+        &mut self,
+        font: &LoadedFont,
+    ) -> Result<TerminalFontResolutionSnapshot> {
+        let requested_family = font
+            .family_name()
+            .unwrap_or(DEFAULT_TERMINAL_FONT_FAMILY)
+            .to_string();
+        let primary =
+            self.diagnostic_for_family_name(requested_family.as_str(), requested_family.as_str());
+        let cjk = self.diagnostic_for_probe(font, requested_family.as_str(), "界");
+        let symbol = self.diagnostic_for_probe(font, requested_family.as_str(), "→");
+        let icon = self.diagnostic_for_probe(font, requested_family.as_str(), "");
+        let emoji = self.diagnostic_for_probe(font, requested_family.as_str(), "🙂");
+        let family_chain = vec![
+            primary.resolved_family.clone(),
+            cjk.resolved_family.clone(),
+            symbol.resolved_family.clone(),
+            icon.resolved_family.clone(),
+            emoji.resolved_family.clone(),
+        ]
+        .into_iter()
+        .fold(Vec::<String>::new(), |mut families, family_name| {
+            if !families
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(family_name.as_str()))
+            {
+                families.push(family_name);
+            }
+            families
+        });
+
+        Ok(TerminalFontResolutionSnapshot {
+            requested_family,
+            requested_weight: DEFAULT_TERMINAL_FONT_WEIGHT.to_string(),
+            requested_style: "normal".to_string(),
+            primary,
+            cjk,
+            symbol,
+            icon,
+            emoji,
+            mixes_multiple_unrelated_families: terminal_chain_uses_unexpected_mix(&family_chain),
+        })
+    }
+
+    fn diagnostic_for_probe(
+        &mut self,
+        font: &LoadedFont,
+        requested_family: &str,
+        text: &str,
+    ) -> FontFaceMatchDiagnostic {
+        let family_name = self.resolve_family_for_text(font, requested_family, text);
+        self.diagnostic_for_family_name(requested_family, family_name.as_str())
+    }
+
+    fn diagnostic_for_family_name(
+        &mut self,
+        requested_family: &str,
+        family_name: &str,
+    ) -> FontFaceMatchDiagnostic {
+        let fallback_family =
+            (!family_name.eq_ignore_ascii_case(requested_family)).then(|| family_name.to_string());
+        let Ok(face) = self.ensure_face_for_family(family_name) else {
+            return unresolved_face_diagnostic(requested_family, family_name);
+        };
+        let Ok(record) = self.face_record(face.face_key) else {
+            return unresolved_face_diagnostic(requested_family, family_name);
+        };
+        let mut diagnostic = bundled_font_match_diagnostic(
+            requested_family,
+            record.family_name.as_str(),
+            match record.source {
+                LoadedFaceSource::Bundled => "bundled",
+                LoadedFaceSource::System => "system",
+            },
+            record.font_data.as_slice(),
+            record.face_index,
+        );
+        diagnostic.fallback_family = fallback_family;
+        diagnostic
+    }
+}
+
+fn is_ignorable_text_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\n' | '\r' | '\t' | '\u{200c}' | '\u{200d}' | '\u{fe0e}' | '\u{fe0f}'
+    )
 }
 
 fn build_face_record(
     family_name: String,
     font_data: Vec<u8>,
     face_index: u32,
+    source: LoadedFaceSource,
 ) -> Result<LoadedFaceRecord> {
     let font = FontArc::new(
         FontVec::try_from_vec_and_index(font_data.clone(), face_index).map_err(|error| {
@@ -345,6 +526,7 @@ fn build_face_record(
         face_index,
         font_data: Arc::new(font_data),
         font,
+        source,
     })
 }
 
@@ -352,9 +534,10 @@ fn fallback_face_data_for_family(family_name: &str) -> Option<ResolvedFontFaceDa
     if family_name.eq_ignore_ascii_case(DEFAULT_TERMINAL_FONT_FAMILY) {
         return Some(ResolvedFontFaceData {
             family_name: DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
-            post_script_name: "SarasaTermSC-Regular".to_string(),
+            post_script_name: "SarasaTermSCNerd-SemiBold".to_string(),
             face_index: DEFAULT_FACE_INDEX,
             font_data: SARASA_TERM_SC_FONT_BYTES.to_vec(),
+            source: ResolvedFontFaceSource::Bundled,
         });
     }
 
@@ -379,7 +562,7 @@ fn fallback_metrics_from_face(face: &LoadedFaceRecord, px_size: f32) -> FontMetr
         descent_px: scaled.descent(),
         line_gap_px: scaled.line_gap(),
         baseline_px,
-        cell_width_px: mono_advance.ceil(),
+        cell_width_px: terminal_cell_width_px(mono_advance),
         cell_height_px: cell_height,
     }
 }
@@ -430,58 +613,19 @@ impl FontSystem for DirectWriteFontSystem {
         request: &TextShapingRequest,
     ) -> Result<Vec<ShapedGlyphRun>> {
         let fallback_faces = self.discover_fallback_faces(font, request.text.as_str())?;
-        let primary_family = fallback_faces
-            .first()
-            .map(|face| face.family_name.clone())
-            .unwrap_or_else(|| {
-                font.family_name()
-                    .unwrap_or(DEFAULT_TERMINAL_FONT_FAMILY)
-                    .to_string()
-            });
+        let primary_family = font
+            .family_name()
+            .unwrap_or(DEFAULT_TERMINAL_FONT_FAMILY)
+            .to_string();
         let mut shaped_runs = Vec::new();
-        let mut active_family: Option<String> = None;
-        let mut active_start = 0usize;
-        let mut active_end = 0usize;
 
-        for (byte_start, grapheme) in request.text.grapheme_indices(true) {
-            let byte_end = byte_start + grapheme.len();
-            self.ensure_locator_initialized();
-            let locator = self
-                .locator
-                .as_ref()
-                .expect("locator should be initialized on demand");
-            let family_name = self.fallback_resolver.resolve_family_for_text(
-                locator,
-                primary_family.as_str(),
-                grapheme,
-            );
-
-            if let Some(current_family) = &active_family
-                && current_family.eq_ignore_ascii_case(&family_name)
-            {
-                active_end = byte_end;
-                continue;
-            }
-
-            if let Some(current_family) = &active_family {
-                shaped_runs.push(self.shape_subrun(
-                    font,
-                    &resolved_face_for_family(&fallback_faces, current_family.as_str()),
-                    active_start..active_end,
-                    request,
-                )?);
-            }
-
-            active_family = Some(family_name);
-            active_start = byte_start;
-            active_end = byte_end;
-        }
-
-        if let Some(current_family) = active_family {
+        for pending_run in split_shaping_subruns_by_family(request.text.as_str(), |grapheme| {
+            self.resolve_family_for_text(font, primary_family.as_str(), grapheme)
+        }) {
             shaped_runs.push(self.shape_subrun(
                 font,
-                &resolved_face_for_family(&fallback_faces, current_family.as_str()),
-                active_start..active_end,
+                &resolved_face_for_family(&fallback_faces, pending_run.family_name.as_str()),
+                pending_run.source_byte_range,
                 request,
             )?);
         }
@@ -524,11 +668,16 @@ impl DirectWriteFontSystem {
             &feature_set,
             request.allow_ligatures,
         )?;
-        let glyphs = if contains_color_glyph_text(text) {
-            self.cache_color_glyph_raster(font, resolved_face, text, &glyphs)
-                .unwrap_or(glyphs)
+        let (glyphs, has_color_glyphs) = if contains_color_glyph_text(text) {
+            match self
+                .cache_color_glyph_raster(font, resolved_face, text, &glyphs)
+                .flatten()
+            {
+                Some(color_glyphs) => (color_glyphs, true),
+                None => (glyphs, false),
+            }
         } else {
-            glyphs
+            (glyphs, false)
         };
 
         Ok(ShapedGlyphRun {
@@ -538,7 +687,7 @@ impl DirectWriteFontSystem {
             resolved_face: resolved_face.clone(),
             feature_set,
             allow_ligatures: request.allow_ligatures,
-            has_color_glyphs: contains_color_glyph_text(text),
+            has_color_glyphs,
         })
     }
 
@@ -548,7 +697,7 @@ impl DirectWriteFontSystem {
         resolved_face: &FontFallbackFace,
         text: &str,
         glyphs: &[ShapedGlyph],
-    ) -> Option<Vec<ShapedGlyph>> {
+    ) -> Option<Option<Vec<ShapedGlyph>>> {
         let (cell_width_px, cell_height_px) = font.cell_size_px();
         let span = color_glyph_cell_span(text);
         let sprite = match self.ensure_emoji_renderer().rasterize_cluster(
@@ -558,8 +707,9 @@ impl DirectWriteFontSystem {
             cell_height_px,
         ) {
             EmojiRenderOutcome::Sprite(sprite) => sprite,
-            EmojiRenderOutcome::VisibleFallback { .. } => {
-                procedural_color_glyph_sprite(text, span, cell_width_px, cell_height_px)
+            EmojiRenderOutcome::VisibleFallback { reason, .. } => {
+                self.log_emoji_raster_fallback_once(text, resolved_face, reason);
+                return Some(None);
             }
         };
         let synthetic_glyph_id = synthetic_color_glyph_id(text);
@@ -572,15 +722,57 @@ impl DirectWriteFontSystem {
             },
         );
 
-        Some(vec![ShapedGlyph {
+        Some(Some(vec![ShapedGlyph {
             glyph_id: synthetic_glyph_id,
             cluster: glyphs.first().map(|glyph| glyph.cluster).unwrap_or(0),
             x_advance: glyphs.iter().map(|glyph| glyph.x_advance).sum(),
             y_advance: glyphs.iter().map(|glyph| glyph.y_advance).sum(),
             x_offset: glyphs.first().map(|glyph| glyph.x_offset).unwrap_or(0),
             y_offset: glyphs.first().map(|glyph| glyph.y_offset).unwrap_or(0),
-        }])
+        }]))
     }
+}
+
+fn split_shaping_subruns_by_family(
+    text: &str,
+    mut resolve_family_for_grapheme: impl FnMut(&str) -> String,
+) -> Vec<PendingShapedSubrun> {
+    let mut pending_runs = Vec::new();
+    let mut active_family: Option<String> = None;
+    let mut active_start = 0usize;
+    let mut active_end = 0usize;
+
+    for (byte_start, grapheme) in text.grapheme_indices(true) {
+        let byte_end = byte_start + grapheme.len();
+        let family_name = resolve_family_for_grapheme(grapheme);
+
+        if let Some(current_family) = &active_family
+            && current_family.eq_ignore_ascii_case(&family_name)
+        {
+            active_end = byte_end;
+            continue;
+        }
+
+        if let Some(current_family) = active_family.take() {
+            pending_runs.push(PendingShapedSubrun {
+                family_name: current_family,
+                source_byte_range: active_start..active_end,
+            });
+        }
+
+        active_family = Some(family_name);
+        active_start = byte_start;
+        active_end = byte_end;
+    }
+
+    if let Some(current_family) = active_family {
+        pending_runs.push(PendingShapedSubrun {
+            family_name: current_family,
+            source_byte_range: active_start..active_end,
+        });
+    }
+
+    pending_runs
 }
 
 fn synthetic_color_glyph_id(text: &str) -> u32 {
@@ -611,63 +803,6 @@ fn resolved_face_for_family(
                 family_name: DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
             })
         })
-}
-
-fn procedural_color_glyph_sprite(
-    text: &str,
-    span: u32,
-    cell_width_px: u32,
-    cell_height_px: u32,
-) -> EmojiSprite {
-    let width = span.max(1).saturating_mul(cell_width_px.max(1));
-    let height = cell_height_px.max(1);
-    let mut rgba = vec![0u8; (width * height * 4) as usize];
-    let palette = procedural_color_palette(text);
-
-    for y in 1..height.saturating_sub(1) {
-        for x in 1..width.saturating_sub(1) {
-            let index = ((y * width + x) * 4) as usize;
-            let color = if (x + y) % 5 == 0 {
-                palette[2]
-            } else if x * 3 > width.saturating_mul(2) {
-                palette[1]
-            } else {
-                palette[0]
-            };
-            rgba[index] = color[0];
-            rgba[index + 1] = color[1];
-            rgba[index + 2] = color[2];
-            rgba[index + 3] = 0xff;
-        }
-    }
-
-    EmojiSprite {
-        width,
-        height,
-        rgba,
-    }
-}
-
-fn procedural_color_palette(text: &str) -> [[u8; 3]; 3] {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    text.hash(&mut hasher);
-    let seed = hasher.finish();
-    let primary = [
-        0x60u8.saturating_add((seed & 0x3f) as u8),
-        0x40u8.saturating_add(((seed >> 6) & 0x5f) as u8),
-        0x70u8.saturating_add(((seed >> 12) & 0x4f) as u8),
-    ];
-    let secondary = [
-        0x30u8.saturating_add(((seed >> 18) & 0x5f) as u8),
-        0x80u8.saturating_add(((seed >> 24) & 0x3f) as u8),
-        0x40u8.saturating_add(((seed >> 30) & 0x5f) as u8),
-    ];
-    let accent = [
-        0xa0u8.saturating_add(((seed >> 8) & 0x2f) as u8),
-        0x50u8.saturating_add(((seed >> 14) & 0x4f) as u8),
-        0x20u8.saturating_add(((seed >> 20) & 0x6f) as u8),
-    ];
-    [primary, secondary, accent]
 }
 
 #[cfg(target_os = "windows")]
@@ -803,5 +938,31 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn subrun_splitting_keeps_a_leading_emoji_out_of_the_ascii_tail() {
+        let subruns = split_shaping_subruns_by_family("🌐 twilight", |grapheme| {
+            if grapheme == "🌐" {
+                "Segoe UI Emoji".to_string()
+            } else {
+                DEFAULT_TERMINAL_FONT_FAMILY.to_string()
+            }
+        });
+
+        assert_eq!(
+            subruns,
+            vec![
+                PendingShapedSubrun {
+                    family_name: "Segoe UI Emoji".to_string(),
+                    source_byte_range: 0..4,
+                },
+                PendingShapedSubrun {
+                    family_name: DEFAULT_TERMINAL_FONT_FAMILY.to_string(),
+                    source_byte_range: 4.."🌐 twilight".len(),
+                },
+            ],
+            "a leading emoji should stay isolated from the following ASCII tail so the color glyph rasterizer never receives mixed emoji-plus-text runs"
+        );
     }
 }

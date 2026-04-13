@@ -145,7 +145,7 @@ pub(super) async fn run_channel_pump(
                             terminal.resize(rows as usize, cols as usize);
                         }
                         if let Some(surface) = snapshot_terminal_surface(&terminal, session_id) {
-                            tracing::debug!(
+                            tracing::trace!(
                                 target: "app.terminal",
                                 requested_rows = rows,
                                 requested_cols = cols,

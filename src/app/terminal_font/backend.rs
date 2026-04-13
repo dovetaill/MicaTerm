@@ -8,7 +8,7 @@ use rustybuzz::{BufferClusterLevel, Face, Feature, UnicodeBuffer, shape};
 #[cfg(feature = "terminal-native-renderer")]
 use std::str::FromStr;
 
-pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = "Sarasa Term SC";
+pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = "Sarasa Term SC Nerd";
 pub const DEFAULT_TERMINAL_CJK_FALLBACK_FAMILY: &str = DEFAULT_TERMINAL_FONT_FAMILY;
 pub const DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY: &str = "Segoe UI Emoji";
 pub const WINDOWS_DEFAULT_TERMINAL_FONT_CHAIN: &[&str] = &[
@@ -17,12 +17,12 @@ pub const WINDOWS_DEFAULT_TERMINAL_FONT_CHAIN: &[&str] = &[
 ];
 pub const DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 14.0;
 pub const DEFAULT_TERMINAL_LINE_HEIGHT: f32 = 1.5;
-pub const WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 15.0;
-pub const WINDOWS_DEFAULT_TERMINAL_CELL_HEIGHT_PX: u32 = 23;
+pub const WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 16.0;
+pub const WINDOWS_DEFAULT_TERMINAL_CELL_HEIGHT_PX: u32 = 24;
 pub const WINDOWS_DEFAULT_TERMINAL_LINE_HEIGHT: f32 =
     WINDOWS_DEFAULT_TERMINAL_CELL_HEIGHT_PX as f32 / WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX;
-pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 0.0;
-pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = "Medium";
+pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 2.0;
+pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = "SemiBold";
 
 const GLYPH_COVERAGE_GAMMA: f32 = 1.0;
 const GLYPH_ALPHA_GAIN: f32 = 1.0;
@@ -544,6 +544,10 @@ pub(crate) fn map_glyph_coverage_to_alpha(coverage: f32, render_profile: FontRen
     let adjusted =
         coverage.clamp(0.0, 1.0).powf(render_profile.coverage_gamma) * render_profile.alpha_gain;
     (adjusted.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+pub(crate) fn terminal_cell_width_px(mono_advance_px: f32) -> f32 {
+    mono_advance_px.ceil() + DEFAULT_TERMINAL_LETTER_SPACING_PX.max(0.0)
 }
 
 #[cfg(feature = "terminal-native-renderer")]

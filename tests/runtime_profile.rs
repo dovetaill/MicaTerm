@@ -150,7 +150,7 @@ fn desktop_packaging_script_copies_default_terminal_font_license() {
         "desktop packaging should copy the bundled MiSans license into the staged package"
     );
     assert!(
-        content.contains("assets/fonts/SarasaTermSC/LICENSE.txt"),
+        content.contains("assets/fonts/SarasaTermSCNerd/LICENSE.txt"),
         "desktop packaging should copy the bundled Sarasa Term SC license into the staged package"
     );
     assert!(

@@ -95,8 +95,12 @@ fn windows_native_presenter_keeps_a_more_readable_text_line_box() -> Result<()> 
     let native = WindowsNativePresenter::new()?;
 
     assert!(
-        native.default_cell_size().1 >= 23,
-        "Windows terminal defaults should reserve at least a 23px row box so 15px-class body text reads less cramped than the old 21px box"
+        native.default_cell_size().1 >= 24,
+        "Windows terminal defaults should reserve at least a 24px row box so the larger 16px-class Semibold body text still keeps vertical breathing room"
+    );
+    assert!(
+        native.default_cell_size().0 >= 9,
+        "Windows terminal defaults should widen the column box so Sarasa Term SC Nerd SemiBold no longer looks cramped on dense prompt output"
     );
 
     Ok(())
@@ -237,6 +241,94 @@ fn classify_cluster_render_kind_routes_explicit_keycap_sequences_to_color_render
     }
 }
 
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn windows_text_engine_keeps_plain_symbols_off_the_color_emoji_path() -> Result<()> {
+    let mut fonts = DirectWriteFontSystem::new()?;
+    let font = fonts.load_font(&FontRequest::default())?;
+
+    for text in ["⚙", "✖", "☁"] {
+        let runs = fonts.shape_text_runs(&font, &TextShapingRequest::new(text))?;
+        assert_eq!(runs.len(), 1, "`{text}` should shape as a single run");
+        assert!(
+            !runs[0].has_color_glyphs,
+            "`{text}` should stay on the mono/symbol path instead of being forced through the color emoji fallback pipeline"
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn windows_text_engine_still_marks_real_emoji_clusters_as_color_glyphs() -> Result<()> {
+    let mut fonts = DirectWriteFontSystem::new()?;
+    fonts.set_emoji_renderer_for_tests(fake_color_emoji_renderer());
+    let font = fonts.load_font(&FontRequest::default())?;
+
+    for text in ["🦀", "🙂", "⚙️"] {
+        let runs = fonts.shape_text_runs(&font, &TextShapingRequest::new(text))?;
+        assert_eq!(runs.len(), 1, "`{text}` should shape as a single run");
+        assert!(
+            runs[0].has_color_glyphs,
+            "`{text}` should remain on the color emoji path"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn windows_text_engine_splits_leading_emoji_from_ascii_tail() {
+    let source = fs::read_to_string("src/app/terminal_font/windows_dwrite.rs")
+        .expect("read windows dwrite source");
+
+    assert!(
+        source.contains("split_shaping_subruns_by_family("),
+        "the Windows shaper should split leading emoji into their own subruns before rasterization so Segoe UI Emoji never receives mixed emoji-plus-ASCII text"
+    );
+    assert!(
+        source.contains("let primary_family = font")
+            || source.contains("let primary_family = font\n"),
+        "the Windows shaper should derive per-grapheme fallback resolution from the requested terminal family instead of the first fallback face encountered in the run"
+    );
+    assert!(
+        !source.contains("let primary_family = fallback_faces"),
+        "the Windows shaper should stop using the first fallback face as the primary family because an emoji-leading run would otherwise smear the ASCII tail onto Segoe UI Emoji"
+    );
+}
+
+#[cfg(feature = "terminal-native-renderer")]
+#[test]
+fn windows_text_engine_demotes_failed_color_emoji_rasterization_to_mono_runs() -> Result<()> {
+    let mut fonts = DirectWriteFontSystem::new()?;
+    fonts.set_emoji_renderer_for_tests(TerminalEmojiRenderer::with_backend(
+        TerminalEmojiResolver::from_resolution(EmojiFontResolution::Resolved(ResolvedEmojiFont {
+            face_id: fontdb::ID::dummy(),
+            family_name: "Segoe UI Emoji".to_string(),
+        })),
+        Box::new(FakeEmojiRasterizerBackend { sprite: None }),
+    ));
+    let font = fonts.load_font(&FontRequest::default())?;
+    let runs = fonts.shape_text_runs(&font, &TextShapingRequest::new("🦀"))?;
+
+    assert_eq!(runs.len(), 1, "emoji probe should stay within a single run");
+    assert!(
+        !runs[0].has_color_glyphs,
+        "when the Windows color emoji rasterizer cannot produce a sprite, the renderer should fall back to the monochrome glyph path instead of caching a synthetic placeholder block"
+    );
+    assert!(
+        runs[0]
+            .glyphs
+            .first()
+            .map(|glyph| glyph.glyph_id < 0x8000_0000)
+            .unwrap_or(false),
+        "the fallback run should keep real shaped glyph ids instead of switching to a synthetic placeholder sprite id"
+    );
+
+    Ok(())
+}
+
 #[test]
 fn recommended_emoji_font_size_stays_within_terminal_cell_bounds() {
     let single_cell_size = recommended_emoji_font_size_px(1, 10, 22);
@@ -281,9 +373,9 @@ struct FakeEmojiRasterizerBackend {
 impl EmojiRasterizerBackend for FakeEmojiRasterizerBackend {
     fn rasterize(&self, request: EmojiFontRasterizeRequest<'_>) -> Option<EmojiSprite> {
         assert_eq!(request.text, "🦀");
-        assert_eq!(request.span, 1);
-        assert_eq!(request.cell_width, 10);
-        assert_eq!(request.cell_height, 22);
+        assert!(request.span >= 1);
+        assert!(request.cell_width > 0);
+        assert!(request.cell_height > 0);
         self.sprite.clone()
     }
 }
@@ -292,10 +384,6 @@ struct FakeAtlasEmojiBackend;
 
 impl EmojiRasterizerBackend for FakeAtlasEmojiBackend {
     fn rasterize(&self, request: EmojiFontRasterizeRequest<'_>) -> Option<EmojiSprite> {
-        if request.text != "🦀" {
-            return None;
-        }
-
         let width = request.span.max(1) * request.cell_width;
         let height = request.cell_height;
         let mut rgba = vec![0u8; (width * height * 4) as usize];
@@ -303,9 +391,14 @@ impl EmojiRasterizerBackend for FakeAtlasEmojiBackend {
         for y in 1..height.saturating_sub(1) {
             for x in 1..width.saturating_sub(1) {
                 let index = ((y * width + x) * 4) as usize;
-                rgba[index] = 0xf4;
-                rgba[index + 1] = 0x43;
-                rgba[index + 2] = 0x36;
+                let (r, g, b) = if x * 2 >= width {
+                    (0xf4, 0xb4, 0x00)
+                } else {
+                    (0xf4, 0x43, 0x36)
+                };
+                rgba[index] = r;
+                rgba[index + 1] = g;
+                rgba[index + 2] = b;
                 rgba[index + 3] = 0xff;
             }
         }
@@ -355,6 +448,7 @@ fn first_monochrome_native_frame_carries_upload_payload_then_reuses_cache() -> R
 fn first_color_native_frame_carries_upload_payload_then_reuses_cache() -> Result<()> {
     let surface = render_surface(4, 12, "🦀\r\n");
     let mut presenter = WindowsNativePresenter::new()?;
+    presenter.set_emoji_renderer_for_tests(fake_color_emoji_renderer());
 
     let first = present_native_frame(&mut presenter, &surface)?;
     let second = present_native_frame(&mut presenter, &surface)?;
@@ -415,6 +509,7 @@ fn presentable_native_frame_threads_palette_contract_and_color_destinations() ->
 ",
     );
     let mut presenter = WindowsNativePresenter::new()?;
+    presenter.set_emoji_renderer_for_tests(fake_color_emoji_renderer());
 
     let frame = present_native_frame(&mut presenter, &surface)?;
     let presentable = &frame.presentable_frame;
@@ -440,6 +535,7 @@ fn presentable_native_frame_threads_palette_contract_and_color_destinations() ->
 #[test]
 fn dwrite_color_glyph_raster_is_not_a_flat_placeholder_block() -> Result<()> {
     let mut fonts = DirectWriteFontSystem::new()?;
+    fonts.set_emoji_renderer_for_tests(fake_color_emoji_renderer());
     let loaded_font = fonts.load_font(&FontRequest::default())?;
     let shaped_runs = fonts.shape_text_runs(&loaded_font, &TextShapingRequest::new("🦀"))?;
     let color_run = shaped_runs

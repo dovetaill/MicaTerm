@@ -1,5 +1,9 @@
 //! Windows text fallback helper that discovers installed system families for mixed text.
 
+use crate::app::font_diagnostics::{
+    TERMINAL_ICON_FALLBACK_FAMILIES, TERMINAL_NERD_FALLBACK_FAMILIES,
+};
+use crate::app::terminal_emoji::{ClusterRenderKind, classify_cluster_render_kind};
 use crate::app::terminal_font::backend::{
     DEFAULT_TERMINAL_EMOJI_FALLBACK_FAMILY, DEFAULT_TERMINAL_FONT_FAMILY,
 };
@@ -30,6 +34,7 @@ impl WindowsFontFallbackResolver {
         locator: &WindowsFontLocator,
         primary_family: &str,
         text: &str,
+        primary_supports_text: bool,
     ) -> Vec<String> {
         let primary_family = normalize_primary_family(primary_family);
         let mut families = vec![primary_family.to_string()];
@@ -40,7 +45,15 @@ impl WindowsFontFallbackResolver {
             push_unique_family(&mut families, family_name);
         }
 
+        if contains_private_use_text(text)
+            && !primary_supports_text
+            && let Some(family_name) = resolve_private_use_fallback_family(locator)
+        {
+            push_unique_family(&mut families, family_name);
+        }
+
         if contains_symbol_text(text)
+            && !primary_supports_text
             && let Some(family_name) = locator.resolve_family(SYMBOL_FALLBACK_CANDIDATES)
         {
             push_unique_family(&mut families, family_name);
@@ -54,11 +67,19 @@ impl WindowsFontFallbackResolver {
         locator: &WindowsFontLocator,
         primary_family: &str,
         text: &str,
+        primary_supports_text: bool,
     ) -> String {
         let primary_family = normalize_primary_family(primary_family);
 
         if contains_color_glyph_text(text) {
             return resolve_fallback_family(locator, primary_family, EMOJI_FALLBACK_CANDIDATES);
+        }
+        if primary_supports_text {
+            return primary_family.to_string();
+        }
+        if contains_private_use_text(text) {
+            return resolve_private_use_fallback_family(locator)
+                .unwrap_or_else(|| primary_family.to_string());
         }
         if contains_symbol_text(text) {
             return resolve_fallback_family(locator, primary_family, SYMBOL_FALLBACK_CANDIDATES);
@@ -78,12 +99,7 @@ impl Default for WindowsFontFallbackResolver {
 }
 
 pub(crate) fn contains_color_glyph_text(text: &str) -> bool {
-    text.chars().any(|ch| {
-        matches!(
-            ch,
-            '\u{2600}'..='\u{27bf}' | '\u{1f300}'..='\u{1faff}'
-        )
-    })
+    classify_cluster_render_kind(text) == ClusterRenderKind::Emoji
 }
 
 fn contains_symbol_text(text: &str) -> bool {
@@ -103,6 +119,17 @@ fn contains_cjk_text(text: &str) -> bool {
         matches!(
             ch,
             '\u{2e80}'..='\u{9fff}' | '\u{f900}'..='\u{faff}' | '\u{ff00}'..='\u{ffef}'
+        )
+    })
+}
+
+fn contains_private_use_text(text: &str) -> bool {
+    text.chars().any(|ch| {
+        matches!(
+            ch,
+            '\u{e000}'..='\u{f8ff}'
+                | '\u{f0000}'..='\u{ffffd}'
+                | '\u{100000}'..='\u{10fffd}'
         )
     })
 }
@@ -128,6 +155,12 @@ fn resolve_fallback_family(
     }
 
     primary_family.to_string()
+}
+
+fn resolve_private_use_fallback_family(locator: &WindowsFontLocator) -> Option<String> {
+    locator
+        .resolve_family(TERMINAL_NERD_FALLBACK_FAMILIES)
+        .or_else(|| locator.resolve_family(TERMINAL_ICON_FALLBACK_FAMILIES))
 }
 
 fn normalize_primary_family(primary_family: &str) -> &str {

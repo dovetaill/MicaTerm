@@ -8,9 +8,15 @@ use std::collections::{HashMap, VecDeque};
 #[cfg(feature = "terminal-native-renderer")]
 use std::time::Instant;
 
+use crate::app::font_diagnostics::{
+    bitmap_terminal_font_resolution_snapshot, log_terminal_font_diagnostics,
+};
 use crate::app::ssh::runtime::{SurfaceState, TerminalCursorShape};
 use crate::app::terminal_atlas::{TerminalAtlasRenderer, TerminalAtlasSelection};
 use crate::app::terminal_core::TerminalFrameSnapshot;
+#[cfg(feature = "terminal-native-renderer")]
+use crate::app::terminal_emoji::TerminalEmojiRenderer;
+use crate::app::terminal_font::DEFAULT_TERMINAL_FONT_SIZE_PX;
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_font::{
     DirectWriteFontSystem, FontRequest, FontSystem, LoadedFont, LoadedFontKey,
@@ -367,6 +373,8 @@ pub struct BitmapAtlasPresenter {
 
 impl BitmapAtlasPresenter {
     pub fn new() -> Result<Self> {
+        let snapshot = bitmap_terminal_font_resolution_snapshot();
+        log_terminal_font_diagnostics("bitmap-atlas", DEFAULT_TERMINAL_FONT_SIZE_PX, &snapshot);
         Ok(Self {
             renderer: TerminalAtlasRenderer::new()?,
             previous_frame: None,
@@ -451,6 +459,8 @@ impl WindowsNativePresenter {
         let request = FontRequest::windows_default();
         let mut font_system = DirectWriteFontSystem::new()?;
         let loaded_font = font_system.load_font(&request)?;
+        let snapshot = font_system.resolution_snapshot(&loaded_font)?;
+        log_terminal_font_diagnostics("directwrite-d2d", request.px_size, &snapshot);
 
         Ok(Self {
             font_system,
@@ -468,10 +478,20 @@ impl WindowsNativePresenter {
     fn reload_loaded_font_for_scale(&mut self, scale_factor: f32) -> Result<()> {
         let request = scaled_terminal_font_request(&self.base_font_request, scale_factor);
         self.loaded_font = self.font_system.load_font(&request)?;
+        let snapshot = self.font_system.resolution_snapshot(&self.loaded_font)?;
+        log_terminal_font_diagnostics("directwrite-d2d", request.px_size, &snapshot);
         self.previous_frame = None;
         self.previous_shaped_rows = None;
         self.shaped_row_cache.clear();
         Ok(())
+    }
+
+    #[doc(hidden)]
+    pub fn set_emoji_renderer_for_tests(&mut self, renderer: TerminalEmojiRenderer) {
+        self.font_system.set_emoji_renderer_for_tests(renderer);
+        self.previous_frame = None;
+        self.previous_shaped_rows = None;
+        self.shaped_row_cache.clear();
     }
 }
 

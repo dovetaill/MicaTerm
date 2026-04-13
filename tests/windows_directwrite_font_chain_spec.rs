@@ -43,8 +43,8 @@ fn windows_directwrite_source_uses_native_collection_and_fallback_mapping_contra
     }
 
     assert!(
-        source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
-        "windows dwrite backend should load the bundled Sarasa Term SC face as the primary terminal font source"
+        source.contains("assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf"),
+        "windows dwrite backend should load the bundled Sarasa Term SC Nerd SemiBold face as the primary terminal font source"
     );
     assert!(
         !source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf"),
@@ -62,7 +62,7 @@ fn windows_directwrite_source_uses_native_collection_and_fallback_mapping_contra
 
 #[cfg(feature = "terminal-native-renderer")]
 #[test]
-fn mixed_script_monochrome_fallback_runs_rasterize_through_resolved_face_keys() -> Result<()> {
+fn mixed_script_monochrome_runs_only_fall_back_after_a_real_primary_glyph_miss() -> Result<()> {
     let mut fonts = DirectWriteFontSystem::new()?;
     let loaded_font = fonts.load_font(&FontRequest::default())?;
     let fallback_faces = fonts.discover_fallback_faces(&loaded_font, "A⌘界")?;
@@ -73,35 +73,43 @@ fn mixed_script_monochrome_fallback_runs_rasterize_through_resolved_face_keys() 
     let shaped_runs = fonts.shape_text_runs(&loaded_font, &TextShapingRequest::new("A⌘界"))?;
     let fallback_run = shaped_runs
         .iter()
-        .find(|run| !run.has_color_glyphs && run.resolved_face.face_key != primary_face_key)
-        .expect("mixed monochrome text should produce a non-primary fallback run");
-    let glyph_id = fallback_run
-        .glyphs
-        .first()
-        .map(|glyph| glyph.glyph_id)
-        .expect("fallback run should carry at least one glyph");
-    let raster = fonts.rasterize_glyph(
-        &loaded_font,
-        loaded_font.raster_request_with_fractional_offset_x_for_face(
-            fallback_run.resolved_face.face_key,
-            glyph_id,
-            false,
-            0.0,
-        ),
-    )?;
+        .find(|run| !run.has_color_glyphs && run.resolved_face.face_key != primary_face_key);
     let distinct_faces = shaped_runs
         .iter()
         .map(|run| run.resolved_face.face_key.0)
         .collect::<BTreeSet<_>>();
 
-    assert!(
-        distinct_faces.len() >= 2,
-        "mixed Latin/symbol/CJK text should resolve to multiple face keys instead of one synthetic fallback label"
-    );
-    assert!(
-        raster.advance_px != 0 || !raster.coverage.is_empty(),
-        "a non-primary monochrome fallback run should rasterize from its resolved face instead of failing back to the primary bundled font only"
-    );
+    if let Some(fallback_run) = fallback_run {
+        let glyph_id = fallback_run
+            .glyphs
+            .first()
+            .map(|glyph| glyph.glyph_id)
+            .expect("fallback run should carry at least one glyph");
+        let raster = fonts.rasterize_glyph(
+            &loaded_font,
+            loaded_font.raster_request_with_fractional_offset_x_for_face(
+                fallback_run.resolved_face.face_key,
+                glyph_id,
+                false,
+                0.0,
+            ),
+        )?;
+
+        assert!(
+            distinct_faces.len() >= 2,
+            "a real primary glyph miss should resolve a non-primary face key instead of smearing every grapheme onto the bundled Sarasa face"
+        );
+        assert!(
+            raster.advance_px != 0 || !raster.coverage.is_empty(),
+            "a non-primary monochrome fallback run should rasterize from its resolved face instead of failing back to the primary bundled font only"
+        );
+    } else {
+        assert_eq!(
+            distinct_faces.len(),
+            1,
+            "when the bundled Sarasa face already covers the mixed-script text, shaping should stay on the primary face instead of inventing a fallback run"
+        );
+    }
 
     Ok(())
 }

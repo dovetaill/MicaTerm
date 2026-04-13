@@ -113,8 +113,9 @@ fn native_surface_diagnostics_smoke_reports_child_host_relationship() {
         !bootstrap_source.contains("host_hwnd = diagnostics.host_hwnd.unwrap_or_default()")
             && !bootstrap_source
                 .contains("host_surface_hwnd = diagnostics.host_surface_hwnd.unwrap_or_default()")
-            && !bootstrap_source
-                .contains("host_surface_visible = diagnostics.host_surface_visible.unwrap_or(false)")
+            && !bootstrap_source.contains(
+                "host_surface_visible = diagnostics.host_surface_visible.unwrap_or(false)"
+            )
             && !bootstrap_source
                 .contains("host_surface_ready = diagnostics.host_surface_ready.unwrap_or(false)"),
         "bootstrap should not emit per-frame host/child HWND diagnostics logs once the retained-native trace spam is retired"

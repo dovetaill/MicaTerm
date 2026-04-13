@@ -17,11 +17,11 @@ fn app_window_has_no_legacy_terminal_font_imports() {
 #[test]
 fn bundled_font_assets_cover_terminal_and_shell_contracts() {
     assert!(
-        Path::new("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf").exists(),
-        "the terminal bundle should ship a Sarasa Term SC regular face"
+        Path::new("assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf").exists(),
+        "the terminal bundle should ship a Sarasa Term SC Nerd regular face"
     );
     assert!(
-        Path::new("assets/fonts/SarasaTermSC/LICENSE.txt").exists(),
+        Path::new("assets/fonts/SarasaTermSCNerd/LICENSE.txt").exists(),
         "the terminal bundle should ship the upstream Sarasa license text"
     );
     assert!(
@@ -67,12 +67,13 @@ fn terminal_shared_font_contract_switches_to_sarasa() {
         fs::read_to_string("src/app/terminal_font/windows_fallback.rs").expect("read fallback");
     let presenter_source =
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read presenter");
-    let windows_renderer_source = fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
-        .expect("read windows renderer");
+    let windows_renderer_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows renderer");
 
     assert!(
-        atlas_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
-        "bitmap atlas should load the bundled Sarasa Term SC face as the shared terminal font"
+        atlas_source.contains("assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf"),
+        "bitmap atlas should load the bundled Sarasa Term SC Nerd SemiBold face as the shared terminal font"
     );
     assert!(
         !atlas_source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf"),
@@ -80,12 +81,12 @@ fn terminal_shared_font_contract_switches_to_sarasa() {
     );
     assert!(
         backend_source
-            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Sarasa Term SC\";"),
-        "font backend should set Sarasa Term SC as the shared terminal default family"
+            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Sarasa Term SC Nerd\";"),
+        "font backend should set Sarasa Term SC Nerd as the shared terminal default family"
     );
     assert!(
-        backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Medium\";"),
-        "font backend should move the shared terminal default weight to Medium"
+        backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"SemiBold\";"),
+        "font backend should keep the shared terminal request aligned with the packaged SemiBold face"
     );
     assert!(
         backend_source.contains(
@@ -108,7 +109,7 @@ fn terminal_shared_font_contract_switches_to_sarasa() {
         "font backend should stop advertising JetBrains Mono as the shared terminal primary family"
     );
     assert!(
-        mock_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
+        mock_source.contains("assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf"),
         "mock font shaping should use the same bundled Sarasa terminal font as production defaults"
     );
     assert!(
@@ -116,8 +117,9 @@ fn terminal_shared_font_contract_switches_to_sarasa() {
         "mock font shaping should stop loading the bundled JetBrains Mono face"
     );
     assert!(
-        windows_renderer_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
-        "Windows native text rendering should resolve the bundled Sarasa Term SC face for DirectWrite"
+        windows_renderer_source
+            .contains("assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf"),
+        "Windows native text rendering should resolve the bundled Sarasa Term SC Nerd SemiBold face for DirectWrite"
     );
     assert!(
         !windows_renderer_source.contains("assets/fonts/JetBrainsMono"),
@@ -168,8 +170,8 @@ fn build_script_watches_only_active_font_assets() {
         "build script should watch the bundled MiSans semibold asset"
     );
     assert!(
-        source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
-        "build script should watch the bundled Sarasa Term SC asset used by the terminal renderer"
+        source.contains("assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf"),
+        "build script should watch the bundled Sarasa Term SC Nerd asset used by the terminal renderer"
     );
     assert!(
         !source.contains("assets/fonts/JetBrainsMono"),

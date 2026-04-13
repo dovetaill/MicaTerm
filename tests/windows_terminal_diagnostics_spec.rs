@@ -9,11 +9,11 @@ use mica_term::app::windows_frame::{
     native_surface_enhanced_contrast_per_mille, native_surface_font_chain,
     native_surface_gamma_per_mille, native_surface_glyph_bounds_trace, native_surface_host_hwnd,
     native_surface_host_surface_hwnd, native_surface_host_surface_ready,
-    native_surface_host_surface_visible,
-    native_surface_pixel_alignment, native_surface_pixel_geometry,
-    native_surface_render_target_alpha_mode, native_surface_rendering_mode,
-    native_surface_rendering_params_source, native_surface_scale_factor_percent,
-    native_surface_text_antialias_mode, native_surface_text_fallback_reason,
+    native_surface_host_surface_visible, native_surface_pixel_alignment,
+    native_surface_pixel_geometry, native_surface_render_target_alpha_mode,
+    native_surface_rendering_mode, native_surface_rendering_params_source,
+    native_surface_scale_factor_percent, native_surface_text_antialias_mode,
+    native_surface_text_fallback_reason,
 };
 
 #[test]
@@ -144,7 +144,7 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
             enhanced_contrast_per_mille: Some(750),
             clear_type_level_per_mille: Some(1000),
             fallback_reason: Some("font-face-unresolved"),
-            font_chain: vec!["Sarasa Term SC".into(), "Segoe UI Emoji".into()],
+            font_chain: vec!["Sarasa Term SC Nerd".into(), "Segoe UI Emoji".into()],
             baseline_px: Some(14),
             pixel_alignment: Some("pixel-snapped"),
             dpi_x: Some(144),
@@ -171,7 +171,10 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
 
     assert_eq!(native_surface_host_hwnd(&diagnostics), Some(0x1234));
     assert_eq!(native_surface_host_surface_hwnd(&diagnostics), Some(0x5678));
-    assert_eq!(native_surface_host_surface_visible(&diagnostics), Some(true));
+    assert_eq!(
+        native_surface_host_surface_visible(&diagnostics),
+        Some(true)
+    );
     assert_eq!(native_surface_host_surface_ready(&diagnostics), Some(true));
     assert_eq!(
         native_surface_text_antialias_mode(&diagnostics),
@@ -212,7 +215,7 @@ fn windows_frame_helpers_project_windows_text_rendering_diagnostics() {
     assert_eq!(
         native_surface_font_chain(&diagnostics).map(|chain| chain.to_vec()),
         Some(vec![
-            "Sarasa Term SC".to_string(),
+            "Sarasa Term SC Nerd".to_string(),
             "Segoe UI Emoji".to_string()
         ])
     );

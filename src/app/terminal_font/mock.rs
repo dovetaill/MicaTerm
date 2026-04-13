@@ -5,7 +5,7 @@ use anyhow::{Result, anyhow};
 
 use crate::app::terminal_font::backend::{
     FontFaceKey, FontMetrics, FontRenderProfile, FontRequest, FontSystem, GlyphRasterRequest,
-    LoadedFont,
+    LoadedFont, terminal_cell_width_px,
 };
 #[cfg(feature = "terminal-native-renderer")]
 use crate::app::terminal_font::backend::{RasterizedGlyph, ShapedGlyph, shape_text_with_rustybuzz};
@@ -13,7 +13,7 @@ use crate::app::terminal_font::backend::{RasterizedGlyph, ShapedGlyph, shape_tex
 use ab_glyph::{Glyph, GlyphId, point};
 
 const SARASA_TERM_SC_FONT_BYTES: &[u8] =
-    include_bytes!("../../../assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
+    include_bytes!("../../../assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf");
 const DEFAULT_FACE_KEY: FontFaceKey = FontFaceKey(1);
 #[cfg(feature = "terminal-native-renderer")]
 const DEFAULT_FACE_INDEX: u32 = 0;
@@ -65,7 +65,7 @@ impl FontSystem for MockFontSystem {
                 descent_px: scaled.descent(),
                 line_gap_px: scaled.line_gap(),
                 baseline_px: scaled.ascent().ceil(),
-                cell_width_px: mono_advance.ceil(),
+                cell_width_px: terminal_cell_width_px(mono_advance),
                 cell_height_px: line_height.ceil(),
             },
             FontRenderProfile::default(),

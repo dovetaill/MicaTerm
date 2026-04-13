@@ -19,10 +19,11 @@ use crate::app::terminal_emoji::{
 };
 use crate::app::terminal_font::backend::{
     DEFAULT_TERMINAL_FONT_SIZE_PX, FontRenderProfile, map_glyph_coverage_to_alpha,
+    terminal_cell_width_px,
 };
 
 const SARASA_TERM_SC_FONT_BYTES: &[u8] =
-    include_bytes!("../../assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
+    include_bytes!("../../assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf");
 const TERMINAL_FONT_SIZE_PX: f32 = DEFAULT_TERMINAL_FONT_SIZE_PX;
 const MIN_CELL_WIDTH_PX: u32 = 8;
 const MIN_CELL_HEIGHT_PX: u32 = 20;
@@ -584,7 +585,7 @@ fn compute_terminal_metrics(font: &FontArc, px_size: f32) -> TerminalAtlasMetric
         .max(scaled.h_advance(scaled.glyph_id('0')))
         .max(scaled.h_advance(scaled.glyph_id('W')))
         .max(scaled.h_advance(scaled.glyph_id('界')) / 2.0);
-    let cell_width = mono_advance.ceil() as u32 + CELL_HORIZONTAL_PADDING_PX;
+    let cell_width = terminal_cell_width_px(mono_advance) as u32 + CELL_HORIZONTAL_PADDING_PX;
     let line_height = (scaled.ascent() - scaled.descent() + scaled.line_gap()).ceil() as u32;
     let cell_height = (line_height + CELL_VERTICAL_PADDING_PX).max(MIN_CELL_HEIGHT_PX);
     let top_padding = cell_height.saturating_sub(line_height) / 2;

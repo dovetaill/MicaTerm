@@ -49,7 +49,7 @@ TOML
 printf '# stub readme\n' > "$PROJECT_DIR/readme.md"
 printf 'icon\n' > "$PROJECT_DIR/assets/icons/windows/mica-term.ico"
 printf 'misans license\n' > "$PROJECT_DIR/assets/fonts/MiSans/LICENSE.txt"
-printf 'sarasa term license\n' > "$PROJECT_DIR/assets/fonts/SarasaTermSC/LICENSE.txt"
+printf 'sarasa term license\n' > "$PROJECT_DIR/assets/fonts/SarasaTermSCNerd/LICENSE.txt"
 
 cat <<'EOF_CARGO' > "$FAKE_BIN/cargo"
 #!/usr/bin/env bash

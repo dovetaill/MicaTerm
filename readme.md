@@ -53,7 +53,7 @@ Notes:
 - `./build-release.sh` remains the aggregate Linux x64 + Windows GNU release entrypoint, with the Windows leg routed through `./build-win-x64-software.sh` because `rust-skia` does not ship `x86_64-pc-windows-gnu` Skia binaries.
 - `[patch.crates-io]` in `Cargo.toml` still points to the vendored `i-slint-backend-winit` backend so the Windows partial-visibility fix stays active.
 - `assets/fonts/MiSans/` is the bundled shell UI family, and `ui/app-window.slint` imports MiSans directly for the Slint desktop shell.
-- `assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf` is the bundled `Sarasa Term SC` terminal face shared by the Rust atlas and Windows DirectWrite paths.
+- `assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf` is the bundled `Sarasa Term SC Nerd` terminal face shared by the Rust atlas and Windows DirectWrite paths.
 - `src/app/terminal_atlas.rs` uses `ab_glyph` for lazy glyph loading and rasterization, avoiding the heavier pre-expanded `fontdue` path for the terminal font.
 - Terminal body text stays on the bundled Sarasa mono atlas path, while emoji-presenting clusters use system color emoji fonts and are composited into the same atlas surface as RGBA sprites.
 - Windows expects `Segoe UI Emoji` for terminal body color emoji rendering, and Linux expects an installed color emoji family such as `Noto Color Emoji`.

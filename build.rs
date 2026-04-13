@@ -4,8 +4,8 @@ mod xwin_link;
 // Cargo build script that compiles the Slint UI and embeds the Windows application icon.
 
 fn main() {
-    println!("cargo:rerun-if-changed=ui/fonts/SarasaTermSCNerd-Regular.ttf");
-    println!("cargo:rerun-if-changed=assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
+    println!("cargo:rerun-if-changed=assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf");
+    println!("cargo:rerun-if-changed=assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf");
     println!("cargo:rerun-if-changed=assets/fonts/MiSans/MiSans-Regular.ttf");
     println!("cargo:rerun-if-changed=assets/fonts/MiSans/MiSans-Semibold.ttf");
     println!("cargo:rerun-if-env-changed=HOME");

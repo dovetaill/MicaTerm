@@ -8,7 +8,7 @@ use swash::scale::image::Content;
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::shape::ShapeContext;
 use swash::text::Script;
-use unicode_properties::UnicodeEmoji;
+use unicode_properties::{UnicodeEmoji, emoji::EmojiStatus};
 
 use crate::app::system_font_database::load_system_font_database;
 
@@ -20,7 +20,7 @@ pub enum ClusterRenderKind {
     Emoji,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum EmojiFallbackReason {
     MissingPreferredFont,
     RasterizationFailed,
@@ -243,13 +243,20 @@ pub fn classify_cluster_render_kind(text: &str) -> ClusterRenderKind {
         return ClusterRenderKind::Mono;
     }
 
-    let saw_emoji = text
-        .chars()
-        .any(|ch| ch.is_emoji_char() && !is_plain_keycap_base(ch));
+    let saw_default_emoji_presentation = text.chars().any(|ch| {
+        !is_plain_keycap_base(ch)
+            && matches!(
+                ch.emoji_status(),
+                EmojiStatus::EmojiPresentation
+                    | EmojiStatus::EmojiPresentationAndModifierBase
+                    | EmojiStatus::EmojiPresentationAndEmojiComponent
+                    | EmojiStatus::EmojiPresentationAndModifierAndEmojiComponent
+            )
+    });
     let has_emoji_presentation_markers =
         text.contains('\u{fe0f}') || text.contains('\u{200d}') || text.contains('\u{20e3}');
 
-    if saw_emoji || has_emoji_presentation_markers {
+    if saw_default_emoji_presentation || has_emoji_presentation_markers {
         ClusterRenderKind::Emoji
     } else {
         ClusterRenderKind::Mono
@@ -259,9 +266,10 @@ pub fn classify_cluster_render_kind(text: &str) -> ClusterRenderKind {
 pub fn recommended_emoji_font_size_px(span: u32, cell_width: u32, cell_height: u32) -> f32 {
     let available_width = span.max(1).saturating_mul(cell_width).max(1);
     let available_height = cell_height.max(1);
-    let fit_box = available_width.min(available_height) as f32;
+    let fit_width = available_width as f32 * 0.8;
+    let fit_height = available_height as f32 * 0.84;
 
-    (fit_box * 0.9).max(1.0)
+    fit_width.min(fit_height).max(1.0)
 }
 
 pub fn preferred_emoji_families() -> &'static [&'static str] {

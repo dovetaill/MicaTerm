@@ -260,7 +260,7 @@ impl NativeTerminalSurface {
                 refresh_diagnostics(&mut state);
             }
             Err(err) => {
-                tracing::warn!(
+                tracing::debug!(
                     target: "app.terminal",
                     error = %err,
                     "native terminal rendering notifier is unavailable; falling back to host-window after-draw present scheduling"
@@ -394,12 +394,16 @@ mod tests {
         effective_present_damage, replay_after_host_redraw,
     };
     use crate::AppWindow;
-    use crate::app::terminal_renderer::damage::{NativeFrameDamageTracker, NativeSurfaceDamage, NativeSurfaceDamageKind};
+    use crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics;
+    use crate::app::terminal_renderer::damage::{
+        NativeFrameDamageTracker, NativeSurfaceDamage, NativeSurfaceDamageKind,
+    };
     use crate::app::terminal_renderer::platform::{
         NativeTerminalSurfaceRect, PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
     };
-    use crate::app::terminal_renderer::present_driver::{NativeSurfacePresentCallback, NativeSurfacePresentDriver};
-    use crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics;
+    use crate::app::terminal_renderer::present_driver::{
+        NativeSurfacePresentCallback, NativeSurfacePresentDriver,
+    };
     use anyhow::Result;
     use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
     use std::rc::Rc;
@@ -420,7 +424,8 @@ mod tests {
         fn update_frame(&mut self, _frame: Option<RetainedNativeTerminalSurfaceFrame>) {}
 
         fn present(&mut self, _damage: NativeSurfaceDamage) {
-            self.present_count.set(self.present_count.get().saturating_add(1));
+            self.present_count
+                .set(self.present_count.get().saturating_add(1));
         }
 
         fn host_image_snapshot(&self) -> Option<Image> {
@@ -567,8 +572,7 @@ mod tests {
             backend: Box::new(backend),
             present_driver: Rc::new(NoopPresentDriver),
             host_image_publisher: Some(Rc::new(move |image| {
-                publish_count_for_callback
-                    .set(publish_count_for_callback.get().saturating_add(1));
+                publish_count_for_callback.set(publish_count_for_callback.get().saturating_add(1));
                 published_width_for_callback.set(image.size().width as i32);
             })),
             retained_frame: None,
@@ -613,8 +617,7 @@ mod tests {
             backend: Box::new(TestBackend::default()),
             present_driver: Rc::new(NoopPresentDriver),
             host_image_publisher: Some(Rc::new(move |_image| {
-                publish_count_for_callback
-                    .set(publish_count_for_callback.get().saturating_add(1));
+                publish_count_for_callback.set(publish_count_for_callback.get().saturating_add(1));
             })),
             retained_frame: None,
             rect: NativeTerminalSurfaceRect {

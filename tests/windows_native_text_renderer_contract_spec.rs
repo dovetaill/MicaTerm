@@ -86,6 +86,31 @@ fn windows_native_text_renderer_source_uses_monitor_aware_clear_type_contract() 
 }
 
 #[test]
+fn windows_native_text_renderer_source_keeps_the_offscreen_host_surface_opaque_for_cleartype() {
+    let windows_backend_source =
+        fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
+            .expect("read windows native backend");
+
+    for expected in [
+        "GUID_WICPixelFormat32bppBGR",
+        "alphaMode: D2D1_ALPHA_MODE_IGNORE",
+        "a: 255,",
+    ] {
+        assert!(
+            windows_backend_source.contains(expected),
+            "windows native text path should reference `{expected}` so the offscreen host-surface bitmap stays opaque and ClearType does not get pushed onto a transparent intermediate target"
+        );
+    }
+
+    assert!(
+        !windows_backend_source.contains(
+            "CreateBitmap(\n                width_px,\n                height_px,\n                &GUID_WICPixelFormat32bppPBGRA,"
+        ),
+        "windows native text path should stop building the host-surface WIC bitmap with premultiplied-alpha PBGRA storage because that keeps ClearType on a transparent intermediate target"
+    );
+}
+
+#[test]
 fn windows_native_text_renderer_source_keeps_body_text_visual_fit_subtle() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
@@ -135,8 +160,12 @@ fn windows_native_text_renderer_source_logs_runtime_text_path_transitions_withou
     for expected in [
         "fn trace_directwrite_text_path_state(&mut self)",
         "text_renderer_path = self.active_text_renderer_path().unwrap_or(\"bitmap-mask-compat\")",
+        "render_target_alpha_mode = self.active_render_target_alpha_mode()",
+        "rendering_mode = self.active_rendering_mode().unwrap_or(\"unknown\")",
         "fallback_reason = self.active_text_fallback_reason().unwrap_or(\"none\")",
+        "gamma_per_mille = self.active_gamma_per_mille().unwrap_or(0)",
         "pixel_geometry = self.active_pixel_geometry().unwrap_or(\"unknown\")",
+        "clear_type_level_per_mille = self.active_clear_type_level_per_mille().unwrap_or(0)",
         "enhanced_contrast_per_mille = self.active_enhanced_contrast_per_mille().unwrap_or(0)",
     ] {
         assert!(
@@ -153,7 +182,7 @@ fn windows_native_text_renderer_source_adds_visual_breathing_room_without_touchi
             .expect("read windows native backend");
 
     for expected in [
-        "assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf",
+        "assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf",
         "fontEmSize: draw.font_em_size_px.max(1) as f32,",
         "let glyph_advances = [draw.advance_px.max(0) as f32];",
         "advanceOffset: 0.0,",
@@ -177,7 +206,7 @@ fn windows_native_text_renderer_source_adds_visual_breathing_room_without_touchi
     ] {
         assert!(
             !windows_backend_source.contains(forbidden),
-            "windows native text renderer should remove `{forbidden}` so the old shrink-to-breathe experiment is gone once the native path switches to the Regular body-text face"
+            "windows native text renderer should remove `{forbidden}` so the old shrink-to-breathe experiment is gone once the native path switches to the SemiBold body-text face"
         );
     }
 }

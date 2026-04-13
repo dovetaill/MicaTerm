@@ -16,8 +16,8 @@ fn backend_source_exposes_shared_terminal_typography_defaults() {
 
     assert!(
         backend_source
-            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Sarasa Term SC\";"),
-        "backend should set Sarasa Term SC as the shared terminal default family"
+            .contains("pub const DEFAULT_TERMINAL_FONT_FAMILY: &str = \"Sarasa Term SC Nerd\";"),
+        "backend should set Sarasa Term SC Nerd as the shared terminal default family"
     );
     assert!(
         !backend_source.contains("WINDOWS_DEFAULT_TERMINAL_FONT_FAMILY"),
@@ -32,24 +32,24 @@ fn backend_source_exposes_shared_terminal_typography_defaults() {
         "backend should expose a slightly looser 1.5 default line height for denser CJK readability"
     );
     assert!(
-        backend_source.contains("pub const WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 15.0;"),
-        "backend should expose a Windows-only 15px terminal font size override so the native presenter lands half to one notch larger without changing Linux/macOS defaults"
+        backend_source.contains("pub const WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX: f32 = 16.0;"),
+        "backend should expose a Windows-only 16px terminal font size override so the native presenter lands a full notch larger without changing Linux/macOS defaults"
     );
     assert!(
-        backend_source.contains("pub const WINDOWS_DEFAULT_TERMINAL_CELL_HEIGHT_PX: u32 = 23;")
+        backend_source.contains("pub const WINDOWS_DEFAULT_TERMINAL_CELL_HEIGHT_PX: u32 = 24;")
             && backend_source.contains("pub const WINDOWS_DEFAULT_TERMINAL_LINE_HEIGHT: f32 =")
             && backend_source.contains(
                 "WINDOWS_DEFAULT_TERMINAL_CELL_HEIGHT_PX as f32 / WINDOWS_DEFAULT_TERMINAL_FONT_SIZE_PX;"
             ),
-        "backend should keep the Windows line-height contract explicit from a 23px cell box so the larger 15px body text stays readable without drifting into a loose terminal"
+        "backend should keep the Windows line-height contract explicit from a 24px cell box so the larger 16px Semibold body text stays readable without drifting into a loose terminal"
     );
     assert!(
-        backend_source.contains("pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 0.0;"),
-        "backend should keep terminal letter spacing at zero"
+        backend_source.contains("pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 2.0;"),
+        "backend should add explicit terminal letter spacing so dense Windows prompt output stops collapsing together"
     );
     assert!(
-        backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Medium\";"),
-        "backend should move terminal weight to Medium"
+        backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"SemiBold\";"),
+        "backend should keep the terminal request aligned with the packaged SemiBold face"
     );
     assert!(
         backend_source.contains(
@@ -107,9 +107,10 @@ fn windows_dwrite_source_keeps_current_native_loader_contract() {
         fs::read_to_string("src/app/terminal_font/windows_dwrite.rs").expect("read dwrite");
 
     assert!(
-        dwrite_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf")
-            && dwrite_source.contains("post_script_name: \"SarasaTermSC-Regular\".to_string()"),
-        "DirectWrite fallback should use the bundled Sarasa Term SC face as the primary packaged terminal font"
+        dwrite_source.contains("assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf")
+            && dwrite_source
+                .contains("post_script_name: \"SarasaTermSCNerd-SemiBold\".to_string()"),
+        "DirectWrite fallback should use the bundled Sarasa Term SC Nerd face as the primary packaged terminal font"
     );
     assert!(
         !dwrite_source.contains("assets/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf")

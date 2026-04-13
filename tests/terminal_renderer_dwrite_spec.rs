@@ -274,8 +274,8 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         .expect("read dwrite font backend");
 
     assert!(
-        atlas_source.contains("assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf"),
-        "atlas renderer should point at the bundled Sarasa Term SC default face"
+        atlas_source.contains("assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf"),
+        "atlas renderer should point at the bundled Sarasa Term SC Nerd SemiBold default face"
     );
     assert!(
         atlas_source.contains("const TERMINAL_FONT_SIZE_PX: f32 = DEFAULT_TERMINAL_FONT_SIZE_PX;"),
@@ -343,12 +343,13 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         "shared typography defaults should expose a slightly looser 1.5 line-height contract for dense Windows terminal text"
     );
     assert!(
-        font_backend_source.contains("pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 0.0;"),
-        "shared typography defaults should keep terminal letter spacing at zero"
+        font_backend_source.contains("pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 2.0;"),
+        "shared typography defaults should widen terminal letter spacing so dense Windows prompt text keeps breathing room"
     );
     assert!(
-        font_backend_source.contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"Medium\";"),
-        "shared typography defaults should move the default terminal weight to Medium"
+        font_backend_source
+            .contains("pub const DEFAULT_TERMINAL_FONT_WEIGHT: &str = \"SemiBold\";"),
+        "shared typography defaults should keep the default terminal request aligned with the packaged SemiBold face"
     );
     assert!(
         font_backend_source.contains("const GLYPH_ALPHA_GAIN: f32 = 1.0;"),

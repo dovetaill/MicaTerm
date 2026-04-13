@@ -44,6 +44,7 @@ use crate::app::assets_catalog::{
     catalog_to_asset_trees,
 };
 use crate::app::async_runtime::AppAsyncRuntime;
+use crate::app::font_diagnostics::{configure_ui_font_fallbacks, log_ui_shell_font_diagnostics};
 use crate::app::keychain::{
     KeychainCatalog, KeychainCatalogRepository, KeychainNodePayload, RedbKeychainCatalogStore,
     derive_public_key_material_from_private_key, derive_public_key_material_from_public_key,
@@ -2283,11 +2284,7 @@ fn workspace_native_terminal_resize_target(
     cell_width_px: u32,
     cell_height_px: u32,
 ) -> Option<(i32, i32)> {
-    if rect.width <= 0
-        || rect.height <= 0
-        || cell_width_px == 0
-        || cell_height_px == 0
-    {
+    if rect.width <= 0 || rect.height <= 0 || cell_width_px == 0 || cell_height_px == 0 {
         return None;
     }
 
@@ -2301,11 +2298,9 @@ fn sync_workspace_native_terminal_resize_backstop(
     rect: NativeTerminalSurfaceRect,
     frame: &NativeTerminalFrame,
 ) {
-    let Some((desired_rows, desired_cols)) = workspace_native_terminal_resize_target(
-        rect,
-        frame.cell_width_px,
-        frame.cell_height_px,
-    ) else {
+    let Some((desired_rows, desired_cols)) =
+        workspace_native_terminal_resize_target(rect, frame.cell_width_px, frame.cell_height_px)
+    else {
         WORKSPACE_PENDING_NATIVE_TERMINAL_RESIZE.with(|pending| {
             pending.borrow_mut().take();
         });
@@ -2335,7 +2330,7 @@ fn sync_workspace_native_terminal_resize_backstop(
         return;
     }
 
-    tracing::debug!(
+    tracing::trace!(
         target: "app.terminal",
         current_rows,
         current_cols,
@@ -2410,7 +2405,7 @@ fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerm
         "presenting retained native terminal frame state"
     );
     let rect = workspace_native_terminal_rect(window);
-    tracing::debug!(
+    tracing::trace!(
         target: "app.terminal",
         frame_token = frame.frame_token,
         grid_rows = frame.presentable_frame.grid_rows,
@@ -5842,7 +5837,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             return;
         };
         let rect = workspace_native_terminal_rect(&window);
-        tracing::debug!(
+        tracing::trace!(
             target: "app.terminal",
             requested_rows = rows,
             requested_cols = cols,
@@ -6225,12 +6220,14 @@ pub fn run_with_profile(
     profile: AppRuntimeProfile,
     async_runtime_handle: tokio::runtime::Handle,
 ) -> Result<()> {
+    configure_ui_font_fallbacks();
     let window = {
         let window_creation_env_override = window_creation_env_override_for_profile(profile);
         let window = AppWindow::new()?;
         let _ = window_creation_env_override;
         window
     };
+    log_ui_shell_font_diagnostics();
     window.set_window_title(runtime_window_title(profile).into());
     bind_top_status_bar_with_profile_and_async_handle(&window, profile, Some(async_runtime_handle));
     window.run()?;

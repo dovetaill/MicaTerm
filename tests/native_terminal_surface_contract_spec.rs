@@ -39,8 +39,10 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         "terminal session host should stretch the scene-owned bitmap exactly onto the terminal grid instead of preserving a contain layout that can introduce secondary scaling"
     );
     assert!(
-        host_source.contains("image-rendering: pixelated;"),
-        "terminal session host should request nearest-neighbor bitmap scaling for the scene-owned terminal image so software rendering does not blur glyph edges"
+        host_source.contains(
+            "image-rendering: root.session-render-mode == \"native\" ? smooth : pixelated;"
+        ),
+        "terminal session host should keep bitmap fallback on nearest-neighbor scaling while letting native-hosted frames use smooth sampling so DirectWrite output is not re-pixelated"
     );
     assert!(
         host_source.contains("function terminal-visible-grid-width() -> length"),
@@ -64,11 +66,15 @@ fn terminal_session_host_source_exposes_native_render_contract() {
         "terminal session host should clip the terminal surface frame so stale grid geometry cannot momentarily paint over sibling UI during software-surface resize races"
     );
     assert!(
-        host_source.contains("out property <length> native-surface-width: root.snapped-terminal-content-width();"),
+        host_source.contains(
+            "out property <length> native-surface-width: root.snapped-terminal-content-width();"
+        ),
         "terminal session host should export the native surface width from the snapped terminal-content viewport so the host-owned surface fills the pane instead of collapsing to the current grid width"
     );
     assert!(
-        host_source.contains("out property <length> native-surface-height: root.snapped-terminal-content-height();"),
+        host_source.contains(
+            "out property <length> native-surface-height: root.snapped-terminal-content-height();"
+        ),
         "terminal session host should export the native surface height from the snapped terminal-content viewport so the host-owned surface fills the pane instead of collapsing to the current grid height"
     );
     assert!(
@@ -472,8 +478,9 @@ fn present_drivers_invoke_immediate_native_repaint_before_requesting_host_redraw
     assert!(
         present_driver_source.contains("callback();")
             && (present_driver_source.contains("if request_host_redraw {")
-                || present_driver_source
-                    .contains("if request_host_redraw && let Some(window) = self.window.upgrade() {"))
+                || present_driver_source.contains(
+                    "if request_host_redraw && let Some(window) = self.window.upgrade() {"
+                ))
             && present_driver_source.contains("window.window().request_redraw();"),
         "present drivers should replay the retained native frame immediately and request a host redraw only when the shell still needs an overlay repaint"
     );
@@ -1495,7 +1502,6 @@ fn windows_backend_source_exposes_lazy_host_hwnd_reacquire_contract() {
     );
 }
 
-
 #[test]
 fn windows_host_owned_contract_rejects_placeholder_hwnd_render_target_surface() {
     let windows_backend_source =
@@ -1551,7 +1557,8 @@ fn windows_backend_source_exposes_host_owned_present_contract() {
     );
     assert!(
         !windows_backend_source.contains("WindowsHwndRenderTargetState")
-            && !windows_backend_source.contains("hwnd_render_target: Option<WindowsHwndRenderTargetState>"),
+            && !windows_backend_source
+                .contains("hwnd_render_target: Option<WindowsHwndRenderTargetState>"),
         "windows backend should stop modeling an HWND render target as the visible owner of terminal pixels"
     );
     assert!(
@@ -1564,7 +1571,8 @@ fn windows_backend_source_exposes_host_owned_present_contract() {
         "windows backend present path should no longer require an HWND render target before drawing retained native content"
     );
     assert!(
-        native_surface_source.contains("pub fn update_terminal_rect(&self, rect: NativeTerminalSurfaceRect)"),
+        native_surface_source
+            .contains("pub fn update_terminal_rect(&self, rect: NativeTerminalSurfaceRect)"),
         "native surface bridge should keep the host-owned rect sync seam while backend presentation ownership changes"
     );
     assert!(
@@ -1573,8 +1581,7 @@ fn windows_backend_source_exposes_host_owned_present_contract() {
     );
     assert!(
         windows_backend_source.contains("self.rect = self.window_rect;")
-            && windows_backend_source
-                .contains("let local = NativeTerminalSurfaceRect {")
+            && windows_backend_source.contains("let local = NativeTerminalSurfaceRect {")
             && windows_backend_source
                 .contains("intersect_present_rect(surface_client_rect(surface_rect), local)"),
         "windows backend should keep pane placement in host coordinates while translating damage into offscreen-local bitmap coordinates before clipping"
@@ -1689,9 +1696,7 @@ fn bootstrap_source_backstops_native_terminal_resize_when_grid_lags_viewport() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     assert!(
-        bootstrap_source.contains(
-            "fn workspace_native_terminal_resize_target("
-        ),
+        bootstrap_source.contains("fn workspace_native_terminal_resize_target("),
         "bootstrap should define a native terminal resize-target helper so host viewport capacity can be compared against the active grid before presenting a retained native frame"
     );
     assert!(
@@ -1700,7 +1705,9 @@ fn bootstrap_source_backstops_native_terminal_resize_when_grid_lags_viewport() {
     );
     assert!(
         bootstrap_source.contains("slint::invoke_from_event_loop(move || {")
-            && bootstrap_source.contains("window.invoke_workspace_session_resize_requested(desired_rows, desired_cols);"),
+            && bootstrap_source.contains(
+                "window.invoke_workspace_session_resize_requested(desired_rows, desired_cols);"
+            ),
         "bootstrap should defer the viewport-driven resize backstop onto the Slint event loop instead of invoking the resize callback synchronously from the native present path, otherwise the callback re-enters bootstrap state while RefCell borrows are still active"
     );
     assert!(
@@ -1857,7 +1864,8 @@ fn terminal_resize_source_coalesces_restore_bursts_and_ignores_minimized_resizes
             )
             && bootstrap_source
                 .contains("window.on_workspace_session_context_menu_open_changed(move |_open| {")
-            && bootstrap_source.contains("sync_workspace_native_terminal_surface_geometry(&window);")
+            && bootstrap_source
+                .contains("sync_workspace_native_terminal_surface_geometry(&window);")
             && !bootstrap_source.contains("|| window.get_workspace_session_context_menu_open()"),
         "terminal context menu state should propagate from the Slint terminal host back into bootstrap so host-surface geometry can resync without collapsing the native terminal body while the menu is open"
     );

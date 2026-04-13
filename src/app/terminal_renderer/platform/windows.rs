@@ -8,6 +8,7 @@ use slint::{ComponentHandle, Image};
 use slint::{Rgba8Pixel, SharedPixelBuffer};
 
 use crate::AppWindow;
+use crate::app::font_diagnostics::terminal_chain_uses_unexpected_mix;
 #[cfg(target_os = "windows")]
 use crate::app::ssh::runtime::TerminalCursorShape;
 #[cfg(target_os = "windows")]
@@ -35,16 +36,16 @@ use super::windows_composition_surface::WindowsCompositionSurfaceHost;
 use windows::Win32::Foundation::{BOOL, D2DERR_RECREATE_TARGET, HWND};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_POINT_2F, D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
-    D2D1_PIXEL_FORMAT,
+    D2D_POINT_2F, D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED,
+    D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-    D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED,
-    D2D1_OPACITY_MASK_CONTENT_GRAPHICS, D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE,
-    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1_RENDER_TARGET_PROPERTIES, D2D1CreateFactory,
-    ID2D1Bitmap, ID2D1Factory, ID2D1RenderTarget, ID2D1SolidColorBrush,
+    D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_OPACITY_MASK_CONTENT_GRAPHICS,
+    D2D1_RENDER_TARGET_PROPERTIES, D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE,
+    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Bitmap, ID2D1Factory,
+    ID2D1RenderTarget, ID2D1SolidColorBrush,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::DirectWrite::{
@@ -65,18 +66,18 @@ use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_B
 use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Imaging::{
-    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICBitmap, IWICBitmapLock,
+    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppBGR, IWICBitmap, IWICBitmapLock,
     IWICImagingFactory, WICBitmapCacheOnLoad, WICBitmapLockRead, WICRect,
 };
 #[cfg(target_os = "windows")]
-use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 #[cfg(target_os = "windows")]
 use windows::core::{Interface, PCWSTR};
 #[cfg(target_os = "windows")]
 const BUNDLED_SARASA_TERM_SC_FONT_BYTES: &[u8] =
-    include_bytes!("../../../../assets/fonts/SarasaTermSC/SarasaTermSC-Regular.ttf");
+    include_bytes!("../../../../assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-SemiBold.ttf");
 #[derive(Default)]
 pub struct WindowsD2DFactoryState {
     pub ready: bool,
@@ -144,10 +145,21 @@ struct WindowsDirectWriteRenderingParamsSnapshot {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct WindowsDirectWriteTextTraceState {
     text_renderer_path: &'static str,
+    render_target_alpha_mode: &'static str,
     rendering_params_source: Option<&'static str>,
+    rendering_mode: Option<&'static str>,
     pixel_geometry: Option<&'static str>,
+    gamma_per_mille: Option<u32>,
     enhanced_contrast_per_mille: Option<u32>,
+    clear_type_level_per_mille: Option<u32>,
     fallback_reason: Option<&'static str>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WindowsFontChainTraceState {
+    text_renderer_path: &'static str,
+    font_chain: Vec<String>,
+    mixes_multiple_unrelated_families: bool,
 }
 
 #[derive(Default)]
@@ -221,6 +233,7 @@ pub struct WindowsNativeSurfaceState {
     pub last_prepared_frame_token: u64,
     pub last_presented_frame_token: u64,
     last_text_trace_state: Option<WindowsDirectWriteTextTraceState>,
+    last_font_chain_trace_state: Option<WindowsFontChainTraceState>,
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -395,21 +408,24 @@ impl WindowsNativeSurfaceState {
             wic_factory.CreateBitmap(
                 width_px,
                 height_px,
-                &GUID_WICPixelFormat32bppPBGRA,
+                &GUID_WICPixelFormat32bppBGR,
                 WICBitmapCacheOnLoad,
             )
         }?;
         let render_target_properties = D2D1_RENDER_TARGET_PROPERTIES {
             pixelFormat: D2D1_PIXEL_FORMAT {
                 format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                // Keep the intermediate target opaque so Direct2D/DirectWrite can
+                // apply stable ClearType instead of falling back to transparent-surface AA.
+                alphaMode: D2D1_ALPHA_MODE_IGNORE,
             },
             dpiX: 96.0,
             dpiY: 96.0,
             ..Default::default()
         };
-        let render_target =
-            unsafe { d2d_factory.CreateWicBitmapRenderTarget(&wic_bitmap, &render_target_properties) }?;
+        let render_target = unsafe {
+            d2d_factory.CreateWicBitmapRenderTarget(&wic_bitmap, &render_target_properties)
+        }?;
         self.render_target_generation = self.render_target_generation.saturating_add(1);
         self.wic_bitmap_render_target = Some(WindowsWicBitmapRenderTargetState {
             width_px,
@@ -468,7 +484,6 @@ impl WindowsNativeSurfaceState {
         self.last_drawn_cursor_overlay_visible = false;
         self.last_drawn_ime_preview_active = false;
         self.last_directwrite_fallback_reason = None;
-        self.last_text_trace_state = None;
     }
 
     fn mark_directwrite_text_path(&mut self, active_path: &'static str) {
@@ -507,9 +522,13 @@ impl WindowsNativeSurfaceState {
             text_renderer_path: self
                 .active_text_renderer_path()
                 .unwrap_or("bitmap-mask-compat"),
+            render_target_alpha_mode: self.active_render_target_alpha_mode(),
             rendering_params_source: self.active_rendering_params_source(),
+            rendering_mode: self.active_rendering_mode(),
             pixel_geometry: self.active_pixel_geometry(),
+            gamma_per_mille: self.active_gamma_per_mille(),
             enhanced_contrast_per_mille: self.active_enhanced_contrast_per_mille(),
+            clear_type_level_per_mille: self.active_clear_type_level_per_mille(),
             fallback_reason: self.active_text_fallback_reason(),
         };
         if self.last_text_trace_state == Some(next_state) {
@@ -519,12 +538,54 @@ impl WindowsNativeSurfaceState {
         tracing::info!(
             target: "app.terminal",
             text_renderer_path = self.active_text_renderer_path().unwrap_or("bitmap-mask-compat"),
+            render_target_alpha_mode = self.active_render_target_alpha_mode(),
             rendering_params_source = self.active_rendering_params_source().unwrap_or("none"),
+            rendering_mode = self.active_rendering_mode().unwrap_or("unknown"),
+            gamma_per_mille = self.active_gamma_per_mille().unwrap_or(0),
             pixel_geometry = self.active_pixel_geometry().unwrap_or("unknown"),
+            clear_type_level_per_mille = self.active_clear_type_level_per_mille().unwrap_or(0),
             enhanced_contrast_per_mille = self.active_enhanced_contrast_per_mille().unwrap_or(0),
             fallback_reason = self.active_text_fallback_reason().unwrap_or("none"),
             "native terminal text renderer state changed"
         );
+    }
+
+    fn trace_active_font_chain_state(&mut self) {
+        let font_chain = self.active_font_chain();
+        if font_chain.is_empty() {
+            self.last_font_chain_trace_state = None;
+            return;
+        }
+
+        let next_state = WindowsFontChainTraceState {
+            text_renderer_path: self
+                .active_text_renderer_path()
+                .unwrap_or("bitmap-mask-compat"),
+            mixes_multiple_unrelated_families: terminal_chain_uses_unexpected_mix(&font_chain),
+            font_chain: font_chain.clone(),
+        };
+        if self.last_font_chain_trace_state.as_ref() == Some(&next_state) {
+            return;
+        }
+        self.last_font_chain_trace_state = Some(next_state.clone());
+
+        tracing::info!(
+            target: "app.fonts",
+            text_renderer_path = next_state.text_renderer_path,
+            primary_family = font_chain.first().map(String::as_str).unwrap_or("none"),
+            font_chain = ?font_chain,
+            mixes_multiple_unrelated_families = next_state.mixes_multiple_unrelated_families,
+            "native terminal font chain changed"
+        );
+
+        if next_state.mixes_multiple_unrelated_families {
+            tracing::warn!(
+                target: "app.fonts",
+                text_renderer_path = next_state.text_renderer_path,
+                font_chain = ?font_chain,
+                "native terminal font chain is mixing unrelated fallback families"
+            );
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -1750,19 +1811,22 @@ impl WindowsNativeSurfaceState {
             Width: i32::try_from(width_px).unwrap_or(i32::MAX),
             Height: i32::try_from(height_px).unwrap_or(i32::MAX),
         };
-        let lock: IWICBitmapLock =
-            match unsafe { target_state.wic_bitmap.Lock(&lock_rect, WICBitmapLockRead.0 as u32) } {
-                Ok(lock) => lock,
-                Err(err) => {
-                    tracing::warn!(
-                        target: "app.terminal",
-                        error = %err,
-                        "failed to lock WIC bitmap for native terminal host-image readback"
-                    );
-                    self.host_surface_image = None;
-                    return false;
-                }
-            };
+        let lock: IWICBitmapLock = match unsafe {
+            target_state
+                .wic_bitmap
+                .Lock(&lock_rect, WICBitmapLockRead.0 as u32)
+        } {
+            Ok(lock) => lock,
+            Err(err) => {
+                tracing::warn!(
+                    target: "app.terminal",
+                    error = %err,
+                    "failed to lock WIC bitmap for native terminal host-image readback"
+                );
+                self.host_surface_image = None;
+                return false;
+            }
+        };
 
         let stride = match unsafe { lock.GetStride() } {
             Ok(stride) => usize::try_from(stride.max(0)).unwrap_or_default(),
@@ -1819,7 +1883,7 @@ impl WindowsNativeSurfaceState {
                     r: row[idx + 2],
                     g: row[idx + 1],
                     b: row[idx],
-                    a: row[idx + 3],
+                    a: 255,
                 };
             }
         }
@@ -1887,7 +1951,7 @@ impl WindowsNativeSurfaceBackend {
             self.destroy_host_surface();
             match WindowsCompositionSurfaceHost::create(host_hwnd, self.state.window_rect) {
                 Ok(host_surface) => {
-                    tracing::debug!(
+                    tracing::trace!(
                         target: "app.terminal",
                         host_hwnd,
                         x = self.state.window_rect.x,
@@ -1923,7 +1987,7 @@ impl WindowsNativeSurfaceBackend {
 
         if !should_show {
             if self.state.host_surface.is_some() {
-                tracing::debug!(
+                tracing::trace!(
                     target: "app.terminal",
                     host_hwnd = self.state.host_hwnd.unwrap_or_default(),
                     attached = self.state.attached,
@@ -1961,7 +2025,7 @@ impl WindowsNativeSurfaceBackend {
 
     fn destroy_host_surface(&mut self) {
         if let Some(mut host_surface) = self.state.host_surface.take() {
-            tracing::debug!(
+            tracing::trace!(
                 target: "app.terminal",
                 host_hwnd = self.state.host_hwnd.unwrap_or_default(),
                 "destroying retained-native host surface"
@@ -2011,6 +2075,7 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
             retained_frame.rect = self.state.rect;
             retained_frame
         });
+        self.state.trace_active_font_chain_state();
         if self.state.retained_frame.is_none() {
             self.state.fallback_paint_required = true;
             self.state.host_surface_image = None;

@@ -976,7 +976,7 @@ export component TerminalSessionHost inherits Rectangle {
                     height: root.session-render-mode == "native" ? parent.height : root.terminal-grid-height();
                     source: root.session-surface-image;
                     image-fit: fill;
-                    image-rendering: pixelated;
+                    image-rendering: root.session-render-mode == "native" ? smooth : pixelated;
                     visible: root.session-render-mode == "bitmap" || root.session-render-mode == "native";
                 }
 

@@ -34,7 +34,7 @@ fn app_window_uses_misans_as_the_shell_default() {
     assert!(source.contains("import \"../assets/fonts/MiSans/MiSans-Semibold.ttf\";"));
     assert!(source.contains("import { AppTypography } from \"theme/typography.slint\";"));
     assert!(source.contains("default-font-family: AppTypography.ui-font-family;"));
-    assert!(source.contains("default-font-weight: AppTypography.ui-font-weight-regular;"));
+    assert!(source.contains("default-font-weight: AppTypography.ui-font-weight-semibold;"));
     assert!(!source.contains("SarasaUiSC"));
 }
 

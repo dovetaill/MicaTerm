@@ -5,12 +5,19 @@ use std::sync::Arc;
 
 use fontdb::{Database, Family, Query, Stretch, Style, Weight};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResolvedFontFaceSource {
+    Bundled,
+    System,
+}
+
 #[derive(Clone, Debug)]
 pub struct ResolvedFontFaceData {
     pub family_name: String,
     pub post_script_name: String,
     pub face_index: u32,
     pub font_data: Vec<u8>,
+    pub source: ResolvedFontFaceSource,
 }
 
 pub struct WindowsFontLocator {
@@ -84,6 +91,7 @@ impl WindowsFontLocator {
                 post_script_name,
                 face_index,
                 font_data: font_data.to_vec(),
+                source: ResolvedFontFaceSource::System,
             })
     }
 
