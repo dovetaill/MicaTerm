@@ -471,7 +471,9 @@ fn present_drivers_invoke_immediate_native_repaint_before_requesting_host_redraw
     );
     assert!(
         present_driver_source.contains("callback();")
-            && present_driver_source.contains("if request_host_redraw {")
+            && (present_driver_source.contains("if request_host_redraw {")
+                || present_driver_source
+                    .contains("if request_host_redraw && let Some(window) = self.window.upgrade() {"))
             && present_driver_source.contains("window.window().request_redraw();"),
         "present drivers should replay the retained native frame immediately and request a host redraw only when the shell still needs an overlay repaint"
     );

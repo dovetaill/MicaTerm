@@ -322,10 +322,10 @@ fn draw_retained_frame(state: &mut NativeTerminalSurfaceState) {
         state.last_drawn_frame_token = 0;
     }
     state.backend.present(damage);
-    if let Some(image) = state.backend.host_image_snapshot() {
-        if let Some(publisher) = state.host_image_publisher.as_ref() {
-            publisher(image);
-        }
+    if let Some(image) = state.backend.host_image_snapshot()
+        && let Some(publisher) = state.host_image_publisher.as_ref()
+    {
+        publisher(image);
     }
     state.host_redraw_sync_pending = false;
     state.dirty = false;
