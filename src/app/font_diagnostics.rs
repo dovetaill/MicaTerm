@@ -4,6 +4,10 @@ use std::collections::BTreeSet;
 
 use fontdb::{Database, Query, Stretch, Style, Weight};
 use slint::fontique_07::{fontique, shared_collection};
+#[cfg(target_os = "windows")]
+use windows::Win32::Graphics::DirectWrite::{
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_PIXEL_GEOMETRY_FLAT, DWriteCreateFactory, IDWriteFactory,
+};
 
 use crate::app::system_font_database::load_system_font_database;
 use crate::app::terminal_font::{DEFAULT_TERMINAL_FONT_WEIGHT, DEFAULT_TERMINAL_LETTER_SPACING_PX};
@@ -13,6 +17,8 @@ pub const UI_FONT_DEFAULT_WEIGHT: i32 = 400;
 pub const UI_CHROME_FONT_WEIGHT: i32 = 500;
 #[cfg(target_os = "windows")]
 const FORCE_OPAQUE_HOST_WINDOW_ENV: &str = "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW";
+#[cfg(target_os = "windows")]
+const FORCE_DEVICE_INDEPENDENT_UI_FONTS_ENV: &str = "MICA_TERM_FORCE_DEVICE_INDEPENDENT_UI_FONTS";
 #[cfg(target_os = "windows")]
 pub const UI_BODY_FONT_SIZE_PX: f32 = 14.0;
 #[cfg(target_os = "windows")]
@@ -288,6 +294,41 @@ fn ui_text_subpixel_positioning() -> bool {
 }
 
 #[cfg(target_os = "windows")]
+fn ui_surface_uses_device_independent_fonts() -> bool {
+    std::env::var_os(FORCE_DEVICE_INDEPENDENT_UI_FONTS_ENV).is_some()
+}
+
+#[cfg(target_os = "windows")]
+fn ui_text_rendering_params() -> Option<(f32, f32)> {
+    let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).ok()? };
+    let params = unsafe { factory.CreateRenderingParams().ok()? };
+    let gamma = unsafe { params.GetGamma() };
+    let enhanced_contrast = unsafe { params.GetEnhancedContrast() };
+    let pixel_geometry = unsafe { params.GetPixelGeometry() };
+    let text_contrast = if pixel_geometry == DWRITE_PIXEL_GEOMETRY_FLAT {
+        enhanced_contrast
+    } else {
+        enhanced_contrast.max(0.65).min(1.0)
+    };
+
+    Some((text_contrast, gamma))
+}
+
+#[cfg(target_os = "windows")]
+fn ui_text_contrast() -> String {
+    ui_text_rendering_params()
+        .map(|(text_contrast, _)| format!("{text_contrast:.2}"))
+        .unwrap_or_else(|| "default".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn ui_text_gamma() -> String {
+    ui_text_rendering_params()
+        .map(|(_, text_gamma)| format!("{text_gamma:.2}"))
+        .unwrap_or_else(|| "default".to_string())
+}
+
+#[cfg(target_os = "windows")]
 fn ui_text_hinting() -> &'static str {
     if ui_host_window_transparent() {
         "normal"
@@ -330,14 +371,14 @@ pub(crate) fn log_ui_text_renderer_diagnostics() {
         ui_text_hinting = ui_text_hinting(),
         ui_surface_pixel_geometry = ui_surface_pixel_geometry(),
         ui_surface_color_space = ui_surface_color_space(),
-        ui_surface_uses_device_independent_fonts = true,
+        ui_surface_uses_device_independent_fonts = ui_surface_uses_device_independent_fonts(),
         ui_default_font_weight = UI_FONT_DEFAULT_WEIGHT,
         ui_chrome_font_weight = UI_CHROME_FONT_WEIGHT,
         ui_body_font_size_px = UI_BODY_FONT_SIZE_PX,
         ui_caption_font_size_px = UI_CAPTION_FONT_SIZE_PX,
         ui_chrome_letter_spacing_px = UI_CHROME_LETTER_SPACING_PX,
-        ui_text_contrast = "default",
-        ui_text_gamma = "default",
+        ui_text_contrast = ui_text_contrast(),
+        ui_text_gamma = ui_text_gamma(),
         ui_text_rendering_policy = ui_text_rendering_policy(),
         "ui text renderer configuration established"
     );

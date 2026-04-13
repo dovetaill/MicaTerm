@@ -9,6 +9,10 @@ use skia_safe::{PixelGeometry, SurfaceProps, SurfacePropsFlags};
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(target_os = "windows")]
+use windows::Win32::Graphics::DirectWrite::{
+    DWRITE_FACTORY_TYPE_SHARED, DWRITE_PIXEL_GEOMETRY_FLAT, DWriteCreateFactory, IDWriteFactory,
+};
 use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
 use windows::Win32::Graphics::Dxgi::Common::DXGI_STANDARD_MULTISAMPLE_QUALITY_PATTERN;
 use windows::core::Interface;
@@ -25,16 +29,66 @@ use windows::Win32::Graphics::Dxgi::{
     DXGI_CREATE_FACTORY_FLAGS, DXGI_PRESENT, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG,
     DXGI_SWAP_EFFECT_FLIP_DISCARD, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIFactory4, IDXGISwapChain3,
 };
+#[cfg(target_os = "windows")]
+use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow};
 use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObjectEx};
 
 use crate::SkiaSharedContext;
 
 #[cfg(target_os = "windows")]
 const FORCE_OPAQUE_HOST_WINDOW_ENV: &str = "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW";
+#[cfg(target_os = "windows")]
+const FORCE_DEVICE_INDEPENDENT_UI_FONTS_ENV: &str =
+    "MICA_TERM_FORCE_DEVICE_INDEPENDENT_UI_FONTS";
 
 #[cfg(target_os = "windows")]
 fn shell_host_is_opaque() -> bool {
     std::env::var_os(FORCE_OPAQUE_HOST_WINDOW_ENV).is_some()
+}
+
+#[cfg(target_os = "windows")]
+fn shell_text_surface_props_flags() -> SurfacePropsFlags {
+    if std::env::var_os(FORCE_DEVICE_INDEPENDENT_UI_FONTS_ENV).is_some() {
+        SurfacePropsFlags::USE_DEVICE_INDEPENDENT_FONTS
+    } else {
+        SurfacePropsFlags::empty()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn shell_text_rendering_params(hwnd: HWND) -> Option<(f32, f32)> {
+    let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).ok()? };
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    let params = if monitor.0.is_null() {
+        unsafe { factory.CreateRenderingParams().ok()? }
+    } else {
+        unsafe { factory.CreateMonitorRenderingParams(monitor).ok() }
+            .or_else(|| unsafe { factory.CreateRenderingParams().ok() })?
+    };
+    let gamma = unsafe { params.GetGamma() };
+    let enhanced_contrast = unsafe { params.GetEnhancedContrast() };
+    let pixel_geometry = unsafe { params.GetPixelGeometry() };
+    let text_contrast = if pixel_geometry == DWRITE_PIXEL_GEOMETRY_FLAT {
+        enhanced_contrast
+    } else {
+        enhanced_contrast.max(0.65).min(1.0)
+    };
+
+    Some((text_contrast, gamma))
+}
+
+#[cfg(target_os = "windows")]
+fn shell_text_surface_props(pixel_geometry: PixelGeometry, hwnd: HWND) -> SurfaceProps {
+    if let Some((text_contrast, text_gamma)) = shell_text_rendering_params(hwnd) {
+        SurfaceProps::new_with_text_properties(
+            shell_text_surface_props_flags(),
+            pixel_geometry,
+            text_contrast,
+            text_gamma,
+        )
+    } else {
+        SurfaceProps::new(shell_text_surface_props_flags(), pixel_geometry)
+    }
 }
 
 trait MapToPlatformError<T> {
@@ -53,6 +107,7 @@ impl<T> MapToPlatformError<T> for windows::core::Result<T> {
 const DEFAULT_SURFACE_FORMAT: DXGI_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 
 struct SwapChain {
+    hwnd: HWND,
     command_queue: ID3D12CommandQueue,
     swap_chain: IDXGISwapChain3,
     surfaces: Option<[skia_safe::Surface; 2]>,
@@ -118,9 +173,11 @@ impl SwapChain {
             &mut gr_context,
             size.width as _,
             size.height as _,
+            hwnd,
         )?);
 
         Ok(Self {
+            hwnd,
             command_queue,
             swap_chain,
             surfaces,
@@ -179,6 +236,7 @@ impl SwapChain {
         gr_context: &mut skia_safe::gpu::DirectContext,
         width: i32,
         height: i32,
+        hwnd: HWND,
     ) -> Result<[skia_safe::Surface; 2], PlatformError> {
         let mut make_surface = |buffer_index| {
             let buffer: ID3D12Resource = unsafe { swap_chain.GetBuffer(buffer_index) }
@@ -205,10 +263,7 @@ impl SwapChain {
             } else {
                 PixelGeometry::Unknown
             };
-            let surface_props = SurfaceProps::new(
-                SurfacePropsFlags::USE_DEVICE_INDEPENDENT_FONTS,
-                pixel_geometry,
-            );
+            let surface_props = shell_text_surface_props(pixel_geometry, hwnd);
 
             skia_safe::gpu::surfaces::wrap_backend_render_target(
                 gr_context,
@@ -252,6 +307,7 @@ impl SwapChain {
             &mut self.gr_context,
             width as i32,
             height as i32,
+            self.hwnd,
         )?);
         Ok(())
     }

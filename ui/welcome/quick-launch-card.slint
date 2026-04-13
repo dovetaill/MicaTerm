@@ -1,4 +1,5 @@
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 import { QuickLaunchCardRow } from "quick-launch-types.slint";
 
 export component QuickLaunchCard inherits Rectangle {
@@ -79,8 +80,10 @@ export component QuickLaunchCard inherits Rectangle {
         y: 38px;
         width: parent.width - 138px;
         text: root.item.subtitle;
-        color: ThemeTokens.text-primary;
-        opacity: 0.82;
+        color: ThemeTokens.text-secondary;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-body;
+        font-weight: AppTypography.ui-font-weight-medium;
         overflow: elide;
     }
 
@@ -89,8 +92,10 @@ export component QuickLaunchCard inherits Rectangle {
         y: 58px;
         width: parent.width - 138px;
         text: root.item.meta != "" ? root.item.meta : "Open saved SSH connection";
-        color: ThemeTokens.text-primary;
-        opacity: 0.58;
+        color: ThemeTokens.text-secondary;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-caption;
+        font-weight: AppTypography.ui-font-weight-medium;
         overflow: elide;
     }
 

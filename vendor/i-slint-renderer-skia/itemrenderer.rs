@@ -372,7 +372,8 @@ impl<'a> SkiaItemRenderer<'a> {
                 skia_safe::AlphaType::Premul,
                 Some(skia_safe::ColorSpace::new_srgb()),
             );
-            let mut surface = self.canvas.new_surface(&image_info, None)?;
+            let layer_surface_props = self.canvas.top_props();
+            let mut surface = self.canvas.new_surface(&image_info, Some(&layer_surface_props))?;
             let canvas = surface.canvas();
             canvas.clear(skia_safe::Color::TRANSPARENT);
 
@@ -918,7 +919,12 @@ impl ItemRenderer for SkiaItemRenderer<'_> {
     ) -> RenderingResult {
         let opacity = opacity_item.opacity();
         if Opacity::need_layer(item_rc, opacity) {
-            self.canvas.save_layer_alpha(None, (opacity * 255.) as u32);
+            let mut layer_paint = skia_safe::Paint::default();
+            layer_paint.set_alpha_f(opacity.clamp(0.0, 1.0));
+            let layer_rec = skia_safe::canvas::SaveLayerRec::default()
+                .paint(&layer_paint)
+                .flags(skia_safe::canvas::SaveLayerFlags::PRESERVE_LCD_TEXT);
+            self.canvas.save_layer(&layer_rec);
             self.state_stack.push(self.current_state);
             self.current_state.alpha = 1.0;
 

@@ -1,4 +1,5 @@
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 import { QuickLaunchDetailRow } from "quick-launch-types.slint";
 
 component QuickLaunchActionButton inherits Rectangle {
@@ -84,8 +85,10 @@ export component QuickLaunchDetailPane inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
                 text: "Select a saved SSH connection to inspect its environment, auth path, proxy route, and launch actions.";
-                color: ThemeTokens.text-primary;
-                opacity: 0.56;
+                color: ThemeTokens.text-secondary;
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-body;
+                font-weight: AppTypography.ui-font-weight-medium;
                 wrap: word-wrap;
                 vertical-alignment: center;
             }
@@ -107,8 +110,10 @@ export component QuickLaunchDetailPane inherits Rectangle {
             Text {
                 width: parent.width;
                 text: root.detail.subtitle;
-                color: ThemeTokens.text-primary;
-                opacity: 0.80;
+                color: ThemeTokens.text-secondary;
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-body;
+                font-weight: AppTypography.ui-font-weight-medium;
                 wrap: word-wrap;
             }
 
@@ -123,32 +128,40 @@ export component QuickLaunchDetailPane inherits Rectangle {
                 text: root.detail.environment != ""
                     ? "Environment: " + root.detail.environment
                     : "Environment: Unspecified";
-                color: ThemeTokens.text-primary;
-                opacity: 0.92;
+                color: ThemeTokens.text-secondary;
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-body;
+                font-weight: AppTypography.ui-font-weight-medium;
                 wrap: word-wrap;
             }
 
             Text {
                 width: parent.width;
                 text: "Auth: " + root.detail.auth_summary;
-                color: ThemeTokens.text-primary;
-                opacity: 0.78;
+                color: ThemeTokens.text-secondary;
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-body;
+                font-weight: AppTypography.ui-font-weight-medium;
                 wrap: word-wrap;
             }
 
             Text {
                 width: parent.width;
                 text: "Proxy: " + root.detail.proxy_summary;
-                color: ThemeTokens.text-primary;
-                opacity: 0.78;
+                color: ThemeTokens.text-secondary;
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-body;
+                font-weight: AppTypography.ui-font-weight-medium;
                 wrap: word-wrap;
             }
 
             if root.detail.recent_label != "" : Text {
                 width: parent.width;
                 text: root.detail.recent_label;
-                color: ThemeTokens.text-primary;
-                opacity: 0.58;
+                color: ThemeTokens.text-secondary;
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-caption;
+                font-weight: AppTypography.ui-font-weight-medium;
             }
 
             if root.detail.remark != "" : Rectangle {
@@ -164,8 +177,10 @@ export component QuickLaunchDetailPane inherits Rectangle {
                     y: 9px;
                     width: parent.width - 24px;
                     text: root.detail.remark;
-                    color: ThemeTokens.text-primary;
-                    opacity: 0.74;
+                    color: ThemeTokens.text-secondary;
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-body;
+                    font-weight: AppTypography.ui-font-weight-medium;
                     wrap: word-wrap;
                 }
             }

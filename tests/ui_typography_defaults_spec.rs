@@ -124,6 +124,61 @@ fn small_shell_chrome_controls_use_explicit_misans_medium_contract() {
 }
 
 #[test]
+fn weak_small_text_hotspots_stop_relying_on_tiny_sizes_and_low_opacity() {
+    let asset_row =
+        fs::read_to_string("ui/components/asset-node-row.slint").expect("read asset row");
+    let quick_launch_section = fs::read_to_string("ui/welcome/quick-launch-section.slint")
+        .expect("read quick launch section");
+    let quick_launch_card =
+        fs::read_to_string("ui/welcome/quick-launch-card.slint").expect("read quick launch card");
+    let quick_launch_detail = fs::read_to_string("ui/welcome/quick-launch-detail-pane.slint")
+        .expect("read quick launch detail pane");
+    let right_panel = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
+
+    assert!(
+        asset_row.contains("text: root.path-hint;")
+            && asset_row.contains("font-weight: AppTypography.ui-font-weight-medium;")
+            && asset_row.contains("color: ThemeTokens.text-secondary;"),
+        "asset row helper text should stop falling back to a thin muted caption so sidebar metadata reads cleaner on Windows"
+    );
+
+    assert!(
+        quick_launch_section.contains("text: root.subtitle;")
+            && quick_launch_section.contains("text: root.empty_text;")
+            && quick_launch_section.contains("font-weight: AppTypography.ui-font-weight-medium;"),
+        "welcome section subtitles and empty-state copy should use a stronger shared chrome weight instead of fading into the background"
+    );
+
+    assert!(
+        !quick_launch_card.contains("opacity: 0.58;")
+            && !quick_launch_card.contains("opacity: 0.82;")
+            && quick_launch_card.contains("color: ThemeTokens.text-secondary;"),
+        "quick launch cards should stop depending on low-opacity primary text for secondary lines because that reads fuzzy in the Windows shell"
+    );
+
+    assert!(
+        !quick_launch_detail.contains("opacity: 0.56;")
+            && !quick_launch_detail.contains("opacity: 0.58;")
+            && !quick_launch_detail.contains("opacity: 0.74;")
+            && quick_launch_detail.contains("color: ThemeTokens.text-secondary;"),
+        "welcome detail helper copy should use explicit semantic colors instead of multiple low-opacity text layers"
+    );
+
+    for expected in [
+        "text: root.sftp-status-copy();\n                    color: ThemeTokens.text-secondary;\n                    font-size: 12px;",
+        "text: item.name;\n                        color: ThemeTokens.text-primary;\n                        font-size: 12px;",
+        "text: item.type_label;\n                        color: ThemeTokens.text-secondary;\n                        font-size: 12px;",
+        "text: item.modified_label;\n                        color: ThemeTokens.text-secondary;\n                        font-size: 12px;",
+        "text: item.size_label;\n                        color: ThemeTokens.text-secondary;\n                        font-size: 12px;",
+    ] {
+        assert!(
+            right_panel.contains(expected),
+            "right panel small-text hotspots should keep `{expected}` so SFTP rows stop rendering critical metadata at 11px"
+        );
+    }
+}
+
+#[test]
 fn assets_sidebar_list_height_tracks_the_shared_row_height() {
     let typography = fs::read_to_string("ui/theme/typography.slint").expect("read typography");
     let sidebar = fs::read_to_string("ui/shell/assets-sidebar.slint").expect("read assets sidebar");
