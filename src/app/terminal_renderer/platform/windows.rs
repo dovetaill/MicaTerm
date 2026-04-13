@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, Image};
+#[cfg(target_os = "windows")]
+use slint::{Rgba8Pixel, SharedPixelBuffer};
 
 use crate::AppWindow;
 #[cfg(target_os = "windows")]
@@ -27,23 +29,22 @@ use crate::app::windows_frame::resolve_host_window_hwnd;
 use super::backend::{
     NativeTerminalSurfaceRect, PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
 };
-use super::windows_child_host::WindowsChildSurfaceHost;
+use super::windows_composition_surface::WindowsCompositionSurfaceHost;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::{BOOL, D2DERR_RECREATE_TARGET, HWND};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_POINT_2F, D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED,
-    D2D1_COLOR_F, D2D1_PIXEL_FORMAT,
+    D2D_POINT_2F, D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F,
+    D2D1_PIXEL_FORMAT,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ANTIALIAS_MODE_ALIASED, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
-    D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_HWND_RENDER_TARGET_PROPERTIES,
-    D2D1_OPACITY_MASK_CONTENT_GRAPHICS, D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE,
-    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1CreateFactory, ID2D1Bitmap, ID2D1Factory,
-    ID2D1HwndRenderTarget, ID2D1SolidColorBrush,
+    D2D1_BITMAP_PROPERTIES, D2D1_FACTORY_TYPE_SINGLE_THREADED,
+    D2D1_OPACITY_MASK_CONTENT_GRAPHICS, D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE,
+    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, D2D1_RENDER_TARGET_PROPERTIES, D2D1CreateFactory,
+    ID2D1Bitmap, ID2D1Factory, ID2D1RenderTarget, ID2D1SolidColorBrush,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::DirectWrite::{
@@ -63,6 +64,13 @@ use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_A8_UNORM, DXGI_FORMAT_B
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONEAREST, MonitorFromWindow};
 #[cfg(target_os = "windows")]
+use windows::Win32::Graphics::Imaging::{
+    CLSID_WICImagingFactory, GUID_WICPixelFormat32bppPBGRA, IWICBitmap, IWICBitmapLock,
+    IWICImagingFactory, WICBitmapCacheOnLoad, WICBitmapLockRead, WICRect,
+};
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 #[cfg(target_os = "windows")]
 use windows::core::{Interface, PCWSTR};
@@ -79,11 +87,14 @@ pub struct WindowsD2DFactoryState {
     factory: Option<ID2D1Factory>,
 }
 
-pub struct WindowsHwndRenderTargetState {
-    pub hwnd: isize,
+pub struct WindowsWicBitmapRenderTargetState {
+    pub width_px: u32,
+    pub height_px: u32,
     pub generation: u64,
     #[cfg(target_os = "windows")]
-    render_target: ID2D1HwndRenderTarget,
+    wic_bitmap: IWICBitmap,
+    #[cfg(target_os = "windows")]
+    render_target: ID2D1RenderTarget,
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -183,16 +194,19 @@ pub struct WindowsColorGlyphBitmapState {
 pub struct WindowsNativeSurfaceState {
     pub attached: bool,
     pub host_hwnd: Option<isize>,
-    pub surface_hwnd: Option<isize>,
+    pub host_surface: Option<WindowsCompositionSurfaceHost>,
     pub fallback_paint_required: bool,
     pub window_rect: NativeTerminalSurfaceRect,
     pub rect: NativeTerminalSurfaceRect,
     pub retained_frame: Option<RetainedNativeTerminalSurfaceFrame>,
     pub d2d_factory: Option<WindowsD2DFactoryState>,
+    #[cfg(target_os = "windows")]
+    pub wic_imaging_factory: Option<IWICImagingFactory>,
     pub directwrite_text_renderer: Option<WindowsDirectWriteTextRendererState>,
-    pub hwnd_render_target: Option<WindowsHwndRenderTargetState>,
+    pub wic_bitmap_render_target: Option<WindowsWicBitmapRenderTargetState>,
     pub render_target_generation: u64,
     pub render_target_dirty: bool,
+    pub host_surface_image: Option<Image>,
     pub d2d_brushes: HashMap<u32, WindowsD2DBrushState>,
     pub monochrome_glyph_bitmaps: HashMap<u32, WindowsMonochromeGlyphBitmapState>,
     pub color_glyph_bitmaps: HashMap<u32, WindowsColorGlyphBitmapState>,
@@ -257,13 +271,36 @@ impl WindowsNativeSurfaceState {
         Ok(())
     }
 
-    fn ensure_hwnd_render_target(&mut self) {
+    fn ensure_wic_imaging_factory(&mut self) {
         #[cfg(target_os = "windows")]
-        if let Err(err) = self.try_ensure_hwnd_render_target() {
+        if let Err(err) = self.try_ensure_wic_imaging_factory() {
             tracing::warn!(
                 target: "app.terminal",
                 error = %err,
-                "failed to create or resize Direct2D HWND render target for native terminal surface"
+                "failed to create WIC imaging factory for Windows native terminal surface"
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn try_ensure_wic_imaging_factory(&mut self) -> Result<()> {
+        if self.wic_imaging_factory.is_some() {
+            return Ok(());
+        }
+
+        let imaging_factory: IWICImagingFactory =
+            unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER) }?;
+        self.wic_imaging_factory = Some(imaging_factory);
+        Ok(())
+    }
+
+    fn ensure_wic_bitmap_render_target(&mut self) {
+        #[cfg(target_os = "windows")]
+        if let Err(err) = self.try_ensure_wic_bitmap_render_target() {
+            tracing::warn!(
+                target: "app.terminal",
+                error = %err,
+                "failed to create Direct2D WIC bitmap render target for native terminal surface"
             );
             self.clear_device_resources();
         }
@@ -322,8 +359,8 @@ impl WindowsNativeSurfaceState {
     }
 
     #[cfg(target_os = "windows")]
-    fn try_ensure_hwnd_render_target(&mut self) -> Result<()> {
-        let Some(surface_hwnd) = self.surface_hwnd else {
+    fn try_ensure_wic_bitmap_render_target(&mut self) -> Result<()> {
+        let Some(_host_surface) = self.host_surface.clone() else {
             self.clear_device_resources();
             return Ok(());
         };
@@ -333,65 +370,55 @@ impl WindowsNativeSurfaceState {
         };
 
         self.ensure_d2d_factory();
-        if self.d2d_factory.is_none() {
+        self.ensure_wic_imaging_factory();
+        if self.d2d_factory.is_none() || self.wic_imaging_factory.is_none() {
             return Ok(());
         }
 
-        if let Some(target_state) = self.hwnd_render_target.as_ref()
-            && target_state.hwnd == surface_hwnd
-        {
-            if !self.render_target_dirty {
+        if let Some(target_state) = self.wic_bitmap_render_target.as_ref() {
+            if target_state.width_px == width_px
+                && target_state.height_px == height_px
+                && !self.render_target_dirty
+            {
                 return Ok(());
-            }
-
-            let pixel_size = D2D_SIZE_U {
-                width: width_px,
-                height: height_px,
-            };
-
-            match unsafe { target_state.render_target.Resize(&pixel_size) } {
-                Ok(()) => {
-                    self.render_target_dirty = false;
-                    return Ok(());
-                }
-                Err(err) if err.code() == D2DERR_RECREATE_TARGET => {
-                    self.clear_device_resources();
-                }
-                Err(err) => return Err(err.into()),
             }
         }
 
         self.clear_device_resources();
-        let factory = &self
+        let d2d_factory = self
             .d2d_factory
             .as_ref()
             .and_then(|state| state.factory.as_ref())
-            .expect("Direct2D factory should exist before creating a render target");
+            .expect("Direct2D factory should exist before creating an offscreen render target");
+        let wic_factory = self
+            .wic_imaging_factory
+            .as_ref()
+            .expect("WIC imaging factory should exist before creating an offscreen render target");
+        let wic_bitmap = unsafe {
+            wic_factory.CreateBitmap(
+                width_px,
+                height_px,
+                &GUID_WICPixelFormat32bppPBGRA,
+                WICBitmapCacheOnLoad,
+            )
+        }?;
         let render_target_properties = D2D1_RENDER_TARGET_PROPERTIES {
             pixelFormat: D2D1_PIXEL_FORMAT {
                 format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                alphaMode: D2D1_ALPHA_MODE_IGNORE,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
             },
             dpiX: 96.0,
             dpiY: 96.0,
             ..Default::default()
         };
-        let hwnd_render_target_properties = D2D1_HWND_RENDER_TARGET_PROPERTIES {
-            hwnd: HWND(surface_hwnd as _),
-            pixelSize: D2D_SIZE_U {
-                width: width_px,
-                height: height_px,
-            },
-            presentOptions: D2D1_PRESENT_OPTIONS_RETAIN_CONTENTS,
-        };
-        let render_target = unsafe {
-            factory
-                .CreateHwndRenderTarget(&render_target_properties, &hwnd_render_target_properties)
-        }?;
+        let render_target =
+            unsafe { d2d_factory.CreateWicBitmapRenderTarget(&wic_bitmap, &render_target_properties) }?;
         self.render_target_generation = self.render_target_generation.saturating_add(1);
-        self.hwnd_render_target = Some(WindowsHwndRenderTargetState {
-            hwnd: surface_hwnd,
+        self.wic_bitmap_render_target = Some(WindowsWicBitmapRenderTargetState {
+            width_px,
+            height_px,
             generation: self.render_target_generation,
+            wic_bitmap,
             render_target,
         });
         self.render_target_dirty = false;
@@ -400,7 +427,8 @@ impl WindowsNativeSurfaceState {
     }
 
     fn clear_device_resources(&mut self) {
-        self.hwnd_render_target = None;
+        self.wic_bitmap_render_target = None;
+        self.host_surface_image = None;
         self.fallback_paint_required = true;
         self.render_target_dirty = true;
         self.last_directwrite_text_drawn = false;
@@ -465,7 +493,11 @@ impl WindowsNativeSurfaceState {
                 target: "app.terminal",
                 fallback_reason = reason,
                 host_hwnd = self.host_hwnd.unwrap_or_default(),
-                surface_hwnd = self.surface_hwnd.unwrap_or_default(),
+                surface_hwnd = self
+                    .host_surface
+                    .as_ref()
+                    .map(|host_surface| host_surface.surface_hwnd())
+                    .unwrap_or_default(),
                 "DirectWrite text path fell back to bitmap-mask-compat"
             );
         }
@@ -930,7 +962,11 @@ impl WindowsNativeSurfaceState {
     ) -> Option<IDWriteFontFace> {
         let font_bytes = Self::bundled_directwrite_font_bytes(family_name)?;
         let host_hwnd = self.host_hwnd.unwrap_or_default();
-        let surface_hwnd = self.surface_hwnd.unwrap_or_default();
+        let surface_hwnd = self
+            .host_surface
+            .as_ref()
+            .map(|host_surface| host_surface.surface_hwnd())
+            .unwrap_or_default();
         let renderer = self.directwrite_text_renderer.as_mut()?;
         let factory = renderer.factory.as_ref()?.clone();
 
@@ -1442,8 +1478,8 @@ impl WindowsNativeSurfaceState {
     }
 
     #[cfg(target_os = "windows")]
-    fn render_target(&self) -> Option<ID2D1HwndRenderTarget> {
-        self.hwnd_render_target
+    fn render_target(&self) -> Option<ID2D1RenderTarget> {
+        self.wic_bitmap_render_target
             .as_ref()
             .map(|state| state.render_target.clone())
     }
@@ -1702,16 +1738,107 @@ impl WindowsNativeSurfaceState {
         true
     }
 
+    #[cfg(target_os = "windows")]
+    fn capture_host_surface_image(&mut self) -> bool {
+        let Some(target_state) = self.wic_bitmap_render_target.as_ref() else {
+            self.host_surface_image = None;
+            return false;
+        };
+        let width_px = target_state.width_px;
+        let height_px = target_state.height_px;
+        if width_px == 0 || height_px == 0 {
+            self.host_surface_image = None;
+            return false;
+        }
+
+        let lock_rect = WICRect {
+            X: 0,
+            Y: 0,
+            Width: i32::try_from(width_px).unwrap_or(i32::MAX),
+            Height: i32::try_from(height_px).unwrap_or(i32::MAX),
+        };
+        let lock: IWICBitmapLock =
+            match unsafe { target_state.wic_bitmap.Lock(&lock_rect, WICBitmapLockRead.0 as u32) } {
+                Ok(lock) => lock,
+                Err(err) => {
+                    tracing::warn!(
+                        target: "app.terminal",
+                        error = %err,
+                        "failed to lock WIC bitmap for native terminal host-image readback"
+                    );
+                    self.host_surface_image = None;
+                    return false;
+                }
+            };
+
+        let stride = match unsafe { lock.GetStride() } {
+            Ok(stride) => usize::try_from(stride.max(0)).unwrap_or_default(),
+            Err(err) => {
+                tracing::warn!(
+                    target: "app.terminal",
+                    error = %err,
+                    "failed to query WIC bitmap stride for native terminal host-image readback"
+                );
+                self.host_surface_image = None;
+                return false;
+            }
+        };
+        let mut buffer_len = 0u32;
+        let mut buffer_ptr = std::ptr::null_mut();
+        if let Err(err) = unsafe { lock.GetDataPointer(&mut buffer_len, &mut buffer_ptr) } {
+            tracing::warn!(
+                target: "app.terminal",
+                error = %err,
+                "failed to read WIC bitmap pixels for native terminal host-image readback"
+            );
+            self.host_surface_image = None;
+            return false;
+        }
+        if buffer_ptr.is_null() {
+            self.host_surface_image = None;
+            return false;
+        }
+        let buffer = unsafe {
+            std::slice::from_raw_parts(buffer_ptr, usize::try_from(buffer_len).unwrap_or_default())
+        };
+        if stride == 0 || buffer.len() < stride.saturating_mul(height_px as usize) {
+            self.host_surface_image = None;
+            return false;
+        }
+        if stride < width_px as usize * 4 {
+            tracing::warn!(
+                target: "app.terminal",
+                stride,
+                width_px,
+                "WIC bitmap stride is smaller than expected row width for native terminal host-image readback"
+            );
+            self.host_surface_image = None;
+            return false;
+        }
+
+        let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(width_px, height_px);
+        let dest = pixels.make_mut_slice();
+        for y in 0..height_px as usize {
+            let row = &buffer[y * stride..y * stride + width_px as usize * 4];
+            for x in 0..width_px as usize {
+                let idx = x * 4;
+                dest[y * width_px as usize + x] = Rgba8Pixel {
+                    r: row[idx + 2],
+                    g: row[idx + 1],
+                    b: row[idx],
+                    a: row[idx + 3],
+                };
+            }
+        }
+        self.host_surface_image = Some(Image::from_rgba8(pixels));
+        true
+    }
+
     fn sync_surface_rect(&mut self) {
         if self.host_hwnd.is_none() || self.window_rect.width <= 0 || self.window_rect.height <= 0 {
             self.rect = NativeTerminalSurfaceRect::default();
         } else {
-            self.rect = NativeTerminalSurfaceRect {
-                x: 0,
-                y: 0,
-                width: self.window_rect.width,
-                height: self.window_rect.height,
-            };
+            self.rect = self.window_rect;
         }
         if let Some(retained_frame) = self.retained_frame.as_mut() {
             retained_frame.rect = self.rect;
@@ -1723,32 +1850,9 @@ impl WindowsNativeSurfaceState {
 pub struct WindowsNativeSurfaceBackend {
     state: WindowsNativeSurfaceState,
     host_window: Option<slint::Weak<AppWindow>>,
-    child_surface_host: Option<WindowsChildSurfaceHost>,
 }
 
 impl WindowsNativeSurfaceBackend {
-    fn child_surface_background_rgba(&self) -> u32 {
-        self.state
-            .retained_frame
-            .as_ref()
-            .map(|frame| {
-                0xff00_0000 | (frame.frame.presentable_frame.default_bg_rgba & 0x00ff_ffff)
-            })
-            .unwrap_or(0xff11_1821)
-    }
-
-    fn sync_child_surface_background_rgba(&self) {
-        if let Some(child_surface_host) = self.child_surface_host.as_ref() {
-            child_surface_host.set_background_rgba(self.child_surface_background_rgba());
-        }
-    }
-
-    fn set_child_surface_fallback_paint_enabled(&self, enabled: bool) {
-        if let Some(child_surface_host) = self.child_surface_host.as_ref() {
-            child_surface_host.set_fallback_paint_enabled(enabled);
-        }
-    }
-
     fn resolve_host_hwnd(window: &AppWindow) -> Option<isize> {
         resolve_host_window_hwnd(window)
     }
@@ -1761,7 +1865,7 @@ impl WindowsNativeSurfaceBackend {
             .and_then(|window| Self::resolve_host_hwnd(&window));
 
         if next_host_hwnd != self.state.host_hwnd {
-            self.destroy_child_surface_window();
+            self.destroy_host_surface();
             self.state.clear_device_resources();
             self.state.host_hwnd = next_host_hwnd;
         }
@@ -1769,58 +1873,54 @@ impl WindowsNativeSurfaceBackend {
         self.state.sync_surface_rect();
     }
 
-    fn ensure_child_surface_window(&mut self) {
+    fn ensure_host_surface(&mut self) {
         let Some(host_hwnd) = self.state.host_hwnd else {
-            self.destroy_child_surface_window();
+            self.destroy_host_surface();
             return;
         };
         if self.state.window_rect.width <= 0 || self.state.window_rect.height <= 0 {
-            self.sync_child_surface_window_rect();
+            self.sync_host_surface_rect();
             return;
         }
 
-        let needs_new_child = self
-            .child_surface_host
+        let needs_new_host_surface = self
+            .state
+            .host_surface
             .as_ref()
-            .map(|host| host.parent_hwnd != host_hwnd || host.surface_hwnd == 0)
+            .map(|host_surface| host_surface.host_hwnd != host_hwnd)
             .unwrap_or(true);
 
-        if needs_new_child {
-            self.destroy_child_surface_window();
-            match WindowsChildSurfaceHost::create(host_hwnd, self.state.window_rect) {
-                Ok(child_surface_host) => {
+        if needs_new_host_surface {
+            self.destroy_host_surface();
+            match WindowsCompositionSurfaceHost::create(host_hwnd, self.state.window_rect) {
+                Ok(host_surface) => {
                     tracing::debug!(
                         target: "app.terminal",
                         host_hwnd,
-                        surface_hwnd = child_surface_host.surface_hwnd,
                         x = self.state.window_rect.x,
                         y = self.state.window_rect.y,
                         width = self.state.window_rect.width,
                         height = self.state.window_rect.height,
-                        "created retained-native child HWND host"
+                        "created retained-native host surface"
                     );
-                    self.state.surface_hwnd = Some(child_surface_host.surface_hwnd);
-                    self.child_surface_host = Some(child_surface_host);
+                    self.state.host_surface = Some(host_surface);
                     self.state.fallback_paint_required = true;
-                    self.sync_child_surface_background_rgba();
-                    self.set_child_surface_fallback_paint_enabled(true);
                     self.state.mark_render_target_dirty();
                 }
                 Err(err) => {
-                    self.state.surface_hwnd = None;
                     tracing::warn!(
                         target: "app.terminal",
                         error = %err,
-                        "failed to create retained-native child HWND host"
+                        "failed to create retained-native host surface"
                     );
                 }
             }
         }
 
-        self.sync_child_surface_window_rect();
+        self.sync_host_surface_rect();
     }
 
-    fn sync_child_surface_window_rect(&mut self) {
+    fn sync_host_surface_rect(&mut self) {
         self.state.sync_surface_rect();
 
         let should_show = self.state.attached
@@ -1829,58 +1929,52 @@ impl WindowsNativeSurfaceBackend {
             && self.state.window_rect.height > 0;
 
         if !should_show {
-            if let Some(child_surface_host) = self.child_surface_host.as_ref() {
+            if self.state.host_surface.is_some() {
                 tracing::debug!(
                     target: "app.terminal",
                     host_hwnd = self.state.host_hwnd.unwrap_or_default(),
-                    surface_hwnd = child_surface_host.surface_hwnd,
                     attached = self.state.attached,
                     x = self.state.window_rect.x,
                     y = self.state.window_rect.y,
                     width = self.state.window_rect.width,
                     height = self.state.window_rect.height,
-                    "tearing down retained-native child HWND because the surface is not visible"
+                    "tearing down retained-native host surface because the surface is not visible"
                 );
             }
-            self.destroy_child_surface_window();
+            self.destroy_host_surface();
             return;
         }
 
-        let background_rgba = self.child_surface_background_rgba();
-        let Some(child_surface_host) = self.child_surface_host.as_mut() else {
-            self.state.surface_hwnd = None;
+        let Some(host_surface) = self.state.host_surface.as_mut() else {
             return;
         };
+        let rect_changed = host_surface.rect != self.state.window_rect;
+        let was_visible = host_surface.is_visible();
 
-        if let Err(err) = child_surface_host.sync_rect(self.state.window_rect) {
+        if let Err(err) = host_surface.sync_rect(self.state.window_rect) {
             tracing::warn!(
                 target: "app.terminal",
                 error = %err,
-                "failed to sync retained-native child HWND rect"
+                "failed to sync retained-native host surface rect"
             );
-            self.destroy_child_surface_window();
+            self.destroy_host_surface();
             return;
         }
-        child_surface_host.set_visible(true);
-        child_surface_host.set_background_rgba(background_rgba);
-        child_surface_host.set_fallback_paint_enabled(self.state.fallback_paint_required);
-
-        self.state.surface_hwnd =
-            (child_surface_host.surface_hwnd != 0).then_some(child_surface_host.surface_hwnd);
-        self.state.mark_render_target_dirty();
+        host_surface.set_visible(true);
+        if rect_changed || !was_visible {
+            self.state.mark_render_target_dirty();
+        }
     }
 
-    fn destroy_child_surface_window(&mut self) {
-        if let Some(mut child_surface_host) = self.child_surface_host.take() {
+    fn destroy_host_surface(&mut self) {
+        if let Some(mut host_surface) = self.state.host_surface.take() {
             tracing::debug!(
                 target: "app.terminal",
                 host_hwnd = self.state.host_hwnd.unwrap_or_default(),
-                surface_hwnd = child_surface_host.surface_hwnd,
-                "destroying retained-native child HWND host"
+                "destroying retained-native host surface"
             );
-            child_surface_host.destroy();
+            host_surface.destroy();
         }
-        self.state.surface_hwnd = None;
         self.state.clear_device_resources();
         self.state.sync_surface_rect();
     }
@@ -1892,7 +1986,7 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         self.state.fallback_paint_required = true;
         self.host_window = Some(window.as_weak());
         self.resolve_host_hwnd_if_needed();
-        self.ensure_child_surface_window();
+        self.ensure_host_surface();
         self.state.mark_render_target_dirty();
         Ok(())
     }
@@ -1905,8 +1999,8 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
             self.state.window_rect = rect;
             self.state.fallback_paint_required = true;
             self.resolve_host_hwnd_if_needed();
-            self.ensure_child_surface_window();
-            self.sync_child_surface_window_rect();
+            self.ensure_host_surface();
+            self.sync_host_surface_rect();
         }
     }
 
@@ -1915,7 +2009,7 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
             return;
         }
         self.resolve_host_hwnd_if_needed();
-        self.ensure_child_surface_window();
+        self.ensure_host_surface();
         self.state.last_prepared_frame_token = frame
             .as_ref()
             .map(|retained_frame| retained_frame.frame.frame_token)
@@ -1926,9 +2020,8 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         });
         if self.state.retained_frame.is_none() {
             self.state.fallback_paint_required = true;
+            self.state.host_surface_image = None;
         }
-        self.sync_child_surface_background_rgba();
-        self.set_child_surface_fallback_paint_enabled(self.state.fallback_paint_required);
     }
 
     fn present(&mut self, damage: NativeSurfaceDamage) {
@@ -1936,16 +2029,16 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
             return;
         }
         self.resolve_host_hwnd_if_needed();
-        self.ensure_child_surface_window();
-        if self.state.host_hwnd.is_none() || self.state.surface_hwnd.is_none() {
+        self.ensure_host_surface();
+        if self.state.host_hwnd.is_none() || self.state.host_surface.is_none() {
             return;
         }
         if self.state.rect.width <= 0 || self.state.rect.height <= 0 {
             return;
         }
-        self.state.ensure_hwnd_render_target();
-        self.set_child_surface_fallback_paint_enabled(self.state.fallback_paint_required);
+        self.state.ensure_wic_bitmap_render_target();
         let Some(frame) = self.state.retained_frame.clone() else {
+            self.state.host_surface_image = None;
             return;
         };
         let present_rect = translate_rect_to_surface_local(
@@ -1978,10 +2071,8 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         #[cfg(target_os = "windows")]
         if self.state.end_frame() {
             self.state.last_presented_frame_token = frame.frame.frame_token;
+            let _ = self.state.capture_host_surface_image();
             self.state.fallback_paint_required = false;
-            self.set_child_surface_fallback_paint_enabled(false);
-        } else {
-            self.set_child_surface_fallback_paint_enabled(self.state.fallback_paint_required);
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -1991,17 +2082,27 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
     }
 
     fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics {
+        let host_surface_hwnd = self
+            .state
+            .host_surface
+            .as_ref()
+            .map(|host_surface| host_surface.surface_hwnd());
         NativeTerminalSurfaceDiagnostics {
-            hwnd: self.state.surface_hwnd.or(self.state.host_hwnd),
+            hwnd: host_surface_hwnd.or(self.state.host_hwnd),
             host_hwnd: self.state.host_hwnd,
-            surface_hwnd: self.state.surface_hwnd,
-            surface_visible: Some(
+            host_surface_hwnd,
+            host_surface_visible: Some(
                 self.state.attached
-                    && self.state.surface_hwnd.is_some()
+                    && self
+                        .state
+                        .host_surface
+                        .as_ref()
+                        .map(|host_surface| host_surface.is_visible())
+                        .unwrap_or(false)
                     && self.state.window_rect.width > 0
                     && self.state.window_rect.height > 0,
             ),
-            render_target_ready: Some(self.state.hwnd_render_target.is_some()),
+            host_surface_ready: Some(self.state.wic_bitmap_render_target.is_some()),
             text_renderer_path: Some(
                 self.state
                     .active_text_renderer_path()
@@ -2018,19 +2119,28 @@ impl PlatformNativeSurfaceBackend for WindowsNativeSurfaceBackend {
         }
     }
 
+    fn host_image_snapshot(&self) -> Option<Image> {
+        self.state.host_surface_image.clone()
+    }
+
     fn detach(&mut self) {
         self.state.attached = false;
         self.state.retained_frame = None;
-        self.destroy_child_surface_window();
+        self.destroy_host_surface();
         self.state.clear_device_resources();
         self.state.d2d_brushes.clear();
         // Keep CPU-side glyph payload caches across detach so a later reattach can
         // recreate D2D bitmaps even when the renderer reuses prepared rows without
         // resending upload payloads on the next frame.
         self.state.d2d_factory = None;
+        #[cfg(target_os = "windows")]
+        {
+            self.state.wic_imaging_factory = None;
+        }
         self.state.directwrite_text_renderer = None;
         self.state.host_hwnd = None;
-        self.state.surface_hwnd = None;
+        self.state.host_surface = None;
+        self.state.host_surface_image = None;
         self.host_window = None;
         self.state.window_rect = NativeTerminalSurfaceRect::default();
         self.state.rect = NativeTerminalSurfaceRect::default();
@@ -2116,12 +2226,12 @@ fn intersect_present_rect(
 #[cfg(test)]
 mod tests {
     use super::{
-        NativeTerminalSurfaceRect, intersect_present_rect, surface_client_rect,
-        translate_rect_to_surface_local,
+        NativeTerminalSurfaceRect, WindowsCompositionSurfaceHost, WindowsNativeSurfaceBackend,
+        intersect_present_rect, surface_client_rect, translate_rect_to_surface_local,
     };
 
     #[test]
-    fn child_surface_client_rect_rebases_origin_to_zero() {
+    fn offscreen_surface_client_rect_rebases_origin_to_zero() {
         let surface_rect = NativeTerminalSurfaceRect {
             x: 374,
             y: 92,
@@ -2137,12 +2247,12 @@ mod tests {
                 width: 560,
                 height: 552,
             },
-            "child HWND render targets should draw in their own client coordinates instead of reusing the parent-relative placement origin"
+            "an offscreen WIC render target should draw in local bitmap coordinates instead of reusing the host-window pane origin"
         );
     }
 
     #[test]
-    fn child_surface_damage_rect_translates_into_local_coordinates() {
+    fn offscreen_surface_damage_rect_translates_into_local_coordinates() {
         let surface_rect = NativeTerminalSurfaceRect {
             x: 374,
             y: 92,
@@ -2164,12 +2274,12 @@ mod tests {
                 width: 80,
                 height: 44,
             },
-            "overlay-only presents should clip against child-local coordinates so the visible child surface is repainted instead of an off-window parent-space region"
+            "overlay-only presents should clip against offscreen-local coordinates so the host-owned bitmap is repainted instead of an off-window parent-space region"
         );
     }
 
     #[test]
-    fn child_surface_local_translation_clamps_to_client_bounds() {
+    fn offscreen_surface_local_translation_clamps_to_bitmap_bounds() {
         let surface_rect = NativeTerminalSurfaceRect {
             x: 374,
             y: 92,
@@ -2194,7 +2304,34 @@ mod tests {
                     height: 80,
                 },
             ),
-            "translated damage should remain clipped to the child client area even when the original rect overflows the surface edge"
+            "translated damage should remain clipped to the offscreen bitmap bounds even when the original host-space rect overflows the pane edge"
+        );
+    }
+
+    #[test]
+    fn stable_host_rect_does_not_force_offscreen_target_recreation() {
+        let surface_rect = NativeTerminalSurfaceRect {
+            x: 374,
+            y: 92,
+            width: 560,
+            height: 552,
+        };
+        let mut backend = WindowsNativeSurfaceBackend::default();
+        backend.state.attached = true;
+        backend.state.host_hwnd = Some(204738);
+        backend.state.window_rect = surface_rect;
+        backend.state.rect = surface_rect;
+        backend.state.host_surface = Some(
+            WindowsCompositionSurfaceHost::create(204738, surface_rect)
+                .expect("create test host surface"),
+        );
+        backend.state.render_target_dirty = false;
+
+        backend.sync_host_surface_rect();
+
+        assert!(
+            !backend.state.render_target_dirty,
+            "an unchanged host rect should not dirty the WIC render target every present, otherwise partial damage redraws recreate a blank bitmap and only repaint the clipped region"
         );
     }
 }

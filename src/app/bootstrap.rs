@@ -215,6 +215,9 @@ thread_local! {
     static WORKSPACE_NATIVE_CURSOR_BLINK_TIMER: RefCell<Option<Rc<Timer>>> = const {
         RefCell::new(None)
     };
+    static WORKSPACE_PENDING_NATIVE_TERMINAL_RESIZE: RefCell<Option<(i32, i32)>> = const {
+        RefCell::new(None)
+    };
     static WORKSPACE_RUNTIME_PROFILE: RefCell<Option<AppRuntimeProfile>> = const {
         RefCell::new(None)
     };
@@ -2251,9 +2254,7 @@ fn workspace_blocks_native_terminal_surface(window: &AppWindow) -> bool {
 }
 
 fn workspace_native_terminal_rect(window: &AppWindow) -> NativeTerminalSurfaceRect {
-    if workspace_blocks_native_terminal_surface(window)
-        || window.get_workspace_session_context_menu_open()
-    {
+    if workspace_blocks_native_terminal_surface(window) {
         return NativeTerminalSurfaceRect::default();
     }
 
@@ -2278,6 +2279,94 @@ fn should_forward_workspace_terminal_resize(window: &AppWindow, rows: i32, cols:
     rows > 0 && cols > 0
 }
 
+fn workspace_native_terminal_resize_target(
+    rect: NativeTerminalSurfaceRect,
+    cell_width_px: u32,
+    cell_height_px: u32,
+) -> Option<(i32, i32)> {
+    if rect.width <= 0
+        || rect.height <= 0
+        || cell_width_px == 0
+        || cell_height_px == 0
+    {
+        return None;
+    }
+
+    let rows = rect.height / i32::try_from(cell_height_px).ok()?;
+    let cols = rect.width / i32::try_from(cell_width_px).ok()?;
+    (rows > 0 && cols > 0).then_some((rows, cols))
+}
+
+fn sync_workspace_native_terminal_resize_backstop(
+    window: &AppWindow,
+    rect: NativeTerminalSurfaceRect,
+    frame: &NativeTerminalFrame,
+) {
+    let Some((desired_rows, desired_cols)) = workspace_native_terminal_resize_target(
+        rect,
+        frame.cell_width_px,
+        frame.cell_height_px,
+    ) else {
+        WORKSPACE_PENDING_NATIVE_TERMINAL_RESIZE.with(|pending| {
+            pending.borrow_mut().take();
+        });
+        return;
+    };
+
+    let current_rows = i32::try_from(frame.presentable_frame.grid_rows).unwrap_or(i32::MAX);
+    let current_cols = i32::try_from(frame.presentable_frame.grid_cols).unwrap_or(i32::MAX);
+    if desired_rows == current_rows && desired_cols == current_cols {
+        WORKSPACE_PENDING_NATIVE_TERMINAL_RESIZE.with(|pending| {
+            pending.borrow_mut().take();
+        });
+        return;
+    }
+
+    let next_request = (desired_rows, desired_cols);
+    let should_request = WORKSPACE_PENDING_NATIVE_TERMINAL_RESIZE.with(|pending| {
+        let mut pending = pending.borrow_mut();
+        if pending.as_ref() == Some(&next_request) {
+            false
+        } else {
+            *pending = Some(next_request);
+            true
+        }
+    });
+    if !should_request {
+        return;
+    }
+
+    tracing::debug!(
+        target: "app.terminal",
+        current_rows,
+        current_cols,
+        desired_rows,
+        desired_cols,
+        rect_width = rect.width,
+        rect_height = rect.height,
+        cell_width_px = frame.cell_width_px,
+        cell_height_px = frame.cell_height_px,
+        "native terminal viewport exceeded the projected grid; requesting host resize backstop"
+    );
+    let handle = window.as_weak();
+    if let Err(err) = slint::invoke_from_event_loop(move || {
+        if let Some(window) = handle.upgrade() {
+            window.invoke_workspace_session_resize_requested(desired_rows, desired_cols);
+        }
+    }) {
+        WORKSPACE_PENDING_NATIVE_TERMINAL_RESIZE.with(|pending| {
+            pending.borrow_mut().take();
+        });
+        tracing::warn!(
+            target: "app.terminal",
+            error = %err,
+            desired_rows,
+            desired_cols,
+            "failed to schedule native terminal resize backstop on the Slint event loop"
+        );
+    }
+}
+
 fn sync_workspace_native_terminal_surface_geometry(window: &AppWindow) {
     let rect = workspace_native_terminal_rect(window);
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
@@ -2289,6 +2378,9 @@ fn sync_workspace_native_terminal_surface_geometry(window: &AppWindow) {
 
 fn clear_workspace_retained_native_terminal_surface(window: &AppWindow) {
     window.set_workspace_session_native_frame_token(0);
+    WORKSPACE_PENDING_NATIVE_TERMINAL_RESIZE.with(|pending| {
+        pending.borrow_mut().take();
+    });
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
         if let Some(surface) = surface.borrow().as_ref() {
             surface.clear_frame();
@@ -2319,10 +2411,25 @@ fn present_workspace_native_terminal_frame(window: &AppWindow, frame: NativeTerm
         "presenting retained native terminal frame state"
     );
     let rect = workspace_native_terminal_rect(window);
+    tracing::debug!(
+        target: "app.terminal",
+        frame_token = frame.frame_token,
+        grid_rows = frame.presentable_frame.grid_rows,
+        grid_cols = frame.presentable_frame.grid_cols,
+        cell_width_px = frame.cell_width_px,
+        cell_height_px = frame.cell_height_px,
+        rect_width = rect.width,
+        rect_height = rect.height,
+        "projecting native terminal frame into host-owned surface"
+    );
+    sync_workspace_native_terminal_resize_backstop(window, rect, &frame);
     WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
         if let Some(surface) = surface.borrow().as_ref() {
             surface.update_terminal_rect(rect);
             surface.present(frame);
+            if let Some(image) = surface.host_image_snapshot() {
+                window.set_workspace_session_surface_image(image);
+            }
         }
     });
 }
@@ -5735,6 +5842,17 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let Some(window) = window_handle.upgrade() else {
             return;
         };
+        let rect = workspace_native_terminal_rect(&window);
+        tracing::debug!(
+            target: "app.terminal",
+            requested_rows = rows,
+            requested_cols = cols,
+            rect_width = rect.width,
+            rect_height = rect.height,
+            cell_width = window.get_workspace_session_cell_width(),
+            cell_height = window.get_workspace_session_cell_height(),
+            "workspace terminal host requested resize"
+        );
         if !should_forward_workspace_terminal_resize(&window, rows, cols) {
             return;
         }

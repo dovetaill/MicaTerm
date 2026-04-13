@@ -3,9 +3,9 @@
 pub mod backend;
 pub mod wayland;
 #[cfg(feature = "terminal-native-renderer")]
-pub mod windows;
+pub mod windows_composition_surface;
 #[cfg(feature = "terminal-native-renderer")]
-pub mod windows_child_host;
+pub mod windows;
 #[cfg(not(feature = "terminal-native-renderer"))]
 pub mod windows_stub;
 pub mod x11;
@@ -89,6 +89,10 @@ impl PlatformNativeSurfaceBackend for DetachedPlatformSurfaceBackend {
     }
 
     fn present(&mut self, _damage: crate::app::terminal_renderer::NativeSurfaceDamage) {}
+
+    fn host_image_snapshot(&self) -> Option<slint::Image> {
+        None
+    }
 
     fn diagnostics_snapshot(
         &self,

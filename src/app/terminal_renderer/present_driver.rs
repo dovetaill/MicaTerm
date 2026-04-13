@@ -10,7 +10,7 @@ use crate::app::runtime_profile::NativePresentPath;
 pub type NativeSurfacePresentCallback = Rc<dyn Fn()>;
 
 pub trait NativeSurfacePresentDriver {
-    // The native present runs immediately; host redraw stays a synchronization hint while the child HWND owns visible terminal output.
+    // The native present runs immediately; host redraw stays a synchronization hint while the host surface owns visible terminal output.
     fn schedule_present(&self, callback: NativeSurfacePresentCallback, request_host_redraw: bool);
 }
 

@@ -156,8 +156,8 @@ export component TerminalSessionHost inherits Rectangle {
     in-out property <int> selection-end-col: -1;
     out property <length> native-surface-x: root.terminal-surface-origin-x();
     out property <length> native-surface-y: root.terminal-surface-origin-y();
-    out property <length> native-surface-width: root.snapped-terminal-visible-grid-width();
-    out property <length> native-surface-height: root.snapped-terminal-visible-grid-height();
+    out property <length> native-surface-width: root.snapped-terminal-content-width();
+    out property <length> native-surface-height: root.snapped-terminal-content-height();
     callback text-input(string);
     callback key-input(string, bool, bool, bool);
     callback surface-resize-requested(int, int);
@@ -265,6 +265,20 @@ export component TerminalSessionHost inherits Rectangle {
             return 0px;
         }
         return root.snap-length-to-device-pixel(root.terminal-visible-grid-height());
+    }
+
+    function snapped-terminal-content-width() -> length {
+        if root.mode != "terminal" {
+            return 0px;
+        }
+        return root.snap-length-to-device-pixel(root.terminal-content-width());
+    }
+
+    function snapped-terminal-content-height() -> length {
+        if root.mode != "terminal" {
+            return 0px;
+        }
+        return root.snap-length-to-device-pixel(root.terminal-content-height());
     }
 
     function scrollbar-visible() -> bool {
@@ -950,20 +964,20 @@ export component TerminalSessionHost inherits Rectangle {
             blank-surface := Rectangle {
                 x: root.terminal-surface-origin-x();
                 y: root.terminal-surface-origin-y();
-                width: root.snapped-terminal-visible-grid-width();
-                height: root.snapped-terminal-visible-grid-height();
+                width: root.snapped-terminal-content-width();
+                height: root.snapped-terminal-content-height();
                 clip: true;
                 background: root.session-default-bg;
 
                 Image {
                     x: 0px;
                     y: 0px;
-                    width: root.terminal-grid-width();
-                    height: root.terminal-grid-height();
+                    width: root.session-render-mode == "native" ? parent.width : root.terminal-grid-width();
+                    height: root.session-render-mode == "native" ? parent.height : root.terminal-grid-height();
                     source: root.session-surface-image;
                     image-fit: fill;
                     image-rendering: pixelated;
-                    visible: root.session-render-mode == "bitmap";
+                    visible: root.session-render-mode == "bitmap" || root.session-render-mode == "native";
                 }
 
                 if root.selection-overlay-active() && root.selection-start-row == root.selection-end-row : selection-overlay-single-row := Rectangle {

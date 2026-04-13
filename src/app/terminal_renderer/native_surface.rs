@@ -3,6 +3,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use slint::ComponentHandle;
+
 use crate::AppWindow;
 use crate::app::runtime_profile::NativePresentPath;
 use crate::app::terminal_presenter::NativeTerminalFrame;
@@ -27,6 +29,7 @@ pub struct NativeTerminalSurface {
 struct NativeTerminalSurfaceState {
     backend: Box<dyn PlatformNativeSurfaceBackend>,
     present_driver: Rc<dyn NativeSurfacePresentDriver>,
+    host_image_publisher: Option<Rc<dyn Fn(slint::Image)>>,
     retained_frame: Option<RetainedNativeTerminalSurfaceFrame>,
     rect: NativeTerminalSurfaceRect,
     last_drawn_frame_token: u64,
@@ -57,6 +60,10 @@ impl PendingPresentGate {
         }
     }
 
+    fn is_scheduled(&self) -> bool {
+        self.scheduled
+    }
+
     fn clear(&mut self) {
         self.scheduled = false;
     }
@@ -64,9 +71,15 @@ impl PendingPresentGate {
 
 impl NativeTerminalSurfaceState {
     fn new(window: &AppWindow) -> Self {
+        let window_weak: slint::Weak<AppWindow> = window.as_weak();
         Self {
             backend: create_platform_native_surface_backend(),
             present_driver: Rc::new(EventLoopPresentDriver::new(window)),
+            host_image_publisher: Some(Rc::new(move |image| {
+                if let Some(window) = window_weak.upgrade() {
+                    window.set_workspace_session_surface_image(image);
+                }
+            })),
             retained_frame: None,
             rect: NativeTerminalSurfaceRect::default(),
             last_drawn_frame_token: 0,
@@ -177,6 +190,10 @@ impl NativeTerminalSurface {
         self.state.borrow().latest_diagnostics.clone()
     }
 
+    pub fn host_image_snapshot(&self) -> Option<slint::Image> {
+        self.state.borrow().backend.host_image_snapshot()
+    }
+
     pub fn clear_frame(&self) {
         let changed = {
             let mut state = self.state.borrow_mut();
@@ -216,8 +233,9 @@ impl NativeTerminalSurface {
             });
         };
 
+        install_after_draw_hook(&self.state);
+
         if native_present_path != NativePresentPath::RenderingNotifier {
-            install_after_draw_hook(&self.state);
             return;
         }
 
@@ -250,8 +268,6 @@ impl NativeTerminalSurface {
                 let mut state = self.state.borrow_mut();
                 state.present_driver = Rc::new(EventLoopPresentDriver::new(window));
                 refresh_diagnostics(&mut state);
-                drop(state);
-                install_after_draw_hook(&self.state);
             }
         }
     }
@@ -306,12 +322,20 @@ fn draw_retained_frame(state: &mut NativeTerminalSurfaceState) {
         state.last_drawn_frame_token = 0;
     }
     state.backend.present(damage);
+    if let Some(image) = state.backend.host_image_snapshot() {
+        if let Some(publisher) = state.host_image_publisher.as_ref() {
+            publisher(image);
+        }
+    }
     state.host_redraw_sync_pending = false;
     state.dirty = false;
     refresh_diagnostics(state);
 }
 
 fn replay_after_host_redraw(state: &mut NativeTerminalSurfaceState) {
+    if !state.pending_host_redraw.is_scheduled() {
+        return;
+    }
     state.pending_host_redraw.clear();
     state.host_redraw_replay_count = state.host_redraw_replay_count.saturating_add(1);
     state.host_redraw_sync_pending = true;
@@ -363,9 +387,74 @@ fn refresh_diagnostics(state: &mut NativeTerminalSurfaceState) {
 
 #[cfg(test)]
 mod tests {
-    use super::{PendingPresentGate, effective_present_damage};
-    use crate::app::terminal_renderer::damage::{NativeSurfaceDamage, NativeSurfaceDamageKind};
-    use crate::app::terminal_renderer::platform::NativeTerminalSurfaceRect;
+    use std::cell::Cell;
+
+    use super::{
+        NativeTerminalSurfaceState, PendingPresentGate, draw_retained_frame,
+        effective_present_damage, replay_after_host_redraw,
+    };
+    use crate::AppWindow;
+    use crate::app::terminal_renderer::damage::{NativeFrameDamageTracker, NativeSurfaceDamage, NativeSurfaceDamageKind};
+    use crate::app::terminal_renderer::platform::{
+        NativeTerminalSurfaceRect, PlatformNativeSurfaceBackend, RetainedNativeTerminalSurfaceFrame,
+    };
+    use crate::app::terminal_renderer::present_driver::{NativeSurfacePresentCallback, NativeSurfacePresentDriver};
+    use crate::app::terminal_renderer::NativeTerminalSurfaceDiagnostics;
+    use anyhow::Result;
+    use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
+    use std::rc::Rc;
+
+    #[derive(Default)]
+    struct TestBackend {
+        snapshot: Option<Image>,
+        present_count: Rc<Cell<u32>>,
+    }
+
+    impl PlatformNativeSurfaceBackend for TestBackend {
+        fn attach(&mut self, _window: &AppWindow) -> Result<()> {
+            Ok(())
+        }
+
+        fn update_surface_rect(&mut self, _rect: NativeTerminalSurfaceRect) {}
+
+        fn update_frame(&mut self, _frame: Option<RetainedNativeTerminalSurfaceFrame>) {}
+
+        fn present(&mut self, _damage: NativeSurfaceDamage) {
+            self.present_count.set(self.present_count.get().saturating_add(1));
+        }
+
+        fn host_image_snapshot(&self) -> Option<Image> {
+            self.snapshot.clone()
+        }
+
+        fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics {
+            NativeTerminalSurfaceDiagnostics::default()
+        }
+
+        fn detach(&mut self) {}
+    }
+
+    struct NoopPresentDriver;
+
+    impl NativeSurfacePresentDriver for NoopPresentDriver {
+        fn schedule_present(
+            &self,
+            _callback: NativeSurfacePresentCallback,
+            _request_host_redraw: bool,
+        ) {
+        }
+    }
+
+    fn one_pixel_image() -> Image {
+        let mut pixels = SharedPixelBuffer::<Rgba8Pixel>::new(1, 1);
+        pixels.make_mut_slice()[0] = Rgba8Pixel {
+            r: 1,
+            g: 2,
+            b: 3,
+            a: 255,
+        };
+        Image::from_rgba8(pixels)
+    }
 
     #[test]
     fn pending_present_gate_coalesces_redundant_schedule_requests() {
@@ -459,6 +548,100 @@ mod tests {
             effective_present_damage(rect, overlay_damage, false, false),
             overlay_damage,
             "when no host redraw replay is pending, overlay-only updates should keep their narrow damage rect"
+        );
+    }
+
+    #[test]
+    fn replay_after_host_redraw_republishes_latest_host_image() {
+        let publish_count = Rc::new(Cell::new(0u32));
+        let published_width = Rc::new(Cell::new(0i32));
+        let image = one_pixel_image();
+        let backend = TestBackend {
+            snapshot: Some(image.clone()),
+            present_count: Rc::new(Cell::new(0)),
+        };
+        let image_size = image.size();
+        let publish_count_for_callback = Rc::clone(&publish_count);
+        let published_width_for_callback = Rc::clone(&published_width);
+        let mut state = NativeTerminalSurfaceState {
+            backend: Box::new(backend),
+            present_driver: Rc::new(NoopPresentDriver),
+            host_image_publisher: Some(Rc::new(move |image| {
+                publish_count_for_callback
+                    .set(publish_count_for_callback.get().saturating_add(1));
+                published_width_for_callback.set(image.size().width as i32);
+            })),
+            retained_frame: None,
+            rect: NativeTerminalSurfaceRect {
+                x: 374,
+                y: 92,
+                width: 560,
+                height: 552,
+            },
+            last_drawn_frame_token: 0,
+            latest_diagnostics: NativeTerminalSurfaceDiagnostics::default(),
+            damage_tracker: NativeFrameDamageTracker::default(),
+            surface_alive: true,
+            host_redraw_sync_pending: false,
+            dirty: false,
+            pending_present: PendingPresentGate::default(),
+            pending_host_redraw: PendingPresentGate { scheduled: true },
+            scheduled_present_count: 0,
+            host_redraw_request_count: 0,
+            host_redraw_replay_count: 0,
+        };
+
+        replay_after_host_redraw(&mut state);
+
+        assert_eq!(
+            publish_count.get(),
+            1,
+            "after-draw host redraw replays should republish the latest host-owned bitmap so the Slint image path stays in sync with offscreen native presents"
+        );
+        assert_eq!(
+            published_width.get(),
+            image_size.width as i32,
+            "the replay-published image should be the backend snapshot produced by the retained native draw"
+        );
+    }
+
+    #[test]
+    fn draw_retained_frame_skips_publish_without_backend_snapshot() {
+        let publish_count = Rc::new(Cell::new(0u32));
+        let publish_count_for_callback = Rc::clone(&publish_count);
+        let mut state = NativeTerminalSurfaceState {
+            backend: Box::new(TestBackend::default()),
+            present_driver: Rc::new(NoopPresentDriver),
+            host_image_publisher: Some(Rc::new(move |_image| {
+                publish_count_for_callback
+                    .set(publish_count_for_callback.get().saturating_add(1));
+            })),
+            retained_frame: None,
+            rect: NativeTerminalSurfaceRect {
+                x: 374,
+                y: 92,
+                width: 560,
+                height: 552,
+            },
+            last_drawn_frame_token: 0,
+            latest_diagnostics: NativeTerminalSurfaceDiagnostics::default(),
+            damage_tracker: NativeFrameDamageTracker::default(),
+            surface_alive: true,
+            host_redraw_sync_pending: false,
+            dirty: true,
+            pending_present: PendingPresentGate::default(),
+            pending_host_redraw: PendingPresentGate::default(),
+            scheduled_present_count: 0,
+            host_redraw_request_count: 0,
+            host_redraw_replay_count: 0,
+        };
+
+        draw_retained_frame(&mut state);
+
+        assert_eq!(
+            publish_count.get(),
+            0,
+            "native surface draws should only republish host-owned images when the backend actually produced a fresh bitmap snapshot"
         );
     }
 }

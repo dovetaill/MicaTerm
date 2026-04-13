@@ -1,6 +1,7 @@
 //! Shared platform backend contract for native terminal surface hosting.
 
 use anyhow::Result;
+use slint::Image;
 
 use crate::AppWindow;
 use crate::app::terminal_presenter::NativeTerminalFrame;
@@ -25,6 +26,7 @@ pub trait PlatformNativeSurfaceBackend {
     fn update_surface_rect(&mut self, rect: NativeTerminalSurfaceRect);
     fn update_frame(&mut self, frame: Option<RetainedNativeTerminalSurfaceFrame>);
     fn present(&mut self, damage: NativeSurfaceDamage);
+    fn host_image_snapshot(&self) -> Option<Image>;
     fn diagnostics_snapshot(&self) -> NativeTerminalSurfaceDiagnostics;
     fn detach(&mut self);
 }

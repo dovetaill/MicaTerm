@@ -847,21 +847,21 @@ fn windows_backend_source_consumes_retained_color_glyph_and_overlay_payloads() {
 }
 
 #[test]
-fn windows_backend_source_hardens_device_loss_and_child_surface_present_contract() {
+fn windows_backend_source_hardens_device_loss_and_host_surface_present_contract() {
     let windows_backend_source =
         fs::read_to_string("src/app/terminal_renderer/platform/windows.rs")
             .expect("read windows platform backend");
 
     assert!(
         windows_backend_source.contains("self.resolve_host_hwnd_if_needed();")
-            && windows_backend_source.contains("self.ensure_child_surface_window();")
+            && windows_backend_source.contains("self.ensure_host_surface();")
             && windows_backend_source.contains(
-                "if self.state.host_hwnd.is_none() || self.state.surface_hwnd.is_none() {
+                "if self.state.host_hwnd.is_none() || self.state.host_surface.is_none() {
             return;
         }"
             )
-            && windows_backend_source.contains("self.state.ensure_hwnd_render_target();"),
-        "windows backend present path should bail out once the host or child HWND disappears and otherwise recreate the dedicated child-surface Direct2D target instead of rebinding to the host window DC"
+            && windows_backend_source.contains("self.state.ensure_wic_bitmap_render_target();"),
+        "windows backend present path should bail out once the host window or host surface disappears and otherwise recreate the dedicated WIC offscreen target instead of rebinding to either a host-window DC or an HWND render target"
     );
     assert!(
         windows_backend_source.contains("fn end_frame(&mut self) -> bool"),
@@ -871,10 +871,9 @@ fn windows_backend_source_hardens_device_loss_and_child_surface_present_contract
         windows_backend_source.contains("if self.state.end_frame() {")
             && windows_backend_source
                 .contains("self.state.last_presented_frame_token = frame.frame.frame_token;")
-            && windows_backend_source.contains("self.state.fallback_paint_required = false;")
-            && windows_backend_source
-                .contains("self.set_child_surface_fallback_paint_enabled(false);"),
-        "windows backend should advance last_presented_frame_token and clear child-surface fallback paint only after EndDraw succeeds"
+            && windows_backend_source.contains("let _ = self.state.capture_host_surface_image();")
+            && windows_backend_source.contains("self.state.fallback_paint_required = false;"),
+        "windows backend should advance last_presented_frame_token, read back the offscreen image, and clear host-surface fallback paint only after EndDraw succeeds"
     );
 }
 
