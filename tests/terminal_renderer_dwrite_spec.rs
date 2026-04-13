@@ -343,8 +343,8 @@ fn atlas_and_font_backend_sources_expose_tighter_typography_contract() {
         "shared typography defaults should expose a slightly looser 1.5 line-height contract for dense Windows terminal text"
     );
     assert!(
-        font_backend_source.contains("pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 2.0;"),
-        "shared typography defaults should widen terminal letter spacing so dense Windows prompt text keeps breathing room"
+        font_backend_source.contains("pub const DEFAULT_TERMINAL_LETTER_SPACING_PX: f32 = 1.5;"),
+        "shared typography defaults should keep a modest terminal letter spacing so dense Windows prompt text keeps breathing room without looking over-tracked"
     );
     assert!(
         font_backend_source

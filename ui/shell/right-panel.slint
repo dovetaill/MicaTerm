@@ -2,6 +2,7 @@
 
 import { ListView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 export struct SftpPanelItem {
     id: string,
@@ -66,10 +67,11 @@ component SftpHeaderCell inherits Rectangle {
         width: parent.width - (sort-indicator.visible ? 14px : 0px);
         height: parent.height;
         text: root.label;
+        font-family: AppTypography.ui-font-family;
         color: ThemeTokens.text-primary;
         opacity: 0.68;
-        font-size: 11px;
-        font-weight: 600;
+        font-size: AppTypography.ui-font-size-caption;
+        font-weight: AppTypography.ui-font-weight-semibold;
         horizontal-alignment: root.right-aligned ? right : left;
         vertical-alignment: center;
         overflow: elide;
@@ -82,9 +84,10 @@ component SftpHeaderCell inherits Rectangle {
         height: parent.height;
         visible: root.active-sort-column == root.column-id;
         text: root.active-sort-direction == "desc" ? "↓" : "↑";
+        font-family: AppTypography.ui-font-family;
         color: ThemeTokens.text-primary;
         opacity: 0.82;
-        font-size: 10px;
+        font-size: AppTypography.ui-font-size-caption;
         font-weight: 700;
         horizontal-alignment: center;
         vertical-alignment: center;

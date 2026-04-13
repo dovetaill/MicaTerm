@@ -1,4 +1,5 @@
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 export component AssetNodeRow inherits Rectangle {
     in property <string> item-id;
@@ -109,6 +110,8 @@ export component AssetNodeRow inherits Rectangle {
         width: parent.width - self.x - root.hint-width - 12px;
         height: parent.height;
         text: root.label;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-body;
         color: ThemeTokens.text-primary;
         vertical-alignment: center;
     }
@@ -119,8 +122,9 @@ export component AssetNodeRow inherits Rectangle {
         width: root.hint-width;
         height: parent.height;
         text: root.path-hint;
+        font-family: AppTypography.ui-font-family;
         color: ThemeTokens.text-muted;
-        font-size: 11px;
+        font-size: AppTypography.ui-font-size-caption;
         horizontal-alignment: right;
         vertical-alignment: center;
     }

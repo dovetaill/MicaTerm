@@ -23,6 +23,8 @@ fn typography_theme_exposes_the_ui_font_contract() {
     assert!(source.contains("ui-font-family: \"MiSans\";"));
     assert!(source.contains("ui-font-weight-regular: 400;"));
     assert!(source.contains("ui-font-weight-semibold: 600;"));
+    assert!(source.contains("ui-font-size-body: 13px;"));
+    assert!(source.contains("ui-font-size-caption: 12px;"));
     assert!(!source.contains("SarasaUiSC"));
 }
 
@@ -35,6 +37,7 @@ fn app_window_uses_misans_as_the_shell_default() {
     assert!(source.contains("import { AppTypography } from \"theme/typography.slint\";"));
     assert!(source.contains("default-font-family: AppTypography.ui-font-family;"));
     assert!(source.contains("default-font-weight: AppTypography.ui-font-weight-semibold;"));
+    assert!(source.contains("default-font-size: AppTypography.ui-font-size-body;"));
     assert!(!source.contains("SarasaUiSC"));
 }
 
@@ -45,7 +48,8 @@ fn popup_menu_uses_the_shared_ui_font_family() {
 
     assert!(source.contains("import { AppTypography } from \"../theme/typography.slint\";"));
     assert!(source.contains("font-family: AppTypography.ui-font-family;"));
-    assert!(source.contains("font-weight: AppTypography.ui-font-weight-regular;"));
+    assert!(source.contains("font-size: AppTypography.ui-font-size-body;"));
+    assert!(source.contains("font-weight: AppTypography.ui-font-weight-semibold;"));
 }
 
 #[test]

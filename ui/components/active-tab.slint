@@ -1,6 +1,7 @@
 // Workspace tab chip that exposes selection and close affordances.
 
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 export component ActiveTab inherits Rectangle {
     in property <string> title: "";
@@ -18,7 +19,7 @@ export component ActiveTab inherits Rectangle {
     private property <bool> close-visible: root.active || root.has-hover;
 
     min-width: 0px;
-    height: 32px;
+    height: 34px;
     preferred-width: min(root.max-chip-width, max(root.min-chip-width, title-metric.preferred-width + 62px));
     border-radius: 10px;
     border-width: 0px;
@@ -38,8 +39,9 @@ export component ActiveTab inherits Rectangle {
         height: 0px;
         text: root.title;
         color: transparent;
-        font-size: 12px;
-        font-weight: root.active ? 700 : 600;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-body;
+        font-weight: root.active ? 700 : AppTypography.ui-font-weight-semibold;
     }
 
     state-dot := Rectangle {
@@ -113,9 +115,10 @@ export component ActiveTab inherits Rectangle {
         width: max(0px, close-button.x - 24px);
         height: parent.height;
         text: root.title;
+        font-family: AppTypography.ui-font-family;
         color: root.active ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
-        font-size: 12px;
-        font-weight: root.active ? 700 : 600;
+        font-size: AppTypography.ui-font-size-body;
+        font-weight: root.active ? 700 : AppTypography.ui-font-weight-semibold;
         vertical-alignment: center;
         overflow: elide;
     }

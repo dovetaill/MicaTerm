@@ -21,7 +21,8 @@ component MenuActionItem inherits Rectangle {
         height: parent.height;
         text: root.label;
         font-family: AppTypography.ui-font-family;
-        font-weight: AppTypography.ui-font-weight-regular;
+        font-size: AppTypography.ui-font-size-body;
+        font-weight: AppTypography.ui-font-weight-semibold;
         color: touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
         vertical-alignment: center;
     }

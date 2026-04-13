@@ -48,6 +48,10 @@ fn ui_shell_default_weight_moves_to_misans_semibold() {
         app_window.contains("default-font-weight: AppTypography.ui-font-weight-semibold;"),
         "shell UI should default to MiSans semibold so the chrome stops looking too thin on Windows"
     );
+    assert!(
+        app_window.contains("default-font-size: AppTypography.ui-font-size-body;"),
+        "shell UI should lift the default font size a notch so the chrome stops looking undersized on Windows"
+    );
 }
 
 #[test]

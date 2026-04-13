@@ -2,6 +2,7 @@
 
 import { ListView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 import { AssetNodeRow } from "../components/asset-node-row.slint";
 import { AssetsSearchPopover } from "../components/assets-search-popover.slint";
 import { SidebarToolbarIconButton } from "../components/sidebar-toolbar-icon-button.slint";
@@ -90,9 +91,10 @@ export component AssetsSidebar inherits Rectangle {
 
                 Text {
                     text: "Assets";
+                    font-family: AppTypography.ui-font-family;
                     color: ThemeTokens.text-secondary;
-                    font-size: 13px;
-                    font-weight: 600;
+                    font-size: 14px;
+                    font-weight: AppTypography.ui-font-weight-semibold;
                     vertical-alignment: center;
                 }
 
