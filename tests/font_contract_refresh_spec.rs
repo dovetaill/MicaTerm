@@ -70,8 +70,8 @@ fn ui_shell_diagnostics_report_medium_request_weight() {
     let diagnostics = fs::read_to_string("src/app/font_diagnostics.rs").expect("read diagnostics");
 
     assert!(
-        diagnostics.contains("let requested_weight = 400;")
-            || diagnostics.contains("const UI_FONT_DEFAULT_WEIGHT: i32 = 400;"),
+        diagnostics.contains("let requested_weight = UI_FONT_DEFAULT_WEIGHT;")
+            || diagnostics.contains("pub const UI_FONT_DEFAULT_WEIGHT: i32 = 400;"),
         "ui diagnostics should keep the default family probe on MiSans regular so generic text/input inheritance stays truthful"
     );
     assert!(
@@ -85,4 +85,48 @@ fn ui_shell_diagnostics_report_medium_request_weight() {
             || diagnostics.contains("chrome_resolved_family"),
         "ui diagnostics should log the actual medium-weight chrome probe so packaged Windows runs can verify the visible shell labels are really hitting the intended MiSans chrome face"
     );
+}
+
+#[test]
+fn slint_renderer_overrides_misans_bundle_weights_to_css_values() {
+    let skia_renderer =
+        fs::read_to_string("vendor/i-slint-renderer-skia/lib.rs").expect("read skia renderer");
+
+    for expected in [
+        "FontInfoOverride",
+        "MiSans-Regular",
+        "MiSans-Medium",
+        "MiSans-Semibold",
+        "FontWeight::new(400.0)",
+        "FontWeight::new(500.0)",
+        "FontWeight::new(600.0)",
+        "family_name: Some(\"MiSans\")",
+    ] {
+        assert!(
+            skia_renderer.contains(expected),
+            "the vendored Slint renderer should keep `{expected}` so bundled MiSans fonts are registered with CSS-like weights instead of their raw 330/380/520 OS/2 metadata"
+        );
+    }
+}
+
+#[test]
+fn font_diagnostics_distinguish_effective_and_embedded_weights() {
+    let diagnostics = fs::read_to_string("src/app/font_diagnostics.rs").expect("read diagnostics");
+
+    for expected in [
+        "embedded_weight",
+        "embedded_post_script_name",
+        "resolved_weight = requested_match.weight.as_str()",
+        "chrome_resolved_weight = chrome_requested_match.weight.as_str()",
+        "resolved_primary_embedded_weight",
+        "cjk_embedded_weight",
+        "symbol_embedded_weight",
+        "icon_embedded_weight",
+        "emoji_embedded_weight",
+    ] {
+        assert!(
+            diagnostics.contains(expected),
+            "font diagnostics should keep `{expected}` so packaged Windows logs reveal the effective matched weight separately from the font file's embedded metadata"
+        );
+    }
 }

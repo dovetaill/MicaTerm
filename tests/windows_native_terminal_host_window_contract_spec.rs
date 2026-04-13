@@ -22,6 +22,10 @@ fn bootstrap_sets_opaque_host_override_before_creating_retained_native_window() 
             && bootstrap_source.contains("AppWindow::new()?"),
         "bootstrap should configure the Windows host-window transparency override before constructing the main Slint window so retained-native child HWND presentation is not forced under a transparent host shell"
     );
+    assert!(
+        !bootstrap_source.contains("let _ = window_creation_env_override;"),
+        "bootstrap should not immediately drop the opaque-host override scope if later renderer diagnostics and shell text policy still need to know whether the host window is opaque"
+    );
 }
 
 #[test]

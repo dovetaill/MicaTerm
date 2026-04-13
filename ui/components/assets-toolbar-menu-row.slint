@@ -1,6 +1,7 @@
 // Reusable row chrome for actions shown in the assets create menu.
 
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 export component AssetsToolbarMenuRow inherits Rectangle {
     in property <string> label;
@@ -36,6 +37,10 @@ export component AssetsToolbarMenuRow inherits Rectangle {
         width: parent.width - 50px;
         height: parent.height;
         text: root.label;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-body;
+        font-weight: AppTypography.ui-font-weight-medium;
+        letter-spacing: 0.08px;
         color: ThemeTokens.text-primary;
         vertical-alignment: center;
     }

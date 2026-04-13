@@ -29,6 +29,14 @@ use windows::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObj
 
 use crate::SkiaSharedContext;
 
+#[cfg(target_os = "windows")]
+const FORCE_OPAQUE_HOST_WINDOW_ENV: &str = "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW";
+
+#[cfg(target_os = "windows")]
+fn shell_host_is_opaque() -> bool {
+    std::env::var_os(FORCE_OPAQUE_HOST_WINDOW_ENV).is_some()
+}
+
 trait MapToPlatformError<T> {
     fn map_platform_error(self, msg: &str) -> std::result::Result<T, PlatformError>;
 }
@@ -191,12 +199,15 @@ impl SwapChain {
             };
             let backend_texture =
                 skia_safe::gpu::BackendRenderTarget::new_d3d((width, height), &texture_info);
-            // The shell UI is composited through translucent surfaces, so keep the main Skia
-            // target on grayscale-friendly text geometry instead of forcing LCD AA assumptions.
             let surface_color_space = skia_safe::ColorSpace::new_srgb();
+            let pixel_geometry = if shell_host_is_opaque() {
+                PixelGeometry::RGBH
+            } else {
+                PixelGeometry::Unknown
+            };
             let surface_props = SurfaceProps::new(
                 SurfacePropsFlags::USE_DEVICE_INDEPENDENT_FONTS,
-                PixelGeometry::Unknown,
+                pixel_geometry,
             );
 
             skia_safe::gpu::surfaces::wrap_backend_render_target(

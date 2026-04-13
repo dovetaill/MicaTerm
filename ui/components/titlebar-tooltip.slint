@@ -1,6 +1,7 @@
 // Tooltip overlay positioned relative to titlebar and sidebar controls.
 
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 export component TitlebarTooltip inherits Rectangle {
     in property <string> text;
@@ -36,7 +37,11 @@ export component TitlebarTooltip inherits Rectangle {
             width: parent.width - 20px;
             height: parent.height;
             text: root.text;
-            color: ThemeTokens.text-secondary;
+            font-family: AppTypography.ui-font-family;
+            font-size: AppTypography.ui-font-size-body;
+            font-weight: AppTypography.ui-font-weight-medium;
+            letter-spacing: 0.08px;
+            color: ThemeTokens.text-primary;
             horizontal-alignment: center;
             vertical-alignment: center;
         }

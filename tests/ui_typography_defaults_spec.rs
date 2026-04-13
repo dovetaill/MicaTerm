@@ -93,6 +93,37 @@ fn shell_chrome_text_uses_medium_weight_and_roomier_rows() {
 }
 
 #[test]
+fn small_shell_chrome_controls_use_explicit_misans_medium_contract() {
+    let tooltip = fs::read_to_string("ui/components/titlebar-tooltip.slint").expect("read tooltip");
+    let context_menu = fs::read_to_string("ui/components/assets-context-menu-row.slint")
+        .expect("read assets context menu row");
+    let toolbar_menu = fs::read_to_string("ui/components/assets-toolbar-menu-row.slint")
+        .expect("read assets toolbar menu row");
+    let welcome = fs::read_to_string("ui/welcome/welcome-view.slint").expect("read welcome view");
+
+    for source in [&tooltip, &context_menu, &toolbar_menu, &welcome] {
+        assert!(
+            source.contains("font-family: AppTypography.ui-font-family;"),
+            "small shell chrome text should stop inheriting whatever default happens to be active and instead request the shared MiSans family explicitly"
+        );
+    }
+
+    for source in [&tooltip, &context_menu, &toolbar_menu] {
+        assert!(
+            source.contains("font-size: AppTypography.ui-font-size-body;")
+                && source.contains("font-weight: AppTypography.ui-font-weight-medium;"),
+            "tooltips and asset menus should use the same explicit 14px MiSans Medium chrome contract so right-click menus and hover affordances stop looking thinner than nearby shell labels"
+        );
+    }
+
+    assert!(
+        welcome.contains("font-size: AppTypography.ui-font-size-body;")
+            && welcome.contains("font-weight: AppTypography.ui-font-weight-medium;"),
+        "the Welcome primary action button should use the same MiSans Medium shell chrome contract as menus and tabs instead of floating on default regular text"
+    );
+}
+
+#[test]
 fn assets_sidebar_list_height_tracks_the_shared_row_height() {
     let typography = fs::read_to_string("ui/theme/typography.slint").expect("read typography");
     let sidebar = fs::read_to_string("ui/shell/assets-sidebar.slint").expect("read assets sidebar");

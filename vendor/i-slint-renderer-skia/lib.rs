@@ -899,7 +899,9 @@ impl i_slint_core::renderer::RendererSealed for SkiaRenderer {
         &self,
         data: &'static [u8],
     ) -> Result<(), Box<dyn std::error::Error>> {
-        sharedfontique::get_collection().register_fonts(data.to_vec().into(), None);
+        let data = data.to_vec();
+        let info_override = misans_font_info_override(&data);
+        sharedfontique::get_collection().register_fonts(data.into(), info_override);
         Ok(())
     }
 
@@ -909,7 +911,8 @@ impl i_slint_core::renderer::RendererSealed for SkiaRenderer {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let requested_path = path.canonicalize().unwrap_or_else(|_| path.into());
         let contents = std::fs::read(requested_path)?;
-        sharedfontique::get_collection().register_fonts(contents.into(), None);
+        let info_override = misans_font_info_override(&contents);
+        sharedfontique::get_collection().register_fonts(contents.into(), info_override);
         Ok(())
     }
 
@@ -1006,6 +1009,38 @@ impl i_slint_core::renderer::RendererSealed for SkiaRenderer {
 
     fn supports_transformations(&self) -> bool {
         true
+    }
+}
+
+fn misans_font_info_override(
+    data: &[u8],
+) -> Option<sharedfontique::fontique::FontInfoOverride<'static>> {
+    let face = sharedfontique::ttf_parser::Face::parse(data, 0).ok()?;
+    let post_script_name = face
+        .names()
+        .into_iter()
+        .find(|name| {
+            name.name_id == sharedfontique::ttf_parser::name_id::POST_SCRIPT_NAME && name.is_unicode()
+        })
+        .and_then(|name| name.to_string())?;
+
+    match post_script_name.as_str() {
+        "MiSans-Regular" => Some(sharedfontique::fontique::FontInfoOverride {
+            family_name: Some("MiSans"),
+            weight: Some(sharedfontique::fontique::FontWeight::new(400.0)),
+            ..Default::default()
+        }),
+        "MiSans-Medium" => Some(sharedfontique::fontique::FontInfoOverride {
+            family_name: Some("MiSans"),
+            weight: Some(sharedfontique::fontique::FontWeight::new(500.0)),
+            ..Default::default()
+        }),
+        "MiSans-Semibold" => Some(sharedfontique::fontique::FontInfoOverride {
+            family_name: Some("MiSans"),
+            weight: Some(sharedfontique::fontique::FontWeight::new(600.0)),
+            ..Default::default()
+        }),
+        _ => None,
     }
 }
 

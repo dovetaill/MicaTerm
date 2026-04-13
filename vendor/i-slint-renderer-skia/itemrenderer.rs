@@ -23,7 +23,15 @@ use i_slint_core::window::WindowInner;
 use i_slint_core::{Brush, Color, SharedString};
 use skia_safe::{Matrix, TileMode};
 
+#[cfg(target_os = "windows")]
+const FORCE_OPAQUE_HOST_WINDOW_ENV: &str = "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW";
+
 pub type SkiaBoxShadowCache = BoxShadowCache<skia_safe::Image>;
+
+#[cfg(target_os = "windows")]
+fn shell_host_is_opaque() -> bool {
+    std::env::var_os(FORCE_OPAQUE_HOST_WINDOW_ENV).is_some()
+}
 
 #[derive(Clone, Copy)]
 struct RenderState {
@@ -1015,11 +1023,14 @@ impl GlyphRenderer for SkiaItemRenderer<'_> {
         let mut font = skia_safe::Font::from_typeface(type_face, font_size.get());
         #[cfg(target_os = "windows")]
         {
-            // The shell is composited through translucent surfaces, so prefer grayscale AA plus
-            // subpixel positioning instead of forcing LCD color-fringe antialiasing.
             font.set_subpixel(true);
-            font.set_edging(skia_safe::font::Edging::AntiAlias);
-            font.set_hinting(skia_safe::FontHinting::Normal);
+            if shell_host_is_opaque() {
+                font.set_edging(skia_safe::font::Edging::SubpixelAntiAlias);
+                font.set_hinting(skia_safe::FontHinting::Slight);
+            } else {
+                font.set_edging(skia_safe::font::Edging::AntiAlias);
+                font.set_hinting(skia_safe::FontHinting::Normal);
+            }
         }
 
         let (glyph_ids, glyph_positions): (Vec<_>, Vec<_>) = glyphs_it

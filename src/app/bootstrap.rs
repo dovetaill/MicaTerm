@@ -6160,76 +6160,36 @@ pub fn run() -> Result<()> {
 const FORCE_OPAQUE_HOST_WINDOW_ENV: &str = "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW";
 
 #[cfg(target_os = "windows")]
-struct ScopedWindowCreationEnvOverride {
-    key: &'static str,
-    previous_value: Option<std::ffi::OsString>,
-}
-
-#[cfg(target_os = "windows")]
-impl ScopedWindowCreationEnvOverride {
-    fn set(key: &'static str, value: &'static str) -> Self {
-        let previous_value = std::env::var_os(key);
-        // Window creation reads this process env synchronously during AppWindow::new().
-        unsafe {
-            std::env::set_var(key, value);
-        }
-        Self {
-            key,
-            previous_value,
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-impl Drop for ScopedWindowCreationEnvOverride {
-    fn drop(&mut self) {
-        // Restore the process env immediately after the main window is created.
-        unsafe {
-            if let Some(previous_value) = self.previous_value.as_ref() {
-                std::env::set_var(self.key, previous_value);
-            } else {
-                std::env::remove_var(self.key);
-            }
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn window_creation_env_override_for_profile(
-    profile: AppRuntimeProfile,
-) -> Option<ScopedWindowCreationEnvOverride> {
+fn configure_window_creation_env_for_profile(profile: AppRuntimeProfile) {
     if profile.prefers_native_terminal_renderer()
         && matches!(
             profile.build_flavor,
             AppBuildFlavor::WindowsMainline | AppBuildFlavor::WindowsSoftwareCompat
         )
     {
-        Some(ScopedWindowCreationEnvOverride::set(
-            FORCE_OPAQUE_HOST_WINDOW_ENV,
-            "1",
-        ))
+        // Keep this process-wide hint available after window creation so renderer setup and
+        // diagnostics can decide whether the shell host is actually opaque.
+        unsafe {
+            std::env::set_var(FORCE_OPAQUE_HOST_WINDOW_ENV, "1");
+        }
     } else {
-        None
+        unsafe {
+            std::env::remove_var(FORCE_OPAQUE_HOST_WINDOW_ENV);
+        }
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn window_creation_env_override_for_profile(_profile: AppRuntimeProfile) -> Option<()> {
-    None
-}
+fn configure_window_creation_env_for_profile(_profile: AppRuntimeProfile) {}
 
 pub fn run_with_profile(
     profile: AppRuntimeProfile,
     async_runtime_handle: tokio::runtime::Handle,
 ) -> Result<()> {
+    configure_window_creation_env_for_profile(profile);
     configure_ui_font_fallbacks();
     log_ui_text_renderer_diagnostics();
-    let window = {
-        let window_creation_env_override = window_creation_env_override_for_profile(profile);
-        let window = AppWindow::new()?;
-        let _ = window_creation_env_override;
-        window
-    };
+    let window = AppWindow::new()?;
     log_ui_shell_font_diagnostics();
     window.set_window_title(runtime_window_title(profile).into());
     bind_top_status_bar_with_profile_and_async_handle(&window, profile, Some(async_runtime_handle));
