@@ -235,3 +235,31 @@ fn font_diagnostics_report_regular_shell_chrome_and_zero_small_tracking() {
     assert!(source.contains("pub const UI_CHROME_FONT_WEIGHT: i32 = 400;"));
     assert!(source.contains("pub const UI_CHROME_LETTER_SPACING_PX: f32 = 0.0;"));
 }
+
+#[test]
+fn small_shell_functional_text_stops_requesting_hardcoded_semibold() {
+    for path in [
+        "ui/components/status-pill.slint",
+        "ui/components/modal-chrome.slint",
+        "ui/components/settings-modal.slint",
+        "ui/components/assets-delete-confirm-modal.slint",
+        "ui/components/assets-folder-create-modal.slint",
+        "ui/components/assets-keychain-identity-modal.slint",
+        "ui/components/assets-keychain-ssh-key-modal.slint",
+        "ui/components/assets-rename-modal.slint",
+        "ui/components/assets-snippet-package-modal.slint",
+        "ui/components/assets-ssh-connection-modal.slint",
+        "ui/components/sftp-conflict-modal.slint",
+        "ui/components/sftp-remote-file-modal.slint",
+        "ui/components/ssh-host-key-confirm-modal.slint",
+        "ui/components/vault-provider-card.slint",
+        "ui/components/workspace-paste-warning-modal.slint",
+        "ui/shell/transfer-center.slint",
+    ] {
+        let source = fs::read_to_string(path).unwrap_or_else(|_| panic!("read {path}"));
+        assert!(
+            !source.contains("font-weight: 600;"),
+            "{path} should stop hardcoding semibold shell labels now that the bundled shell UI face is regular-only"
+        );
+    }
+}

@@ -1,5 +1,6 @@
 import { ModalHeaderBar } from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 export component SettingsModal inherits Rectangle {
     callback close-requested();
@@ -73,7 +74,7 @@ export component SettingsModal inherits Rectangle {
                 text: "Terminal settings";
                 color: ThemeTokens.text-primary;
                 font-size: 16px;
-                font-weight: 600;
+                font-weight: AppTypography.ui-font-weight-regular;
             }
 
             subtitle-copy := Text {
@@ -102,7 +103,7 @@ export component SettingsModal inherits Rectangle {
                 text: root.terminal-scrollback-limit + " lines";
                 color: ThemeTokens.text-primary;
                 font-size: 16px;
-                font-weight: 600;
+                font-weight: AppTypography.ui-font-weight-regular;
             }
 
             scrollback-dec := Rectangle {

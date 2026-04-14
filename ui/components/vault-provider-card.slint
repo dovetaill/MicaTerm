@@ -1,4 +1,5 @@
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 export component VaultProviderCard inherits Rectangle {
     in property <string> role: "primary";
@@ -49,7 +50,7 @@ export component VaultProviderCard inherits Rectangle {
         width: parent.width - 108px;
         text: root.provider-name;
         color: ThemeTokens.text-primary;
-        font-weight: 600;
+        font-weight: AppTypography.ui-font-weight-regular;
     }
 
     Text {
@@ -69,6 +70,6 @@ export component VaultProviderCard inherits Rectangle {
         text: root.action-label;
         color: ThemeTokens.accent;
         horizontal-alignment: right;
-        font-weight: 600;
+        font-weight: AppTypography.ui-font-weight-regular;
     }
 }

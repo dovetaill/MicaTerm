@@ -1,4 +1,5 @@
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 component DialogButton inherits Rectangle {
     in property <string> label: "";
@@ -91,7 +92,7 @@ export component AssetsFolderCreateModal inherits Rectangle {
                 text: root.dialog-title;
                 color: ThemeTokens.text-primary;
                 font-size: 18px;
-                font-weight: 600;
+                font-weight: AppTypography.ui-font-weight-regular;
                 vertical-alignment: center;
             }
 

@@ -1,5 +1,6 @@
 import { ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 export component ModalHeaderBar inherits Rectangle {
     in property <string> title: "";
@@ -49,7 +50,7 @@ export component ModalHeaderBar inherits Rectangle {
         text: root.title;
         color: ThemeTokens.text-primary;
         font-size: 18px;
-        font-weight: 600;
+        font-weight: AppTypography.ui-font-weight-regular;
         vertical-alignment: center;
         overflow: elide;
     }

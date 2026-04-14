@@ -1,4 +1,5 @@
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 component ConflictActionButton inherits Rectangle {
     in property <string> label: "";
@@ -26,7 +27,7 @@ component ConflictActionButton inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
         font-size: 12px;
-        font-weight: 600;
+        font-weight: AppTypography.ui-font-weight-regular;
     }
 
     touch := TouchArea {

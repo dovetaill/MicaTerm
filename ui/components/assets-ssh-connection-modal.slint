@@ -1,6 +1,7 @@
 import { ComboBox, ScrollView } from "std-widgets.slint";
 import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
 
 component ModalTabButton inherits Rectangle {
     in property <string> label: "";
@@ -316,7 +317,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         width: body-scroll.content-column-width;
                         text: "Basic";
                         color: ThemeTokens.text-primary;
-                        font-weight: 600;
+                        font-weight: AppTypography.ui-font-weight-regular;
                     }
 
                     VerticalLayout {
@@ -447,7 +448,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         width: body-scroll.content-column-width;
                         text: "Authentication";
                         color: ThemeTokens.text-primary;
-                        font-weight: 600;
+                        font-weight: AppTypography.ui-font-weight-regular;
                     }
 
                     VerticalLayout {
@@ -645,7 +646,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         width: body-scroll.content-column-width;
                         text: "Proxy";
                         color: ThemeTokens.text-primary;
-                        font-weight: 600;
+                        font-weight: AppTypography.ui-font-weight-regular;
                     }
 
                     VerticalLayout {
@@ -898,7 +899,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         width: body-scroll.content-column-width;
                         text: "Notes";
                         color: ThemeTokens.text-primary;
-                        font-weight: 600;
+                        font-weight: AppTypography.ui-font-weight-regular;
                     }
 
                     VerticalLayout {
