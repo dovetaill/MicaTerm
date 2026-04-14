@@ -32,16 +32,33 @@ fn pixel_at(image: &slint::Image, x: u32, y: u32) -> Rgba8Pixel {
     buffer.as_slice()[(y * width + x) as usize]
 }
 
-fn count_non_background_pixels(image: &slint::Image, background: Rgba8Pixel) -> usize {
-    image
-        .to_rgba8()
-        .expect("rgba image")
-        .as_slice()
-        .iter()
-        .filter(|pixel| {
-            pixel.r != background.r || pixel.g != background.g || pixel.b != background.b
+fn color_distance(a: Rgba8Pixel, b: Rgba8Pixel) -> u16 {
+    let dr = (i16::from(a.r) - i16::from(b.r)).unsigned_abs();
+    let dg = (i16::from(a.g) - i16::from(b.g)).unsigned_abs();
+    let db = (i16::from(a.b) - i16::from(b.b)).unsigned_abs();
+
+    dr + dg + db
+}
+
+fn count_non_row_background_pixels(image: &slint::Image) -> usize {
+    let buffer = image.to_rgba8().expect("rgba image");
+    let width = buffer.width() as usize;
+    if width == 0 {
+        return 0;
+    }
+
+    let pixels = buffer.as_slice();
+    pixels
+        .chunks(width)
+        .map(|row| {
+            let background = row.last().copied().expect("row background");
+            row.iter()
+                .filter(|pixel| {
+                    pixel.r != background.r || pixel.g != background.g || pixel.b != background.b
+                })
+                .count()
         })
-        .count()
+        .sum()
 }
 
 fn renderer_with_fake_color_emoji() -> Result<TerminalAtlasRenderer> {
@@ -145,19 +162,30 @@ fn atlas_renderer_rasterizes_bitmap_surface_at_hidpi_scale_without_changing_logi
 }
 
 #[test]
-fn atlas_renderer_default_background_rows_use_subtle_band_colors() -> Result<()> {
+fn atlas_renderer_viewport_background_is_quiet_and_row_band_free() -> Result<()> {
     let dark_surface = render_surface(4, 12, "");
     let mut dark_renderer = TerminalAtlasRenderer::new()?;
     let dark_frame = dark_renderer.render(&dark_surface)?;
-    let dark_row0 = pixel_at(&dark_frame.image, 0, dark_frame.metrics.cell_height / 2);
+    let dark_top = pixel_at(&dark_frame.image, 0, dark_frame.metrics.cell_height / 2);
     let dark_row1 = pixel_at(
         &dark_frame.image,
         0,
         dark_frame.metrics.cell_height + (dark_frame.metrics.cell_height / 2),
     );
+    let dark_bottom = pixel_at(
+        &dark_frame.image,
+        0,
+        dark_frame.image.size().height.saturating_sub(dark_frame.metrics.cell_height / 2 + 1),
+    );
 
-    assert_eq!(dark_row0, unpack_rgba(0xff11_1821));
-    assert_eq!(dark_row1, unpack_rgba(0xff14_212d));
+    assert!(
+        color_distance(dark_top, dark_row1) <= 6,
+        "dark viewport background should not alternate into visible row banding between adjacent rows"
+    );
+    assert!(
+        color_distance(dark_top, dark_bottom) >= 1 && color_distance(dark_top, dark_bottom) <= 18,
+        "dark viewport background should keep only a very subtle top-to-bottom lift instead of a flat black slab or obvious gradient"
+    );
 
     let mut light_session = TerminalSession::new(4, 12);
     light_session.set_theme_mode(ThemeMode::Light);
@@ -171,8 +199,10 @@ fn atlas_renderer_default_background_rows_use_subtle_band_colors() -> Result<()>
         light_frame.metrics.cell_height + (light_frame.metrics.cell_height / 2),
     );
 
-    assert_eq!(light_row0, unpack_rgba(0xfffb_fcfe));
-    assert_eq!(light_row1, unpack_rgba(0xfff3_f7fb));
+    assert_eq!(
+        light_row0, light_row1,
+        "light viewport background should stay on one continuous quiet fill when no light-theme gradient is configured"
+    );
 
     Ok(())
 }
@@ -382,11 +412,11 @@ fn atlas_renderer_draws_bold_cells_with_more_ink_than_plain_cells() -> Result<()
 
     let plain = renderer.render(&plain_surface)?;
     let bold = renderer.render(&bold_surface)?;
-    let background = unpack_rgba(bold_surface.default_bg_rgba);
+    let plain_count = count_non_row_background_pixels(&plain.image);
+    let bold_count = count_non_row_background_pixels(&bold.image);
 
     assert!(
-        count_non_background_pixels(&bold.image, background)
-            > count_non_background_pixels(&plain.image, background),
+        bold_count > plain_count,
         "bold terminal cells should occupy more lit pixels than the plain regular-weight glyph"
     );
 

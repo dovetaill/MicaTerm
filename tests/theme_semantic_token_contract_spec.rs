@@ -21,7 +21,6 @@ fn semantic_theme_tokens_cover_shell_hierarchy_and_states() {
         "out property <brush> text-muted:",
         "out property <brush> link-accent:",
         "out property <brush> focus-ring:",
-        "out property <brush> terminal-row-stripe-surface:",
     ] {
         assert!(
             tokens.contains(token),
@@ -99,8 +98,19 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
         "terminal host chrome should use the shared panel surface token rather than a generic control fill"
     );
     assert!(
-        theme_spec.contains("row_bg_even") && theme_spec.contains("row_bg_odd"),
-        "terminal palette spec should continue to carry the subtle terminal row stripe contract for renderer-side background banding"
+        theme_spec.contains("TERMINAL_ROW_BANDING_ENABLED")
+            && theme_spec.contains("TERMINAL_ROW_BANDING_ALPHA")
+            && theme_spec.contains("TERMINAL_BG_GRAIN_ALPHA")
+            && theme_spec.contains("TERMINAL_BG_BASE_DARK")
+            && theme_spec.contains("TERMINAL_BG_GRADIENT_TOP_DARK")
+            && theme_spec.contains("TERMINAL_BG_GRADIENT_BOTTOM_DARK"),
+        "terminal palette spec should expose explicit viewport background tuning constants now that renderer-side chrome no longer consumes alternating row stripe colors"
+    );
+    assert!(
+        !fs::read_to_string("ui/theme/tokens.slint")
+            .expect("read theme tokens")
+            .contains("terminal-row-stripe-surface"),
+        "unused shell stripe tokens should be removed once terminal viewport banding is no longer part of the design system"
     );
 }
 

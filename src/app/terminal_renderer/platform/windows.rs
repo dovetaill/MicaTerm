@@ -960,25 +960,11 @@ impl WindowsNativeSurfaceState {
                     render_target.FillRectangle(&clip_rect, &brush);
                 }
             }
-            for row in 0..presentable_frame.grid_rows {
-                let row_rgba = if row % 2 == 0 {
-                    presentable_frame.row_bg_even_rgba
-                } else {
-                    presentable_frame.row_bg_odd_rgba
-                };
-                let row_rgba = opaque_surface_fill_rgba(row_rgba);
-                self.ensure_brush(row_rgba);
-                if let (Some(row_rect), Some(brush)) = (
-                    row_background_rect(frame.rect, row, frame.frame.cell_height_px),
-                    self.brush_for(row_rgba),
-                ) {
-                    unsafe {
-                        render_target.FillRectangle(&row_rect, &brush);
-                    }
-                }
-            }
             for run in &frame.frame.presentable_frame.background_runs {
                 let bg_rgba = opaque_surface_fill_rgba(run.bg_rgba);
+                if bg_rgba == default_bg_rgba {
+                    continue;
+                }
                 self.ensure_brush(bg_rgba);
                 if let (Some(run_rect), Some(brush)) = (
                     cell_span_rect(
@@ -2417,26 +2403,6 @@ fn terminal_clip_rect(rect: NativeTerminalSurfaceRect) -> D2D_RECT_F {
         right: rect.x.saturating_add(rect.width) as f32,
         bottom: rect.y.saturating_add(rect.height) as f32,
     }
-}
-
-#[cfg(target_os = "windows")]
-fn row_background_rect(
-    rect: NativeTerminalSurfaceRect,
-    row: u32,
-    cell_height_px: u32,
-) -> Option<D2D_RECT_F> {
-    let top = rect
-        .y
-        .saturating_add((row.saturating_mul(cell_height_px)) as i32);
-    let bottom = top
-        .saturating_add(cell_height_px as i32)
-        .min(rect.y.saturating_add(rect.height));
-    (bottom > top).then_some(D2D_RECT_F {
-        left: rect.x as f32,
-        top: top as f32,
-        right: rect.x.saturating_add(rect.width) as f32,
-        bottom: bottom as f32,
-    })
 }
 
 #[cfg(target_os = "windows")]

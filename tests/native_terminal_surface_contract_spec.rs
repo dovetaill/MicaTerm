@@ -1104,7 +1104,11 @@ fn windows_backend_source_exposes_background_and_monochrome_draw_contract() {
     );
     assert!(
         windows_backend_source.contains("FillRectangle("),
-        "windows backend should use Direct2D rectangle fills for row backgrounds and ANSI background runs"
+        "windows backend should use Direct2D rectangle fills for the viewport background pass and ANSI background runs"
+    );
+    assert!(
+        !windows_backend_source.contains("row_background_rect("),
+        "windows backend should drop the row-by-row viewport background helper once terminal chrome becomes a whole-surface fill"
     );
     assert!(
         windows_backend_source.contains("FillOpacityMask("),

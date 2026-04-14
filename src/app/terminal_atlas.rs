@@ -144,10 +144,10 @@ struct ClusterKey {
 #[derive(Clone, Copy)]
 struct RowRenderRequest {
     row: u32,
-    cols: u32,
     default_fg_rgba: u32,
     default_bg_rgba: u32,
-    row_bg_rgba: u32,
+    viewport_bg_top_rgba: u32,
+    viewport_bg_bottom_rgba: u32,
     row_selection: Option<(u32, u32)>,
     selection_overlay_rgba: u32,
 }
@@ -277,7 +277,16 @@ impl TerminalAtlasRenderer {
         if resized {
             self.surface_width_px = width_px;
             self.surface_height_px = height_px;
-            self.pixels = vec![rgba8(surface.row_bg_even_rgba); (width_px * height_px) as usize];
+            self.pixels = vec![rgba8(surface.default_bg_rgba); (width_px * height_px) as usize];
+            fill_viewport_background_span(
+                &mut self.pixels,
+                self.surface_width_px,
+                self.surface_height_px,
+                0,
+                self.surface_height_px,
+                rgba8(surface.row_bg_even_rgba),
+                rgba8(surface.row_bg_odd_rgba),
+            );
             self.row_hashes = vec![0; surface.rows as usize];
         } else if self.row_hashes.len() != surface.rows as usize {
             self.row_hashes.resize(surface.rows as usize, 0);
@@ -291,7 +300,6 @@ impl TerminalAtlasRenderer {
         }
 
         for row in 0..surface.rows {
-            let row_bg_rgba = row_background_rgba(surface, row);
             let row_selection = selection.and_then(|value| value.row_bounds(row, surface.cols));
             let row_selection_overlay_rgba = if row_selection.is_some() {
                 selection_overlay_rgba
@@ -302,7 +310,8 @@ impl TerminalAtlasRenderer {
                 surface.cols,
                 surface.default_fg_rgba,
                 surface.default_bg_rgba,
-                row_bg_rgba,
+                surface.row_bg_even_rgba,
+                surface.row_bg_odd_rgba,
                 row_selection,
                 row_selection_overlay_rgba,
                 row_cells[row as usize].as_slice(),
@@ -311,10 +320,10 @@ impl TerminalAtlasRenderer {
                 self.render_row(
                     RowRenderRequest {
                         row,
-                        cols: surface.cols,
                         default_fg_rgba: surface.default_fg_rgba,
                         default_bg_rgba: surface.default_bg_rgba,
-                        row_bg_rgba,
+                        viewport_bg_top_rgba: surface.row_bg_even_rgba,
+                        viewport_bg_bottom_rgba: surface.row_bg_odd_rgba,
                         row_selection,
                         selection_overlay_rgba: row_selection_overlay_rgba,
                     },
@@ -354,19 +363,21 @@ impl TerminalAtlasRenderer {
         rendered_clusters: &mut Vec<RenderedCluster>,
     ) {
         let row_y = request.row * self.raster_metrics.cell_height;
-        let row_bg = rgba8(request.row_bg_rgba);
         let default_fg = rgba8(request.default_fg_rgba);
-        fill_rect(
+        fill_viewport_background_span(
             &mut self.pixels,
             self.surface_width_px,
             self.surface_height_px,
-            PixelRect {
-                start_x: 0,
-                start_y: row_y,
-                width: request.cols * self.raster_metrics.cell_width,
-                height: self.raster_metrics.cell_height,
-            },
-            row_bg,
+            row_y,
+            self.raster_metrics.cell_height,
+            rgba8(request.viewport_bg_top_rgba),
+            rgba8(request.viewport_bg_bottom_rgba),
+        );
+        let row_bg = viewport_gradient_color(
+            rgba8(request.viewport_bg_top_rgba),
+            rgba8(request.viewport_bg_bottom_rgba),
+            row_y + (self.raster_metrics.cell_height / 2),
+            self.surface_height_px,
         );
 
         if let Some((start_col, end_col)) = request.row_selection {
@@ -391,30 +402,32 @@ impl TerminalAtlasRenderer {
             let selected = request
                 .row_selection
                 .is_some_and(|value| selection_overlaps_cell(value, cell.col, span));
-            let cell_bg_rgba = if cell.bg_rgba == request.default_bg_rgba {
-                request.row_bg_rgba
+            let uses_default_background = cell.bg_rgba == request.default_bg_rgba;
+            let cell_bg = if uses_default_background {
+                row_bg
             } else {
-                cell.bg_rgba
+                rgba8(cell.bg_rgba)
             };
-            let cell_bg = rgba8(cell_bg_rgba);
             let background = if selected {
                 composite_color(cell_bg, rgba8(request.selection_overlay_rgba))
             } else {
                 cell_bg
             };
 
-            fill_rect(
-                &mut self.pixels,
-                self.surface_width_px,
-                self.surface_height_px,
-                PixelRect {
-                    start_x: cell_x,
-                    start_y: row_y,
-                    width: span_width_px,
-                    height: self.raster_metrics.cell_height,
-                },
-                background,
-            );
+            if selected || !uses_default_background {
+                fill_rect(
+                    &mut self.pixels,
+                    self.surface_width_px,
+                    self.surface_height_px,
+                    PixelRect {
+                        start_x: cell_x,
+                        start_y: row_y,
+                        width: span_width_px,
+                        height: self.raster_metrics.cell_height,
+                    },
+                    background,
+                );
+            }
 
             let foreground = if selected {
                 resolve_selected_foreground(rgba8(cell.fg_rgba), cell_bg, default_fg, background)
@@ -567,14 +580,6 @@ impl TerminalAtlasRenderer {
 
     fn underline_thickness_px(&self) -> u32 {
         self.raster_scale.round().max(1.0) as u32
-    }
-}
-
-fn row_background_rgba(surface: &TerminalSurfaceState, row: u32) -> u32 {
-    if row.is_multiple_of(2) {
-        surface.row_bg_even_rgba
-    } else {
-        surface.row_bg_odd_rgba
     }
 }
 
@@ -785,7 +790,8 @@ fn hash_row(
     cols: u32,
     default_fg_rgba: u32,
     default_bg_rgba: u32,
-    row_bg_rgba: u32,
+    viewport_bg_top_rgba: u32,
+    viewport_bg_bottom_rgba: u32,
     selection: Option<(u32, u32)>,
     selection_overlay_rgba: u32,
     cells: &[&TerminalCellState],
@@ -794,7 +800,8 @@ fn hash_row(
     cols.hash(&mut hasher);
     default_fg_rgba.hash(&mut hasher);
     default_bg_rgba.hash(&mut hasher);
-    row_bg_rgba.hash(&mut hasher);
+    viewport_bg_top_rgba.hash(&mut hasher);
+    viewport_bg_bottom_rgba.hash(&mut hasher);
     selection.hash(&mut hasher);
     selection_overlay_rgba.hash(&mut hasher);
     for cell in cells {
@@ -807,6 +814,54 @@ fn hash_row(
         cell.bg_rgba.hash(&mut hasher);
     }
     hasher.finish()
+}
+
+fn fill_viewport_background_span(
+    pixels: &mut [Rgba8Pixel],
+    surface_width_px: u32,
+    surface_height_px: u32,
+    start_y: u32,
+    height: u32,
+    top: Rgba8Pixel,
+    bottom: Rgba8Pixel,
+) {
+    let end_y = (start_y + height).min(surface_height_px);
+
+    for y in start_y.min(surface_height_px)..end_y {
+        let color = viewport_gradient_color(top, bottom, y, surface_height_px);
+        for x in 0..surface_width_px {
+            pixels[(y * surface_width_px + x) as usize] = color;
+        }
+    }
+}
+
+fn viewport_gradient_color(
+    top: Rgba8Pixel,
+    bottom: Rgba8Pixel,
+    y: u32,
+    total_height: u32,
+) -> Rgba8Pixel {
+    if total_height <= 1 || top == bottom {
+        return top;
+    }
+
+    let ratio = y.min(total_height - 1) as f32 / (total_height - 1) as f32;
+    lerp_rgba(top, bottom, ratio)
+}
+
+fn lerp_rgba(top: Rgba8Pixel, bottom: Rgba8Pixel, ratio: f32) -> Rgba8Pixel {
+    fn lerp_channel(start: u8, end: u8, ratio: f32) -> u8 {
+        let start = f32::from(start);
+        let end = f32::from(end);
+        (start + ((end - start) * ratio.clamp(0.0, 1.0))).round() as u8
+    }
+
+    Rgba8Pixel {
+        a: 255,
+        r: lerp_channel(top.r, bottom.r, ratio),
+        g: lerp_channel(top.g, bottom.g, ratio),
+        b: lerp_channel(top.b, bottom.b, ratio),
+    }
 }
 
 fn rgba8(color: u32) -> Rgba8Pixel {

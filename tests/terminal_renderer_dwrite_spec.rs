@@ -591,11 +591,11 @@ fn native_renderer_sources_expose_draw_ready_text_payloads() {
     );
     assert!(
         presenter_source.contains("pub row_bg_even_rgba: u32"),
-        "presentable native frames should keep even-row banding colors available for blank rows and cells"
+        "presentable native frames should keep the legacy even-row background field available as a compatibility transport channel while viewport chrome stops consuming it as alternating stripe paint"
     );
     assert!(
         presenter_source.contains("pub row_bg_odd_rgba: u32"),
-        "presentable native frames should keep odd-row banding colors available for blank rows and cells"
+        "presentable native frames should keep the legacy odd-row background field available as a compatibility transport channel while viewport chrome stops consuming it as alternating stripe paint"
     );
     assert!(
         presenter_source.contains("pub grid_rows: u32"),
@@ -808,6 +808,10 @@ fn windows_backend_source_consumes_retained_background_and_monochrome_payloads()
     assert!(
         windows_backend_source.contains("run.bg_rgba"),
         "windows backend should draw background runs with the retained ANSI background color instead of clearing only the default background"
+    );
+    assert!(
+        !windows_backend_source.contains("for row in 0..presentable_frame.grid_rows"),
+        "windows backend should stop iterating every terminal row for viewport striping once the background model becomes a whole-surface fill"
     );
 }
 
