@@ -185,6 +185,7 @@ fn export_vault_snapshot_excludes_ui_preferences_for_first_release() {
         theme_mode: ThemeMode::Light,
         always_on_top: true,
         right_panel_view: "appearance".into(),
+        ..UiPreferences::default()
     };
 
     let snapshot = export_vault_snapshot(

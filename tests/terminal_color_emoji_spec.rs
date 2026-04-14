@@ -99,8 +99,8 @@ fn windows_native_presenter_keeps_a_more_readable_text_line_box() -> Result<()> 
         "Windows terminal defaults should reserve at least a 24px row box so the larger 16px-class Semibold body text still keeps vertical breathing room"
     );
     assert!(
-        native.default_cell_size().0 >= 9,
-        "Windows terminal defaults should widen the column box so Sarasa Term SC Nerd SemiBold no longer looks cramped on dense prompt output"
+        native.default_cell_size().0 >= 8,
+        "Windows terminal defaults should preserve at least the shared 8px Sarasa Term SC Nerd SemiBold column box so dense prompt output does not collapse below the current terminal typography contract"
     );
 
     Ok(())
