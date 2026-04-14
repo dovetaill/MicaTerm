@@ -194,8 +194,18 @@ fn native_renderer_snaps_ascii_clusters_to_cell_origins_instead_of_shaped_pen_dr
             .iter()
             .map(|request| request.fractional_offset_x())
             .collect::<Vec<_>>(),
-        vec![0.0, 0.0, 0.0],
-        "single-cell terminal clusters should reset their raster phase at each cell boundary instead of carrying subpixel pen drift across the row"
+        vec![0.0],
+        "single-cell terminal clusters should collapse to one shared whole-pixel raster request when every cell restarts on the same snapped phase"
+    );
+    assert_eq!(
+        prepared.monochrome_glyph_draws[0].atlas_entry.slot,
+        prepared.monochrome_glyph_draws[1].atlas_entry.slot,
+        "matching snapped ASCII cells should reuse the same atlas slot instead of rasterizing duplicate monochrome entries"
+    );
+    assert_eq!(
+        prepared.monochrome_glyph_draws[1].atlas_entry.slot,
+        prepared.monochrome_glyph_draws[2].atlas_entry.slot,
+        "later snapped ASCII cells should keep reusing that same atlas slot while draw destinations move to the next cell origins"
     );
 
     Ok(())

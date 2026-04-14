@@ -793,8 +793,8 @@ fn native_renderer_preserves_fractional_x_phase_when_color_run_falls_back_to_mon
     );
     assert_eq!(
         fonts.requests.len(),
-        2,
-        "fallback rasterization should still thread explicit glyph requests through the font backend"
+        1,
+        "fallback rasterization should still issue the shared monochrome glyph request once, then reuse the cached atlas entry for matching cell-boundary phases"
     );
     assert_eq!(
         fonts.requests[0].fractional_offset_x(),
@@ -802,9 +802,9 @@ fn native_renderer_preserves_fractional_x_phase_when_color_run_falls_back_to_mon
         "the first fallback glyph should keep its whole-pixel phase"
     );
     assert_eq!(
-        fonts.requests[1].fractional_offset_x(),
-        0.0,
-        "color-run monochrome fallback should also restart from each terminal cell boundary instead of carrying spacing drift into the next cell"
+        prepared.monochrome_glyph_draws[0].atlas_entry.slot,
+        prepared.monochrome_glyph_draws[1].atlas_entry.slot,
+        "color-run monochrome fallback should reuse the same atlas slot when each cell restarts on the same whole-pixel phase"
     );
 
     Ok(())

@@ -4111,6 +4111,9 @@ fn periodic_auto_sync_retries_failed_dirty_changes() {
 
     primary.set_write_error(None);
     settle_sync_scheduler(Duration::from_secs(121));
+    wait_for_condition(Duration::from_secs(2), || {
+        primary.recorded_writes().len() == 1
+    });
 
     assert_eq!(
         primary.recorded_writes().len(),

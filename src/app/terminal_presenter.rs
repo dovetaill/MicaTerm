@@ -1016,31 +1016,44 @@ mod tests {
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
-        let mut context = NativeFramePreparationContext::new(
-            &mut font_system,
-            &mut shaper,
-            &mut renderer,
-            &loaded_font,
-            &mut previous_frame,
-            &mut previous_shaped_rows,
-            &mut shaped_row_cache,
-        );
-        prepare_native_terminal_frame(
-            &mut context,
-            &first_surface,
-            TerminalPresentationOptions::default(),
-        )?;
+        {
+            let mut context = NativeFramePreparationContext::new(
+                &mut font_system,
+                &mut shaper,
+                &mut renderer,
+                &loaded_font,
+                &mut previous_frame,
+                &mut previous_shaped_rows,
+                &mut shaped_row_cache,
+            );
+            prepare_native_terminal_frame(
+                &mut context,
+                &first_surface,
+                TerminalPresentationOptions::default(),
+            )?;
+        }
         assert_eq!(
             font_system.shape_text_runs_calls(),
             3,
             "the first viewport should shape all visible rows once"
         );
 
-        prepare_native_terminal_frame(
-            &mut context,
-            &second_surface,
-            TerminalPresentationOptions::default(),
-        )?;
+        {
+            let mut context = NativeFramePreparationContext::new(
+                &mut font_system,
+                &mut shaper,
+                &mut renderer,
+                &loaded_font,
+                &mut previous_frame,
+                &mut previous_shaped_rows,
+                &mut shaped_row_cache,
+            );
+            prepare_native_terminal_frame(
+                &mut context,
+                &second_surface,
+                TerminalPresentationOptions::default(),
+            )?;
+        }
         assert_eq!(
             font_system.shape_text_runs_calls(),
             4,
@@ -1109,34 +1122,58 @@ mod tests {
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
-        let mut context = NativeFramePreparationContext::new(
-            &mut font_system,
-            &mut shaper,
-            &mut renderer,
-            &loaded_font,
-            &mut previous_frame,
-            &mut previous_shaped_rows,
-            &mut shaped_row_cache,
-        );
-        prepare_native_terminal_frame(
-            &mut context,
-            &first_surface,
-            TerminalPresentationOptions::default(),
-        )?;
+        {
+            let mut context = NativeFramePreparationContext::new(
+                &mut font_system,
+                &mut shaper,
+                &mut renderer,
+                &loaded_font,
+                &mut previous_frame,
+                &mut previous_shaped_rows,
+                &mut shaped_row_cache,
+            );
+            prepare_native_terminal_frame(
+                &mut context,
+                &first_surface,
+                TerminalPresentationOptions::default(),
+            )?;
+        }
         assert_eq!(font_system.shape_text_runs_calls(), 3);
 
-        prepare_native_terminal_frame(
-            &mut context,
-            &second_surface,
-            TerminalPresentationOptions::default(),
-        )?;
+        {
+            let mut context = NativeFramePreparationContext::new(
+                &mut font_system,
+                &mut shaper,
+                &mut renderer,
+                &loaded_font,
+                &mut previous_frame,
+                &mut previous_shaped_rows,
+                &mut shaped_row_cache,
+            );
+            prepare_native_terminal_frame(
+                &mut context,
+                &second_surface,
+                TerminalPresentationOptions::default(),
+            )?;
+        }
         assert_eq!(font_system.shape_text_runs_calls(), 6);
 
-        prepare_native_terminal_frame(
-            &mut context,
-            &third_surface,
-            TerminalPresentationOptions::default(),
-        )?;
+        {
+            let mut context = NativeFramePreparationContext::new(
+                &mut font_system,
+                &mut shaper,
+                &mut renderer,
+                &loaded_font,
+                &mut previous_frame,
+                &mut previous_shaped_rows,
+                &mut shaped_row_cache,
+            );
+            prepare_native_terminal_frame(
+                &mut context,
+                &third_surface,
+                TerminalPresentationOptions::default(),
+            )?;
+        }
         assert_eq!(
             font_system.shape_text_runs_calls(),
             6,
@@ -1160,32 +1197,45 @@ mod tests {
         let mut previous_shaped_rows = None;
         let mut shaped_row_cache = PresenterShapedRowCache::default();
 
-        let mut context = NativeFramePreparationContext::new(
-            &mut font_system,
-            &mut shaper,
-            &mut renderer,
-            &loaded_font,
-            &mut previous_frame,
-            &mut previous_shaped_rows,
-            &mut shaped_row_cache,
-        );
-        prepare_native_terminal_frame(
-            &mut context,
-            &first_surface,
-            TerminalPresentationOptions::default(),
-        )?;
-        prepare_native_terminal_frame(
-            &mut context,
-            &second_surface,
-            TerminalPresentationOptions::default(),
-        )?;
+        {
+            let mut context = NativeFramePreparationContext::new(
+                &mut font_system,
+                &mut shaper,
+                &mut renderer,
+                &loaded_font,
+                &mut previous_frame,
+                &mut previous_shaped_rows,
+                &mut shaped_row_cache,
+            );
+            prepare_native_terminal_frame(
+                &mut context,
+                &first_surface,
+                TerminalPresentationOptions::default(),
+            )?;
+            prepare_native_terminal_frame(
+                &mut context,
+                &second_surface,
+                TerminalPresentationOptions::default(),
+            )?;
+        }
         assert_eq!(font_system.shape_text_runs_calls(), 6);
 
-        prepare_native_terminal_frame(
-            &mut context,
-            &third_surface,
-            TerminalPresentationOptions::default(),
-        )?;
+        {
+            let mut context = NativeFramePreparationContext::new(
+                &mut font_system,
+                &mut shaper,
+                &mut renderer,
+                &loaded_font,
+                &mut previous_frame,
+                &mut previous_shaped_rows,
+                &mut shaped_row_cache,
+            );
+            prepare_native_terminal_frame(
+                &mut context,
+                &third_surface,
+                TerminalPresentationOptions::default(),
+            )?;
+        }
         assert_eq!(
             font_system.shape_text_runs_calls(),
             7,

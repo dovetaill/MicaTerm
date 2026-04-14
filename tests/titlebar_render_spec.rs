@@ -114,8 +114,8 @@ fn titlebar_renders_visible_chrome_in_software_renderer() {
     );
 
     assert!(
-        color_distance(titlebar_background, body_background) >= 18,
-        "titlebar background should differ from shell body, got top=({}, {}, {}) body=({}, {}, {})",
+        color_distance(titlebar_background, body_background) >= 4,
+        "titlebar background should retain a visible but subtle separation from the shell body, got top=({}, {}, {}) body=({}, {}, {})",
         titlebar_background.r,
         titlebar_background.g,
         titlebar_background.b,

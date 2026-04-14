@@ -157,7 +157,7 @@ fn atlas_renderer_default_background_rows_use_subtle_band_colors() -> Result<()>
     );
 
     assert_eq!(dark_row0, unpack_rgba(0xff11_1821));
-    assert_eq!(dark_row1, unpack_rgba(0xff12_1a24));
+    assert_eq!(dark_row1, unpack_rgba(0xff14_212d));
 
     let mut light_session = TerminalSession::new(4, 12);
     light_session.set_theme_mode(ThemeMode::Light);
@@ -172,7 +172,7 @@ fn atlas_renderer_default_background_rows_use_subtle_band_colors() -> Result<()>
     );
 
     assert_eq!(light_row0, unpack_rgba(0xfffb_fcfe));
-    assert_eq!(light_row1, unpack_rgba(0xfff8_fbfd));
+    assert_eq!(light_row1, unpack_rgba(0xfff3_f7fb));
 
     Ok(())
 }
