@@ -41,12 +41,12 @@ fn terminal_font_contract_switches_to_sarasa_nerd_assets() {
 }
 
 #[test]
-fn ui_shell_default_weight_moves_to_misans_medium() {
+fn ui_shell_default_weight_stays_regular_for_small_shell_text() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
 
     assert!(
         app_window.contains("default-font-weight: AppTypography.ui-font-weight-regular;"),
-        "shell UI should keep the global default on MiSans regular so text inputs do not all become unnecessarily heavy"
+        "shell UI should keep the global default on JetBrains Maple Mono regular so text inputs do not all become unnecessarily heavy"
     );
     assert!(
         app_window.contains("default-font-size: AppTypography.ui-font-size-body;"),
@@ -72,7 +72,7 @@ fn ui_shell_diagnostics_report_medium_request_weight() {
     assert!(
         diagnostics.contains("let requested_weight = UI_FONT_DEFAULT_WEIGHT;")
             || diagnostics.contains("pub const UI_FONT_DEFAULT_WEIGHT: i32 = 400;"),
-        "ui diagnostics should keep the default family probe on MiSans regular so generic text/input inheritance stays truthful"
+        "ui diagnostics should keep the default family probe on JetBrains Maple Mono regular so generic text/input inheritance stays truthful"
     );
     assert!(
         diagnostics.contains("ui_chrome_font_weight")
@@ -83,30 +83,35 @@ fn ui_shell_diagnostics_report_medium_request_weight() {
         diagnostics.contains("chrome_requested_weight")
             || diagnostics.contains("chrome_resolved_weight")
             || diagnostics.contains("chrome_resolved_family"),
-        "ui diagnostics should log the actual medium-weight chrome probe so packaged Windows runs can verify the visible shell labels are really hitting the intended MiSans chrome face"
+        "ui diagnostics should log the actual chrome probe so packaged Windows runs can verify the visible shell labels are really hitting the intended JetBrains Maple Mono face"
     );
 }
 
 #[test]
-fn slint_renderer_overrides_misans_bundle_weights_to_css_values() {
+fn slint_renderer_overrides_jetbrains_maple_mono_bundle_weights_to_css_values() {
     let skia_renderer =
         fs::read_to_string("vendor/i-slint-renderer-skia/lib.rs").expect("read skia renderer");
 
     for expected in [
         "FontInfoOverride",
-        "MiSans-Regular",
-        "MiSans-Medium",
-        "MiSans-Semibold",
+        "JetBrainsMapleMono-Regular",
         "FontWeight::new(400.0)",
-        "FontWeight::new(500.0)",
-        "FontWeight::new(600.0)",
-        "family_name: Some(\"MiSans\")",
+        "family_name: Some(\"JetBrains Maple Mono\")",
     ] {
         assert!(
             skia_renderer.contains(expected),
-            "the vendored Slint renderer should keep `{expected}` so bundled MiSans fonts are registered with CSS-like weights instead of their raw 330/380/520 OS/2 metadata"
+            "the vendored Slint renderer should keep `{expected}` so bundled JetBrains Maple Mono fonts are registered with CSS-like weights instead of their raw embedded metadata"
         );
     }
+
+    assert!(
+        !skia_renderer.contains("JetBrainsMapleMono-Medium"),
+        "the vendored Slint renderer should stop carrying a separate JetBrains Maple Mono medium override once the shell becomes regular-only"
+    );
+    assert!(
+        !skia_renderer.contains("JetBrainsMapleMono-SemiBold"),
+        "the vendored Slint renderer should stop carrying a separate JetBrains Maple Mono semibold override once the shell becomes regular-only"
+    );
 }
 
 #[test]

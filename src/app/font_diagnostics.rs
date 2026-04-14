@@ -13,9 +13,9 @@ use windows::Win32::Graphics::DirectWrite::{
 use crate::app::system_font_database::load_system_font_database;
 use crate::app::terminal_font::{DEFAULT_TERMINAL_FONT_WEIGHT, DEFAULT_TERMINAL_LETTER_SPACING_PX};
 
-pub const UI_FONT_FAMILY: &str = "MiSans";
+pub const UI_FONT_FAMILY: &str = "JetBrains Maple Mono";
 pub const UI_FONT_DEFAULT_WEIGHT: i32 = 400;
-pub const UI_CHROME_FONT_WEIGHT: i32 = 500;
+pub const UI_CHROME_FONT_WEIGHT: i32 = 400;
 #[cfg(target_os = "windows")]
 const FORCE_OPAQUE_HOST_WINDOW_ENV: &str = "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW";
 #[cfg(target_os = "windows")]
@@ -25,7 +25,7 @@ pub const UI_BODY_FONT_SIZE_PX: f32 = 14.0;
 #[cfg(target_os = "windows")]
 pub const UI_CAPTION_FONT_SIZE_PX: f32 = 13.0;
 #[cfg(target_os = "windows")]
-pub const UI_CHROME_LETTER_SPACING_PX: f32 = 0.08;
+pub const UI_CHROME_LETTER_SPACING_PX: f32 = 0.0;
 pub const TERMINAL_PRIMARY_FAMILY: &str = "Sarasa Term SC Nerd";
 pub const TERMINAL_EMOJI_FALLBACK_FAMILY: &str = "Segoe UI Emoji";
 pub const UI_FALLBACK_FAMILIES: &[&str] =
@@ -315,6 +315,10 @@ fn ui_text_antialias_mode() -> &'static str {
 
 #[cfg(target_os = "windows")]
 fn ui_text_subpixel_positioning() -> bool {
+    if !ui_host_window_transparent() {
+        return false;
+    }
+
     true
 }
 
@@ -352,7 +356,7 @@ fn ui_text_gamma() -> String {
 #[cfg(target_os = "windows")]
 fn ui_text_hinting() -> &'static str {
     match ui_text_antialias_mode() {
-        "subpixel" => "slight",
+        "subpixel" => "normal",
         _ => "normal",
     }
 }

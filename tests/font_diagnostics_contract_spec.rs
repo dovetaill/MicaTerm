@@ -13,7 +13,7 @@ fn font_diagnostics_module_defines_explicit_ui_and_terminal_font_contracts() {
     );
 
     for expected in [
-        "pub const UI_FONT_FAMILY: &str = \"MiSans\";",
+        "pub const UI_FONT_FAMILY: &str = \"JetBrains Maple Mono\";",
         "pub const TERMINAL_PRIMARY_FAMILY: &str = \"Sarasa Term SC Nerd\";",
         "pub const TERMINAL_EMOJI_FALLBACK_FAMILY: &str = \"Segoe UI Emoji\";",
         "pub const UI_FALLBACK_FAMILIES: &[&str]",

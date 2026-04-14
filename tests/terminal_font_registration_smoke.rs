@@ -25,28 +25,36 @@ fn bundled_font_assets_cover_terminal_and_shell_contracts() {
         "the terminal bundle should ship the upstream Sarasa license text"
     );
     assert!(
-        Path::new("assets/fonts/MiSans/MiSans-Regular.ttf").exists(),
-        "the shell UI bundle should ship a MiSans regular face"
+        Path::new("assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf").exists(),
+        "the shell UI bundle should ship a JetBrains Maple Mono regular face"
     );
     assert!(
-        Path::new("assets/fonts/MiSans/MiSans-Medium.ttf").exists(),
-        "the shell UI bundle should ship a MiSans medium face"
+        !Path::new("assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-Medium.ttf").exists(),
+        "the shell UI bundle should no longer ship a JetBrains Maple Mono medium face once the shell collapses onto regular"
     );
     assert!(
-        Path::new("assets/fonts/MiSans/LICENSE.txt").exists(),
-        "the shell UI bundle should ship the upstream MiSans license text"
+        Path::new("assets/fonts/JetBrainsMapleMono/LICENSE.txt").exists(),
+        "the shell UI bundle should ship the upstream JetBrains Maple Mono license text"
     );
-    for retired_family in [
-        "assets/fonts/JetBrainsMono",
-        "assets/fonts/CascadiaMono",
-        "assets/fonts/SarasaUiSC",
-        "assets/fonts/Fusion-JetBrainsMapleMono",
-    ] {
-        assert!(
-            !Path::new(retired_family).exists(),
-            "retired bundled font family `{retired_family}` should be removed from the repository"
-        );
-    }
+    let bundled_font_dirs = std::fs::read_dir("assets/fonts")
+        .expect("read bundled fonts directory")
+        .map(|entry| {
+            entry
+                .expect("font dir entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        bundled_font_dirs,
+        vec![
+            "JetBrainsMapleMono".to_string(),
+            "SarasaTermSCNerd".to_string()
+        ],
+        "repository should keep only the current shell UI and terminal bundled font directories"
+    );
 }
 
 #[test]
@@ -166,16 +174,16 @@ fn build_script_watches_only_active_font_assets() {
     let source = fs::read_to_string("build.rs").expect("read build script");
 
     assert!(
-        source.contains("assets/fonts/MiSans/MiSans-Regular.ttf"),
-        "build script should watch the bundled MiSans regular asset"
+        source.contains("assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf"),
+        "build script should watch the bundled JetBrains Maple Mono regular asset"
     );
     assert!(
-        source.contains("assets/fonts/MiSans/MiSans-Medium.ttf"),
-        "build script should watch the bundled MiSans medium asset"
+        !source.contains("assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-Medium.ttf"),
+        "build script should stop watching a bundled JetBrains Maple Mono medium asset once the shell becomes regular-only"
     );
     assert!(
-        source.contains("assets/fonts/MiSans/MiSans-Semibold.ttf"),
-        "build script should watch the bundled MiSans semibold asset"
+        !source.contains("assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-SemiBold.ttf"),
+        "build script should stop watching a bundled JetBrains Maple Mono semibold asset once the shell becomes regular-only"
     );
     assert!(
         source.contains("assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf"),

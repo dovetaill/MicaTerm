@@ -36,11 +36,11 @@ fn light_mode_text_tokens_raise_shell_contrast_for_small_misans_copy() {
 
     assert!(
         tokens.contains("out property <brush> text-secondary: dark-mode ? #b9c3d0 : #3f4d5d;"),
-        "light-mode secondary text should move to a darker shell contrast so 14px MiSans body copy stops reading as gray haze on Windows"
+        "light-mode secondary text should move to a darker shell contrast so 14px shell body copy stops reading as gray haze on Windows"
     );
     assert!(
         tokens.contains("out property <brush> text-muted: dark-mode ? #8794a6 : #5f7084;"),
-        "light-mode muted text should keep enough density for small MiSans captions instead of collapsing into low-contrast gray"
+        "light-mode muted text should keep enough density for small shell captions instead of collapsing into low-contrast gray"
     );
 }
 
@@ -116,7 +116,7 @@ fn welcome_shell_copy_uses_token_colors_instead_of_opacity_fades() {
     );
     assert!(
         !welcome.contains("opacity: 0.72;"),
-        "welcome hero supporting copy should stop using opacity fades because that pushes text through transparent compositing and makes MiSans look gray on Windows"
+        "welcome hero supporting copy should stop using opacity fades because that pushes text through transparent compositing and makes shell text look gray on Windows"
     );
     assert!(
         quick_launch.contains("color: ThemeTokens.text-secondary;")

@@ -2,20 +2,20 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Make the terminal render with a Sarasa-only primary text contract, move all non-terminal shell UI surfaces to bundled MiSans, and remove the retired bundled font families from the repository.
+**Goal:** Make the terminal render with a Sarasa-only primary text contract, move all non-terminal shell UI surfaces to bundled JetBrains Maple Mono, and remove the retired bundled font families from the repository.
 
-**Architecture:** The Rust terminal renderer keeps full ownership of terminal typography and converges every normal text path on `Sarasa Term SC`, with emoji-only fallback left intact. The Slint shell owns UI chrome typography through a shared `MiSans` contract, while build/package/docs/tests are rewritten so the repo only describes the approved bundled font story.
+**Architecture:** The Rust terminal renderer keeps full ownership of terminal typography and converges every normal text path on `Sarasa Term SC`, with emoji-only fallback left intact. The Slint shell owns UI chrome typography through a shared `JetBrains Maple Mono` contract, while build/package/docs/tests are rewritten so the repo only describes the approved bundled font story.
 
 **Tech Stack:** Rust, Slint, cargo tests, DirectWrite fallback code, atlas renderer (`ab_glyph`/`swash`), shell packaging scripts, source-contract tests
 
 ---
 
-### Task 1: Add failing contracts and bundled assets for the MiSans UI shell
+### Task 1: Add failing contracts and bundled assets for the JetBrains Maple Mono UI shell
 
 **Files:**
-- Create: `assets/fonts/MiSans/MiSans-Regular.ttf`
-- Create: `assets/fonts/MiSans/MiSans-Semibold.ttf`
-- Create: `assets/fonts/MiSans/LICENSE.txt`
+- Create: `assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf`
+- Create: `assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-SemiBold.ttf`
+- Create: `assets/fonts/JetBrainsMapleMono/LICENSE.txt`
 - Modify: `ui/theme/typography.slint`
 - Modify: `ui/app-window.slint`
 - Modify: `tests/ui_typography_defaults_spec.rs`
@@ -26,39 +26,39 @@
 Update `tests/ui_typography_defaults_spec.rs` so it asserts the new UI contract instead of the current `Sarasa UI SC` contract.
 
 ```rust
-assert!(Path::new("assets/fonts/MiSans/MiSans-Regular.ttf").exists());
-assert!(Path::new("assets/fonts/MiSans/MiSans-Semibold.ttf").exists());
-assert!(Path::new("assets/fonts/MiSans/LICENSE.txt").exists());
-assert!(source.contains("ui-font-family: \"MiSans\";"));
-assert!(source.contains("import \"../assets/fonts/MiSans/MiSans-Regular.ttf\";"));
-assert!(source.contains("import \"../assets/fonts/MiSans/MiSans-Semibold.ttf\";"));
+assert!(Path::new("assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf").exists());
+assert!(Path::new("assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-SemiBold.ttf").exists());
+assert!(Path::new("assets/fonts/JetBrainsMapleMono/LICENSE.txt").exists());
+assert!(source.contains("ui-font-family: \"JetBrains Maple Mono\";"));
+assert!(source.contains("import \"../assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf\";"));
+assert!(source.contains("import \"../assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-SemiBold.ttf\";"));
 assert!(!source.contains("SarasaUiSC"));
 ```
 
 **Step 2: Run test to verify it fails**
 
 Run: `cargo test --test ui_typography_defaults_spec -q`
-Expected: FAIL because `MiSans` assets do not exist yet and the Slint typography contract still says `Sarasa UI SC`.
+Expected: FAIL because `JetBrains Maple Mono` assets do not exist yet and the Slint typography contract still says `Sarasa UI SC`.
 
 **Step 3: Write minimal implementation**
 
-Add the approved bundled `MiSans` files under `assets/fonts/MiSans/`, then update the shared UI typography contract and app-window imports.
+Add the approved bundled `JetBrains Maple Mono` files under `assets/fonts/JetBrainsMapleMono/`, then update the shared UI typography contract and app-window imports.
 
 ```slint
 export global AppTypography {
-    out property <string> ui-font-family: "MiSans";
+    out property <string> ui-font-family: "JetBrains Maple Mono";
     out property <int> ui-font-weight-regular: 400;
     out property <int> ui-font-weight-semibold: 600;
 }
 ```
 
 ```slint
-import "../assets/fonts/MiSans/MiSans-Regular.ttf";
-import "../assets/fonts/MiSans/MiSans-Semibold.ttf";
+import "../assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf";
+import "../assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-SemiBold.ttf";
 default-font-family: AppTypography.ui-font-family;
 ```
 
-Update `build.rs` to watch the new `MiSans` assets and stop watching `assets/fonts/SarasaUiSC/...`.
+Update `build.rs` to watch the new `JetBrains Maple Mono` assets and stop watching `assets/fonts/SarasaUiSC/...`.
 
 **Step 4: Run test to verify it passes**
 
@@ -68,7 +68,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add assets/fonts/MiSans build.rs ui/theme/typography.slint ui/app-window.slint tests/ui_typography_defaults_spec.rs
+git add assets/fonts/JetBrains Maple Mono build.rs ui/theme/typography.slint ui/app-window.slint tests/ui_typography_defaults_spec.rs
 git commit -m "feat: add bundled misans ui contract"
 ```
 
@@ -208,7 +208,7 @@ git commit -m "feat: align windows font fallback with sarasa"
 Update packaging/docs contract tests so they require the new bundled-license story and stop expecting the removed font directories.
 
 ```rust
-assert!(content.contains("assets/fonts/MiSans/LICENSE.txt"));
+assert!(content.contains("assets/fonts/JetBrainsMapleMono/LICENSE.txt"));
 assert!(content.contains("assets/fonts/SarasaTermSC/LICENSE.txt"));
 assert!(!content.contains("assets/fonts/JetBrainsMono/OFL.txt"));
 assert!(!content.contains("assets/fonts/SarasaUiSC/LICENSE.txt"));
@@ -234,8 +234,8 @@ rm -rf assets/fonts/JetBrainsMono assets/fonts/CascadiaMono assets/fonts/SarasaU
 Then update `build-desktop.sh` so license staging creates only the approved font directories, for example:
 
 ```bash
-mkdir -p "$license_root/MiSans" "$license_root/SarasaTermSC"
-cp "$ROOT_DIR/assets/fonts/MiSans/LICENSE.txt" "$license_root/MiSans/LICENSE.txt"
+mkdir -p "$license_root/JetBrainsMapleMono" "$license_root/SarasaTermSC"
+cp "$ROOT_DIR/assets/fonts/JetBrainsMapleMono/LICENSE.txt" "$license_root/JetBrainsMapleMono/LICENSE.txt"
 cp "$ROOT_DIR/assets/fonts/SarasaTermSC/LICENSE.txt" "$license_root/SarasaTermSC/LICENSE.txt"
 ```
 

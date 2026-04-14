@@ -1029,11 +1029,16 @@ impl GlyphRenderer for SkiaItemRenderer<'_> {
         let mut font = skia_safe::Font::from_typeface(type_face, font_size.get());
         #[cfg(target_os = "windows")]
         {
-            font.set_subpixel(true);
             if shell_host_is_opaque() {
+                // Keep LCD edge AA on the opaque shell host, but disable fractional glyph
+                // positioning so tiny UI labels stop picking up uneven 1px seams.
+                font.set_subpixel(false);
                 font.set_edging(skia_safe::font::Edging::SubpixelAntiAlias);
-                font.set_hinting(skia_safe::FontHinting::Slight);
+                // Match Skia's Windows/DirectWrite default: keep LCD AA, but use
+                // Normal hinting so tiny shell glyphs stay grid-fitted.
+                font.set_hinting(skia_safe::FontHinting::Normal);
             } else {
+                font.set_subpixel(true);
                 font.set_edging(skia_safe::font::Edging::AntiAlias);
                 font.set_hinting(skia_safe::FontHinting::Normal);
             }

@@ -6,7 +6,7 @@ This document records the final implementation contract for the `2026-04-13-term
 
 Goal:
 
-- unify the Slint shell UI onto bundled `MiSans`
+- unify the Slint shell UI onto bundled `JetBrains Maple Mono`
 - unify the shared terminal text contract onto bundled `Sarasa Term SC`
 - remove retired bundled font families from runtime, packaging, and repository assets
 
@@ -47,15 +47,15 @@ Goal:
   - Windows native presenter and bitmap presenter now consume the same Sarasa-first terminal typography contract
 - packaging contract in `build-desktop.sh`
   - `stage_bundled_font_licenses()` stages only:
-    - `licenses/fonts/MiSans/LICENSE.txt`
+    - `licenses/fonts/JetBrainsMapleMono/LICENSE.txt`
     - `licenses/fonts/SarasaTermSC/LICENSE.txt`
   - retired bundles are no longer copied into packaged Windows artifacts
 
 ## Slint Callbacks, Global State, And Bindings
 
 - `ui/app-window.slint` imports:
-  - `../assets/fonts/MiSans/MiSans-Regular.ttf`
-  - `../assets/fonts/MiSans/MiSans-Semibold.ttf`
+  - `../assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-Regular.ttf`
+  - `../assets/fonts/JetBrainsMapleMono/JetBrainsMapleMono-SemiBold.ttf`
 - `AppWindow` binds:
   - `default-font-family: AppTypography.ui-font-family`
   - `default-font-weight: AppTypography.ui-font-weight-regular`
@@ -73,14 +73,14 @@ Goal:
 
 ## State Flow
 
-1. Slint shell startup loads `MiSans` through `ui/app-window.slint`.
+1. Slint shell startup loads `JetBrains Maple Mono` through `ui/app-window.slint`.
 2. `AppTypography` publishes the shell UI typography contract to the full window tree.
 3. Terminal presenters request the shared terminal font through `FontRequest::default()` or `FontRequest::windows_default()`.
 4. `TerminalAtlasRenderer` loads bundled `Sarasa Term SC` for the bitmap path.
 5. `DirectWriteFontSystem` loads bundled `Sarasa Term SC` first, then resolves emoji and symbol fallbacks only when text content requires them.
 6. `WindowsDirectWriteTextRendererState` keeps the in-memory bundled Sarasa bytes available so native DirectWrite faces stay on repository-owned font data.
 7. On DPI or scale changes, `WindowsNativePresenter::reload_loaded_font_for_scale()` reloads metrics and clears shaped-row/frame caches before the next present.
-8. During packaging, `build-desktop.sh` stages only `MiSans` and `SarasaTermSC` license files into the final Windows artifact.
+8. During packaging, `build-desktop.sh` stages only `JetBrains Maple Mono` and `SarasaTermSC` license files into the final Windows artifact.
 
 ## Key Error Handling Strategies
 
@@ -119,10 +119,10 @@ Goal:
 - integration tests for `WindowsNativePresenter::set_raster_scale()`
   - verify cache reset and loaded-font reload behavior across multiple scale changes
 - packaging smoke tests
-  - assert Windows zip contents contain only `MiSans/LICENSE.txt` and `SarasaTermSC/LICENSE.txt`
+  - assert Windows zip contents contain only `JetBrainsMapleMono/LICENSE.txt` and `SarasaTermSC/LICENSE.txt`
   - assert retired font license directories never reappear
 - UI typography smoke tests
-  - assert `AppWindow` keeps importing bundled `MiSans` faces
+  - assert `AppWindow` keeps importing bundled `JetBrains Maple Mono` faces
   - assert `AppTypography` remains the sole default shell font contract
 - renderer contract tests
   - assert bitmap atlas and retained-native DirectWrite paths both continue using bundled `Sarasa Term SC`
@@ -136,5 +136,5 @@ Goal:
 - passed Windows packaging verification:
   - `./build-win-x64.sh`
 - packaged Windows artifact now stages only:
-  - `licenses/fonts/MiSans/LICENSE.txt`
+  - `licenses/fonts/JetBrainsMapleMono/LICENSE.txt`
   - `licenses/fonts/SarasaTermSC/LICENSE.txt`

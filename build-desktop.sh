@@ -84,11 +84,11 @@ stage_bundled_font_licenses() {
   local license_root="$stage_dir/licenses/fonts"
 
   mkdir -p \
-    "$license_root/MiSans" \
+    "$license_root/JetBrainsMapleMono" \
     "$license_root/SarasaTermSCNerd"
 
-  cp "$ROOT_DIR/assets/fonts/MiSans/LICENSE.txt" \
-    "$license_root/MiSans/LICENSE.txt"
+  cp "$ROOT_DIR/assets/fonts/JetBrainsMapleMono/LICENSE.txt" \
+    "$license_root/JetBrainsMapleMono/LICENSE.txt"
   cp "$ROOT_DIR/assets/fonts/SarasaTermSCNerd/LICENSE.txt" \
     "$license_root/SarasaTermSCNerd/LICENSE.txt"
 }

@@ -31,8 +31,8 @@ fn readme_describes_current_bundled_shell_and_terminal_fonts() {
     let content = fs::read_to_string("readme.md").expect("read readme");
 
     assert!(
-        content.contains("MiSans"),
-        "readme should describe MiSans as the bundled shell UI family"
+        content.contains("JetBrains Maple Mono"),
+        "readme should describe JetBrains Maple Mono as the bundled shell UI family"
     );
     assert!(
         content.contains("Sarasa Term SC Nerd"),

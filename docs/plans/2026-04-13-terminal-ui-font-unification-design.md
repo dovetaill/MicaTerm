@@ -6,14 +6,14 @@ The current typography split does not match the intended product direction:
 
 - The terminal body still defaults to `JetBrains Mono`, with `Sarasa Term SC` only acting as a CJK fallback.
 - The bitmap atlas path and the Windows native text path do not share the same "Sarasa-first" contract, so mixed Chinese/English terminal content can feel visually inconsistent.
-- The desktop shell UI still defaults to `Sarasa UI SC`, not `MiSans`.
+- The desktop shell UI still defaults to `Sarasa UI SC`, not `JetBrains Maple Mono`.
 - The repository still bundles several historical font packages (`JetBrainsMono`, `CascadiaMono`, `SarasaUiSC`, `Fusion-JetBrainsMapleMono`) that the user no longer wants to keep.
 
 The approved product decision is now explicit:
 
 - **Terminal area:** use `Sarasa Term SC` as the unified main typeface.
 - **Terminal exception:** keep system color emoji fallback only for emoji-capable glyphs.
-- **UI shell outside the terminal:** use bundled `MiSans`.
+- **UI shell outside the terminal:** use bundled `JetBrains Maple Mono`.
 - **Asset policy:** delete the old non-approved bundled font families instead of merely leaving them unused.
 
 ## Chosen Approach
@@ -38,9 +38,9 @@ All terminal text entry points should converge on `Sarasa Term SC`:
 
 The only functional fallback that remains should be color emoji fallback, because removing it would risk tofu squares or degraded emoji rendering.
 
-### 3. Move all shell UI typography to bundled `MiSans`
+### 3. Move all shell UI typography to bundled `JetBrains Maple Mono`
 
-The UI shell should import bundled `MiSans` assets and expose them through the shared Slint typography contract so the whole shell changes together:
+The UI shell should import bundled `JetBrains Maple Mono` assets and expose them through the shared Slint typography contract so the whole shell changes together:
 
 - app window default font
 - popup/menu surfaces
@@ -77,9 +77,9 @@ The atlas path and Windows native path should describe the same primary family s
 
 ### UI path
 
-Replace the current Slint UI family contract with bundled `MiSans`:
+Replace the current Slint UI family contract with bundled `JetBrains Maple Mono`:
 
-- add `MiSans` assets plus license text under `assets/fonts`
+- add `JetBrains Maple Mono` assets plus license text under `assets/fonts`
 - update `ui/theme/typography.slint`
 - update `ui/app-window.slint`
 - update popup/menu typography that does not inherit the root `Window` defaults automatically
@@ -90,17 +90,17 @@ Replace the current Slint UI family contract with bundled `MiSans`:
 The repository should only bundle the approved font families after this change:
 
 - `Sarasa Term SC`
-- `MiSans`
+- `JetBrains Maple Mono`
 
 Build/packaging/license staging should be rewritten accordingly so packaged artifacts no longer include licenses for removed font families.
 
 ## Risks and Mitigations
 
-### Risk 1: `MiSans` is not yet vendored in the repository
+### Risk 1: `JetBrains Maple Mono` is not yet vendored in the repository
 
 Mitigation:
 
-- add the required `MiSans` font files as part of the change
+- add the required `JetBrains Maple Mono` font files as part of the change
 - add the corresponding license file
 - update source-contract tests first so missing assets fail clearly
 
@@ -133,7 +133,7 @@ Mitigation:
 1. Add/adjust failing source-contract tests for the new terminal/UI font contracts.
 2. Add/adjust asset and packaging tests so removed font families are no longer expected.
 3. Implement the Rust terminal font changes.
-4. Implement the Slint UI `MiSans` changes.
+4. Implement the Slint UI `JetBrains Maple Mono` changes.
 5. Remove retired bundled font families and clean all references.
 6. Run focused typography/font contract tests.
 7. Run `cargo check`.
@@ -144,7 +144,7 @@ Mitigation:
 This change is successful when all of the following are true:
 
 1. Terminal body text resolves to `Sarasa Term SC` instead of the current JetBrains-led mixed path.
-2. The desktop shell UI defaults to bundled `MiSans`.
+2. The desktop shell UI defaults to bundled `JetBrains Maple Mono`.
 3. The repository no longer bundles the retired JetBrains/Cascadia/SarasaUi/Fusion font families.
 4. Emoji still renders via the allowed fallback path instead of regressing into missing-glyph output.
 5. Build scripts, tests, docs, and packaged license staging all match the new font contract.

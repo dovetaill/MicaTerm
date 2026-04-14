@@ -146,8 +146,8 @@ fn desktop_packaging_script_copies_default_terminal_font_license() {
     let content = fs::read_to_string("build-desktop.sh").expect("read build-desktop script");
 
     assert!(
-        content.contains("assets/fonts/MiSans/LICENSE.txt"),
-        "desktop packaging should copy the bundled MiSans license into the staged package"
+        content.contains("assets/fonts/JetBrainsMapleMono/LICENSE.txt"),
+        "desktop packaging should copy the bundled JetBrains Maple Mono license into the staged package"
     );
     assert!(
         content.contains("assets/fonts/SarasaTermSCNerd/LICENSE.txt"),
@@ -166,7 +166,7 @@ fn desktop_packaging_script_copies_default_terminal_font_license() {
         "desktop packaging should stage bundled font licenses under a dedicated licenses/fonts tree"
     );
     assert!(
-        content.contains("MiSans/LICENSE.txt"),
-        "desktop packaging should preserve the MiSans license filename inside the staged font license bundle"
+        content.contains("JetBrainsMapleMono/LICENSE.txt"),
+        "desktop packaging should preserve the JetBrains Maple Mono license filename inside the staged font license bundle"
     );
 }

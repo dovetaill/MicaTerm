@@ -1,23 +1,28 @@
 use std::fs;
 
 #[test]
-fn vendored_slint_skia_item_renderer_switches_shell_text_aa_by_host_opacity() {
+fn vendored_slint_skia_item_renderer_uses_windows_pixel_snapped_shell_text_policy() {
     let item_renderer_source = fs::read_to_string("vendor/i-slint-renderer-skia/itemrenderer.rs")
         .expect("read skia item renderer");
 
     for expected in [
         "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW",
-        "font.set_subpixel(true);",
+        "font.set_subpixel(false);",
         "font.set_edging(skia_safe::font::Edging::SubpixelAntiAlias);",
         "font.set_edging(skia_safe::font::Edging::AntiAlias);",
-        "font.set_hinting(skia_safe::FontHinting::Slight);",
         "font.set_hinting(skia_safe::FontHinting::Normal);",
     ] {
         assert!(
             item_renderer_source.contains(expected),
-            "vendored skia item renderer should keep `{expected}` so Windows shell text can switch between an opaque-host LCD path and a transparent-host grayscale fallback instead of hard-wiring one AA mode for every host window"
+            "vendored skia item renderer should keep `{expected}` so Windows shell text can stay on LCD AA while disabling fractional glyph positioning that makes tiny 13-14px labels look uneven"
         );
     }
+
+    assert!(
+        item_renderer_source.contains("if shell_host_is_opaque() {\n                // Keep LCD edge AA on the opaque shell host, but disable fractional glyph\n                // positioning so tiny UI labels stop picking up uneven 1px seams.\n                font.set_subpixel(false);")
+            && item_renderer_source.contains("} else {\n                font.set_subpixel(true);"),
+        "vendored skia item renderer should disable subpixel glyph positioning specifically on the opaque Windows shell path while leaving the transparent fallback path untouched"
+    );
 }
 
 #[test]
@@ -97,6 +102,19 @@ fn ui_renderer_logs_dynamic_shell_text_policy() {
             "ui renderer diagnostics should expose `{expected}` so packaged Windows runs can see whether the shell is on the opaque-host LCD path or the transparent-host grayscale fallback instead of guessing from screenshots"
         );
     }
+
+    assert!(
+        diagnostics_source.contains("fn ui_text_hinting() -> &'static str")
+            && diagnostics_source.contains("\"subpixel\" => \"normal\""),
+        "ui renderer diagnostics should report the Windows LCD shell path as normal hinting so packaged logs reflect the actual rasterization policy instead of a stale slight-hinting label"
+    );
+
+    assert!(
+        diagnostics_source.contains("fn ui_text_subpixel_positioning() -> bool")
+            && diagnostics_source
+                .contains("!ui_host_window_transparent() {\n        return false;"),
+        "ui renderer diagnostics should report subpixel positioning as disabled on the opaque Windows shell path so logs expose the pixel-snapped experiment instead of continuing to claim ideal glyph placement"
+    );
 }
 
 #[test]
