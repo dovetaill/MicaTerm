@@ -13,7 +13,7 @@ SNIPPET_MODAL="$ROOT_DIR/ui/components/assets-snippet-modal.slint"
 SNIPPET_PACKAGE_MODAL="$ROOT_DIR/ui/components/assets-snippet-package-modal.slint"
 MODAL_SHELL="$ROOT_DIR/ui/components/blocking-modal-shell.slint"
 MODAL_CHROME="$ROOT_DIR/ui/components/modal-chrome.slint"
-BOOTSTRAP="$ROOT_DIR/src/app/bootstrap.rs"
+BOOTSTRAP_ASSETS="$ROOT_DIR/src/app/bootstrap/assets_keychain.rs"
 TOKENS="$ROOT_DIR/ui/theme/tokens.slint"
 ASSETS_SIDEBAR="$ROOT_DIR/ui/shell/assets-sidebar.slint"
 SIDEBAR="$ROOT_DIR/ui/shell/sidebar.slint"
@@ -132,9 +132,9 @@ grep -F 'import { ScrollView } from "std-widgets.slint";' "$SYNC_MODAL" >/dev/nu
 grep -F 'import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> mode: "not-configured";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> title: "Sync Settings";' "$SYNC_MODAL" >/dev/null
-grep -F 'in property <bool> auto-sync-enabled: false;' "$SYNC_MODAL" >/dev/null
-grep -F 'in property <string> primary-gist-id: "";' "$SYNC_MODAL" >/dev/null
-grep -F 'in property <bool> mirror-enabled: false;' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <string> local-last-sync-text: "Never synced";' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <string> remote-last-update-text: "Unknown";' "$SYNC_MODAL" >/dev/null
+grep -F 'in property <string> primary-revision-text: "Unknown";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> master-password: "";' "$SYNC_MODAL" >/dev/null
 grep -F 'callback close-requested();' "$SYNC_MODAL" >/dev/null
 grep -F 'callback primary-action-requested();' "$SYNC_MODAL" >/dev/null
@@ -142,7 +142,7 @@ grep -F 'callback secondary-action-requested();' "$SYNC_MODAL" >/dev/null
 grep -F 'callback draft-changed(string, string);' "$SYNC_MODAL" >/dev/null
 grep -F 'callback toggle-changed(string, bool);' "$SYNC_MODAL" >/dev/null
 grep -F 'body := ModalBodyScrollArea {' "$SYNC_MODAL" >/dev/null
-grep -F 'mouse-drag-pan-enabled: true;' "$MODAL_CHROME" >/dev/null
+grep -F 'mouse-drag-pan-enabled: false;' "$MODAL_CHROME" >/dev/null
 grep -F 'horizontal-scrollbar-policy: always-off;' "$MODAL_CHROME" >/dev/null
 grep -F 'scroll-body := Rectangle {' "$MODAL_CHROME" >/dev/null
 grep -F 'body-panel := Rectangle {' "$MODAL_CHROME" >/dev/null
@@ -161,13 +161,13 @@ grep -F 'footer := ModalFooterBar {' "$SYNC_MODAL" >/dev/null
 grep -F 'y: parent.height - root.footer-height;' "$SYNC_MODAL" >/dev/null
 grep -F 'divider-color: ThemeTokens.divider-strong;' "$SYNC_MODAL" >/dev/null
 grep -F 'error-banner := Rectangle {' "$SYNC_MODAL" >/dev/null
-grep -F 'SyncModalToggleRow {' "$SYNC_MODAL" >/dev/null
+grep -F 'label: "Local last sync";' "$SYNC_MODAL" >/dev/null
 grep -F 'prominent: true;' "$SYNC_MODAL" >/dev/null
 grep -F 'panel-surface: ThemeTokens.window-surface;' "$SYNC_MODAL" >/dev/null
 grep -F 'surface: ThemeTokens.activity-surface;' "$SYNC_MODAL" >/dev/null
 grep -F 'SyncModalTextField {' "$SYNC_MODAL" >/dev/null
 grep -F 'content-column := Rectangle {' "$SYNC_MODAL" >/dev/null
-grep -F 'if root.mode == "not-configured" || root.mode == "locked"' "$SYNC_MODAL" >/dev/null
+grep -F 'if root.mode == "not-configured" : password-field := SyncModalTextField {' "$SYNC_MODAL" >/dev/null
 grep -F 'export component AssetsSnippetPackageModal inherits Rectangle {' "$SNIPPET_PACKAGE_MODAL" >/dev/null
 grep -F 'export component AssetsFolderCreateModal inherits Rectangle {' "$FOLDER_MODAL" >/dev/null
 grep -F 'export component AssetsSshConnectionModal inherits Rectangle {' "$SSH_MODAL" >/dev/null
@@ -400,4 +400,4 @@ rg -n "can-confirm" "$FOLDER_MODAL" >/dev/null
 rg -n "can-confirm" "$SNIPPET_MODAL" >/dev/null
 rg -n "can-confirm" "$SNIPPET_PACKAGE_MODAL" >/dev/null
 rg -n "can-confirm" "$SSH_MODAL" >/dev/null
-grep -F 'window.set_asset_modal_focus_sequence(window.get_asset_modal_focus_sequence() + 1);' "$BOOTSTRAP" >/dev/null
+grep -F 'window.set_asset_modal_focus_sequence(window.get_asset_modal_focus_sequence() + 1);' "$BOOTSTRAP_ASSETS" >/dev/null

@@ -784,8 +784,8 @@ fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
         "sync modal body must scroll from directly below the title bar"
     );
     assert!(
-        modal_chrome.contains("mouse-drag-pan-enabled: true;"),
-        "shared modal scroll host should allow direct drag scrolling when the content grows"
+        modal_chrome.contains("mouse-drag-pan-enabled: false;"),
+        "shared modal scroll host should require wheel or scrollbar input instead of direct drag scrolling"
     );
     assert!(
         modal_chrome.contains("horizontal-scrollbar-policy: always-off;")
