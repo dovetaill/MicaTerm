@@ -1832,6 +1832,63 @@ fn close_session_by_id(
     state.close_workspace_session_with_fallback(session_id)
 }
 
+fn close_workspace_tab_by_id(
+    state: &mut ShellViewModel,
+    bridge: Option<&ShellSessionBridge>,
+    tab_id: &str,
+) -> bool {
+    let Some(tab) = state
+        .workspace_tabs()
+        .iter()
+        .find(|tab| tab.tab_id == tab_id)
+        .cloned()
+    else {
+        return false;
+    };
+
+    if tab.kind == crate::shell::tabs::WorkspaceTabKind::Terminal {
+        let has_dependent_sftp_tabs =
+            state.has_workspace_sftp_tabs_for_terminal_session(tab.session_id.as_str());
+        if has_dependent_sftp_tabs {
+            if let Some(bridge) = bridge
+                && let Ok(session_uuid) = Uuid::parse_str(tab.session_id.as_str())
+            {
+                let _ = bridge.manager.disconnect_session(session_uuid);
+            }
+            state.hide_workspace_terminal_session(tab.session_id.as_str());
+            let _ = state.mark_workspace_sftp_sessions_disconnected(tab.session_id.as_str());
+            return state.close_workspace_tab(tab_id);
+        }
+
+        return close_session_by_id(state, bridge, tab.session_id.as_str());
+    }
+
+    let linked_hidden_session_id = state
+        .file_browser_sessions
+        .get(tab.file_browser_session_id.as_str())
+        .and_then(|browser_session| browser_session.linked_terminal_session_id.clone())
+        .filter(|session_id| state.workspace_terminal_session_hidden(session_id));
+
+    state.file_browser_sessions.remove(tab.file_browser_session_id.as_str());
+    let closed = state.close_workspace_tab(tab_id);
+    if !closed {
+        return false;
+    }
+
+    if let Some(session_id) = linked_hidden_session_id
+        && !state.has_workspace_sftp_tabs_for_terminal_session(session_id.as_str())
+    {
+        if let Some(bridge) = bridge
+            && let Ok(session_uuid) = Uuid::parse_str(session_id.as_str())
+        {
+            let _ = bridge.manager.close_session(session_uuid);
+        }
+        state.unhide_workspace_terminal_session(session_id.as_str());
+    }
+
+    true
+}
+
 fn sync_workspace_tab_items(window: &AppWindow, state: &ShellViewModel) {
     let tabs = state
         .workspace_tabs()
@@ -4335,6 +4392,40 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 }
             }
 
+            let workspace_sftp_projection_delta = {
+                let mut controller = sftp_browser_controller_ref.borrow_mut();
+                let workspace_sftp_open_changed = sftp::ensure_active_workspace_sftp_browser_started(
+                    &mut state,
+                    &mut controller,
+                    &manager,
+                );
+                let workspace_sftp_retry_changed =
+                    sftp::sync_active_workspace_sftp_browser_pending_request(
+                        &mut state,
+                        &mut controller,
+                        &manager,
+                    );
+                if workspace_sftp_open_changed || workspace_sftp_retry_changed {
+                    workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager)
+                } else {
+                    WorkspaceProjectionDelta::default()
+                }
+            };
+            if workspace_sftp_projection_delta.tabs_changed {
+                sync_workspace_tab_items(&window, &state);
+            }
+            if workspace_sftp_projection_delta.any_changed() {
+                sync_workspace_session_state_with_manager(
+                    &window,
+                    &state,
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                    Some(&manager),
+                );
+                if workspace_sftp_projection_delta.sftp_changed {
+                    sftp::sync_right_panel_state(&window, &state);
+                }
+            }
+
             let now = Instant::now();
             let active_surface = state.active_workspace_terminal_surface();
             let has_active_surface = active_surface.is_some();
@@ -5052,6 +5143,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         &store,
         &effects,
         &session_bridge,
+        &workspace_follow_tracker,
         &sftp_browser_controller,
     );
 
@@ -5513,22 +5605,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let had_active_surface = state.active_workspace_terminal_surface().is_some();
-        let terminal_session_id = state
-            .workspace_tabs()
-            .iter()
-            .find(|tab| tab.tab_id == tab_id.as_str())
-            .map(|tab| tab.session_id.clone())
-            .filter(|session_id| !session_id.is_empty());
-        let closed = if let Some(session_id) = terminal_session_id {
-            close_session_by_id(
-                &mut state,
-                session_bridge_ref.as_deref(),
-                session_id.as_str(),
-            )
-        } else {
-            state.close_workspace_tab(tab_id.as_str())
-        };
-        if closed {
+        if close_workspace_tab_by_id(&mut state, session_bridge_ref.as_deref(), tab_id.as_str()) {
             if let Some(session_bridge) = session_bridge_ref.as_ref() {
                 let _ = workspace_terminal::sync_workspace_projection_from_manager(
                     &mut state,
@@ -5599,15 +5676,15 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 windowing::sync_ssh_host_key_modal_state(&window, &state);
             }
             "close-tab" => {
-                let Some(session_id) = state.active_workspace_session_id().map(str::to_owned)
+                let Some(tab_id) = state.active_workspace_tab_id().map(str::to_owned)
                 else {
                     return;
                 };
                 let had_active_surface = state.active_workspace_terminal_surface().is_some();
-                if close_session_by_id(
+                if close_workspace_tab_by_id(
                     &mut state,
                     session_bridge_ref.as_deref(),
-                    session_id.as_str(),
+                    tab_id.as_str(),
                 ) {
                     if let Some(session_bridge) = session_bridge_ref.as_ref() {
                         let _ = workspace_terminal::sync_workspace_projection_from_manager(
@@ -5698,6 +5775,41 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&session_bridge.manager),
                 );
+            }
+            "reconnect-sftp-workspace" => {
+                let Some(session_bridge) = session_bridge_ref.as_ref() else {
+                    return;
+                };
+                if !state.reconnect_active_sftp_workspace() {
+                    return;
+                }
+                let Some(browser_session) = state.active_workspace_sftp_session().cloned() else {
+                    return;
+                };
+                let Some(session_id) = browser_session
+                    .linked_terminal_session_id
+                    .as_deref()
+                    .and_then(|session_id| Uuid::parse_str(session_id).ok())
+                else {
+                    return;
+                };
+                if let Err(err) = session_bridge.manager.retry_session(session_id) {
+                    tracing::error!(
+                        target: "app.ssh",
+                        session_id = session_id.to_string(),
+                        error = %err,
+                        "failed to reconnect sftp workspace"
+                    );
+                    return;
+                }
+                state.hide_workspace_terminal_session(session_id.to_string().as_str());
+                sync_workspace_tabs_with_manager(
+                    &window,
+                    &state,
+                    &mut workspace_follow_tracker_ref.borrow_mut(),
+                    Some(&session_bridge.manager),
+                );
+                sftp::sync_right_panel_state(&window, &state);
             }
             "trust-host-key" => {
                 let Some(session_bridge) = session_bridge_ref.as_ref() else {
