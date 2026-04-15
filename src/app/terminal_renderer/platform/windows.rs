@@ -330,6 +330,7 @@ impl WindowsNativeSurfaceState {
                 renderer.rendering_params_snapshot = None;
             }
             self.last_directwrite_fallback_reason = Some("renderer-init-failed");
+            self.trace_directwrite_text_path_state();
         }
     }
 
@@ -513,6 +514,7 @@ impl WindowsNativeSurfaceState {
             );
         }
         self.mark_directwrite_text_path("bitmap-mask-compat");
+        self.trace_directwrite_text_path_state();
     }
 
     fn trace_directwrite_text_path_state(&mut self) {
@@ -1279,6 +1281,7 @@ impl WindowsNativeSurfaceState {
 
             self.last_directwrite_text_drawn = true;
             self.mark_directwrite_text_path("directwrite-d2d");
+            self.trace_directwrite_text_path_state();
         }
     }
 

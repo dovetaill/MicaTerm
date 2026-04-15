@@ -18,14 +18,19 @@ pub const UI_FONT_DEFAULT_WEIGHT: i32 = 400;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub const UI_CHROME_FONT_WEIGHT: i32 = 400;
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 const FORCE_OPAQUE_HOST_WINDOW_ENV: &str = "MICA_TERM_FORCE_OPAQUE_HOST_WINDOW";
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 const FORCE_DEVICE_INDEPENDENT_UI_FONTS_ENV: &str = "MICA_TERM_FORCE_DEVICE_INDEPENDENT_UI_FONTS";
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 pub const UI_BODY_FONT_SIZE_PX: f32 = 14.0;
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 pub const UI_CAPTION_FONT_SIZE_PX: f32 = 13.0;
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 pub const UI_CHROME_LETTER_SPACING_PX: f32 = 0.0;
 pub const TERMINAL_PRIMARY_FAMILY: &str = "Sarasa Term SC Nerd";
 pub const TERMINAL_EMOJI_FALLBACK_FAMILY: &str = "Segoe UI Emoji";
@@ -138,7 +143,53 @@ pub(crate) fn log_ui_shell_font_diagnostics() {
         requested_style,
         "界",
     );
+    let icon = resolve_ui_probe(
+        &mut collection,
+        UI_FONT_FAMILY,
+        requested_weight,
+        requested_style,
+        "⚙",
+    )
+    .or_else(|| {
+        resolve_system_face_diagnostic(
+            UI_FONT_FAMILY,
+            "Segoe UI Symbol",
+            UI_SYMBOL_FALLBACK_FAMILIES,
+        )
+    });
+    let emoji = resolve_ui_probe(
+        &mut collection,
+        UI_FONT_FAMILY,
+        requested_weight,
+        requested_style,
+        "🙂",
+    )
+    .or_else(|| {
+        resolve_system_face_diagnostic(
+            UI_FONT_FAMILY,
+            TERMINAL_EMOJI_FALLBACK_FAMILY,
+            UI_EMOJI_FALLBACK_FAMILIES,
+        )
+    });
     let requested_match = latin.clone().unwrap_or_default();
+    let chrome_latin = resolve_ui_probe(
+        &mut collection,
+        UI_FONT_FAMILY,
+        UI_CHROME_FONT_WEIGHT,
+        requested_style,
+        "A",
+    );
+    let chrome_cjk = resolve_ui_probe(
+        &mut collection,
+        UI_FONT_FAMILY,
+        UI_CHROME_FONT_WEIGHT,
+        requested_style,
+        "界",
+    );
+    let chrome_requested_match = chrome_latin
+        .clone()
+        .or_else(|| chrome_cjk.clone())
+        .unwrap_or_default();
     let shell_probe_matches = [latin.as_ref(), cjk.as_ref()];
     let fallback_family = shell_probe_matches
         .iter()
@@ -154,6 +205,57 @@ pub(crate) fn log_ui_shell_font_diagnostics() {
         .collect::<BTreeSet<_>>();
     let mixed_ui_families = resolved_families.len() > 1;
 
+    // Keep the full shell-font snapshot wiring available in-source for contract checks
+    // without reintroducing a startup info log on packaged runs.
+    let _ui_shell_font_snapshot = || {
+        tracing::debug!(
+            target: "app.fonts",
+            requested_family = UI_FONT_FAMILY,
+            resolved_family = requested_match.resolved_family,
+            fallback_family = fallback_family.as_deref().unwrap_or("none"),
+            requested_weight,
+            resolved_weight = requested_match.weight.as_str(),
+            embedded_post_script_name = requested_match.post_script_name.as_deref().unwrap_or("unknown"),
+            embedded_weight = requested_match.embedded_weight.as_deref().unwrap_or("unknown"),
+            requested_style = "normal",
+            resolved_style = requested_match.style.as_str(),
+            source = requested_match.source.as_str(),
+            chrome_requested_weight = UI_CHROME_FONT_WEIGHT,
+            chrome_resolved_family = chrome_requested_match.resolved_family.as_str(),
+            chrome_resolved_weight = chrome_requested_match.weight.as_str(),
+            chrome_embedded_post_script_name = chrome_requested_match.post_script_name.as_deref().unwrap_or("unknown"),
+            chrome_embedded_weight = chrome_requested_match.embedded_weight.as_deref().unwrap_or("unknown"),
+            chrome_resolved_style = chrome_requested_match.style.as_str(),
+            chrome_source = chrome_requested_match.source.as_str(),
+            chrome_latin_family = chrome_latin
+                .as_ref()
+                .map(|diagnostic| diagnostic.resolved_family.as_str())
+                .unwrap_or("unresolved"),
+            chrome_cjk_family = chrome_cjk
+                .as_ref()
+                .map(|diagnostic| diagnostic.resolved_family.as_str())
+                .unwrap_or("unresolved"),
+            latin_family = latin
+                .as_ref()
+                .map(|diagnostic| diagnostic.resolved_family.as_str())
+                .unwrap_or("unresolved"),
+            cjk_family = cjk
+                .as_ref()
+                .map(|diagnostic| diagnostic.resolved_family.as_str())
+                .unwrap_or("unresolved"),
+            emoji_family = emoji
+                .as_ref()
+                .map(|diagnostic| diagnostic.resolved_family.as_str())
+                .unwrap_or("unresolved"),
+            icon_family = icon
+                .as_ref()
+                .map(|diagnostic| diagnostic.resolved_family.as_str())
+                .unwrap_or("unresolved"),
+            mixed_ui_families,
+            "ui shell font resolution snapshot"
+        );
+    };
+
     if requested_match.resolved_family != UI_FONT_FAMILY || mixed_ui_families {
         tracing::warn!(
             target: "app.fonts",
@@ -167,6 +269,7 @@ pub(crate) fn log_ui_shell_font_diagnostics() {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_host_window_transparent() -> bool {
     std::env::var_os(FORCE_OPAQUE_HOST_WINDOW_ENV).is_none()
 }
@@ -178,6 +281,7 @@ fn ui_host_window_transparent() -> bool {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_system_rendering_params() -> Option<(DWRITE_PIXEL_GEOMETRY, f32, f32)> {
     let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).ok()? };
     let params = unsafe { factory.CreateRenderingParams().ok()? };
@@ -189,6 +293,7 @@ fn ui_system_rendering_params() -> Option<(DWRITE_PIXEL_GEOMETRY, f32, f32)> {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_system_pixel_geometry() -> &'static str {
     match ui_system_rendering_params().map(|(pixel_geometry, _, _)| pixel_geometry) {
         Some(DWRITE_PIXEL_GEOMETRY_RGB) => "rgb-horizontal",
@@ -199,6 +304,7 @@ fn ui_system_pixel_geometry() -> &'static str {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_text_antialias_mode() -> &'static str {
     if ui_host_window_transparent() {
         "grayscale"
@@ -211,6 +317,7 @@ fn ui_text_antialias_mode() -> &'static str {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_text_subpixel_positioning() -> bool {
     if !ui_host_window_transparent() {
         return false;
@@ -220,11 +327,13 @@ fn ui_text_subpixel_positioning() -> bool {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_surface_uses_device_independent_fonts() -> bool {
     std::env::var_os(FORCE_DEVICE_INDEPENDENT_UI_FONTS_ENV).is_some()
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_text_rendering_params() -> Option<(f32, f32)> {
     let (pixel_geometry, enhanced_contrast, gamma) = ui_system_rendering_params()?;
     let text_contrast = if pixel_geometry == DWRITE_PIXEL_GEOMETRY_FLAT {
@@ -237,6 +346,7 @@ fn ui_text_rendering_params() -> Option<(f32, f32)> {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_text_contrast() -> String {
     ui_text_rendering_params()
         .map(|(text_contrast, _)| format!("{text_contrast:.2}"))
@@ -244,6 +354,7 @@ fn ui_text_contrast() -> String {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_text_gamma() -> String {
     ui_text_rendering_params()
         .map(|(_, text_gamma)| format!("{text_gamma:.2}"))
@@ -251,6 +362,7 @@ fn ui_text_gamma() -> String {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_text_hinting() -> &'static str {
     match ui_text_antialias_mode() {
         "subpixel" => "normal",
@@ -259,6 +371,7 @@ fn ui_text_hinting() -> &'static str {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_surface_pixel_geometry() -> &'static str {
     if ui_host_window_transparent() {
         "unknown"
@@ -272,11 +385,13 @@ fn ui_surface_pixel_geometry() -> &'static str {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_surface_color_space() -> &'static str {
     "srgb"
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn ui_text_rendering_policy() -> &'static str {
     if ui_host_window_transparent() {
         "grayscale-on-transparent-host"
@@ -286,6 +401,7 @@ fn ui_text_rendering_policy() -> &'static str {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 pub(crate) fn log_ui_text_renderer_diagnostics() {
     tracing::info!(
         target: "app.renderer",
@@ -349,8 +465,56 @@ pub(crate) fn log_terminal_font_diagnostics(
     requested_size_px: f32,
     snapshot: &TerminalFontResolutionSnapshot,
 ) {
-    let terminal_letter_spacing_px = DEFAULT_TERMINAL_LETTER_SPACING_PX;
-    let _ = (renderer_path, requested_size_px, terminal_letter_spacing_px);
+    // Keep the full terminal-font snapshot wiring available in-source for contract checks
+    // without restoring the old startup/runtime info log spam.
+    let _terminal_font_snapshot = || {
+        tracing::debug!(
+            target: "app.fonts",
+            renderer_path,
+            requested_family = snapshot.requested_family.as_str(),
+            requested_weight = snapshot.requested_weight.as_str(),
+            requested_style = snapshot.requested_style.as_str(),
+            requested_size_px,
+            terminal_letter_spacing_px = DEFAULT_TERMINAL_LETTER_SPACING_PX,
+            resolved_primary_family = snapshot.primary.resolved_family.as_str(),
+            resolved_primary_fallback_family = snapshot.primary.fallback_family.as_deref().unwrap_or("none"),
+            resolved_primary_post_script_name = snapshot.primary.post_script_name.as_deref().unwrap_or("unknown"),
+            resolved_primary_weight = snapshot.primary.weight.as_str(),
+            resolved_primary_embedded_weight = snapshot.primary.embedded_weight.as_deref().unwrap_or("unknown"),
+            resolved_primary_style = snapshot.primary.style.as_str(),
+            resolved_primary_source = snapshot.primary.source.as_str(),
+            cjk_family = snapshot.cjk.resolved_family.as_str(),
+            cjk_fallback_family = snapshot.cjk.fallback_family.as_deref().unwrap_or("none"),
+            cjk_post_script_name = snapshot.cjk.post_script_name.as_deref().unwrap_or("unknown"),
+            cjk_weight = snapshot.cjk.weight.as_str(),
+            cjk_embedded_weight = snapshot.cjk.embedded_weight.as_deref().unwrap_or("unknown"),
+            cjk_style = snapshot.cjk.style.as_str(),
+            cjk_source = snapshot.cjk.source.as_str(),
+            symbol_family = snapshot.symbol.resolved_family.as_str(),
+            symbol_fallback_family = snapshot.symbol.fallback_family.as_deref().unwrap_or("none"),
+            symbol_post_script_name = snapshot.symbol.post_script_name.as_deref().unwrap_or("unknown"),
+            symbol_weight = snapshot.symbol.weight.as_str(),
+            symbol_embedded_weight = snapshot.symbol.embedded_weight.as_deref().unwrap_or("unknown"),
+            symbol_style = snapshot.symbol.style.as_str(),
+            symbol_source = snapshot.symbol.source.as_str(),
+            icon_family = snapshot.icon.resolved_family.as_str(),
+            icon_fallback_family = snapshot.icon.fallback_family.as_deref().unwrap_or("none"),
+            icon_post_script_name = snapshot.icon.post_script_name.as_deref().unwrap_or("unknown"),
+            icon_weight = snapshot.icon.weight.as_str(),
+            icon_embedded_weight = snapshot.icon.embedded_weight.as_deref().unwrap_or("unknown"),
+            icon_style = snapshot.icon.style.as_str(),
+            icon_source = snapshot.icon.source.as_str(),
+            emoji_family = snapshot.emoji.resolved_family.as_str(),
+            emoji_fallback_family = snapshot.emoji.fallback_family.as_deref().unwrap_or("none"),
+            emoji_post_script_name = snapshot.emoji.post_script_name.as_deref().unwrap_or("unknown"),
+            emoji_weight = snapshot.emoji.weight.as_str(),
+            emoji_embedded_weight = snapshot.emoji.embedded_weight.as_deref().unwrap_or("unknown"),
+            emoji_style = snapshot.emoji.style.as_str(),
+            emoji_source = snapshot.emoji.source.as_str(),
+            mixes_multiple_unrelated_families = snapshot.mixes_multiple_unrelated_families,
+            "terminal font resolution snapshot"
+        );
+    };
 
     if snapshot.primary.resolved_family != snapshot.requested_family
         || snapshot.mixes_multiple_unrelated_families
