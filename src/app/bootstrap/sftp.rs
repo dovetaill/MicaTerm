@@ -1,6 +1,7 @@
 //! Bootstrap SFTP binder module.
 
 use super::*;
+use crate::app::sftp::SftpDirectoryEntry;
 
 const SFTP_PARENT_ITEM_ID: &str = "__sftp_parent__";
 
@@ -47,10 +48,10 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) 
             .map(|entry| SftpPanelItem {
                 id: entry.id.as_str().into(),
                 name: entry.name.as_str().into(),
-                type_label: sftp_panel_entry_type_label(entry.kind).into(),
+                type_label: sftp_panel_entry_type_label(entry).into(),
                 modified_label: sftp_panel_entry_modified_label(entry).into(),
                 size_label: sftp_panel_entry_size_label(entry).into(),
-                kind: sftp_panel_entry_kind(entry.kind).into(),
+                kind: sftp_panel_entry_kind(entry).into(),
                 selected: state
                     .sftp_panel_selected_entry_ids()
                     .iter()
@@ -97,12 +98,16 @@ pub(super) fn sync_sftp_remote_file_modal_state(window: &AppWindow, state: &Shel
     super::sync_workspace_native_terminal_surface_geometry(window);
 }
 
-pub(super) fn sftp_panel_entry_type_label(kind: SftpDirectoryEntryKind) -> &'static str {
-    match kind {
-        SftpDirectoryEntryKind::Directory => "Folder",
-        SftpDirectoryEntryKind::Symlink => "Link",
-        SftpDirectoryEntryKind::Unknown => "Unknown",
-        SftpDirectoryEntryKind::File => "File",
+pub(super) fn sftp_panel_entry_type_label(entry: &crate::app::sftp::SftpDirectoryEntry) -> &'static str {
+    match sftp_panel_entry_kind(entry) {
+        "directory" => "Folder",
+        "symlink" => "Link",
+        "archive" => "Archive",
+        "image" => "Image",
+        "config" => "Config",
+        "executable" => "Executable",
+        "unknown" => "Unknown",
+        _ => "File",
     }
 }
 
@@ -139,13 +144,94 @@ fn format_binary_size(bytes: u64) -> String {
     }
 }
 
-pub(super) fn sftp_panel_entry_kind(kind: SftpDirectoryEntryKind) -> &'static str {
-    match kind {
+pub(super) fn sftp_panel_entry_kind(entry: &crate::app::sftp::SftpDirectoryEntry) -> &'static str {
+    match entry.kind {
         SftpDirectoryEntryKind::Directory => "directory",
-        SftpDirectoryEntryKind::File => "file",
         SftpDirectoryEntryKind::Symlink => "symlink",
         SftpDirectoryEntryKind::Unknown => "unknown",
+        SftpDirectoryEntryKind::File => classify_sftp_file_visual_kind(entry.name.as_str()),
     }
+}
+
+fn classify_sftp_file_visual_kind(name: &str) -> &'static str {
+    let lowercase = name.to_ascii_lowercase();
+    if lowercase.ends_with(".tar.gz")
+        || lowercase.ends_with(".tgz")
+        || lowercase.ends_with(".tar.bz2")
+        || lowercase.ends_with(".tbz2")
+        || lowercase.ends_with(".tar.xz")
+        || lowercase.ends_with(".txz")
+        || has_any_suffix(
+            lowercase.as_str(),
+            &[".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".jar"],
+        )
+    {
+        return "archive";
+    }
+    if has_any_suffix(
+        lowercase.as_str(),
+        &[
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+            ".bmp",
+            ".svg",
+            ".ico",
+            ".tif",
+            ".tiff",
+            ".avif",
+        ],
+    ) {
+        return "image";
+    }
+    if lowercase.starts_with(".env")
+        || matches!(
+            lowercase.as_str(),
+            "dockerfile" | "compose.yml" | "compose.yaml" | "makefile" | "justfile"
+        )
+        || has_any_suffix(
+            lowercase.as_str(),
+            &[
+                ".json",
+                ".yaml",
+                ".yml",
+                ".toml",
+                ".ini",
+                ".cfg",
+                ".conf",
+                ".config",
+                ".service",
+                ".xml",
+                ".lock",
+                ".properties",
+            ],
+        )
+    {
+        return "config";
+    }
+    if matches!(
+        lowercase.as_str(),
+        "gradlew" | "configure" | "install" | "run" | "start" | "deploy"
+    ) || has_any_suffix(
+        lowercase.as_str(),
+        &[".sh", ".bash", ".zsh", ".fish", ".ps1", ".cmd", ".bat", ".exe", ".bin", ".run", ".appimage"],
+    ) {
+        return "executable";
+    }
+    "file"
+}
+
+fn has_any_suffix(value: &str, suffixes: &[&str]) -> bool {
+    suffixes.iter().any(|suffix| value.ends_with(suffix))
+}
+
+#[derive(Debug)]
+pub(super) struct SftpBrowserBackgroundMessage {
+    request: SftpBrowserLoadRequest,
+    result: Result<Vec<SftpDirectoryEntry>, String>,
+    disconnected: bool,
 }
 
 pub(super) fn sync_active_sftp_projection_from_manager(
@@ -250,6 +336,45 @@ pub(super) fn project_sftp_browser_state_into_view_model(
     true
 }
 
+async fn load_sftp_browser_request_result(
+    manager: SessionManager,
+    session_id: Uuid,
+    path: String,
+) -> (Result<Vec<SftpDirectoryEntry>, String>, bool) {
+    const MAX_RECONNECT_WAIT_STEPS: usize = 100;
+    const RECONNECT_WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(10);
+
+    let mut wait_steps = 0usize;
+    loop {
+        let binding = manager.sftp_binding(session_id);
+        if binding
+            .as_ref()
+            .is_some_and(|binding| binding.mode() != SftpPanelMode::Disconnected)
+        {
+            let result = manager
+                .sftp_read_dir_async(session_id, path.as_str())
+                .await
+                .map_err(|err| err.to_string());
+            let disconnected = manager
+                .sftp_binding(session_id)
+                .is_none_or(|binding| binding.mode() == SftpPanelMode::Disconnected);
+            return (result, disconnected);
+        }
+
+        let session_state = manager.session(session_id).map(|session| session.state);
+        let should_wait_for_reconnect = matches!(
+            session_state,
+            Some(SessionState::Connecting | SessionState::Connected | SessionState::WaitingUser)
+        );
+        if !should_wait_for_reconnect || wait_steps >= MAX_RECONNECT_WAIT_STEPS {
+            return (Err("sftp session disconnected".to_string()), true);
+        }
+
+        wait_steps += 1;
+        tokio::time::sleep(RECONNECT_WAIT_STEP).await;
+    }
+}
+
 pub(super) fn execute_sftp_browser_request(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
@@ -289,6 +414,108 @@ pub(super) fn execute_sftp_browser_request(
                 browser_state,
             )
         })
+}
+
+fn project_pending_sftp_browser_request(
+    state: &mut ShellViewModel,
+    controller: &mut SftpBrowserController,
+    browser_session_id: &str,
+) -> bool {
+    controller
+        .browser_session_state(browser_session_id)
+        .is_some_and(|browser_state| {
+            project_sftp_browser_state_into_view_model(state, browser_session_id, browser_state)
+        })
+}
+
+pub(super) fn queue_sftp_browser_request(
+    state: &mut ShellViewModel,
+    controller: &mut SftpBrowserController,
+    manager: &SessionManager,
+    request: SftpBrowserLoadRequest,
+    async_runtime: Option<&tokio::runtime::Handle>,
+    result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
+) -> bool {
+    let pending_changed = project_pending_sftp_browser_request(
+        state,
+        controller,
+        request.file_browser_session_id.as_str(),
+    );
+
+    let Some(async_runtime) = async_runtime.cloned() else {
+        return pending_changed | execute_sftp_browser_request(state, controller, manager, request);
+    };
+    if !controller.mark_request_in_flight(request.request_id) {
+        return pending_changed;
+    }
+
+    let manager = manager.clone();
+    let completion_tx = result_tx.clone();
+    async_runtime.spawn(async move {
+        let (result, disconnected) = load_sftp_browser_request_result(
+            manager,
+            request.session_id,
+            request.path.clone(),
+        )
+        .await;
+        let _ = completion_tx.send(SftpBrowserBackgroundMessage {
+            request,
+            result,
+            disconnected,
+        });
+    });
+
+    pending_changed
+}
+
+pub(super) fn apply_sftp_browser_background_message(
+    state: &mut ShellViewModel,
+    controller: &mut SftpBrowserController,
+    message: SftpBrowserBackgroundMessage,
+) -> bool {
+    controller.complete_request(message.request.request_id);
+    match message.result {
+        Ok(entries) => controller.apply_loaded_directory_for_browser_session(
+            message.request.file_browser_session_id.as_str(),
+            message.request.request_id,
+            message.request.path.as_str(),
+            entries,
+        ),
+        Err(error) => {
+            if message.disconnected {
+                controller
+                    .mark_disconnected_browser_session(message.request.file_browser_session_id.as_str());
+            } else {
+                controller.apply_load_error_for_browser_session(
+                    message.request.file_browser_session_id.as_str(),
+                    message.request.request_id,
+                    message.request.path.as_str(),
+                    error,
+                );
+            }
+        }
+    }
+
+    project_pending_sftp_browser_request(
+        state,
+        controller,
+        message.request.file_browser_session_id.as_str(),
+    )
+}
+
+pub(super) fn drain_sftp_browser_background_messages(
+    state: &mut ShellViewModel,
+    controller: &mut SftpBrowserController,
+    result_rx: &std::sync::mpsc::Receiver<SftpBrowserBackgroundMessage>,
+) -> bool {
+    let mut changed = false;
+    loop {
+        let Ok(message) = result_rx.try_recv() else {
+            break;
+        };
+        changed |= apply_sftp_browser_background_message(state, controller, message);
+    }
+    changed
 }
 
 pub(super) fn sftp_remote_file_title(remote_path: &str) -> String {
@@ -360,6 +587,8 @@ pub(super) fn ensure_active_sftp_browser_started(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
+    async_runtime: Option<&tokio::runtime::Handle>,
+    result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
 ) -> bool {
     let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
         return false;
@@ -370,7 +599,7 @@ pub(super) fn ensure_active_sftp_browser_started(
 
     initial_sftp_browser_path(manager, session_id).is_some_and(|path| {
         let request = controller.open(session_id, path.as_str());
-        execute_sftp_browser_request(state, controller, manager, request)
+        queue_sftp_browser_request(state, controller, manager, request, async_runtime, result_tx)
     })
 }
 
@@ -378,6 +607,8 @@ pub(super) fn open_active_sftp_browser_for_current_session(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
+    async_runtime: Option<&tokio::runtime::Handle>,
+    result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
 ) -> bool {
     if !state.quick_browser_follows_active_terminal() && state.quick_browser_session().is_some() {
         return false;
@@ -387,7 +618,13 @@ pub(super) fn open_active_sftp_browser_for_current_session(
         return false;
     };
     if controller.session_state(session_id).is_none() {
-        return ensure_active_sftp_browser_started(state, controller, manager);
+        return ensure_active_sftp_browser_started(
+            state,
+            controller,
+            manager,
+            async_runtime,
+            result_tx,
+        );
     }
 
     let request = if controller.session_state(session_id).is_some() {
@@ -395,13 +632,17 @@ pub(super) fn open_active_sftp_browser_for_current_session(
     } else {
         None
     };
-    request.is_some_and(|request| execute_sftp_browser_request(state, controller, manager, request))
+    request.is_some_and(|request| {
+        queue_sftp_browser_request(state, controller, manager, request, async_runtime, result_tx)
+    })
 }
 
 pub(super) fn sync_active_sftp_browser_follow_request(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
+    async_runtime: Option<&tokio::runtime::Handle>,
+    result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
 ) -> bool {
     let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
         return false;
@@ -440,13 +681,17 @@ pub(super) fn sync_active_sftp_browser_follow_request(
 
     controller
         .follow_cwd(session_id, cwd.as_str())
-        .is_some_and(|request| execute_sftp_browser_request(state, controller, manager, request))
+        .is_some_and(|request| {
+            queue_sftp_browser_request(state, controller, manager, request, async_runtime, result_tx)
+        })
 }
 
 pub(super) fn sync_active_sftp_browser_pending_request(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
+    async_runtime: Option<&tokio::runtime::Handle>,
+    result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
 ) -> bool {
     let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
         return false;
@@ -466,13 +711,17 @@ pub(super) fn sync_active_sftp_browser_pending_request(
 
     controller
         .pending_request(session_id)
-        .is_some_and(|request| execute_sftp_browser_request(state, controller, manager, request))
+        .is_some_and(|request| {
+            queue_sftp_browser_request(state, controller, manager, request, async_runtime, result_tx)
+        })
 }
 
 pub(super) fn ensure_active_workspace_sftp_browser_started(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
+    async_runtime: Option<&tokio::runtime::Handle>,
+    result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
 ) -> bool {
     let Some(browser_session) = state.active_workspace_sftp_session().cloned() else {
         return false;
@@ -504,13 +753,15 @@ pub(super) fn ensure_active_workspace_sftp_browser_started(
     }
 
     let request = controller.open_file_browser_session(browser_session);
-    execute_sftp_browser_request(state, controller, manager, request)
+    queue_sftp_browser_request(state, controller, manager, request, async_runtime, result_tx)
 }
 
 pub(super) fn sync_active_workspace_sftp_browser_pending_request(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
+    async_runtime: Option<&tokio::runtime::Handle>,
+    result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
 ) -> bool {
     let Some(browser_session) = state.active_workspace_sftp_session().cloned() else {
         return false;
@@ -540,7 +791,9 @@ pub(super) fn sync_active_workspace_sftp_browser_pending_request(
             browser_session.file_browser_session_id.as_str(),
             session_id,
         )
-        .is_some_and(|request| execute_sftp_browser_request(state, controller, manager, request))
+        .is_some_and(|request| {
+            queue_sftp_browser_request(state, controller, manager, request, async_runtime, result_tx)
+        })
 }
 
 pub(super) fn bind_sftp_callbacks(
@@ -549,15 +802,21 @@ pub(super) fn bind_sftp_callbacks(
     store: &Option<Rc<UiPreferencesStore>>,
     effects: &Rc<dyn PlatformWindowEffects>,
     session_bridge: &Option<Rc<ShellSessionBridge>>,
+    async_runtime: Option<&tokio::runtime::Handle>,
+    sftp_result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
     workspace_follow_tracker: &Rc<RefCell<WorkspaceFollowTracker>>,
     sftp_browser_controller: &Rc<RefCell<SftpBrowserController>>,
 ) {
+    let async_runtime_handle = async_runtime.cloned();
+    let sftp_result_tx = sftp_result_tx.clone();
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(effects);
     let session_bridge_ref = session_bridge.clone();
     let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let open_runtime_handle = async_runtime_handle.clone();
+    let open_result_tx = sftp_result_tx.clone();
     window.on_open_sftp_panel_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -569,6 +828,8 @@ pub(super) fn bind_sftp_callbacks(
                 &mut state,
                 &mut controller,
                 &session_bridge.manager,
+                open_runtime_handle.as_ref(),
+                &open_result_tx,
             );
         }
         super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
@@ -600,6 +861,8 @@ pub(super) fn bind_sftp_callbacks(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let binding_toggle_runtime_handle = async_runtime_handle.clone();
+    let binding_toggle_result_tx = sftp_result_tx.clone();
     window.on_sftp_panel_binding_mode_toggle_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -616,6 +879,8 @@ pub(super) fn bind_sftp_callbacks(
                 &mut state,
                 &mut controller,
                 &session_bridge.manager,
+                binding_toggle_runtime_handle.as_ref(),
+                &binding_toggle_result_tx,
             );
         }
 
@@ -670,6 +935,8 @@ pub(super) fn bind_sftp_callbacks(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let item_activated_runtime_handle = async_runtime_handle.clone();
+    let item_activated_result_tx = sftp_result_tx.clone();
     window.on_sftp_panel_item_activated(move |entry_id, item_kind| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -694,11 +961,13 @@ pub(super) fn bind_sftp_callbacks(
                 };
                 if let Some(request) = request {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    panel_changed |= execute_sftp_browser_request(
+                    panel_changed |= queue_sftp_browser_request(
                         &mut state,
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        item_activated_runtime_handle.as_ref(),
+                        &item_activated_result_tx,
                     );
                 }
             } else {
@@ -715,11 +984,13 @@ pub(super) fn bind_sftp_callbacks(
                         controller.navigate(session_id, entry.path.as_str())
                     };
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    panel_changed |= execute_sftp_browser_request(
+                    panel_changed |= queue_sftp_browser_request(
                         &mut state,
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        item_activated_runtime_handle.as_ref(),
+                        &item_activated_result_tx,
                     );
                 }
             } else if let Some(session_bridge) = session_bridge_ref.as_ref()
@@ -756,6 +1027,8 @@ pub(super) fn bind_sftp_callbacks(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let path_submit_runtime_handle = async_runtime_handle.clone();
+    let path_submit_result_tx = sftp_result_tx.clone();
     window.on_sftp_panel_path_submitted(move |path| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -770,11 +1043,13 @@ pub(super) fn bind_sftp_callbacks(
                         controller.navigate(session_id, trimmed)
                     };
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
+                    queue_sftp_browser_request(
                         &mut state,
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        path_submit_runtime_handle.as_ref(),
+                        &path_submit_result_tx,
                     )
                 }
             } else {
@@ -792,6 +1067,8 @@ pub(super) fn bind_sftp_callbacks(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let back_runtime_handle = async_runtime_handle.clone();
+    let back_result_tx = sftp_result_tx.clone();
     window.on_sftp_panel_back_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -803,11 +1080,13 @@ pub(super) fn bind_sftp_callbacks(
                 };
                 if let Some(request) = request {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
+                    queue_sftp_browser_request(
                         &mut state,
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        back_runtime_handle.as_ref(),
+                        &back_result_tx,
                     )
                 } else {
                     false
@@ -827,6 +1106,8 @@ pub(super) fn bind_sftp_callbacks(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let forward_runtime_handle = async_runtime_handle.clone();
+    let forward_result_tx = sftp_result_tx.clone();
     window.on_sftp_panel_forward_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -838,11 +1119,13 @@ pub(super) fn bind_sftp_callbacks(
                 };
                 if let Some(request) = request {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
+                    queue_sftp_browser_request(
                         &mut state,
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        forward_runtime_handle.as_ref(),
+                        &forward_result_tx,
                     )
                 } else {
                     false
@@ -862,6 +1145,8 @@ pub(super) fn bind_sftp_callbacks(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let up_runtime_handle = async_runtime_handle.clone();
+    let up_result_tx = sftp_result_tx.clone();
     window.on_sftp_panel_up_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -873,11 +1158,13 @@ pub(super) fn bind_sftp_callbacks(
                 };
                 if let Some(request) = request {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
+                    queue_sftp_browser_request(
                         &mut state,
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        up_runtime_handle.as_ref(),
+                        &up_result_tx,
                     )
                 } else {
                     false
@@ -897,6 +1184,8 @@ pub(super) fn bind_sftp_callbacks(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let refresh_runtime_handle = async_runtime_handle.clone();
+    let refresh_result_tx = sftp_result_tx.clone();
     window.on_sftp_panel_refresh_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -908,11 +1197,13 @@ pub(super) fn bind_sftp_callbacks(
                 };
                 if let Some(request) = request {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
+                    queue_sftp_browser_request(
                         &mut state,
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        refresh_runtime_handle.as_ref(),
+                        &refresh_result_tx,
                     )
                 } else {
                     false
@@ -932,6 +1223,8 @@ pub(super) fn bind_sftp_callbacks(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let retry_runtime_handle = async_runtime_handle.clone();
+    let retry_result_tx = sftp_result_tx.clone();
     window.on_sftp_panel_retry_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -953,27 +1246,14 @@ pub(super) fn bind_sftp_callbacks(
                     let browser_changed = {
                         let mut controller = sftp_browser_controller_ref.borrow_mut();
                         if let Some(request) = controller.retry(session_id) {
-                            if session_bridge.manager.sftp_binding(session_id).is_some_and(
-                                |binding| binding.mode() != SftpPanelMode::Disconnected,
-                            ) {
-                                execute_sftp_browser_request(
-                                    &mut state,
-                                    &mut controller,
-                                    &session_bridge.manager,
-                                    request,
-                                )
-                            } else {
-                                let browser_session_id = session_id.to_string();
-                                controller
-                                    .session_state(session_id)
-                                    .is_some_and(|browser_state| {
-                                        project_sftp_browser_state_into_view_model(
-                                            &mut state,
-                                            browser_session_id.as_str(),
-                                            browser_state,
-                                        )
-                                    })
-                            }
+                            queue_sftp_browser_request(
+                                &mut state,
+                                &mut controller,
+                                &session_bridge.manager,
+                                request,
+                                retry_runtime_handle.as_ref(),
+                                &retry_result_tx,
+                            )
                         } else {
                             false
                         }
@@ -998,6 +1278,8 @@ pub(super) fn bind_sftp_callbacks(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let follow_runtime_handle = async_runtime_handle.clone();
+    let follow_result_tx = sftp_result_tx.clone();
     window.on_sftp_panel_reenable_follow_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -1009,11 +1291,13 @@ pub(super) fn bind_sftp_callbacks(
                         controller.open(session_id, cwd.as_str())
                     };
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    execute_sftp_browser_request(
+                    queue_sftp_browser_request(
                         &mut state,
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        follow_runtime_handle.as_ref(),
+                        &follow_result_tx,
                     )
                 } else {
                     false

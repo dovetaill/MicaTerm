@@ -504,8 +504,20 @@ struct DelayedCwdRecordingSftpLauncher {
     state: RecordingSftpState,
 }
 
+#[derive(Clone)]
+struct DelayedReadRecordingSftpLauncher {
+    state: RecordingSftpState,
+    read_delay_by_path: Arc<BTreeMap<String, Duration>>,
+}
+
 struct RecordingSftpBackend {
     responses: BTreeMap<String, Vec<SftpDirectoryEntry>>,
+    state: RecordingSftpState,
+}
+
+struct DelayedRecordingSftpBackend {
+    responses: BTreeMap<String, Vec<SftpDirectoryEntry>>,
+    read_delay_by_path: Arc<BTreeMap<String, Duration>>,
     state: RecordingSftpState,
 }
 
@@ -887,6 +899,109 @@ impl SftpBackend for RecordingSftpBackend {
     }
 }
 
+impl SftpBackend for DelayedRecordingSftpBackend {
+    fn read_dir<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<SftpDirectoryEntry>>> + Send + 'a>> {
+        let state = self.state.clone();
+        let response = self.responses.get(path).cloned().unwrap_or_default();
+        let delay = self.read_delay_by_path.get(path).copied().unwrap_or_default();
+        let path = path.to_string();
+        Box::pin(async move {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            state
+                .read_dir_calls
+                .lock()
+                .expect("lock delayed sftp read_dir calls")
+                .push(path);
+            Ok(response)
+        })
+    }
+
+    fn mkdir<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn rename<'a>(
+        &'a self,
+        _from: &'a str,
+        _to: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn path_exists<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
+        Box::pin(async move { Ok(true) })
+    }
+
+    fn upload_file<'a>(
+        &'a self,
+        remote_path: &'a str,
+        data: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<u64>> + Send + 'a>> {
+        let state = self.state.clone();
+        let remote_path = remote_path.to_string();
+        Box::pin(async move {
+            state
+                .remote_files
+                .lock()
+                .expect("lock delayed remote files")
+                .insert(remote_path.clone(), data.clone());
+            state
+                .upload_file_calls
+                .lock()
+                .expect("lock delayed sftp upload file calls")
+                .push((remote_path, data.clone()));
+            Ok(data.len() as u64)
+        })
+    }
+
+    fn download_file<'a>(
+        &'a self,
+        remote_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>>> + Send + 'a>> {
+        let state = self.state.clone();
+        let remote_path = remote_path.to_string();
+        Box::pin(async move {
+            state
+                .download_file_calls
+                .lock()
+                .expect("lock delayed sftp download file calls")
+                .push(remote_path.clone());
+            Ok(state
+                .remote_files
+                .lock()
+                .expect("lock delayed remote files")
+                .get(&remote_path)
+                .cloned()
+                .unwrap_or_default())
+        })
+    }
+
+    fn remove_file<'a>(
+        &'a self,
+        _remote_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn remove_dir<'a>(
+        &'a self,
+        _remote_path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
 impl SessionRuntimeControl for RecordingSftpRuntimeControl {
     fn disconnect(&self) -> Result<()> {
         Ok(())
@@ -1045,6 +1160,93 @@ impl SessionRuntimeLauncher for DelayedCwdRecordingSftpLauncher {
             Ok(Box::new(RecordingSftpRuntimeControl {
                 runtime: SftpRuntimeHandle::new(Arc::new(RecordingSftpBackend {
                     responses,
+                    state,
+                })),
+            }) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        _profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        Box::pin(async move { Ok(()) })
+    }
+}
+
+impl SessionRuntimeLauncher for DelayedReadRecordingSftpLauncher {
+    fn launch(
+        &self,
+        profile: ConnectionProfile,
+        _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let state = self.state.clone();
+        let read_delay_by_path = Arc::clone(&self.read_delay_by_path);
+        Box::pin(async move {
+            let responses = match profile.host.as_str() {
+                "10.0.0.12" => BTreeMap::from([
+                    (
+                        "/srv/app".to_string(),
+                        vec![SftpDirectoryEntry {
+                            id: "entry-logs".into(),
+                            name: "logs".into(),
+                            path: "/srv/app/logs".into(),
+                            kind: SftpDirectoryEntryKind::Directory,
+                            modified_unix_seconds: Some(1_775_012_700),
+                            size_bytes: None,
+                        }],
+                    ),
+                    (
+                        "/srv/app/logs".to_string(),
+                        vec![SftpDirectoryEntry {
+                            id: "entry-log-a".into(),
+                            name: "app.log".into(),
+                            path: "/srv/app/logs/app.log".into(),
+                            kind: SftpDirectoryEntryKind::File,
+                            modified_unix_seconds: Some(1_775_012_780),
+                            size_bytes: Some(2048),
+                        }],
+                    ),
+                    (
+                        "/srv/app/releases".to_string(),
+                        vec![SftpDirectoryEntry {
+                            id: "entry-release".into(),
+                            name: "release.tar.gz".into(),
+                            path: "/srv/app/releases/release.tar.gz".into(),
+                            kind: SftpDirectoryEntryKind::File,
+                            modified_unix_seconds: Some(1_775_013_060),
+                            size_bytes: Some(14 * 1024),
+                        }],
+                    ),
+                ]),
+                _ => BTreeMap::from([(
+                    "/srv/db".to_string(),
+                    vec![SftpDirectoryEntry {
+                        id: "entry-backup".into(),
+                        name: "backup.sql".into(),
+                        path: "/srv/db/backup.sql".into(),
+                        kind: SftpDirectoryEntryKind::File,
+                        modified_unix_seconds: Some(1_775_013_420),
+                        size_bytes: Some(7 * 1024),
+                    }],
+                )]),
+            };
+
+            let cwd = if profile.host == "10.0.0.24" {
+                "/srv/db"
+            } else {
+                "/srv/app"
+            };
+            state.set_event_tx(event_tx.clone());
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            let _ = event_tx.send(SessionRuntimeEvent::CurrentDirectoryChanged(cwd.into()));
+            Ok(Box::new(RecordingSftpRuntimeControl {
+                runtime: SftpRuntimeHandle::new(Arc::new(DelayedRecordingSftpBackend {
+                    responses,
+                    read_delay_by_path,
                     state,
                 })),
             }) as Box<dyn SessionRuntimeControl>)
@@ -9240,7 +9442,8 @@ fn refresh_and_path_submit_trigger_real_directory_reads() {
         "release.tar.gz"
     );
     let release_row = app.get_sftp_panel_items().row_data(1).expect("release row");
-    assert_eq!(release_row.type_label.as_str(), "File");
+    assert_eq!(release_row.kind.as_str(), "archive");
+    assert_eq!(release_row.type_label.as_str(), "Archive");
     assert_eq!(release_row.size_label.as_str(), "14 KB");
     assert!(
         !release_row.modified_label.is_empty(),
@@ -9308,6 +9511,127 @@ fn parent_directory_row_navigates_up_and_stays_first_in_the_sftp_table() {
             "/srv/app".to_string(),
             "/srv/app/releases".to_string(),
             "/srv/app".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn opening_sftp_with_a_slow_backend_returns_before_directory_loading_finishes() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedReadRecordingSftpLauncher {
+            state: sftp_state.clone(),
+            read_delay_by_path: Arc::new(BTreeMap::from([(
+                "/srv/app".to_string(),
+                Duration::from_millis(180),
+            )])),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    let started = Instant::now();
+    app.invoke_open_sftp_panel_requested();
+
+    assert!(
+        started.elapsed() < Duration::from_millis(80),
+        "opening the quick browser should no longer block on a slow remote directory read"
+    );
+    assert_eq!(app.get_right_panel_view().as_str(), "sftp");
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app");
+    assert_ne!(
+        app.get_sftp_panel_mode().as_str(),
+        "ready",
+        "slow background reads should leave the quick browser in a pending state until the async result arrives"
+    );
+
+    std::thread::sleep(Duration::from_millis(220));
+    flush_runtime_projection();
+
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
+    assert_eq!(app.get_sftp_panel_items().row_count(), 2);
+    assert_eq!(
+        sftp_state.take_read_dir_calls(),
+        vec!["/srv/app".to_string()]
+    );
+}
+
+#[test]
+fn latest_sftp_directory_request_wins_when_slower_results_finish_last() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedReadRecordingSftpLauncher {
+            state: sftp_state.clone(),
+            read_delay_by_path: Arc::new(BTreeMap::from([
+                ("/srv/app/releases".to_string(), Duration::from_millis(180)),
+                ("/srv/app/logs".to_string(), Duration::from_millis(10)),
+            ])),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
+
+    let started = Instant::now();
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    app.invoke_sftp_panel_path_submitted("/srv/app/logs".into());
+
+    assert!(
+        started.elapsed() < Duration::from_millis(80),
+        "submitting two quick browser navigations should not block on the first slow read before queuing the second request"
+    );
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app/logs");
+
+    std::thread::sleep(Duration::from_millis(40));
+    flush_runtime_projection();
+
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app/logs");
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("latest log row")
+            .name
+            .as_str(),
+        "app.log"
+    );
+
+    std::thread::sleep(Duration::from_millis(220));
+    flush_runtime_projection();
+
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app/logs");
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("latest log row after stale completion")
+            .name
+            .as_str(),
+        "app.log",
+        "a stale slower directory response should not overwrite the newest quick browser request"
+    );
+    assert_eq!(
+        sftp_state.take_read_dir_calls(),
+        vec![
+            "/srv/app".to_string(),
+            "/srv/app/logs".to_string(),
+            "/srv/app/releases".to_string(),
         ]
     );
 }

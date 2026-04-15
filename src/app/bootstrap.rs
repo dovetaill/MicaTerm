@@ -4289,6 +4289,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         );
     }
     install_windows_frame_adapter(window);
+    let sftp_browser_async_runtime = session_runtime_guard.as_ref().map(AppAsyncRuntime::handle);
+    let (sftp_browser_result_tx, sftp_browser_result_rx) =
+        std::sync::mpsc::channel::<sftp::SftpBrowserBackgroundMessage>();
+    let sftp_browser_result_rx = Rc::new(RefCell::new(sftp_browser_result_rx));
     let session_projection_timer = Rc::new(Timer::default());
     let input_projection_refresh_timer = Rc::new(Timer::default());
     let input_projection_refresh_gate = Rc::new(RefCell::new(
@@ -4319,6 +4323,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let pending_workspace_paste_warning_ref = Rc::clone(&pending_workspace_paste_warning);
         let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
         let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
+        let sftp_browser_result_rx_ref = Rc::clone(&sftp_browser_result_rx);
+        let sftp_browser_result_tx_ref = sftp_browser_result_tx.clone();
+        let sftp_browser_async_runtime_ref = sftp_browser_async_runtime.clone();
         let workspace_terminal_active_surface_fingerprint_ref =
             Rc::clone(&workspace_terminal_active_surface_fingerprint);
         let workspace_terminal_active_surface_since_ref =
@@ -4334,6 +4341,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 return;
             };
             let mut state = state.borrow_mut();
+            let sftp_result_changed = {
+                let receiver = sftp_browser_result_rx_ref.borrow();
+                let mut controller = sftp_browser_controller_ref.borrow_mut();
+                sftp::drain_sftp_browser_background_messages(&mut state, &mut controller, &receiver)
+            };
             let had_active_surface = state.active_workspace_terminal_surface().is_some();
             let projection_delta =
                 workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager);
@@ -4354,6 +4366,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 sync_workspace_tab_items(&window, &state);
                 assets_keychain::sync_assets_context_menu_state(&window, &state);
             }
+            let mut right_panel_changed = sftp_result_changed;
             if projection_delta.any_changed() {
                 sync_workspace_session_state_with_manager(
                     &window,
@@ -4361,55 +4374,100 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&manager),
                 );
-                let (sftp_open_changed, sftp_retry_changed, sftp_follow_changed) =
-                    if state.show_right_panel {
-                        let mut controller = sftp_browser_controller_ref.borrow_mut();
-                        let open_changed = sftp::ensure_active_sftp_browser_started(
-                            &mut state,
-                            &mut controller,
-                            &manager,
-                        );
-                        let retry_changed = sftp::sync_active_sftp_browser_pending_request(
-                            &mut state,
-                            &mut controller,
-                            &manager,
-                        );
-                        let follow_changed = sftp::sync_active_sftp_browser_follow_request(
-                            &mut state,
-                            &mut controller,
-                            &manager,
-                        );
-                        (open_changed, retry_changed, follow_changed)
-                    } else {
-                        (false, false, false)
-                    };
-                if projection_delta.sftp_changed
-                    || sftp_open_changed
-                    || sftp_retry_changed
-                    || sftp_follow_changed
-                {
-                    sftp::sync_right_panel_state(&window, &state);
-                }
+            }
+            let (sftp_open_changed, sftp_retry_changed, sftp_follow_changed) =
+                if state.show_right_panel {
+                    let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    let open_changed = sftp::ensure_active_sftp_browser_started(
+                        &mut state,
+                        &mut controller,
+                        &manager,
+                        sftp_browser_async_runtime_ref.as_ref(),
+                        &sftp_browser_result_tx_ref,
+                    );
+                    let retry_changed = sftp::sync_active_sftp_browser_pending_request(
+                        &mut state,
+                        &mut controller,
+                        &manager,
+                        sftp_browser_async_runtime_ref.as_ref(),
+                        &sftp_browser_result_tx_ref,
+                    );
+                    let follow_changed = sftp::sync_active_sftp_browser_follow_request(
+                        &mut state,
+                        &mut controller,
+                        &manager,
+                        sftp_browser_async_runtime_ref.as_ref(),
+                        &sftp_browser_result_tx_ref,
+                    );
+                    (open_changed, retry_changed, follow_changed)
+                } else {
+                    (false, false, false)
+                };
+            if projection_delta.sftp_changed
+                || sftp_open_changed
+                || sftp_retry_changed
+                || sftp_follow_changed
+            {
+                right_panel_changed = true;
+            }
+            if right_panel_changed {
+                sftp::sync_right_panel_state(&window, &state);
             }
 
-            let workspace_sftp_projection_delta = {
+            let (workspace_sftp_open_changed, workspace_sftp_retry_changed) = {
                 let mut controller = sftp_browser_controller_ref.borrow_mut();
                 let workspace_sftp_open_changed = sftp::ensure_active_workspace_sftp_browser_started(
                     &mut state,
                     &mut controller,
                     &manager,
+                    sftp_browser_async_runtime_ref.as_ref(),
+                    &sftp_browser_result_tx_ref,
                 );
                 let workspace_sftp_retry_changed =
                     sftp::sync_active_workspace_sftp_browser_pending_request(
                         &mut state,
                         &mut controller,
                         &manager,
+                        sftp_browser_async_runtime_ref.as_ref(),
+                        &sftp_browser_result_tx_ref,
                     );
-                if workspace_sftp_open_changed || workspace_sftp_retry_changed {
-                    workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager)
-                } else {
-                    WorkspaceProjectionDelta::default()
+                (workspace_sftp_open_changed, workspace_sftp_retry_changed)
+            };
+            let queued_sftp_request_changed = sftp_open_changed
+                || sftp_retry_changed
+                || sftp_follow_changed
+                || workspace_sftp_open_changed
+                || workspace_sftp_retry_changed;
+            let mut sftp_result_changed_after_queue = {
+                let receiver = sftp_browser_result_rx_ref.borrow();
+                let mut controller = sftp_browser_controller_ref.borrow_mut();
+                sftp::drain_sftp_browser_background_messages(&mut state, &mut controller, &receiver)
+            };
+            if !sftp_result_changed_after_queue && queued_sftp_request_changed {
+                let deadline = Instant::now() + Duration::from_millis(10);
+                while !sftp_result_changed_after_queue && Instant::now() < deadline {
+                    std::thread::yield_now();
+                    let receiver = sftp_browser_result_rx_ref.borrow();
+                    let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    sftp_result_changed_after_queue = sftp::drain_sftp_browser_background_messages(
+                        &mut state,
+                        &mut controller,
+                        &receiver,
+                    );
                 }
+            }
+            if sftp_result_changed_after_queue {
+                sftp::sync_right_panel_state(&window, &state);
+            }
+
+            let workspace_sftp_projection_delta = if workspace_sftp_open_changed
+                || workspace_sftp_retry_changed
+                || sftp_result_changed
+                || sftp_result_changed_after_queue
+            {
+                workspace_terminal::sync_workspace_projection_from_manager(&mut state, &manager)
+            } else {
+                WorkspaceProjectionDelta::default()
             };
             if workspace_sftp_projection_delta.tabs_changed {
                 sync_workspace_tab_items(&window, &state);
@@ -5143,6 +5201,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         &store,
         &effects,
         &session_bridge,
+        sftp_browser_async_runtime.as_ref(),
+        &sftp_browser_result_tx,
         &workspace_follow_tracker,
         &sftp_browser_controller,
     );
@@ -5552,6 +5612,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_bridge_ref = session_bridge.clone();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
+    let sftp_browser_async_runtime_ref = sftp_browser_async_runtime.clone();
+    let sftp_browser_result_tx_ref = sftp_browser_result_tx.clone();
     window.on_workspace_tab_selected(move |tab_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -5586,6 +5648,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &mut state,
                     &mut controller,
                     &session_bridge.manager,
+                    sftp_browser_async_runtime_ref.as_ref(),
+                    &sftp_browser_result_tx_ref,
                 );
             }
             sftp::sync_right_panel_state(&window, &state);

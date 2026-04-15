@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use uuid::Uuid;
 
@@ -16,6 +16,7 @@ pub struct SftpBrowserLoadRequest {
 pub struct SftpBrowserController {
     next_request_id: u64,
     sessions: HashMap<String, SftpBrowserSessionState>,
+    in_flight_request_ids: HashSet<u64>,
 }
 
 impl SftpBrowserController {
@@ -293,6 +294,14 @@ impl SftpBrowserController {
 
     pub fn browser_session_state(&self, browser_session_id: &str) -> Option<&SftpBrowserSessionState> {
         self.sessions.get(browser_session_id)
+    }
+
+    pub fn mark_request_in_flight(&mut self, request_id: u64) -> bool {
+        self.in_flight_request_ids.insert(request_id)
+    }
+
+    pub fn complete_request(&mut self, request_id: u64) {
+        self.in_flight_request_ids.remove(&request_id);
     }
 
     fn new_request(

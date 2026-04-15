@@ -187,10 +187,14 @@ impl SessionManager {
 
         let session_id = Uuid::new_v4();
         let attempt_id = Uuid::new_v4();
+        let display_title = {
+            let registry = self.registry.lock().expect("lock session registry");
+            next_session_display_title(&registry, profile.name.as_str())
+        };
         let handle = SessionHandle {
             session_id,
             asset_id: asset_id.clone(),
-            title: profile.name.clone(),
+            title: display_title,
             subtitle: format!("{}@{}:{}", profile.user, profile.host, profile.port),
             state: SessionState::Connecting,
             can_reconnect: false,
@@ -341,8 +345,17 @@ impl SessionManager {
     }
 
     pub fn sftp_read_dir(&self, session_id: Uuid, path: &str) -> Result<Vec<SftpDirectoryEntry>> {
+        self.runtime_handle
+            .block_on(self.sftp_read_dir_async(session_id, path))
+    }
+
+    pub async fn sftp_read_dir_async(
+        &self,
+        session_id: Uuid,
+        path: &str,
+    ) -> Result<Vec<SftpDirectoryEntry>> {
         let runtime = self.sftp_runtime(session_id)?;
-        self.runtime_handle.block_on(runtime.read_dir(path))
+        runtime.read_dir(path).await
     }
 
     pub fn sftp_download_file(&self, session_id: Uuid, remote_path: &str) -> Result<Vec<u8>> {
@@ -825,6 +838,45 @@ impl SessionManager {
             .and_then(|binding| binding.runtime())
             .ok_or_else(|| anyhow!("sftp runtime is unavailable for session `{session_id}`"))
     }
+}
+
+fn next_session_display_title(registry: &SessionRegistry, base_title: &str) -> String {
+    let base_title = base_title.trim();
+    if base_title.is_empty() {
+        return String::new();
+    }
+
+    let mut used_slots = HashSet::new();
+    for (session_id, session) in &registry.sessions {
+        let Some(profile) = registry.session_profiles.get(session_id) else {
+            continue;
+        };
+        if profile.name.trim() != base_title {
+            continue;
+        }
+        if let Some(slot) = session_title_slot(session.title.as_str(), base_title) {
+            used_slots.insert(slot);
+        }
+    }
+
+    let next_slot = (1..)
+        .find(|slot| !used_slots.contains(slot))
+        .expect("numeric suffix space should not be exhausted");
+    if next_slot == 1 {
+        base_title.to_string()
+    } else {
+        format!("{base_title}({next_slot})")
+    }
+}
+
+fn session_title_slot(title: &str, base_title: &str) -> Option<usize> {
+    if title == base_title {
+        return Some(1);
+    }
+
+    let suffix = title.strip_prefix(base_title)?;
+    let suffix = suffix.strip_prefix('(')?.strip_suffix(')')?;
+    suffix.parse::<usize>().ok().filter(|slot| *slot >= 2)
 }
 
 struct SessionRegistry {

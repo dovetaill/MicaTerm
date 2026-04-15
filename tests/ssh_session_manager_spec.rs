@@ -1795,6 +1795,69 @@ fn session_manager_can_force_new_tab_session_for_same_asset() {
 }
 
 #[test]
+fn force_new_tab_duplicate_sessions_receive_incrementing_display_titles() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(FakeLauncher::stay_connecting()),
+    );
+
+    let first = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open first session");
+    let second = manager
+        .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+        .expect("open second session");
+    let third = manager
+        .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+        .expect("open third session");
+
+    assert_eq!(first.title, "Prod Bastion");
+    assert_eq!(second.title, "Prod Bastion(2)");
+    assert_eq!(third.title, "Prod Bastion(3)");
+}
+
+#[test]
+fn closing_a_duplicate_session_reuses_the_smallest_available_title_suffix() {
+    let runtime = AppAsyncRuntime::new().expect("create app async runtime");
+    let manager = SessionManager::new_with_launcher(
+        runtime.handle(),
+        Arc::new(FakeLauncher::stay_connecting()),
+    );
+
+    let first = manager
+        .open_session(
+            sample_profile("asset-prod"),
+            OpenSessionMode::ActivateExisting,
+        )
+        .expect("open first session");
+    let second = manager
+        .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+        .expect("open second session");
+    let third = manager
+        .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+        .expect("open third session");
+
+    assert_eq!(first.title, "Prod Bastion");
+    assert_eq!(second.title, "Prod Bastion(2)");
+    assert_eq!(third.title, "Prod Bastion(3)");
+
+    manager
+        .close_session(second.session_id)
+        .expect("close second duplicate session");
+
+    let reopened = manager
+        .open_session(sample_profile("asset-prod"), OpenSessionMode::ForceNewTab)
+        .expect("reopen duplicate session");
+
+    assert_eq!(third.title, "Prod Bastion(3)");
+    assert_eq!(reopened.title, "Prod Bastion(2)");
+}
+
+#[test]
 fn session_manager_exposes_sftp_binding_for_runtime_ready_session() {
     let runtime = AppAsyncRuntime::new().expect("create app async runtime");
     let manager = SessionManager::new_with_launcher(
