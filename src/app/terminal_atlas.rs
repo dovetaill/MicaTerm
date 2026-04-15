@@ -132,6 +132,7 @@ pub struct TerminalAtlasRenderer {
     pixels: Vec<Rgba8Pixel>,
     surface_width_px: u32,
     surface_height_px: u32,
+    viewport_background_signature: Option<(u32, u32, u32)>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -232,6 +233,7 @@ impl TerminalAtlasRenderer {
             pixels: Vec::new(),
             surface_width_px: 0,
             surface_height_px: 0,
+            viewport_background_signature: None,
         })
     }
 
@@ -270,14 +272,26 @@ impl TerminalAtlasRenderer {
     ) -> Result<TerminalSurfaceFrame> {
         let width_px = surface.cols.max(1) * self.raster_metrics.cell_width;
         let height_px = surface.rows.max(1) * self.raster_metrics.cell_height;
+        let viewport_background_signature = (
+            surface.default_bg_rgba,
+            surface.row_bg_even_rgba,
+            surface.row_bg_odd_rgba,
+        );
         let mut rerendered_rows = Vec::new();
         let mut rendered_clusters = Vec::new();
         let resized = self.surface_width_px != width_px || self.surface_height_px != height_px;
+        let viewport_background_changed =
+            resized || self.viewport_background_signature != Some(viewport_background_signature);
 
         if resized {
             self.surface_width_px = width_px;
             self.surface_height_px = height_px;
             self.pixels = vec![rgba8(surface.default_bg_rgba); (width_px * height_px) as usize];
+            self.row_hashes = vec![0; surface.rows as usize];
+        } else if self.row_hashes.len() != surface.rows as usize {
+            self.row_hashes.resize(surface.rows as usize, 0);
+        }
+        if viewport_background_changed {
             fill_viewport_background_span(
                 &mut self.pixels,
                 self.surface_width_px,
@@ -287,9 +301,7 @@ impl TerminalAtlasRenderer {
                 rgba8(surface.row_bg_even_rgba),
                 rgba8(surface.row_bg_odd_rgba),
             );
-            self.row_hashes = vec![0; surface.rows as usize];
-        } else if self.row_hashes.len() != surface.rows as usize {
-            self.row_hashes.resize(surface.rows as usize, 0);
+            self.viewport_background_signature = Some(viewport_background_signature);
         }
 
         let mut row_cells = vec![Vec::new(); surface.rows as usize];
@@ -364,6 +376,8 @@ impl TerminalAtlasRenderer {
     ) {
         let row_y = request.row * self.raster_metrics.cell_height;
         let default_fg = rgba8(request.default_fg_rgba);
+        // Restore the dirty row from the shared viewport background layer before repainting
+        // selection, explicit cell backgrounds, and glyphs on top.
         fill_viewport_background_span(
             &mut self.pixels,
             self.surface_width_px,

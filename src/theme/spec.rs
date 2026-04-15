@@ -23,6 +23,8 @@ pub struct ThemeTerminalPaletteSpec {
     pub name: &'static str,
     pub default_bg: u32,
     pub default_fg: u32,
+    // Historical compatibility transport: renderer backends should interpret these as
+    // viewport background endpoints, not alternating row stripe colors.
     pub row_bg_even: u32,
     pub row_bg_odd: u32,
     pub cursor_bg: u32,
@@ -42,13 +44,13 @@ pub const TERMINAL_ROW_BANDING_ALPHA: f32 = 0.0;
 #[allow(dead_code)]
 pub const TERMINAL_BG_GRAIN_ALPHA: f32 = 0.0;
 
-pub const TERMINAL_BG_BASE_DARK: u32 = 0x07_111a;
-pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0a_1621;
-pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x07_111a;
+pub const TERMINAL_BG_BASE_DARK: u32 = 0x08_131d;
+pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0b_1824;
+pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x08_131d;
 
-pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xfb_fcfe;
-pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xfb_fcfe;
-pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xfb_fcfe;
+pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf2_f4f7;
+pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xf6_f7f9;
+pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf2_f4f7;
 
 pub fn terminal_palette_spec(theme_mode: ThemeMode) -> ThemeTerminalPaletteSpec {
     match theme_mode {

@@ -214,6 +214,8 @@ impl TerminalCoreAdapter for AlacrittyTerminalCoreAdapter {
         let lines = visible_lines_from_rows(&rows);
         let grid = self.term.grid();
         let preset = preset_for_theme_mode(self.theme_mode);
+        let viewport_bg_top_rgba = pack_rgb_hex(preset.viewport_bg_top);
+        let viewport_bg_bottom_rgba = pack_rgb_hex(preset.viewport_bg_bottom);
 
         TerminalFrameSnapshot {
             seqno: self.sequence_number,
@@ -221,8 +223,8 @@ impl TerminalCoreAdapter for AlacrittyTerminalCoreAdapter {
             cols: grid.columns() as u32,
             default_fg_rgba: pack_rgb_hex(preset.foreground),
             default_bg_rgba: pack_rgb_hex(preset.background),
-            row_bg_even_rgba: pack_rgb_hex(preset.row_band_even),
-            row_bg_odd_rgba: pack_rgb_hex(preset.row_band_odd),
+            row_bg_even_rgba: viewport_bg_top_rgba,
+            row_bg_odd_rgba: viewport_bg_bottom_rgba,
             viewport: ViewportState {
                 offset_lines: grid.display_offset() as u32,
                 max_offset_lines: grid.history_size() as u32,

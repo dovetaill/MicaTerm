@@ -940,26 +940,52 @@ impl WindowsNativeSurfaceState {
         Ok(())
     }
 
-    fn draw_background_runs(&mut self, frame: &RetainedNativeTerminalSurfaceFrame) {
-        self.last_drawn_background_runs = 0;
-
+    fn draw_viewport_background(
+        &mut self,
+        frame: &RetainedNativeTerminalSurfaceFrame,
+    ) -> Option<u32> {
         #[cfg(not(target_os = "windows"))]
-        let _ = frame;
+        {
+            let _ = frame;
+            None
+        }
 
         #[cfg(target_os = "windows")]
         {
-            let Some(render_target) = self.render_target() else {
-                return;
-            };
-            let presentable_frame = &frame.frame.presentable_frame;
+            let render_target = self.render_target()?;
             let clip_rect = terminal_clip_rect(frame.rect);
-            let default_bg_rgba = opaque_surface_fill_rgba(presentable_frame.default_bg_rgba);
+            let default_bg_rgba =
+                opaque_surface_fill_rgba(frame.frame.presentable_frame.default_bg_rgba);
+            // Retained Windows rendering intentionally uses the uniform base fill as the
+            // reliable viewport-background fallback; explicit ANSI/cell backgrounds are still
+            // layered on afterward through retained background runs.
             self.ensure_brush(default_bg_rgba);
             if let Some(brush) = self.brush_for(default_bg_rgba) {
                 unsafe {
                     render_target.FillRectangle(&clip_rect, &brush);
                 }
             }
+            Some(default_bg_rgba)
+        }
+    }
+
+    fn draw_background_runs(&mut self, frame: &RetainedNativeTerminalSurfaceFrame) {
+        self.last_drawn_background_runs = 0;
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = self.draw_viewport_background(frame);
+            return;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let Some(default_bg_rgba) = self.draw_viewport_background(frame) else {
+                return;
+            };
+            let Some(render_target) = self.render_target() else {
+                return;
+            };
             for run in &frame.frame.presentable_frame.background_runs {
                 let bg_rgba = opaque_surface_fill_rgba(run.bg_rgba);
                 if bg_rgba == default_bg_rgba {

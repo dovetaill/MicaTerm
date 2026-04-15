@@ -1,5 +1,5 @@
 use anyhow::Result;
-use mica_term::app::ssh::runtime::{TerminalSession, TerminalSurfaceState};
+use mica_term::app::ssh::runtime::{TerminalCellState, TerminalSession, TerminalSurfaceState};
 use mica_term::app::terminal_atlas::{
     ClusterSpriteKind, TerminalAtlasRenderer, TerminalAtlasSelection,
 };
@@ -175,7 +175,11 @@ fn atlas_renderer_viewport_background_is_quiet_and_row_band_free() -> Result<()>
     let dark_bottom = pixel_at(
         &dark_frame.image,
         0,
-        dark_frame.image.size().height.saturating_sub(dark_frame.metrics.cell_height / 2 + 1),
+        dark_frame
+            .image
+            .size()
+            .height
+            .saturating_sub(dark_frame.metrics.cell_height / 2 + 1),
     );
 
     assert!(
@@ -183,7 +187,7 @@ fn atlas_renderer_viewport_background_is_quiet_and_row_band_free() -> Result<()>
         "dark viewport background should not alternate into visible row banding between adjacent rows"
     );
     assert!(
-        color_distance(dark_top, dark_bottom) >= 1 && color_distance(dark_top, dark_bottom) <= 18,
+        color_distance(dark_top, dark_bottom) >= 4 && color_distance(dark_top, dark_bottom) <= 18,
         "dark viewport background should keep only a very subtle top-to-bottom lift instead of a flat black slab or obvious gradient"
     );
 
@@ -192,16 +196,75 @@ fn atlas_renderer_viewport_background_is_quiet_and_row_band_free() -> Result<()>
     let light_surface = light_session.surface_state(Uuid::new_v4());
     let mut light_renderer = TerminalAtlasRenderer::new()?;
     let light_frame = light_renderer.render(&light_surface)?;
-    let light_row0 = pixel_at(&light_frame.image, 0, light_frame.metrics.cell_height / 2);
+    let light_top = pixel_at(&light_frame.image, 0, light_frame.metrics.cell_height / 2);
     let light_row1 = pixel_at(
         &light_frame.image,
         0,
         light_frame.metrics.cell_height + (light_frame.metrics.cell_height / 2),
     );
+    let light_bottom = pixel_at(
+        &light_frame.image,
+        0,
+        light_frame
+            .image
+            .size()
+            .height
+            .saturating_sub(light_frame.metrics.cell_height / 2 + 1),
+    );
 
     assert_eq!(
-        light_row0, light_row1,
-        "light viewport background should stay on one continuous quiet fill when no light-theme gradient is configured"
+        light_top.a, 255,
+        "light viewport fill should stay fully opaque so empty terminal space reads like the same solid surface as text rows"
+    );
+    assert!(
+        color_distance(light_top, light_row1) <= 6,
+        "light viewport background should not reintroduce parity-based banding between adjacent empty rows"
+    );
+    assert!(
+        color_distance(light_top, light_bottom) >= 1
+            && color_distance(light_top, light_bottom) <= 12,
+        "light viewport background should keep only a very soft top-to-bottom lift instead of a harsh blank white canvas"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn atlas_renderer_preserves_explicit_cell_backgrounds_over_unified_viewport_fill() -> Result<()> {
+    let mut surface = render_surface(2, 4, "");
+    let explicit_bg = 0xffc8_6414;
+    surface.cells.push(TerminalCellState {
+        row: 0,
+        col: 1,
+        width: 1,
+        text: " ".to_string(),
+        bold: false,
+        underline: false,
+        fg_rgba: surface.default_fg_rgba,
+        bg_rgba: explicit_bg,
+    });
+
+    let mut renderer = TerminalAtlasRenderer::new()?;
+    let frame = renderer.render(&surface)?;
+    let explicit_pixel = pixel_at(
+        &frame.image,
+        frame.metrics.cell_width + (frame.metrics.cell_width / 2),
+        frame.metrics.cell_height / 2,
+    );
+    let neighbor_pixel = pixel_at(
+        &frame.image,
+        (frame.metrics.cell_width * 2) + (frame.metrics.cell_width / 2),
+        frame.metrics.cell_height / 2,
+    );
+
+    assert_eq!(
+        explicit_pixel,
+        unpack_rgba(explicit_bg),
+        "explicit ANSI/cell background colors should still paint on top of the unified viewport background layer"
+    );
+    assert_ne!(
+        explicit_pixel, neighbor_pixel,
+        "only cells with an explicit background should diverge from the shared viewport fill"
     );
 
     Ok(())

@@ -158,6 +158,8 @@ impl WeztermTerminalCoreAdapter {
         let visible_lines = visible_lines_from_rows(&visible_rows);
         let cells = self.visible_cells(&palette);
         let cursor = self.cursor_state(&palette);
+        let viewport_bg_top_rgba = 0xff00_0000 | preset.viewport_bg_top;
+        let viewport_bg_bottom_rgba = 0xff00_0000 | preset.viewport_bg_bottom;
         TerminalSurfaceState {
             session_id,
             seqno: self.sequence_number(),
@@ -165,8 +167,8 @@ impl WeztermTerminalCoreAdapter {
             cols: size.cols as u32,
             default_fg_rgba: color_to_rgba_u32(palette.foreground),
             default_bg_rgba: color_to_rgba_u32(palette.background),
-            row_bg_even_rgba: 0xff00_0000 | preset.row_band_even,
-            row_bg_odd_rgba: 0xff00_0000 | preset.row_band_odd,
+            row_bg_even_rgba: viewport_bg_top_rgba,
+            row_bg_odd_rgba: viewport_bg_bottom_rgba,
             viewport_offset_lines: self.viewport_offset_lines as u32,
             viewport_max_offset_lines: self.max_viewport_offset_lines() as u32,
             viewport_at_bottom: self.viewport_offset_lines == 0,

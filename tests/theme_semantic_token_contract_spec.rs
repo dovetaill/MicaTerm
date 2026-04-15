@@ -98,13 +98,16 @@ fn shell_chrome_consumes_semantic_tokens_for_tabs_sidebar_inputs_and_pills() {
         "terminal host chrome should use the shared panel surface token rather than a generic control fill"
     );
     assert!(
-        theme_spec.contains("TERMINAL_ROW_BANDING_ENABLED")
-            && theme_spec.contains("TERMINAL_ROW_BANDING_ALPHA")
-            && theme_spec.contains("TERMINAL_BG_GRAIN_ALPHA")
-            && theme_spec.contains("TERMINAL_BG_BASE_DARK")
-            && theme_spec.contains("TERMINAL_BG_GRADIENT_TOP_DARK")
-            && theme_spec.contains("TERMINAL_BG_GRADIENT_BOTTOM_DARK"),
-        "terminal palette spec should expose explicit viewport background tuning constants now that renderer-side chrome no longer consumes alternating row stripe colors"
+        theme_spec.contains("pub const TERMINAL_ROW_BANDING_ENABLED: bool = false;")
+            && theme_spec.contains("pub const TERMINAL_ROW_BANDING_ALPHA: f32 = 0.0;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRAIN_ALPHA: f32 = 0.0;")
+            && theme_spec.contains("pub const TERMINAL_BG_BASE_DARK: u32 = 0x08_131d;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_DARK: u32 = 0x0b_1824;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_DARK: u32 = 0x08_131d;")
+            && theme_spec.contains("pub const TERMINAL_BG_BASE_LIGHT: u32 = 0xf2_f4f7;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_TOP_LIGHT: u32 = 0xf6_f7f9;")
+            && theme_spec.contains("pub const TERMINAL_BG_GRADIENT_BOTTOM_LIGHT: u32 = 0xf2_f4f7;"),
+        "terminal palette spec should expose the shared calm viewport background constants, disable legacy row banding/grain, and keep soft dark/light gradient endpoints explicit"
     );
     assert!(
         !fs::read_to_string("ui/theme/tokens.slint")
