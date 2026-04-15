@@ -1351,3 +1351,18 @@ fn double_click_and_context_menu_open_create_distinct_sessions() {
         second_session_id
     );
 }
+
+#[test]
+fn workspace_tab_projection_uses_tab_identity_for_generic_tabbar_selection() {
+    let bootstrap = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let tabbar = fs::read_to_string("ui/shell/tabbar.slint").expect("read tabbar");
+
+    assert!(
+        bootstrap.contains("session_id: tab.tab_id.clone().into()"),
+        "workspace tab projection should feed tab ids into the tabbar model so terminal and sftp tabs share one selection identity contract"
+    );
+    assert!(
+        tabbar.contains("title: item.title;"),
+        "TabBar should keep rendering the generic workspace tab title binding so SFTP tabs can display `Files: <host>` without a special case"
+    );
+}

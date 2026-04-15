@@ -1837,7 +1837,7 @@ fn sync_workspace_tab_items(window: &AppWindow, state: &ShellViewModel) {
         .workspace_tabs()
         .iter()
         .map(|tab| WorkspaceTabItem {
-            session_id: tab.session_id.clone().into(),
+            session_id: tab.tab_id.clone().into(),
             title: tab.title.clone().into(),
             subtitle: tab.subtitle.clone().into(),
             state: tab.state.clone().into(),
@@ -5460,10 +5460,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let session_bridge_ref = session_bridge.clone();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let sftp_browser_controller_ref = Rc::clone(&sftp_browser_controller);
-    window.on_workspace_tab_selected(move |session_id| {
+    window.on_workspace_tab_selected(move |tab_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        if state.activate_workspace_session(session_id.as_str()) {
+        if state.activate_workspace_tab(tab_id.as_str()) {
             if let Some(session_bridge) = session_bridge_ref.as_ref() {
                 let _ = workspace_terminal::sync_workspace_projection_from_manager(
                     &mut state,
@@ -5508,16 +5508,27 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let workspace_terminal_no_surface_since_ref = Rc::clone(&workspace_terminal_no_surface_since);
     let workspace_terminal_idle_cache_shrunk_ref = Rc::clone(&workspace_terminal_idle_cache_shrunk);
-    window.on_workspace_tab_close_requested(move |session_id| {
+    window.on_workspace_tab_close_requested(move |tab_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let had_active_surface = state.active_workspace_terminal_surface().is_some();
-        if close_session_by_id(
-            &mut state,
-            session_bridge_ref.as_deref(),
-            session_id.as_str(),
-        ) {
+        let terminal_session_id = state
+            .workspace_tabs()
+            .iter()
+            .find(|tab| tab.tab_id == tab_id.as_str())
+            .map(|tab| tab.session_id.clone())
+            .filter(|session_id| !session_id.is_empty());
+        let closed = if let Some(session_id) = terminal_session_id {
+            close_session_by_id(
+                &mut state,
+                session_bridge_ref.as_deref(),
+                session_id.as_str(),
+            )
+        } else {
+            state.close_workspace_tab(tab_id.as_str())
+        };
+        if closed {
             if let Some(session_bridge) = session_bridge_ref.as_ref() {
                 let _ = workspace_terminal::sync_workspace_projection_from_manager(
                     &mut state,

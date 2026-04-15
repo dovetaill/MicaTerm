@@ -2,6 +2,7 @@
 
 import { ThemeTokens } from "../theme/tokens.slint";
 import { QuickLaunchCardRow, QuickLaunchDetailRow, QuickLaunchGroupRow } from "../welcome/quick-launch-types.slint";
+import { SftpWorkspaceHost } from "./sftp-workspace-host.slint";
 import { TabBar, WorkspaceTabItem } from "./tabbar.slint";
 import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow, TerminalSessionHost } from "./terminal-session-host.slint";
 
@@ -133,9 +134,18 @@ export component WorkspacePane inherits Rectangle {
             vertical-stretch: 1;
             background: transparent;
 
+            if root.workspace-session-host-mode == "sftp" : sftp-host := SftpWorkspaceHost {
+                width: 100%;
+                height: 100%;
+                session-title: root.workspace-session-title;
+                session-subtitle: root.workspace-session-subtitle;
+                session-state: root.workspace-session-state;
+            }
+
             session-host := TerminalSessionHost {
                 width: 100%;
                 height: 100%;
+                visible: root.workspace-session-host-mode != "sftp";
                 session-id: root.active-workspace-session-id;
                 mode: root.workspace-session-host-mode;
                 session-title: root.workspace-session-title;

@@ -1,0 +1,199 @@
+import { ThemeTokens } from "../theme/tokens.slint";
+import { AppTypography } from "../theme/typography.slint";
+
+export component SftpWorkspaceHost inherits Rectangle {
+    in property <string> session-title: "";
+    in property <string> session-subtitle: "";
+    in property <string> session-state: "";
+
+    width: 100%;
+    height: 100%;
+    background: ThemeTokens.workspace-surface;
+
+    toolbar-card := Rectangle {
+        x: 16px;
+        y: 16px;
+        width: parent.width - 32px;
+        height: 72px;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: ThemeTokens.divider-subtle;
+        background: ThemeTokens.tabbar-surface;
+
+        eyebrow := Text {
+            x: 16px;
+            y: 14px;
+            width: parent.width - 160px;
+            height: 16px;
+            text: "Files workspace";
+            font-family: AppTypography.ui-font-family;
+            font-size: AppTypography.ui-font-size-caption;
+            font-weight: AppTypography.ui-font-weight-semibold;
+            color: ThemeTokens.text-secondary;
+            vertical-alignment: center;
+        }
+
+        title := Text {
+            x: 16px;
+            y: 30px;
+            width: parent.width - 180px;
+            height: 24px;
+            text: root.session-title;
+            font-family: AppTypography.ui-font-family;
+            font-size: AppTypography.ui-font-size-body;
+            font-weight: AppTypography.ui-font-weight-semibold;
+            color: ThemeTokens.text-primary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        subtitle := Text {
+            x: 16px;
+            y: 52px;
+            width: parent.width - 180px;
+            height: 14px;
+            text: root.session-subtitle;
+            font-family: AppTypography.ui-font-family;
+            font-size: AppTypography.ui-font-size-caption;
+            font-weight: AppTypography.ui-font-weight-regular;
+            color: ThemeTokens.text-secondary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        open-quick-browser := Rectangle {
+            x: parent.width - self.width - 16px;
+            y: 20px;
+            width: 148px;
+            height: 32px;
+            border-radius: 16px;
+            border-width: 1px;
+            border-color: ThemeTokens.input-border;
+            background: ThemeTokens.workspace-surface;
+
+            Text {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                text: "Open a Quick Browser";
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-caption;
+                font-weight: AppTypography.ui-font-weight-semibold;
+                color: ThemeTokens.text-primary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    table-card := Rectangle {
+        x: 16px;
+        y: toolbar-card.y + toolbar-card.height + 16px;
+        width: parent.width - 32px;
+        height: max(0px, parent.height - self.y - 16px);
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: ThemeTokens.divider-subtle;
+        background: ThemeTokens.workspace-surface;
+
+        header-row := Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 38px;
+            background: ThemeTokens.tabbar-surface;
+
+            Text {
+                x: 16px;
+                y: 0px;
+                width: 220px;
+                height: parent.height;
+                text: "Name";
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-caption;
+                font-weight: AppTypography.ui-font-weight-semibold;
+                color: ThemeTokens.text-secondary;
+                vertical-alignment: center;
+            }
+
+            Text {
+                x: 252px;
+                y: 0px;
+                width: 120px;
+                height: parent.height;
+                text: "Type";
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-caption;
+                font-weight: AppTypography.ui-font-weight-semibold;
+                color: ThemeTokens.text-secondary;
+                vertical-alignment: center;
+            }
+
+            Text {
+                x: parent.width - 220px;
+                y: 0px;
+                width: 100px;
+                height: parent.height;
+                text: "Modified";
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-caption;
+                font-weight: AppTypography.ui-font-weight-semibold;
+                color: ThemeTokens.text-secondary;
+                vertical-alignment: center;
+            }
+
+            Text {
+                x: parent.width - 96px;
+                y: 0px;
+                width: 72px;
+                height: parent.height;
+                text: "Size";
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-caption;
+                font-weight: AppTypography.ui-font-weight-semibold;
+                color: ThemeTokens.text-secondary;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+        }
+
+        empty-state := Rectangle {
+            x: 24px;
+            y: 62px;
+            width: parent.width - 48px;
+            height: 120px;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.tabbar-surface;
+
+            Text {
+                x: 20px;
+                y: 20px;
+                width: parent.width - 40px;
+                height: 22px;
+                text: root.session-title == "" ? "Files workspace" : root.session-title;
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-body;
+                font-weight: AppTypography.ui-font-weight-semibold;
+                color: ThemeTokens.text-primary;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                x: 20px;
+                y: 50px;
+                width: parent.width - 40px;
+                height: 20px;
+                text: "Expand a Quick Browser session to bring file work into the main workspace.";
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-caption;
+                font-weight: AppTypography.ui-font-weight-regular;
+                color: ThemeTokens.text-secondary;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
