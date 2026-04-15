@@ -564,6 +564,7 @@ pub struct ShellViewModel {
     pub sftp_queue_summary: TransferQueueSummary,
     pub sftp_queue_drawer_open: bool,
     workspace_tabs: Vec<WorkspaceTab>,
+    active_workspace_tab_id: Option<String>,
     active_workspace_session_id: Option<String>,
     active_workspace_terminal_surface: Option<TerminalSurfaceState>,
     pending_ssh_modal_action: Option<PendingSshModalAction>,
@@ -633,6 +634,7 @@ impl Default for ShellViewModel {
             sftp_queue_summary: TransferQueueSummary::default(),
             sftp_queue_drawer_open: false,
             workspace_tabs: Vec::new(),
+            active_workspace_tab_id: None,
             active_workspace_session_id: None,
             active_workspace_terminal_surface: None,
             pending_ssh_modal_action: None,
@@ -1442,32 +1444,37 @@ impl ShellViewModel {
     }
 
     fn normalize_workspace_tabs(&mut self) {
-        let active_id = self
-            .active_workspace_session_id
+        let active_tab_id = self
+            .active_workspace_tab_id
             .as_deref()
             .filter(|candidate| {
                 self.workspace_tabs
                     .iter()
-                    .any(|tab| tab.session_id == *candidate)
+                    .any(|tab| tab.tab_id == *candidate)
             })
             .map(str::to_string)
             .or_else(|| {
                 self.workspace_tabs
                     .iter()
                     .find(|tab| tab.active)
-                    .map(|tab| tab.session_id.clone())
+                    .map(|tab| tab.tab_id.clone())
             })
-            .or_else(|| {
-                self.workspace_tabs
-                    .first()
-                    .map(|tab| tab.session_id.clone())
-            });
+            .or_else(|| self.workspace_tabs.first().map(|tab| tab.tab_id.clone()));
 
         for tab in &mut self.workspace_tabs {
-            tab.active = active_id.as_deref() == Some(tab.session_id.as_str());
+            tab.active = active_tab_id.as_deref() == Some(tab.tab_id.as_str());
         }
 
-        self.active_workspace_session_id = active_id;
+        self.active_workspace_tab_id = active_tab_id.clone();
+        self.active_workspace_session_id = active_tab_id
+            .as_deref()
+            .and_then(|active_id| {
+                self.workspace_tabs
+                    .iter()
+                    .find(|tab| tab.tab_id == active_id)
+                    .map(|tab| tab.session_id.clone())
+            })
+            .filter(|session_id| !session_id.is_empty());
         if self.active_workspace_terminal_surface().is_none() {
             self.active_workspace_terminal_surface = None;
         }

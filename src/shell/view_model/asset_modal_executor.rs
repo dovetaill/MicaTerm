@@ -56,7 +56,9 @@ impl ShellViewModel {
                     return false;
                 }
 
-                let Some(session_id) = self.active_workspace_session_id().map(str::to_string)
+                let Some(session_id) = self
+                    .active_workspace_terminal_session_id()
+                    .map(str::to_string)
                 else {
                     return false;
                 };

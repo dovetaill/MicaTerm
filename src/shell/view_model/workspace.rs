@@ -3,6 +3,10 @@
 use super::*;
 
 impl ShellViewModel {
+    pub fn active_workspace_tab_id(&self) -> Option<&str> {
+        self.active_workspace_tab_id.as_deref()
+    }
+
     pub fn workspace_tabs(&self) -> &[WorkspaceTab] {
         &self.workspace_tabs
     }
@@ -16,8 +20,17 @@ impl ShellViewModel {
         self.active_workspace_session_id.as_deref()
     }
 
+    pub fn active_workspace_terminal_session_id(&self) -> Option<&str> {
+        let tab = self.active_workspace_tab()?;
+        if !tab.uses_terminal_surface() && !tab.uses_connection_progress_surface() && !tab.can_reconnect() {
+            return None;
+        }
+
+        (!tab.session_id.is_empty()).then_some(tab.session_id.as_str())
+    }
+
     pub fn active_workspace_terminal_surface(&self) -> Option<&TerminalSurfaceState> {
-        let active_id = self.active_workspace_session_id.as_deref()?;
+        let active_id = self.active_workspace_terminal_session_id()?;
         self.active_workspace_terminal_surface
             .as_ref()
             .filter(|surface| surface.session_id.to_string() == active_id)
@@ -28,61 +41,85 @@ impl ShellViewModel {
     }
 
     pub fn active_workspace_tab(&self) -> Option<&WorkspaceTab> {
-        let active_id = self.active_workspace_session_id.as_deref()?;
-        self.workspace_tabs
-            .iter()
-            .find(|tab| tab.session_id == active_id)
+        let active_id = self.active_workspace_tab_id.as_deref()?;
+        self.workspace_tabs.iter().find(|tab| tab.tab_id == active_id)
     }
 
-    pub fn activate_workspace_session(&mut self, session_id: &str) -> bool {
-        if !self
-            .workspace_tabs
-            .iter()
-            .any(|tab| tab.session_id == session_id)
-        {
+    pub fn activate_workspace_tab(&mut self, tab_id: &str) -> bool {
+        if !self.workspace_tabs.iter().any(|tab| tab.tab_id == tab_id) {
             return false;
         }
 
-        self.active_workspace_session_id = Some(session_id.to_string());
+        self.active_workspace_tab_id = Some(tab_id.to_string());
         self.normalize_workspace_tabs();
         true
     }
 
+    pub fn activate_workspace_session(&mut self, session_id: &str) -> bool {
+        let Some(tab_id) = self
+            .workspace_tabs
+            .iter()
+            .find(|tab| tab.session_id == session_id)
+            .map(|tab| tab.tab_id.clone())
+        else {
+            return false;
+        };
+
+        self.activate_workspace_tab(tab_id.as_str())
+    }
+
     pub fn close_workspace_session(&mut self, session_id: &str) -> bool {
-        self.close_workspace_session_with_fallback(session_id)
+        let Some(tab_id) = self
+            .workspace_tabs
+            .iter()
+            .find(|tab| tab.session_id == session_id)
+            .map(|tab| tab.tab_id.clone())
+        else {
+            return false;
+        };
+
+        self.close_workspace_tab(tab_id.as_str())
+    }
+
+    pub fn close_workspace_tab(&mut self, tab_id: &str) -> bool {
+        self.close_workspace_tab_with_fallback(tab_id)
+    }
+
+    pub fn close_workspace_session_with_fallback(&mut self, session_id: &str) -> bool {
+        self.close_workspace_session(session_id)
     }
 
     pub fn open_workspace_launcher_tab(&mut self) {
         if self.workspace_tabs.iter().any(WorkspaceTab::is_launcher) {
-            let _ = self.activate_workspace_session("workspace-launcher");
+            let _ = self.activate_workspace_tab("workspace-launcher");
             return;
         }
 
         let mut launcher = WorkspaceTab::launcher();
         launcher.active = true;
         self.workspace_tabs.push(launcher);
-        self.active_workspace_session_id = Some("workspace-launcher".into());
+        self.active_workspace_tab_id = Some("workspace-launcher".into());
         self.normalize_workspace_tabs();
     }
 
     pub fn close_workspace_launcher_tab(&mut self) -> bool {
-        self.close_workspace_session_with_fallback("workspace-launcher")
+        self.close_workspace_tab_with_fallback("workspace-launcher")
     }
 
-    pub fn close_workspace_session_with_fallback(&mut self, session_id: &str) -> bool {
+    pub fn close_workspace_tab_with_fallback(&mut self, tab_id: &str) -> bool {
         let Some(removed_index) = self
             .workspace_tabs
             .iter()
-            .position(|tab| tab.session_id == session_id)
+            .position(|tab| tab.tab_id == tab_id)
         else {
             return false;
         };
 
-        let removed_was_active = self.active_workspace_session_id.as_deref() == Some(session_id);
+        let removed_was_active = self.active_workspace_tab_id.as_deref() == Some(tab_id);
         self.workspace_tabs.remove(removed_index);
 
         if removed_was_active {
-            self.active_workspace_session_id = self
+            self.active_workspace_tab_id = self
                 .workspace_tabs
                 .get(removed_index)
                 .or_else(|| {
@@ -90,7 +127,7 @@ impl ShellViewModel {
                         .checked_sub(1)
                         .and_then(|index| self.workspace_tabs.get(index))
                 })
-                .map(|tab| tab.session_id.clone());
+                .map(|tab| tab.tab_id.clone());
         }
 
         self.normalize_workspace_tabs();
@@ -133,6 +170,7 @@ impl ShellViewModel {
         match self.active_workspace_tab() {
             None => "welcome",
             Some(tab) if tab.is_launcher() => "welcome",
+            Some(tab) if tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp => "sftp",
             Some(tab) if tab.uses_terminal_surface() => "terminal",
             Some(tab) if tab.uses_connection_progress_surface() => "connection-progress",
             Some(_) => "session-error",

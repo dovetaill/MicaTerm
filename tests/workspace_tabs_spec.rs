@@ -154,6 +154,26 @@ fn terminal_workspace_tabs_keep_tab_id_equal_to_their_terminal_session_id_for_no
 }
 
 #[test]
+fn workspace_can_activate_sftp_tab_without_losing_terminal_tab_identity() {
+    let terminal_tab = WorkspaceTab::from_session(&sample_handle(
+        "Prod Bastion",
+        "ops@example.com:22",
+        SessionState::Connected,
+    ));
+    let sftp_tab = WorkspaceTab::sftp("tab-files-1", "browser-1", "Files: Prod");
+
+    let mut view_model = ShellViewModel::default();
+    view_model.set_workspace_tabs(vec![terminal_tab.clone(), sftp_tab.clone()]);
+
+    assert!(view_model.activate_workspace_tab(sftp_tab.tab_id.as_str()));
+    assert_eq!(
+        view_model.active_workspace_tab().expect("active workspace tab").title,
+        "Files: Prod"
+    );
+    assert!(view_model.active_workspace_terminal_session_id().is_none());
+}
+
+#[test]
 fn workspace_tabs_hide_connection_details_from_visible_copy() {
     let named = WorkspaceTab::from_session(&sample_handle(
         "Prod Bastion",
