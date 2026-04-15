@@ -9114,10 +9114,26 @@ fn opening_sftp_reads_the_active_session_directory_instead_of_staying_connecting
 
     assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
     assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app");
-    assert_eq!(app.get_sftp_panel_items().row_count(), 1);
+    assert_eq!(app.get_sftp_panel_items().row_count(), 2);
     assert_eq!(
         app.get_sftp_panel_items()
             .row_data(0)
+            .expect("sftp row")
+            .name
+            .as_str(),
+        ".."
+    );
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(0)
+            .expect("sftp row")
+            .type_label
+            .as_str(),
+        "Up"
+    );
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
             .expect("sftp row")
             .name
             .as_str(),
@@ -9125,7 +9141,7 @@ fn opening_sftp_reads_the_active_session_directory_instead_of_staying_connecting
     );
     assert_eq!(
         app.get_sftp_panel_items()
-            .row_data(0)
+            .row_data(1)
             .expect("sftp row")
             .type_label
             .as_str(),
@@ -9198,16 +9214,32 @@ fn refresh_and_path_submit_trigger_real_directory_reads() {
     flush_runtime_projection();
     assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
     assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app/releases");
-    assert_eq!(app.get_sftp_panel_items().row_count(), 1);
+    assert_eq!(app.get_sftp_panel_items().row_count(), 2);
     assert_eq!(
         app.get_sftp_panel_items()
             .row_data(0)
             .expect("sftp row")
             .name
             .as_str(),
+        ".."
+    );
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(0)
+            .expect("sftp row")
+            .type_label
+            .as_str(),
+        "Up"
+    );
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("sftp row")
+            .name
+            .as_str(),
         "release.tar.gz"
     );
-    let release_row = app.get_sftp_panel_items().row_data(0).expect("release row");
+    let release_row = app.get_sftp_panel_items().row_data(1).expect("release row");
     assert_eq!(release_row.type_label.as_str(), "File");
     assert_eq!(release_row.size_label.as_str(), "14 KB");
     assert!(
@@ -9224,6 +9256,58 @@ fn refresh_and_path_submit_trigger_real_directory_reads() {
             "/srv/app".to_string(),
             "/srv/app/releases".to_string(),
             "/srv/app/releases".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn parent_directory_row_navigates_up_and_stays_first_in_the_sftp_table() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    flush_runtime_projection();
+
+    let parent_row = app.get_sftp_panel_items().row_data(0).expect("parent row");
+    assert_eq!(parent_row.id.as_str(), "__sftp_parent__");
+    assert_eq!(parent_row.name.as_str(), "..");
+    assert_eq!(parent_row.kind.as_str(), "parent-directory");
+    assert_eq!(parent_row.type_label.as_str(), "Up");
+
+    app.invoke_sftp_panel_item_activated("__sftp_parent__".into(), "parent-directory".into());
+    flush_runtime_projection();
+
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app");
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(0)
+            .expect("parent row after navigate up")
+            .name
+            .as_str(),
+        ".."
+    );
+    assert_eq!(
+        sftp_state.take_read_dir_calls(),
+        vec![
+            "/srv/app".to_string(),
+            "/srv/app/releases".to_string(),
+            "/srv/app".to_string(),
         ]
     );
 }

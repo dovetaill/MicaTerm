@@ -199,9 +199,13 @@ fn right_panel_source_uses_borderless_toolbar_buttons_and_horizontal_file_scroll
         "sftp toolbar buttons should drop their visible border chrome"
     );
     assert!(
-        source.contains("horizontal-scrollbar-policy")
+        source.contains("horizontal-scrollbar-policy: always-on;")
             && source.contains("viewport-width: max(self.visible-width"),
         "dense file list should support horizontal scrolling when the metadata columns overflow the panel"
+    );
+    assert!(
+        source.contains("item.kind == \"parent-directory\""),
+        "sftp rows should reserve a dedicated parent-directory row contract for navigating up"
     );
 }
 

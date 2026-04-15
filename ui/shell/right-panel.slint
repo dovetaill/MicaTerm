@@ -661,7 +661,7 @@ export component RightPanel inherits Rectangle {
                 width: parent.width;
                 height: parent.height - root.sftp-table-header-height - root.sftp-status-row-height;
                 viewport-x <=> root.sftp-list-viewport-x;
-                horizontal-scrollbar-policy: ScrollBarPolicy.as-needed;
+                horizontal-scrollbar-policy: always-on;
                 viewport-width: max(self.visible-width, root.sftp-table-content-width);
 
                 for item in root.sftp-panel-items : Rectangle {
@@ -684,7 +684,9 @@ export component RightPanel inherits Rectangle {
                         y: 6px;
                         width: 16px;
                         height: 16px;
-                        source: item.kind == "directory" ? root.folder-icon : root.document-icon;
+                        source: item.kind == "parent-directory"
+                            ? root.arrow-hook-up-left-icon
+                            : item.kind == "directory" ? root.folder-icon : root.document-icon;
                         image-fit: contain;
                         colorize: ThemeTokens.text-primary;
                     }
@@ -755,7 +757,9 @@ export component RightPanel inherits Rectangle {
                             if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
                                 root.sftp-panel-context-menu-requested(
                                     item.id,
-                                    item.kind == "directory" ? "sftp-directory" : "sftp-file",
+                                    item.kind == "parent-directory"
+                                        ? "sftp-blank"
+                                        : item.kind == "directory" ? "sftp-directory" : "sftp-file",
                                     self.mouse-x + self.absolute-position.x,
                                     self.mouse-y + self.absolute-position.y,
                                 );

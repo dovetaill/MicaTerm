@@ -2,6 +2,20 @@
 
 use super::*;
 
+const SFTP_PARENT_ITEM_ID: &str = "__sftp_parent__";
+
+fn sftp_parent_panel_item() -> SftpPanelItem {
+    SftpPanelItem {
+        id: SFTP_PARENT_ITEM_ID.into(),
+        name: "..".into(),
+        type_label: "Up".into(),
+        modified_label: String::new().into(),
+        size_label: String::new().into(),
+        kind: "parent-directory".into(),
+        selected: false,
+    }
+}
+
 pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) {
     window.set_sftp_panel_mode(state.sftp_panel_mode_id().into());
     window.set_sftp_panel_host_label(state.sftp_panel_host_label().into());
@@ -19,22 +33,27 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) 
     window.set_sftp_panel_size_column_width(state.sftp_panel_size_column_width_px());
     window.set_sftp_queue_drawer_open(state.sftp_queue_drawer_open());
 
-    let items = state
-        .project_sftp_panel_entries(state.sftp_panel_entries())
-        .iter()
-        .map(|entry| SftpPanelItem {
-            id: entry.id.as_str().into(),
-            name: entry.name.as_str().into(),
-            type_label: sftp_panel_entry_type_label(entry.kind).into(),
-            modified_label: sftp_panel_entry_modified_label(entry).into(),
-            size_label: sftp_panel_entry_size_label(entry).into(),
-            kind: sftp_panel_entry_kind(entry.kind).into(),
-            selected: state
-                .sftp_panel_selected_entry_ids()
-                .iter()
-                .any(|selected_id| selected_id == &entry.id),
-        })
-        .collect::<Vec<_>>();
+    let mut items = Vec::new();
+    if state.sftp_panel_can_go_up() {
+        items.push(sftp_parent_panel_item());
+    }
+    items.extend(
+        state
+            .project_sftp_panel_entries(state.sftp_panel_entries())
+            .iter()
+            .map(|entry| SftpPanelItem {
+                id: entry.id.as_str().into(),
+                name: entry.name.as_str().into(),
+                type_label: sftp_panel_entry_type_label(entry.kind).into(),
+                modified_label: sftp_panel_entry_modified_label(entry).into(),
+                size_label: sftp_panel_entry_size_label(entry).into(),
+                kind: sftp_panel_entry_kind(entry.kind).into(),
+                selected: state
+                    .sftp_panel_selected_entry_ids()
+                    .iter()
+                    .any(|selected_id| selected_id == &entry.id),
+            }),
+    );
     sync_vec_model(window.get_sftp_panel_items(), items, |model| {
         window.set_sftp_panel_items(model)
     });
@@ -448,6 +467,9 @@ pub(super) fn bind_sftp_callbacks(
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     window.on_sftp_panel_item_selected(move |entry_id| {
+        if entry_id.as_str() == SFTP_PARENT_ITEM_ID {
+            return;
+        }
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         if state.select_sftp_panel_entry(entry_id.as_str()) {
@@ -462,12 +484,38 @@ pub(super) fn bind_sftp_callbacks(
     window.on_sftp_panel_item_activated(move |entry_id, item_kind| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let selection_changed = state.select_sftp_panel_entry(entry_id.as_str());
+        let is_parent_row = entry_id.as_str() == SFTP_PARENT_ITEM_ID
+            || item_kind.as_str() == "parent-directory";
+        let selection_changed = if is_parent_row {
+            false
+        } else {
+            state.select_sftp_panel_entry(entry_id.as_str())
+        };
         let entry = state.active_sftp_entry(entry_id.as_str()).cloned();
         let mut panel_changed = selection_changed;
         let was_modal_open = state.sftp_remote_file_editor_state().open;
 
-        if let Some(entry) = entry {
+        if is_parent_row {
+            if let Some(session_bridge) = session_bridge_ref.as_ref()
+                && let Some(session_id) = active_workspace_session_uuid(&state)
+            {
+                let request = {
+                    let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    controller.navigate_up(session_id)
+                };
+                if let Some(request) = request {
+                    let mut controller = sftp_browser_controller_ref.borrow_mut();
+                    panel_changed |= execute_sftp_browser_request(
+                        &mut state,
+                        &mut controller,
+                        &session_bridge.manager,
+                        request,
+                    );
+                }
+            } else {
+                panel_changed |= state.navigate_sftp_panel_up();
+            }
+        } else if let Some(entry) = entry {
             if item_kind.as_str() == "directory" || entry.kind == SftpDirectoryEntryKind::Directory
             {
                 if let Some(session_bridge) = session_bridge_ref.as_ref()
