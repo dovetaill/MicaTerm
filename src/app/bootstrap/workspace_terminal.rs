@@ -32,6 +32,9 @@ pub(super) fn sync_workspace_projection_from_manager(
     let mut next_tabs = manager
         .ordered_sessions()
         .into_iter()
+        .filter(|handle| {
+            !state.workspace_terminal_session_hidden(handle.session_id.to_string().as_str())
+        })
         .map(|handle| WorkspaceTab::from_session(&handle))
         .collect::<Vec<_>>();
     let manager_session_ids = next_tabs
@@ -66,7 +69,7 @@ pub(super) fn sync_workspace_projection_from_manager(
         .collect::<Vec<_>>();
     next_tabs.extend(preserved_error_tabs);
     next_tabs.extend(preserved_launcher_tabs);
-    next_tabs.extend(preserved_sftp_tabs);
+    next_tabs.extend(sync_workspace_sftp_tabs(state, manager, preserved_sftp_tabs));
     let active_id = projected_active_workspace_tab_id(state, &next_tabs);
     for tab in &mut next_tabs {
         tab.active = active_id.as_deref() == Some(tab.tab_id.as_str());
@@ -99,6 +102,49 @@ pub(super) fn sync_workspace_projection_from_manager(
         surface_changed,
         sftp_changed,
     }
+}
+
+fn sync_workspace_sftp_tabs(
+    state: &mut ShellViewModel,
+    manager: &SessionManager,
+    tabs: Vec<WorkspaceTab>,
+) -> Vec<WorkspaceTab> {
+    tabs.into_iter()
+        .map(|mut tab| {
+            let linked_session_id_text = state
+                .file_browser_sessions
+                .get(tab.file_browser_session_id.as_str())
+                .and_then(|browser_session| browser_session.linked_terminal_session_id.clone());
+            let binding_disconnected = linked_session_id_text
+                .as_deref()
+                .and_then(|session_id| Uuid::parse_str(session_id).ok())
+                .and_then(|session_id| manager.sftp_binding(session_id))
+                .is_some_and(|binding| binding.mode() == SftpPanelMode::Disconnected);
+
+            let Some(browser_session) = state
+                .file_browser_sessions
+                .get_mut(tab.file_browser_session_id.as_str())
+            else {
+                tab.state = "disconnected".into();
+                tab.error_detail = "SFTP workspace browser session is unavailable.".into();
+                return tab;
+            };
+
+            if binding_disconnected {
+                browser_session.mark_disconnected();
+            }
+
+            tab.state = browser_session.mode.id().into();
+            if browser_session.mode == SftpPanelMode::Disconnected {
+                tab.error_detail = "Reconnect the file workspace to restore remote browsing.".into();
+            } else if let Some(last_error) = browser_session.last_error.as_deref() {
+                tab.error_detail = last_error.to_string();
+            } else {
+                tab.error_detail.clear();
+            }
+            tab
+        })
+        .collect()
 }
 
 pub(super) fn snap_active_workspace_viewport_to_bottom_if_needed(

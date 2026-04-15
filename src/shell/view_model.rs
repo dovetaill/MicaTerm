@@ -14,7 +14,7 @@ mod workspace;
 use self::asset_modal_executor::normalized_keychain_identity_auth_kind_id;
 pub use self::asset_modal_executor::welcome_actions;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::app::keychain::{
     KeychainCatalog, KeychainIdentityAuthKind, KeychainNodePayload, KeychainSshKeySpec,
@@ -24,7 +24,7 @@ use crate::app::sftp::{
     FILE_BROWSER_MODIFIED_COLUMN_MIN_PX, FILE_BROWSER_SIZE_COLUMN_MIN_PX,
     FILE_BROWSER_TYPE_COLUMN_MIN_PX, FileBrowserSession, FileBrowserSortColumn,
     FileBrowserSortDirection, FileBrowserSortState, SftpDirectoryEntry, SftpFollowMode,
-    SftpPanelMode, TransferQueueSummary,
+    SftpPanelMode, SftpSessionBindingState, TransferQueueSummary, HostProfileRef,
 };
 use crate::app::ssh::credentials::{
     SshCredentialKind, keychain_identity_credential_ref, keychain_key_credential_ref,
@@ -512,6 +512,7 @@ pub struct ShellViewModel {
     pub sftp_queue_summary: TransferQueueSummary,
     pub sftp_queue_drawer_open: bool,
     workspace_tabs: Vec<WorkspaceTab>,
+    hidden_workspace_terminal_session_ids: HashSet<String>,
     active_workspace_tab_id: Option<String>,
     active_workspace_session_id: Option<String>,
     active_workspace_terminal_surface: Option<TerminalSurfaceState>,
@@ -582,6 +583,7 @@ impl Default for ShellViewModel {
             sftp_queue_summary: TransferQueueSummary::default(),
             sftp_queue_drawer_open: false,
             workspace_tabs: Vec::new(),
+            hidden_workspace_terminal_session_ids: HashSet::new(),
             active_workspace_tab_id: None,
             active_workspace_session_id: None,
             active_workspace_terminal_surface: None,

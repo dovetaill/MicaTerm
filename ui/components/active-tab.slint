@@ -55,9 +55,8 @@ export component ActiveTab inherits Rectangle {
             ? ThemeTokens.status-error-accent
             : root.state == "connecting"
                 ? ThemeTokens.status-busy-accent
-                : root.state == "launcher"
-                    ? ThemeTokens.divider-strong
-                    : ThemeTokens.status-success-accent;
+                : root.state == "launcher" ? ThemeTokens.divider-subtle
+                : ThemeTokens.status-success-accent;
     }
 
     active-indicator := Rectangle {

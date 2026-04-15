@@ -14,6 +14,35 @@ impl ShellViewModel {
             .insert(session.file_browser_session_id.clone(), session);
     }
 
+    pub fn set_sftp_session_state(
+        &mut self,
+        session_id: String,
+        state: SftpSessionBindingState,
+    ) {
+        let mut session = self
+            .file_browser_sessions
+            .get(session_id.as_str())
+            .cloned()
+            .unwrap_or_else(|| {
+                let mut session = FileBrowserSession::quick_browser(
+                    HostProfileRef::new("active-session"),
+                    state.current_path.clone(),
+                );
+                session.file_browser_session_id = session_id.clone();
+                session
+            });
+        session.attach_terminal_session_id(session_id.clone());
+        session.mode = state.mode;
+        session.follow_mode = state.follow_mode;
+        session.current_path = state.current_path;
+        session.history = state.history;
+        session.entries = state.entries;
+        session.selected_entry_ids = state.selected_entry_ids;
+        session.last_error = state.last_error;
+        session.active_request_id = None;
+        self.set_file_browser_session(session);
+    }
+
     pub fn quick_browser_session_id(&self) -> Option<&str> {
         self.quick_browser_session_id
             .as_deref()
@@ -359,6 +388,78 @@ impl ShellViewModel {
             return false;
         }
         self.quick_browser_state.path_editing = true;
+        true
+    }
+
+    pub fn has_workspace_sftp_tabs_for_terminal_session(&self, session_id: &str) -> bool {
+        self.workspace_tabs.iter().any(|tab| {
+            tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp
+                && self
+                    .file_browser_sessions
+                    .get(tab.file_browser_session_id.as_str())
+                    .and_then(|browser_session| {
+                        browser_session.linked_terminal_session_id.as_deref()
+                    })
+                    == Some(session_id)
+        })
+    }
+
+    pub fn mark_workspace_sftp_sessions_disconnected(&mut self, session_id: &str) -> bool {
+        let mut changed = false;
+        for tab in self
+            .workspace_tabs
+            .iter()
+            .filter(|tab| tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp)
+        {
+            let Some(browser_session) = self
+                .file_browser_sessions
+                .get_mut(tab.file_browser_session_id.as_str())
+            else {
+                continue;
+            };
+            if browser_session.linked_terminal_session_id.as_deref() != Some(session_id) {
+                continue;
+            }
+            if browser_session.mode != SftpPanelMode::Disconnected {
+                browser_session.mark_disconnected();
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    pub fn expand_quick_browser_to_workspace(&mut self) -> Option<crate::shell::tabs::WorkspaceTabId> {
+        let quick_browser = self.quick_browser_session()?.clone();
+        let workspace_session = quick_browser.clone_for_workspace();
+        let tab_id = format!("workspace-{}", workspace_session.file_browser_session_id);
+        let mut tab = WorkspaceTab::sftp(
+            tab_id.clone(),
+            workspace_session.file_browser_session_id.clone(),
+            format!("Files: {}", workspace_session.host_profile_ref.label),
+        );
+        tab.state = workspace_session.mode.id().into();
+        self.set_file_browser_session(workspace_session);
+        self.workspace_tabs.push(tab);
+        let _ = self.activate_workspace_tab(tab_id.as_str());
+        Some(tab_id)
+    }
+
+    pub fn reconnect_active_sftp_workspace(&mut self) -> bool {
+        let Some(active_tab_id) = self.active_workspace_tab_id().map(str::to_owned) else {
+            return false;
+        };
+        let Some(browser_session) = self.active_workspace_sftp_session_mut() else {
+            return false;
+        };
+        browser_session.mark_connecting();
+        if let Some(tab) = self
+            .workspace_tabs
+            .iter_mut()
+            .find(|tab| tab.tab_id == active_tab_id)
+        {
+            tab.state = SftpPanelMode::Connecting.id().into();
+            tab.error_detail.clear();
+        }
         true
     }
 

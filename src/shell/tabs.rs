@@ -85,8 +85,13 @@ impl WorkspaceTab {
     }
 
     pub fn can_reconnect(&self) -> bool {
-        self.kind == WorkspaceTabKind::Terminal
-            && matches!(self.state.as_str(), "cancelled" | "disconnected" | "error")
+        match self.kind {
+            WorkspaceTabKind::Terminal => {
+                matches!(self.state.as_str(), "cancelled" | "disconnected" | "error")
+            }
+            WorkspaceTabKind::Sftp => matches!(self.state.as_str(), "disconnected" | "error"),
+            WorkspaceTabKind::Launcher => false,
+        }
     }
 
     pub fn uses_terminal_surface(&self) -> bool {

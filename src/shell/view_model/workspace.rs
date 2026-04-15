@@ -11,6 +11,19 @@ impl ShellViewModel {
         &self.workspace_tabs
     }
 
+    pub fn workspace_terminal_session_hidden(&self, session_id: &str) -> bool {
+        self.hidden_workspace_terminal_session_ids.contains(session_id)
+    }
+
+    pub fn hide_workspace_terminal_session(&mut self, session_id: &str) {
+        self.hidden_workspace_terminal_session_ids
+            .insert(session_id.to_string());
+    }
+
+    pub fn unhide_workspace_terminal_session(&mut self, session_id: &str) {
+        self.hidden_workspace_terminal_session_ids.remove(session_id);
+    }
+
     pub fn set_workspace_tabs(&mut self, tabs: Vec<WorkspaceTab>) {
         self.workspace_tabs = tabs;
         self.normalize_workspace_tabs();

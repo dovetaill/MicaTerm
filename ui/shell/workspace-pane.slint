@@ -140,6 +140,10 @@ export component WorkspacePane inherits Rectangle {
                 session-title: root.workspace-session-title;
                 session-subtitle: root.workspace-session-subtitle;
                 session-state: root.workspace-session-state;
+
+                local-action-requested(action-id) => {
+                    root.local-action-requested(action-id);
+                }
             }
 
             session-host := TerminalSessionHost {

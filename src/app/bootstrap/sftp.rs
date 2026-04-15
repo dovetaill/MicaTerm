@@ -220,23 +220,21 @@ pub(super) fn sync_active_sftp_projection_from_manager(
 
 pub(super) fn project_sftp_browser_state_into_view_model(
     state: &mut ShellViewModel,
-    session_id: Uuid,
+    browser_session_id: &str,
     browser_state: &SftpBrowserSessionState,
 ) -> bool {
-    let session_id_text = session_id.to_string();
     let mut next = state
         .file_browser_sessions
-        .get(&session_id_text)
+        .get(browser_session_id)
         .cloned()
         .unwrap_or_else(|| {
             let mut session = crate::app::sftp::FileBrowserSession::quick_browser(
                 crate::app::sftp::HostProfileRef::new("active-session"),
                 browser_state.current_path.clone(),
             );
-            session.file_browser_session_id = session_id_text.clone();
+            session.file_browser_session_id = browser_session_id.to_string();
             session
         });
-    next.attach_terminal_session_id(session_id_text.clone());
     next.mode = browser_state.mode;
     next.follow_mode = browser_state.follow_mode;
     next.current_path = browser_state.current_path.clone();
@@ -245,7 +243,7 @@ pub(super) fn project_sftp_browser_state_into_view_model(
     next.selected_entry_ids = browser_state.selected_entry_ids.clone();
     next.last_error = browser_state.last_error.clone();
     next.active_request_id = browser_state.active_request_id;
-    if state.file_browser_sessions.get(&session_id_text) == Some(&next) {
+    if state.file_browser_sessions.get(browser_session_id) == Some(&next) {
         return false;
     }
     state.set_file_browser_session(next);
@@ -259,8 +257,8 @@ pub(super) fn execute_sftp_browser_request(
     request: SftpBrowserLoadRequest,
 ) -> bool {
     match manager.sftp_read_dir(request.session_id, request.path.as_str()) {
-        Ok(entries) => controller.apply_loaded_directory(
-            request.session_id,
+        Ok(entries) => controller.apply_loaded_directory_for_browser_session(
+            request.file_browser_session_id.as_str(),
             request.request_id,
             request.path.as_str(),
             entries,
@@ -270,10 +268,10 @@ pub(super) fn execute_sftp_browser_request(
                 .sftp_binding(request.session_id)
                 .is_some_and(|binding| binding.mode() == SftpPanelMode::Disconnected)
             {
-                controller.mark_disconnected(request.session_id);
+                controller.mark_disconnected_browser_session(request.file_browser_session_id.as_str());
             } else {
-                controller.apply_load_error(
-                    request.session_id,
+                controller.apply_load_error_for_browser_session(
+                    request.file_browser_session_id.as_str(),
                     request.request_id,
                     request.path.as_str(),
                     err.to_string(),
@@ -283,9 +281,13 @@ pub(super) fn execute_sftp_browser_request(
     }
 
     controller
-        .session_state(request.session_id)
+        .browser_session_state(request.file_browser_session_id.as_str())
         .is_some_and(|browser_state| {
-            project_sftp_browser_state_into_view_model(state, request.session_id, browser_state)
+            project_sftp_browser_state_into_view_model(
+                state,
+                request.file_browser_session_id.as_str(),
+                browser_state,
+            )
         })
 }
 
@@ -410,10 +412,15 @@ pub(super) fn sync_active_sftp_browser_follow_request(
         .is_some_and(|binding| binding.mode() == SftpPanelMode::Disconnected)
     {
         controller.mark_disconnected(session_id);
+        let browser_session_id = session_id.to_string();
         return controller
             .session_state(session_id)
             .is_some_and(|browser_state| {
-                project_sftp_browser_state_into_view_model(state, session_id, browser_state)
+                project_sftp_browser_state_into_view_model(
+                    state,
+                    browser_session_id.as_str(),
+                    browser_state,
+                )
             });
     }
 
@@ -462,12 +469,87 @@ pub(super) fn sync_active_sftp_browser_pending_request(
         .is_some_and(|request| execute_sftp_browser_request(state, controller, manager, request))
 }
 
+pub(super) fn ensure_active_workspace_sftp_browser_started(
+    state: &mut ShellViewModel,
+    controller: &mut SftpBrowserController,
+    manager: &SessionManager,
+) -> bool {
+    let Some(browser_session) = state.active_workspace_sftp_session().cloned() else {
+        return false;
+    };
+    let needs_restart = matches!(
+        browser_session.mode,
+        SftpPanelMode::Connecting | SftpPanelMode::Disconnected
+    );
+    if controller
+        .browser_session_state(browser_session.file_browser_session_id.as_str())
+        .is_some_and(|browser_state| {
+            browser_state.mode != SftpPanelMode::Disconnected && !needs_restart
+        })
+    {
+        return false;
+    }
+    let Some(session_id) = browser_session
+        .linked_terminal_session_id
+        .as_deref()
+        .and_then(|session_id| Uuid::parse_str(session_id).ok())
+    else {
+        return false;
+    };
+    if manager
+        .sftp_binding(session_id)
+        .is_none_or(|binding| binding.mode() == SftpPanelMode::Disconnected)
+    {
+        return false;
+    }
+
+    let request = controller.open_file_browser_session(browser_session);
+    execute_sftp_browser_request(state, controller, manager, request)
+}
+
+pub(super) fn sync_active_workspace_sftp_browser_pending_request(
+    state: &mut ShellViewModel,
+    controller: &mut SftpBrowserController,
+    manager: &SessionManager,
+) -> bool {
+    let Some(browser_session) = state.active_workspace_sftp_session().cloned() else {
+        return false;
+    };
+    let Some(session_id) = browser_session
+        .linked_terminal_session_id
+        .as_deref()
+        .and_then(|session_id| Uuid::parse_str(session_id).ok())
+    else {
+        return false;
+    };
+    let Some(browser_state) = controller.browser_session_state(browser_session.file_browser_session_id.as_str()) else {
+        return false;
+    };
+    if browser_state.mode != SftpPanelMode::Connecting {
+        return false;
+    }
+    if manager
+        .sftp_binding(session_id)
+        .is_none_or(|binding| binding.mode() == SftpPanelMode::Disconnected)
+    {
+        return false;
+    }
+
+    controller
+        .pending_request_for_browser_session(
+            browser_session.file_browser_session_id.as_str(),
+            session_id,
+        )
+        .is_some_and(|request| execute_sftp_browser_request(state, controller, manager, request))
+}
+
 pub(super) fn bind_sftp_callbacks(
     window: &AppWindow,
     view_model: &Rc<RefCell<ShellViewModel>>,
     store: &Option<Rc<UiPreferencesStore>>,
     effects: &Rc<dyn PlatformWindowEffects>,
     session_bridge: &Option<Rc<ShellSessionBridge>>,
+    workspace_follow_tracker: &Rc<RefCell<WorkspaceFollowTracker>>,
     sftp_browser_controller: &Rc<RefCell<SftpBrowserController>>,
 ) {
     let state = Rc::clone(view_model);
@@ -497,9 +579,20 @@ pub(super) fn bind_sftp_callbacks(
 
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
     window.on_sftp_panel_expand_requested(move || {
         let window = handle.unwrap();
-        let state = state.borrow();
+        let mut state = state.borrow_mut();
+        if state.expand_quick_browser_to_workspace().is_none() {
+            return;
+        }
+        super::sync_workspace_tabs_with_manager(
+            &window,
+            &state,
+            &mut workspace_follow_tracker_ref.borrow_mut(),
+            session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
+        );
         sync_right_panel_state(&window, &state);
     });
 
@@ -870,12 +963,13 @@ pub(super) fn bind_sftp_callbacks(
                                     request,
                                 )
                             } else {
+                                let browser_session_id = session_id.to_string();
                                 controller
                                     .session_state(session_id)
                                     .is_some_and(|browser_state| {
                                         project_sftp_browser_state_into_view_model(
                                             &mut state,
-                                            session_id,
+                                            browser_session_id.as_str(),
                                             browser_state,
                                         )
                                     })

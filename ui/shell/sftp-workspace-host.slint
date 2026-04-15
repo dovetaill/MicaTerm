@@ -5,6 +5,7 @@ export component SftpWorkspaceHost inherits Rectangle {
     in property <string> session-title: "";
     in property <string> session-subtitle: "";
     in property <string> session-state: "";
+    callback local-action-requested(string);
 
     width: 100%;
     height: 100%;
@@ -83,6 +84,40 @@ export component SftpWorkspaceHost inherits Rectangle {
                 color: ThemeTokens.text-primary;
                 horizontal-alignment: center;
                 vertical-alignment: center;
+            }
+        }
+
+        if root.session-state == "disconnected" || root.session-state == "error" : reconnect-button := Rectangle {
+            x: open-quick-browser.x - self.width - 8px;
+            y: 20px;
+            width: 96px;
+            height: 32px;
+            border-radius: 16px;
+            border-width: 1px;
+            border-color: ThemeTokens.input-border;
+            background: ThemeTokens.workspace-surface;
+
+            Text {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                text: "Reconnect";
+                font-family: AppTypography.ui-font-family;
+                font-size: AppTypography.ui-font-size-caption;
+                font-weight: AppTypography.ui-font-weight-semibold;
+                color: ThemeTokens.text-primary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            TouchArea {
+                width: parent.width;
+                height: parent.height;
+
+                clicked => {
+                    root.local-action-requested("reconnect-sftp-workspace");
+                }
             }
         }
     }
