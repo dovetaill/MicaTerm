@@ -24,32 +24,15 @@ pub fn memory_diagnostics_enabled() -> bool {
     AppLoggingConfig::from_env().memory_diagnostics_enabled()
 }
 
-pub fn emit_runtime_profile_metadata(profile: AppRuntimeProfile) {
-    tracing::info!(
-        target: "app.renderer",
-        build_flavor = ?profile.build_flavor,
-        renderer_mode = ?profile.renderer_mode,
-        terminal_render_mode = ?profile.terminal_render_mode(),
-        selector_label = profile.selector_label(),
-        prefers_direct3d = profile.prefers_direct3d(),
-        requested_graphics_api = ?profile.preferred_graphics_api(),
-        renderer_fallback_chain = ?profile.renderer_fallback_chain(),
-        forced_backend = ?profile.forced_backend(),
-        forced_renderer = ?profile.forced_renderer(),
-        "initialized runtime profile"
-    );
+pub fn emit_runtime_profile_metadata(_profile: AppRuntimeProfile) {
+    // Startup profile details were useful while stabilizing renderer selection,
+    // but they now duplicate the final renderer-selection summary without adding
+    // actionable signal to packaged logs.
 }
 
-pub fn emit_app_root_metadata(paths: &LoggingPaths) {
-    tracing::info!(
-        target: "app.paths",
-        root_source = ?paths.root_source,
-        root_dir = %paths.root_dir.display(),
-        data_dir = %paths.data_dir.display(),
-        logs_dir = %paths.logs_dir.display(),
-        crash_dir = %paths.crash_dir.display(),
-        "resolved app root directories"
-    );
+pub fn emit_app_root_metadata(_paths: &LoggingPaths) {
+    // Packaged app-root discovery is stable enough that repeating the resolved
+    // directories on every launch no longer helps routine diagnostics.
 }
 
 pub fn build_test_logging_runtime(

@@ -79,9 +79,10 @@ fn vendored_slint_d3d_surface_switches_pixel_geometry_by_host_opacity() {
 }
 
 #[test]
-fn ui_renderer_logs_dynamic_shell_text_policy() {
+fn ui_renderer_keeps_dynamic_shell_text_policy_helpers_without_startup_log_noise() {
     let diagnostics_source =
         fs::read_to_string("src/app/font_diagnostics.rs").expect("read font diagnostics");
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
     for expected in [
         "ui_host_window_transparent",
@@ -95,13 +96,17 @@ fn ui_renderer_logs_dynamic_shell_text_policy() {
         "ui_text_gamma = ui_text_gamma()",
         "ui_text_rendering_policy = ui_text_rendering_policy()",
         "ui_chrome_font_weight",
-        "\"ui text renderer configuration established\"",
     ] {
         assert!(
             diagnostics_source.contains(expected),
-            "ui renderer diagnostics should expose `{expected}` so packaged Windows runs can see whether the shell is on the opaque-host LCD path or the transparent-host grayscale fallback instead of guessing from screenshots"
+            "ui renderer diagnostics should keep `{expected}` so the Windows shell text policy stays discoverable in code even after startup logs stop dumping the full configuration"
         );
     }
+
+    assert!(
+        !bootstrap_source.contains("log_ui_text_renderer_diagnostics();"),
+        "ui renderer startup should stop invoking the one-shot text policy info log once the policy has stabilized"
+    );
 
     assert!(
         diagnostics_source.contains("fn ui_text_hinting() -> &'static str")

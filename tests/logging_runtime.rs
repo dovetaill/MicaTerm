@@ -72,7 +72,7 @@ fn logging_runtime_keeps_debug_events_when_debug_mode_is_enabled() {
 }
 
 #[test]
-fn debug_logging_can_emit_windows_mainline_runtime_profile_metadata() {
+fn debug_logging_ignores_runtime_profile_metadata_helpers() {
     let temp_root = std::env::temp_dir()
         .join("mica-term")
         .join("tests")
@@ -98,19 +98,13 @@ fn debug_logging_can_emit_windows_mainline_runtime_profile_metadata() {
     drop(runtime.guard);
 
     let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
-    assert!(content.contains("initialized runtime profile"));
-    assert!(content.contains("WindowsMainline"));
-    assert!(content.contains("Skia"));
-    assert!(content.contains("winit-skia"));
-    assert!(content.contains("prefers_direct3d=true"));
-    assert!(content.contains("requested_graphics_api=Some(Direct3D)"));
-    assert!(content.contains("renderer_fallback_chain=[Skia, SkiaSoftware, Software]"));
-    assert!(content.contains("Some(\"winit\")"));
-    assert!(content.contains("Some(\"skia\")"));
+    assert!(!content.contains("initialized runtime profile"));
+    assert!(!content.contains("WindowsMainline"));
+    assert!(!content.contains("winit-skia"));
 }
 
 #[test]
-fn debug_logging_emits_app_root_metadata() {
+fn debug_logging_ignores_app_root_metadata_helpers() {
     let temp_root = std::env::temp_dir()
         .join("mica-term")
         .join("tests")
@@ -137,10 +131,10 @@ fn debug_logging_emits_app_root_metadata() {
     drop(runtime.guard);
 
     let content = fs::read_to_string(paths.logs_dir.join("system-error.log")).unwrap();
-    assert!(content.contains("resolved app root directories"));
-    assert!(content.contains("PortableMarker"));
-    assert!(content.contains(paths.root_dir.to_string_lossy().as_ref()));
-    assert!(content.contains(paths.data_dir.to_string_lossy().as_ref()));
-    assert!(content.contains(paths.logs_dir.to_string_lossy().as_ref()));
-    assert!(content.contains(paths.crash_dir.to_string_lossy().as_ref()));
+    assert!(!content.contains("resolved app root directories"));
+    assert!(!content.contains("PortableMarker"));
+    assert!(!content.contains(paths.root_dir.to_string_lossy().as_ref()));
+    assert!(!content.contains(paths.data_dir.to_string_lossy().as_ref()));
+    assert!(!content.contains(paths.logs_dir.to_string_lossy().as_ref()));
+    assert!(!content.contains(paths.crash_dir.to_string_lossy().as_ref()));
 }

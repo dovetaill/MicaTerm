@@ -44,9 +44,7 @@ use crate::app::assets_catalog::{
     catalog_to_asset_trees,
 };
 use crate::app::async_runtime::AppAsyncRuntime;
-use crate::app::font_diagnostics::{
-    configure_ui_font_fallbacks, log_ui_shell_font_diagnostics, log_ui_text_renderer_diagnostics,
-};
+use crate::app::font_diagnostics::{configure_ui_font_fallbacks, log_ui_shell_font_diagnostics};
 use crate::app::keychain::{
     KeychainCatalog, KeychainCatalogRepository, KeychainNodePayload, RedbKeychainCatalogStore,
     derive_public_key_material_from_private_key, derive_public_key_material_from_public_key,
@@ -2117,13 +2115,6 @@ fn ensure_workspace_terminal_presenter(
                 };
             let mut host = TerminalRendererHost::new(presenter, active_render_mode);
             host.set_raster_scale(scale_factor);
-            tracing::info!(
-                target: "app.terminal",
-                requested_render_mode = profile.terminal_render_mode_label(),
-                active_render_mode = active_render_mode.as_str(),
-                native_present_path = profile.native_present_path_label(),
-                "initialized workspace terminal presenter"
-            );
             *cell.borrow_mut() = Some(host);
             initialized_render_mode = Some(active_render_mode);
         }
@@ -6188,7 +6179,6 @@ pub fn run_with_profile(
 ) -> Result<()> {
     configure_window_creation_env_for_profile(profile);
     configure_ui_font_fallbacks();
-    log_ui_text_renderer_diagnostics();
     let window = AppWindow::new()?;
     log_ui_shell_font_diagnostics();
     window.set_window_title(runtime_window_title(profile).into());

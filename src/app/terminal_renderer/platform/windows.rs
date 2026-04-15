@@ -330,7 +330,6 @@ impl WindowsNativeSurfaceState {
                 renderer.rendering_params_snapshot = None;
             }
             self.last_directwrite_fallback_reason = Some("renderer-init-failed");
-            self.trace_directwrite_text_path_state();
         }
     }
 
@@ -514,7 +513,6 @@ impl WindowsNativeSurfaceState {
             );
         }
         self.mark_directwrite_text_path("bitmap-mask-compat");
-        self.trace_directwrite_text_path_state();
     }
 
     fn trace_directwrite_text_path_state(&mut self) {
@@ -568,15 +566,6 @@ impl WindowsNativeSurfaceState {
             return;
         }
         self.last_font_chain_trace_state = Some(next_state.clone());
-
-        tracing::info!(
-            target: "app.fonts",
-            text_renderer_path = next_state.text_renderer_path,
-            primary_family = font_chain.first().map(String::as_str).unwrap_or("none"),
-            font_chain = ?font_chain,
-            mixes_multiple_unrelated_families = next_state.mixes_multiple_unrelated_families,
-            "native terminal font chain changed"
-        );
 
         if next_state.mixes_multiple_unrelated_families {
             tracing::warn!(
@@ -1290,7 +1279,6 @@ impl WindowsNativeSurfaceState {
 
             self.last_directwrite_text_drawn = true;
             self.mark_directwrite_text_path("directwrite-d2d");
-            self.trace_directwrite_text_path_state();
         }
     }
 

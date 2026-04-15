@@ -39,7 +39,7 @@ fn font_diagnostics_module_defines_explicit_ui_and_terminal_font_contracts() {
 }
 
 #[test]
-fn bootstrap_and_presenters_emit_explicit_font_resolution_logs() {
+fn bootstrap_and_presenters_keep_font_logging_focused_on_warnings() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
     let presenter_source =
         fs::read_to_string("src/app/terminal_presenter.rs").expect("read presenter");
@@ -52,11 +52,10 @@ fn bootstrap_and_presenters_emit_explicit_font_resolution_logs() {
     for expected in [
         "configure_ui_font_fallbacks();",
         "log_ui_shell_font_diagnostics(",
-        "log_ui_text_renderer_diagnostics(",
-        "\"ui shell font resolution established\"",
-        "\"ui text renderer configuration established\"",
-        "\"terminal font resolution established\"",
-        "\"native terminal font chain changed\"",
+        "log_terminal_font_diagnostics(",
+        "ui shell font resolution is not locked to the requested family",
+        "terminal font resolution drifted away from the requested primary family",
+        "native terminal font chain is mixing unrelated fallback families",
     ] {
         let found = bootstrap_source.contains(expected)
             || presenter_source.contains(expected)
@@ -64,7 +63,24 @@ fn bootstrap_and_presenters_emit_explicit_font_resolution_logs() {
             || windows_backend_source.contains(expected);
         assert!(
             found,
-            "runtime sources should emit `{expected}` so Windows package logs expose real UI/terminal family matches and fallback chains"
+            "runtime sources should keep `{expected}` so Windows package logs still surface actionable fallback and drift warnings"
+        );
+    }
+
+    for forbidden in [
+        "log_ui_text_renderer_diagnostics();",
+        "\"configured ui shell font fallback policy\"",
+        "\"ui shell font resolution established\"",
+        "\"terminal font resolution established\"",
+        "\"native terminal font chain changed\"",
+    ] {
+        let found = bootstrap_source.contains(forbidden)
+            || presenter_source.contains(forbidden)
+            || diagnostics_source.contains(forbidden)
+            || windows_backend_source.contains(forbidden);
+        assert!(
+            !found,
+            "runtime sources should drop noisy startup diagnostic `{forbidden}` so packaged runs keep only actionable warnings"
         );
     }
 }
