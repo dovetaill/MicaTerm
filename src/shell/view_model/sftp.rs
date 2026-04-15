@@ -14,12 +14,43 @@ impl ShellViewModel {
             .insert(session.file_browser_session_id.clone(), session);
     }
 
-    pub fn active_file_browser_session_id(&self) -> Option<&str> {
-        self.active_workspace_tab()
-            .filter(|tab| tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp)
-            .and_then(|tab| (!tab.file_browser_session_id.is_empty()).then_some(tab.file_browser_session_id.as_str()))
-            .or(self.quick_browser_session_id.as_deref())
+    pub fn quick_browser_session_id(&self) -> Option<&str> {
+        self.quick_browser_session_id
+            .as_deref()
             .or(self.active_workspace_terminal_session_id())
+    }
+
+    pub fn quick_browser_session(&self) -> Option<&FileBrowserSession> {
+        let session_id = self.quick_browser_session_id()?;
+        self.file_browser_sessions.get(session_id)
+    }
+
+    pub(super) fn quick_browser_session_mut(&mut self) -> Option<&mut FileBrowserSession> {
+        let session_id = self.quick_browser_session_id()?.to_string();
+        self.file_browser_sessions.get_mut(&session_id)
+    }
+
+    pub fn active_workspace_sftp_session(&self) -> Option<&FileBrowserSession> {
+        let tab = self.active_workspace_tab()?;
+        if tab.kind != crate::shell::tabs::WorkspaceTabKind::Sftp {
+            return None;
+        }
+
+        self.file_browser_sessions.get(tab.file_browser_session_id.as_str())
+    }
+
+    pub(super) fn active_workspace_sftp_session_mut(&mut self) -> Option<&mut FileBrowserSession> {
+        let session_id = self
+            .active_workspace_tab()
+            .filter(|tab| tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp)
+            .map(|tab| tab.file_browser_session_id.clone())?;
+        self.file_browser_sessions.get_mut(&session_id)
+    }
+
+    pub fn active_file_browser_session_id(&self) -> Option<&str> {
+        self.active_workspace_sftp_session()
+            .map(|session| session.file_browser_session_id.as_str())
+            .or_else(|| self.quick_browser_session().map(|session| session.file_browser_session_id.as_str()))
     }
 
     pub fn active_sftp_session_state(&self) -> Option<&FileBrowserSession> {
@@ -54,49 +85,49 @@ impl ShellViewModel {
     }
 
     pub fn sftp_panel_mode_id(&self) -> &'static str {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.mode.id())
             .unwrap_or(SftpPanelMode::Empty.id())
     }
 
     pub fn sftp_panel_host_label(&self) -> String {
-        self.active_workspace_tab()
-            .map(|tab| tab.title.clone())
+        self.quick_browser_session()
+            .map(|state| state.host_profile_ref.label.clone())
             .unwrap_or_default()
     }
 
     pub fn sftp_panel_path(&self) -> String {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.current_path.clone())
             .unwrap_or_default()
     }
 
     pub fn sftp_panel_follow_mode_id(&self) -> &'static str {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.follow_mode.id())
             .unwrap_or(SftpFollowMode::FollowCwd.id())
     }
 
     pub fn sftp_panel_can_go_back(&self) -> bool {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.history.can_back())
             .unwrap_or(false)
     }
 
     pub fn sftp_panel_can_go_forward(&self) -> bool {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.history.can_forward())
             .unwrap_or(false)
     }
 
     pub fn sftp_panel_can_go_up(&self) -> bool {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(FileBrowserSession::can_navigate_up)
             .unwrap_or(false)
     }
 
     pub fn sftp_panel_actions_enabled(&self) -> bool {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| {
                 matches!(
                     state.mode,
@@ -107,7 +138,7 @@ impl ShellViewModel {
     }
 
     pub fn sftp_panel_sort_column_id(&self) -> &'static str {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.sort_state)
             .unwrap_or(self.quick_browser_state.sort_state)
             .column
@@ -116,7 +147,7 @@ impl ShellViewModel {
     }
 
     pub fn sftp_panel_sort_direction_id(&self) -> &'static str {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.sort_state)
             .unwrap_or(self.quick_browser_state.sort_state)
             .direction
@@ -129,7 +160,7 @@ impl ShellViewModel {
             return false;
         };
         let next_sort_state = match self
-            .active_sftp_session_state()
+            .quick_browser_session()
             .map(|state| state.sort_state)
             .unwrap_or(self.quick_browser_state.sort_state)
         {
@@ -150,7 +181,7 @@ impl ShellViewModel {
             },
         };
 
-        if let Some(state) = self.active_sftp_session_state_mut() {
+        if let Some(state) = self.quick_browser_session_mut() {
             state.sort_state = next_sort_state;
         } else {
             self.quick_browser_state.sort_state = next_sort_state;
@@ -159,31 +190,31 @@ impl ShellViewModel {
     }
 
     pub fn sftp_panel_name_column_width_px(&self) -> f32 {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.column_layout.name_px)
             .unwrap_or(self.quick_browser_state.column_layout.name_px)
     }
 
     pub fn sftp_panel_type_column_width_px(&self) -> f32 {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.column_layout.type_px)
             .unwrap_or(self.quick_browser_state.column_layout.type_px)
     }
 
     pub fn sftp_panel_modified_column_width_px(&self) -> f32 {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.column_layout.modified_px)
             .unwrap_or(self.quick_browser_state.column_layout.modified_px)
     }
 
     pub fn sftp_panel_size_column_width_px(&self) -> f32 {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.column_layout.size_px)
             .unwrap_or(self.quick_browser_state.column_layout.size_px)
     }
 
     pub fn set_sftp_panel_column_width(&mut self, column_id: &str, width_px: f32) -> bool {
-        let layout = if let Some(state) = self.active_sftp_session_state_mut() {
+        let layout = if let Some(state) = self.quick_browser_session_mut() {
             &mut state.column_layout
         } else {
             &mut self.quick_browser_state.column_layout
@@ -205,7 +236,7 @@ impl ShellViewModel {
         entries: &'a [SftpDirectoryEntry],
     ) -> Vec<&'a SftpDirectoryEntry> {
         let sort_state = self
-            .active_sftp_session_state()
+            .quick_browser_session()
             .map(|state| state.sort_state)
             .unwrap_or(self.quick_browser_state.sort_state);
         let mut projection = entries.iter().collect::<Vec<_>>();
@@ -214,13 +245,13 @@ impl ShellViewModel {
     }
 
     pub fn sftp_panel_entries(&self) -> &[SftpDirectoryEntry] {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.entries.as_slice())
             .unwrap_or(&[])
     }
 
     pub fn sftp_panel_selected_entry_ids(&self) -> &[String] {
-        self.active_sftp_session_state()
+        self.quick_browser_session()
             .map(|state| state.selected_entry_ids.as_slice())
             .unwrap_or(&[])
     }
@@ -232,33 +263,34 @@ impl ShellViewModel {
             return false;
         }
 
-        let Some(state) = self.active_sftp_session_state_mut() else {
+        let Some(state) = self.quick_browser_session_mut() else {
             return false;
         };
         state.navigate_manual(trimmed.to_string());
+        self.quick_browser_state.path_editing = false;
         true
     }
 
     pub fn navigate_sftp_panel_back(&mut self) -> bool {
-        self.active_sftp_session_state_mut()
+        self.quick_browser_session_mut()
             .map(FileBrowserSession::navigate_back)
             .unwrap_or(false)
     }
 
     pub fn navigate_sftp_panel_forward(&mut self) -> bool {
-        self.active_sftp_session_state_mut()
+        self.quick_browser_session_mut()
             .map(FileBrowserSession::navigate_forward)
             .unwrap_or(false)
     }
 
     pub fn navigate_sftp_panel_up(&mut self) -> bool {
-        self.active_sftp_session_state_mut()
+        self.quick_browser_session_mut()
             .map(FileBrowserSession::navigate_up)
             .unwrap_or(false)
     }
 
     pub fn retry_sftp_panel(&mut self) -> bool {
-        let Some(state) = self.active_sftp_session_state_mut() else {
+        let Some(state) = self.quick_browser_session_mut() else {
             return false;
         };
         state.mark_connecting();
@@ -266,7 +298,7 @@ impl ShellViewModel {
     }
 
     pub fn refresh_sftp_panel(&mut self) -> bool {
-        let Some(state) = self.active_sftp_session_state_mut() else {
+        let Some(state) = self.quick_browser_session_mut() else {
             return false;
         };
         state.mark_loading();
@@ -274,7 +306,7 @@ impl ShellViewModel {
     }
 
     pub fn reenable_sftp_follow(&mut self) -> bool {
-        let Some(state) = self.active_sftp_session_state_mut() else {
+        let Some(state) = self.quick_browser_session_mut() else {
             return false;
         };
         let path = if state.current_path.is_empty() {
@@ -283,6 +315,50 @@ impl ShellViewModel {
             state.current_path.clone()
         };
         state.reenable_follow(path);
+        self.quick_browser_state.path_editing = false;
+        true
+    }
+
+    pub fn quick_browser_connection_badge(&self) -> String {
+        self.quick_browser_session()
+            .map(|state| state.host_profile_ref.label.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn quick_browser_follows_active_terminal(&self) -> bool {
+        self.quick_browser_state.follows_active_terminal
+    }
+
+    pub fn quick_browser_linked_terminal_session_id(&self) -> Option<&str> {
+        self.quick_browser_session()
+            .and_then(|state| state.linked_terminal_session_id.as_deref())
+            .or_else(|| self.quick_browser_session_id())
+    }
+
+    pub fn quick_browser_binding_mode_label(&self) -> &'static str {
+        if self.quick_browser_state.follows_active_terminal {
+            "Follow"
+        } else {
+            "Locked"
+        }
+    }
+
+    pub fn quick_browser_path_editing(&self) -> bool {
+        self.quick_browser_state.path_editing
+    }
+
+    pub fn toggle_quick_browser_binding_mode(&mut self) -> bool {
+        self.quick_browser_state.follows_active_terminal =
+            !self.quick_browser_state.follows_active_terminal;
+        self.quick_browser_state.path_editing = false;
+        true
+    }
+
+    pub fn begin_quick_browser_path_edit(&mut self) -> bool {
+        if self.quick_browser_session().is_none() {
+            return false;
+        }
+        self.quick_browser_state.path_editing = true;
         true
     }
 

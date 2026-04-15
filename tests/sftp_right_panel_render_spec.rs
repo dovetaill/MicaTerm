@@ -299,6 +299,25 @@ fn right_panel_source_no_longer_renders_queue_summary_inside_panel() {
 }
 
 #[test]
+fn quick_browser_header_keeps_low_frequency_actions_out_of_the_main_toolbar() {
+    let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
+    let toolbar_source = source
+        .split("toolbar-row := Rectangle {")
+        .nth(1)
+        .and_then(|rest| rest.split("table-card := Rectangle {").next())
+        .expect("toolbar section should exist");
+
+    assert!(
+        !toolbar_source.contains("root.sftp-panel-upload-requested();"),
+        "upload should remain a low-frequency action outside the main quick-browser toolbar"
+    );
+    assert!(
+        !toolbar_source.contains("root.sftp-panel-new-folder-requested();"),
+        "new folder should remain a low-frequency action outside the main quick-browser toolbar"
+    );
+}
+
+#[test]
 fn ready_sftp_panel_renders_compact_toolbar_and_file_table() {
     let rows = vec![
         SftpPanelItem {

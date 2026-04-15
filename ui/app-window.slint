@@ -78,6 +78,9 @@ export component AppWindow inherits Window {
     in-out property <string> sftp-panel-host-label: "";
     in-out property <string> sftp-panel-path: "";
     in-out property <string> sftp-panel-follow-mode: "follow-cwd";
+    in-out property <string> sftp-panel-connection-badge: "";
+    in-out property <string> sftp-panel-binding-mode-label: "Follow";
+    in-out property <bool> sftp-panel-path-editing: false;
     in-out property <bool> sftp-panel-can-go-back: false;
     in-out property <bool> sftp-panel-can-go-forward: false;
     in-out property <bool> sftp-panel-can-go-up: false;
@@ -343,6 +346,9 @@ export component AppWindow inherits Window {
     callback sftp-panel-forward-requested();
     callback sftp-panel-refresh-requested();
     callback sftp-panel-up-requested();
+    callback sftp-panel-expand-requested();
+    callback sftp-panel-binding-mode-toggle-requested();
+    callback sftp-panel-path-edit-requested();
     callback sftp-panel-path-submitted(string);
     callback sftp-panel-sort-requested(string);
     callback sftp-panel-column-width-change-requested(string, length);
@@ -885,6 +891,9 @@ export component AppWindow inherits Window {
                         sftp-panel-host-label: root.sftp-panel-host-label;
                         sftp-panel-path: root.sftp-panel-path;
                         sftp-panel-follow-mode: root.sftp-panel-follow-mode;
+                        sftp-panel-connection-badge: root.sftp-panel-connection-badge;
+                        sftp-panel-binding-mode-label: root.sftp-panel-binding-mode-label;
+                        sftp-panel-path-editing: root.sftp-panel-path-editing;
                         sftp-panel-can-go-back: root.sftp-panel-can-go-back;
                         sftp-panel-can-go-forward: root.sftp-panel-can-go-forward;
                         sftp-panel-can-go-up: root.sftp-panel-can-go-up;
@@ -916,6 +925,18 @@ export component AppWindow inherits Window {
 
                         sftp-panel-up-requested => {
                             root.sftp-panel-up-requested();
+                        }
+
+                        sftp-panel-expand-requested => {
+                            root.sftp-panel-expand-requested();
+                        }
+
+                        sftp-panel-binding-mode-toggle-requested => {
+                            root.sftp-panel-binding-mode-toggle-requested();
+                        }
+
+                        sftp-panel-path-edit-requested => {
+                            root.sftp-panel-path-edit-requested();
                         }
 
                         sftp-panel-path-submitted(path) => {

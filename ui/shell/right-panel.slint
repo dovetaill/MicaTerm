@@ -51,6 +51,47 @@ component SftpToolbarButton inherits Rectangle {
     }
 }
 
+component SftpHeaderChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    height: 28px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: enabled ? ThemeTokens.input-border : ThemeTokens.divider-subtle;
+    background: !root.enabled ? ThemeTokens.control-disabled-surface
+        : chip-touch.pressed ? ThemeTokens.control-pressed-surface
+        : chip-touch.has-hover ? ThemeTokens.control-hover-surface
+        : ThemeTokens.workspace-surface;
+    opacity: root.enabled ? 1.0 : 0.7;
+
+    label-text := Text {
+        x: 10px;
+        y: 0px;
+        width: parent.width - 20px;
+        height: parent.height;
+        text: root.label;
+        font-family: AppTypography.ui-font-family;
+        font-size: AppTypography.ui-font-size-caption;
+        font-weight: AppTypography.ui-font-weight-semibold;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    chip-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
 component SftpHeaderCell inherits Rectangle {
     in property <string> label;
     in property <string> column-id;
@@ -155,6 +196,9 @@ export component RightPanel inherits Rectangle {
     in property <string> sftp-panel-host-label: "";
     in property <string> sftp-panel-path: "";
     in property <string> sftp-panel-follow-mode: "follow-cwd";
+    in property <string> sftp-panel-connection-badge: "";
+    in property <string> sftp-panel-binding-mode-label: "Follow";
+    in property <bool> sftp-panel-path-editing: false;
     in property <bool> sftp-panel-can-go-back: false;
     in property <bool> sftp-panel-can-go-forward: false;
     in property <bool> sftp-panel-can-go-up: false;
@@ -183,6 +227,9 @@ export component RightPanel inherits Rectangle {
     callback sftp-panel-forward-requested();
     callback sftp-panel-refresh-requested();
     callback sftp-panel-up-requested();
+    callback sftp-panel-expand-requested();
+    callback sftp-panel-binding-mode-toggle-requested();
+    callback sftp-panel-path-edit-requested();
     callback sftp-panel-path-submitted(string);
     callback sftp-panel-sort-requested(string);
     callback sftp-panel-column-width-change-requested(string, length);
@@ -208,6 +255,10 @@ export component RightPanel inherits Rectangle {
     private property <length> sftp-modified-column-x: root.sftp-type-column-x + root.sftp-panel-type-column-width + 10px;
     private property <length> sftp-size-column-x: root.sftp-modified-column-x + root.sftp-panel-modified-column-width + 10px;
     private property <length> sftp-table-content-width: root.sftp-size-column-x + root.sftp-panel-size-column-width + 12px;
+    private property <string> sftp-panel-connection-badge-text:
+        root.sftp-panel-connection-badge == ""
+            ? root.sftp-panel-host-label
+            : root.sftp-panel-connection-badge;
 
     function sftp-empty-headline() -> string {
         return "Open an SSH session";
@@ -278,15 +329,98 @@ export component RightPanel inherits Rectangle {
             x: 8px;
             y: 8px;
             width: parent.width - 16px;
-            height: 30px;
-            border-radius: 0px;
-            border-width: 0px;
-            border-color: transparent;
-            background: transparent;
+            height: 62px;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: ThemeTokens.divider-subtle;
+            background: ThemeTokens.workspace-surface;
+
+            Rectangle {
+                x: 12px;
+                y: 31px;
+                width: parent.width - 24px;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
+            }
+
+            expand-button := Rectangle {
+                x: 0px;
+                y: 0px;
+                width: 72px;
+                height: 28px;
+                border-radius: 14px;
+                border-width: 1px;
+                border-color: root.sftp-panel-actions-enabled ? ThemeTokens.input-border : ThemeTokens.divider-subtle;
+                background: !root.sftp-panel-actions-enabled ? ThemeTokens.control-disabled-surface
+                    : expand-touch.pressed ? ThemeTokens.control-pressed-surface
+                    : expand-touch.has-hover ? ThemeTokens.control-hover-surface
+                    : ThemeTokens.workspace-surface;
+
+                Text {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    text: "Expand";
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    font-weight: AppTypography.ui-font-weight-semibold;
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                expand-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    enabled: root.sftp-panel-actions-enabled;
+
+                    clicked => {
+                        root.sftp-panel-expand-requested();
+                    }
+                }
+            }
+
+            connection-badge := Rectangle {
+                x: expand-button.x + expand-button.width + 8px;
+                y: 0px;
+                width: max(92px, parent.width - self.x - 82px);
+                height: 28px;
+                border-radius: 14px;
+                border-width: 1px;
+                border-color: ThemeTokens.input-border;
+                background: ThemeTokens.workspace-surface;
+
+                Text {
+                    x: 10px;
+                    y: 0px;
+                    width: parent.width - 20px;
+                    height: parent.height;
+                    text: root.sftp-panel-connection-badge-text;
+                    font-family: AppTypography.ui-font-family;
+                    font-size: AppTypography.ui-font-size-caption;
+                    font-weight: AppTypography.ui-font-weight-semibold;
+                    color: ThemeTokens.text-secondary;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+
+            binding-mode-button := SftpHeaderChip {
+                x: parent.width - 74px;
+                y: 0px;
+                width: 74px;
+                label: root.sftp-panel-binding-mode-label;
+                enabled: root.sftp-panel-path != "";
+
+                clicked => {
+                    root.sftp-panel-binding-mode-toggle-requested();
+                }
+            }
 
             back-button := SftpToolbarButton {
                 x: 0px;
-                y: 1px;
+                y: 34px;
                 width: 28px;
                 height: 28px;
                 icon-source: root.arrow-hook-up-left-icon;
@@ -297,9 +431,22 @@ export component RightPanel inherits Rectangle {
                 }
             }
 
+            refresh-button := SftpToolbarButton {
+                x: parent.width - 58px;
+                y: 34px;
+                width: 28px;
+                height: 28px;
+                icon-source: root.arrow-clockwise-icon;
+                enabled: root.sftp-panel-actions-enabled;
+
+                clicked => {
+                    root.sftp-panel-refresh-requested();
+                }
+            }
+
             overflow-button := SftpToolbarButton {
                 x: parent.width - self.width;
-                y: 1px;
+                y: 34px;
                 width: 28px;
                 height: 28px;
                 icon-source: root.add-square-multiple-icon;
@@ -315,30 +462,17 @@ export component RightPanel inherits Rectangle {
                 }
             }
 
-            refresh-button := SftpToolbarButton {
-                x: overflow-button.x - self.width - 2px;
-                y: 1px;
-                width: 28px;
-                height: 28px;
-                icon-source: root.arrow-clockwise-icon;
-                enabled: root.sftp-panel-actions-enabled;
-
-                clicked => {
-                    root.sftp-panel-refresh-requested();
-                }
-            }
-
             path-bar := Rectangle {
                 x: back-button.x + back-button.width + 4px;
-                y: 0px;
+                y: 33px;
                 width: refresh-button.x - self.x - 4px;
-                height: parent.height;
+                height: 30px;
                 border-radius: 6px;
                 border-width: 1px;
                 border-color: ThemeTokens.input-border;
                 background: ThemeTokens.input-surface;
 
-                path-input := TextInput {
+                if root.sftp-panel-path-editing : path-input := TextInput {
                     x: 10px;
                     y: 0px;
                     width: parent.width - 20px;
@@ -366,14 +500,46 @@ export component RightPanel inherits Rectangle {
                         }
                     }
                 }
+
+                if !root.sftp-panel-path-editing : breadcrumb-shell := Rectangle {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    background: transparent;
+
+                    breadcrumb-text := Text {
+                        x: 10px;
+                        y: 0px;
+                        width: parent.width - 20px;
+                        height: parent.height;
+                        text: root.sftp-panel-path;
+                        font-family: AppTypography.ui-font-family;
+                        font-size: AppTypography.ui-font-size-caption;
+                        font-weight: AppTypography.ui-font-weight-regular;
+                        color: ThemeTokens.text-primary;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        enabled: root.sftp-panel-actions-enabled;
+
+                        clicked => {
+                            root.sftp-panel-path-edit-requested();
+                        }
+                    }
+                }
             }
         }
 
         table-card := Rectangle {
             x: 8px;
-            y: 46px;
+            y: 78px;
             width: parent.width - 8px;
-            height: max(0px, parent.height - 54px);
+            height: max(0px, parent.height - 86px);
             border-radius: 0px;
             border-width: 0px;
             border-color: transparent;

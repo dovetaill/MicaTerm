@@ -459,6 +459,7 @@ struct PendingSnippetActivation {
 #[derive(Debug, Clone, PartialEq)]
 pub struct QuickBrowserState {
     pub follows_active_terminal: bool,
+    pub path_editing: bool,
     pub sort_state: FileBrowserSortState,
     pub column_layout: crate::app::sftp::FileBrowserColumnLayout,
 }
@@ -467,6 +468,7 @@ impl Default for QuickBrowserState {
     fn default() -> Self {
         Self {
             follows_active_terminal: true,
+            path_editing: false,
             sort_state: FileBrowserSortState::default(),
             column_layout: crate::app::sftp::FileBrowserColumnLayout::default(),
         }

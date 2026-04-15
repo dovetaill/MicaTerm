@@ -492,3 +492,57 @@ fn switching_workspace_tabs_reprojects_the_active_session_sftp_path() {
     flush_runtime_projection();
     assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/db");
 }
+
+#[test]
+fn quick_browser_can_lock_to_current_host_until_follow_is_reenabled() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(SessionCwdLauncher {
+            cwd_by_host: Arc::new(vec![
+                ("10.0.0.12".into(), "/srv/app".into()),
+                ("10.0.0.24".into(), "/srv/db".into()),
+            ]),
+        }),
+        Arc::new(MemoryCredentialStore::default()),
+    );
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    let prod_asset = find_console_asset_id(&app, "Prod Bastion");
+    app.invoke_asset_activated(prod_asset.into());
+    flush_runtime_projection();
+    let prod_session_id = app.get_active_workspace_session_id().to_string();
+
+    create_root_ssh(&app, "DB Replica", "10.0.0.24");
+    let db_asset = find_console_asset_id(&app, "DB Replica");
+    app.invoke_asset_activated(db_asset.into());
+    flush_runtime_projection();
+    let db_session_id = app.get_active_workspace_session_id().to_string();
+
+    app.invoke_workspace_tab_selected(prod_session_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+    assert_eq!(app.get_sftp_panel_binding_mode_label().as_str(), "Follow");
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app");
+
+    app.invoke_sftp_panel_binding_mode_toggle_requested();
+    flush_runtime_projection();
+    assert_eq!(app.get_sftp_panel_binding_mode_label().as_str(), "Locked");
+
+    app.invoke_workspace_tab_selected(db_session_id.into());
+    flush_runtime_projection();
+    assert_eq!(
+        app.get_sftp_panel_path().as_str(),
+        "/srv/app",
+        "locked quick browser should keep the previous host/path instead of following the newly active terminal"
+    );
+
+    app.invoke_sftp_panel_binding_mode_toggle_requested();
+    flush_runtime_projection();
+    assert_eq!(app.get_sftp_panel_binding_mode_label().as_str(), "Follow");
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/db");
+}

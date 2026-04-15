@@ -21,6 +21,9 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) 
     window.set_sftp_panel_host_label(state.sftp_panel_host_label().into());
     window.set_sftp_panel_path(state.sftp_panel_path().into());
     window.set_sftp_panel_follow_mode(state.sftp_panel_follow_mode_id().into());
+    window.set_sftp_panel_connection_badge(state.quick_browser_connection_badge().into());
+    window.set_sftp_panel_binding_mode_label(state.quick_browser_binding_mode_label().into());
+    window.set_sftp_panel_path_editing(state.quick_browser_path_editing());
     window.set_sftp_panel_can_go_back(state.sftp_panel_can_go_back());
     window.set_sftp_panel_can_go_forward(state.sftp_panel_can_go_forward());
     window.set_sftp_panel_can_go_up(state.sftp_panel_can_go_up());
@@ -149,13 +152,17 @@ pub(super) fn sync_active_sftp_projection_from_manager(
     state: &mut ShellViewModel,
     manager: &SessionManager,
 ) -> bool {
-    let Some(session_id_text) = state
+    let Some(active_session_id_text) = state
         .active_workspace_terminal_session_id()
         .map(str::to_string)
     else {
         return false;
     };
-    let Some(session_id) = Uuid::parse_str(&session_id_text).ok() else {
+    if !state.quick_browser_follows_active_terminal() && state.quick_browser_session().is_some() {
+        return false;
+    }
+
+    let Some(session_id) = Uuid::parse_str(&active_session_id_text).ok() else {
         return false;
     };
 
@@ -165,7 +172,7 @@ pub(super) fn sync_active_sftp_projection_from_manager(
         return false;
     };
 
-    state.quick_browser_session_id = Some(session_id_text.clone());
+    state.quick_browser_session_id = Some(active_session_id_text.clone());
     let host_profile_ref = state
         .active_workspace_tab()
         .map(|tab| {
@@ -175,17 +182,17 @@ pub(super) fn sync_active_sftp_projection_from_manager(
     let initial_path = cwd.clone().unwrap_or_else(|| "/".to_string());
     let session_state = state
         .file_browser_sessions
-        .entry(session_id_text.clone())
+        .entry(active_session_id_text.clone())
         .or_insert_with(|| {
             let mut session = crate::app::sftp::FileBrowserSession::quick_browser(
                 host_profile_ref.clone(),
                 initial_path,
             );
-            session.file_browser_session_id = session_id_text.clone();
-            session.attach_terminal_session_id(session_id_text.clone());
+            session.file_browser_session_id = active_session_id_text.clone();
+            session.attach_terminal_session_id(active_session_id_text.clone());
             session
         });
-    session_state.attach_terminal_session_id(session_id_text);
+    session_state.attach_terminal_session_id(active_session_id_text);
     let before = session_state.clone();
 
     match binding.mode() {
@@ -341,12 +348,18 @@ pub(super) fn initial_sftp_browser_path(
         .map(|_| "/".to_string())
 }
 
+fn quick_browser_terminal_session_uuid(state: &ShellViewModel) -> Option<Uuid> {
+    state
+        .quick_browser_linked_terminal_session_id()
+        .and_then(|session_id| Uuid::parse_str(session_id).ok())
+}
+
 pub(super) fn ensure_active_sftp_browser_started(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
 ) -> bool {
-    let Some(session_id) = active_workspace_session_uuid(state) else {
+    let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
         return false;
     };
     if controller.session_state(session_id).is_some() {
@@ -364,7 +377,11 @@ pub(super) fn open_active_sftp_browser_for_current_session(
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
 ) -> bool {
-    let Some(session_id) = active_workspace_session_uuid(state) else {
+    if !state.quick_browser_follows_active_terminal() && state.quick_browser_session().is_some() {
+        return false;
+    }
+
+    let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
         return false;
     };
     if controller.session_state(session_id).is_none() {
@@ -384,7 +401,7 @@ pub(super) fn sync_active_sftp_browser_follow_request(
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
 ) -> bool {
-    let Some(session_id) = active_workspace_session_uuid(state) else {
+    let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
         return false;
     };
 
@@ -424,7 +441,7 @@ pub(super) fn sync_active_sftp_browser_pending_request(
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
 ) -> bool {
-    let Some(session_id) = active_workspace_session_uuid(state) else {
+    let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
         return false;
     };
     let Some(browser_state) = controller.session_state(session_id) else {
@@ -476,6 +493,50 @@ pub(super) fn bind_sftp_callbacks(
         sync_right_panel_state(&window, &state);
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_expand_requested(move || {
+        let window = handle.unwrap();
+        let state = state.borrow();
+        sync_right_panel_state(&window, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    window.on_sftp_panel_binding_mode_toggle_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if !state.toggle_quick_browser_binding_mode() {
+            return;
+        }
+
+        if state.quick_browser_follows_active_terminal()
+            && let Some(session_bridge) = session_bridge_ref.as_ref()
+        {
+            let _ = sync_active_sftp_projection_from_manager(&mut state, &session_bridge.manager);
+            let mut controller = sftp_browser_controller_ref.borrow_mut();
+            let _ = open_active_sftp_browser_for_current_session(
+                &mut state,
+                &mut controller,
+                &session_bridge.manager,
+            );
+        }
+
+        sync_right_panel_state(&window, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_path_edit_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.begin_quick_browser_path_edit() {
+            sync_right_panel_state(&window, &state);
+        }
     });
 
     let state = Rc::clone(view_model);
@@ -532,7 +593,7 @@ pub(super) fn bind_sftp_callbacks(
 
         if is_parent_row {
             if let Some(session_bridge) = session_bridge_ref.as_ref()
-                && let Some(session_id) = active_workspace_session_uuid(&state)
+                && let Some(session_id) = quick_browser_terminal_session_uuid(&state)
             {
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
@@ -554,7 +615,7 @@ pub(super) fn bind_sftp_callbacks(
             if item_kind.as_str() == "directory" || entry.kind == SftpDirectoryEntryKind::Directory
             {
                 if let Some(session_bridge) = session_bridge_ref.as_ref()
-                    && let Some(session_id) = active_workspace_session_uuid(&state)
+                    && let Some(session_id) = quick_browser_terminal_session_uuid(&state)
                 {
                     let request = {
                         let mut controller = sftp_browser_controller_ref.borrow_mut();
@@ -569,7 +630,7 @@ pub(super) fn bind_sftp_callbacks(
                     );
                 }
             } else if let Some(session_bridge) = session_bridge_ref.as_ref()
-                && let Some(session_id) = active_workspace_session_uuid(&state)
+                && let Some(session_id) = quick_browser_terminal_session_uuid(&state)
             {
                 open_sftp_remote_file_editor_for_entry(
                     &mut state,
@@ -606,7 +667,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
+            if let Some(session_id) = quick_browser_terminal_session_uuid(&state) {
                 let trimmed = path.trim();
                 if trimmed.is_empty() {
                     false
@@ -642,7 +703,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
+            if let Some(session_id) = quick_browser_terminal_session_uuid(&state) {
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.navigate_back(session_id)
@@ -677,7 +738,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
+            if let Some(session_id) = quick_browser_terminal_session_uuid(&state) {
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.navigate_forward(session_id)
@@ -712,7 +773,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
+            if let Some(session_id) = quick_browser_terminal_session_uuid(&state) {
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.navigate_up(session_id)
@@ -747,7 +808,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
+            if let Some(session_id) = quick_browser_terminal_session_uuid(&state) {
                 let request = {
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     controller.refresh(session_id)
@@ -782,7 +843,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let retried = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
+            if let Some(session_id) = quick_browser_terminal_session_uuid(&state) {
                 if let Err(err) = session_bridge.manager.retry_session(session_id) {
                     tracing::error!(
                         target: "app.ssh",
@@ -847,7 +908,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let changed = if let Some(session_bridge) = session_bridge_ref.as_ref() {
-            if let Some(session_id) = active_workspace_session_uuid(&state) {
+            if let Some(session_id) = quick_browser_terminal_session_uuid(&state) {
                 if let Some(cwd) = session_bridge.manager.current_working_directory(session_id) {
                     let request = {
                         let mut controller = sftp_browser_controller_ref.borrow_mut();
