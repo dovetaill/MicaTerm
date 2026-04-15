@@ -1,6 +1,6 @@
 use mica_term::app::sftp::{
-    SftpDirectoryEntry, SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode, SftpPathHistory,
-    SftpSessionBindingState,
+    FileBrowserSortColumn, FileBrowserSortDirection, SftpDirectoryEntry, SftpDirectoryEntryKind,
+    SftpFollowMode, SftpPanelMode, SftpPathHistory, SftpSessionBindingState,
 };
 use mica_term::shell::view_model::ShellViewModel;
 
@@ -65,10 +65,29 @@ fn path_history_supports_back_forward_and_push() {
 fn shell_view_model_exposes_raw_sftp_state_containers() {
     let view_model = ShellViewModel::default();
 
-    assert!(view_model.sftp_sessions.is_empty());
+    assert!(view_model.file_browser_sessions.is_empty());
+    assert!(view_model.quick_browser_session_id.is_none());
+    assert!(view_model.quick_browser_state.follows_active_terminal);
     assert_eq!(view_model.sftp_queue_summary.active_count, 0);
     assert_eq!(view_model.sftp_queue_summary.failed_count, 0);
     assert_eq!(view_model.sftp_queue_summary.current_session_count, 0);
+}
+
+#[test]
+fn file_browser_sort_cycle_is_session_local_state() {
+    let mut quick = mica_term::app::sftp::FileBrowserSession::quick_browser(
+        mica_term::app::sftp::HostProfileRef::new("asset-prod"),
+        "/srv/app",
+    );
+    quick.sort_state.column = Some(FileBrowserSortColumn::Name);
+    quick.sort_state.direction = Some(FileBrowserSortDirection::Asc);
+    let workspace = quick.clone_for_workspace();
+
+    assert_eq!(workspace.sort_state.column, Some(FileBrowserSortColumn::Name));
+    assert_eq!(
+        workspace.sort_state.direction,
+        Some(FileBrowserSortDirection::Asc)
+    );
 }
 
 #[test]

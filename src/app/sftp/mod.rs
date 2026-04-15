@@ -10,7 +10,12 @@ pub mod runtime;
 pub mod session_binding;
 
 pub use browser_controller::{SftpBrowserController, SftpBrowserLoadRequest};
-pub use browser_session::{FileBrowserSession, FileBrowserSessionId, HostProfileRef};
+pub use browser_session::{
+    FILE_BROWSER_MODIFIED_COLUMN_MIN_PX, FILE_BROWSER_SIZE_COLUMN_MIN_PX,
+    FILE_BROWSER_TYPE_COLUMN_MIN_PX, FileBrowserColumnLayout, FileBrowserSession,
+    FileBrowserSessionId, FileBrowserSortColumn, FileBrowserSortDirection,
+    FileBrowserSortState, HostProfileRef,
+};
 pub use browser_state::SftpBrowserSessionState;
 pub use local_ops::{
     LocalTransferEntry, build_local_download_path, build_remote_upload_path, scan_local_sources,

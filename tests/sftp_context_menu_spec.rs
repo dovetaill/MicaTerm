@@ -259,11 +259,11 @@ fn sftp_create_rename_and_delete_flows_mutate_projected_state_only_after_confirm
 
     {
         let active_session_id = state
-            .active_workspace_session_id()
-            .expect("active session")
+            .active_file_browser_session_id()
+            .expect("active browser session")
             .to_string();
         let sftp_state = state
-            .sftp_sessions
+            .file_browser_sessions
             .get_mut(&active_session_id)
             .expect("session state");
         sftp_state.selected_entry_ids = vec!["entry-app".into(), "entry-release".into()];

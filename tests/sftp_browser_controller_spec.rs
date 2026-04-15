@@ -1,6 +1,6 @@
 use mica_term::app::sftp::{
-    SftpBrowserController, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpFollowMode,
-    SftpPanelMode,
+    FileBrowserSession, HostProfileRef, SftpBrowserController, SftpDirectoryEntry,
+    SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode,
 };
 use uuid::Uuid;
 
@@ -210,5 +210,30 @@ fn back_forward_and_up_navigation_issue_real_load_requests() {
         .expect("session state should be available");
     assert_eq!(state.mode, SftpPanelMode::Loading);
     assert_eq!(state.follow_mode, SftpFollowMode::ManualBrowse);
+    assert_eq!(state.current_path, "/srv/app");
+}
+
+#[test]
+fn load_requests_can_route_by_file_browser_session_id() {
+    let mut controller = SftpBrowserController::default();
+    let browser_session =
+        FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
+    let browser_session_id = browser_session.file_browser_session_id.clone();
+
+    let request = controller.open_file_browser_session(browser_session.clone());
+
+    assert_eq!(request.file_browser_session_id, browser_session_id);
+    assert_eq!(request.path, "/srv/app");
+
+    controller.apply_loaded_directory_for_browser_session(
+        request.file_browser_session_id.as_str(),
+        request.request_id,
+        "/srv/app",
+        Vec::new(),
+    );
+
+    let state = controller
+        .browser_session_state(browser_session_id.as_str())
+        .expect("browser session state should remain available");
     assert_eq!(state.current_path, "/srv/app");
 }

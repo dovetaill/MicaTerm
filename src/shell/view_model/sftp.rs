@@ -9,22 +9,27 @@ impl ShellViewModel {
         self.show_global_menu = false;
     }
 
-    pub fn set_sftp_session_state(
-        &mut self,
-        session_id: impl Into<String>,
-        state: SftpSessionBindingState,
-    ) {
-        self.sftp_sessions.insert(session_id.into(), state);
+    pub fn set_file_browser_session(&mut self, session: FileBrowserSession) {
+        self.file_browser_sessions
+            .insert(session.file_browser_session_id.clone(), session);
     }
 
-    pub fn active_sftp_session_state(&self) -> Option<&SftpSessionBindingState> {
-        let session_id = self.active_workspace_session_id.as_deref()?;
-        self.sftp_sessions.get(session_id)
+    pub fn active_file_browser_session_id(&self) -> Option<&str> {
+        self.active_workspace_tab()
+            .filter(|tab| tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp)
+            .and_then(|tab| (!tab.file_browser_session_id.is_empty()).then_some(tab.file_browser_session_id.as_str()))
+            .or(self.quick_browser_session_id.as_deref())
+            .or(self.active_workspace_terminal_session_id())
     }
 
-    pub(super) fn active_sftp_session_state_mut(&mut self) -> Option<&mut SftpSessionBindingState> {
-        let session_id = self.active_workspace_session_id.clone()?;
-        Some(self.sftp_sessions.entry(session_id).or_default())
+    pub fn active_sftp_session_state(&self) -> Option<&FileBrowserSession> {
+        let session_id = self.active_file_browser_session_id()?;
+        self.file_browser_sessions.get(session_id)
+    }
+
+    pub(super) fn active_sftp_session_state_mut(&mut self) -> Option<&mut FileBrowserSession> {
+        let session_id = self.active_file_browser_session_id()?.to_string();
+        self.file_browser_sessions.get_mut(&session_id)
     }
 
     pub fn select_sftp_panel_entry(&mut self, entry_id: &str) -> bool {
@@ -49,10 +54,6 @@ impl ShellViewModel {
     }
 
     pub fn sftp_panel_mode_id(&self) -> &'static str {
-        if self.active_workspace_session_id.is_none() {
-            return SftpPanelMode::Empty.id();
-        }
-
         self.active_sftp_session_state()
             .map(|state| state.mode.id())
             .unwrap_or(SftpPanelMode::Empty.id())
@@ -90,7 +91,7 @@ impl ShellViewModel {
 
     pub fn sftp_panel_can_go_up(&self) -> bool {
         self.active_sftp_session_state()
-            .map(SftpSessionBindingState::can_navigate_up)
+            .map(FileBrowserSession::can_navigate_up)
             .unwrap_or(false)
     }
 
@@ -106,69 +107,94 @@ impl ShellViewModel {
     }
 
     pub fn sftp_panel_sort_column_id(&self) -> &'static str {
-        self.sftp_panel_sort_state
+        self.active_sftp_session_state()
+            .map(|state| state.sort_state)
+            .unwrap_or(self.quick_browser_state.sort_state)
             .column
-            .map(SftpPanelSortColumn::id)
+            .map(FileBrowserSortColumn::id)
             .unwrap_or("default")
     }
 
     pub fn sftp_panel_sort_direction_id(&self) -> &'static str {
-        self.sftp_panel_sort_state
+        self.active_sftp_session_state()
+            .map(|state| state.sort_state)
+            .unwrap_or(self.quick_browser_state.sort_state)
             .direction
-            .map(SftpPanelSortDirection::id)
+            .map(FileBrowserSortDirection::id)
             .unwrap_or("none")
     }
 
     pub fn cycle_sftp_panel_sort(&mut self, column_id: &str) -> bool {
-        let Some(column) = SftpPanelSortColumn::from_id(column_id) else {
+        let Some(column) = FileBrowserSortColumn::from_id(column_id) else {
             return false;
         };
-
-        self.sftp_panel_sort_state = match self.sftp_panel_sort_state {
-            SftpPanelSortState {
+        let next_sort_state = match self
+            .active_sftp_session_state()
+            .map(|state| state.sort_state)
+            .unwrap_or(self.quick_browser_state.sort_state)
+        {
+            FileBrowserSortState {
                 column: Some(active_column),
-                direction: Some(SftpPanelSortDirection::Asc),
-            } if active_column == column => SftpPanelSortState {
+                direction: Some(FileBrowserSortDirection::Asc),
+            } if active_column == column => FileBrowserSortState {
                 column: Some(column),
-                direction: Some(SftpPanelSortDirection::Desc),
+                direction: Some(FileBrowserSortDirection::Desc),
             },
-            SftpPanelSortState {
+            FileBrowserSortState {
                 column: Some(active_column),
-                direction: Some(SftpPanelSortDirection::Desc),
-            } if active_column == column => SftpPanelSortState::default(),
-            _ => SftpPanelSortState {
+                direction: Some(FileBrowserSortDirection::Desc),
+            } if active_column == column => FileBrowserSortState::default(),
+            _ => FileBrowserSortState {
                 column: Some(column),
-                direction: Some(SftpPanelSortDirection::Asc),
+                direction: Some(FileBrowserSortDirection::Asc),
             },
         };
+
+        if let Some(state) = self.active_sftp_session_state_mut() {
+            state.sort_state = next_sort_state;
+        } else {
+            self.quick_browser_state.sort_state = next_sort_state;
+        }
         true
     }
 
     pub fn sftp_panel_name_column_width_px(&self) -> f32 {
-        self.sftp_panel_column_layout.name_px
+        self.active_sftp_session_state()
+            .map(|state| state.column_layout.name_px)
+            .unwrap_or(self.quick_browser_state.column_layout.name_px)
     }
 
     pub fn sftp_panel_type_column_width_px(&self) -> f32 {
-        self.sftp_panel_column_layout.type_px
+        self.active_sftp_session_state()
+            .map(|state| state.column_layout.type_px)
+            .unwrap_or(self.quick_browser_state.column_layout.type_px)
     }
 
     pub fn sftp_panel_modified_column_width_px(&self) -> f32 {
-        self.sftp_panel_column_layout.modified_px
+        self.active_sftp_session_state()
+            .map(|state| state.column_layout.modified_px)
+            .unwrap_or(self.quick_browser_state.column_layout.modified_px)
     }
 
     pub fn sftp_panel_size_column_width_px(&self) -> f32 {
-        self.sftp_panel_column_layout.size_px
+        self.active_sftp_session_state()
+            .map(|state| state.column_layout.size_px)
+            .unwrap_or(self.quick_browser_state.column_layout.size_px)
     }
 
     pub fn set_sftp_panel_column_width(&mut self, column_id: &str, width_px: f32) -> bool {
+        let layout = if let Some(state) = self.active_sftp_session_state_mut() {
+            &mut state.column_layout
+        } else {
+            &mut self.quick_browser_state.column_layout
+        };
         match column_id {
-            "name" => self.sftp_panel_column_layout.name_px = width_px.max(0.0),
-            "type" => self.sftp_panel_column_layout.type_px = width_px.max(SFTP_TYPE_COLUMN_MIN_PX),
+            "name" => layout.name_px = width_px.max(0.0),
+            "type" => layout.type_px = width_px.max(FILE_BROWSER_TYPE_COLUMN_MIN_PX),
             "modified" => {
-                self.sftp_panel_column_layout.modified_px =
-                    width_px.max(SFTP_MODIFIED_COLUMN_MIN_PX);
+                layout.modified_px = width_px.max(FILE_BROWSER_MODIFIED_COLUMN_MIN_PX);
             }
-            "size" => self.sftp_panel_column_layout.size_px = width_px.max(SFTP_SIZE_COLUMN_MIN_PX),
+            "size" => layout.size_px = width_px.max(FILE_BROWSER_SIZE_COLUMN_MIN_PX),
             _ => return false,
         }
         true
@@ -178,10 +204,12 @@ impl ShellViewModel {
         &self,
         entries: &'a [SftpDirectoryEntry],
     ) -> Vec<&'a SftpDirectoryEntry> {
+        let sort_state = self
+            .active_sftp_session_state()
+            .map(|state| state.sort_state)
+            .unwrap_or(self.quick_browser_state.sort_state);
         let mut projection = entries.iter().collect::<Vec<_>>();
-        projection.sort_by(|left, right| {
-            compare_sftp_panel_entries(left, right, self.sftp_panel_sort_state)
-        });
+        projection.sort_by(|left, right| compare_sftp_panel_entries(left, right, sort_state));
         projection
     }
 
@@ -213,19 +241,19 @@ impl ShellViewModel {
 
     pub fn navigate_sftp_panel_back(&mut self) -> bool {
         self.active_sftp_session_state_mut()
-            .map(SftpSessionBindingState::navigate_back)
+            .map(FileBrowserSession::navigate_back)
             .unwrap_or(false)
     }
 
     pub fn navigate_sftp_panel_forward(&mut self) -> bool {
         self.active_sftp_session_state_mut()
-            .map(SftpSessionBindingState::navigate_forward)
+            .map(FileBrowserSession::navigate_forward)
             .unwrap_or(false)
     }
 
     pub fn navigate_sftp_panel_up(&mut self) -> bool {
         self.active_sftp_session_state_mut()
-            .map(SftpSessionBindingState::navigate_up)
+            .map(FileBrowserSession::navigate_up)
             .unwrap_or(false)
     }
 

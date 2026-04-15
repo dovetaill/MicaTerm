@@ -149,7 +149,10 @@ pub(super) fn sync_active_sftp_projection_from_manager(
     state: &mut ShellViewModel,
     manager: &SessionManager,
 ) -> bool {
-    let Some(session_id_text) = state.active_workspace_session_id().map(str::to_string) else {
+    let Some(session_id_text) = state
+        .active_workspace_terminal_session_id()
+        .map(str::to_string)
+    else {
         return false;
     };
     let Some(session_id) = Uuid::parse_str(&session_id_text).ok() else {
@@ -162,7 +165,27 @@ pub(super) fn sync_active_sftp_projection_from_manager(
         return false;
     };
 
-    let session_state = state.sftp_sessions.entry(session_id_text).or_default();
+    state.quick_browser_session_id = Some(session_id_text.clone());
+    let host_profile_ref = state
+        .active_workspace_tab()
+        .map(|tab| {
+            crate::app::sftp::HostProfileRef::with_label(tab.asset_id.clone(), tab.title.clone())
+        })
+        .unwrap_or_else(|| crate::app::sftp::HostProfileRef::new("active-session"));
+    let initial_path = cwd.clone().unwrap_or_else(|| "/".to_string());
+    let session_state = state
+        .file_browser_sessions
+        .entry(session_id_text.clone())
+        .or_insert_with(|| {
+            let mut session = crate::app::sftp::FileBrowserSession::quick_browser(
+                host_profile_ref.clone(),
+                initial_path,
+            );
+            session.file_browser_session_id = session_id_text.clone();
+            session.attach_terminal_session_id(session_id_text.clone());
+            session
+        });
+    session_state.attach_terminal_session_id(session_id_text);
     let before = session_state.clone();
 
     match binding.mode() {
@@ -193,20 +216,32 @@ pub(super) fn project_sftp_browser_state_into_view_model(
     session_id: Uuid,
     browser_state: &SftpBrowserSessionState,
 ) -> bool {
-    let next = SftpSessionBindingState {
-        mode: browser_state.mode,
-        follow_mode: browser_state.follow_mode,
-        current_path: browser_state.current_path.clone(),
-        history: browser_state.history.clone(),
-        entries: browser_state.entries.clone(),
-        selected_entry_ids: browser_state.selected_entry_ids.clone(),
-        last_error: browser_state.last_error.clone(),
-    };
     let session_id_text = session_id.to_string();
-    if state.sftp_sessions.get(&session_id_text) == Some(&next) {
+    let mut next = state
+        .file_browser_sessions
+        .get(&session_id_text)
+        .cloned()
+        .unwrap_or_else(|| {
+            let mut session = crate::app::sftp::FileBrowserSession::quick_browser(
+                crate::app::sftp::HostProfileRef::new("active-session"),
+                browser_state.current_path.clone(),
+            );
+            session.file_browser_session_id = session_id_text.clone();
+            session
+        });
+    next.attach_terminal_session_id(session_id_text.clone());
+    next.mode = browser_state.mode;
+    next.follow_mode = browser_state.follow_mode;
+    next.current_path = browser_state.current_path.clone();
+    next.history = browser_state.history.clone();
+    next.entries = browser_state.entries.clone();
+    next.selected_entry_ids = browser_state.selected_entry_ids.clone();
+    next.last_error = browser_state.last_error.clone();
+    next.active_request_id = browser_state.active_request_id;
+    if state.file_browser_sessions.get(&session_id_text) == Some(&next) {
         return false;
     }
-    state.set_sftp_session_state(session_id_text, next);
+    state.set_file_browser_session(next);
     true
 }
 

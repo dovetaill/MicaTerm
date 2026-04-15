@@ -56,7 +56,7 @@ use crate::app::quick_launch_preferences::{
 use crate::app::runtime_profile::{AppBuildFlavor, AppRuntimeProfile, TerminalRenderMode};
 use crate::app::sftp::{
     SftpBrowserController, SftpBrowserLoadRequest, SftpBrowserSessionState, SftpDirectoryEntryKind,
-    SftpFollowMode, SftpPanelMode, SftpSessionBindingState,
+    SftpFollowMode, SftpPanelMode,
 };
 use crate::app::ssh::connection_progress::{
     ConnectionAttemptState, ConnectionHeadlineState, ConnectionStepState, ConnectionStepStateItem,

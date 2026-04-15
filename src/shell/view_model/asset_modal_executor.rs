@@ -56,12 +56,9 @@ impl ShellViewModel {
                     return false;
                 }
 
-                let Some(session_id) = self
-                    .active_workspace_terminal_session_id()
-                    .map(str::to_string)
-                else {
+                if self.active_workspace_terminal_session_id().is_none() {
                     return false;
-                };
+                }
                 let path = sftp_child_path(self.sftp_panel_path().as_str(), draft_name.trim());
                 let entry_id = format!("sftp-dir-{}", path);
                 let next_entry = SftpDirectoryEntry {
@@ -73,7 +70,7 @@ impl ShellViewModel {
                     size_bytes: None,
                 };
 
-                if let Some(state) = self.sftp_sessions.get_mut(&session_id) {
+                if let Some(state) = self.active_sftp_session_state_mut() {
                     state.entries.push(next_entry);
                     state.selected_entry_ids = vec![entry_id.clone()];
                 }
