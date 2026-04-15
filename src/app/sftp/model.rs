@@ -1,4 +1,4 @@
-//! Session-bound SFTP panel state and navigation reducers.
+//! File-browser-session-friendly SFTP panel state and navigation reducers.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SftpPanelMode {

@@ -129,6 +129,31 @@ fn tab_model_prefers_asset_name_then_host_for_title() {
 }
 
 #[test]
+fn sftp_workspace_tab_uses_tab_identity_instead_of_terminal_session_identity() {
+    let tab = WorkspaceTab::sftp("tab-files-1", "browser-1", "Files: Prod");
+
+    assert_eq!(tab.tab_id, "tab-files-1");
+    assert_eq!(tab.file_browser_session_id, "browser-1");
+    assert_eq!(tab.title, "Files: Prod");
+    assert_eq!(tab.kind, mica_term::shell::tabs::WorkspaceTabKind::Sftp);
+    assert!(!tab.uses_terminal_surface());
+}
+
+#[test]
+fn terminal_workspace_tabs_keep_tab_id_equal_to_their_terminal_session_id_for_now() {
+    let handle = sample_handle(
+        "Prod Bastion",
+        "ops@example.com:22",
+        SessionState::Connected,
+    );
+
+    let tab = WorkspaceTab::from_session(&handle);
+
+    assert_eq!(tab.tab_id, tab.session_id);
+    assert!(tab.file_browser_session_id.is_empty());
+}
+
+#[test]
 fn workspace_tabs_hide_connection_details_from_visible_copy() {
     let named = WorkspaceTab::from_session(&sample_handle(
         "Prod Bastion",

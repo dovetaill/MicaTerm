@@ -1,6 +1,7 @@
 //! Pure SFTP domain state used by later runtime and UI integration tasks.
 
 pub mod browser_controller;
+pub mod browser_session;
 pub mod browser_state;
 pub mod local_ops;
 pub mod model;
@@ -9,6 +10,7 @@ pub mod runtime;
 pub mod session_binding;
 
 pub use browser_controller::{SftpBrowserController, SftpBrowserLoadRequest};
+pub use browser_session::{FileBrowserSession, FileBrowserSessionId, HostProfileRef};
 pub use browser_state::SftpBrowserSessionState;
 pub use local_ops::{
     LocalTransferEntry, build_local_download_path, build_remote_upload_path, scan_local_sources,
