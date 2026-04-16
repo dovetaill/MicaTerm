@@ -267,12 +267,7 @@ fn has_any_suffix(value: &str, suffixes: &[&str]) -> bool {
     suffixes.iter().any(|suffix| value.ends_with(suffix))
 }
 
-#[derive(Debug)]
-pub(super) struct SftpBrowserBackgroundMessage {
-    request: SftpBrowserLoadRequest,
-    result: Result<Vec<SftpDirectoryEntry>, String>,
-    disconnected: bool,
-}
+pub(super) type SftpBrowserBackgroundMessage = crate::app::sftp::SftpBrowserOperationResult;
 
 #[derive(Debug)]
 pub(super) struct SftpTransferBackgroundMessage {
@@ -720,50 +715,18 @@ pub(super) fn project_sftp_browser_state_into_view_model(
     next.selected_entry_ids = browser_state.selected_entry_ids.clone();
     next.last_error = browser_state.last_error.clone();
     next.active_request_id = browser_state.active_request_id;
-    if state.file_browser_sessions.get(browser_session_id) == Some(&next) {
+    let promote_pending_terminal = state.quick_browser_follows_active_terminal()
+        && state.quick_browser_state.pending_terminal_session_id.as_deref() == Some(browser_session_id)
+        && matches!(browser_state.mode, SftpPanelMode::Ready | SftpPanelMode::Error | SftpPanelMode::Disconnected);
+    if state.file_browser_sessions.get(browser_session_id) == Some(&next) && !promote_pending_terminal {
         return false;
     }
     state.set_file_browser_session(next);
-    true
-}
-
-async fn load_sftp_browser_request_result(
-    manager: SessionManager,
-    session_id: Uuid,
-    path: String,
-) -> (Result<Vec<SftpDirectoryEntry>, String>, bool) {
-    const MAX_RECONNECT_WAIT_STEPS: usize = 100;
-    const RECONNECT_WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(10);
-
-    let mut wait_steps = 0usize;
-    loop {
-        let binding = manager.sftp_binding(session_id);
-        if binding
-            .as_ref()
-            .is_some_and(|binding| binding.mode() != SftpPanelMode::Disconnected)
-        {
-            let result = manager
-                .sftp_read_dir_async(session_id, path.as_str())
-                .await
-                .map_err(|err| err.to_string());
-            let disconnected = manager
-                .sftp_binding(session_id)
-                .is_none_or(|binding| binding.mode() == SftpPanelMode::Disconnected);
-            return (result, disconnected);
-        }
-
-        let session_state = manager.session(session_id).map(|session| session.state);
-        let should_wait_for_reconnect = matches!(
-            session_state,
-            Some(SessionState::Connecting | SessionState::Connected | SessionState::WaitingUser)
-        );
-        if !should_wait_for_reconnect || wait_steps >= MAX_RECONNECT_WAIT_STEPS {
-            return (Err("sftp session disconnected".to_string()), true);
-        }
-
-        wait_steps += 1;
-        tokio::time::sleep(RECONNECT_WAIT_STEP).await;
+    if promote_pending_terminal {
+        state.quick_browser_session_id = Some(browser_session_id.to_string());
+        state.quick_browser_state.pending_terminal_session_id = None;
     }
+    true
 }
 
 pub(super) fn execute_sftp_browser_request(
@@ -772,39 +735,17 @@ pub(super) fn execute_sftp_browser_request(
     manager: &SessionManager,
     request: SftpBrowserLoadRequest,
 ) -> bool {
-    match manager.sftp_read_dir(request.session_id, request.path.as_str()) {
-        Ok(entries) => controller.apply_loaded_directory_for_browser_session(
-            request.file_browser_session_id.as_str(),
-            request.request_id,
-            request.path.as_str(),
-            entries,
-        ),
-        Err(err) => {
-            if manager
-                .sftp_binding(request.session_id)
-                .is_some_and(|binding| binding.mode() == SftpPanelMode::Disconnected)
-            {
-                controller.mark_disconnected_browser_session(request.file_browser_session_id.as_str());
-            } else {
-                controller.apply_load_error_for_browser_session(
-                    request.file_browser_session_id.as_str(),
-                    request.request_id,
-                    request.path.as_str(),
-                    err.to_string(),
-                );
-            }
-        }
-    }
-
-    controller
-        .browser_session_state(request.file_browser_session_id.as_str())
-        .is_some_and(|browser_state| {
-            project_sftp_browser_state_into_view_model(
-                state,
-                request.file_browser_session_id.as_str(),
-                browser_state,
-            )
-        })
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    crate::app::sftp::dispatch_sftp_load_dir_operation(
+        &manager.runtime_handle(),
+        manager.clone(),
+        request,
+        result_tx,
+    );
+    let Ok(message) = result_rx.recv() else {
+        return false;
+    };
+    apply_sftp_browser_background_message(state, controller, message)
 }
 
 fn project_pending_sftp_browser_request(
@@ -833,28 +774,19 @@ pub(super) fn queue_sftp_browser_request(
         request.file_browser_session_id.as_str(),
     );
 
-    let Some(async_runtime) = async_runtime.cloned() else {
-        return pending_changed | execute_sftp_browser_request(state, controller, manager, request);
-    };
     if !controller.mark_request_in_flight(request.request_id) {
         return pending_changed;
     }
 
-    let manager = manager.clone();
-    let completion_tx = result_tx.clone();
-    async_runtime.spawn(async move {
-        let (result, disconnected) = load_sftp_browser_request_result(
-            manager,
-            request.session_id,
-            request.path.clone(),
-        )
-        .await;
-        let _ = completion_tx.send(SftpBrowserBackgroundMessage {
-            request,
-            result,
-            disconnected,
-        });
-    });
+    let Some(runtime_handle) = async_runtime.cloned() else {
+        return pending_changed | execute_sftp_browser_request(state, controller, manager, request);
+    };
+    crate::app::sftp::dispatch_sftp_load_dir_operation(
+        &runtime_handle,
+        manager.clone(),
+        request,
+        result_tx.clone(),
+    );
 
     pending_changed
 }
@@ -865,9 +797,13 @@ pub(super) fn apply_sftp_browser_background_message(
     message: SftpBrowserBackgroundMessage,
 ) -> bool {
     controller.complete_request(message.request.request_id);
+    if message.kind != crate::app::sftp::SftpOperationKind::LoadDir {
+        return false;
+    }
     match message.result {
         Ok(entries) => controller.apply_loaded_directory_for_browser_session(
             message.request.file_browser_session_id.as_str(),
+            message.request.generation,
             message.request.request_id,
             message.request.path.as_str(),
             entries,
@@ -879,6 +815,7 @@ pub(super) fn apply_sftp_browser_background_message(
             } else {
                 controller.apply_load_error_for_browser_session(
                     message.request.file_browser_session_id.as_str(),
+                    message.request.generation,
                     message.request.request_id,
                     message.request.path.as_str(),
                     error,

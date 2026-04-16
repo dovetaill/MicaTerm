@@ -92,6 +92,24 @@ fn rgb_tuple_to_hex((red, green, blue): (u8, u8, u8)) -> u32 {
 }
 
 #[test]
+fn bootstrap_sftp_source_routes_browser_loads_through_async_dispatcher_contract() {
+    let bootstrap_sftp = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+
+    assert!(
+        bootstrap_sftp.contains("SftpOperationKind::LoadDir"),
+        "bootstrap SFTP wiring should route directory loads through the async operation dispatcher"
+    );
+    assert!(
+        bootstrap_sftp.contains("dispatch_sftp_load_dir_operation("),
+        "bootstrap SFTP wiring should dispatch browser loads through a shared async helper"
+    );
+    assert!(
+        !bootstrap_sftp.contains("match manager.sftp_read_dir(request.session_id, request.path.as_str())"),
+        "quick-browser directory loads should stop calling the synchronous session-manager wrapper directly"
+    );
+}
+
+#[test]
 fn bootstrap_source_uses_terminal_presenter_contract() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 

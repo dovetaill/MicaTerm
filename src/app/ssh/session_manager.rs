@@ -167,6 +167,10 @@ impl SessionManager {
         }
     }
 
+    pub fn runtime_handle(&self) -> tokio::runtime::Handle {
+        self.runtime_handle.clone()
+    }
+
     pub fn open_session(
         &self,
         profile: ConnectionProfile,
@@ -359,10 +363,28 @@ impl SessionManager {
         runtime.read_dir(path).await
     }
 
-    pub fn sftp_download_file(&self, session_id: Uuid, remote_path: &str) -> Result<Vec<u8>> {
+    pub async fn sftp_download_file_async(
+        &self,
+        session_id: Uuid,
+        remote_path: &str,
+    ) -> Result<Vec<u8>> {
         let runtime = self.sftp_runtime(session_id)?;
+        runtime.download_file(remote_path).await
+    }
+
+    pub fn sftp_download_file(&self, session_id: Uuid, remote_path: &str) -> Result<Vec<u8>> {
         self.runtime_handle
-            .block_on(runtime.download_file(remote_path))
+            .block_on(self.sftp_download_file_async(session_id, remote_path))
+    }
+
+    pub async fn sftp_upload_file_async(
+        &self,
+        session_id: Uuid,
+        remote_path: &str,
+        data: Vec<u8>,
+    ) -> Result<u64> {
+        let runtime = self.sftp_runtime(session_id)?;
+        runtime.upload_file(remote_path, data).await
     }
 
     pub fn sftp_upload_file(
@@ -371,9 +393,23 @@ impl SessionManager {
         remote_path: &str,
         data: Vec<u8>,
     ) -> Result<u64> {
-        let runtime = self.sftp_runtime(session_id)?;
         self.runtime_handle
-            .block_on(runtime.upload_file(remote_path, data))
+            .block_on(self.sftp_upload_file_async(session_id, remote_path, data))
+    }
+
+    pub async fn sftp_create_directory_async(&self, session_id: Uuid, path: &str) -> Result<()> {
+        let runtime = self.sftp_runtime(session_id)?;
+        runtime.mkdir(path).await
+    }
+
+    pub async fn sftp_rename_entry_async(
+        &self,
+        session_id: Uuid,
+        from: &str,
+        to: &str,
+    ) -> Result<()> {
+        let runtime = self.sftp_runtime(session_id)?;
+        runtime.rename(from, to).await
     }
 
     pub fn sftp_execute_queued_transfers(
