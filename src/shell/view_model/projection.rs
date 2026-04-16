@@ -256,10 +256,7 @@ impl ShellViewModel {
         true
     }
 
-    pub fn transfer_center_includes_task(
-        &self,
-        task: &crate::app::sftp::TransferTask,
-    ) -> bool {
+    pub fn transfer_center_includes_task(&self, task: &crate::app::sftp::TransferTask) -> bool {
         self.transfer_center_filter.matches(task)
     }
 
@@ -267,10 +264,70 @@ impl ShellViewModel {
         &self.sftp_transfer_tasks
     }
 
-    pub fn merge_sftp_transfer_tasks(
-        &mut self,
-        tasks: &[crate::app::sftp::TransferTask],
-    ) -> bool {
+    pub fn transfer_task_local_open_file_path(&self, task_id: &str) -> Option<std::path::PathBuf> {
+        let task = self.transfer_task_by_id(task_id)?;
+        if task.state != crate::app::sftp::TransferTaskState::Completed {
+            return None;
+        }
+        match &task.action {
+            crate::app::sftp::TransferTaskAction::Download { local_path } => {
+                Some(local_path.clone())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn transfer_task_local_open_folder_path(
+        &self,
+        task_id: &str,
+    ) -> Option<std::path::PathBuf> {
+        let task = self.transfer_task_by_id(task_id)?;
+        if task.state != crate::app::sftp::TransferTaskState::Completed {
+            return None;
+        }
+        match &task.action {
+            crate::app::sftp::TransferTaskAction::Download { local_path } => local_path
+                .parent()
+                .map(|parent| parent.to_path_buf())
+                .or_else(|| Some(local_path.clone())),
+            crate::app::sftp::TransferTaskAction::DownloadDirectory { local_path } => {
+                Some(local_path.clone())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn remove_transfer_task(&mut self, task_id: &str) -> bool {
+        let before_len = self.sftp_transfer_tasks.len();
+        self.sftp_transfer_tasks.retain(|task| task.id != task_id);
+        if self.sftp_transfer_tasks.len() == before_len {
+            return false;
+        }
+        if self.sftp_conflict_modal_state.task_id.as_deref() == Some(task_id)
+            || self
+                .sftp_conflict_modal_state
+                .batch_task_ids
+                .iter()
+                .any(|id| id == task_id)
+        {
+            self.sftp_conflict_modal_state = SftpConflictModalState::default();
+        }
+        let _ = self.recompute_sftp_queue_summary();
+        true
+    }
+
+    pub fn clear_completed_transfer_tasks(&mut self) -> bool {
+        let before_len = self.sftp_transfer_tasks.len();
+        self.sftp_transfer_tasks
+            .retain(|task| task.state != crate::app::sftp::TransferTaskState::Completed);
+        if self.sftp_transfer_tasks.len() == before_len {
+            return false;
+        }
+        let _ = self.recompute_sftp_queue_summary();
+        true
+    }
+
+    pub fn merge_sftp_transfer_tasks(&mut self, tasks: &[crate::app::sftp::TransferTask]) -> bool {
         let mut changed = false;
         for next_task in tasks {
             if let Some(current_task) = self

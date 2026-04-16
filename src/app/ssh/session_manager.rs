@@ -10,8 +10,8 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::app::sftp::{
-    DownloadTransferEntry, SftpDirectoryEntry, SftpRuntimeHandle, SftpSessionBinding,
-    SftpSessionBindingState, TransferQueue, collect_download_targets,
+    DownloadTransferEntry, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpRuntimeHandle,
+    SftpSessionBinding, SftpSessionBindingState, TransferQueue, collect_download_targets,
     delete_entries as delete_sftp_entries, execute_queued_transfers,
     execute_queued_transfers_with_progress, move_entry_between_directories,
 };
@@ -165,6 +165,10 @@ impl SessionManager {
             launcher,
             registry: Arc::new(Mutex::new(SessionRegistry::default())),
         }
+    }
+
+    pub fn runtime_handle(&self) -> tokio::runtime::Handle {
+        self.runtime_handle.clone()
     }
 
     pub fn open_session(
@@ -359,10 +363,28 @@ impl SessionManager {
         runtime.read_dir(path).await
     }
 
-    pub fn sftp_download_file(&self, session_id: Uuid, remote_path: &str) -> Result<Vec<u8>> {
+    pub async fn sftp_download_file_async(
+        &self,
+        session_id: Uuid,
+        remote_path: &str,
+    ) -> Result<Vec<u8>> {
         let runtime = self.sftp_runtime(session_id)?;
+        runtime.download_file(remote_path).await
+    }
+
+    pub fn sftp_download_file(&self, session_id: Uuid, remote_path: &str) -> Result<Vec<u8>> {
         self.runtime_handle
-            .block_on(runtime.download_file(remote_path))
+            .block_on(self.sftp_download_file_async(session_id, remote_path))
+    }
+
+    pub async fn sftp_upload_file_async(
+        &self,
+        session_id: Uuid,
+        remote_path: &str,
+        data: Vec<u8>,
+    ) -> Result<u64> {
+        let runtime = self.sftp_runtime(session_id)?;
+        runtime.upload_file(remote_path, data).await
     }
 
     pub fn sftp_upload_file(
@@ -371,9 +393,39 @@ impl SessionManager {
         remote_path: &str,
         data: Vec<u8>,
     ) -> Result<u64> {
-        let runtime = self.sftp_runtime(session_id)?;
         self.runtime_handle
-            .block_on(runtime.upload_file(remote_path, data))
+            .block_on(self.sftp_upload_file_async(session_id, remote_path, data))
+    }
+
+    pub async fn sftp_create_directory_async(&self, session_id: Uuid, path: &str) -> Result<()> {
+        let runtime = self.sftp_runtime(session_id)?;
+        runtime.mkdir(path).await
+    }
+
+    pub async fn sftp_rename_entry_async(
+        &self,
+        session_id: Uuid,
+        from: &str,
+        to: &str,
+    ) -> Result<()> {
+        let runtime = self.sftp_runtime(session_id)?;
+        runtime.rename(from, to).await
+    }
+
+    pub async fn sftp_delete_entries_async(
+        &self,
+        session_id: Uuid,
+        entries: Vec<SftpDirectoryEntry>,
+    ) -> Result<()> {
+        let runtime = self.sftp_runtime(session_id)?;
+        for entry in entries {
+            if entry.kind == SftpDirectoryEntryKind::Directory {
+                runtime.delete_dir(entry.path.as_str()).await?;
+            } else {
+                runtime.delete_file(entry.path.as_str()).await?;
+            }
+        }
+        Ok(())
     }
 
     pub fn sftp_execute_queued_transfers(
@@ -396,11 +448,12 @@ impl SessionManager {
         F: FnMut(&TransferQueue),
     {
         let runtime = self.sftp_runtime(session_id)?;
-        self.runtime_handle.block_on(execute_queued_transfers_with_progress(
-            &runtime,
-            queue,
-            on_queue_updated,
-        ))
+        self.runtime_handle
+            .block_on(execute_queued_transfers_with_progress(
+                &runtime,
+                queue,
+                on_queue_updated,
+            ))
     }
 
     pub fn sftp_collect_download_targets(

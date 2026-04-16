@@ -4399,8 +4399,10 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     Some(&manager),
                 );
             }
-            let (sftp_open_changed, sftp_retry_changed, sftp_follow_changed) =
+            let (sftp_projection_changed, sftp_open_changed, sftp_retry_changed, sftp_follow_changed) =
                 if state.show_right_panel {
+                    let sftp_projection_changed =
+                        sftp::sync_active_sftp_projection_from_manager(&mut state, &manager);
                     let mut controller = sftp_browser_controller_ref.borrow_mut();
                     let open_changed = sftp::ensure_active_sftp_browser_started(
                         &mut state,
@@ -4423,15 +4425,29 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                         sftp_browser_async_runtime_ref.as_ref(),
                         &sftp_browser_result_tx_ref,
                     );
-                    (open_changed, retry_changed, follow_changed)
+                    (
+                        sftp_projection_changed,
+                        open_changed,
+                        retry_changed,
+                        follow_changed,
+                    )
                 } else {
-                    (false, false, false)
+                    (false, false, false, false)
                 };
             if projection_delta.sftp_changed
+                || sftp_projection_changed
                 || sftp_open_changed
                 || sftp_retry_changed
                 || sftp_follow_changed
             {
+                right_panel_changed = true;
+            }
+            let sftp_result_changed_after_quick_queue = {
+                let receiver = sftp_browser_result_rx_ref.borrow();
+                let mut controller = sftp_browser_controller_ref.borrow_mut();
+                sftp::drain_sftp_browser_background_messages(&mut state, &mut controller, &receiver)
+            };
+            if sftp_result_changed_after_quick_queue {
                 right_panel_changed = true;
             }
             if right_panel_changed {

@@ -3,9 +3,12 @@
 pub mod browser_controller;
 pub mod browser_session;
 pub mod browser_state;
+pub mod local_open;
 pub mod local_ops;
 pub mod model;
+pub mod operation_dispatch;
 pub mod queue;
+pub mod working_copy;
 pub mod runtime;
 pub mod session_binding;
 
@@ -23,6 +26,14 @@ pub use local_ops::{
 pub use model::{
     SftpDirectoryEntry, SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode, SftpPathHistory,
     SftpSessionBindingState,
+};
+pub use local_open::{SftpOpenAction, open_path_locally, prepare_local_open_path};
+pub use operation_dispatch::{
+    SftpBrowserOperationResult, SftpOperationKind, SftpOperationToken,
+    dispatch_sftp_load_dir_operation,
+};
+pub use working_copy::{
+    SftpWorkingCopy, WorkingCopySnapshot, snapshot_working_copy, working_copy_has_changed,
 };
 pub use queue::{
     DownloadTransferEntry, TransferConflictPolicy, TransferDirection, TransferQueue,

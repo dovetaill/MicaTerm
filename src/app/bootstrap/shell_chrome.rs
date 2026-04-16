@@ -58,7 +58,9 @@ fn format_transfer_bytes(bytes: u64) -> String {
 fn transfer_progress_label(task: &crate::app::sftp::TransferTask) -> String {
     if task.bytes_total > 0 {
         let transferred = match task.state {
-            crate::app::sftp::TransferTaskState::Completed => task.bytes_total.max(task.bytes_transferred),
+            crate::app::sftp::TransferTaskState::Completed => {
+                task.bytes_total.max(task.bytes_transferred)
+            }
             _ => task.bytes_transferred,
         };
         return format!(
@@ -87,14 +89,34 @@ fn transfer_show_error(task: &crate::app::sftp::TransferTask) -> bool {
     task.state.needs_attention() && !transfer_error_summary(task).trim().is_empty()
 }
 
+fn transfer_can_open_file(task: &crate::app::sftp::TransferTask) -> bool {
+    task.state == crate::app::sftp::TransferTaskState::Completed
+        && matches!(
+            task.action,
+            crate::app::sftp::TransferTaskAction::Download { .. }
+        )
+}
+
+fn transfer_can_open_folder(task: &crate::app::sftp::TransferTask) -> bool {
+    task.state == crate::app::sftp::TransferTaskState::Completed
+        && matches!(
+            task.action,
+            crate::app::sftp::TransferTaskAction::Download { .. }
+                | crate::app::sftp::TransferTaskAction::DownloadDirectory { .. }
+        )
+}
+
+fn transfer_can_remove(task: &crate::app::sftp::TransferTask) -> bool {
+    !task.state.is_active()
+}
+
 fn transfer_task_title(task: &crate::app::sftp::TransferTask) -> String {
     let path = match task.direction {
         crate::app::sftp::TransferDirection::Upload | crate::app::sftp::TransferDirection::Move => {
             task.target_path.as_str()
         }
-        crate::app::sftp::TransferDirection::Download | crate::app::sftp::TransferDirection::Delete => {
-            task.source_path.as_str()
-        }
+        crate::app::sftp::TransferDirection::Download
+        | crate::app::sftp::TransferDirection::Delete => task.source_path.as_str(),
     };
     path.rsplit('/')
         .next()
@@ -141,11 +163,16 @@ fn project_transfer_center_items(state: &ShellViewModel) -> Vec<TransferCenterIt
                 error_summary: transfer_error_summary(task).into(),
                 error_tooltip: transfer_error_summary(task).into(),
                 show_error: transfer_show_error(task),
+                can_show_error: transfer_show_error(task),
                 can_retry: session_ready
                     && task.state == crate::app::sftp::TransferTaskState::Failed,
                 can_resolve_conflict: session_ready
                     && task.state == crate::app::sftp::TransferTaskState::Conflict,
-                can_open_workspace: session_ready && task.state.needs_attention(),
+                can_open_workspace: session_ready
+                    && task.state == crate::app::sftp::TransferTaskState::Conflict,
+                can_open_file: transfer_can_open_file(task),
+                can_open_folder: transfer_can_open_folder(task),
+                can_remove: transfer_can_remove(task),
             }
         })
         .collect()
@@ -229,9 +256,11 @@ pub(super) fn sync_top_status_bar_state(
     );
     window.set_transfer_center_active_filter(state.transfer_center_filter_id().into());
     let transfer_items = project_transfer_center_items(state);
-    super::sync_vec_model(window.get_transfer_center_items(), transfer_items, |model| {
-        window.set_transfer_center_items(model)
-    });
+    super::sync_vec_model(
+        window.get_transfer_center_items(),
+        transfer_items,
+        |model| window.set_transfer_center_items(model),
+    );
     window.set_show_global_menu(state.show_global_menu);
     window.set_is_window_maximized(state.is_window_maximized());
     window.set_is_window_active(state.is_window_active);

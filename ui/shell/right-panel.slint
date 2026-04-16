@@ -734,6 +734,24 @@ export component RightPanel inherits Rectangle {
                     }
                 }
             }
+
+            if root.sftp-panel-mode != "empty" : list-host-blank-area-touch := TouchArea {
+                x: 0px;
+                y: root.sftp-status-row-height;
+                width: parent.width;
+                height: parent.height - root.sftp-status-row-height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                        root.sftp-panel-context-menu-requested(
+                            "",
+                            "sftp-blank",
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    }
+                }
+            }
         }
     }
 

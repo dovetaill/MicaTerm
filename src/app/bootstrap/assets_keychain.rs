@@ -973,6 +973,11 @@ pub(super) fn bind_assets_keychain_callbacks(
     let asset_repo_ref = asset_repo.clone();
     let keychain_repo_ref = keychain_repo.clone();
     let credential_store_ref = Arc::clone(credential_store);
+    let session_bridge_ref = session_bridge.clone();
+    let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let sftp_async_runtime_ref = sftp_async_runtime.clone();
+    let sftp_result_tx_ref = sftp_result_tx.clone();
+    let sftp_transfer_result_tx_ref = sftp_transfer_result_tx.clone();
     let vault_session_ref = Rc::clone(vault_session);
     let vault_sync_scheduler_ref = Rc::clone(vault_sync_scheduler);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
@@ -990,9 +995,23 @@ pub(super) fn bind_assets_keychain_callbacks(
         };
         let should_save_keychain_catalog =
             pending_identity_draft.is_some() || pending_keychain_draft.is_some();
+        let is_sftp_new_folder_modal = matches!(
+            state.asset_modal_state.as_ref(),
+            Some(AssetModalState::SftpNewFolder { .. })
+        );
         let did_mutate = state.confirm_asset_modal();
         if did_mutate {
-            if let Some(draft) = pending_identity_draft.as_ref()
+            if is_sftp_new_folder_modal {
+                let mut sftp_browser_controller = sftp_browser_controller_ref.borrow_mut();
+                let _ = super::sftp::apply_pending_sftp_context_action(
+                    &mut state,
+                    session_bridge_ref.as_deref(),
+                    &mut sftp_browser_controller,
+                    sftp_async_runtime_ref.as_ref(),
+                    &sftp_result_tx_ref,
+                    &sftp_transfer_result_tx_ref,
+                );
+            } else if let Some(draft) = pending_identity_draft.as_ref()
                 && let Some(identity_id) = state.focused_keychain_id.clone()
                 && let Err(err) = persist_keychain_identity_secret(
                     credential_store_ref.as_ref(),
@@ -1022,18 +1041,20 @@ pub(super) fn bind_assets_keychain_callbacks(
                     "failed to persist keychain SSH key secret bundle"
                 );
             }
-            save_asset_catalog_if_available(&asset_repo_ref, &state);
-            if should_save_keychain_catalog {
-                save_keychain_catalog_if_available(&keychain_repo_ref, &state);
+            if !is_sftp_new_folder_modal {
+                save_asset_catalog_if_available(&asset_repo_ref, &state);
+                if should_save_keychain_catalog {
+                    save_keychain_catalog_if_available(&keychain_repo_ref, &state);
+                }
+                let mut vault = vault_session_ref.borrow_mut();
+                vault_sync::mark_local_vault_dirty_and_arm_sync(
+                    &mut state,
+                    &mut vault,
+                    &vault_sync_scheduler_ref,
+                    &vault_auto_sync_timer_ref,
+                    Rc::clone(&run_vault_sync_ref),
+                );
             }
-            let mut vault = vault_session_ref.borrow_mut();
-            vault_sync::mark_local_vault_dirty_and_arm_sync(
-                &mut state,
-                &mut vault,
-                &vault_sync_scheduler_ref,
-                &vault_auto_sync_timer_ref,
-                Rc::clone(&run_vault_sync_ref),
-            );
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
@@ -1054,6 +1075,11 @@ pub(super) fn bind_assets_keychain_callbacks(
     let handle = window.as_weak();
     let asset_repo_ref = asset_repo.clone();
     let keychain_repo_ref = keychain_repo.clone();
+    let session_bridge_ref = session_bridge.clone();
+    let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let sftp_async_runtime_ref = sftp_async_runtime.clone();
+    let sftp_result_tx_ref = sftp_result_tx.clone();
+    let sftp_transfer_result_tx_ref = sftp_transfer_result_tx.clone();
     let vault_session_ref = Rc::clone(vault_session);
     let vault_sync_scheduler_ref = Rc::clone(vault_sync_scheduler);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
@@ -1066,20 +1092,36 @@ pub(super) fn bind_assets_keychain_callbacks(
             Some(AssetModalState::RenameAsset { asset_id, .. })
                 if state.keychain_catalog().nodes.contains_key(asset_id)
         );
+        let is_sftp_rename_modal = matches!(
+            state.asset_modal_state.as_ref(),
+            Some(AssetModalState::SftpRenameEntry { .. })
+        );
         let did_mutate = state.confirm_asset_modal();
         if did_mutate {
-            save_asset_catalog_if_available(&asset_repo_ref, &state);
-            if should_save_keychain_catalog {
-                save_keychain_catalog_if_available(&keychain_repo_ref, &state);
+            if is_sftp_rename_modal {
+                let mut sftp_browser_controller = sftp_browser_controller_ref.borrow_mut();
+                let _ = super::sftp::apply_pending_sftp_context_action(
+                    &mut state,
+                    session_bridge_ref.as_deref(),
+                    &mut sftp_browser_controller,
+                    sftp_async_runtime_ref.as_ref(),
+                    &sftp_result_tx_ref,
+                    &sftp_transfer_result_tx_ref,
+                );
+            } else {
+                save_asset_catalog_if_available(&asset_repo_ref, &state);
+                if should_save_keychain_catalog {
+                    save_keychain_catalog_if_available(&keychain_repo_ref, &state);
+                }
+                let mut vault = vault_session_ref.borrow_mut();
+                vault_sync::mark_local_vault_dirty_and_arm_sync(
+                    &mut state,
+                    &mut vault,
+                    &vault_sync_scheduler_ref,
+                    &vault_auto_sync_timer_ref,
+                    Rc::clone(&run_vault_sync_ref),
+                );
             }
-            let mut vault = vault_session_ref.borrow_mut();
-            vault_sync::mark_local_vault_dirty_and_arm_sync(
-                &mut state,
-                &mut vault,
-                &vault_sync_scheduler_ref,
-                &vault_auto_sync_timer_ref,
-                Rc::clone(&run_vault_sync_ref),
-            );
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
@@ -1091,6 +1133,11 @@ pub(super) fn bind_assets_keychain_callbacks(
     let handle = window.as_weak();
     let asset_repo_ref = asset_repo.clone();
     let keychain_repo_ref = keychain_repo.clone();
+    let session_bridge_ref = session_bridge.clone();
+    let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let sftp_async_runtime_ref = sftp_async_runtime.clone();
+    let sftp_result_tx_ref = sftp_result_tx.clone();
+    let sftp_transfer_result_tx_ref = sftp_transfer_result_tx.clone();
     let vault_session_ref = Rc::clone(vault_session);
     let vault_sync_scheduler_ref = Rc::clone(vault_sync_scheduler);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
@@ -1103,20 +1150,36 @@ pub(super) fn bind_assets_keychain_callbacks(
             Some(AssetModalState::DeleteAssetConfirm { asset_id, .. })
                 if state.keychain_catalog().nodes.contains_key(asset_id)
         );
+        let is_sftp_delete_modal = matches!(
+            state.asset_modal_state.as_ref(),
+            Some(AssetModalState::SftpDeleteEntriesConfirm { .. })
+        );
         let did_mutate = state.confirm_delete_asset();
         if did_mutate {
-            save_asset_catalog_if_available(&asset_repo_ref, &state);
-            if should_save_keychain_catalog {
-                save_keychain_catalog_if_available(&keychain_repo_ref, &state);
+            if is_sftp_delete_modal {
+                let mut sftp_browser_controller = sftp_browser_controller_ref.borrow_mut();
+                let _ = super::sftp::apply_pending_sftp_context_action(
+                    &mut state,
+                    session_bridge_ref.as_deref(),
+                    &mut sftp_browser_controller,
+                    sftp_async_runtime_ref.as_ref(),
+                    &sftp_result_tx_ref,
+                    &sftp_transfer_result_tx_ref,
+                );
+            } else {
+                save_asset_catalog_if_available(&asset_repo_ref, &state);
+                if should_save_keychain_catalog {
+                    save_keychain_catalog_if_available(&keychain_repo_ref, &state);
+                }
+                let mut vault = vault_session_ref.borrow_mut();
+                vault_sync::mark_local_vault_dirty_and_arm_sync(
+                    &mut state,
+                    &mut vault,
+                    &vault_sync_scheduler_ref,
+                    &vault_auto_sync_timer_ref,
+                    Rc::clone(&run_vault_sync_ref),
+                );
             }
-            let mut vault = vault_session_ref.borrow_mut();
-            vault_sync::mark_local_vault_dirty_and_arm_sync(
-                &mut state,
-                &mut vault,
-                &vault_sync_scheduler_ref,
-                &vault_auto_sync_timer_ref,
-                Rc::clone(&run_vault_sync_ref),
-            );
         }
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);

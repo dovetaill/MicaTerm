@@ -1,3 +1,4 @@
+use std::fs;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -302,6 +303,33 @@ fn flush_runtime_projection() {
     std::thread::sleep(Duration::from_millis(20));
     i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
     slint::platform::update_timers_and_animations();
+}
+
+#[test]
+fn sftp_module_exposes_async_operation_dispatcher_contract() {
+    let sftp_mod = fs::read_to_string("src/app/sftp/mod.rs").expect("read sftp mod");
+    let dispatch_source =
+        fs::read_to_string("src/app/sftp/operation_dispatch.rs").unwrap_or_default();
+    let browser_state =
+        fs::read_to_string("src/app/sftp/browser_state.rs").expect("read browser state");
+
+    assert!(
+        sftp_mod.contains("pub mod operation_dispatch;"),
+        "the SFTP module should export a dedicated async operation dispatcher"
+    );
+    assert!(
+        dispatch_source.contains("pub enum SftpOperationKind"),
+        "the async operation dispatcher should define typed SFTP operation kinds"
+    );
+    assert!(
+        dispatch_source.contains("pub struct SftpOperationToken"),
+        "the async operation dispatcher should expose generation-aware operation tokens"
+    );
+    assert!(
+        browser_state.contains("pub generation: u64")
+            && browser_state.contains("accepts_request(&self, generation: u64, request_id: u64)"),
+        "browser session state should track generations when accepting async results"
+    );
 }
 
 #[test]

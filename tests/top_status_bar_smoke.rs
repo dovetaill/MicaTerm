@@ -385,7 +385,7 @@ fn titlebar_sync_feedback_contract_supports_a_persistent_inflight_state() {
 }
 
 #[test]
-fn titlebar_exposes_transfer_icon_with_queue_badge() {
+fn titlebar_no_longer_renders_numeric_transfer_badge() {
     let content = std::fs::read_to_string("ui/shell/titlebar.slint").unwrap();
 
     assert!(
@@ -393,8 +393,8 @@ fn titlebar_exposes_transfer_icon_with_queue_badge() {
         "titlebar should expose a dedicated transfer action button"
     );
     assert!(
-        content.contains("transfer-badge"),
-        "titlebar should surface a queue badge on the transfer action"
+        !content.contains("transfer-badge := Rectangle"),
+        "titlebar should stop rendering the raw numeric transfer badge once the semantic summary pill owns transfer status"
     );
 }
 
@@ -456,6 +456,23 @@ fn titlebar_exposes_transfer_activity_summary_binding() {
     assert!(
         shell_chrome.contains("window.set_transfer_queue_current_session("),
         "shell chrome should synchronize the current-session transfer count into the window"
+    );
+}
+
+#[test]
+fn titlebar_shows_semantic_transfer_summary_without_numeric_badge() {
+    let titlebar = std::fs::read_to_string("ui/shell/titlebar.slint").unwrap();
+
+    assert!(
+        titlebar.contains("Transfers active")
+            && titlebar.contains("Transfer issues need attention"),
+        "titlebar should use semantic transfer summary copy instead of raw numeric badge text"
+    );
+    assert!(
+        !titlebar.contains("\"\" + root.transfer-queue-active + \" active\"")
+            && !titlebar.contains("\"\" + root.transfer-queue-failed + \" issues\"")
+            && !titlebar.contains("\"\" + root.transfer-queue-current-session + \" this session\""),
+        "titlebar should stop concatenating raw numeric transfer counts into the summary pill"
     );
 }
 

@@ -38,13 +38,11 @@ fn transfer_center_exposes_live_transfer_rows_contract() {
     );
 }
 
-
 #[test]
 fn transfer_center_exposes_filter_and_row_action_contracts() {
     let content =
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
-    let app_window =
-        fs::read_to_string("ui/app-window.slint").expect("read app window source");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window source");
 
     assert!(
         content.contains("can_retry: bool")
@@ -71,6 +69,73 @@ fn transfer_center_exposes_filter_and_row_action_contracts() {
 }
 
 #[test]
+fn transfer_center_contract_includes_completed_file_actions() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("callback open-file-requested(string);"),
+        "transfer center should expose a completed-row file open callback"
+    );
+    assert!(
+        content.contains("callback open-folder-requested(string);"),
+        "transfer center should expose a completed-row folder open callback"
+    );
+    assert!(
+        content.contains("callback remove-requested(string);"),
+        "transfer center should expose a per-row remove callback"
+    );
+    assert!(
+        content.contains("callback clear-completed-requested();"),
+        "transfer center should expose a clear-completed toolbar callback"
+    );
+}
+
+#[test]
+fn completed_transfer_rows_expose_open_file_open_folder_and_remove() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window source");
+
+    assert!(
+        content.contains("can_open_file: bool")
+            && content.contains("can_open_folder: bool")
+            && content.contains("can_remove: bool"),
+        "completed transfer rows should project dedicated open-file/open-folder/remove capability flags"
+    );
+    assert!(
+        content.contains("\"Open File\"")
+            && content.contains("\"Open Folder\"")
+            && content.contains("\"Remove\""),
+        "completed transfer rows should render explicit Open File / Open Folder / Remove actions instead of reusing the attention-only workspace affordance"
+    );
+    assert!(
+        app_window.contains("callback transfer-center-open-file-requested(string);")
+            && app_window.contains("callback transfer-center-open-folder-requested(string);")
+            && app_window.contains("callback transfer-center-remove-requested(string);")
+            && app_window.contains("callback transfer-center-clear-completed-requested();"),
+        "app window should forward completed-row open/remove callbacks into bootstrap"
+    );
+}
+
+#[test]
+fn failed_transfer_rows_expose_retry_show_error_and_remove() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("can_retry: bool")
+            && content.contains("can_show_error: bool")
+            && content.contains("can_remove: bool"),
+        "failed transfer rows should project retry/show-error/remove capability flags"
+    );
+    assert!(
+        content.contains("\"Details\"") && content.contains("\"Remove\""),
+        "failed transfer rows should surface compact Details and Remove actions alongside Retry"
+    );
+}
+
+#[test]
 fn transfer_center_rows_use_compact_primary_and_workspace_actions() {
     let content =
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
@@ -86,8 +151,7 @@ fn transfer_center_rows_use_compact_primary_and_workspace_actions() {
 fn transfer_center_rows_expose_error_summary_and_tooltip_contract() {
     let content =
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
-    let app_window =
-        fs::read_to_string("ui/app-window.slint").expect("read app window source");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window source");
 
     assert!(
         content.contains("error_summary: string"),
@@ -111,8 +175,7 @@ fn transfer_center_rows_expose_error_summary_and_tooltip_contract() {
 fn conflict_modal_exposes_destination_scoped_batch_toggle_contract() {
     let modal =
         fs::read_to_string("ui/components/sftp-conflict-modal.slint").expect("read conflict modal");
-    let app_window =
-        fs::read_to_string("ui/app-window.slint").expect("read app window source");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window source");
 
     assert!(
         modal.contains("in property <int> batch-conflict-count: 0;")
@@ -128,9 +191,11 @@ fn conflict_modal_exposes_destination_scoped_batch_toggle_contract() {
     );
     assert!(
         app_window.contains("in-out property <int> sftp-conflict-modal-batch-conflict-count: 0;")
-            && app_window.contains("in-out property <bool> sftp-conflict-modal-apply-to-batch: false;")
+            && app_window
+                .contains("in-out property <bool> sftp-conflict-modal-apply-to-batch: false;")
             && app_window.contains("callback sftp-conflict-modal-apply-to-batch-toggled(bool);")
-            && app_window.contains("batch-conflict-count: root.sftp-conflict-modal-batch-conflict-count;")
+            && app_window
+                .contains("batch-conflict-count: root.sftp-conflict-modal-batch-conflict-count;")
             && app_window.contains("apply-to-batch: root.sftp-conflict-modal-apply-to-batch;"),
         "app window should forward the conflict modal batch scope state and toggle callback into bootstrap"
     );
@@ -178,8 +243,7 @@ fn conflict_modal_exposes_keyboard_shortcuts_for_batch_toggle_and_primary_action
         "conflict modal should let Space toggle the destination batch checkbox when the scope card is present"
     );
     assert!(
-        modal.contains("event.text == Key.Return")
-            && modal.contains("root.replace-requested();"),
+        modal.contains("event.text == Key.Return") && modal.contains("root.replace-requested();"),
         "conflict modal should treat Enter as the default Replace action so the dialog behaves like a mature transfer sheet"
     );
 }
@@ -199,7 +263,8 @@ fn conflict_modal_batch_toggle_row_exposes_focus_and_checkbox_accessibility_cont
     );
     assert!(
         modal.contains("border-color: root.has-focus ? ThemeTokens.focus-ring")
-            && modal.contains("background: toggle-touch.pressed ? ThemeTokens.control-pressed-surface")
+            && modal
+                .contains("background: toggle-touch.pressed ? ThemeTokens.control-pressed-surface")
             && modal.contains(": root.has-focus ? ThemeTokens.control-active-surface"),
         "conflict modal batch-toggle row should reserve a distinct focus treatment instead of looking identical to the passive scope card"
     );
@@ -246,7 +311,9 @@ fn transfer_center_row_error_tooltip_yields_to_action_tooltips() {
         "transfer-center rows should close the error tooltip while resolve/workspace actions are hovered or focused"
     );
     assert!(
-        content.contains("!self.row-action-tooltip-active && self.has-hover && item.error_tooltip != \"\""),
+        content.contains(
+            "!self.row-action-tooltip-active && self.has-hover && item.error_tooltip != \"\""
+        ),
         "transfer-center rows should only schedule the inline error tooltip when no action tooltip is active"
     );
 }

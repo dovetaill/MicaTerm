@@ -4,7 +4,10 @@ use super::*;
 
 impl ShellViewModel {
     pub fn handle_context_menu_leaf_action(&mut self, action_id: &str) {
-        if self.context_menu_target_kind.is_some_and(is_sftp_context_target) {
+        if self
+            .context_menu_target_kind
+            .is_some_and(is_sftp_context_target)
+        {
             let roots = self.context_menu_roots();
             let Some(action) = find_action_node_by_id(&roots, action_id) else {
                 return;
@@ -17,7 +20,9 @@ impl ShellViewModel {
                 ContextMenuActionState::Planned => {
                     self.handle_planned_sftp_context_menu_action(action_id, action.label);
                 }
-                ContextMenuActionState::Disabled => {}
+                ContextMenuActionState::Disabled => {
+                    self.handle_disabled_sftp_context_menu_action(action_id);
+                }
             }
             return;
         }
@@ -253,6 +258,20 @@ impl ShellViewModel {
                     self.close_context_menu();
                 }
             }
+            "open-local" => {
+                if let Some(entry_id) = self.context_target_asset_id.clone() {
+                    self.pending_sftp_context_action =
+                        Some(PendingSftpContextAction::OpenLocal { entry_id });
+                    self.close_context_menu();
+                }
+            }
+            "edit-locally" => {
+                if let Some(entry_id) = self.context_target_asset_id.clone() {
+                    self.pending_sftp_context_action =
+                        Some(PendingSftpContextAction::EditLocally { entry_id });
+                    self.close_context_menu();
+                }
+            }
             "new-folder" => self.open_sftp_new_folder_modal(),
             "upload-files" => {
                 self.pending_sftp_context_action = Some(PendingSftpContextAction::UploadFiles);
@@ -324,12 +343,14 @@ impl ShellViewModel {
                 self.copy_sftp_text_to_clipboard(self.sftp_panel_path(), "Current path");
             }
             "copy-file-path" | "copy-folder-path" => {
-                if let Some(text) = self.context_target_sftp_entry_text(|entry| entry.path.clone()) {
+                if let Some(text) = self.context_target_sftp_entry_text(|entry| entry.path.clone())
+                {
                     self.copy_sftp_text_to_clipboard(text, "Remote path");
                 }
             }
             "copy-file-name" => {
-                if let Some(text) = self.context_target_sftp_entry_text(|entry| entry.name.clone()) {
+                if let Some(text) = self.context_target_sftp_entry_text(|entry| entry.name.clone())
+                {
                     self.copy_sftp_text_to_clipboard(text, "File name");
                 }
             }
@@ -358,6 +379,19 @@ impl ShellViewModel {
             _ => format!("{label} is not wired yet."),
         };
         self.set_context_menu_feedback(message);
+    }
+
+    fn handle_disabled_sftp_context_menu_action(&mut self, action_id: &str) {
+        let message = match action_id {
+            "copy-sftp-entry" => Some("Copy is not available for SFTP yet."),
+            "cut-sftp-entry" => Some("Cut is not available for SFTP yet."),
+            "paste-sftp" => Some("Paste is not available for SFTP yet."),
+            "permissions-sftp" => Some("Permissions are not available for SFTP yet."),
+            _ => None,
+        };
+        if let Some(message) = message {
+            self.set_context_menu_feedback(message);
+        }
     }
 
     fn copy_sftp_text_to_clipboard(&mut self, text: String, label: &str) {

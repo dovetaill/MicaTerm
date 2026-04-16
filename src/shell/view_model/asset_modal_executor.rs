@@ -55,26 +55,15 @@ impl ShellViewModel {
                 if self.sftp_name_validation(&draft_name, None) != AssetNameValidation::Valid {
                     return false;
                 }
-
-                if self.active_workspace_terminal_session_id().is_none() {
+                if self.quick_browser_linked_terminal_session_id().is_none() {
                     return false;
                 }
-                let path = sftp_child_path(self.sftp_panel_path().as_str(), draft_name.trim());
-                let entry_id = format!("sftp-dir-{}", path);
-                let next_entry = SftpDirectoryEntry {
-                    id: entry_id.clone(),
-                    name: draft_name.trim().to_string(),
-                    path,
-                    kind: crate::app::sftp::SftpDirectoryEntryKind::Directory,
-                    modified_unix_seconds: None,
-                    size_bytes: None,
-                };
 
-                if let Some(state) = self.active_sftp_session_state_mut() {
-                    state.entries.push(next_entry);
-                    state.selected_entry_ids = vec![entry_id.clone()];
-                }
-                self.context_target_asset_id = Some(entry_id);
+                let refresh_path = self.sftp_panel_path();
+                let path = sftp_child_path(refresh_path.as_str(), draft_name.trim());
+                self.pending_sftp_context_action =
+                    Some(PendingSftpContextAction::CreateFolder { path, refresh_path });
+                self.context_target_asset_id = None;
                 self.asset_modal_state = None;
                 return true;
             }
@@ -372,21 +361,24 @@ impl ShellViewModel {
                 {
                     return false;
                 }
-
-                let current_path = self.sftp_panel_path();
-                let next_name = draft_name.trim().to_string();
-                if let Some(state) = self.active_sftp_session_state_mut()
-                    && let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == entry_id)
-                {
-                    entry.name = next_name.clone();
-                    entry.path = sftp_child_path(current_path.as_str(), next_name.as_str());
-                    state.selected_entry_ids = vec![entry.id.clone()];
-                    self.context_target_asset_id = Some(entry.id.clone());
-                    self.asset_modal_state = None;
-                    return true;
+                if self.quick_browser_linked_terminal_session_id().is_none() {
+                    return false;
                 }
 
-                return false;
+                let Some(entry) = self.active_sftp_entry(entry_id.as_str()).cloned() else {
+                    return false;
+                };
+                let refresh_path = self.sftp_panel_path();
+                let next_name = draft_name.trim().to_string();
+                let next_path = sftp_child_path(refresh_path.as_str(), next_name.as_str());
+                self.pending_sftp_context_action = Some(PendingSftpContextAction::RenameEntry {
+                    from: entry.path,
+                    to: next_path,
+                    refresh_path,
+                });
+                self.context_target_asset_id = Some(entry_id);
+                self.asset_modal_state = None;
+                return true;
             }
             AssetModalState::RenameAsset {
                 asset_id,
