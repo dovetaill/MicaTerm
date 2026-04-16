@@ -789,17 +789,17 @@ fn resolve_sftp_directory_actions(selection: &SelectionContext) -> Vec<ContextMe
 fn resolve_sftp_file_actions(selection: &SelectionContext) -> Vec<ContextMenuActionNode> {
     vec![
         action_with_state(
-            "open-remote",
+            "open-local",
             "Open",
             "document",
             selection_state(selection),
             false,
         ),
         action_with_state(
-            "open-with-remote",
-            "Open With...",
+            "edit-locally",
+            "Edit Locally",
             "document-code",
-            planned_selection_state(selection),
+            selection_state(selection),
             false,
         ),
         action_with_state(

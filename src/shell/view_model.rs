@@ -507,6 +507,8 @@ struct PendingSnippetActivation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingSftpContextAction {
     OpenRemote { entry_id: String },
+    OpenLocal { entry_id: String },
+    EditLocally { entry_id: String },
     UploadFiles,
     UploadFolder,
     DownloadSelection { entry_ids: Vec<String> },

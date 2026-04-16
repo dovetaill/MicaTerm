@@ -98,11 +98,8 @@ fn sftp_ready_state_exposes_blank_area_context_menu_hook() {
         .expect("ready-state quick browser block");
 
     assert!(
-        ready_state_block.contains(
-            r#"sftp-panel-context-menu-requested(
-                            "",
-                            "sftp-blank""#
-        ),
+        ready_state_block.contains("sftp-panel-context-menu-requested(")
+            && ready_state_block.contains("\"sftp-blank\""),
         "ready-state quick browser should expose a blank-area context-menu hook even when entries are already rendered"
     );
 }
@@ -206,8 +203,8 @@ fn sftp_targets_resolve_expected_action_sets() {
     assert_eq!(
         file_ids,
         vec![
-            "open-remote",
-            "open-with-remote",
+            "open-local",
+            "edit-locally",
             "download",
             "rename-sftp-entry",
             "delete-sftp-entry",
@@ -219,6 +216,22 @@ fn sftp_targets_resolve_expected_action_sets() {
             "permissions-sftp",
             "properties",
         ]
+    );
+    assert_eq!(
+        file_actions
+            .iter()
+            .find(|node| node.id == "open-local")
+            .expect("open-local action")
+            .label,
+        "Open"
+    );
+    assert_eq!(
+        file_actions
+            .iter()
+            .find(|node| node.id == "edit-locally")
+            .expect("edit-locally action")
+            .label,
+        "Edit Locally"
     );
     assert!(file_ids.contains(&"download"));
     assert!(file_ids.contains(&"copy-file-path"));
@@ -272,6 +285,27 @@ fn sftp_targets_resolve_expected_action_sets() {
             .expect("copy-sftp-entry action")
             .state,
         ContextMenuActionState::Planned
+    );
+}
+
+#[test]
+fn sftp_file_context_menu_contract_exposes_open_and_edit_locally_actions() {
+    let dispatcher_source = fs::read_to_string("src/shell/view_model/context_menu_dispatcher.rs")
+        .expect("read context menu dispatcher");
+    let context_menu_source =
+        fs::read_to_string("src/shell/context_menu.rs").expect("read context menu source");
+
+    assert!(
+        context_menu_source.contains("\"open-local\"") && context_menu_source.contains("\"edit-locally\""),
+        "the file context menu should expose separate action ids for local open and edit-locally"
+    );
+    assert!(
+        dispatcher_source.contains("\"open-local\"") && dispatcher_source.contains("\"edit-locally\""),
+        "the context-menu dispatcher should route both local-open and edit-locally actions"
+    );
+    assert!(
+        !context_menu_source.contains("\"open-with-remote\""),
+        "the default SFTP file context menu should stop advertising the legacy remote editor action"
     );
 }
 

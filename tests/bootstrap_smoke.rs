@@ -110,6 +110,63 @@ fn bootstrap_sftp_source_routes_browser_loads_through_async_dispatcher_contract(
 }
 
 #[test]
+fn open_remote_file_queues_background_download_instead_of_modal_editor() {
+    let bootstrap_sftp = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+    let local_open_source = fs::read_to_string("src/app/sftp/local_open.rs").unwrap_or_default();
+
+    let item_activated_block = bootstrap_sftp
+        .split("window.on_sftp_panel_item_activated(move |entry_id, item_kind| {")
+        .nth(1)
+        .and_then(|rest| rest.split("window.on_sftp_panel_open_queue_requested").next())
+        .expect("sftp item activation block should exist");
+    let open_action_block = bootstrap_sftp
+        .split("PendingSftpContextAction::OpenRemote { entry_id } => {")
+        .nth(1)
+        .and_then(|rest| rest.split("PendingSftpContextAction::UploadFiles =>").next())
+        .expect("sftp open action block should exist");
+
+    assert!(
+        local_open_source.contains("DownloadAndOpen"),
+        "the SFTP open flow should define a dedicated local-open action instead of reusing the remote modal"
+    );
+    assert!(
+        !item_activated_block.contains("open_sftp_remote_file_editor_for_entry("),
+        "activating a file row should stop routing the default Open path through the remote editor modal"
+    );
+    assert!(
+        !open_action_block.contains("open_sftp_remote_file_editor_for_entry("),
+        "the default SFTP file context action should stop depending on the remote editor modal"
+    );
+}
+
+#[test]
+fn edit_locally_tracks_working_copy_and_queues_async_upload_on_save() {
+    let bootstrap_sftp = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+    let context_dispatcher = fs::read_to_string("src/shell/view_model/context_menu_dispatcher.rs")
+        .expect("read context menu dispatcher");
+    let working_copy_source = fs::read_to_string("src/app/sftp/working_copy.rs").unwrap_or_default();
+    let local_open_source = fs::read_to_string("src/app/sftp/local_open.rs").unwrap_or_default();
+
+    assert!(
+        working_copy_source.contains("pub struct SftpWorkingCopy")
+            && working_copy_source.contains("pub upload_on_save: bool"),
+        "edit-locally should track a managed working copy that records whether local saves upload back"
+    );
+    assert!(
+        local_open_source.contains("EditLocally"),
+        "the local-open helper should distinguish edit-locally from plain download-and-open"
+    );
+    assert!(
+        context_dispatcher.contains("\"edit-locally\""),
+        "the context-menu dispatcher should expose a distinct edit-locally action"
+    );
+    assert!(
+        bootstrap_sftp.contains("sftp_upload_file_async("),
+        "edit-locally save-back should queue async uploads instead of calling the synchronous UI-thread wrapper"
+    );
+}
+
+#[test]
 fn bootstrap_source_uses_terminal_presenter_contract() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
 
@@ -9991,12 +10048,13 @@ fn latest_sftp_directory_request_wins_when_slower_results_finish_last() {
 }
 
 #[test]
-fn activating_sftp_rows_navigates_directories_and_opens_remote_text_files() {
+fn activating_sftp_rows_navigates_directories_and_downloads_files_for_local_open() {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
     let sftp_state = RecordingSftpState::default();
-    sftp_state.set_remote_file("/srv/app/releases/release.tar.gz", b"port=22\n".to_vec());
+    sftp_state.set_remote_file("/srv/app/releases/release.tar.gz", b"port=22
+".to_vec());
     bind_with_launcher(
         &app,
         None,
@@ -10027,34 +10085,17 @@ fn activating_sftp_rows_navigates_directories_and_opens_remote_text_files() {
     app.invoke_sftp_panel_item_activated("entry-release".into(), "file".into());
     flush_runtime_projection();
 
-    assert!(app.get_sftp_remote_file_modal_open());
-    assert_eq!(
-        app.get_sftp_remote_file_modal_path().as_str(),
-        "/srv/app/releases/release.tar.gz"
-    );
-    assert_eq!(
-        app.get_sftp_remote_file_modal_content().as_str(),
-        "port=22\n"
+    assert!(
+        !app.get_sftp_remote_file_modal_open(),
+        "default Open should download and hand off locally instead of surfacing the legacy remote editor modal"
     );
     assert_eq!(
         sftp_state.take_download_file_calls(),
         vec!["/srv/app/releases/release.tar.gz".to_string()]
     );
-
-    app.invoke_sftp_remote_file_modal_content_changed("port=2022\n".into());
-    app.invoke_sftp_remote_file_modal_save_requested();
-    flush_runtime_projection();
-
-    assert_eq!(
-        sftp_state.take_upload_file_calls(),
-        vec![(
-            "/srv/app/releases/release.tar.gz".to_string(),
-            b"port=2022\n".to_vec(),
-        )]
-    );
-    assert_eq!(
-        app.get_sftp_remote_file_modal_content().as_str(),
-        "port=2022\n"
+    assert!(
+        sftp_state.take_upload_file_calls().is_empty(),
+        "default Open should not synchronously upload anything back"
     );
 }
 

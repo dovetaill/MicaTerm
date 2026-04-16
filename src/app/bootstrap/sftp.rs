@@ -892,7 +892,8 @@ pub(super) fn drain_sftp_transfer_background_messages(
     changed
 }
 
-pub(super) fn sftp_remote_file_title(remote_path: &str) -> String {
+#[allow(dead_code)]
+fn sftp_remote_file_title(remote_path: &str) -> String {
     remote_path
         .rsplit('/')
         .next()
@@ -901,7 +902,9 @@ pub(super) fn sftp_remote_file_title(remote_path: &str) -> String {
         .to_string()
 }
 
-pub(super) fn open_sftp_remote_file_editor_for_entry(
+#[allow(dead_code)]
+// Legacy modal fallback kept around while the default SFTP file actions use local files.
+fn open_sftp_remote_file_editor_for_entry(
     state: &mut ShellViewModel,
     manager: &SessionManager,
     session_id: Uuid,
@@ -935,6 +938,116 @@ pub(super) fn open_sftp_remote_file_editor_for_entry(
             format!("Failed to open remote file: {err}"),
         ),
     }
+}
+
+fn start_sftp_working_copy_upload_monitor(
+    manager: SessionManager,
+    working_copy: crate::app::sftp::SftpWorkingCopy,
+) {
+    if !working_copy.upload_on_save {
+        return;
+    }
+
+    let runtime_handle = manager.runtime_handle();
+    std::thread::spawn(move || {
+        let mut last_snapshot =
+            crate::app::sftp::snapshot_working_copy(working_copy.local_path.as_path());
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let next_snapshot =
+                crate::app::sftp::snapshot_working_copy(working_copy.local_path.as_path());
+            if !crate::app::sftp::working_copy_has_changed(&last_snapshot, &next_snapshot) {
+                continue;
+            }
+            last_snapshot = next_snapshot;
+
+            let Ok(bytes) = std::fs::read(working_copy.local_path.as_path()) else {
+                continue;
+            };
+            let manager = manager.clone();
+            let session_id = working_copy.session_id;
+            let remote_path = working_copy.remote_path.clone();
+            runtime_handle.spawn(async move {
+                if let Err(err) = manager
+                    .sftp_upload_file_async(session_id, remote_path.as_str(), bytes)
+                    .await
+                {
+                    tracing::error!(
+                        target: "app.sftp",
+                        remote_path,
+                        error = %err,
+                        "failed to upload a saved local SFTP working copy"
+                    );
+                }
+            });
+        }
+    });
+}
+
+fn queue_sftp_local_file_action(
+    manager: &SessionManager,
+    session_id: Uuid,
+    remote_path: &str,
+    action: crate::app::sftp::SftpOpenAction,
+) -> bool {
+    let Ok(local_path) = crate::app::sftp::prepare_local_open_path(session_id, remote_path, action)
+    else {
+        return false;
+    };
+
+    let manager = manager.clone();
+    let remote_path = remote_path.to_string();
+    manager.runtime_handle().spawn(async move {
+        let bytes = match manager
+            .sftp_download_file_async(session_id, remote_path.as_str())
+            .await
+        {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                tracing::error!(
+                    target: "app.sftp",
+                    remote_path,
+                    error = %err,
+                    "failed to download a remote SFTP file for local open"
+                );
+                return;
+            }
+        };
+
+        if let Some(parent) = local_path.parent()
+            && let Err(err) = std::fs::create_dir_all(parent)
+        {
+            tracing::error!(
+                target: "app.sftp",
+                local_path = %local_path.display(),
+                error = %err,
+                "failed to create the local SFTP staging directory"
+            );
+            return;
+        }
+        if let Err(err) = std::fs::write(local_path.as_path(), &bytes) {
+            tracing::error!(
+                target: "app.sftp",
+                local_path = %local_path.display(),
+                error = %err,
+                "failed to persist the downloaded SFTP file locally"
+            );
+            return;
+        }
+
+        if action == crate::app::sftp::SftpOpenAction::EditLocally {
+            let working_copy = crate::app::sftp::SftpWorkingCopy::new(
+                session_id,
+                remote_path.clone(),
+                local_path.clone(),
+                true,
+            );
+            start_sftp_working_copy_upload_monitor(manager.clone(), working_copy);
+        }
+
+        crate::app::sftp::open_path_locally(local_path.as_path());
+    });
+    true
 }
 
 pub(super) fn initial_sftp_browser_path(
@@ -1038,29 +1151,51 @@ pub(super) fn apply_pending_sftp_context_action(
             let Some(entry) = state.active_sftp_entry(entry_id.as_str()).cloned() else {
                 return false;
             };
+            if entry.kind != SftpDirectoryEntryKind::Directory {
+                return false;
+            }
             let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
                 return false;
             };
-
-            if entry.kind == SftpDirectoryEntryKind::Directory {
-                let request = controller.navigate(session_id, entry.path.as_str());
-                queue_sftp_browser_request(
-                    state,
-                    controller,
-                    &session_bridge.manager,
-                    request,
-                    async_runtime,
-                    browser_result_tx,
-                )
-            } else {
-                open_sftp_remote_file_editor_for_entry(
-                    state,
+            let request = controller.navigate(session_id, entry.path.as_str());
+            queue_sftp_browser_request(
+                state,
+                controller,
+                &session_bridge.manager,
+                request,
+                async_runtime,
+                browser_result_tx,
+            )
+        }
+        PendingSftpContextAction::OpenLocal { entry_id } => {
+            let Some(entry) = state.active_sftp_entry(entry_id.as_str()).cloned() else {
+                return false;
+            };
+            let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
+                return false;
+            };
+            entry.kind == SftpDirectoryEntryKind::File
+                && queue_sftp_local_file_action(
                     &session_bridge.manager,
                     session_id,
                     entry.path.as_str(),
-                );
-                true
-            }
+                    crate::app::sftp::SftpOpenAction::DownloadAndOpen,
+                )
+        }
+        PendingSftpContextAction::EditLocally { entry_id } => {
+            let Some(entry) = state.active_sftp_entry(entry_id.as_str()).cloned() else {
+                return false;
+            };
+            let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
+                return false;
+            };
+            entry.kind == SftpDirectoryEntryKind::File
+                && queue_sftp_local_file_action(
+                    &session_bridge.manager,
+                    session_id,
+                    entry.path.as_str(),
+                    crate::app::sftp::SftpOpenAction::EditLocally,
+                )
         }
         PendingSftpContextAction::UploadFiles => rfd::FileDialog::new()
             .set_title("Upload Files to SFTP")
@@ -1705,11 +1840,11 @@ pub(super) fn bind_sftp_callbacks(
             } else if let Some(session_bridge) = session_bridge_ref.as_ref()
                 && let Some(session_id) = quick_browser_terminal_session_uuid(&state)
             {
-                open_sftp_remote_file_editor_for_entry(
-                    &mut state,
+                panel_changed |= queue_sftp_local_file_action(
                     &session_bridge.manager,
                     session_id,
                     entry.path.as_str(),
+                    crate::app::sftp::SftpOpenAction::DownloadAndOpen,
                 );
             }
         }

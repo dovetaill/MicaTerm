@@ -253,6 +253,20 @@ impl ShellViewModel {
                     self.close_context_menu();
                 }
             }
+            "open-local" => {
+                if let Some(entry_id) = self.context_target_asset_id.clone() {
+                    self.pending_sftp_context_action =
+                        Some(PendingSftpContextAction::OpenLocal { entry_id });
+                    self.close_context_menu();
+                }
+            }
+            "edit-locally" => {
+                if let Some(entry_id) = self.context_target_asset_id.clone() {
+                    self.pending_sftp_context_action =
+                        Some(PendingSftpContextAction::EditLocally { entry_id });
+                    self.close_context_menu();
+                }
+            }
             "new-folder" => self.open_sftp_new_folder_modal(),
             "upload-files" => {
                 self.pending_sftp_context_action = Some(PendingSftpContextAction::UploadFiles);
