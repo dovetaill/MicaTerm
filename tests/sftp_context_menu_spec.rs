@@ -1,3 +1,5 @@
+use std::fs;
+
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store;
 use mica_term::app::sftp::{
@@ -86,6 +88,24 @@ fn ready_mixed_selection(file_count: usize, directory_count: usize) -> Selection
     }
 }
 
+#[test]
+fn sftp_ready_state_exposes_blank_area_context_menu_hook() {
+    let source = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel");
+    let ready_state_block = source
+        .split(r#"if root.sftp-panel-mode != "empty" :"#)
+        .nth(1)
+        .and_then(|rest| rest.split("tooltip-delay := Timer {").next())
+        .expect("ready-state quick browser block");
+
+    assert!(
+        ready_state_block.contains(
+            r#"sftp-panel-context-menu-requested(
+                            "",
+                            "sftp-blank""#
+        ),
+        "ready-state quick browser should expose a blank-area context-menu hook even when entries are already rendered"
+    );
+}
 #[test]
 fn sftp_targets_resolve_expected_action_sets() {
     let blank_actions = resolve_action_tree(

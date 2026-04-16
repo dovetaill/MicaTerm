@@ -413,27 +413,6 @@ export component Titlebar inherits Rectangle {
                 }
             }
 
-            if root.transfer-queue-total > 0 : transfer-badge := Rectangle {
-                x: transfer-button.x + 21px;
-                y: 1px;
-                min-width: 16px;
-                height: 16px;
-                border-radius: 8px;
-                background: ThemeTokens.accent;
-
-                Text {
-                    x: 0px;
-                    y: 0px;
-                    width: parent.width;
-                    height: parent.height;
-                    text: root.transfer-queue-total > 99 ? "99+" : "" + root.transfer-queue-total;
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    font-size: 9px;
-                    font-weight: 700;
-                }
-            }
 
             divider-line := Rectangle {
                 x: 164px;

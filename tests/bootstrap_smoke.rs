@@ -287,6 +287,40 @@ fn path_errors_render_as_lightweight_status_rows_instead_of_full_height_empty_ca
     );
 }
 
+#[test]
+fn transfer_center_projection_contract_includes_completed_file_actions() {
+    let shell_chrome_source =
+        fs::read_to_string("src/app/bootstrap/shell_chrome.rs").expect("read shell chrome");
+
+    assert!(
+        shell_chrome_source.contains("can_open_file:"),
+        "bootstrap transfer projection should publish a completed-row open-file capability"
+    );
+    assert!(
+        shell_chrome_source.contains("can_open_folder:"),
+        "bootstrap transfer projection should publish a completed-row open-folder capability"
+    );
+    assert!(
+        shell_chrome_source.contains("can_remove:"),
+        "bootstrap transfer projection should publish a row removal capability"
+    );
+}
+
+#[test]
+fn failed_transfer_rows_keep_retry_and_show_error_projection_contract() {
+    let shell_chrome_source =
+        fs::read_to_string("src/app/bootstrap/shell_chrome.rs").expect("read shell chrome");
+
+    assert!(
+        shell_chrome_source.contains("can_retry:"),
+        "bootstrap transfer projection should keep retry capability for failed rows"
+    );
+    assert!(
+        shell_chrome_source.contains("can_show_error:"),
+        "bootstrap transfer projection should explicitly publish whether failed rows can surface show-error follow-up actions"
+    );
+}
+
 #[derive(Default)]
 struct AssetRepoState {
     load_calls: usize,

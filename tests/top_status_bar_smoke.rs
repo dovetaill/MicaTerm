@@ -385,7 +385,7 @@ fn titlebar_sync_feedback_contract_supports_a_persistent_inflight_state() {
 }
 
 #[test]
-fn titlebar_exposes_transfer_icon_with_queue_badge() {
+fn titlebar_no_longer_renders_numeric_transfer_badge() {
     let content = std::fs::read_to_string("ui/shell/titlebar.slint").unwrap();
 
     assert!(
@@ -393,8 +393,8 @@ fn titlebar_exposes_transfer_icon_with_queue_badge() {
         "titlebar should expose a dedicated transfer action button"
     );
     assert!(
-        content.contains("transfer-badge"),
-        "titlebar should surface a queue badge on the transfer action"
+        !content.contains("transfer-badge := Rectangle"),
+        "titlebar should stop rendering the raw numeric transfer badge once the semantic summary pill owns transfer status"
     );
 }
 

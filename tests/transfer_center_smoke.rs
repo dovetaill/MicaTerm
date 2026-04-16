@@ -71,6 +71,29 @@ fn transfer_center_exposes_filter_and_row_action_contracts() {
 }
 
 #[test]
+fn transfer_center_contract_includes_completed_file_actions() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("callback open-file-requested(string);"),
+        "transfer center should expose a completed-row file open callback"
+    );
+    assert!(
+        content.contains("callback open-folder-requested(string);"),
+        "transfer center should expose a completed-row folder open callback"
+    );
+    assert!(
+        content.contains("callback remove-requested(string);"),
+        "transfer center should expose a per-row remove callback"
+    );
+    assert!(
+        content.contains("callback clear-completed-requested();"),
+        "transfer center should expose a clear-completed toolbar callback"
+    );
+}
+
+#[test]
 fn transfer_center_rows_use_compact_primary_and_workspace_actions() {
     let content =
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");

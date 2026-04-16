@@ -218,6 +218,10 @@ export component TransferCenter inherits Rectangle {
     callback retry-requested(string);
     callback resolve-conflict-requested(string);
     callback open-workspace-requested(string);
+    callback open-file-requested(string);
+    callback open-folder-requested(string);
+    callback remove-requested(string);
+    callback clear-completed-requested();
     private property <string> tooltip-text-value: "";
     private property <bool> tooltip-visible-value: false;
     private property <string> tooltip-source-id-value: "";
