@@ -10,8 +10,8 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::app::sftp::{
-    DownloadTransferEntry, SftpDirectoryEntry, SftpRuntimeHandle, SftpSessionBinding,
-    SftpSessionBindingState, TransferQueue, collect_download_targets,
+    DownloadTransferEntry, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpRuntimeHandle,
+    SftpSessionBinding, SftpSessionBindingState, TransferQueue, collect_download_targets,
     delete_entries as delete_sftp_entries, execute_queued_transfers,
     execute_queued_transfers_with_progress, move_entry_between_directories,
 };
@@ -412,6 +412,22 @@ impl SessionManager {
         runtime.rename(from, to).await
     }
 
+    pub async fn sftp_delete_entries_async(
+        &self,
+        session_id: Uuid,
+        entries: Vec<SftpDirectoryEntry>,
+    ) -> Result<()> {
+        let runtime = self.sftp_runtime(session_id)?;
+        for entry in entries {
+            if entry.kind == SftpDirectoryEntryKind::Directory {
+                runtime.delete_dir(entry.path.as_str()).await?;
+            } else {
+                runtime.delete_file(entry.path.as_str()).await?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn sftp_execute_queued_transfers(
         &self,
         session_id: Uuid,
@@ -432,11 +448,12 @@ impl SessionManager {
         F: FnMut(&TransferQueue),
     {
         let runtime = self.sftp_runtime(session_id)?;
-        self.runtime_handle.block_on(execute_queued_transfers_with_progress(
-            &runtime,
-            queue,
-            on_queue_updated,
-        ))
+        self.runtime_handle
+            .block_on(execute_queued_transfers_with_progress(
+                &runtime,
+                queue,
+                on_queue_updated,
+            ))
     }
 
     pub fn sftp_collect_download_targets(

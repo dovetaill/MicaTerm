@@ -23,8 +23,8 @@ use crate::app::quick_launch_preferences::{QuickLaunchPreferences, record_recent
 use crate::app::sftp::{
     FILE_BROWSER_MODIFIED_COLUMN_MIN_PX, FILE_BROWSER_SIZE_COLUMN_MIN_PX,
     FILE_BROWSER_TYPE_COLUMN_MIN_PX, FileBrowserSession, FileBrowserSortColumn,
-    FileBrowserSortDirection, FileBrowserSortState, SftpDirectoryEntry, SftpFollowMode,
-    SftpPanelMode, SftpSessionBindingState, TransferQueueSummary, HostProfileRef,
+    FileBrowserSortDirection, FileBrowserSortState, HostProfileRef, SftpDirectoryEntry,
+    SftpFollowMode, SftpPanelMode, SftpSessionBindingState, TransferQueueSummary,
 };
 use crate::app::ssh::credentials::{
     SshCredentialKind, keychain_identity_credential_ref, keychain_key_credential_ref,
@@ -506,12 +506,33 @@ struct PendingSnippetActivation {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingSftpContextAction {
-    OpenRemote { entry_id: String },
-    OpenLocal { entry_id: String },
-    EditLocally { entry_id: String },
+    OpenRemote {
+        entry_id: String,
+    },
+    OpenLocal {
+        entry_id: String,
+    },
+    EditLocally {
+        entry_id: String,
+    },
+    CreateFolder {
+        path: String,
+        refresh_path: String,
+    },
+    RenameEntry {
+        from: String,
+        to: String,
+        refresh_path: String,
+    },
+    DeleteEntries {
+        entries: Vec<SftpDirectoryEntry>,
+        refresh_path: String,
+    },
     UploadFiles,
     UploadFolder,
-    DownloadSelection { entry_ids: Vec<String> },
+    DownloadSelection {
+        entry_ids: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1130,7 +1151,8 @@ impl ShellViewModel {
         anchor_x: f32,
         anchor_y: f32,
     ) {
-        let target_kind = self.resolve_context_target_kind_for_selection(target_kind, target_id.as_deref());
+        let target_kind =
+            self.resolve_context_target_kind_for_selection(target_kind, target_id.as_deref());
         self.context_menu_open = true;
         self.context_menu_target_kind = Some(target_kind);
         self.context_target_asset_id = target_id.clone();
@@ -1263,6 +1285,7 @@ impl ShellViewModel {
         };
 
         if current.state == ContextMenuActionState::Disabled {
+            self.handle_context_menu_leaf_action(current.id);
             return;
         }
 

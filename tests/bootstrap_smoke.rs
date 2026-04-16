@@ -93,7 +93,8 @@ fn rgb_tuple_to_hex((red, green, blue): (u8, u8, u8)) -> u32 {
 
 #[test]
 fn bootstrap_sftp_source_routes_browser_loads_through_async_dispatcher_contract() {
-    let bootstrap_sftp = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
 
     assert!(
         bootstrap_sftp.contains("SftpOperationKind::LoadDir"),
@@ -104,25 +105,33 @@ fn bootstrap_sftp_source_routes_browser_loads_through_async_dispatcher_contract(
         "bootstrap SFTP wiring should dispatch browser loads through a shared async helper"
     );
     assert!(
-        !bootstrap_sftp.contains("match manager.sftp_read_dir(request.session_id, request.path.as_str())"),
+        !bootstrap_sftp
+            .contains("match manager.sftp_read_dir(request.session_id, request.path.as_str())"),
         "quick-browser directory loads should stop calling the synchronous session-manager wrapper directly"
     );
 }
 
 #[test]
 fn open_remote_file_queues_background_download_instead_of_modal_editor() {
-    let bootstrap_sftp = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
     let local_open_source = fs::read_to_string("src/app/sftp/local_open.rs").unwrap_or_default();
 
     let item_activated_block = bootstrap_sftp
         .split("window.on_sftp_panel_item_activated(move |entry_id, item_kind| {")
         .nth(1)
-        .and_then(|rest| rest.split("window.on_sftp_panel_open_queue_requested").next())
+        .and_then(|rest| {
+            rest.split("window.on_sftp_panel_open_queue_requested")
+                .next()
+        })
         .expect("sftp item activation block should exist");
     let open_action_block = bootstrap_sftp
         .split("PendingSftpContextAction::OpenRemote { entry_id } => {")
         .nth(1)
-        .and_then(|rest| rest.split("PendingSftpContextAction::UploadFiles =>").next())
+        .and_then(|rest| {
+            rest.split("PendingSftpContextAction::UploadFiles =>")
+                .next()
+        })
         .expect("sftp open action block should exist");
 
     assert!(
@@ -141,10 +150,12 @@ fn open_remote_file_queues_background_download_instead_of_modal_editor() {
 
 #[test]
 fn edit_locally_tracks_working_copy_and_queues_async_upload_on_save() {
-    let bootstrap_sftp = fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
     let context_dispatcher = fs::read_to_string("src/shell/view_model/context_menu_dispatcher.rs")
         .expect("read context menu dispatcher");
-    let working_copy_source = fs::read_to_string("src/app/sftp/working_copy.rs").unwrap_or_default();
+    let working_copy_source =
+        fs::read_to_string("src/app/sftp/working_copy.rs").unwrap_or_default();
     let local_open_source = fs::read_to_string("src/app/sftp/local_open.rs").unwrap_or_default();
 
     assert!(
@@ -549,6 +560,10 @@ struct RecordingSftpState {
     read_dir_calls: Arc<Mutex<Vec<String>>>,
     download_file_calls: Arc<Mutex<Vec<String>>>,
     upload_file_calls: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+    mkdir_calls: Arc<Mutex<Vec<String>>>,
+    rename_calls: Arc<Mutex<Vec<(String, String)>>>,
+    remove_file_calls: Arc<Mutex<Vec<String>>>,
+    remove_dir_calls: Arc<Mutex<Vec<String>>>,
     upload_failures_remaining: Arc<Mutex<BTreeMap<String, usize>>>,
     remote_files: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
     event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<SessionRuntimeEvent>>>>,
@@ -579,6 +594,32 @@ impl RecordingSftpState {
                 .upload_file_calls
                 .lock()
                 .expect("lock sftp upload file calls"),
+        )
+    }
+
+    fn take_mkdir_calls(&self) -> Vec<String> {
+        std::mem::take(&mut *self.mkdir_calls.lock().expect("lock sftp mkdir calls"))
+    }
+
+    fn take_rename_calls(&self) -> Vec<(String, String)> {
+        std::mem::take(&mut *self.rename_calls.lock().expect("lock sftp rename calls"))
+    }
+
+    fn take_remove_file_calls(&self) -> Vec<String> {
+        std::mem::take(
+            &mut *self
+                .remove_file_calls
+                .lock()
+                .expect("lock sftp remove-file calls"),
+        )
+    }
+
+    fn take_remove_dir_calls(&self) -> Vec<String> {
+        std::mem::take(
+            &mut *self
+                .remove_dir_calls
+                .lock()
+                .expect("lock sftp remove-dir calls"),
         )
     }
 
@@ -935,19 +976,35 @@ impl SftpBackend for RecordingSftpBackend {
         })
     }
 
-    fn mkdir<'a>(
-        &'a self,
-        _path: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move { Ok(()) })
+    fn mkdir<'a>(&'a self, path: &'a str) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        let state = self.state.clone();
+        let path = path.to_string();
+        Box::pin(async move {
+            state
+                .mkdir_calls
+                .lock()
+                .expect("lock sftp mkdir calls")
+                .push(path);
+            Ok(())
+        })
     }
 
     fn rename<'a>(
         &'a self,
-        _from: &'a str,
-        _to: &'a str,
+        from: &'a str,
+        to: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move { Ok(()) })
+        let state = self.state.clone();
+        let from = from.to_string();
+        let to = to.to_string();
+        Box::pin(async move {
+            state
+                .rename_calls
+                .lock()
+                .expect("lock sftp rename calls")
+                .push((from, to));
+            Ok(())
+        })
     }
 
     fn path_exists<'a>(
@@ -964,10 +1021,7 @@ impl SftpBackend for RecordingSftpBackend {
                 .expect("lock remote files")
                 .contains_key(&path);
             let directory_exists = responses.contains_key(&path);
-            let listed_entry_exists = responses
-                .values()
-                .flatten()
-                .any(|entry| entry.path == path);
+            let listed_entry_exists = responses.values().flatten().any(|entry| entry.path == path);
             Ok(file_exists || directory_exists || listed_entry_exists)
         })
     }
@@ -1035,16 +1089,34 @@ impl SftpBackend for RecordingSftpBackend {
 
     fn remove_file<'a>(
         &'a self,
-        _remote_path: &'a str,
+        remote_path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move { Ok(()) })
+        let state = self.state.clone();
+        let remote_path = remote_path.to_string();
+        Box::pin(async move {
+            state
+                .remove_file_calls
+                .lock()
+                .expect("lock sftp remove-file calls")
+                .push(remote_path);
+            Ok(())
+        })
     }
 
     fn remove_dir<'a>(
         &'a self,
-        _remote_path: &'a str,
+        remote_path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move { Ok(()) })
+        let state = self.state.clone();
+        let remote_path = remote_path.to_string();
+        Box::pin(async move {
+            state
+                .remove_dir_calls
+                .lock()
+                .expect("lock sftp remove-dir calls")
+                .push(remote_path);
+            Ok(())
+        })
     }
 }
 
@@ -1055,7 +1127,11 @@ impl SftpBackend for DelayedRecordingSftpBackend {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<SftpDirectoryEntry>>> + Send + 'a>> {
         let state = self.state.clone();
         let response = self.responses.get(path).cloned().unwrap_or_default();
-        let delay = self.read_delay_by_path.get(path).copied().unwrap_or_default();
+        let delay = self
+            .read_delay_by_path
+            .get(path)
+            .copied()
+            .unwrap_or_default();
         let path = path.to_string();
         Box::pin(async move {
             if !delay.is_zero() {
@@ -1070,19 +1146,35 @@ impl SftpBackend for DelayedRecordingSftpBackend {
         })
     }
 
-    fn mkdir<'a>(
-        &'a self,
-        _path: &'a str,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move { Ok(()) })
+    fn mkdir<'a>(&'a self, path: &'a str) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        let state = self.state.clone();
+        let path = path.to_string();
+        Box::pin(async move {
+            state
+                .mkdir_calls
+                .lock()
+                .expect("lock sftp mkdir calls")
+                .push(path);
+            Ok(())
+        })
     }
 
     fn rename<'a>(
         &'a self,
-        _from: &'a str,
-        _to: &'a str,
+        from: &'a str,
+        to: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move { Ok(()) })
+        let state = self.state.clone();
+        let from = from.to_string();
+        let to = to.to_string();
+        Box::pin(async move {
+            state
+                .rename_calls
+                .lock()
+                .expect("lock sftp rename calls")
+                .push((from, to));
+            Ok(())
+        })
     }
 
     fn path_exists<'a>(
@@ -1099,10 +1191,7 @@ impl SftpBackend for DelayedRecordingSftpBackend {
                 .expect("lock delayed remote files")
                 .contains_key(&path);
             let directory_exists = responses.contains_key(&path);
-            let listed_entry_exists = responses
-                .values()
-                .flatten()
-                .any(|entry| entry.path == path);
+            let listed_entry_exists = responses.values().flatten().any(|entry| entry.path == path);
             Ok(file_exists || directory_exists || listed_entry_exists)
         })
     }
@@ -1170,16 +1259,34 @@ impl SftpBackend for DelayedRecordingSftpBackend {
 
     fn remove_file<'a>(
         &'a self,
-        _remote_path: &'a str,
+        remote_path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move { Ok(()) })
+        let state = self.state.clone();
+        let remote_path = remote_path.to_string();
+        Box::pin(async move {
+            state
+                .remove_file_calls
+                .lock()
+                .expect("lock sftp remove-file calls")
+                .push(remote_path);
+            Ok(())
+        })
     }
 
     fn remove_dir<'a>(
         &'a self,
-        _remote_path: &'a str,
+        remote_path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move { Ok(()) })
+        let state = self.state.clone();
+        let remote_path = remote_path.to_string();
+        Box::pin(async move {
+            state
+                .remove_dir_calls
+                .lock()
+                .expect("lock sftp remove-dir calls")
+                .push(remote_path);
+            Ok(())
+        })
     }
 }
 
@@ -3168,9 +3275,9 @@ fn find_console_asset_id(app: &AppWindow, label: &str) -> String {
     let items = app.get_console_asset_items();
     (0..items.row_count())
         .find_map(|index| {
-            items.row_data(index).and_then(|row| {
-                (row.label.as_str() == label).then(|| row.id.to_string())
-            })
+            items
+                .row_data(index)
+                .and_then(|row| (row.label.as_str() == label).then(|| row.id.to_string()))
         })
         .unwrap_or_else(|| panic!("expected console asset `{label}`"))
 }
@@ -6853,9 +6960,18 @@ fn duplicate_ssh_tabs_keep_resolved_titles_and_reuse_suffix_gaps() {
 
     let rows = app.get_workspace_tab_items();
     assert_eq!(rows.row_count(), 3);
-    assert_eq!(rows.row_data(0).expect("first prod tab").title.as_str(), "Prod Bastion");
-    assert_eq!(rows.row_data(1).expect("second prod tab").title.as_str(), "Prod Bastion(2)");
-    assert_eq!(rows.row_data(2).expect("third prod tab").title.as_str(), "Prod Bastion(3)");
+    assert_eq!(
+        rows.row_data(0).expect("first prod tab").title.as_str(),
+        "Prod Bastion"
+    );
+    assert_eq!(
+        rows.row_data(1).expect("second prod tab").title.as_str(),
+        "Prod Bastion(2)"
+    );
+    assert_eq!(
+        rows.row_data(2).expect("third prod tab").title.as_str(),
+        "Prod Bastion(3)"
+    );
 
     let second_tab_session_id = rows
         .row_data(1)
@@ -6869,9 +6985,30 @@ fn duplicate_ssh_tabs_keep_resolved_titles_and_reuse_suffix_gaps() {
 
     let reopened_rows = app.get_workspace_tab_items();
     assert_eq!(reopened_rows.row_count(), 3);
-    assert_eq!(reopened_rows.row_data(0).expect("first reopened tab").title.as_str(), "Prod Bastion");
-    assert_eq!(reopened_rows.row_data(1).expect("reused suffix tab").title.as_str(), "Prod Bastion(3)");
-    assert_eq!(reopened_rows.row_data(2).expect("reopened duplicate tab").title.as_str(), "Prod Bastion(2)");
+    assert_eq!(
+        reopened_rows
+            .row_data(0)
+            .expect("first reopened tab")
+            .title
+            .as_str(),
+        "Prod Bastion"
+    );
+    assert_eq!(
+        reopened_rows
+            .row_data(1)
+            .expect("reused suffix tab")
+            .title
+            .as_str(),
+        "Prod Bastion(3)"
+    );
+    assert_eq!(
+        reopened_rows
+            .row_data(2)
+            .expect("reopened duplicate tab")
+            .title
+            .as_str(),
+        "Prod Bastion(2)"
+    );
 }
 
 #[test]
@@ -9684,7 +9821,10 @@ fn refresh_and_path_submit_trigger_real_directory_reads() {
     assert_eq!(release_row.type_label.as_str(), "Archive");
     assert_eq!(release_row.size_label.as_str(), "14 KB");
     assert!(
-        release_row.meta_label.as_str().starts_with("Archive · 14 KB"),
+        release_row
+            .meta_label
+            .as_str()
+            .starts_with("Archive · 14 KB"),
         "quick browser rows should project a compact prebuilt meta label instead of rebuilding metadata fragments inside Slint"
     );
     assert!(
@@ -9789,7 +9929,8 @@ fn revisiting_a_previous_remote_path_keeps_its_cached_snapshot_visible_while_ref
 }
 
 #[test]
-fn switching_tabs_keeps_terminal_selection_fast_and_leaves_the_previous_quick_browser_snapshot_visible_until_refresh_completes() {
+fn switching_tabs_keeps_terminal_selection_fast_and_leaves_the_previous_quick_browser_snapshot_visible_until_refresh_completes()
+ {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -10053,8 +10194,12 @@ fn activating_sftp_rows_navigates_directories_and_downloads_files_for_local_open
 
     let app = AppWindow::new().unwrap();
     let sftp_state = RecordingSftpState::default();
-    sftp_state.set_remote_file("/srv/app/releases/release.tar.gz", b"port=22
-".to_vec());
+    sftp_state.set_remote_file(
+        "/srv/app/releases/release.tar.gz",
+        b"port=22
+"
+        .to_vec(),
+    );
     bind_with_launcher(
         &app,
         None,
@@ -10096,6 +10241,189 @@ fn activating_sftp_rows_navigates_directories_and_downloads_files_for_local_open
     assert!(
         sftp_state.take_upload_file_calls().is_empty(),
         "default Open should not synchronously upload anything back"
+    );
+}
+
+#[test]
+fn sftp_new_folder_dispatches_backend_mkdir_instead_of_local_push() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.invoke_sftp_panel_context_menu_requested("".into(), "sftp-blank".into(), 64.0, 96.0);
+    app.invoke_assets_context_menu_action_invoked("new-folder".into());
+    app.invoke_asset_folder_modal_name_changed("shared".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        sftp_state
+            .mkdir_calls
+            .lock()
+            .expect("lock sftp mkdir calls")
+            .len()
+            == 1
+    });
+
+    assert_eq!(
+        sftp_state.take_mkdir_calls(),
+        vec!["/srv/app/shared".to_string()]
+    );
+    let item_names = (0..app.get_sftp_panel_items().row_count())
+        .filter_map(|index| app.get_sftp_panel_items().row_data(index))
+        .map(|row| row.name.to_string())
+        .collect::<Vec<_>>();
+    assert!(
+        !item_names.iter().any(|name| name == "shared"),
+        "quick-browser new-folder should stop inserting a local-only row before the backend refresh completes"
+    );
+}
+
+#[test]
+fn sftp_rename_dispatches_backend_rename_instead_of_local_relabel() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_path().as_str() == "/srv/app/releases"
+    });
+
+    app.invoke_sftp_panel_context_menu_requested(
+        "entry-release".into(),
+        "sftp-file".into(),
+        80.0,
+        120.0,
+    );
+    app.invoke_assets_context_menu_action_invoked("rename-sftp-entry".into());
+    app.invoke_asset_rename_modal_name_changed("release-v2.tar.gz".into());
+    app.invoke_confirm_asset_rename_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        sftp_state
+            .rename_calls
+            .lock()
+            .expect("lock sftp rename calls")
+            .len()
+            == 1
+    });
+
+    assert_eq!(
+        sftp_state.take_rename_calls(),
+        vec![(
+            "/srv/app/releases/release.tar.gz".to_string(),
+            "/srv/app/releases/release-v2.tar.gz".to_string(),
+        )]
+    );
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("release row")
+            .name
+            .as_str(),
+        "release.tar.gz",
+        "quick-browser rename should wait for the remote refresh instead of relabeling the visible row immediately"
+    );
+}
+
+#[test]
+fn sftp_delete_dispatches_backend_remove_and_requires_confirmation() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_path().as_str() == "/srv/app/releases"
+    });
+
+    app.invoke_sftp_panel_context_menu_requested(
+        "entry-release".into(),
+        "sftp-file".into(),
+        80.0,
+        120.0,
+    );
+    app.invoke_assets_context_menu_action_invoked("delete-sftp-entry".into());
+    assert!(
+        sftp_state
+            .remove_file_calls
+            .lock()
+            .expect("lock sftp remove-file calls")
+            .is_empty(),
+        "delete should still wait for explicit confirmation"
+    );
+
+    app.invoke_confirm_delete_asset_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        sftp_state
+            .remove_file_calls
+            .lock()
+            .expect("lock sftp remove-file calls")
+            .len()
+            == 1
+    });
+
+    assert_eq!(
+        sftp_state.take_remove_file_calls(),
+        vec!["/srv/app/releases/release.tar.gz".to_string()]
+    );
+    assert!(
+        sftp_state.take_remove_dir_calls().is_empty(),
+        "deleting a file row should not call the directory removal backend"
+    );
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("release row")
+            .name
+            .as_str(),
+        "release.tar.gz",
+        "quick-browser delete should stop pruning the projected row locally before the remote refresh lands"
     );
 }
 
@@ -10467,7 +10795,10 @@ fn transfer_center_attention_rows_can_open_linked_sftp_workspace() {
         app.get_workspace_session_host_mode().as_str() == "sftp"
     });
 
-    assert_eq!(app.get_workspace_session_title().as_str(), "Files: Prod Bastion");
+    assert_eq!(
+        app.get_workspace_session_title().as_str(),
+        "Files: Prod Bastion"
+    );
 }
 
 #[test]
@@ -10486,8 +10817,10 @@ fn transfer_center_conflict_rows_can_open_resolve_modal_and_replace() {
 
     let temp_root = sample_vault_runtime_root("transfer-center-conflict-replace");
     let upload_path = temp_root.join("release.tar.gz");
-    fs::create_dir_all(temp_root.as_path()).expect("create transfer-center conflict replace temp root");
-    fs::write(&upload_path, b"archive bytes").expect("write transfer-center conflict replace upload source");
+    fs::create_dir_all(temp_root.as_path())
+        .expect("create transfer-center conflict replace temp root");
+    fs::write(&upload_path, b"archive bytes")
+        .expect("write transfer-center conflict replace upload source");
 
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
     app.invoke_asset_activated(ssh_id.into());
@@ -10566,9 +10899,12 @@ fn transfer_center_conflict_modal_can_apply_replace_to_matching_destination_batc
     let release_a_path = temp_root.join("release-a.tar.gz");
     let release_b_path = temp_root.join("release-b.tar.gz");
     let other_path = temp_root.join("other.env");
-    fs::create_dir_all(temp_root.as_path()).expect("create transfer-center conflict batch temp root");
-    fs::write(&release_a_path, b"archive a").expect("write transfer-center conflict batch source a");
-    fs::write(&release_b_path, b"archive b").expect("write transfer-center conflict batch source b");
+    fs::create_dir_all(temp_root.as_path())
+        .expect("create transfer-center conflict batch temp root");
+    fs::write(&release_a_path, b"archive a")
+        .expect("write transfer-center conflict batch source a");
+    fs::write(&release_b_path, b"archive b")
+        .expect("write transfer-center conflict batch source b");
     fs::write(&other_path, b"PORT=22\n").expect("write transfer-center conflict batch source c");
 
     sftp_state.set_remote_file("/srv/app/releases/release-a.tar.gz", b"existing a".to_vec());
@@ -10634,8 +10970,12 @@ fn transfer_center_conflict_modal_can_apply_replace_to_matching_destination_batc
                 conflict_titles.push(row.title.to_string());
             }
         }
-        conflict_titles.iter().any(|title| title == "release-a.tar.gz")
-            && conflict_titles.iter().any(|title| title == "release-b.tar.gz")
+        conflict_titles
+            .iter()
+            .any(|title| title == "release-a.tar.gz")
+            && conflict_titles
+                .iter()
+                .any(|title| title == "release-b.tar.gz")
             && conflict_titles.iter().any(|title| title == "other.env")
     });
 
@@ -10670,17 +11010,22 @@ fn transfer_center_conflict_modal_can_apply_replace_to_matching_destination_batc
             let Some(row) = rows.row_data(index) else {
                 continue;
             };
-            if row.title.as_str() == "release-a.tar.gz" && row.status_label.as_str() == "Completed" {
+            if row.title.as_str() == "release-a.tar.gz" && row.status_label.as_str() == "Completed"
+            {
                 release_a_done = true;
             }
-            if row.title.as_str() == "release-b.tar.gz" && row.status_label.as_str() == "Completed" {
+            if row.title.as_str() == "release-b.tar.gz" && row.status_label.as_str() == "Completed"
+            {
                 release_b_done = true;
             }
             if row.title.as_str() == "other.env" && row.status_label.as_str() == "Conflict" {
                 other_still_conflict = true;
             }
         }
-        !app.get_sftp_conflict_modal_open() && release_a_done && release_b_done && other_still_conflict
+        !app.get_sftp_conflict_modal_open()
+            && release_a_done
+            && release_b_done
+            && other_still_conflict
     });
 }
 
@@ -10780,8 +11125,10 @@ fn transfer_center_conflict_rows_can_skip_conflicted_transfer() {
 
     let temp_root = sample_vault_runtime_root("transfer-center-conflict-skip");
     let upload_path = temp_root.join("release.tar.gz");
-    fs::create_dir_all(temp_root.as_path()).expect("create transfer-center conflict skip temp root");
-    fs::write(&upload_path, b"archive bytes").expect("write transfer-center conflict skip upload source");
+    fs::create_dir_all(temp_root.as_path())
+        .expect("create transfer-center conflict skip temp root");
+    fs::write(&upload_path, b"archive bytes")
+        .expect("write transfer-center conflict skip upload source");
 
     let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
     app.invoke_asset_activated(ssh_id.into());

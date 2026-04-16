@@ -396,28 +396,28 @@ impl ShellViewModel {
         if let Some(AssetModalState::SftpDeleteEntriesConfirm { entry_ids, .. }) =
             self.asset_modal_state.clone()
         {
-            let should_clear_context_target = self
-                .context_target_asset_id
-                .as_deref()
-                .is_some_and(|entry_id| entry_ids.iter().any(|removed_id| removed_id == entry_id));
-            let Some(state) = self.active_sftp_session_state_mut() else {
+            if self.quick_browser_linked_terminal_session_id().is_none() {
                 return false;
-            };
-
-            let before_len = state.entries.len();
-            state
-                .entries
-                .retain(|entry| !entry_ids.iter().any(|id| id == &entry.id));
-            state
-                .selected_entry_ids
-                .retain(|selected_id| !entry_ids.iter().any(|entry_id| entry_id == selected_id));
-            if state.entries.len() == before_len {
+            }
+            let selected_entries = self
+                .active_sftp_session_state()
+                .map(|state| {
+                    state
+                        .entries
+                        .iter()
+                        .filter(|entry| entry_ids.iter().any(|id| id == &entry.id))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if selected_entries.is_empty() {
                 return false;
             }
 
-            if should_clear_context_target {
-                self.context_target_asset_id = state.selected_entry_ids.first().cloned();
-            }
+            self.pending_sftp_context_action = Some(PendingSftpContextAction::DeleteEntries {
+                entries: selected_entries,
+                refresh_path: self.sftp_panel_path(),
+            });
             self.asset_modal_state = None;
             return true;
         }

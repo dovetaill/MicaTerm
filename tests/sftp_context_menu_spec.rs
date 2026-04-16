@@ -116,7 +116,7 @@ fn sftp_targets_resolve_expected_action_sets() {
             .find(|node| node.id == "paste-sftp")
             .expect("paste-sftp action")
             .state,
-        ContextMenuActionState::Planned
+        ContextMenuActionState::Disabled
     );
     assert_eq!(
         blank_actions
@@ -250,7 +250,7 @@ fn sftp_targets_resolve_expected_action_sets() {
             .find(|node| node.id == "copy-sftp-entry")
             .expect("copy-sftp-entry action")
             .state,
-        ContextMenuActionState::Planned
+        ContextMenuActionState::Disabled
     );
 
     let multi_actions = resolve_action_tree(
@@ -284,7 +284,7 @@ fn sftp_targets_resolve_expected_action_sets() {
             .find(|node| node.id == "copy-sftp-entry")
             .expect("copy-sftp-entry action")
             .state,
-        ContextMenuActionState::Planned
+        ContextMenuActionState::Disabled
     );
 }
 
@@ -296,11 +296,13 @@ fn sftp_file_context_menu_contract_exposes_open_and_edit_locally_actions() {
         fs::read_to_string("src/shell/context_menu.rs").expect("read context menu source");
 
     assert!(
-        context_menu_source.contains("\"open-local\"") && context_menu_source.contains("\"edit-locally\""),
+        context_menu_source.contains("\"open-local\"")
+            && context_menu_source.contains("\"edit-locally\""),
         "the file context menu should expose separate action ids for local open and edit-locally"
     );
     assert!(
-        dispatcher_source.contains("\"open-local\"") && dispatcher_source.contains("\"edit-locally\""),
+        dispatcher_source.contains("\"open-local\"")
+            && dispatcher_source.contains("\"edit-locally\""),
         "the context-menu dispatcher should route both local-open and edit-locally actions"
     );
     assert!(
@@ -463,7 +465,7 @@ fn right_clicking_an_already_multi_selected_sftp_entry_keeps_the_multi_selection
 }
 
 #[test]
-fn sftp_create_rename_and_delete_flows_mutate_projected_state_only_after_confirmation() {
+fn sftp_create_rename_and_delete_confirmations_do_not_mutate_projected_entries_locally() {
     let mut state = active_sftp_view_model(vec![
         SftpDirectoryEntry {
             id: "entry-app".into(),
@@ -493,7 +495,8 @@ fn sftp_create_rename_and_delete_flows_mutate_projected_state_only_after_confirm
             .expect("active sftp state")
             .entries
             .iter()
-            .any(|entry| entry.name == "shared" && entry.kind == SftpDirectoryEntryKind::Directory)
+            .all(|entry| entry.name != "shared"),
+        "SFTP new-folder confirmation should wait for a real backend refresh instead of pushing a synthetic row into the projected list"
     );
 
     state.open_context_menu_for_target(
@@ -514,13 +517,21 @@ fn sftp_create_rename_and_delete_flows_mutate_projected_state_only_after_confirm
         state.asset_rename_modal_validation_message(),
         "Name already exists in this folder."
     );
+
+    state.update_rename_asset_modal_name("release-v2.tar.gz".into());
+    assert!(state.confirm_asset_modal());
     assert!(
         state
             .active_sftp_session_state()
             .expect("active sftp state")
             .entries
             .iter()
-            .any(|entry| entry.id == "entry-release" && entry.name == "release.tar.gz")
+            .any(|entry| {
+                entry.id == "entry-release"
+                    && entry.name == "release.tar.gz"
+                    && entry.path == "/srv/app/release.tar.gz"
+            }),
+        "SFTP rename confirmation should leave the projected row alone until the remote refresh lands"
     );
 
     {
@@ -552,7 +563,142 @@ fn sftp_create_rename_and_delete_flows_mutate_projected_state_only_after_confirm
             .expect("active sftp state")
             .entries
             .iter()
-            .all(|entry| entry.id != "entry-app" && entry.id != "entry-release")
+            .any(|entry| entry.id == "entry-app")
+            && state
+                .active_sftp_session_state()
+                .expect("active sftp state")
+                .entries
+                .iter()
+                .any(|entry| entry.id == "entry-release"),
+        "SFTP delete confirmation should stop pruning projected rows locally before the remote delete finishes"
+    );
+}
+
+#[test]
+fn unsupported_sftp_actions_render_disabled_reasons() {
+    let blank_actions = resolve_action_tree(
+        ContextTargetKind::SftpBlankArea,
+        &ready_selection_with_clipboard(vec![], true),
+    );
+    assert_eq!(
+        blank_actions
+            .iter()
+            .find(|node| node.id == "paste-sftp")
+            .expect("paste-sftp action")
+            .state,
+        ContextMenuActionState::Disabled
+    );
+
+    let file_actions = resolve_action_tree(
+        ContextTargetKind::SftpFile,
+        &ready_file_selection(vec!["entry-release"]),
+    );
+    for action_id in ["copy-sftp-entry", "cut-sftp-entry", "permissions-sftp"] {
+        assert_eq!(
+            file_actions
+                .iter()
+                .find(|node| node.id == action_id)
+                .unwrap_or_else(|| panic!("{action_id} action"))
+                .state,
+            ContextMenuActionState::Disabled,
+            "{action_id} should surface as disabled instead of planned"
+        );
+    }
+
+    let mut state = active_sftp_view_model(vec![
+        SftpDirectoryEntry {
+            id: "entry-app".into(),
+            name: "app".into(),
+            path: "/srv/app".into(),
+            kind: SftpDirectoryEntryKind::Directory,
+            modified_unix_seconds: None,
+            size_bytes: None,
+        },
+        SftpDirectoryEntry {
+            id: "entry-release".into(),
+            name: "release.tar.gz".into(),
+            path: "/srv/app/release.tar.gz".into(),
+            kind: SftpDirectoryEntryKind::File,
+            modified_unix_seconds: None,
+            size_bytes: Some(14 * 1024),
+        },
+    ]);
+
+    state.open_context_menu_for_target(
+        ContextTargetKind::SftpFile,
+        Some("entry-release".into()),
+        80.0,
+        120.0,
+    );
+    let copy_index = resolve_action_tree(
+        state.context_menu_target_kind.expect("copy target kind"),
+        &state.context_menu_selection(),
+    )
+    .iter()
+    .position(|node| node.id == "copy-sftp-entry")
+    .expect("copy action index");
+    state.set_context_menu_open_path(vec![copy_index]);
+    state.invoke_current_context_menu_item();
+    assert_eq!(
+        state.context_menu_feedback_text,
+        "Copy is not available for SFTP yet."
+    );
+
+    state.open_context_menu_for_target(
+        ContextTargetKind::SftpFile,
+        Some("entry-release".into()),
+        80.0,
+        120.0,
+    );
+    let cut_index = resolve_action_tree(
+        state.context_menu_target_kind.expect("cut target kind"),
+        &state.context_menu_selection(),
+    )
+    .iter()
+    .position(|node| node.id == "cut-sftp-entry")
+    .expect("cut action index");
+    state.set_context_menu_open_path(vec![cut_index]);
+    state.invoke_current_context_menu_item();
+    assert_eq!(
+        state.context_menu_feedback_text,
+        "Cut is not available for SFTP yet."
+    );
+
+    state.open_context_menu_for_target(ContextTargetKind::SftpBlankArea, None, 64.0, 96.0);
+    let paste_index = resolve_action_tree(
+        state.context_menu_target_kind.expect("paste target kind"),
+        &state.context_menu_selection(),
+    )
+    .iter()
+    .position(|node| node.id == "paste-sftp")
+    .expect("paste action index");
+    state.set_context_menu_open_path(vec![paste_index]);
+    state.invoke_current_context_menu_item();
+    assert_eq!(
+        state.context_menu_feedback_text,
+        "Paste is not available for SFTP yet."
+    );
+
+    state.open_context_menu_for_target(
+        ContextTargetKind::SftpFile,
+        Some("entry-release".into()),
+        80.0,
+        120.0,
+    );
+    let permissions_index = resolve_action_tree(
+        state
+            .context_menu_target_kind
+            .expect("permissions target kind"),
+        &state.context_menu_selection(),
+    )
+    .iter()
+    .position(|node| node.id == "permissions-sftp")
+    .expect("permissions action index");
+    state.set_context_menu_open_path(vec![permissions_index]);
+    state.invoke_current_context_menu_item();
+    assert_eq!(
+        state.context_menu_feedback_text,
+        "Permissions are not available for SFTP yet."
     );
 }
 

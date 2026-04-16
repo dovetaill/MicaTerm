@@ -599,11 +599,7 @@ fn resolve_sftp_blank_area_actions(selection: &SelectionContext) -> Vec<ContextM
             "paste-sftp",
             "Paste",
             "clipboard",
-            if selection.target_mutable && selection.clipboard_has_asset_payload {
-                ContextMenuActionState::Planned
-            } else {
-                ContextMenuActionState::Disabled
-            },
+            ContextMenuActionState::Disabled,
             true,
         ),
         action_with_state(
@@ -734,25 +730,21 @@ fn resolve_sftp_directory_actions(selection: &SelectionContext) -> Vec<ContextMe
             "copy-sftp-entry",
             "Copy",
             "copy",
-            planned_selection_state(selection),
+            ContextMenuActionState::Disabled,
             true,
         ),
         action_with_state(
             "cut-sftp-entry",
             "Cut",
             "cut",
-            planned_selection_state(selection),
+            ContextMenuActionState::Disabled,
             false,
         ),
         action_with_state(
             "paste-sftp",
             "Paste",
             "clipboard",
-            if selection.target_mutable && selection.clipboard_has_asset_payload {
-                ContextMenuActionState::Planned
-            } else {
-                ContextMenuActionState::Disabled
-            },
+            ContextMenuActionState::Disabled,
             false,
         ),
         action_with_state(
@@ -773,7 +765,7 @@ fn resolve_sftp_directory_actions(selection: &SelectionContext) -> Vec<ContextMe
             "permissions-sftp",
             "Permissions...",
             "key-multiple",
-            planned_selection_state(selection),
+            ContextMenuActionState::Disabled,
             true,
         ),
         action_with_state(
@@ -827,14 +819,14 @@ fn resolve_sftp_file_actions(selection: &SelectionContext) -> Vec<ContextMenuAct
             "copy-sftp-entry",
             "Copy",
             "copy",
-            planned_selection_state(selection),
+            ContextMenuActionState::Disabled,
             true,
         ),
         action_with_state(
             "cut-sftp-entry",
             "Cut",
             "cut",
-            planned_selection_state(selection),
+            ContextMenuActionState::Disabled,
             false,
         ),
         action_with_state(
@@ -862,7 +854,7 @@ fn resolve_sftp_file_actions(selection: &SelectionContext) -> Vec<ContextMenuAct
             "permissions-sftp",
             "Permissions...",
             "key-multiple",
-            planned_selection_state(selection),
+            ContextMenuActionState::Disabled,
             true,
         ),
         action_with_state(
@@ -897,21 +889,21 @@ fn resolve_sftp_multi_selection_actions(
             "copy-sftp-entry",
             "Copy",
             "copy",
-            planned_selection_state(selection),
+            ContextMenuActionState::Disabled,
             false,
         ),
         action_with_state(
             "cut-sftp-entry",
             "Cut",
             "cut",
-            planned_selection_state(selection),
+            ContextMenuActionState::Disabled,
             false,
         ),
         action_with_state(
             "permissions-sftp",
             "Permissions...",
             "key-multiple",
-            planned_selection_state(selection),
+            ContextMenuActionState::Disabled,
             false,
         ),
         action_with_state(
@@ -1030,7 +1022,6 @@ fn planned_mutable_state(selection: &SelectionContext) -> ContextMenuActionState
         ContextMenuActionState::Disabled
     }
 }
-
 
 fn action_with_state(
     id: &'static str,
