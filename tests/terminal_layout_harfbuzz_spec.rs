@@ -487,8 +487,7 @@ fn harfbuzz_layout_maps_fallback_subruns_back_to_terminal_cells() -> anyhow::Res
     );
     if shaped.runs.len() == 1 {
         assert_eq!(
-            shaped.runs[0].text,
-            row.text,
+            shaped.runs[0].text, row.text,
             "when fallback resolution stays on the primary family, the single shaped run should still cover the full mixed-text payload"
         );
     }
