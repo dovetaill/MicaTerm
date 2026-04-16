@@ -1,9 +1,235 @@
+import { ListView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
+
+component TransferCenterFilterChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked();
+
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: self.active
+        ? ThemeTokens.accent
+        : ThemeTokens.divider-subtle;
+    background: self.active
+        ? ThemeTokens.control-active-surface
+        : ThemeTokens.control-hover-surface;
+
+    Text {
+        x: 14px;
+        y: 0px;
+        width: parent.width - 28px;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+        font-size: 12px;
+        font-weight: root.active ? 700 : AppTypography.ui-font-weight-regular;
+        overflow: elide;
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component TransferCenterActionChip inherits Rectangle {
+    in property <string> label;
+    in property <string> tooltip-text: "";
+    in property <string> tooltip-source-id: "";
+    out property <bool> has-hover: touch.has-hover;
+    out property <bool> has-focus: action-focus.has-focus;
+    out property <bool> tooltip-active: (root.has-hover || root.has-focus) && root.tooltip-text != "";
+    callback clicked();
+    callback tooltip-open-requested(string, string, length, length, length);
+    callback tooltip-close-requested(string);
+    callback tooltip-activity-changed(bool);
+
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: root.has-focus ? ThemeTokens.focus-ring : ThemeTokens.status-pill-border;
+    background: touch.pressed ? ThemeTokens.control-pressed-surface
+        : root.has-focus ? ThemeTokens.control-active-surface
+        : touch.has-hover ? ThemeTokens.control-hover-surface
+        : ThemeTokens.status-pill-surface;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.label;
+    accessible-action-default => { touch.clicked(); }
+    forward-focus: action-focus;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+        font-size: 10px;
+        font-weight: 700;
+        overflow: elide;
+    }
+
+    changed tooltip-active => {
+        root.tooltip-activity-changed(self.tooltip-active);
+        if self.tooltip-active {
+            root.tooltip-open-requested(
+                root.tooltip-source-id,
+                root.tooltip-text,
+                self.absolute-position.x + self.width / 2,
+                self.absolute-position.y + self.height + 8px,
+                self.width,
+            );
+        } else {
+            root.tooltip-close-requested(root.tooltip-source-id);
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            root.tooltip-close-requested(root.tooltip-source-id);
+            root.clicked();
+        }
+    }
+
+    action-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                touch.clicked();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+}
+
+component TransferCenterActionLink inherits Rectangle {
+    in property <string> label;
+    in property <string> tooltip-text: "";
+    in property <string> tooltip-source-id: "";
+    out property <bool> has-hover: secondary-action-touch.has-hover;
+    out property <bool> has-focus: action-focus.has-focus;
+    out property <bool> tooltip-active: (root.has-hover || root.has-focus) && root.tooltip-text != "";
+    callback clicked();
+    callback tooltip-open-requested(string, string, length, length, length);
+    callback tooltip-close-requested(string);
+    callback tooltip-activity-changed(bool);
+
+    border-radius: 8px;
+    border-width: root.has-focus ? 1px : 0px;
+    border-color: ThemeTokens.focus-ring;
+    background: secondary-action-touch.pressed ? ThemeTokens.control-pressed-surface
+        : root.has-focus ? ThemeTokens.control-active-surface
+        : root.has-hover ? ThemeTokens.control-hover-surface
+        : transparent;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.label;
+    accessible-action-default => { secondary-action-touch.clicked(); }
+    forward-focus: action-focus;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: root.has-focus || root.has-hover ? ThemeTokens.text-primary : ThemeTokens.accent;
+        vertical-alignment: center;
+        horizontal-alignment: right;
+        font-size: 10px;
+        font-weight: 700;
+        overflow: elide;
+    }
+
+    changed tooltip-active => {
+        root.tooltip-activity-changed(self.tooltip-active);
+        if self.tooltip-active {
+            root.tooltip-open-requested(
+                root.tooltip-source-id,
+                root.tooltip-text,
+                self.absolute-position.x + self.width / 2,
+                self.absolute-position.y + self.height + 8px,
+                self.width,
+            );
+        } else {
+            root.tooltip-close-requested(root.tooltip-source-id);
+        }
+    }
+
+    secondary-action-touch := TouchArea {
+        clicked => {
+            root.tooltip-close-requested(root.tooltip-source-id);
+            root.clicked();
+        }
+    }
+
+    action-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                secondary-action-touch.clicked();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+}
+
+export struct TransferCenterItem {
+    id: string,
+    title: string,
+    detail: string,
+    status_label: string,
+    status_tone: string,
+    progress_label: string,
+    error_summary: string,
+    error_tooltip: string,
+    show_error: bool,
+    can_retry: bool,
+    can_resolve_conflict: bool,
+    can_open_workspace: bool,
+}
 
 export component TransferCenter inherits Rectangle {
     in property <bool> open: false;
     in property <int> queue-total: 0;
+    in property <int> queued-count: 0;
+    in property <int> running-count: 0;
+    in property <int> paused-count: 0;
+    in property <int> failed-count: 0;
+    in property <int> completed-count: 0;
+    in property <string> active-filter: "all";
+    in property <[TransferCenterItem]> items: [];
+    callback filter-toggle-requested(string);
+    callback retry-requested(string);
+    callback resolve-conflict-requested(string);
+    callback open-workspace-requested(string);
+    private property <string> tooltip-text-value: "";
+    private property <bool> tooltip-visible-value: false;
+    private property <string> tooltip-source-id-value: "";
+    private property <string> tooltip-close-source-id-value: "";
+    private property <length> tooltip-anchor-x-value: 0px;
+    private property <length> tooltip-anchor-y-value: 0px;
+    private property <length> tooltip-anchor-width-value: 0px;
+    out property <string> tooltip-text <=> root.tooltip-text-value;
+    out property <bool> tooltip-visible <=> root.tooltip-visible-value;
+    out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
+    out property <length> tooltip-anchor-y <=> root.tooltip-anchor-y-value;
+    out property <length> tooltip-anchor-width <=> root.tooltip-anchor-width-value;
 
     visible: root.open;
     border-radius: 18px;
@@ -32,11 +258,61 @@ export component TransferCenter inherits Rectangle {
             x: 20px;
             y: 42px;
             text: root.queue-total > 0
-                ? "" + root.queue-total + " transfers tracked across sessions"
+                ? "" + root.queue-total + " transfer tasks tracked across sessions"
                 : "Global transfer activity appears here once uploads, downloads, and deletes are queued.";
             color: ThemeTokens.text-primary;
             opacity: 0.68;
             font-size: 12px;
+        }
+    }
+
+    function status-chip_label(label: string, count: int) -> string {
+        count > 0 ? label + " " + count : label
+    }
+
+    function filter-active(filter-id: string) -> bool {
+        root.active-filter == filter-id
+    }
+
+    function schedule-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length, anchor-width: length) {
+        root.tooltip-anchor-x-value = anchor-x;
+        root.tooltip-anchor-y-value = anchor-y;
+        root.tooltip-anchor-width-value = anchor-width;
+
+        if root.tooltip-source-id-value == source-id && root.tooltip-text-value == text {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+        } else {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+            root.tooltip-source-id-value = source-id;
+            root.tooltip-text-value = text;
+            root.tooltip-visible-value = false;
+            tooltip-delay.start();
+        }
+    }
+
+    function queue-tooltip-close(source-id: string) {
+        if root.tooltip-source-id-value == source-id && source-id != "" {
+            root.tooltip-close-source-id-value = source-id;
+            tooltip-close-delay.start();
+        }
+    }
+
+    function close-tooltip(source-id: string) {
+        if root.tooltip-source-id-value == source-id || source-id == "" {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+            root.tooltip-visible-value = false;
+            root.tooltip-text-value = "";
+            root.tooltip-source-id-value = "";
+            tooltip-delay.stop();
+        }
+    }
+
+    changed open => {
+        if !root.open {
+            root.close-tooltip("");
         }
     }
 
@@ -47,118 +323,64 @@ export component TransferCenter inherits Rectangle {
         height: 28px;
         background: transparent;
 
-        running-tab := Rectangle {
+        running-tab := TransferCenterFilterChip {
             x: 0px;
-            width: 88px;
+            width: 98px;
             height: parent.height;
-            border-radius: 14px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.control-active-surface;
-
-            Text {
-                x: 14px;
-                y: 0px;
-                width: parent.width - 28px;
-                height: parent.height;
-                text: "Running";
-                color: ThemeTokens.text-primary;
-                vertical-alignment: center;
-                horizontal-alignment: center;
-                font-size: 12px;
-                font-weight: 700;
+            label: status-chip_label("Running", root.running-count);
+            active: root.filter-active("running");
+            clicked => {
+                root.filter-toggle-requested("running");
             }
         }
 
-        queued-tab := Rectangle {
+        queued-tab := TransferCenterFilterChip {
             x: running-tab.x + running-tab.width + 8px;
-            width: 82px;
+            width: 94px;
             height: parent.height;
-            border-radius: 14px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.control-hover-surface;
-
-            Text {
-                x: 14px;
-                y: 0px;
-                width: parent.width - 28px;
-                height: parent.height;
-                text: "Queued";
-                color: ThemeTokens.text-primary;
-                vertical-alignment: center;
-                horizontal-alignment: center;
-                font-size: 12px;
-                font-weight: AppTypography.ui-font-weight-regular;
+            label: status-chip_label("Queued", root.queued-count);
+            active: root.filter-active("queued");
+            clicked => {
+                root.filter-toggle-requested("queued");
             }
         }
 
-        paused-tab := Rectangle {
+        paused-tab := TransferCenterFilterChip {
             x: queued-tab.x + queued-tab.width + 8px;
-            width: 82px;
+            width: 92px;
             height: parent.height;
-            border-radius: 14px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.control-hover-surface;
-
-            Text {
-                x: 14px;
-                y: 0px;
-                width: parent.width - 28px;
-                height: parent.height;
-                text: "Paused";
-                color: ThemeTokens.text-primary;
-                vertical-alignment: center;
-                horizontal-alignment: center;
-                font-size: 12px;
-                font-weight: AppTypography.ui-font-weight-regular;
+            label: status-chip_label("Paused", root.paused-count);
+            active: root.filter-active("paused");
+            clicked => {
+                root.filter-toggle-requested("paused");
             }
         }
 
-        failed-tab := Rectangle {
+        failed-tab := TransferCenterFilterChip {
             x: paused-tab.x + paused-tab.width + 8px;
-            width: 76px;
+            width: 86px;
             height: parent.height;
-            border-radius: 14px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.control-hover-surface;
-
-            Text {
-                x: 14px;
-                y: 0px;
-                width: parent.width - 28px;
-                height: parent.height;
-                text: "Failed";
-                color: ThemeTokens.text-primary;
-                vertical-alignment: center;
-                horizontal-alignment: center;
-                font-size: 12px;
-                font-weight: AppTypography.ui-font-weight-regular;
+            label: status-chip_label("Failed", root.failed-count);
+            active: root.filter-active("failed");
+            border-color: self.active
+                ? ThemeTokens.status-error-accent
+                : ThemeTokens.divider-subtle;
+            background: self.active
+                ? ThemeTokens.status-error-surface
+                : ThemeTokens.control-hover-surface;
+            clicked => {
+                root.filter-toggle-requested("failed");
             }
         }
 
-        completed-tab := Rectangle {
+        completed-tab := TransferCenterFilterChip {
             x: failed-tab.x + failed-tab.width + 8px;
-            width: 108px;
+            width: 118px;
             height: parent.height;
-            border-radius: 14px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.control-hover-surface;
-
-            Text {
-                x: 14px;
-                y: 0px;
-                width: parent.width - 28px;
-                height: parent.height;
-                text: "Completed";
-                color: ThemeTokens.text-primary;
-                vertical-alignment: center;
-                horizontal-alignment: center;
-                font-size: 12px;
-                font-weight: AppTypography.ui-font-weight-regular;
+            label: status-chip_label("Completed", root.completed-count);
+            active: root.filter-active("completed");
+            clicked => {
+                root.filter-toggle-requested("completed");
             }
         }
     }
@@ -190,9 +412,9 @@ export component TransferCenter inherits Rectangle {
             }
 
             Text {
-                x: parent.width - 180px;
+                x: parent.width - 196px;
                 y: 9px;
-                width: 72px;
+                width: 88px;
                 text: "Status";
                 color: ThemeTokens.text-primary;
                 font-size: 12px;
@@ -200,9 +422,9 @@ export component TransferCenter inherits Rectangle {
             }
 
             Text {
-                x: parent.width - 92px;
+                x: parent.width - 96px;
                 y: 9px;
-                width: 76px;
+                width: 80px;
                 text: "Progress";
                 color: ThemeTokens.text-primary;
                 horizontal-alignment: right;
@@ -211,7 +433,7 @@ export component TransferCenter inherits Rectangle {
             }
         }
 
-        empty-state := Rectangle {
+        if root.items.length == 0 : empty-state := Rectangle {
             x: 0px;
             y: table-header.height;
             width: parent.width;
@@ -244,6 +466,258 @@ export component TransferCenter inherits Rectangle {
                 color: ThemeTokens.text-primary;
                 opacity: 0.7;
                 wrap: word-wrap;
+            }
+        }
+
+        if root.items.length > 0 : list-shell := Rectangle {
+            x: 0px;
+            y: table-header.height;
+            width: parent.width;
+            height: parent.height - table-header.height;
+            background: transparent;
+            clip: true;
+
+            list-host := ListView {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+
+                for item in root.items : row := Rectangle {
+                    private property <bool> show-actions: item.can_retry || item.can_resolve_conflict || item.can_open_workspace;
+                    private property <bool> retry-tooltip-active: false;
+                    private property <bool> resolve-tooltip-active: false;
+                    private property <bool> workspace-tooltip-active: false;
+                    private property <bool> row-action-tooltip-active: self.retry-tooltip-active || self.resolve-tooltip-active || self.workspace-tooltip-active;
+                    height: item.show_error
+                        ? (self.show-actions ? 92px : 72px)
+                        : (self.show-actions ? 76px : 56px);
+                    background: touch.has-hover
+                        ? ThemeTokens.control-hover-surface
+                        : transparent;
+                    border-width: 0px;
+
+                    Rectangle {
+                        x: 16px;
+                        y: 10px;
+                        width: 3px;
+                        height: parent.height - 20px;
+                        border-radius: 2px;
+                        background: item.status_tone == "error"
+                            ? ThemeTokens.status-error-accent
+                            : item.status_tone == "success"
+                                ? ThemeTokens.status-success-accent
+                                : item.status_tone == "busy"
+                                    ? ThemeTokens.status-busy-accent
+                                    : ThemeTokens.status-pill-border;
+                    }
+
+                    Text {
+                        x: 28px;
+                        y: 10px;
+                        width: max(0px, parent.width - 220px);
+                        text: item.title;
+                        color: ThemeTokens.text-primary;
+                        font-size: 13px;
+                        font-weight: 700;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: 28px;
+                        y: 30px;
+                        width: max(0px, parent.width - 220px);
+                        text: item.detail;
+                        color: ThemeTokens.text-secondary;
+                        font-size: 11px;
+                        overflow: elide;
+                    }
+
+                    if item.show_error : error-copy := Text {
+                        x: 28px;
+                        y: 46px;
+                        width: max(0px, parent.width - 220px);
+                        text: item.error_summary;
+                        color: ThemeTokens.status-error-accent;
+                        font-size: 11px;
+                        overflow: elide;
+                    }
+
+                    Rectangle {
+                        x: parent.width - 188px;
+                        y: item.show_error ? 12px : 15px;
+                        width: 84px;
+                        height: 24px;
+                        border-radius: 12px;
+                        border-width: 1px;
+                        border-color: item.status_tone == "error"
+                            ? ThemeTokens.status-error-accent
+                            : item.status_tone == "success"
+                                ? ThemeTokens.status-success-accent
+                                : item.status_tone == "busy"
+                                    ? ThemeTokens.status-busy-accent
+                                    : ThemeTokens.status-pill-border;
+                        background: item.status_tone == "error"
+                            ? ThemeTokens.status-error-surface
+                            : item.status_tone == "success"
+                                ? ThemeTokens.status-success-surface
+                                : item.status_tone == "busy"
+                                    ? ThemeTokens.status-busy-surface
+                                    : ThemeTokens.status-pill-surface;
+
+                        Text {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: parent.height;
+                            text: item.status_label;
+                            color: ThemeTokens.text-primary;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            font-size: 11px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+                    }
+
+                    Text {
+                        x: parent.width - 92px;
+                        y: item.show_error ? 16px : 19px;
+                        width: 76px;
+                        text: item.progress_label;
+                        color: ThemeTokens.text-secondary;
+                        horizontal-alignment: right;
+                        font-size: 11px;
+                        overflow: elide;
+                    }
+
+                    if self.show-actions : retry-action := TransferCenterActionChip {
+                        x: parent.width - 188px;
+                        y: item.show_error ? 62px : 46px;
+                        width: 76px;
+                        height: 22px;
+                        visible: item.can_retry;
+                        label: "Retry";
+                        tooltip-text: "Retry failed transfer";
+                        tooltip-source-id: item.id + "-retry";
+                        clicked => {
+                            root.retry-requested(item.id);
+                        }
+                        tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                            root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                        }
+                        tooltip-close-requested(source-id) => {
+                            root.queue-tooltip-close(source-id);
+                        }
+                        tooltip-activity-changed(active) => {
+                            row.retry-tooltip-active = active;
+                        }
+                    }
+
+                    if self.show-actions : resolve-action := TransferCenterActionChip {
+                        x: parent.width - 188px;
+                        y: item.show_error ? 62px : 46px;
+                        width: 76px;
+                        height: 22px;
+                        visible: item.can_resolve_conflict;
+                        label: "Resolve";
+                        tooltip-text: "Resolve transfer conflict";
+                        tooltip-source-id: item.id + "-resolve";
+                        clicked => {
+                            root.resolve-conflict-requested(item.id);
+                        }
+                        tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                            root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                        }
+                        tooltip-close-requested(source-id) => {
+                            root.queue-tooltip-close(source-id);
+                        }
+                        tooltip-activity-changed(active) => {
+                            row.resolve-tooltip-active = active;
+                        }
+                    }
+
+                    if self.show-actions : open-workspace-action := TransferCenterActionLink {
+                        x: parent.width - 104px;
+                        y: item.show_error ? 62px : 46px;
+                        width: 84px;
+                        height: 22px;
+                        visible: item.can_open_workspace;
+                        label: "Workspace";
+                        tooltip-text: "Open task in SFTP workspace";
+                        tooltip-source-id: item.id + "-workspace";
+                        clicked => {
+                            root.open-workspace-requested(item.id);
+                        }
+                        tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                            root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                        }
+                        tooltip-close-requested(source-id) => {
+                            root.queue-tooltip-close(source-id);
+                        }
+                        tooltip-activity-changed(active) => {
+                            row.workspace-tooltip-active = active;
+                        }
+                    }
+
+                    private property <bool> has-hover: touch.has-hover;
+
+                    touch := TouchArea {}
+
+                    changed has-hover => {
+                        if !self.row-action-tooltip-active && self.has-hover && item.error_tooltip != "" {
+                            root.schedule-tooltip(
+                                item.id,
+                                item.error_tooltip,
+                                self.absolute-position.x + 28px,
+                                self.absolute-position.y + self.height + 8px,
+                                max(140px, min(self.width - 44px, 360px)),
+                            );
+                        } else {
+                            root.queue-tooltip-close(item.id);
+                        }
+                    }
+
+                    changed row-action-tooltip-active => {
+                        if self.row-action-tooltip-active {
+                            root.queue-tooltip-close(item.id);
+                        } else if !self.row-action-tooltip-active && self.has-hover && item.error_tooltip != "" {
+                            root.schedule-tooltip(
+                                item.id,
+                                item.error_tooltip,
+                                self.absolute-position.x + 28px,
+                                self.absolute-position.y + self.height + 8px,
+                                max(140px, min(self.width - 44px, 360px)),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    tooltip-delay := Timer {
+        interval: 280ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.tooltip-text-value != "" {
+                root.tooltip-visible-value = true;
+            }
+        }
+    }
+
+    tooltip-close-delay := Timer {
+        interval: 80ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.tooltip-close-source-id-value != "" {
+                root.close-tooltip(root.tooltip-close-source-id-value);
             }
         }
     }

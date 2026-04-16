@@ -11,6 +11,8 @@ fn blank_selection() -> SelectionContext {
         selected_ids: Vec::new(),
         clipboard_has_asset_payload: false,
         target_mutable: true,
+        selected_file_count: 0,
+        selected_directory_count: 0,
     }
 }
 
@@ -72,6 +74,8 @@ fn ssh_context_menu_exposes_only_one_open_action() {
         selected_ids: vec!["ssh-prod-01".into()],
         clipboard_has_asset_payload: true,
         target_mutable: true,
+        selected_file_count: 0,
+        selected_directory_count: 0,
     };
 
     let ids: Vec<_> = resolve_action_tree(ContextTargetKind::SshConnection, &selection)
@@ -110,6 +114,8 @@ fn ssh_scene_exposes_flat_create_actions_without_connection_submenu() {
         selected_ids: vec!["ssh-prod-01".into()],
         clipboard_has_asset_payload: true,
         target_mutable: true,
+        selected_file_count: 0,
+        selected_directory_count: 0,
     };
 
     let ids: Vec<_> = resolve_action_tree(ContextTargetKind::SshConnection, &selection)
@@ -128,6 +134,8 @@ fn ssh_scene_marks_proxy_chrome_as_planned_but_clickable() {
         selected_ids: vec!["ssh-prod-01".into()],
         clipboard_has_asset_payload: true,
         target_mutable: true,
+        selected_file_count: 0,
+        selected_directory_count: 0,
     };
 
     let roots = resolve_action_tree(ContextTargetKind::SshConnection, &selection);
@@ -147,6 +155,8 @@ fn open_action_stays_enabled_for_ssh_assets() {
             selected_ids: vec!["ssh-prod-01".into()],
             clipboard_has_asset_payload: false,
             target_mutable: true,
+            selected_file_count: 0,
+            selected_directory_count: 0,
         },
     );
 
@@ -166,6 +176,8 @@ fn folder_target_exposes_flat_create_actions() {
             selected_ids: vec!["folder-1".into()],
             clipboard_has_asset_payload: false,
             target_mutable: true,
+            selected_file_count: 0,
+            selected_directory_count: 0,
         },
     );
 
@@ -190,6 +202,8 @@ fn snippet_target_exposes_paste_run_edit_and_delete_actions() {
             selected_ids: vec!["snippet-1".into()],
             clipboard_has_asset_payload: false,
             target_mutable: true,
+            selected_file_count: 0,
+            selected_directory_count: 0,
         },
     );
     let ids: Vec<_> = actions.iter().map(|action| action.id).collect();
@@ -208,6 +222,8 @@ fn snippet_package_target_omits_run_and_paste_but_keeps_package_actions() {
             selected_ids: vec!["package-1".into()],
             clipboard_has_asset_payload: false,
             target_mutable: true,
+            selected_file_count: 0,
+            selected_directory_count: 0,
         },
     );
     let ids: Vec<_> = actions.iter().map(|action| action.id).collect();
@@ -228,6 +244,8 @@ fn folder_and_ssh_context_menus_keep_rename_and_delete_as_enabled_leaf_actions()
             selected_ids: vec!["folder-1".into()],
             clipboard_has_asset_payload: false,
             target_mutable: true,
+            selected_file_count: 0,
+            selected_directory_count: 0,
         },
     );
     let ssh_actions = resolve_action_tree(
@@ -236,6 +254,8 @@ fn folder_and_ssh_context_menus_keep_rename_and_delete_as_enabled_leaf_actions()
             selected_ids: vec!["ssh-1".into()],
             clipboard_has_asset_payload: false,
             target_mutable: true,
+            selected_file_count: 0,
+            selected_directory_count: 0,
         },
     );
 
@@ -390,6 +410,8 @@ fn invoking_planned_action_sets_feedback_text_without_closing_documentation_gap(
             selected_ids: view_model.selected_asset_ids.clone(),
             clipboard_has_asset_payload: false,
             target_mutable: true,
+            selected_file_count: 0,
+            selected_directory_count: 0,
         },
     );
     let proxy_index = roots

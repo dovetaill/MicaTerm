@@ -166,6 +166,28 @@ impl ShellViewModel {
             .unwrap_or(false)
     }
 
+    pub fn quick_browser_accepts_external_drop(&self) -> bool {
+        self.show_right_panel
+            && self.right_panel_view == RightPanelView::Sftp
+            && self.quick_browser_linked_terminal_session_id().is_some()
+            && self.quick_browser_session().is_some_and(|state| {
+                state.mode == SftpPanelMode::Ready && !state.current_path.trim().is_empty()
+            })
+    }
+
+    pub fn quick_browser_drop_target_active(&self) -> bool {
+        self.quick_browser_state.drop_target_active && self.quick_browser_accepts_external_drop()
+    }
+
+    pub fn set_quick_browser_drop_target_active(&mut self, active: bool) -> bool {
+        let next_active = active && self.quick_browser_accepts_external_drop();
+        if self.quick_browser_state.drop_target_active == next_active {
+            return false;
+        }
+        self.quick_browser_state.drop_target_active = next_active;
+        true
+    }
+
     pub fn sftp_panel_sort_column_id(&self) -> &'static str {
         self.quick_browser_session()
             .map(|state| state.sort_state)
@@ -215,6 +237,58 @@ impl ShellViewModel {
         } else {
             self.quick_browser_state.sort_state = next_sort_state;
         }
+        true
+    }
+
+    pub fn set_sftp_panel_sort_column(&mut self, column_id: &str) -> bool {
+        let Some(column) = FileBrowserSortColumn::from_id(column_id) else {
+            return false;
+        };
+        let next_sort_state = FileBrowserSortState {
+            column: Some(column),
+            direction: Some(FileBrowserSortDirection::Asc),
+        };
+
+        if let Some(state) = self.quick_browser_session_mut() {
+            if state.sort_state == next_sort_state {
+                return false;
+            }
+            state.sort_state = next_sort_state;
+        } else {
+            if self.quick_browser_state.sort_state == next_sort_state {
+                return false;
+            }
+            self.quick_browser_state.sort_state = next_sort_state;
+        }
+        true
+    }
+
+    pub fn select_all_sftp_entries(&mut self) -> bool {
+        let next_selection = self
+            .active_sftp_session_state()
+            .map(|state| {
+                state
+                    .entries
+                    .iter()
+                    .map(|entry| entry.id.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if next_selection.is_empty() {
+            return false;
+        }
+
+        let first_selected_id = next_selection.first().cloned();
+        {
+            let Some(state) = self.active_sftp_session_state_mut() else {
+                return false;
+            };
+            if state.selected_entry_ids == next_selection {
+                return false;
+            }
+            state.selected_entry_ids = next_selection;
+        }
+        self.context_target_asset_id = first_selected_id;
         true
     }
 
@@ -354,11 +428,23 @@ impl ShellViewModel {
             .unwrap_or_default()
     }
 
+    pub fn take_pending_sftp_context_action(&mut self) -> Option<PendingSftpContextAction> {
+        self.pending_sftp_context_action.take()
+    }
+
     pub fn quick_browser_follows_active_terminal(&self) -> bool {
         self.quick_browser_state.follows_active_terminal
     }
 
     pub fn quick_browser_linked_terminal_session_id(&self) -> Option<&str> {
+        if self.quick_browser_state.follows_active_terminal
+            && let Some(pending_session_id) = self
+                .quick_browser_state
+                .pending_terminal_session_id
+                .as_deref()
+        {
+            return Some(pending_session_id);
+        }
         self.quick_browser_session()
             .and_then(|state| state.linked_terminal_session_id.as_deref())
             .or_else(|| self.quick_browser_session_id())
@@ -376,10 +462,28 @@ impl ShellViewModel {
         self.quick_browser_state.path_editing
     }
 
+    pub fn defer_quick_browser_follow_to_active_terminal(&mut self) -> bool {
+        if !self.quick_browser_state.follows_active_terminal {
+            return false;
+        }
+        let Some(active_session_id) = self.active_workspace_terminal_session_id() else {
+            return false;
+        };
+        if self.quick_browser_session_id.as_deref() == Some(active_session_id)
+            && self.quick_browser_state.pending_terminal_session_id.as_deref() == Some(active_session_id)
+        {
+            return false;
+        }
+        self.quick_browser_state.pending_terminal_session_id = Some(active_session_id.to_string());
+        true
+    }
+
     pub fn toggle_quick_browser_binding_mode(&mut self) -> bool {
         self.quick_browser_state.follows_active_terminal =
             !self.quick_browser_state.follows_active_terminal;
+        self.quick_browser_state.pending_terminal_session_id = None;
         self.quick_browser_state.path_editing = false;
+        self.quick_browser_state.drop_target_active = false;
         true
     }
 
@@ -402,6 +506,94 @@ impl ShellViewModel {
                     })
                     == Some(session_id)
         })
+    }
+
+    pub fn has_connected_terminal_session(&self, session_id: &str) -> bool {
+        self.workspace_tabs.iter().any(|tab| {
+            tab.kind == crate::shell::tabs::WorkspaceTabKind::Terminal
+                && tab.session_id == session_id
+                && tab.state == "connected"
+        })
+    }
+
+    pub fn transfer_task_by_id(&self, task_id: &str) -> Option<&crate::app::sftp::TransferTask> {
+        self.sftp_transfer_tasks
+            .iter()
+            .find(|task| task.id == task_id)
+    }
+
+    pub fn open_transfer_conflict_modal(&mut self, task_id: &str) -> bool {
+        let Some(task) = self.transfer_task_by_id(task_id).cloned() else {
+            return false;
+        };
+        if task.state != crate::app::sftp::TransferTaskState::Conflict {
+            return false;
+        }
+        let batch_task_ids = self.transfer_conflict_batch_task_ids(&task);
+
+        self.sftp_conflict_modal_state = SftpConflictModalState {
+            open: true,
+            task_id: Some(task.id),
+            source_path: task.source_path,
+            target_path: task.target_path,
+            batch_task_ids,
+            apply_to_batch: false,
+        };
+        true
+    }
+
+    pub fn close_sftp_conflict_modal(&mut self) -> bool {
+        if !self.sftp_conflict_modal_state.open {
+            return false;
+        }
+        self.sftp_conflict_modal_state = SftpConflictModalState::default();
+        true
+    }
+
+    pub fn active_sftp_conflict_tasks(&self) -> Vec<crate::app::sftp::TransferTask> {
+        let task_ids = if self.sftp_conflict_modal_state.apply_to_batch
+            && self.sftp_conflict_modal_state.batch_task_ids.len() > 1
+        {
+            self.sftp_conflict_modal_state.batch_task_ids.clone()
+        } else {
+            self.sftp_conflict_modal_state
+                .task_id
+                .iter()
+                .cloned()
+                .collect()
+        };
+
+        task_ids
+            .into_iter()
+            .filter_map(|task_id| self.transfer_task_by_id(task_id.as_str()).cloned())
+            .filter(|task| task.state == crate::app::sftp::TransferTaskState::Conflict)
+            .collect()
+    }
+
+    pub fn sftp_conflict_modal_batch_conflict_count(&self) -> i32 {
+        let related = self
+            .sftp_conflict_modal_state
+            .batch_task_ids
+            .len()
+            .saturating_sub(1);
+        i32::try_from(related).unwrap_or(i32::MAX)
+    }
+
+    pub fn sftp_conflict_modal_apply_to_batch(&self) -> bool {
+        self.sftp_conflict_modal_state.apply_to_batch
+            && self.sftp_conflict_modal_state.batch_task_ids.len() > 1
+    }
+
+    pub fn set_sftp_conflict_modal_apply_to_batch(&mut self, apply_to_batch: bool) -> bool {
+        if !self.sftp_conflict_modal_state.open {
+            return false;
+        }
+        let next_value = apply_to_batch && self.sftp_conflict_modal_state.batch_task_ids.len() > 1;
+        if self.sftp_conflict_modal_state.apply_to_batch == next_value {
+            return false;
+        }
+        self.sftp_conflict_modal_state.apply_to_batch = next_value;
+        true
     }
 
     pub fn mark_workspace_sftp_sessions_disconnected(&mut self, session_id: &str) -> bool {
@@ -442,6 +634,67 @@ impl ShellViewModel {
         self.workspace_tabs.push(tab);
         let _ = self.activate_workspace_tab(tab_id.as_str());
         Some(tab_id)
+    }
+
+    pub fn open_transfer_task_in_sftp_workspace(&mut self, task_id: &str) -> bool {
+        let Some(task) = self.transfer_task_by_id(task_id).cloned() else {
+            return false;
+        };
+        if !self.has_connected_terminal_session(task.session_id.as_str()) {
+            return false;
+        }
+        let Some(remote_dir) = transfer_task_workspace_dir(&task) else {
+            return false;
+        };
+        let session_id = task.session_id.clone();
+
+        if let Some(existing_tab) = self.workspace_tabs.iter().find(|tab| {
+            tab.kind == crate::shell::tabs::WorkspaceTabKind::Sftp
+                && self
+                    .file_browser_sessions
+                    .get(tab.file_browser_session_id.as_str())
+                    .and_then(|browser_session| {
+                        browser_session.linked_terminal_session_id.as_deref()
+                    })
+                    == Some(session_id.as_str())
+        }) {
+            let browser_session_id = existing_tab.file_browser_session_id.clone();
+            let tab_id = existing_tab.tab_id.clone();
+            if let Some(browser_session) = self.file_browser_sessions.get_mut(&browser_session_id) {
+                browser_session.navigate_manual(remote_dir);
+                browser_session.selected_entry_ids.clear();
+                browser_session.last_error = None;
+            }
+            let _ = self.activate_workspace_tab(tab_id.as_str());
+            self.transfer_center_open = false;
+            return true;
+        }
+
+        let mut workspace_session = self
+            .file_browser_sessions
+            .get(session_id.as_str())
+            .cloned()
+            .map(|session| session.clone_for_workspace())
+            .unwrap_or_else(|| {
+                FileBrowserSession::quick_browser(
+                    HostProfileRef::new(self.transfer_task_workspace_host_label(session_id.as_str())),
+                    remote_dir.clone(),
+                )
+            });
+        workspace_session.attach_terminal_session_id(session_id);
+        workspace_session.navigate_manual(remote_dir);
+        let tab_id = format!("workspace-{}", workspace_session.file_browser_session_id);
+        let mut tab = WorkspaceTab::sftp(
+            tab_id.clone(),
+            workspace_session.file_browser_session_id.clone(),
+            format!("Files: {}", workspace_session.host_profile_ref.label),
+        );
+        tab.state = workspace_session.mode.id().into();
+        self.set_file_browser_session(workspace_session);
+        self.workspace_tabs.push(tab);
+        let _ = self.activate_workspace_tab(tab_id.as_str());
+        self.transfer_center_open = false;
+        true
     }
 
     pub fn reconnect_active_sftp_workspace(&mut self) -> bool {
@@ -558,5 +811,69 @@ impl ShellViewModel {
 
     pub fn vault_panel_state_mut(&mut self) -> &mut VaultPanelViewState {
         &mut self.vault_panel_state
+    }
+
+    fn transfer_task_workspace_host_label(&self, session_id: &str) -> String {
+        self.file_browser_sessions
+            .get(session_id)
+            .map(|session| session.host_profile_ref.label.clone())
+            .or_else(|| {
+                self.workspace_tabs
+                    .iter()
+                    .find(|tab| {
+                        tab.kind == crate::shell::tabs::WorkspaceTabKind::Terminal
+                            && tab.session_id == session_id
+                    })
+                    .map(|tab| tab.title.clone())
+            })
+            .unwrap_or_else(|| "Remote Files".into())
+    }
+
+    fn transfer_conflict_batch_task_ids(
+        &self,
+        task: &crate::app::sftp::TransferTask,
+    ) -> Vec<String> {
+        let scope_dir = remote_parent_dir(task.target_path.as_str());
+
+        self.sftp_transfer_tasks
+            .iter()
+            .filter(|candidate| {
+                candidate.state == crate::app::sftp::TransferTaskState::Conflict
+                    && candidate.session_id == task.session_id
+                    && candidate.direction == task.direction
+                    && remote_parent_dir(candidate.target_path.as_str()) == scope_dir
+            })
+            .map(|candidate| candidate.id.clone())
+            .collect()
+    }
+}
+
+fn transfer_task_workspace_dir(task: &crate::app::sftp::TransferTask) -> Option<String> {
+    let path = match task.direction {
+        crate::app::sftp::TransferDirection::Upload
+        | crate::app::sftp::TransferDirection::Move => task.target_path.as_str(),
+        crate::app::sftp::TransferDirection::Download
+        | crate::app::sftp::TransferDirection::Delete => task.source_path.as_str(),
+    };
+    remote_parent_dir(path)
+}
+
+fn remote_parent_dir(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed == "/" {
+        return Some("/".into());
+    }
+
+    let normalized = trimmed.trim_end_matches('/');
+    if normalized.is_empty() {
+        return Some("/".into());
+    }
+    match normalized.rsplit_once('/') {
+        Some(("", _)) => Some("/".into()),
+        Some((parent, _)) => Some(parent.to_string()),
+        None => Some("/".into()),
     }
 }

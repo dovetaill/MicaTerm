@@ -25,10 +25,11 @@ pub use model::{
     SftpSessionBindingState,
 };
 pub use queue::{
-    TransferConflictPolicy, TransferDirection, TransferQueue, TransferQueueSummary, TransferTask,
-    TransferTaskAction, TransferTaskState,
+    DownloadTransferEntry, TransferConflictPolicy, TransferDirection, TransferQueue,
+    TransferQueueSummary, TransferTask, TransferTaskAction, TransferTaskState,
 };
 pub use runtime::{SftpBackend, SftpOperationFuture, SftpRuntimeHandle};
 pub use session_binding::{
-    SftpSessionBinding, delete_entries, execute_queued_transfers, move_entry_between_directories,
+    SftpSessionBinding, collect_download_targets, delete_entries, execute_queued_transfers,
+    execute_queued_transfers_with_progress, move_entry_between_directories,
 };

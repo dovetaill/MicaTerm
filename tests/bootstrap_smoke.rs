@@ -81,7 +81,7 @@ use mica_term::theme::ThemeMode;
 use russh::keys::{HashAlg, PublicKey};
 use secrecy::SecretString;
 use slint::platform::{Key, PointerEventButton, WindowEvent};
-use slint::{ComponentHandle, LogicalPosition, Model};
+use slint::{ComponentHandle, LogicalPosition, Model, ModelRc, SharedString, VecModel};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -440,6 +440,7 @@ struct RecordingSftpState {
     read_dir_calls: Arc<Mutex<Vec<String>>>,
     download_file_calls: Arc<Mutex<Vec<String>>>,
     upload_file_calls: Arc<Mutex<Vec<(String, Vec<u8>)>>>,
+    upload_failures_remaining: Arc<Mutex<BTreeMap<String, usize>>>,
     remote_files: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
     event_tx: Arc<Mutex<Option<mpsc::UnboundedSender<SessionRuntimeEvent>>>>,
 }
@@ -477,6 +478,13 @@ impl RecordingSftpState {
             .lock()
             .expect("lock remote files")
             .insert(remote_path.into(), bytes);
+    }
+
+    fn fail_upload_attempts(&self, remote_path: &str, attempts: usize) {
+        self.upload_failures_remaining
+            .lock()
+            .expect("lock upload failure injection state")
+            .insert(remote_path.into(), attempts);
     }
 
     fn set_event_tx(&self, event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>) {
@@ -835,9 +843,24 @@ impl SftpBackend for RecordingSftpBackend {
 
     fn path_exists<'a>(
         &'a self,
-        _path: &'a str,
+        path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
-        Box::pin(async move { Ok(true) })
+        let state = self.state.clone();
+        let responses = self.responses.clone();
+        let path = path.to_string();
+        Box::pin(async move {
+            let file_exists = state
+                .remote_files
+                .lock()
+                .expect("lock remote files")
+                .contains_key(&path);
+            let directory_exists = responses.contains_key(&path);
+            let listed_entry_exists = responses
+                .values()
+                .flatten()
+                .any(|entry| entry.path == path);
+            Ok(file_exists || directory_exists || listed_entry_exists)
+        })
     }
 
     fn upload_file<'a>(
@@ -848,6 +871,23 @@ impl SftpBackend for RecordingSftpBackend {
         let state = self.state.clone();
         let remote_path = remote_path.to_string();
         Box::pin(async move {
+            let mut failures = state
+                .upload_failures_remaining
+                .lock()
+                .expect("lock upload failure injection state");
+            if let Some(remaining) = failures.get_mut(&remote_path)
+                && *remaining > 0
+            {
+                *remaining -= 1;
+                drop(failures);
+                state
+                    .upload_file_calls
+                    .lock()
+                    .expect("lock sftp upload file calls")
+                    .push((remote_path.clone(), data));
+                return Err(anyhow!("simulated upload failure"));
+            }
+            drop(failures);
             state
                 .remote_files
                 .lock()
@@ -938,9 +978,24 @@ impl SftpBackend for DelayedRecordingSftpBackend {
 
     fn path_exists<'a>(
         &'a self,
-        _path: &'a str,
+        path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
-        Box::pin(async move { Ok(true) })
+        let state = self.state.clone();
+        let responses = self.responses.clone();
+        let path = path.to_string();
+        Box::pin(async move {
+            let file_exists = state
+                .remote_files
+                .lock()
+                .expect("lock delayed remote files")
+                .contains_key(&path);
+            let directory_exists = responses.contains_key(&path);
+            let listed_entry_exists = responses
+                .values()
+                .flatten()
+                .any(|entry| entry.path == path);
+            Ok(file_exists || directory_exists || listed_entry_exists)
+        })
     }
 
     fn upload_file<'a>(
@@ -951,6 +1006,23 @@ impl SftpBackend for DelayedRecordingSftpBackend {
         let state = self.state.clone();
         let remote_path = remote_path.to_string();
         Box::pin(async move {
+            let mut failures = state
+                .upload_failures_remaining
+                .lock()
+                .expect("lock delayed upload failure injection state");
+            if let Some(remaining) = failures.get_mut(&remote_path)
+                && *remaining > 0
+            {
+                *remaining -= 1;
+                drop(failures);
+                state
+                    .upload_file_calls
+                    .lock()
+                    .expect("lock delayed sftp upload file calls")
+                    .push((remote_path.clone(), data));
+                return Err(anyhow!("simulated upload failure"));
+            }
+            drop(failures);
             state
                 .remote_files
                 .lock()
@@ -2981,6 +3053,17 @@ fn create_root_ssh(app: &AppWindow, name: &str, host: &str) -> String {
         .expect("saved ssh asset")
         .id
         .to_string()
+}
+
+fn find_console_asset_id(app: &AppWindow, label: &str) -> String {
+    let items = app.get_console_asset_items();
+    (0..items.row_count())
+        .find_map(|index| {
+            items.row_data(index).and_then(|row| {
+                (row.label.as_str() == label).then(|| row.id.to_string())
+            })
+        })
+        .unwrap_or_else(|| panic!("expected console asset `{label}`"))
 }
 
 fn create_root_snippet(app: &AppWindow, name: &str, script: &str) -> String {
@@ -6645,6 +6728,44 @@ fn launcher_quick_launch_connect_restores_native_terminal_surface_rect() {
 }
 
 #[test]
+fn duplicate_ssh_tabs_keep_resolved_titles_and_reuse_suffix_gaps() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_with_fake_sessions(&app, None);
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+
+    app.invoke_asset_activated(ssh_id.clone().into());
+    app.invoke_workspace_new_tab_requested();
+    app.invoke_welcome_quick_launch_connect_in_new_tab_requested(ssh_id.clone().into());
+    app.invoke_workspace_new_tab_requested();
+    app.invoke_welcome_quick_launch_connect_in_new_tab_requested(ssh_id.clone().into());
+
+    let rows = app.get_workspace_tab_items();
+    assert_eq!(rows.row_count(), 3);
+    assert_eq!(rows.row_data(0).expect("first prod tab").title.as_str(), "Prod Bastion");
+    assert_eq!(rows.row_data(1).expect("second prod tab").title.as_str(), "Prod Bastion(2)");
+    assert_eq!(rows.row_data(2).expect("third prod tab").title.as_str(), "Prod Bastion(3)");
+
+    let second_tab_session_id = rows
+        .row_data(1)
+        .expect("second prod tab session id")
+        .session_id
+        .to_string();
+    app.invoke_workspace_tab_close_requested(second_tab_session_id.into());
+
+    app.invoke_workspace_new_tab_requested();
+    app.invoke_welcome_quick_launch_connect_in_new_tab_requested(ssh_id.into());
+
+    let reopened_rows = app.get_workspace_tab_items();
+    assert_eq!(reopened_rows.row_count(), 3);
+    assert_eq!(reopened_rows.row_data(0).expect("first reopened tab").title.as_str(), "Prod Bastion");
+    assert_eq!(reopened_rows.row_data(1).expect("reused suffix tab").title.as_str(), "Prod Bastion(3)");
+    assert_eq!(reopened_rows.row_data(2).expect("reopened duplicate tab").title.as_str(), "Prod Bastion(2)");
+}
+
+#[test]
 fn launcher_picker_activation_replaces_launcher_tab_and_closes_modal() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -9376,15 +9497,23 @@ fn opening_sftp_without_initial_cwd_falls_back_to_root_until_follow_cwd_arrives(
     app.invoke_open_sftp_panel_requested();
     flush_runtime_projection();
 
-    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
     assert_eq!(app.get_sftp_panel_path().as_str(), "/");
+    if app.get_sftp_panel_mode().as_str() != "ready" {
+        assert_eq!(app.get_sftp_panel_mode().as_str(), "loading");
+        flush_runtime_projection();
+    }
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
     assert_eq!(sftp_state.take_read_dir_calls(), vec!["/".to_string()]);
 
     sftp_state.emit_cwd("/srv/app");
     flush_runtime_projection();
 
-    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
     assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app");
+    if app.get_sftp_panel_mode().as_str() != "ready" {
+        assert_eq!(app.get_sftp_panel_mode().as_str(), "loading");
+        flush_runtime_projection();
+    }
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
     assert_eq!(
         sftp_state.take_read_dir_calls(),
         vec!["/srv/app".to_string()]
@@ -9446,6 +9575,10 @@ fn refresh_and_path_submit_trigger_real_directory_reads() {
     assert_eq!(release_row.type_label.as_str(), "Archive");
     assert_eq!(release_row.size_label.as_str(), "14 KB");
     assert!(
+        release_row.meta_label.as_str().starts_with("Archive · 14 KB"),
+        "quick browser rows should project a compact prebuilt meta label instead of rebuilding metadata fragments inside Slint"
+    );
+    assert!(
         !release_row.modified_label.is_empty(),
         "release row should expose a real modified timestamp"
     );
@@ -9460,6 +9593,175 @@ fn refresh_and_path_submit_trigger_real_directory_reads() {
             "/srv/app/releases".to_string(),
             "/srv/app/releases".to_string(),
         ]
+    );
+}
+
+#[test]
+fn revisiting_a_previous_remote_path_keeps_its_cached_snapshot_visible_while_refreshing() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedReadRecordingSftpLauncher {
+            state: sftp_state.clone(),
+            read_delay_by_path: Arc::new(BTreeMap::from([(
+                "/srv/app".to_string(),
+                Duration::from_millis(180),
+            )])),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    app.invoke_open_sftp_panel_requested();
+    std::thread::sleep(Duration::from_millis(220));
+    flush_runtime_projection();
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("ready /srv/app row")
+            .name
+            .as_str(),
+        "logs"
+    );
+
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    flush_runtime_projection();
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("ready /srv/app/releases row")
+            .name
+            .as_str(),
+        "release.tar.gz"
+    );
+
+    app.invoke_sftp_panel_path_submitted("/srv/app".into());
+
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "loading");
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/app");
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("cached /srv/app row while loading")
+            .name
+            .as_str(),
+        "logs",
+        "revisiting a previously loaded path should immediately show its cached snapshot while the background refresh is still in flight"
+    );
+
+    std::thread::sleep(Duration::from_millis(220));
+    flush_runtime_projection();
+
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("ready /srv/app row after refresh")
+            .name
+            .as_str(),
+        "logs"
+    );
+    assert_eq!(
+        sftp_state.take_read_dir_calls(),
+        vec![
+            "/srv/app".to_string(),
+            "/srv/app/releases".to_string(),
+            "/srv/app".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn switching_tabs_keeps_terminal_selection_fast_and_leaves_the_previous_quick_browser_snapshot_visible_until_refresh_completes() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedReadRecordingSftpLauncher {
+            state: sftp_state.clone(),
+            read_delay_by_path: Arc::new(BTreeMap::from([(
+                "/srv/db".to_string(),
+                Duration::from_millis(180),
+            )])),
+        }),
+    );
+
+    create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    let prod_id = find_console_asset_id(&app, "Prod Bastion");
+    app.invoke_asset_activated(prod_id.into());
+    flush_runtime_projection();
+    let prod_session_id = app.get_active_workspace_session_id().to_string();
+
+    create_root_ssh(&app, "DB Replica", "10.0.0.24");
+    let db_id = find_console_asset_id(&app, "DB Replica");
+    app.invoke_asset_activated(db_id.into());
+    flush_runtime_projection();
+    let db_session_id = app.get_active_workspace_session_id().to_string();
+
+    app.invoke_workspace_tab_selected(prod_session_id.clone().into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("prod quick browser row")
+            .name
+            .as_str(),
+        "logs"
+    );
+
+    let started = Instant::now();
+    app.invoke_workspace_tab_selected(db_session_id.clone().into());
+
+    assert!(
+        started.elapsed() < Duration::from_millis(80),
+        "switching the active SSH tab should not wait for the right-side SFTP browser refresh"
+    );
+    assert_eq!(
+        app.get_active_workspace_session_id().as_str(),
+        db_session_id.as_str(),
+        "terminal focus should switch immediately even while the quick browser is still refreshing in the background"
+    );
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("previous quick browser row while db refresh is pending")
+            .name
+            .as_str(),
+        "logs",
+        "until the target tab refresh completes, the quick browser should keep showing the previous snapshot instead of blanking or blocking"
+    );
+
+    flush_runtime_projection();
+    std::thread::sleep(Duration::from_millis(220));
+    flush_runtime_projection();
+
+    assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/db");
+    assert_eq!(app.get_sftp_panel_mode().as_str(), "ready");
+    assert_eq!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("db quick browser row after refresh")
+            .name
+            .as_str(),
+        "backup.sql"
+    );
+    assert_eq!(
+        sftp_state.take_read_dir_calls(),
+        vec!["/srv/app".to_string(), "/srv/db".to_string()]
     );
 }
 
@@ -9701,6 +10003,826 @@ fn activating_sftp_rows_navigates_directories_and_opens_remote_text_files() {
     assert_eq!(
         app.get_sftp_remote_file_modal_content().as_str(),
         "port=2022\n"
+    );
+}
+
+#[test]
+fn external_sftp_drop_callbacks_toggle_overlay_and_queue_background_uploads() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("sftp-drop-upload");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create drop upload temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write local drop source");
+
+    app.invoke_sftp_panel_external_drop_hover_changed(true);
+    flush_runtime_projection();
+    assert!(
+        !app.get_sftp_panel_drop_target_active(),
+        "drag hover should stay inactive until the quick browser has a ready SFTP target"
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.invoke_sftp_panel_external_drop_hover_changed(true);
+    flush_runtime_projection();
+    assert!(
+        app.get_sftp_panel_drop_target_active(),
+        "drag hover should expose the quick-browser drop overlay once the active SFTP path is ready"
+    );
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        upload_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        !sftp_state
+            .upload_file_calls
+            .lock()
+            .expect("lock sftp upload file calls")
+            .is_empty()
+    });
+
+    let upload_calls = sftp_state.take_upload_file_calls();
+    assert_eq!(
+        upload_calls,
+        vec![("/srv/app/release.env".to_string(), b"PORT=22\n".to_vec())]
+    );
+    assert!(
+        !app.get_sftp_panel_drop_target_active(),
+        "drop completion should clear the hover overlay so the quick browser returns to normal browsing chrome"
+    );
+}
+
+#[test]
+fn transfer_center_receives_live_rows_from_background_sftp_transfers() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-upload");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create transfer-center temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write transfer-center upload source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        upload_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_transfer_center_items().row_count() > 0
+    });
+
+    let rows = app.get_transfer_center_items();
+    let first_row = rows.row_data(0).expect("first transfer center row");
+    assert!(
+        first_row.title.contains("release.env"),
+        "transfer center should surface the queued/uploaded file name"
+    );
+    assert!(
+        first_row.detail.contains("Upload"),
+        "transfer center rows should carry the transfer direction summary"
+    );
+}
+
+#[test]
+fn transfer_center_conflict_rows_expose_inline_error_summary_and_tooltip() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-conflict-row");
+    let upload_path = temp_root.join("logs");
+    fs::create_dir_all(temp_root.as_path()).expect("create transfer-center conflict temp root");
+    fs::write(&upload_path, b"pretend archive bytes").expect("write conflict upload source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        upload_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_transfer_center_items().row_count() > 0
+    });
+
+    let row = app
+        .get_transfer_center_items()
+        .row_data(0)
+        .expect("transfer-center conflict row");
+    assert_eq!(row.status_label.as_str(), "Conflict");
+    assert!(
+        row.show_error,
+        "failed/conflict transfer rows should opt into a dedicated inline error line"
+    );
+    assert!(
+        row.error_summary.as_str().contains("already exists"),
+        "the inline transfer-center error summary should explain the actionable conflict reason"
+    );
+    assert!(
+        row.error_tooltip.as_str().contains("already exists"),
+        "the transfer-center tooltip payload should preserve the full conflict text for hover display"
+    );
+}
+
+#[test]
+fn transfer_center_filters_toggle_failed_completed_and_all_views() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-filter-tabs");
+    let upload_path = temp_root.join("release.env");
+    let conflict_path = temp_root.join("logs");
+    fs::create_dir_all(temp_root.as_path()).expect("create transfer-center filter temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write transfer-center completed upload source");
+    fs::write(&conflict_path, b"pretend archive bytes")
+        .expect("write transfer-center conflict upload source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        upload_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        conflict_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        let statuses = (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .map(|row| row.status_label.to_string())
+            .collect::<Vec<_>>();
+        statuses.iter().any(|status| status == "Completed")
+            && statuses.iter().any(|status| status == "Conflict")
+    });
+
+    app.invoke_transfer_center_filter_toggle_requested("failed".into());
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        rows.row_count() == 1
+            && rows
+                .row_data(0)
+                .map(|row| row.status_label.as_str() == "Conflict")
+                .unwrap_or(false)
+    });
+
+    app.invoke_transfer_center_filter_toggle_requested("completed".into());
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        rows.row_count() == 1
+            && rows
+                .row_data(0)
+                .map(|row| row.status_label.as_str() == "Completed")
+                .unwrap_or(false)
+    });
+
+    app.invoke_transfer_center_filter_toggle_requested("completed".into());
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        app.get_transfer_center_items().row_count() >= 2
+    });
+}
+
+#[test]
+fn transfer_center_failed_rows_expose_retry_and_retry_real_transfer() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    sftp_state.fail_upload_attempts("/srv/app/release.env", 1);
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-retry");
+    let upload_path = temp_root.join("release.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create transfer-center retry temp root");
+    fs::write(&upload_path, b"PORT=22\n").expect("write transfer-center retry upload source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        upload_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        rows.row_count() > 0
+            && rows
+                .row_data(0)
+                .map(|row| row.status_label.as_str() == "Failed")
+                .unwrap_or(false)
+    });
+
+    let failed_row = app
+        .get_transfer_center_items()
+        .row_data(0)
+        .expect("failed transfer-center row");
+    assert!(
+        failed_row.can_retry,
+        "failed transfer rows should expose a real retry affordance"
+    );
+
+    app.invoke_transfer_center_retry_requested(failed_row.id.clone());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let upload_calls = sftp_state
+            .upload_file_calls
+            .lock()
+            .expect("lock sftp retry upload calls")
+            .len();
+        let rows = app.get_transfer_center_items();
+        upload_calls >= 2
+            && rows.row_count() > 0
+            && rows
+                .row_data(0)
+                .map(|row| row.status_label.as_str() == "Completed")
+                .unwrap_or(false)
+    });
+}
+
+#[test]
+fn transfer_center_attention_rows_can_open_linked_sftp_workspace() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-open-workspace");
+    let conflict_path = temp_root.join("logs");
+    fs::create_dir_all(temp_root.as_path())
+        .expect("create transfer-center open workspace temp root");
+    fs::write(&conflict_path, b"pretend archive bytes")
+        .expect("write transfer-center open workspace upload source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        conflict_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        rows.row_count() > 0
+            && rows
+                .row_data(0)
+                .map(|row| row.status_label.as_str() == "Conflict")
+                .unwrap_or(false)
+    });
+
+    let attention_row = app
+        .get_transfer_center_items()
+        .row_data(0)
+        .expect("transfer-center attention row");
+    assert!(
+        attention_row.can_open_workspace,
+        "attention rows should expose a path into the full SFTP workspace for heavier follow-up work"
+    );
+
+    app.invoke_transfer_center_open_workspace_requested(attention_row.id.clone());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_workspace_session_host_mode().as_str() == "sftp"
+    });
+
+    assert_eq!(app.get_workspace_session_title().as_str(), "Files: Prod Bastion");
+}
+
+#[test]
+fn transfer_center_conflict_rows_can_open_resolve_modal_and_replace() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-conflict-replace");
+    let upload_path = temp_root.join("release.tar.gz");
+    fs::create_dir_all(temp_root.as_path()).expect("create transfer-center conflict replace temp root");
+    fs::write(&upload_path, b"archive bytes").expect("write transfer-center conflict replace upload source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_path().as_str() == "/srv/app/releases"
+    });
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        upload_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        rows.row_count() > 0
+            && rows
+                .row_data(0)
+                .map(|row| row.status_label.as_str() == "Conflict" && row.can_resolve_conflict)
+                .unwrap_or(false)
+    });
+
+    let row = app
+        .get_transfer_center_items()
+        .row_data(0)
+        .expect("transfer-center conflict row");
+    app.invoke_transfer_center_resolve_conflict_requested(row.id.clone());
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        app.get_sftp_conflict_modal_open()
+    });
+
+    assert_eq!(
+        app.get_sftp_conflict_modal_source_path().as_str(),
+        upload_path.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        app.get_sftp_conflict_modal_target_path().as_str(),
+        "/srv/app/releases/release.tar.gz"
+    );
+
+    app.invoke_sftp_conflict_modal_replace_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        !app.get_sftp_conflict_modal_open()
+            && rows.row_count() > 0
+            && rows
+                .row_data(0)
+                .map(|updated| updated.status_label.as_str() == "Completed")
+                .unwrap_or(false)
+    });
+}
+
+#[test]
+fn transfer_center_conflict_modal_can_apply_replace_to_matching_destination_batch() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-conflict-batch-replace");
+    let release_a_path = temp_root.join("release-a.tar.gz");
+    let release_b_path = temp_root.join("release-b.tar.gz");
+    let other_path = temp_root.join("other.env");
+    fs::create_dir_all(temp_root.as_path()).expect("create transfer-center conflict batch temp root");
+    fs::write(&release_a_path, b"archive a").expect("write transfer-center conflict batch source a");
+    fs::write(&release_b_path, b"archive b").expect("write transfer-center conflict batch source b");
+    fs::write(&other_path, b"PORT=22\n").expect("write transfer-center conflict batch source c");
+
+    sftp_state.set_remote_file("/srv/app/releases/release-a.tar.gz", b"existing a".to_vec());
+    sftp_state.set_remote_file("/srv/app/releases/release-b.tar.gz", b"existing b".to_vec());
+    sftp_state.set_remote_file("/srv/app/config/other.env", b"existing c".to_vec());
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_path().as_str() == "/srv/app/releases"
+    });
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(release_a_path.to_string_lossy().to_string()),
+        SharedString::from(release_b_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        let mut release_conflicts = 0;
+        for index in 0..rows.row_count() {
+            let Some(row) = rows.row_data(index) else {
+                continue;
+            };
+            if row.status_label.as_str() == "Conflict"
+                && (row.title.as_str() == "release-a.tar.gz"
+                    || row.title.as_str() == "release-b.tar.gz")
+            {
+                release_conflicts += 1;
+            }
+        }
+        release_conflicts == 2
+    });
+
+    app.invoke_sftp_panel_path_submitted("/srv/app/config".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_path().as_str() == "/srv/app/config"
+    });
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        other_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        let mut conflict_titles = Vec::new();
+        for index in 0..rows.row_count() {
+            let Some(row) = rows.row_data(index) else {
+                continue;
+            };
+            if row.status_label.as_str() == "Conflict" {
+                conflict_titles.push(row.title.to_string());
+            }
+        }
+        conflict_titles.iter().any(|title| title == "release-a.tar.gz")
+            && conflict_titles.iter().any(|title| title == "release-b.tar.gz")
+            && conflict_titles.iter().any(|title| title == "other.env")
+    });
+
+    let release_a_row = {
+        let rows = app.get_transfer_center_items();
+        (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .find(|row| row.title.as_str() == "release-a.tar.gz")
+            .expect("release-a conflict row")
+    };
+    app.invoke_transfer_center_resolve_conflict_requested(release_a_row.id.clone());
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        app.get_sftp_conflict_modal_open()
+    });
+
+    assert_eq!(app.get_sftp_conflict_modal_batch_conflict_count(), 1);
+    app.invoke_sftp_conflict_modal_apply_to_batch_toggled(true);
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        app.get_sftp_conflict_modal_apply_to_batch()
+    });
+
+    app.invoke_sftp_conflict_modal_replace_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        let mut release_a_done = false;
+        let mut release_b_done = false;
+        let mut other_still_conflict = false;
+        for index in 0..rows.row_count() {
+            let Some(row) = rows.row_data(index) else {
+                continue;
+            };
+            if row.title.as_str() == "release-a.tar.gz" && row.status_label.as_str() == "Completed" {
+                release_a_done = true;
+            }
+            if row.title.as_str() == "release-b.tar.gz" && row.status_label.as_str() == "Completed" {
+                release_b_done = true;
+            }
+            if row.title.as_str() == "other.env" && row.status_label.as_str() == "Conflict" {
+                other_still_conflict = true;
+            }
+        }
+        !app.get_sftp_conflict_modal_open() && release_a_done && release_b_done && other_still_conflict
+    });
+}
+
+#[test]
+fn transfer_center_conflict_modal_requests_focus_when_opened_for_keyboard_access() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+    let temp_root = sample_vault_runtime_root("transfer-center-conflict-keyboard-batch");
+    let release_a_path = temp_root.join("release-a.tar.gz");
+    let release_b_path = temp_root.join("release-b.tar.gz");
+    fs::create_dir_all(temp_root.as_path()).expect("create transfer-center keyboard temp root");
+    fs::write(&release_a_path, b"archive a").expect("write transfer-center keyboard source a");
+    fs::write(&release_b_path, b"archive b").expect("write transfer-center keyboard source b");
+
+    sftp_state.set_remote_file("/srv/app/releases/release-a.tar.gz", b"existing a".to_vec());
+    sftp_state.set_remote_file("/srv/app/releases/release-b.tar.gz", b"existing b".to_vec());
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_path().as_str() == "/srv/app/releases"
+    });
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(release_a_path.to_string_lossy().to_string()),
+        SharedString::from(release_b_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        let mut release_conflicts = 0;
+        for index in 0..rows.row_count() {
+            let Some(row) = rows.row_data(index) else {
+                continue;
+            };
+            if row.status_label.as_str() == "Conflict" {
+                release_conflicts += 1;
+            }
+        }
+        release_conflicts == 2
+    });
+
+    let release_a_row = {
+        let rows = app.get_transfer_center_items();
+        (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .find(|row| row.title.as_str() == "release-a.tar.gz")
+            .expect("release-a conflict row")
+    };
+    app.invoke_transfer_center_resolve_conflict_requested(release_a_row.id.clone());
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        app.get_sftp_conflict_modal_open()
+    });
+
+    assert_eq!(app.get_sftp_conflict_modal_batch_conflict_count(), 1);
+    assert!(
+        !app.get_sftp_conflict_modal_apply_to_batch(),
+        "batch scope should start disabled until the user explicitly opts in"
+    );
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        app.get_sftp_conflict_modal_focus_sequence() > 0
+    });
+}
+
+#[test]
+fn transfer_center_conflict_rows_can_skip_conflicted_transfer() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-conflict-skip");
+    let upload_path = temp_root.join("release.tar.gz");
+    fs::create_dir_all(temp_root.as_path()).expect("create transfer-center conflict skip temp root");
+    fs::write(&upload_path, b"archive bytes").expect("write transfer-center conflict skip upload source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_path().as_str() == "/srv/app/releases"
+    });
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        upload_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        rows.row_count() > 0
+            && rows
+                .row_data(0)
+                .map(|row| row.status_label.as_str() == "Conflict")
+                .unwrap_or(false)
+    });
+
+    let row = app
+        .get_transfer_center_items()
+        .row_data(0)
+        .expect("transfer-center conflict row");
+    app.invoke_transfer_center_resolve_conflict_requested(row.id.clone());
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        app.get_sftp_conflict_modal_open()
+    });
+
+    app.invoke_sftp_conflict_modal_skip_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        !app.get_sftp_conflict_modal_open()
+            && rows.row_count() > 0
+            && rows
+                .row_data(0)
+                .map(|updated| updated.status_label.as_str() == "Cancelled")
+                .unwrap_or(false)
+    });
+}
+
+#[test]
+fn transfer_summary_recomputes_current_session_counts_when_switching_tabs() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-session-counts");
+    fs::create_dir_all(temp_root.as_path()).expect("create session-count temp root");
+    let prod_file_a = temp_root.join("prod-a.env");
+    let prod_file_b = temp_root.join("prod-b.env");
+    let db_file = temp_root.join("db.env");
+    fs::write(&prod_file_a, b"PORT=22\n").expect("write prod-a upload source");
+    fs::write(&prod_file_b, b"PORT=23\n").expect("write prod-b upload source");
+    fs::write(&db_file, b"PORT=24\n").expect("write db upload source");
+
+    let prod_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(prod_id.into());
+    flush_runtime_projection();
+    let prod_session_id = app.get_active_workspace_session_id().to_string();
+
+    let db_id = create_root_ssh(&app, "DB Replica", "10.0.0.24");
+    app.invoke_asset_activated(db_id.into());
+    flush_runtime_projection();
+    let db_session_id = app.get_active_workspace_session_id().to_string();
+
+    app.invoke_workspace_tab_selected(prod_session_id.clone().into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(prod_file_a.to_string_lossy().to_string()),
+        SharedString::from(prod_file_b.to_string_lossy().to_string()),
+    ])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_transfer_queue_total() >= 2 && app.get_transfer_queue_current_session() == 2
+    });
+
+    app.invoke_workspace_tab_selected(db_session_id.clone().into());
+    flush_runtime_projection();
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        db_file.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_transfer_queue_total() >= 3 && app.get_transfer_queue_current_session() == 1
+    });
+
+    app.invoke_workspace_tab_selected(prod_session_id.into());
+    flush_runtime_projection();
+
+    wait_for_condition(Duration::from_millis(500), || {
+        flush_runtime_projection();
+        app.get_transfer_queue_current_session() == 2
+    });
+}
+
+#[test]
+fn native_windowing_bridge_wires_os_file_drop_events_into_sftp_callbacks() {
+    let windowing_source =
+        fs::read_to_string("src/app/bootstrap/windowing.rs").expect("read windowing source");
+
+    assert!(
+        windowing_source.contains("WindowEvent::HoveredFile")
+            && windowing_source.contains("invoke_sftp_panel_external_drop_hover_changed"),
+        "native windowing should forward hovered-file events into the quick-browser drop hover callback"
+    );
+    assert!(
+        windowing_source.contains("WindowEvent::DroppedFile")
+            && windowing_source.contains("invoke_sftp_panel_external_drop_requested"),
+        "native windowing should forward dropped files into the quick-browser upload callback"
     );
 }
 

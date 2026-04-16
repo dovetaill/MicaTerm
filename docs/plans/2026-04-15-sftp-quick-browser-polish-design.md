@@ -11,6 +11,7 @@
 - 右侧 quick browser 仍然沿用多列表格布局，在 392px 窄栏下产生横向滚动和视觉拥挤；
 - quick browser 的目录读取仍走同步链路，切换 SSH tab 时会阻塞 UI，严重时导致窗口未响应；
 - 相同 SSH 连接名打开多个 tab 时，标签显示完全相同，无法快速区分。
+- quick browser 还缺少直觉化的文件拖拽上传入口，轻操作需要绕去更重的 workflow。
 
 直接相关代码位置：
 
@@ -20,6 +21,8 @@
 - `src/app/ssh/session_manager.rs`
 - `src/shell/view_model/sftp.rs`
 - `src/shell/tabs.rs`
+- `src/main.rs`
+- `src/app/bootstrap/windowing.rs`
 
 ## 根因分析
 
@@ -62,6 +65,7 @@
 - 文件图标按类型语义上色，不再统一纯白线稿；
 - SFTP 目录同步改为后台异步，不再阻塞 tab 切换；
 - quick browser 支持会话级目录快照复用，切 tab 先显示上次内容，再后台刷新；
+- quick browser 支持把本地文件/文件夹直接拖到右侧内容区并排入现有 transfer queue；
 - 同名 SSH tab 自动编号，且编号可补位复用。
 
 ### 本轮不做
@@ -71,6 +75,7 @@
 - 远端目录树；
 - 文件预览器升级；
 - 高级缓存失效策略（如目录监听、mtime 校验、增量刷新）。
+- 拖到具体某个子文件夹行时的精确落点投递。
 
 ## 方案对比
 
@@ -153,6 +158,15 @@
 
 窄栏下不再出现单独的 `Type / Modified / Size` 列，也不再保留横向滚动依赖。
 
+### 拖拽上传
+
+拖拽上传只在 quick browser 的内容区生效：
+
+- 拖到空白态、列表区、状态条下方都视为“上传到当前 remote path”；
+- 不做 per-row folder drop target，避免右栏退化成完整文件管理器；
+- 命中可投放状态时显示轻量 drop overlay；
+- 放手后只做排队与反馈，不阻塞终端和列表交互。
+
 ### 状态层
 
 状态从“大块表格状态行”收敛成轻量 status strip：
@@ -215,12 +229,25 @@
 - 如果处于 `Follow CWD`，后台再根据最新 cwd 发新请求；
 - 用户显式点击 refresh 时无条件刷新；
 - 自动跟随触发时可以做轻量去抖，避免短时间重复读同一路径。
+- 拖拽上传成功入队后立即保留当前列表视图，后台通过 queue 执行并在必要时 revalidate 当前目录。
 
 ### 线程边界
 
 - `SessionManager` 不再在 UI 路径中 `block_on(read_dir)`；
 - 同步接口只保留给测试或显式后台 worker 使用；
 - quick browser 实际刷新由后台任务驱动，UI 层只消费投影结果。
+
+### 拖放事件接入
+
+Slint 自身没有直接暴露桌面文件拖放到业务层的高层 API，但当前仓库已经启用了 `unstable-winit-030`。因此桌面文件拖放采用：
+
+1. 通过 `BackendSelector::with_winit_custom_application_handler(...)` 截获 `winit::event::WindowEvent::{HoveredFile, HoveredFileCancelled, DroppedFile}`；
+2. 将 hover/drop 的文件路径和窗口 ID 透传给 bootstrap；
+3. bootstrap 判断当前窗口是否命中右侧 quick browser 内容区、当前 SFTP session 是否可写；
+4. 命中时把本地文件/文件夹扫描为 upload tasks，进入现有 `TransferQueue`；
+5. 使用已有 SFTP queue runtime 执行上传，而不是单独造一条同步上传链路。
+
+这样做的关键是：拖放只是“输入方式”，上传执行仍复用现有 transfer 模型，避免新增一套并行状态机。
 
 ## 同名标签命名
 
@@ -245,6 +272,8 @@ SFTP workspace tab 若来源于对应终端 tab，可同步使用消歧后的 ho
 - `src/app/ssh/session_manager.rs`：补充后台可用的 async SFTP 目录读取接口
 - `src/shell/view_model/sftp.rs`：收缩表格心智，增加快照/refreshing 状态投影
 - `src/shell/tabs.rs` / workspace projection：实现重复 tab 标题编号
+- `src/main.rs`：为 winit backend 挂接 custom application handler
+- `src/app/bootstrap/windowing.rs` / `src/app/bootstrap.rs`：桥接桌面文件拖放事件到 quick browser 状态
 - 测试：render、view-model、session manager、bootstrap 行为回归
 
 ## 验证标准
@@ -253,5 +282,6 @@ SFTP workspace tab 若来源于对应终端 tab，可同步使用消歧后的 ho
 - 切换 SSH tab 时窗口保持可交互，不出现明显主线程卡死；
 - Follow CWD 与 refresh 结果只采纳最新请求；
 - quick browser 在已有快照时切换 tab 能立即显示内容；
+- 把本地文件拖到 quick browser 时不会阻塞 UI，并且能正确排入上传队列；
 - 同名 SSH 标签显示稳定编号，关闭后编号可复用；
 - 相关渲染测试、view-model 测试、session manager 测试与 bootstrap 行为测试通过。

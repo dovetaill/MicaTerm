@@ -7,7 +7,8 @@ fn transfer_center_renders_running_queued_paused_failed_completed_tabs() {
 
     for label in ["Running", "Queued", "Paused", "Failed", "Completed"] {
         assert!(
-            content.contains(&format!("text: \"{label}\"")),
+            content.contains(&format!("status-chip_label(\"{label}\""))
+                || content.contains(&format!("\"{label}\"")),
             "transfer center should expose the `{label}` tab"
         );
     }
@@ -15,5 +16,330 @@ fn transfer_center_renders_running_queued_paused_failed_completed_tabs() {
     assert!(
         content.contains("No transfers yet"),
         "transfer center should expose a lightweight empty state"
+    );
+}
+
+#[test]
+fn transfer_center_exposes_live_transfer_rows_contract() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("export struct TransferCenterItem"),
+        "transfer center should define a projected row contract for live transfer tasks"
+    );
+    assert!(
+        content.contains("in property <[TransferCenterItem]> items: [];"),
+        "transfer center should accept a live item list from bootstrap"
+    );
+    assert!(
+        content.contains("for item in root.items"),
+        "transfer center should render real transfer rows instead of a permanent placeholder"
+    );
+}
+
+
+#[test]
+fn transfer_center_exposes_filter_and_row_action_contracts() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+    let app_window =
+        fs::read_to_string("ui/app-window.slint").expect("read app window source");
+
+    assert!(
+        content.contains("can_retry: bool")
+            && content.contains("can_resolve_conflict: bool")
+            && content.contains("can_open_workspace: bool"),
+        "transfer-center rows should expose lightweight action capability flags for retry/resolve/open-workspace affordances"
+    );
+    assert!(
+        content.contains("in property <string> active-filter: \"all\";")
+            && content.contains("callback filter-toggle-requested(string);")
+            && content.contains("callback retry-requested(string);")
+            && content.contains("callback resolve-conflict-requested(string);")
+            && content.contains("callback open-workspace-requested(string);"),
+        "transfer center should expose filter and row action callbacks so the lightweight UI can drive real host behavior"
+    );
+    assert!(
+        app_window.contains("transfer-center-active-filter")
+            && app_window.contains("callback transfer-center-filter-toggle-requested(string);")
+            && app_window.contains("callback transfer-center-retry-requested(string);")
+            && app_window.contains("callback transfer-center-resolve-conflict-requested(string);")
+            && app_window.contains("callback transfer-center-open-workspace-requested(string);"),
+        "app window should forward transfer-center filter and action callbacks into bootstrap"
+    );
+}
+
+#[test]
+fn transfer_center_rows_use_compact_primary_and_workspace_actions() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("\"Resolve\"")
+            && content.contains("\"Workspace\"")
+            && content.contains("secondary-action-touch := TouchArea"),
+        "transfer-center rows should expose a compact primary action plus a lighter workspace shortcut for narrow widths"
+    );
+}
+#[test]
+fn transfer_center_rows_expose_error_summary_and_tooltip_contract() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+    let app_window =
+        fs::read_to_string("ui/app-window.slint").expect("read app window source");
+
+    assert!(
+        content.contains("error_summary: string"),
+        "transfer center rows should expose a compact inline error summary for failed/conflict tasks"
+    );
+    assert!(
+        content.contains("error_tooltip: string"),
+        "transfer center rows should expose the full error text for hover tooltip display"
+    );
+    assert!(
+        content.contains("show_error: bool"),
+        "transfer center rows should explicitly mark whether an inline error line should render"
+    );
+    assert!(
+        app_window.contains("transfer-center-tooltip-overlay := TitlebarTooltip"),
+        "app window should host a dedicated tooltip overlay for transfer-center error hover text"
+    );
+}
+
+#[test]
+fn conflict_modal_exposes_destination_scoped_batch_toggle_contract() {
+    let modal =
+        fs::read_to_string("ui/components/sftp-conflict-modal.slint").expect("read conflict modal");
+    let app_window =
+        fs::read_to_string("ui/app-window.slint").expect("read app window source");
+
+    assert!(
+        modal.contains("in property <int> batch-conflict-count: 0;")
+            && modal.contains("in property <bool> apply-to-batch: false;")
+            && modal.contains("callback apply-to-batch-toggled(bool);"),
+        "conflict modal should expose destination-scoped batch-toggle properties and callback so the UI can drive a real multi-conflict scope"
+    );
+    assert!(
+        modal.contains("function batch-scope-copy() -> string")
+            && modal.contains("function batch-toggle-copy() -> string")
+            && modal.contains("if root.batch-conflict-count > 0 : scope-card := Rectangle {"),
+        "conflict modal should compute its destination-scope copy in one place and render a dedicated scope card only when other matching conflicts exist"
+    );
+    assert!(
+        app_window.contains("in-out property <int> sftp-conflict-modal-batch-conflict-count: 0;")
+            && app_window.contains("in-out property <bool> sftp-conflict-modal-apply-to-batch: false;")
+            && app_window.contains("callback sftp-conflict-modal-apply-to-batch-toggled(bool);")
+            && app_window.contains("batch-conflict-count: root.sftp-conflict-modal-batch-conflict-count;")
+            && app_window.contains("apply-to-batch: root.sftp-conflict-modal-apply-to-batch;"),
+        "app window should forward the conflict modal batch scope state and toggle callback into bootstrap"
+    );
+}
+
+#[test]
+fn conflict_modal_uses_labeled_cards_instead_of_raw_source_target_lines() {
+    let modal =
+        fs::read_to_string("ui/components/sftp-conflict-modal.slint").expect("read conflict modal");
+
+    for label in ["Incoming item", "Existing target", "Destination scope"] {
+        assert!(
+            modal.contains(&format!("label: \"{label}\";"))
+                || modal.contains(&format!("text: \"{label}\";")),
+            "conflict modal should render a labeled `{label}` card so the narrow dialog reads like a mature transfer sheet instead of raw concatenated path text"
+        );
+    }
+
+    assert!(
+        !modal.contains("text: \"Source: \" + root.source-path;")
+            && !modal.contains("text: \"Target: \" + root.target-path;"),
+        "conflict modal should stop rendering raw `Source:` / `Target:` lines once the labeled cards exist"
+    );
+    assert!(
+        modal.contains("other conflict is waiting in this folder.")
+            && modal.contains("other conflicts are waiting in this folder.")
+            && modal.contains("Apply this choice to the other ")
+            && modal.contains(" conflicts in this folder."),
+        "conflict modal batch copy should clearly describe folder-scoped impact in both singular and plural states"
+    );
+}
+
+#[test]
+fn conflict_modal_exposes_keyboard_shortcuts_for_batch_toggle_and_primary_action() {
+    let modal =
+        fs::read_to_string("ui/components/sftp-conflict-modal.slint").expect("read conflict modal");
+
+    assert!(
+        modal.contains("key-pressed(event) => {"),
+        "conflict modal should own keyboard handling directly so the dialog remains usable without pointer interaction"
+    );
+    assert!(
+        modal.contains("event.text == Key.Space")
+            && modal.contains("root.apply-to-batch-toggled(!root.apply-to-batch);"),
+        "conflict modal should let Space toggle the destination batch checkbox when the scope card is present"
+    );
+    assert!(
+        modal.contains("event.text == Key.Return")
+            && modal.contains("root.replace-requested();"),
+        "conflict modal should treat Enter as the default Replace action so the dialog behaves like a mature transfer sheet"
+    );
+}
+
+#[test]
+fn conflict_modal_batch_toggle_row_exposes_focus_and_checkbox_accessibility_contract() {
+    let modal =
+        fs::read_to_string("ui/components/sftp-conflict-modal.slint").expect("read conflict modal");
+
+    assert!(
+        modal.contains("component ConflictBatchToggleRow inherits Rectangle")
+            && modal.contains("accessible-role: AccessibleRole.checkbox;")
+            && modal.contains("accessible-checkable: true;")
+            && modal.contains("accessible-checked: root.checked;")
+            && modal.contains("forward-focus: toggle-focus;"),
+        "conflict modal batch-toggle row should behave like a real checkbox row so keyboard users can discover and activate the folder-scope toggle"
+    );
+    assert!(
+        modal.contains("border-color: root.has-focus ? ThemeTokens.focus-ring")
+            && modal.contains("background: toggle-touch.pressed ? ThemeTokens.control-pressed-surface")
+            && modal.contains(": root.has-focus ? ThemeTokens.control-active-surface"),
+        "conflict modal batch-toggle row should reserve a distinct focus treatment instead of looking identical to the passive scope card"
+    );
+}
+
+#[test]
+fn transfer_center_attention_actions_expose_tooltips_and_keyboard_button_contract() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("tooltip-text: \"Resolve transfer conflict\";")
+            && content.contains("tooltip-text: \"Open task in SFTP workspace\";"),
+        "transfer-center resolve/workspace affordances should expose explicit tooltip copy so narrow action labels stay understandable"
+    );
+    assert!(
+        content.contains("accessible-role: AccessibleRole.button;")
+            && content.contains("accessible-action-default => { touch.clicked(); }")
+            && content.contains("forward-focus: action-focus;")
+            && content.contains("event.text == \" \" || event.text == \"\\n\""),
+        "transfer-center row actions should expose a button-like keyboard contract instead of remaining pointer-only chips"
+    );
+    assert!(
+        content.contains("if self.tooltip-active {")
+            && content.contains("root.tooltip-open-requested(")
+            && content.contains("root.tooltip-close-requested(root.tooltip-source-id);"),
+        "transfer-center action affordances should surface their tooltip on hover or focus and close it again once attention leaves"
+    );
+}
+
+#[test]
+fn transfer_center_row_error_tooltip_yields_to_action_tooltips() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("private property <bool> row-action-tooltip-active:")
+            && content.contains("changed row-action-tooltip-active => {"),
+        "transfer-center rows should explicitly track whether an inline action currently owns tooltip attention"
+    );
+    assert!(
+        content.contains("if self.row-action-tooltip-active {")
+            && content.contains("root.queue-tooltip-close(item.id);"),
+        "transfer-center rows should close the error tooltip while resolve/workspace actions are hovered or focused"
+    );
+    assert!(
+        content.contains("!self.row-action-tooltip-active && self.has-hover && item.error_tooltip != \"\""),
+        "transfer-center rows should only schedule the inline error tooltip when no action tooltip is active"
+    );
+}
+
+#[test]
+fn conflict_modal_footer_buttons_expose_focusable_button_contract() {
+    let modal =
+        fs::read_to_string("ui/components/sftp-conflict-modal.slint").expect("read conflict modal");
+
+    assert!(
+        modal.contains("accessible-role: AccessibleRole.button;")
+            && modal.contains("accessible-action-default => { button-touch.clicked(); }")
+            && modal.contains("forward-focus: button-focus;")
+            && modal.contains("out property <bool> has-focus: button-focus.has-focus;"),
+        "conflict modal footer buttons should expose a real button contract so Tab navigation can reach Cancel, Skip, and Replace"
+    );
+    assert!(
+        modal.contains("button-focus := FocusScope {")
+            && modal.contains("event.text == \" \" || event.text == \"\\n\"")
+            && modal.contains("button-touch.clicked();"),
+        "conflict modal footer buttons should respond to keyboard activation instead of remaining pointer-only"
+    );
+    assert!(
+        modal.contains("cancel-button := ConflictDialogButton {")
+            && modal.contains("skip-button := ConflictDialogButton {")
+            && modal.contains("replace-button := ConflictDialogButton {"),
+        "conflict modal footer should keep all three actions in the shared focusable button component"
+    );
+}
+
+#[test]
+fn conflict_modal_close_button_exposes_focus_and_tooltip_contract() {
+    let modal =
+        fs::read_to_string("ui/components/sftp-conflict-modal.slint").expect("read conflict modal");
+
+    assert!(
+        modal.contains("component ConflictIconButton inherits Rectangle")
+            && modal.contains("tooltip-text: \"Close conflict dialog\";")
+            && modal.contains("tooltip-source-id: \"sftp-conflict-close\";")
+            && modal.contains("accessible-role: AccessibleRole.button;")
+            && modal.contains("forward-focus: button-focus;"),
+        "conflict modal close affordance should graduate from a bare rectangle to a real focusable icon button with explicit close tooltip copy"
+    );
+    assert!(
+        modal.contains("close-tooltip-overlay := TitlebarTooltip {")
+            && modal.contains("text: root.tooltip-text-value;")
+            && modal.contains("tooltip-visible: root.tooltip-visible-value;")
+            && modal.contains("function schedule-tooltip("),
+        "conflict modal should own a lightweight tooltip state machine so the close affordance can show the same kind of explicit hint as other shell actions"
+    );
+}
+
+#[test]
+fn transfer_center_row_actions_keep_a_stable_source_focus_order() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    let retry_index = content
+        .find("retry-action := TransferCenterActionChip {")
+        .expect("retry action contract");
+    let resolve_index = content
+        .find("resolve-action := TransferCenterActionChip {")
+        .expect("resolve action contract");
+    let workspace_index = content
+        .find("open-workspace-action := TransferCenterActionLink {")
+        .expect("workspace action contract");
+
+    assert!(
+        retry_index < resolve_index && resolve_index < workspace_index,
+        "transfer-center row actions should stay declared in their intended left-to-right focus order so source-contract smoke can catch accidental reordering"
+    );
+    assert!(
+        content.contains("x: parent.width - 188px;")
+            && content.contains("x: parent.width - 104px;")
+            && content.contains("forward-focus: action-focus;"),
+        "transfer-center action affordances should keep a compact left-to-right layout backed by explicit focus forwarding"
+    );
+}
+
+#[test]
+fn transfer_center_retry_action_matches_attention_tooltip_contract() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("tooltip-text: \"Retry failed transfer\";")
+            && content.contains("tooltip-source-id: item.id + \"-retry\";"),
+        "transfer-center retry should expose explicit tooltip copy so failed-task recovery reads as clearly as resolve/workspace actions"
+    );
+    assert!(
+        content.contains("private property <bool> retry-tooltip-active: false;")
+            && content.contains("private property <bool> row-action-tooltip-active: self.retry-tooltip-active || self.resolve-tooltip-active || self.workspace-tooltip-active;")
+            && content.contains("row.retry-tooltip-active = active;"),
+        "transfer-center retry should participate in the shared action-tooltip ownership model so error hover text does not compete with the retry hint"
     );
 }

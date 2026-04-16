@@ -19,16 +19,22 @@ export component AssetsContextMenuColumn inherits Rectangle {
     private property <image> arrow-clockwise-icon: @image-url("../../assets/icons/fluent/arrow-clockwise-20-regular.svg");
     private property <image> arrow-download-icon: @image-url("../../assets/icons/fluent/arrow-download-20-regular.svg");
     private property <image> arrow-upload-icon: @image-url("../../assets/icons/fluent/arrow-upload-20-regular.svg");
+    private property <image> add-square-multiple-icon: @image-url("../../assets/icons/fluent/add-square-multiple-20-regular.svg");
     private property <image> branch-icon: @image-url("../../assets/icons/fluent/branch-20-regular.svg");
     private property <image> clipboard-icon: @image-url("../../assets/icons/fluent/copy-20-regular.svg");
     private property <image> copy-icon: @image-url("../../assets/icons/fluent/copy-20-regular.svg");
     private property <image> cut-icon: @image-url("../../assets/icons/fluent/cut-20-regular.svg");
     private property <image> delete-icon: @image-url("../../assets/icons/fluent/delete-20-regular.svg");
     private property <image> dismiss-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
+    private property <image> document-icon: @image-url("../../assets/icons/fluent/document-20-regular.svg");
     private property <image> document-code-icon: @image-url("../../assets/icons/fluent/document-code-16-regular.svg");
     private property <image> edit-icon: @image-url("../../assets/icons/fluent/edit-20-regular.svg");
     private property <image> folder-icon: @image-url("../../assets/icons/fluent/folder-20-regular.svg");
     private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
+    private property <image> key-multiple-icon: @image-url("../../assets/icons/fluent/key-multiple-20-regular.svg");
+    private property <image> link-icon: @image-url("../../assets/icons/fluent/link-20-regular.svg");
+    private property <image> list-icon: @image-url("../../assets/icons/fluent/list-20-regular.svg");
+    private property <image> panel-right-expand-icon: @image-url("../../assets/icons/fluent/panel-right-expand-20-regular.svg");
     private property <image> play-icon: @image-url("../../assets/icons/fluent/branch-20-regular.svg");
     private property <image> window-console-icon: @image-url("../../assets/icons/fluent/window-console-20-regular.svg");
     callback item-invoked(string);
@@ -60,6 +66,8 @@ export component AssetsContextMenuColumn inherits Rectangle {
                         ? root.arrow-download-icon
                         : item.icon_id == "arrow-upload"
                             ? root.arrow-upload-icon
+                            : item.icon_id == "add-square-multiple"
+                                ? root.add-square-multiple-icon
                             : item.icon_id == "branch"
                                 ? root.branch-icon
                                 : item.icon_id == "clipboard"
@@ -71,13 +79,23 @@ export component AssetsContextMenuColumn inherits Rectangle {
                                             : item.icon_id == "delete"
                                                 ? root.delete-icon
                                                 : item.icon_id == "dismiss"
-                                                    ? root.dismiss-icon
-                                                    : item.icon_id == "document-code"
-                                                        ? root.document-code-icon
+                                                ? root.dismiss-icon
+                                                : item.icon_id == "document"
+                                                    ? root.document-icon
+                                                : item.icon_id == "document-code"
+                                                    ? root.document-code-icon
                                                     : item.icon_id == "edit"
                                                         ? root.edit-icon
                                                         : item.icon_id == "folder-open"
                                                             ? root.folder-open-icon
+                                                            : item.icon_id == "key-multiple"
+                                                                ? root.key-multiple-icon
+                                                            : item.icon_id == "link"
+                                                                ? root.link-icon
+                                                            : item.icon_id == "list"
+                                                                ? root.list-icon
+                                                            : item.icon_id == "panel-right-expand"
+                                                                ? root.panel-right-expand-icon
                                                             : item.icon_id == "play"
                                                                 ? root.play-icon
                                                             : item.icon_id == "window-console"

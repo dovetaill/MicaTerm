@@ -1,13 +1,15 @@
 //! Session-bound SFTP binding snapshots projected from SSH runtime state.
 
 use std::fs;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use uuid::Uuid;
 
 use crate::app::sftp::{
-    SftpDirectoryEntryKind, SftpPanelMode, SftpRuntimeHandle, SftpSessionBindingState,
-    TransferConflictPolicy, TransferQueue, TransferTaskAction,
+    DownloadTransferEntry, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpPanelMode,
+    SftpRuntimeHandle, SftpSessionBindingState, TransferConflictPolicy, TransferQueue,
+    TransferTaskAction,
 };
 
 #[derive(Clone)]
@@ -63,12 +65,85 @@ pub async fn execute_queued_transfers(
     runtime: &SftpRuntimeHandle,
     queue: &mut TransferQueue,
 ) -> Result<()> {
+    execute_queued_transfers_with_progress(runtime, queue, |_| {}).await
+}
+
+pub async fn execute_queued_transfers_with_progress<F>(
+    runtime: &SftpRuntimeHandle,
+    queue: &mut TransferQueue,
+    mut on_queue_updated: F,
+) -> Result<()>
+where
+    F: FnMut(&TransferQueue),
+{
     let task_ids = queue.queued_task_ids();
     for task_id in task_ids {
-        execute_transfer(runtime, queue, &task_id).await?;
+        if let Err(err) = execute_transfer(runtime, queue, &task_id, &mut on_queue_updated).await {
+            queue.mark_failed(&task_id, err.to_string());
+            on_queue_updated(queue);
+            return Err(err);
+        }
     }
 
     Ok(())
+}
+
+pub async fn collect_download_targets(
+    runtime: &SftpRuntimeHandle,
+    local_root: &Path,
+    entries: &[SftpDirectoryEntry],
+) -> Result<Vec<DownloadTransferEntry>> {
+    let mut targets = Vec::new();
+    let mut pending_directories = Vec::new();
+    for entry in entries {
+        match entry.kind {
+            SftpDirectoryEntryKind::Directory => {
+                let directory_root = local_root.join(entry.name.as_str());
+                targets.push(DownloadTransferEntry {
+                    remote_path: entry.path.clone(),
+                    local_path: directory_root.clone(),
+                    entry_kind: SftpDirectoryEntryKind::Directory,
+                    bytes_total: 0,
+                });
+                pending_directories.push((entry.path.clone(), directory_root));
+            }
+            _ => targets.push(DownloadTransferEntry {
+                remote_path: entry.path.clone(),
+                local_path: local_root.join(entry.name.as_str()),
+                entry_kind: entry.kind,
+                bytes_total: entry.size_bytes.unwrap_or(0),
+            }),
+        }
+    }
+
+    while let Some((remote_dir, local_dir)) = pending_directories.pop() {
+        let entries = runtime
+            .read_dir(remote_dir.as_str())
+            .await
+            .with_context(|| format!("failed to read remote directory `{remote_dir}`"))?;
+        for entry in entries {
+            let local_path = local_dir.join(entry.name.as_str());
+            if entry.kind == SftpDirectoryEntryKind::Directory {
+                targets.push(DownloadTransferEntry {
+                    remote_path: entry.path.clone(),
+                    local_path: local_path.clone(),
+                    entry_kind: SftpDirectoryEntryKind::Directory,
+                    bytes_total: 0,
+                });
+                pending_directories.push((entry.path.clone(), local_path));
+            } else {
+                targets.push(DownloadTransferEntry {
+                    remote_path: entry.path.clone(),
+                    local_path,
+                    entry_kind: entry.kind,
+                    bytes_total: entry.size_bytes.unwrap_or(0),
+                });
+            }
+        }
+    }
+
+    targets.sort_by(|left, right| left.local_path.cmp(&right.local_path));
+    Ok(targets)
 }
 
 pub async fn move_entry_between_directories(
@@ -162,6 +237,7 @@ async fn execute_transfer(
     runtime: &SftpRuntimeHandle,
     queue: &mut TransferQueue,
     task_id: &str,
+    on_queue_updated: &mut impl FnMut(&TransferQueue),
 ) -> Result<()> {
     let Some(task) = queue.task(task_id).cloned() else {
         return Ok(());
@@ -174,10 +250,12 @@ async fn execute_transfer(
                 match task.conflict_policy {
                     None => {
                         queue.mark_conflict(task_id, "Remote path already exists");
+                        on_queue_updated(queue);
                         return Ok(());
                     }
                     Some(TransferConflictPolicy::Skip) => {
                         queue.cancel_task(task_id, "Skipped existing remote path");
+                        on_queue_updated(queue);
                         return Ok(());
                     }
                     Some(TransferConflictPolicy::Overwrite) => {}
@@ -185,6 +263,7 @@ async fn execute_transfer(
             }
 
             queue.mark_running(task_id);
+            on_queue_updated(queue);
             ensure_remote_parent_dirs(runtime, &task.target_path).await?;
             let bytes = fs::read(&local_path).with_context(|| {
                 format!(
@@ -197,6 +276,7 @@ async fn execute_transfer(
                 .await
                 .with_context(|| format!("failed to upload `{}`", local_path.display()))?;
             queue.mark_completed(task_id, transferred);
+            on_queue_updated(queue);
         }
         TransferTaskAction::Download { local_path } => {
             let local_exists = local_path.exists();
@@ -204,10 +284,12 @@ async fn execute_transfer(
                 match task.conflict_policy {
                     None => {
                         queue.mark_conflict(task_id, "Local path already exists");
+                        on_queue_updated(queue);
                         return Ok(());
                     }
                     Some(TransferConflictPolicy::Skip) => {
                         queue.cancel_task(task_id, "Skipped existing local path");
+                        on_queue_updated(queue);
                         return Ok(());
                     }
                     Some(TransferConflictPolicy::Overwrite) => {}
@@ -215,6 +297,7 @@ async fn execute_transfer(
             }
 
             queue.mark_running(task_id);
+            on_queue_updated(queue);
             let bytes = runtime
                 .download_file(&task.source_path)
                 .await
@@ -231,11 +314,49 @@ async fn execute_transfer(
                 format!("failed to write local download `{}`", local_path.display())
             })?;
             queue.mark_completed(task_id, bytes.len() as u64);
+            on_queue_updated(queue);
+        }
+        TransferTaskAction::DownloadDirectory { local_path } => {
+            if local_path.exists() && !local_path.is_dir() {
+                match task.conflict_policy {
+                    None => {
+                        queue.mark_conflict(task_id, "Local path already exists as a file");
+                        on_queue_updated(queue);
+                        return Ok(());
+                    }
+                    Some(TransferConflictPolicy::Skip) => {
+                        queue.cancel_task(task_id, "Skipped existing local file path");
+                        on_queue_updated(queue);
+                        return Ok(());
+                    }
+                    Some(TransferConflictPolicy::Overwrite) => {
+                        fs::remove_file(&local_path).with_context(|| {
+                            format!(
+                                "failed to remove conflicting local file `{}`",
+                                local_path.display()
+                            )
+                        })?;
+                    }
+                }
+            }
+
+            queue.mark_running(task_id);
+            on_queue_updated(queue);
+            fs::create_dir_all(&local_path).with_context(|| {
+                format!(
+                    "failed to create local download directory `{}`",
+                    local_path.display()
+                )
+            })?;
+            queue.mark_completed(task_id, 0);
+            on_queue_updated(queue);
         }
         TransferTaskAction::Delete { entry_kind } => {
             queue.mark_running(task_id);
+            on_queue_updated(queue);
             delete_remote_entry(runtime, &task.source_path, entry_kind).await?;
             queue.mark_completed(task_id, 0);
+            on_queue_updated(queue);
         }
         TransferTaskAction::Move => {
             let remote_exists = runtime.path_exists(&task.target_path).await?;
@@ -243,10 +364,12 @@ async fn execute_transfer(
                 match task.conflict_policy {
                     None => {
                         queue.mark_conflict(task_id, "Remote target already exists");
+                        on_queue_updated(queue);
                         return Ok(());
                     }
                     Some(TransferConflictPolicy::Skip) => {
                         queue.cancel_task(task_id, "Skipped existing remote target");
+                        on_queue_updated(queue);
                         return Ok(());
                     }
                     Some(TransferConflictPolicy::Overwrite) => {}
@@ -254,6 +377,7 @@ async fn execute_transfer(
             }
 
             queue.mark_running(task_id);
+            on_queue_updated(queue);
             ensure_remote_parent_dirs(runtime, &task.target_path).await?;
             runtime
                 .move_entry(&task.source_path, &task.target_path)
@@ -265,6 +389,7 @@ async fn execute_transfer(
                     )
                 })?;
             queue.mark_completed(task_id, 0);
+            on_queue_updated(queue);
         }
     }
 

@@ -1,25 +1,29 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
+import { TitlebarTooltip } from "titlebar-tooltip.slint";
 
-component ConflictActionButton inherits Rectangle {
+component ConflictDialogButton inherits Rectangle {
     in property <string> label: "";
-    in property <bool> enabled: true;
+    in property <bool> primary: false;
+    out property <bool> has-focus: button-focus.has-focus;
     callback clicked();
 
-    width: 88px;
-    height: 30px;
+    height: 34px;
     border-radius: 0px;
     border-width: 1px;
-    border-color: ThemeTokens.divider-subtle;
-    background: !root.enabled ? ThemeTokens.control-disabled-surface
-        : touch.pressed ? ThemeTokens.control-pressed-surface
-        : touch.has-hover ? ThemeTokens.control-hover-surface
-        : ThemeTokens.control-active-surface;
-    opacity: root.enabled ? 1.0 : 0.48;
+    border-color: root.has-focus ? ThemeTokens.focus-ring
+        : root.primary ? ThemeTokens.accent
+        : ThemeTokens.divider-subtle;
+    background: button-touch.pressed ? ThemeTokens.control-pressed-surface
+        : root.has-focus ? ThemeTokens.control-active-surface
+        : button-touch.has-hover ? ThemeTokens.control-hover-surface
+        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.label;
+    accessible-action-default => { button-touch.clicked(); }
+    forward-focus: button-focus;
 
     Text {
-        x: 0px;
-        y: 0px;
         width: parent.width;
         height: parent.height;
         text: root.label;
@@ -30,13 +34,206 @@ component ConflictActionButton inherits Rectangle {
         font-weight: AppTypography.ui-font-weight-regular;
     }
 
-    touch := TouchArea {
-        width: parent.width;
-        height: parent.height;
-        enabled: root.enabled;
-
+    button-touch := TouchArea {
         clicked => {
             root.clicked();
+        }
+    }
+
+    button-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                button-touch.clicked();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+}
+
+component ConflictIconButton inherits Rectangle {
+    in property <string> glyph: "";
+    in property <string> action-label: "";
+    in property <string> tooltip-text: "";
+    in property <string> tooltip-source-id: "";
+    out property <bool> has-hover: button-touch.has-hover;
+    out property <bool> has-focus: button-focus.has-focus;
+    out property <bool> tooltip-active: (root.has-hover || root.has-focus) && root.tooltip-text != "";
+    callback clicked();
+    callback tooltip-open-requested(string, string, length, length, length);
+    callback tooltip-close-requested(string);
+
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: root.has-focus ? ThemeTokens.focus-ring : ThemeTokens.divider-subtle;
+    background: button-touch.pressed ? ThemeTokens.control-pressed-surface
+        : root.has-focus ? ThemeTokens.control-active-surface
+        : button-touch.has-hover ? ThemeTokens.control-hover-surface
+        : ThemeTokens.control-active-surface;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.action-label;
+    accessible-action-default => { button-touch.clicked(); }
+    forward-focus: button-focus;
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.glyph;
+        color: ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    changed tooltip-active => {
+        if self.tooltip-active {
+            root.tooltip-open-requested(
+                root.tooltip-source-id,
+                root.tooltip-text,
+                self.absolute-position.x + self.width / 2,
+                self.absolute-position.y + self.height + 8px,
+                self.width,
+            );
+        } else {
+            root.tooltip-close-requested(root.tooltip-source-id);
+        }
+    }
+
+    button-touch := TouchArea {
+        clicked => {
+            root.tooltip-close-requested(root.tooltip-source-id);
+            root.clicked();
+        }
+    }
+
+    button-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                button-touch.clicked();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+}
+
+component ConflictInfoCard inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "";
+
+    height: max(58px, value-copy.preferred-height + 30px);
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: ThemeTokens.divider-subtle;
+    background: ThemeTokens.control-active-surface;
+
+    Text {
+        x: 12px;
+        y: 8px;
+        width: parent.width - 24px;
+        text: root.label;
+        color: ThemeTokens.text-secondary;
+        font-size: 11px;
+        font-weight: AppTypography.ui-font-weight-regular;
+    }
+
+    value-copy := Text {
+        x: 12px;
+        y: 24px;
+        width: parent.width - 24px;
+        text: root.value;
+        color: ThemeTokens.text-primary;
+        font-size: 12px;
+        font-weight: AppTypography.ui-font-weight-regular;
+        wrap: word-wrap;
+    }
+}
+
+component ConflictBatchToggleRow inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> checked: false;
+    out property <bool> has-hover: toggle-touch.has-hover;
+    out property <bool> has-focus: toggle-focus.has-focus;
+    callback toggled(bool);
+
+    border-radius: 0px;
+    border-width: 1px;
+    border-color: root.has-focus ? ThemeTokens.focus-ring
+        : root.has-hover ? ThemeTokens.divider-strong
+        : ThemeTokens.divider-subtle;
+    background: toggle-touch.pressed ? ThemeTokens.control-pressed-surface
+        : root.has-focus ? ThemeTokens.control-active-surface
+        : root.has-hover ? ThemeTokens.control-hover-surface
+        : ThemeTokens.workspace-surface;
+    accessible-role: AccessibleRole.checkbox;
+    accessible-checkable: true;
+    accessible-label: root.label;
+    accessible-checked: root.checked;
+    accessible-action-default => { toggle-touch.clicked(); }
+    forward-focus: toggle-focus;
+
+    checkbox := Rectangle {
+        x: 10px;
+        y: 10px;
+        width: 18px;
+        height: 18px;
+        border-radius: 0px;
+        border-width: 1px;
+        border-color: root.checked ? ThemeTokens.accent
+            : root.has-focus ? ThemeTokens.focus-ring
+            : ThemeTokens.divider-strong;
+        background: root.checked ? ThemeTokens.accent : transparent;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.checked ? "✓" : "";
+            color: ThemeTokens.text-primary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-size: 12px;
+            font-weight: AppTypography.ui-font-weight-regular;
+        }
+    }
+
+    Text {
+        x: 38px;
+        y: 5px;
+        width: parent.width - 50px;
+        text: root.label;
+        color: ThemeTokens.text-primary;
+        font-size: 12px;
+        font-weight: AppTypography.ui-font-weight-regular;
+        wrap: word-wrap;
+    }
+
+    toggle-touch := TouchArea {
+        clicked => {
+            root.toggled(!root.checked);
+        }
+    }
+
+    toggle-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                toggle-touch.clicked();
+                accept
+            } else {
+                reject
+            }
         }
     }
 }
@@ -44,130 +241,354 @@ component ConflictActionButton inherits Rectangle {
 export component SftpConflictModal inherits Rectangle {
     in property <string> source-path: "";
     in property <string> target-path: "";
-    in property <bool> can-resume: false;
-    in property <bool> apply-to-all: false;
+    in property <int> batch-conflict-count: 0;
+    in property <bool> apply-to-batch: false;
+    in property <int> focus-sequence: 0;
     callback close-requested();
+    callback apply-to-batch-toggled(bool);
     callback replace-requested();
     callback skip-requested();
-    callback keep-both-requested();
-    callback resume-requested();
-    callback apply-to-all-toggled(bool);
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
+    private property <length> footer-height: 66px;
+    private property <string> tooltip-text-value: "";
+    private property <bool> tooltip-visible-value: false;
+    private property <string> tooltip-source-id-value: "";
+    private property <string> tooltip-close-source-id-value: "";
+    private property <length> tooltip-anchor-x-value: 0px;
+    private property <length> tooltip-anchor-y-value: 0px;
+    private property <length> tooltip-anchor-width-value: 0px;
 
-    background: ThemeTokens.workspace-surface;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: ThemeTokens.divider-subtle;
-
-    Text {
-        x: 20px;
-        y: 18px;
-        text: "Resolve File Conflict";
-        color: ThemeTokens.text-primary;
-        font-size: 22px;
-        font-weight: 700;
+    function batch-scope-copy() -> string {
+        if root.batch-conflict-count == 1 {
+            return "1 other conflict is waiting in this folder.";
+        }
+        return root.batch-conflict-count + " other conflicts are waiting in this folder.";
     }
 
-    Text {
-        x: 20px;
-        y: 56px;
-        width: parent.width - 40px;
-        text: "The transfer queue will use this shell in the next task when upload or download targets collide.";
-        color: ThemeTokens.text-primary;
-        opacity: 0.72;
-        wrap: word-wrap;
+    function batch-toggle-copy() -> string {
+        if root.batch-conflict-count == 1 {
+            return "Apply this choice to the other conflict in this folder.";
+        }
+        return "Apply this choice to the other " + root.batch-conflict-count + " conflicts in this folder.";
     }
 
-    Text {
-        x: 20px;
-        y: 104px;
-        width: parent.width - 40px;
-        text: "Source: " + root.source-path;
-        color: ThemeTokens.text-primary;
-        wrap: word-wrap;
-    }
+    function schedule-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length, anchor-width: length) {
+        root.tooltip-anchor-x-value = anchor-x;
+        root.tooltip-anchor-y-value = anchor-y;
+        root.tooltip-anchor-width-value = anchor-width;
 
-    Text {
-        x: 20px;
-        y: 132px;
-        width: parent.width - 40px;
-        text: "Target: " + root.target-path;
-        color: ThemeTokens.text-primary;
-        wrap: word-wrap;
-    }
-
-    apply-toggle := TouchArea {
-        x: 20px;
-        y: parent.height - 78px;
-        width: 148px;
-        height: 24px;
-
-        clicked => {
-            root.apply-to-all-toggled(!root.apply-to-all);
+        if root.tooltip-source-id-value == source-id && root.tooltip-text-value == text {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+        } else {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+            root.tooltip-source-id-value = source-id;
+            root.tooltip-text-value = text;
+            root.tooltip-visible-value = false;
+            tooltip-delay.start();
         }
     }
 
-    Rectangle {
-        x: 20px;
-        y: parent.height - 74px;
-        width: 16px;
-        height: 16px;
-        border-radius: 0px;
-        border-width: 1px;
-        border-color: ThemeTokens.divider-subtle;
-        background: root.apply-to-all ? ThemeTokens.accent : ThemeTokens.control-active-surface;
-    }
-
-    Text {
-        x: 44px;
-        y: parent.height - 76px;
-        text: "Apply to all";
-        color: ThemeTokens.text-primary;
-        font-size: 12px;
-    }
-
-    replace-button := ConflictActionButton {
-        x: parent.width - 388px;
-        y: parent.height - 48px;
-        label: "Replace";
-
-        clicked => {
-            root.replace-requested();
+    function queue-tooltip-close(source-id: string) {
+        if root.tooltip-source-id-value == source-id && source-id != "" {
+            root.tooltip-close-source-id-value = source-id;
+            tooltip-close-delay.start();
         }
     }
 
-    skip-button := ConflictActionButton {
-        x: replace-button.x + replace-button.width + 8px;
-        y: parent.height - 48px;
-        label: "Skip";
-
-        clicked => {
-            root.skip-requested();
+    function close-tooltip(source-id: string) {
+        if root.tooltip-source-id-value == source-id || source-id == "" {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+            root.tooltip-visible-value = false;
+            root.tooltip-text-value = "";
+            root.tooltip-source-id-value = "";
+            tooltip-delay.stop();
         }
     }
 
-    keep-both-button := ConflictActionButton {
-        x: skip-button.x + skip-button.width + 8px;
-        y: parent.height - 48px;
-        width: 98px;
-        label: "Keep Both";
+    background: transparent;
 
-        clicked => {
-            root.keep-both-requested();
+    close-tooltip-overlay := TitlebarTooltip {
+        text: root.tooltip-text-value;
+        anchor-x: root.tooltip-anchor-x-value;
+        anchor-y: root.tooltip-anchor-y-value;
+        anchor-width: root.tooltip-anchor-width-value;
+        tooltip-visible: root.tooltip-visible-value;
+        host-width: root.width;
+        host-height: root.height;
+        place-right: false;
+    }
+
+    public function focus-dialog() {
+        modal-focus.focus();
+    }
+
+    modal-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.focus-restore-requested();
+                root.close-requested();
+                accept
+            } else if (event.text == Key.Space && root.batch-conflict-count > 0) {
+                root.apply-to-batch-toggled(!root.apply-to-batch);
+                accept
+            } else if (event.text == Key.Return) {
+                root.replace-requested();
+                accept
+            } else {
+                reject
+            }
+        }
+
+        header := Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: 56px;
+            background: ThemeTokens.assets-surface;
+
+            Text {
+                x: 20px;
+                y: 0px;
+                width: parent.width - 72px;
+                height: parent.height;
+                text: "Resolve Transfer Conflict";
+                color: ThemeTokens.text-primary;
+                font-size: 18px;
+                font-weight: AppTypography.ui-font-weight-regular;
+                vertical-alignment: center;
+            }
+
+            drag-touch := TouchArea {
+                width: parent.width - 48px;
+                height: parent.height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down
+                        && event.button == PointerEventButton.left
+                    {
+                        root.drag-requested(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.move {
+                        root.drag-moved(
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    } else if event.kind == PointerEventKind.up {
+                        root.drag-ended();
+                    }
+                }
+            }
+
+            close-button := ConflictIconButton {
+                x: parent.width - 40px;
+                y: 12px;
+                width: 28px;
+                height: 28px;
+                glyph: "×";
+                action-label: "Close conflict dialog";
+                tooltip-text: "Close conflict dialog";
+                tooltip-source-id: "sftp-conflict-close";
+
+                clicked => {
+                    root.focus-restore-requested();
+                    root.close-requested();
+                }
+
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                }
+
+                tooltip-close-requested(source-id) => {
+                    root.queue-tooltip-close(source-id);
+                }
+            }
+
+            divider := Rectangle {
+                y: parent.height - 1px;
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
+            }
+        }
+
+        body := Rectangle {
+            x: 0px;
+            y: header.height;
+            width: parent.width;
+            height: parent.height - header.height - root.footer-height;
+            background: transparent;
+
+            Text {
+                x: 20px;
+                y: 18px;
+                width: parent.width - 40px;
+                text: "The target already exists.";
+                color: ThemeTokens.text-primary;
+                font-size: 15px;
+                font-weight: AppTypography.ui-font-weight-regular;
+                wrap: word-wrap;
+            }
+
+            Text {
+                x: 20px;
+                y: 44px;
+                width: parent.width - 40px;
+                text: "Replace overwrites the existing target. Skip keeps it and marks this transfer as skipped.";
+                color: ThemeTokens.text-secondary;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+
+            incoming-card := ConflictInfoCard {
+                x: 20px;
+                y: 88px;
+                width: parent.width - 40px;
+                label: "Incoming item";
+                value: root.source-path;
+            }
+
+            target-card := ConflictInfoCard {
+                x: 20px;
+                y: incoming-card.y + incoming-card.height + 10px;
+                width: parent.width - 40px;
+                label: "Existing target";
+                value: root.target-path;
+            }
+
+            if root.batch-conflict-count > 0 : scope-card := Rectangle {
+                x: 20px;
+                y: target-card.y + target-card.height + 10px;
+                width: parent.width - 40px;
+                height: 106px;
+                border-radius: 0px;
+                border-width: 1px;
+                border-color: ThemeTokens.divider-subtle;
+                background: ThemeTokens.control-active-surface;
+
+                Text {
+                    x: 12px;
+                    y: 8px;
+                    width: parent.width - 24px;
+                    text: "Destination scope";
+                    color: ThemeTokens.text-secondary;
+                    font-size: 11px;
+                    font-weight: AppTypography.ui-font-weight-regular;
+                }
+
+                Text {
+                    x: 12px;
+                    y: 24px;
+                    width: parent.width - 24px;
+                    text: root.batch-scope-copy();
+                    color: ThemeTokens.text-primary;
+                    font-size: 12px;
+                    font-weight: AppTypography.ui-font-weight-regular;
+                    wrap: word-wrap;
+                }
+
+                batch-toggle-row := ConflictBatchToggleRow {
+                    x: 12px;
+                    y: 56px;
+                    width: parent.width - 24px;
+                    height: 38px;
+                    label: root.batch-toggle-copy();
+                    checked: root.apply-to-batch;
+
+                    toggled(value) => {
+                        root.apply-to-batch-toggled(value);
+                    }
+                }
+            }
+        }
+
+        footer := Rectangle {
+            x: 0px;
+            y: parent.height - root.footer-height;
+            width: parent.width;
+            height: root.footer-height;
+            background: ThemeTokens.assets-surface;
+
+            footer-divider := Rectangle {
+                width: parent.width;
+                height: 1px;
+                background: ThemeTokens.divider-subtle;
+            }
+
+            cancel-button := ConflictDialogButton {
+                x: parent.width - 300px;
+                y: 16px;
+                width: 88px;
+                label: "Cancel";
+
+                clicked => {
+                    root.focus-restore-requested();
+                    root.close-requested();
+                }
+            }
+
+            skip-button := ConflictDialogButton {
+                x: parent.width - 200px;
+                y: 16px;
+                width: 88px;
+                label: "Skip";
+
+                clicked => {
+                    root.skip-requested();
+                }
+            }
+
+            replace-button := ConflictDialogButton {
+                x: parent.width - 104px;
+                y: 16px;
+                width: 84px;
+                label: "Replace";
+                primary: true;
+
+                clicked => {
+                    root.replace-requested();
+                }
+            }
         }
     }
 
-    resume-button := ConflictActionButton {
-        x: keep-both-button.x + keep-both-button.width + 8px;
-        y: parent.height - 48px;
-        label: "Resume";
-        enabled: root.can-resume;
+    changed focus-sequence => {
+        root.focus-dialog();
+    }
 
-        clicked => {
-            root.resume-requested();
+    tooltip-delay := Timer {
+        interval: 280ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.tooltip-text-value != "" {
+                root.tooltip-visible-value = true;
+            }
+        }
+    }
+
+    tooltip-close-delay := Timer {
+        interval: 80ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.tooltip-close-source-id-value != "" {
+                root.close-tooltip(root.tooltip-close-source-id-value);
+            }
         }
     }
 }

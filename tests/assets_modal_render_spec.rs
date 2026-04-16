@@ -7,8 +7,8 @@ use std::{fs, path::Path};
 use mica_term::AppWindow;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store;
 use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
-use slint::platform::{Platform, PlatformError, WindowAdapter};
-use slint::{ComponentHandle, PhysicalSize, Rgb8Pixel, SharedPixelBuffer};
+use slint::platform::{Platform, PlatformError, WindowAdapter, WindowEvent};
+use slint::{ComponentHandle, LogicalPosition, PhysicalSize, Rgb8Pixel, SharedPixelBuffer};
 
 const WINDOW_WIDTH: u32 = 1440;
 const WINDOW_HEIGHT: u32 = 900;
@@ -64,6 +64,30 @@ fn count_distinct_pixels(
     distinct
 }
 
+fn count_changed_pixels(
+    before: &SharedPixelBuffer<Rgb8Pixel>,
+    after: &SharedPixelBuffer<Rgb8Pixel>,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    threshold: u16,
+) -> usize {
+    let mut changed = 0usize;
+
+    for sample_y in y..(y + height) {
+        for sample_x in x..(x + width) {
+            if color_distance(pixel_at(before, sample_x, sample_y), pixel_at(after, sample_x, sample_y))
+                >= threshold
+            {
+                changed += 1;
+            }
+        }
+    }
+
+    changed
+}
+
 #[derive(Clone, Copy)]
 struct ModalRect {
     x: u32,
@@ -90,13 +114,12 @@ fn blocking_modal_rect_for_viewport(
     let available_width = (window_width - (viewport_margin * 2)).max(280);
     let available_height = (window_height - TITLEBAR_HEIGHT - (viewport_margin * 2)).max(220);
     let resolved_width = modal_width.min(available_width);
-    let resolved_height = if available_height > modal_height
-        && available_height - modal_height <= 40
-    {
-        available_height
-    } else {
-        modal_height.min(available_height)
-    };
+    let resolved_height =
+        if available_height > modal_height && available_height - modal_height <= 40 {
+            available_height
+        } else {
+            modal_height.min(available_height)
+        };
     let x = ((window_width - resolved_width) / 2)
         .min(window_width - viewport_margin - resolved_width)
         .max(viewport_margin);
@@ -121,6 +144,15 @@ fn render_app_with_size(
     window_height: u32,
     setup: impl FnOnce(&AppWindow),
 ) -> SharedPixelBuffer<Rgb8Pixel> {
+    render_app_with_size_and_after_show(window_width, window_height, setup, |_| {})
+}
+
+fn render_app_with_size_and_after_show(
+    window_width: u32,
+    window_height: u32,
+    setup: impl FnOnce(&AppWindow),
+    after_show: impl FnOnce(&AppWindow),
+) -> SharedPixelBuffer<Rgb8Pixel> {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
     slint::platform::set_platform(Box::new(SoftwareTestPlatform {
         window: window.clone(),
@@ -135,6 +167,7 @@ fn render_app_with_size(
         .set_size(PhysicalSize::new(window_width, window_height));
     setup(&app);
     app.show().unwrap();
+    after_show(&app);
     let mut buffer = SharedPixelBuffer::<Rgb8Pixel>::new(window_width, window_height);
     let stride = buffer.width() as usize;
     assert!(window.draw_if_needed(|renderer| {
@@ -634,5 +667,130 @@ fn ssh_modal_short_viewport_keeps_primary_auth_field_actionable() {
     assert!(
         password_field_pixels >= 1200,
         "ssh modal should keep the first authentication field visibly above the sticky footer in short viewports, only found {password_field_pixels} distinct pixels"
+    );
+}
+
+#[test]
+fn sftp_conflict_modal_renders_info_cards_scope_card_and_footer_actions() {
+    let modal = blocking_modal_rect(520, 396);
+    let buffer = render_app(|app| {
+        app.set_sftp_conflict_modal_open(true);
+        app.set_sftp_conflict_modal_source_path("/tmp/releases/release-a.tar.gz".into());
+        app.set_sftp_conflict_modal_target_path("/srv/app/releases/release-a.tar.gz".into());
+        app.set_sftp_conflict_modal_batch_conflict_count(2);
+        app.set_sftp_conflict_modal_apply_to_batch(true);
+    });
+
+    let modal_surface = pixel_at(&buffer, modal.x + 10, modal.y + 10);
+    let incoming_card_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 20,
+        modal.y + 140,
+        modal.width - 40,
+        54,
+        modal_surface,
+        14,
+    );
+    let target_card_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 20,
+        modal.y + 204,
+        modal.width - 40,
+        54,
+        modal_surface,
+        14,
+    );
+    let scope_card_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 20,
+        modal.y + 268,
+        modal.width - 40,
+        92,
+        modal_surface,
+        14,
+    );
+    let footer_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + modal.width - 312,
+        modal.y + modal.height - 56,
+        292,
+        40,
+        modal_surface,
+        14,
+    );
+
+    assert!(
+        incoming_card_pixels >= 1800,
+        "conflict modal should render a visible incoming-item card, only found {incoming_card_pixels} distinct pixels"
+    );
+    assert!(
+        target_card_pixels >= 1800,
+        "conflict modal should render a visible existing-target card, only found {target_card_pixels} distinct pixels"
+    );
+    assert!(
+        scope_card_pixels >= 2600,
+        "conflict modal should render the destination scope card and checkbox affordance, only found {scope_card_pixels} distinct pixels"
+    );
+    assert!(
+        footer_pixels >= 1400,
+        "conflict modal footer should keep the cancel/skip/replace action cluster visible, only found {footer_pixels} distinct pixels"
+    );
+}
+
+#[test]
+fn sftp_conflict_modal_close_tooltip_renders_when_close_affordance_is_hovered() {
+    let modal = blocking_modal_rect(520, 396);
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+    slint::platform::set_platform(Box::new(SoftwareTestPlatform {
+        window: window.clone(),
+        started_at: Instant::now(),
+    }))
+    .unwrap();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.set_dark_mode(false);
+    app.window()
+        .set_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
+    app.set_sftp_conflict_modal_open(true);
+    app.set_sftp_conflict_modal_source_path("/tmp/releases/release-a.tar.gz".into());
+    app.set_sftp_conflict_modal_target_path("/srv/app/releases/release-a.tar.gz".into());
+    app.set_sftp_conflict_modal_batch_conflict_count(1);
+    app.show().unwrap();
+
+    let mut base = SharedPixelBuffer::<Rgb8Pixel>::new(WINDOW_WIDTH, WINDOW_HEIGHT);
+    let stride = base.width() as usize;
+    assert!(window.draw_if_needed(|renderer| {
+        renderer.render(base.make_mut_slice(), stride);
+    }));
+
+    let close_position = LogicalPosition::new(
+        (modal.x + modal.width - 26) as f32,
+        (modal.y + 26) as f32,
+    );
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position: close_position });
+    std::thread::sleep(Duration::from_millis(320));
+    slint::platform::update_timers_and_animations();
+
+    let mut hovered = SharedPixelBuffer::<Rgb8Pixel>::new(WINDOW_WIDTH, WINDOW_HEIGHT);
+    let hovered_stride = hovered.width() as usize;
+    assert!(window.draw_if_needed(|renderer| {
+        renderer.render(hovered.make_mut_slice(), hovered_stride);
+    }));
+
+    let tooltip_delta = count_changed_pixels(
+        &base,
+        &hovered,
+        modal.x + modal.width - 162,
+        modal.y + 36,
+        144,
+        42,
+        12,
+    );
+
+    assert!(
+        tooltip_delta >= 1200,
+        "hovering the conflict-modal close affordance should render a visible tooltip pill, only found {tooltip_delta} changed pixels"
     );
 }

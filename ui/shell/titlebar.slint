@@ -14,6 +14,9 @@ export component Titlebar inherits Rectangle {
     in property <bool> show-right-panel: false;
     in property <bool> transfer-center-open: false;
     in property <int> transfer-queue-total: 0;
+    in property <int> transfer-queue-active: 0;
+    in property <int> transfer-queue-failed: 0;
+    in property <int> transfer-queue-current-session: 0;
     in property <bool> show-global-menu: false;
     in property <bool> is-window-maximized: false;
     in property <bool> is-window-active: true;
@@ -40,6 +43,35 @@ export component Titlebar inherits Rectangle {
     private property <string> tooltip-close-source-id-value: "";
     private property <length> tooltip-anchor-x-value: 0px;
     private property <length> tooltip-anchor-y-value: 0px;
+    private property <bool> transfer-summary-visible: root.transfer-queue-active > 0
+        || root.transfer-queue-failed > 0
+        || root.transfer-queue-current-session > 0;
+    private property <string> transfer-summary-text: root.transfer-queue-failed > 0
+        && root.transfer-queue-active > 0
+        ? "" + root.transfer-queue-active + " active / " + root.transfer-queue-failed + " issues"
+        : root.transfer-queue-failed > 0
+            ? "" + root.transfer-queue-failed + " issues"
+            : root.transfer-queue-active > 0
+                ? "" + root.transfer-queue-active + " active"
+                : "" + root.transfer-queue-current-session + " this session";
+    private property <string> transfer-summary-tooltip: root.transfer-summary-visible
+        ? "Open transfer center - " + root.transfer-summary-text
+        : "Open transfer center";
+    private property <brush> transfer-summary-surface: root.transfer-queue-failed > 0
+        ? ThemeTokens.status-error-surface
+        : root.transfer-queue-active > 0
+            ? ThemeTokens.status-busy-surface
+            : ThemeTokens.status-pill-surface;
+    private property <brush> transfer-summary-border: root.transfer-queue-failed > 0
+        ? ThemeTokens.status-error-accent
+        : root.transfer-queue-active > 0
+            ? ThemeTokens.status-busy-accent
+            : ThemeTokens.status-pill-border;
+    private property <brush> transfer-summary-accent: root.transfer-queue-failed > 0
+        ? ThemeTokens.status-error-accent
+        : root.transfer-queue-active > 0
+            ? ThemeTokens.status-busy-accent
+            : ThemeTokens.accent;
     out property <string> tooltip-text <=> root.tooltip-text-value;
     out property <bool> tooltip-visible <=> root.tooltip-visible-value;
     out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
@@ -219,6 +251,76 @@ export component Titlebar inherits Rectangle {
                     root.drag-double-clicked();
                 }
             }
+
+            if root.transfer-summary-visible : transfer-summary-button := Rectangle {
+                x: max(0px, parent.width - self.width - 12px);
+                y: 4px;
+                width: max(0px, min(196px, parent.width - 12px));
+                height: 28px;
+                border-radius: 14px;
+                border-width: 1px;
+                private property <bool> has-hover: transfer-summary-touch.has-hover;
+                border-color: transfer-summary-touch.has-hover
+                    ? ThemeTokens.divider-strong
+                    : root.transfer-summary-border;
+                background: transfer-summary-touch.pressed
+                    ? ThemeTokens.control-pressed-surface
+                    : transfer-summary-touch.has-hover
+                        ? ThemeTokens.control-hover-surface
+                        : root.transfer-summary-surface;
+                clip: true;
+
+                Image {
+                    x: 10px;
+                    y: 5px;
+                    width: 18px;
+                    height: 18px;
+                    source: root.transfer-icon;
+                    image-fit: contain;
+                    colorize: root.transfer-summary-accent;
+                }
+
+                Rectangle {
+                    x: 32px;
+                    y: 10px;
+                    width: 6px;
+                    height: 6px;
+                    border-radius: 3px;
+                    background: root.transfer-summary-accent;
+                }
+
+                Text {
+                    x: 44px;
+                    y: 0px;
+                    width: parent.width - 54px;
+                    height: parent.height;
+                    text: root.transfer-summary-text;
+                    color: ThemeTokens.text-primary;
+                    vertical-alignment: center;
+                    font-size: 11px;
+                    font-weight: 700;
+                    overflow: elide;
+                }
+
+                transfer-summary-touch := TouchArea {
+                    clicked => {
+                        root.open-transfer-center-requested();
+                    }
+                }
+
+                changed has-hover => {
+                    if self.has-hover {
+                        root.schedule-tooltip(
+                            "transfer-summary-button",
+                            root.transfer-summary-tooltip,
+                            self.absolute-position.x + self.width / 2,
+                            self.absolute-position.y + self.height + 8px,
+                        );
+                    } else {
+                        root.queue-tooltip-close("transfer-summary-button");
+                    }
+                }
+            }
         }
 
         utility-zone := Rectangle {
@@ -295,7 +397,7 @@ export component Titlebar inherits Rectangle {
                 y: 0px;
                 icon-source: root.transfer-icon;
                 active: root.transfer-center-open;
-                tooltip-text: "Open transfer center";
+                tooltip-text: root.transfer-summary-tooltip;
                 tooltip-source-id: "transfer-button";
 
                 clicked => {

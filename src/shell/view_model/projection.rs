@@ -236,6 +236,73 @@ impl ShellViewModel {
         self.transfer_center_open = !self.transfer_center_open;
     }
 
+    pub fn transfer_center_filter_id(&self) -> &'static str {
+        self.transfer_center_filter.id()
+    }
+
+    pub fn toggle_transfer_center_filter(&mut self, filter_id: &str) -> bool {
+        let Some(filter) = TransferCenterFilter::from_id(filter_id) else {
+            return false;
+        };
+        let next = if self.transfer_center_filter == filter {
+            TransferCenterFilter::All
+        } else {
+            filter
+        };
+        if self.transfer_center_filter == next {
+            return false;
+        }
+        self.transfer_center_filter = next;
+        true
+    }
+
+    pub fn transfer_center_includes_task(
+        &self,
+        task: &crate::app::sftp::TransferTask,
+    ) -> bool {
+        self.transfer_center_filter.matches(task)
+    }
+
+    pub fn sftp_transfer_tasks(&self) -> &[crate::app::sftp::TransferTask] {
+        &self.sftp_transfer_tasks
+    }
+
+    pub fn merge_sftp_transfer_tasks(
+        &mut self,
+        tasks: &[crate::app::sftp::TransferTask],
+    ) -> bool {
+        let mut changed = false;
+        for next_task in tasks {
+            if let Some(current_task) = self
+                .sftp_transfer_tasks
+                .iter_mut()
+                .find(|task| task.id == next_task.id)
+            {
+                if current_task != next_task {
+                    *current_task = next_task.clone();
+                    changed = true;
+                }
+            } else {
+                self.sftp_transfer_tasks.push(next_task.clone());
+                changed = true;
+            }
+        }
+
+        changed
+    }
+
+    pub fn recompute_sftp_queue_summary(&mut self) -> bool {
+        let next = crate::app::sftp::TransferQueueSummary::from_tasks(
+            &self.sftp_transfer_tasks,
+            self.active_workspace_terminal_session_id(),
+        );
+        if self.sftp_queue_summary == next {
+            return false;
+        }
+        self.sftp_queue_summary = next;
+        true
+    }
+
     pub fn window_placement(&self) -> WindowPlacementKind {
         self.window_placement
     }

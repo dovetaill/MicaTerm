@@ -27,6 +27,7 @@ pub enum TransferConflictPolicy {
 pub enum TransferTaskAction {
     Upload { local_path: PathBuf },
     Download { local_path: PathBuf },
+    DownloadDirectory { local_path: PathBuf },
     Delete { entry_kind: SftpDirectoryEntryKind },
     Move,
 }
@@ -50,6 +51,26 @@ impl TransferTaskState {
     pub fn needs_attention(self) -> bool {
         matches!(self, Self::Failed | Self::Conflict)
     }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Paused => "paused",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Conflict => "conflict",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadTransferEntry {
+    pub remote_path: String,
+    pub local_path: PathBuf,
+    pub entry_kind: SftpDirectoryEntryKind,
+    pub bytes_total: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +92,10 @@ pub struct TransferTask {
 pub struct TransferQueueSummary {
     pub total_count: usize,
     pub active_count: usize,
+    pub queued_count: usize,
+    pub running_count: usize,
+    pub paused_count: usize,
+    pub completed_count: usize,
     pub failed_count: usize,
     pub current_session_count: usize,
 }
@@ -79,6 +104,22 @@ impl TransferQueueSummary {
     pub fn from_tasks(tasks: &[TransferTask], current_session_id: Option<&str>) -> Self {
         let total_count = tasks.len();
         let active_count = tasks.iter().filter(|task| task.state.is_active()).count();
+        let queued_count = tasks
+            .iter()
+            .filter(|task| task.state == TransferTaskState::Queued)
+            .count();
+        let running_count = tasks
+            .iter()
+            .filter(|task| task.state == TransferTaskState::Running)
+            .count();
+        let paused_count = tasks
+            .iter()
+            .filter(|task| task.state == TransferTaskState::Paused)
+            .count();
+        let completed_count = tasks
+            .iter()
+            .filter(|task| task.state == TransferTaskState::Completed)
+            .count();
         let failed_count = tasks
             .iter()
             .filter(|task| task.state.needs_attention())
@@ -95,6 +136,10 @@ impl TransferQueueSummary {
         Self {
             total_count,
             active_count,
+            queued_count,
+            running_count,
+            paused_count,
+            completed_count,
             failed_count,
             current_session_count,
         }
@@ -247,19 +292,44 @@ impl TransferQueue {
         local_root: &Path,
         entries: &[SftpDirectoryEntry],
     ) -> Vec<String> {
+        let targets = entries
+            .iter()
+            .map(|entry| DownloadTransferEntry {
+                remote_path: entry.path.clone(),
+                local_path: build_local_download_path(local_root, &entry.path),
+                entry_kind: entry.kind,
+                bytes_total: entry.size_bytes.unwrap_or(0),
+            })
+            .collect::<Vec<_>>();
+        self.enqueue_download_targets(session_id, &targets)
+    }
+
+    pub fn enqueue_download_targets(
+        &mut self,
+        session_id: &str,
+        entries: &[DownloadTransferEntry],
+    ) -> Vec<String> {
         entries
             .iter()
             .map(|entry| {
-                let local_path = build_local_download_path(local_root, &entry.path);
+                let action = if entry.entry_kind == SftpDirectoryEntryKind::Directory {
+                    TransferTaskAction::DownloadDirectory {
+                        local_path: entry.local_path.clone(),
+                    }
+                } else {
+                    TransferTaskAction::Download {
+                        local_path: entry.local_path.clone(),
+                    }
+                };
                 let task = TransferTask {
                     id: Uuid::new_v4().to_string(),
                     session_id: session_id.into(),
-                    source_path: entry.path.clone(),
-                    target_path: local_path.to_string_lossy().to_string(),
+                    source_path: entry.remote_path.clone(),
+                    target_path: entry.local_path.to_string_lossy().to_string(),
                     direction: TransferDirection::Download,
-                    action: TransferTaskAction::Download { local_path },
+                    action,
                     state: TransferTaskState::Queued,
-                    bytes_total: entry.size_bytes.unwrap_or(0),
+                    bytes_total: entry.bytes_total,
                     bytes_transferred: 0,
                     conflict_policy: None,
                     error_message: None,

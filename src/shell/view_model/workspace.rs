@@ -27,6 +27,7 @@ impl ShellViewModel {
     pub fn set_workspace_tabs(&mut self, tabs: Vec<WorkspaceTab>) {
         self.workspace_tabs = tabs;
         self.normalize_workspace_tabs();
+        let _ = self.recompute_sftp_queue_summary();
     }
 
     pub fn active_workspace_session_id(&self) -> Option<&str> {
@@ -65,6 +66,7 @@ impl ShellViewModel {
 
         self.active_workspace_tab_id = Some(tab_id.to_string());
         self.normalize_workspace_tabs();
+        let _ = self.recompute_sftp_queue_summary();
         true
     }
 

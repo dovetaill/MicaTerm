@@ -119,8 +119,8 @@ fn right_panel_source_defines_single_line_toolbar_and_path_bar_contract() {
         "right panel should define a compact single-line toolbar row"
     );
     assert!(
-        source.contains("path-bar"),
-        "right panel should define a dedicated path bar shell"
+        source.contains("breadcrumb-row"),
+        "right panel should define a dedicated breadcrumb/path row shell"
     );
     assert!(
         !source.contains("session-strip"),
@@ -129,33 +129,33 @@ fn right_panel_source_defines_single_line_toolbar_and_path_bar_contract() {
 }
 
 #[test]
-fn right_panel_source_defines_dense_remote_file_headers() {
+fn right_panel_source_uses_two_line_rows_instead_of_dense_file_headers() {
     let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
 
     assert!(
-        source.contains("text: \"Name\"") || source.contains("label: \"Name\""),
-        "right panel should expose the Name column header"
+        source.contains("meta-text := Text"),
+        "right panel should project a dedicated meta text row for compact file metadata"
     );
     assert!(
-        source.contains("text: \"Type\"") || source.contains("label: \"Type\""),
-        "right panel should expose the Type column header"
+        !source.contains("text: \"Name\"") && !source.contains("label: \"Name\""),
+        "right panel should stop rendering the legacy Name table header"
     );
     assert!(
-        source.contains("text: \"Modified\"") || source.contains("label: \"Modified\""),
-        "right panel should expose the Modified column header"
+        !source.contains("text: \"Type\"") && !source.contains("label: \"Type\""),
+        "right panel should stop rendering the legacy Type table header"
     );
     assert!(
-        source.contains("text: \"Size\"") || source.contains("label: \"Size\""),
-        "right panel should expose the Size column header"
+        !source.contains("text: \"Modified\"") && !source.contains("label: \"Modified\""),
+        "right panel should stop rendering the legacy Modified table header"
     );
     assert!(
-        !source.contains("text: \"Remote items\""),
-        "right panel should drop the legacy single-column list header"
+        !source.contains("text: \"Size\"") && !source.contains("label: \"Size\""),
+        "right panel should stop rendering the legacy Size table header"
     );
 }
 
 #[test]
-fn right_panel_source_exposes_sort_indicator_and_column_resize_contract() {
+fn right_panel_source_keeps_runtime_sort_contract_without_table_handles() {
     let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
 
     assert!(
@@ -177,31 +177,22 @@ fn right_panel_source_exposes_sort_indicator_and_column_resize_contract() {
         "right panel should expose sort and column-resize callbacks"
     );
     assert!(
-        source.contains("sort-indicator") && source.contains("resize-handle"),
-        "right panel should render an explicit header sort indicator and resize handles"
+        !source.contains("sort-indicator") && !source.contains("resize-handle"),
+        "the compact quick browser should drop explicit table sort indicators and resize handles from the rendered chrome"
     );
 }
 
 #[test]
-fn right_panel_source_uses_borderless_toolbar_buttons_and_horizontal_file_scroll() {
+fn right_panel_source_uses_compact_toolbar_buttons_without_horizontal_file_scroll() {
     let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
-    let toolbar_button_source = source
-        .split("component SftpToolbarButton inherits Rectangle {")
-        .nth(1)
-        .and_then(|rest| {
-            rest.split("export component RightPanel inherits Rectangle {")
-                .next()
-        })
-        .expect("toolbar button source should be present");
 
     assert!(
-        toolbar_button_source.contains("border-width: 0px;"),
-        "sftp toolbar buttons should drop their visible border chrome"
+        source.contains("SidebarToolbarIconButton"),
+        "sftp toolbar should reuse the shared compact icon button component"
     );
     assert!(
-        source.contains("horizontal-scrollbar-policy: always-on;")
-            && source.contains("viewport-width: max(self.visible-width"),
-        "dense file list should support horizontal scrolling when the metadata columns overflow the panel"
+        !source.contains("horizontal-scrollbar-policy: always-on;"),
+        "the quick browser should not force horizontal scrolling for the two-line row layout"
     );
     assert!(
         source.contains("item.kind == \"parent-directory\""),
@@ -242,8 +233,9 @@ fn right_panel_source_uses_fluent_toolbar_icons_and_actions_menu_trigger() {
 
     for asset in [
         "arrow-hook-up-left-20-regular.svg",
-        "arrow-clockwise-20-regular.svg",
-        "add-square-multiple-20-regular.svg",
+        "arrow-sync-20-regular.svg",
+        "panel-right-expand-20-regular.svg",
+        "link-20-regular.svg",
         "folder-20-regular.svg",
         "document-20-regular.svg",
     ] {
@@ -255,7 +247,7 @@ fn right_panel_source_uses_fluent_toolbar_icons_and_actions_menu_trigger() {
 
     assert!(
         source.contains("sftp-panel-context-menu-requested(") && source.contains("\"sftp-blank\""),
-        "toolbar overflow action should open the blank-area SFTP actions menu instead of directly firing a placeholder action"
+        "blank-area context menu affordances should stay wired for low-frequency actions"
     );
     assert!(
         !source.contains("glyph: \"<\"")
@@ -323,6 +315,7 @@ fn ready_sftp_panel_renders_compact_toolbar_and_file_table() {
         SftpPanelItem {
             id: "entry-app".into(),
             name: "app".into(),
+            meta_label: "Folder · 2026-03-31 10:05".into(),
             type_label: "Folder".into(),
             modified_label: "2026-03-31 10:05".into(),
             size_label: "".into(),
@@ -332,6 +325,7 @@ fn ready_sftp_panel_renders_compact_toolbar_and_file_table() {
         SftpPanelItem {
             id: "entry-release".into(),
             name: "release.tar.gz".into(),
+            meta_label: "File · 14 KB · 2026-03-31 10:11".into(),
             type_label: "File".into(),
             modified_label: "2026-03-31 10:11".into(),
             size_label: "14 KB".into(),
@@ -394,7 +388,8 @@ fn disconnected_sftp_panel_renders_retry_guidance_shell() {
         count_distinct_pixels(&buffer, PANEL_X + 12, 96, 340, 52, panel_surface, 14);
     let body_pixels =
         count_distinct_pixels(&buffer, PANEL_X + 12, 150, 340, 160, panel_surface, 14);
-    let retry_pixels = count_distinct_pixels(&buffer, PANEL_X + 280, 82, 96, 40, panel_surface, 14);
+    let retry_pixels =
+        count_distinct_pixels(&buffer, PANEL_X + 300, 102, 84, 36, panel_surface, 14);
 
     assert!(
         headline_pixels >= 1100,
@@ -405,7 +400,7 @@ fn disconnected_sftp_panel_renders_retry_guidance_shell() {
         "disconnected sftp panel should render recovery guidance copy, only found {body_pixels} distinct pixels"
     );
     assert!(
-        retry_pixels >= 900,
+        retry_pixels >= 480,
         "disconnected sftp panel should render a retry action shell, only found {retry_pixels} distinct pixels"
     );
 }

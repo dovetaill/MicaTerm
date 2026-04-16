@@ -264,6 +264,11 @@ pub(super) fn schedule_asset_modal_focus(window: &AppWindow) {
                 window.get_sftp_remote_file_modal_focus_sequence() + 1,
             );
         }
+        if window.get_sftp_conflict_modal_open() {
+            window.set_sftp_conflict_modal_focus_sequence(
+                window.get_sftp_conflict_modal_focus_sequence() + 1,
+            );
+        }
     });
 }
 
@@ -799,6 +804,10 @@ pub(super) fn bind_assets_keychain_callbacks(
     asset_repo: &Option<Rc<dyn AssetCatalogRepository>>,
     session_bridge: &Option<Rc<ShellSessionBridge>>,
     session_runtime_guard: &Option<AppAsyncRuntime>,
+    sftp_async_runtime: Option<&tokio::runtime::Handle>,
+    sftp_result_tx: &std::sync::mpsc::Sender<super::sftp::SftpBrowserBackgroundMessage>,
+    sftp_transfer_result_tx: &std::sync::mpsc::Sender<super::sftp::SftpTransferBackgroundMessage>,
+    sftp_browser_controller: &Rc<RefCell<SftpBrowserController>>,
     credential_store: &Arc<dyn CredentialStore>,
     private_key_importer: &Arc<dyn PrivateKeyImporter>,
     keychain_repo: &Option<Rc<dyn KeychainCatalogRepository>>,
@@ -812,6 +821,9 @@ pub(super) fn bind_assets_keychain_callbacks(
     asset_click_tracker: &Rc<RefCell<Option<PendingAssetClick>>>,
     pending_double_click_activation: &Rc<RefCell<Option<String>>>,
 ) {
+    let sftp_async_runtime = sftp_async_runtime.cloned();
+    let sftp_result_tx = sftp_result_tx.clone();
+    let sftp_transfer_result_tx = sftp_transfer_result_tx.clone();
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     window.on_toggle_assets_search_requested(move || {
@@ -1635,6 +1647,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     let handle = window.as_weak();
     let session_bridge_ref = session_bridge.clone();
     let session_runtime_guard_ref = session_runtime_guard.clone();
+    let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
     let pending_host_key_approval_ref = Rc::clone(pending_host_key_approval);
     let credential_store_ref = Arc::clone(credential_store);
     let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
@@ -1643,11 +1656,15 @@ pub(super) fn bind_assets_keychain_callbacks(
     let vault_sync_scheduler_ref = Rc::clone(vault_sync_scheduler);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
     let run_vault_sync_ref = Rc::clone(run_vault_sync);
+    let sftp_async_runtime_ref = sftp_async_runtime.clone();
+    let sftp_result_tx_ref = sftp_result_tx.clone();
+    let sftp_transfer_result_tx_ref = sftp_transfer_result_tx.clone();
     window.on_assets_context_menu_action_invoked(move |action_id| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let was_modal_open = state.asset_modal_state.is_some();
+        let was_sftp_remote_file_modal_open = state.sftp_remote_file_editor_state().open;
         let keychain_node_count_before = state.keychain_catalog().nodes.len();
 
         if let Some((path, action)) = context_menu_action_entry_for(&state, action_id.as_str()) {
@@ -1672,6 +1689,17 @@ pub(super) fn bind_assets_keychain_callbacks(
             } else {
                 state.handle_context_menu_leaf_action(action_id.as_str());
             }
+        }
+        {
+            let mut sftp_browser_controller = sftp_browser_controller_ref.borrow_mut();
+            let _ = super::sftp::apply_pending_sftp_context_action(
+                &mut state,
+                session_bridge_ref.as_deref(),
+                &mut sftp_browser_controller,
+                sftp_async_runtime_ref.as_ref(),
+                &sftp_result_tx_ref,
+                &sftp_transfer_result_tx_ref,
+            );
         }
         if state.keychain_catalog().nodes.len() > keychain_node_count_before {
             save_keychain_catalog_if_available(&keychain_repo_ref, &state);
@@ -1703,20 +1731,31 @@ pub(super) fn bind_assets_keychain_callbacks(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
+        super::sftp::sync_right_panel_state(&window, &state);
         sync_asset_modal_state(&window, &state);
+        super::sftp::sync_sftp_remote_file_modal_state(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
         windowing::sync_ssh_host_key_modal_state(&window, &state);
         if !was_modal_open && state.asset_modal_state.is_some() {
             schedule_asset_modal_focus(&window);
         }
+        if !was_sftp_remote_file_modal_open && state.sftp_remote_file_editor_state().open {
+            schedule_asset_modal_focus(&window);
+        }
     });
 
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
+    let session_bridge_ref = session_bridge.clone();
+    let sftp_browser_controller_ref = Rc::clone(sftp_browser_controller);
+    let sftp_async_runtime_ref = sftp_async_runtime.clone();
+    let sftp_result_tx_ref = sftp_result_tx.clone();
+    let sftp_transfer_result_tx_ref = sftp_transfer_result_tx.clone();
     window.on_assets_context_menu_key_pressed(move |command| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let was_sftp_remote_file_modal_open = state.sftp_remote_file_editor_state().open;
 
         match command.as_str() {
             "escape" => state.handle_context_menu_escape(),
@@ -1725,11 +1764,27 @@ pub(super) fn bind_assets_keychain_callbacks(
             "enter" => state.invoke_current_context_menu_item(),
             _ => {}
         }
+        {
+            let mut sftp_browser_controller = sftp_browser_controller_ref.borrow_mut();
+            let _ = super::sftp::apply_pending_sftp_context_action(
+                &mut state,
+                session_bridge_ref.as_deref(),
+                &mut sftp_browser_controller,
+                sftp_async_runtime_ref.as_ref(),
+                &sftp_result_tx_ref,
+                &sftp_transfer_result_tx_ref,
+            );
+        }
 
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
+        super::sftp::sync_right_panel_state(&window, &state);
+        super::sftp::sync_sftp_remote_file_modal_state(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);
+        if !was_sftp_remote_file_modal_open && state.sftp_remote_file_editor_state().open {
+            schedule_asset_modal_focus(&window);
+        }
     });
 
     let state = Rc::clone(view_model);

@@ -10,8 +10,8 @@ use anyhow::{Result, anyhow};
 use mica_term::app::sftp::{
     LocalTransferEntry, SftpBackend, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpPanelMode,
     SftpRuntimeHandle, SftpSessionBindingState, TransferConflictPolicy, TransferQueue,
-    TransferTaskState, delete_entries, execute_queued_transfers, move_entry_between_directories,
-    scan_local_sources,
+    TransferTaskState, collect_download_targets, delete_entries, execute_queued_transfers,
+    move_entry_between_directories, scan_local_sources,
 };
 use uuid::Uuid;
 
@@ -19,6 +19,7 @@ use uuid::Uuid;
 struct MemoryBackend {
     files: Mutex<HashMap<String, Vec<u8>>>,
     directories: Mutex<HashSet<String>>,
+    directory_entries: Mutex<HashMap<String, Vec<SftpDirectoryEntry>>>,
     mkdir_requests: Mutex<Vec<String>>,
     rename_requests: Mutex<Vec<(String, String)>>,
     delete_requests: Mutex<Vec<String>>,
@@ -43,6 +44,13 @@ impl MemoryBackend {
             .insert(path.into(), bytes.to_vec());
     }
 
+    fn set_directory_entries(&self, path: &str, entries: Vec<SftpDirectoryEntry>) {
+        self.directory_entries
+            .lock()
+            .expect("lock directory entries")
+            .insert(path.into(), entries);
+    }
+
     fn file_bytes(&self, path: &str) -> Option<Vec<u8>> {
         self.files.lock().expect("lock files").get(path).cloned()
     }
@@ -51,9 +59,17 @@ impl MemoryBackend {
 impl SftpBackend for MemoryBackend {
     fn read_dir<'a>(
         &'a self,
-        _path: &'a str,
+        path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<SftpDirectoryEntry>>> + Send + 'a>> {
-        Box::pin(async move { Ok(Vec::new()) })
+        Box::pin(async move {
+            Ok(self
+                .directory_entries
+                .lock()
+                .expect("lock directory entries")
+                .get(path)
+                .cloned()
+                .unwrap_or_default())
+        })
     }
 
     fn mkdir<'a>(&'a self, path: &'a str) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
@@ -173,6 +189,17 @@ fn file_entry(id: &str, name: &str, path: &str) -> SftpDirectoryEntry {
         kind: SftpDirectoryEntryKind::File,
         modified_unix_seconds: None,
         size_bytes: Some(128),
+    }
+}
+
+fn directory_entry(id: &str, name: &str, path: &str) -> SftpDirectoryEntry {
+    SftpDirectoryEntry {
+        id: id.into(),
+        name: name.into(),
+        path: path.into(),
+        kind: SftpDirectoryEntryKind::Directory,
+        modified_unix_seconds: None,
+        size_bytes: None,
     }
 }
 
@@ -388,5 +415,57 @@ async fn conflict_task_can_resume_and_complete_with_selected_policy() {
     assert_eq!(
         backend.file_bytes("/srv/app/config.yml"),
         Some(b"port=2200".to_vec())
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn recursive_folder_download_preserves_nested_files_and_empty_directories() {
+    let root = temp_test_root("download-folder");
+    let backend = Arc::new(MemoryBackend::with_directories(&[
+        "/srv",
+        "/srv/releases",
+        "/srv/releases/current",
+        "/srv/releases/empty-dir",
+    ]));
+    backend.set_directory_entries(
+        "/srv/releases",
+        vec![
+            directory_entry("current-dir", "current", "/srv/releases/current"),
+            directory_entry("empty-dir", "empty-dir", "/srv/releases/empty-dir"),
+        ],
+    );
+    backend.set_directory_entries(
+        "/srv/releases/current",
+        vec![file_entry(
+            "app-yml",
+            "app.yml",
+            "/srv/releases/current/app.yml",
+        )],
+    );
+    backend.set_directory_entries("/srv/releases/empty-dir", vec![]);
+    backend.insert_remote_file("/srv/releases/current/app.yml", b"port=22");
+
+    let runtime = SftpRuntimeHandle::new(backend.clone());
+    let download_targets = collect_download_targets(
+        &runtime,
+        root.as_path(),
+        &[directory_entry("releases-dir", "releases", "/srv/releases")],
+    )
+    .await
+    .expect("collect recursive folder download targets");
+
+    let mut queue = TransferQueue::default();
+    queue.enqueue_download_targets("session-a", &download_targets);
+    execute_queued_transfers(&runtime, &mut queue)
+        .await
+        .expect("run recursive folder download");
+
+    assert_eq!(
+        fs::read(root.join("releases/current/app.yml")).expect("read nested downloaded file"),
+        b"port=22".to_vec()
+    );
+    assert!(
+        root.join("releases/empty-dir").is_dir(),
+        "recursive folder download should preserve empty directories instead of dropping them"
     );
 }

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::app::sftp::{SftpDirectoryEntry, SftpFollowMode, SftpPanelMode, SftpPathHistory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -6,6 +8,7 @@ pub struct SftpBrowserSessionState {
     pub follow_mode: SftpFollowMode,
     pub current_path: String,
     pub history: SftpPathHistory,
+    pub cached_entries_by_path: BTreeMap<String, Vec<SftpDirectoryEntry>>,
     pub entries: Vec<SftpDirectoryEntry>,
     pub selected_entry_ids: Vec<String>,
     pub last_error: Option<String>,
@@ -19,6 +22,7 @@ impl Default for SftpBrowserSessionState {
             follow_mode: SftpFollowMode::FollowCwd,
             current_path: String::new(),
             history: SftpPathHistory::default(),
+            cached_entries_by_path: BTreeMap::new(),
             entries: Vec::new(),
             selected_entry_ids: Vec::new(),
             last_error: None,
@@ -32,6 +36,7 @@ impl SftpBrowserSessionState {
         self.follow_mode = SftpFollowMode::FollowCwd;
         self.current_path = path.to_string();
         self.history.push(path.to_string());
+        self.restore_cached_entries(path);
         self.mode = SftpPanelMode::Connecting;
         self.last_error = None;
         self.active_request_id = Some(request_id);
@@ -41,6 +46,7 @@ impl SftpBrowserSessionState {
         self.follow_mode = SftpFollowMode::FollowCwd;
         self.current_path = path.to_string();
         self.history.push(path.to_string());
+        self.restore_cached_entries(path);
         self.mode = SftpPanelMode::Loading;
         self.last_error = None;
         self.active_request_id = Some(request_id);
@@ -50,6 +56,7 @@ impl SftpBrowserSessionState {
         self.follow_mode = SftpFollowMode::ManualBrowse;
         self.current_path = path.to_string();
         self.history.push(path.to_string());
+        self.restore_cached_entries(path);
         self.mode = SftpPanelMode::Loading;
         self.last_error = None;
         self.active_request_id = Some(request_id);
@@ -76,6 +83,8 @@ impl SftpBrowserSessionState {
     pub fn set_ready(&mut self, path: &str, entries: Vec<SftpDirectoryEntry>) {
         self.mode = SftpPanelMode::Ready;
         self.current_path = path.to_string();
+        self.cached_entries_by_path
+            .insert(path.to_string(), entries.clone());
         self.entries = entries;
         self.last_error = None;
     }
@@ -89,6 +98,7 @@ impl SftpBrowserSessionState {
 
     pub fn set_retrying(&mut self, path: &str, request_id: u64) {
         self.current_path = path.to_string();
+        self.restore_cached_entries(path);
         self.mode = SftpPanelMode::Connecting;
         self.last_error = None;
         self.active_request_id = Some(request_id);
@@ -109,9 +119,17 @@ impl SftpBrowserSessionState {
         if push_history {
             self.history.push(path);
         }
+        let current_path = self.current_path.clone();
+        self.restore_cached_entries(current_path.as_str());
         self.mode = SftpPanelMode::Loading;
         self.last_error = None;
         self.active_request_id = Some(request_id);
+    }
+
+    fn restore_cached_entries(&mut self, path: &str) {
+        if let Some(entries) = self.cached_entries_by_path.get(path) {
+            self.entries = entries.clone();
+        }
     }
 }
 

@@ -8,6 +8,7 @@ import { SidebarToolbarIconButton } from "../components/sidebar-toolbar-icon-but
 export struct SftpPanelItem {
     id: string,
     name: string,
+    meta_label: string,
     type_label: string,
     modified_label: string,
     size_label: string,
@@ -24,6 +25,7 @@ export component RightPanel inherits Rectangle {
     in property <string> sftp-panel-follow-mode: "follow-cwd";
     in property <string> sftp-panel-connection-badge: "";
     in property <string> sftp-panel-binding-mode-label: "Follow";
+    in property <bool> sftp-panel-binding-mode-active: true;
     in property <bool> sftp-panel-path-editing: false;
     in property <bool> sftp-panel-can-go-back: false;
     in property <bool> sftp-panel-can-go-forward: false;
@@ -41,8 +43,25 @@ export component RightPanel inherits Rectangle {
     in property <int> sftp-panel-queue-failed: 0;
     in property <int> sftp-panel-queue-current-session: 0;
     in property <bool> sftp-queue-drawer-open: false;
+    in property <bool> sftp-panel-drop-target-active: false;
     out property <length> layout-radius: root.border-radius;
     out property <length> layout-border-width: root.border-width;
+    out property <length> sftp-drop-target-x: table-card.x;
+    out property <length> sftp-drop-target-y: table-card.y;
+    out property <length> sftp-drop-target-width: table-card.width;
+    out property <length> sftp-drop-target-height: table-card.height;
+    private property <string> tooltip-text-value: "";
+    private property <bool> tooltip-visible-value: false;
+    private property <string> tooltip-source-id-value: "";
+    private property <string> tooltip-close-source-id-value: "";
+    private property <length> tooltip-anchor-x-value: 0px;
+    private property <length> tooltip-anchor-y-value: 0px;
+    private property <length> tooltip-anchor-width-value: 0px;
+    out property <string> tooltip-text <=> root.tooltip-text-value;
+    out property <bool> tooltip-visible <=> root.tooltip-visible-value;
+    out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
+    out property <length> tooltip-anchor-y <=> root.tooltip-anchor-y-value;
+    out property <length> tooltip-anchor-width <=> root.tooltip-anchor-width-value;
     in-out property <length> sftp-list-viewport-x: 0px;
     private property <image> arrow-hook-up-left-icon: @image-url("../../assets/icons/fluent/arrow-hook-up-left-20-regular.svg");
     private property <image> arrow-sync-icon: @image-url("../../assets/icons/fluent/arrow-sync-20-regular.svg");
@@ -92,6 +111,44 @@ export component RightPanel inherits Rectangle {
         root.sftp-panel-connection-badge == ""
             ? root.sftp-panel-host-label
             : root.sftp-panel-connection-badge;
+    private property <string> sftp-panel-connection-tooltip:
+        "Current connection: " + root.sftp-panel-connection-badge-text;
+
+    function schedule-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length, anchor-width: length) {
+        root.tooltip-anchor-x-value = anchor-x;
+        root.tooltip-anchor-y-value = anchor-y;
+        root.tooltip-anchor-width-value = anchor-width;
+
+        if root.tooltip-source-id-value == source-id && root.tooltip-text-value == text {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+        } else {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+            root.tooltip-source-id-value = source-id;
+            root.tooltip-text-value = text;
+            root.tooltip-visible-value = false;
+            tooltip-delay.start();
+        }
+    }
+
+    function queue-tooltip-close(source-id: string) {
+        if root.tooltip-source-id-value == source-id && source-id != "" {
+            root.tooltip-close-source-id-value = source-id;
+            tooltip-close-delay.start();
+        }
+    }
+
+    function close-tooltip(source-id: string) {
+        if root.tooltip-source-id-value == source-id || source-id == "" {
+            tooltip-close-delay.stop();
+            root.tooltip-close-source-id-value = "";
+            root.tooltip-visible-value = false;
+            root.tooltip-text-value = "";
+            root.tooltip-source-id-value = "";
+            tooltip-delay.stop();
+        }
+    }
 
     function sftp-empty-headline() -> string {
         return "Open an SSH session";
@@ -183,8 +240,8 @@ export component RightPanel inherits Rectangle {
                 height: 28px;
                 border-radius: 14px;
                 border-width: 1px;
-                border-color: ThemeTokens.input-border;
-                background: ThemeTokens.workspace-surface;
+                border-color: ThemeTokens.status-pill-border;
+                background: ThemeTokens.status-pill-surface;
 
                 Text {
                     x: 10px;
@@ -199,6 +256,22 @@ export component RightPanel inherits Rectangle {
                     vertical-alignment: center;
                     overflow: elide;
                 }
+
+                badge-touch := TouchArea {
+                    changed has-hover => {
+                        if self.has-hover && root.sftp-panel-connection-badge-text != "" {
+                            root.schedule-tooltip(
+                                "sftp-connection-badge",
+                                root.sftp-panel-connection-tooltip,
+                                parent.absolute-position.x,
+                                parent.absolute-position.y + parent.height / 2,
+                                parent.width,
+                            );
+                        } else {
+                            root.queue-tooltip-close("sftp-connection-badge");
+                        }
+                    }
+                }
             }
 
             follow-button := SidebarToolbarIconButton {
@@ -208,13 +281,21 @@ export component RightPanel inherits Rectangle {
                 height: 28px;
                 icon-source: root.link-icon;
                 active-icon-source: root.link-icon-active;
-                active: root.sftp-panel-follow-mode == "follow-cwd";
+                active: root.sftp-panel-binding-mode-active;
                 enabled: root.sftp-panel-path != "";
-                tooltip-text: root.sftp-panel-binding-mode-label;
+                tooltip-text: "Follow active terminal";
                 tooltip-source-id: "sftp-follow";
 
                 clicked => {
                     root.sftp-panel-binding-mode-toggle-requested();
+                }
+
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                }
+
+                tooltip-close-requested(source-id) => {
+                    root.queue-tooltip-close(source-id);
                 }
             }
 
@@ -226,11 +307,19 @@ export component RightPanel inherits Rectangle {
                 icon-source: root.arrow-sync-icon;
                 active-icon-source: root.arrow-sync-icon;
                 enabled: root.sftp-panel-actions-enabled;
-                tooltip-text: "Refresh";
+                tooltip-text: "Refresh files";
                 tooltip-source-id: "sftp-refresh";
 
                 clicked => {
                     root.sftp-panel-refresh-requested();
+                }
+
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                }
+
+                tooltip-close-requested(source-id) => {
+                    root.queue-tooltip-close(source-id);
                 }
             }
 
@@ -242,11 +331,19 @@ export component RightPanel inherits Rectangle {
                 icon-source: root.expand-icon;
                 active-icon-source: root.expand-icon-active;
                 enabled: root.sftp-panel-actions-enabled;
-                tooltip-text: "Expand";
+                tooltip-text: "Open in SFTP workspace";
                 tooltip-source-id: "sftp-expand";
 
                 clicked => {
                     root.sftp-panel-expand-requested();
+                }
+
+                tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                }
+
+                tooltip-close-requested(source-id) => {
+                    root.queue-tooltip-close(source-id);
                 }
             }
 
@@ -333,6 +430,42 @@ export component RightPanel inherits Rectangle {
             border-color: transparent;
             background: ThemeTokens.workspace-surface;
             clip: true;
+
+            if root.sftp-panel-drop-target-active : drop-overlay := Rectangle {
+                x: 8px;
+                y: 8px;
+                width: parent.width - 16px;
+                height: parent.height - 16px;
+                z: 20;
+                border-radius: 14px;
+                border-width: 1px;
+                border-color: ThemeTokens.link-accent;
+                background: ThemeTokens.terminal-selection-surface;
+
+                Rectangle {
+                    x: 14px;
+                    y: 14px;
+                    width: parent.width - 28px;
+                    height: parent.height - 28px;
+                    border-radius: 10px;
+                    border-width: 1px;
+                    border-color: ThemeTokens.link-accent;
+                    background: transparent;
+                }
+
+                Text {
+                    x: 20px;
+                    y: 0px;
+                    width: parent.width - 40px;
+                    height: parent.height;
+                    text: "Drop files to upload";
+                    color: ThemeTokens.text-primary;
+                    font-size: 13px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
 
             if root.sftp-panel-mode == "empty" : empty-state := Rectangle {
                 x: 0px;
@@ -537,23 +670,39 @@ export component RightPanel inherits Rectangle {
                         overflow: elide;
                     }
 
-                    meta-text := Text {
+                    Text {
                         x: 40px;
                         y: 22px;
-                        width: parent.width - 52px;
+                        width: 56px;
                         height: 16px;
-                        text: item.kind == "parent-directory"
-                            ? "Go to parent directory"
-                            : item.type_label == "" ? item.modified_label
-                            : item.size_label != "" && item.modified_label != ""
-                                ? item.type_label + " · " + item.size_label + " · " + item.modified_label
-                                : item.size_label != ""
-                                    ? item.type_label + " · " + item.size_label
-                                    : item.modified_label != ""
-                                        ? item.type_label + " · " + item.modified_label
-                                        : item.type_label;
+                        text: item.type_label;
                         color: ThemeTokens.text-secondary;
-                        font-size: 11px;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: 100px;
+                        y: 22px;
+                        width: parent.width - 182px;
+                        height: 16px;
+                        text: item.modified_label;
+                        color: ThemeTokens.text-secondary;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Text {
+                        x: parent.width - 78px;
+                        y: 22px;
+                        width: 64px;
+                        height: 16px;
+                        text: item.size_label;
+                        color: ThemeTokens.text-secondary;
+                        font-size: 12px;
+                        horizontal-alignment: right;
                         vertical-alignment: center;
                         overflow: elide;
                     }
@@ -584,6 +733,32 @@ export component RightPanel inherits Rectangle {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    tooltip-delay := Timer {
+        interval: 280ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.tooltip-text-value != "" {
+                root.tooltip-visible-value = true;
+            }
+        }
+    }
+
+    tooltip-close-delay := Timer {
+        interval: 80ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+
+            if root.tooltip-close-source-id-value != "" {
+                root.close-tooltip(root.tooltip-close-source-id-value);
             }
         }
     }

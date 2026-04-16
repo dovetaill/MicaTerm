@@ -35,6 +35,10 @@ pub(super) fn bind_windows_window_state_tracking(
 
     let handle = window.as_weak();
     let modifiers = Rc::new(RefCell::new(NativeTerminalModifierState::default()));
+    let sftp_drop_hover_active = Rc::new(RefCell::new(false));
+    let sftp_drop_paths = Rc::new(RefCell::new(Vec::<PathBuf>::new()));
+    let last_pointer_position = Rc::new(RefCell::new(None::<(f32, f32)>));
+    let sftp_drop_flush_timer = Rc::new(Timer::default());
     window
         .window()
         .on_winit_window_event(move |_slint_window, event| {
@@ -91,6 +95,71 @@ pub(super) fn bind_windows_window_state_tracking(
                 }
             }
 
+            if let winit::event::WindowEvent::CursorMoved { position, .. } = event {
+                *last_pointer_position.borrow_mut() = Some((position.x as f32, position.y as f32));
+            }
+
+            if let winit::event::WindowEvent::HoveredFile(path) = event {
+                let window = handle.unwrap();
+                let accepts_drop =
+                    sftp_drop_target_contains(&window, *last_pointer_position.borrow());
+                update_sftp_drop_hover_state(&window, &sftp_drop_hover_active, accepts_drop);
+                if accepts_drop {
+                    let mut pending_paths = sftp_drop_paths.borrow_mut();
+                    if !pending_paths.iter().any(|pending| pending == path) {
+                        pending_paths.push(path.clone());
+                    }
+                }
+            }
+
+            if matches!(event, winit::event::WindowEvent::HoveredFileCancelled) {
+                sftp_drop_flush_timer.stop();
+                sftp_drop_paths.borrow_mut().clear();
+                let window = handle.unwrap();
+                update_sftp_drop_hover_state(&window, &sftp_drop_hover_active, false);
+            }
+
+            if let winit::event::WindowEvent::DroppedFile(path) = event {
+                let window = handle.unwrap();
+                if !sftp_drop_target_contains(&window, *last_pointer_position.borrow()) {
+                    sftp_drop_flush_timer.stop();
+                    sftp_drop_paths.borrow_mut().clear();
+                    update_sftp_drop_hover_state(&window, &sftp_drop_hover_active, false);
+                    return EventResult::Propagate;
+                }
+
+                {
+                    let mut pending_paths = sftp_drop_paths.borrow_mut();
+                    if !pending_paths.iter().any(|pending| pending == path) {
+                        pending_paths.push(path.clone());
+                    }
+                }
+                update_sftp_drop_hover_state(&window, &sftp_drop_hover_active, true);
+                let timer_ref = Rc::clone(&sftp_drop_flush_timer);
+                let handle = handle.clone();
+                let sftp_drop_hover_active_ref = Rc::clone(&sftp_drop_hover_active);
+                let sftp_drop_paths_ref = Rc::clone(&sftp_drop_paths);
+                timer_ref.start(TimerMode::SingleShot, Duration::from_millis(24), move || {
+                    let Some(window) = handle.upgrade() else {
+                        return;
+                    };
+                    let pending_paths = std::mem::take(&mut *sftp_drop_paths_ref.borrow_mut());
+                    if pending_paths.is_empty() {
+                        return;
+                    }
+
+                    let dropped_paths = pending_paths
+                        .into_iter()
+                        .map(|path| SharedString::from(path.to_string_lossy().to_string()))
+                        .collect::<Vec<_>>();
+                    window.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(
+                        dropped_paths,
+                    )));
+                    window.invoke_sftp_panel_external_drop_requested();
+                    update_sftp_drop_hover_state(&window, &sftp_drop_hover_active_ref, false);
+                });
+            }
+
             if matches!(
                 event,
                 winit::event::WindowEvent::Moved(_)
@@ -113,6 +182,38 @@ pub(super) fn bind_windows_window_state_tracking(
 
             EventResult::Propagate
         });
+}
+
+fn sftp_drop_target_contains(window: &AppWindow, pointer: Option<(f32, f32)>) -> bool {
+    let Some((pointer_x, pointer_y)) = pointer else {
+        return false;
+    };
+
+    let origin_x = window.get_layout_sftp_drop_target_x();
+    let origin_y = window.get_layout_sftp_drop_target_y();
+    let width = window.get_layout_sftp_drop_target_width();
+    let height = window.get_layout_sftp_drop_target_height();
+    if width <= 0.0 || height <= 0.0 {
+        return false;
+    }
+
+    pointer_x >= origin_x
+        && pointer_x <= origin_x + width
+        && pointer_y >= origin_y
+        && pointer_y <= origin_y + height
+}
+
+fn update_sftp_drop_hover_state(
+    window: &AppWindow,
+    hover_state: &Rc<RefCell<bool>>,
+    active: bool,
+) {
+    if *hover_state.borrow() == active {
+        return;
+    }
+
+    *hover_state.borrow_mut() = active;
+    window.invoke_sftp_panel_external_drop_hover_changed(active);
 }
 
 pub(super) fn sync_sync_modal_state(window: &AppWindow, state: &ShellViewModel) {

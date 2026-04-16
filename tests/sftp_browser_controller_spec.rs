@@ -237,3 +237,54 @@ fn load_requests_can_route_by_file_browser_session_id() {
         .expect("browser session state should remain available");
     assert_eq!(state.current_path, "/srv/app");
 }
+
+#[test]
+fn revisiting_a_cached_path_reuses_the_previous_snapshot_while_loading() {
+    let session_id = Uuid::new_v4();
+    let mut controller = SftpBrowserController::default();
+
+    let open = controller.open(session_id, "/srv/app");
+    controller.apply_loaded_directory(
+        session_id,
+        open.request_id,
+        "/srv/app",
+        vec![entry(
+            "entry-logs",
+            "logs",
+            "/srv/app/logs",
+            SftpDirectoryEntryKind::Directory,
+        )],
+    );
+
+    let releases = controller.navigate(session_id, "/srv/app/releases");
+    controller.apply_loaded_directory(
+        session_id,
+        releases.request_id,
+        "/srv/app/releases",
+        vec![entry(
+            "entry-release",
+            "release.tar.gz",
+            "/srv/app/releases/release.tar.gz",
+            SftpDirectoryEntryKind::File,
+        )],
+    );
+
+    let back = controller
+        .navigate_back(session_id)
+        .expect("history back should produce a load request");
+    assert_eq!(back.path, "/srv/app");
+
+    let state = controller
+        .session_state(session_id)
+        .expect("session state should remain available");
+    assert_eq!(state.mode, SftpPanelMode::Loading);
+    assert_eq!(state.current_path, "/srv/app");
+    assert_eq!(
+        state.entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["logs"],
+        "revisiting a previously loaded path should restore that cached snapshot immediately instead of leaving the last unrelated directory on screen"
+    );
+}

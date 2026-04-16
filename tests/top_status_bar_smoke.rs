@@ -399,6 +399,67 @@ fn titlebar_exposes_transfer_icon_with_queue_badge() {
 }
 
 #[test]
+fn titlebar_exposes_transfer_activity_summary_binding() {
+    let titlebar = std::fs::read_to_string("ui/shell/titlebar.slint").unwrap();
+    let app_window = std::fs::read_to_string("ui/app-window.slint").unwrap();
+    let shell_chrome =
+        std::fs::read_to_string("src/app/bootstrap/shell_chrome.rs").expect("read shell chrome");
+
+    assert!(
+        titlebar.contains("transfer-summary-button"),
+        "titlebar should expose a dedicated transfer summary affordance in the top status area"
+    );
+    assert!(
+        titlebar.contains("in property <int> transfer-queue-active: 0;"),
+        "titlebar should receive the active transfer count"
+    );
+    assert!(
+        titlebar.contains("in property <int> transfer-queue-failed: 0;"),
+        "titlebar should receive the failed transfer count"
+    );
+    assert!(
+        titlebar.contains("in property <int> transfer-queue-current-session: 0;"),
+        "titlebar should receive the current-session transfer count"
+    );
+    assert!(
+        app_window.contains("in-out property <int> transfer-queue-active: 0;"),
+        "app window should expose the active transfer count binding"
+    );
+    assert!(
+        app_window.contains("in-out property <int> transfer-queue-failed: 0;"),
+        "app window should expose the failed transfer count binding"
+    );
+    assert!(
+        app_window.contains("in-out property <int> transfer-queue-current-session: 0;"),
+        "app window should expose the current-session transfer count binding"
+    );
+    assert!(
+        app_window.contains("transfer-queue-active: root.transfer-queue-active;"),
+        "app window should forward the active transfer count into the titlebar"
+    );
+    assert!(
+        app_window.contains("transfer-queue-failed: root.transfer-queue-failed;"),
+        "app window should forward the failed transfer count into the titlebar"
+    );
+    assert!(
+        app_window.contains("transfer-queue-current-session: root.transfer-queue-current-session;"),
+        "app window should forward the current-session transfer count into the titlebar"
+    );
+    assert!(
+        shell_chrome.contains("window.set_transfer_queue_active("),
+        "shell chrome should synchronize the active transfer count into the window"
+    );
+    assert!(
+        shell_chrome.contains("window.set_transfer_queue_failed("),
+        "shell chrome should synchronize the failed transfer count into the window"
+    );
+    assert!(
+        shell_chrome.contains("window.set_transfer_queue_current_session("),
+        "shell chrome should synchronize the current-session transfer count into the window"
+    );
+}
+
+#[test]
 fn clicking_transfer_icon_opens_transfer_center_surface() {
     i_slint_backend_testing::init_no_event_loop();
 

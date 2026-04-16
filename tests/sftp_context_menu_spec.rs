@@ -37,55 +37,130 @@ fn active_sftp_view_model(entries: Vec<SftpDirectoryEntry>) -> ShellViewModel {
 }
 
 fn ready_selection(selected_ids: Vec<&str>) -> SelectionContext {
+    ready_selection_with_clipboard(selected_ids, false)
+}
+
+fn ready_selection_with_clipboard(
+    selected_ids: Vec<&str>,
+    clipboard_has_payload: bool,
+) -> SelectionContext {
+    SelectionContext {
+        selected_ids: selected_ids.into_iter().map(str::to_string).collect(),
+        clipboard_has_asset_payload: clipboard_has_payload,
+        target_mutable: true,
+        selected_file_count: 0,
+        selected_directory_count: 0,
+    }
+}
+
+fn ready_file_selection(selected_ids: Vec<&str>) -> SelectionContext {
+    let count = selected_ids.len();
     SelectionContext {
         selected_ids: selected_ids.into_iter().map(str::to_string).collect(),
         clipboard_has_asset_payload: false,
         target_mutable: true,
+        selected_file_count: count,
+        selected_directory_count: 0,
+    }
+}
+
+fn ready_directory_selection(selected_ids: Vec<&str>) -> SelectionContext {
+    let count = selected_ids.len();
+    SelectionContext {
+        selected_ids: selected_ids.into_iter().map(str::to_string).collect(),
+        clipboard_has_asset_payload: false,
+        target_mutable: true,
+        selected_file_count: 0,
+        selected_directory_count: count,
+    }
+}
+
+fn ready_mixed_selection(file_count: usize, directory_count: usize) -> SelectionContext {
+    let total = file_count + directory_count;
+    SelectionContext {
+        selected_ids: (0..total).map(|index| format!("entry-{index}")).collect(),
+        clipboard_has_asset_payload: false,
+        target_mutable: true,
+        selected_file_count: file_count,
+        selected_directory_count: directory_count,
     }
 }
 
 #[test]
 fn sftp_targets_resolve_expected_action_sets() {
-    let blank_actions =
-        resolve_action_tree(ContextTargetKind::SftpBlankArea, &ready_selection(vec![]));
+    let blank_actions = resolve_action_tree(
+        ContextTargetKind::SftpBlankArea,
+        &ready_selection_with_clipboard(vec![], true),
+    );
     let blank_ids: Vec<_> = blank_actions.iter().map(|node| node.id).collect();
     assert_eq!(
         blank_actions
             .iter()
-            .find(|node| node.id == "upload-files")
-            .expect("upload-files action")
+            .find(|node| node.id == "paste-sftp")
+            .expect("paste-sftp action")
             .state,
-        ContextMenuActionState::Enabled
+        ContextMenuActionState::Planned
     );
     assert_eq!(
         blank_actions
             .iter()
-            .find(|node| node.id == "upload-folder")
-            .expect("upload-folder action")
+            .find(|node| node.id == "show-hidden-sftp")
+            .expect("show-hidden-sftp action")
             .state,
-        ContextMenuActionState::Enabled
+        ContextMenuActionState::Planned
     );
     assert_eq!(
         blank_ids,
         vec![
+            "new-file",
+            "new-folder",
             "upload-files",
             "upload-folder",
-            "new-folder",
             "paste-sftp",
+            "select-all-sftp",
             "refresh-sftp",
+            "sort-name",
+            "sort-size",
+            "sort-modified",
+            "show-hidden-sftp",
             "copy-current-path",
+            "open-sftp-workspace",
         ]
     );
 
     let folder_actions = resolve_action_tree(
         ContextTargetKind::SftpDirectory,
-        &ready_selection(vec!["entry-app"]),
+        &ready_directory_selection(vec!["entry-app"]),
     );
     let folder_ids: Vec<_> = folder_actions.iter().map(|node| node.id).collect();
+    assert_eq!(
+        folder_ids,
+        vec![
+            "open-remote",
+            "open-in-new-sftp-tab",
+            "download",
+            "rename-sftp-entry",
+            "delete-sftp-entry",
+            "copy-sftp-entry",
+            "cut-sftp-entry",
+            "paste-sftp",
+            "copy-folder-path",
+            "open-terminal-here",
+            "permissions-sftp",
+            "properties",
+        ]
+    );
     assert!(folder_ids.contains(&"open-terminal-here"));
-    assert!(folder_ids.contains(&"upload-here"));
     assert!(folder_ids.contains(&"rename-sftp-entry"));
     assert!(folder_ids.contains(&"delete-sftp-entry"));
+    assert_eq!(
+        folder_actions
+            .iter()
+            .find(|node| node.id == "download")
+            .expect("download action")
+            .label,
+        "Download To..."
+    );
     assert_eq!(
         folder_actions
             .iter()
@@ -97,26 +172,57 @@ fn sftp_targets_resolve_expected_action_sets() {
     assert_eq!(
         folder_actions
             .iter()
-            .find(|node| node.id == "upload-here")
-            .expect("upload-here action")
+            .find(|node| node.id == "paste-sftp")
+            .expect("paste-sftp action")
+            .state,
+        ContextMenuActionState::Disabled
+    );
+
+    let file_actions = resolve_action_tree(
+        ContextTargetKind::SftpFile,
+        &ready_file_selection(vec!["entry-release"]),
+    );
+    let file_ids: Vec<_> = file_actions.iter().map(|node| node.id).collect();
+    assert_eq!(
+        file_ids,
+        vec![
+            "open-remote",
+            "open-with-remote",
+            "download",
+            "rename-sftp-entry",
+            "delete-sftp-entry",
+            "copy-sftp-entry",
+            "cut-sftp-entry",
+            "paste-sftp",
+            "copy-file-path",
+            "copy-file-name",
+            "permissions-sftp",
+            "properties",
+        ]
+    );
+    assert!(file_ids.contains(&"download"));
+    assert!(file_ids.contains(&"copy-file-path"));
+    assert!(file_ids.contains(&"properties"));
+    assert_eq!(
+        file_actions
+            .iter()
+            .find(|node| node.id == "download")
+            .expect("download action")
             .state,
         ContextMenuActionState::Enabled
     );
-
-    let file_ids: Vec<_> = resolve_action_tree(
-        ContextTargetKind::SftpFile,
-        &ready_selection(vec!["entry-release"]),
-    )
-    .into_iter()
-    .map(|node| node.id)
-    .collect();
-    assert!(file_ids.contains(&"download"));
-    assert!(file_ids.contains(&"copy-sftp-url"));
-    assert!(file_ids.contains(&"properties"));
+    assert_eq!(
+        file_actions
+            .iter()
+            .find(|node| node.id == "copy-sftp-entry")
+            .expect("copy-sftp-entry action")
+            .state,
+        ContextMenuActionState::Planned
+    );
 
     let multi_actions = resolve_action_tree(
         ContextTargetKind::SftpMultiSelection,
-        &ready_selection(vec!["entry-app", "entry-release"]),
+        &ready_mixed_selection(1, 1),
     );
     let multi_ids: Vec<_> = multi_actions.iter().map(|node| node.id).collect();
     assert_eq!(
@@ -124,13 +230,65 @@ fn sftp_targets_resolve_expected_action_sets() {
         vec![
             "download-selected",
             "delete-selected",
+            "copy-sftp-entry",
+            "cut-sftp-entry",
+            "permissions-sftp",
             "copy-paths",
-            "cancel-transfers",
             "refresh-sftp",
         ]
     );
     assert_eq!(
         multi_actions
+            .iter()
+            .find(|node| node.id == "download-selected")
+            .expect("download-selected action")
+            .state,
+        ContextMenuActionState::Enabled
+    );
+    assert_eq!(
+        multi_actions
+            .iter()
+            .find(|node| node.id == "copy-sftp-entry")
+            .expect("copy-sftp-entry action")
+            .state,
+        ContextMenuActionState::Planned
+    );
+}
+
+#[test]
+fn sftp_multi_select_download_supports_files_and_directories() {
+    let files_only_actions = resolve_action_tree(
+        ContextTargetKind::SftpMultiSelection,
+        &ready_file_selection(vec!["entry-release", "entry-config"]),
+    );
+    assert_eq!(
+        files_only_actions
+            .iter()
+            .find(|node| node.id == "download-selected")
+            .expect("download-selected action")
+            .state,
+        ContextMenuActionState::Enabled
+    );
+
+    let directories_only_actions = resolve_action_tree(
+        ContextTargetKind::SftpMultiSelection,
+        &ready_directory_selection(vec!["entry-app", "entry-logs"]),
+    );
+    assert_eq!(
+        directories_only_actions
+            .iter()
+            .find(|node| node.id == "download-selected")
+            .expect("download-selected action")
+            .state,
+        ContextMenuActionState::Enabled
+    );
+
+    let mixed_actions = resolve_action_tree(
+        ContextTargetKind::SftpMultiSelection,
+        &ready_mixed_selection(1, 1),
+    );
+    assert_eq!(
+        mixed_actions
             .iter()
             .find(|node| node.id == "download-selected")
             .expect("download-selected action")
@@ -143,6 +301,8 @@ fn sftp_targets_resolve_expected_action_sets() {
 fn sftp_disconnected_or_loading_targets_disable_mutating_actions() {
     let disabled_selection = SelectionContext {
         target_mutable: false,
+        selected_file_count: 0,
+        selected_directory_count: 1,
         ..ready_selection(vec!["entry-app"])
     };
 
@@ -164,7 +324,12 @@ fn sftp_disconnected_or_loading_targets_disable_mutating_actions() {
         .iter()
         .find(|node| node.id == "new-folder")
         .expect("new-folder action should exist");
+    let paste = blank_actions
+        .iter()
+        .find(|node| node.id == "paste-sftp")
+        .expect("paste-sftp action should exist");
     assert_eq!(new_folder.state, ContextMenuActionState::Disabled);
+    assert_eq!(paste.state, ContextMenuActionState::Disabled);
 }
 
 #[test]
@@ -194,6 +359,53 @@ fn opening_sftp_context_menu_tracks_remote_selection_without_touching_asset_sele
     );
     assert_eq!(state.selected_asset_ids, vec!["asset-root".to_string()]);
     assert_eq!(state.focused_asset_id.as_deref(), Some("asset-root"));
+}
+
+#[test]
+fn right_clicking_an_already_multi_selected_sftp_entry_keeps_the_multi_selection_menu() {
+    let mut state = active_sftp_view_model(vec![
+        SftpDirectoryEntry {
+            id: "entry-app".into(),
+            name: "app".into(),
+            path: "/srv/app".into(),
+            kind: SftpDirectoryEntryKind::Directory,
+            modified_unix_seconds: None,
+            size_bytes: None,
+        },
+        SftpDirectoryEntry {
+            id: "entry-release".into(),
+            name: "release.tar.gz".into(),
+            path: "/srv/app/release.tar.gz".into(),
+            kind: SftpDirectoryEntryKind::File,
+            modified_unix_seconds: None,
+            size_bytes: Some(14 * 1024),
+        },
+    ]);
+    let active_session_id = state
+        .active_file_browser_session_id()
+        .expect("active browser session")
+        .to_string();
+    state
+        .file_browser_sessions
+        .get_mut(&active_session_id)
+        .expect("session state")
+        .selected_entry_ids = vec!["entry-app".into(), "entry-release".into()];
+
+    state.open_context_menu_for_target(
+        ContextTargetKind::SftpFile,
+        Some("entry-release".into()),
+        96.0,
+        144.0,
+    );
+
+    assert_eq!(
+        state.context_menu_target_kind,
+        Some(ContextTargetKind::SftpMultiSelection)
+    );
+    assert_eq!(
+        state.context_menu_selection().selected_ids,
+        vec!["entry-app".to_string(), "entry-release".to_string()]
+    );
 }
 
 #[test]

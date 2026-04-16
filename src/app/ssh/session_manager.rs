@@ -10,9 +10,10 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::app::sftp::{
-    SftpDirectoryEntry, SftpRuntimeHandle, SftpSessionBinding, SftpSessionBindingState,
-    TransferQueue, delete_entries as delete_sftp_entries, execute_queued_transfers,
-    move_entry_between_directories,
+    DownloadTransferEntry, SftpDirectoryEntry, SftpRuntimeHandle, SftpSessionBinding,
+    SftpSessionBindingState, TransferQueue, collect_download_targets,
+    delete_entries as delete_sftp_entries, execute_queued_transfers,
+    execute_queued_transfers_with_progress, move_entry_between_directories,
 };
 use crate::app::ssh::connection_progress::{
     ConnectionAttemptState, ConnectionDiagnosticLine, ConnectionHeadlineState,
@@ -383,6 +384,34 @@ impl SessionManager {
         let runtime = self.sftp_runtime(session_id)?;
         self.runtime_handle
             .block_on(execute_queued_transfers(&runtime, queue))
+    }
+
+    pub fn sftp_execute_queued_transfers_with_progress<F>(
+        &self,
+        session_id: Uuid,
+        queue: &mut TransferQueue,
+        on_queue_updated: F,
+    ) -> Result<()>
+    where
+        F: FnMut(&TransferQueue),
+    {
+        let runtime = self.sftp_runtime(session_id)?;
+        self.runtime_handle.block_on(execute_queued_transfers_with_progress(
+            &runtime,
+            queue,
+            on_queue_updated,
+        ))
+    }
+
+    pub fn sftp_collect_download_targets(
+        &self,
+        session_id: Uuid,
+        local_root: &std::path::Path,
+        entries: &[SftpDirectoryEntry],
+    ) -> Result<Vec<DownloadTransferEntry>> {
+        let runtime = self.sftp_runtime(session_id)?;
+        self.runtime_handle
+            .block_on(collect_download_targets(&runtime, local_root, entries))
     }
 
     pub fn sftp_delete_entries(

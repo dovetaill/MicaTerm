@@ -597,3 +597,22 @@ fn expanding_to_workspace_keeps_the_quick_browser_following_terminal_switches() 
     flush_runtime_projection();
     assert_eq!(app.get_sftp_panel_path().as_str(), "/srv/db");
 }
+
+#[test]
+fn workspace_tab_selection_path_does_not_eagerly_refresh_or_spin_for_sftp_results() {
+    let source = std::fs::read_to_string("src/app/bootstrap.rs").unwrap();
+    let tab_selected_block = source
+        .split("window.on_workspace_tab_selected(move |tab_id| {")
+        .nth(1)
+        .and_then(|rest| rest.split("window.on_workspace_tab_close_requested").next())
+        .expect("workspace-tab-selected bootstrap block should exist");
+
+    assert!(
+        !tab_selected_block.contains("open_active_sftp_browser_for_current_session("),
+        "tab switching should not synchronously queue an eager quick-browser refresh inside the terminal-selection hot path"
+    );
+    assert!(
+        !source.contains("std::thread::yield_now();"),
+        "the workspace projection timer should not spin-yield while waiting for SFTP background results after queueing requests"
+    );
+}

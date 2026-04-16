@@ -47,8 +47,26 @@ fn right_panel_source_uses_two_row_icon_first_quick_browser_header() {
         "quick browser header should render follow, refresh, and expand as icon buttons instead of equal-weight text pills"
     );
     assert!(
-        source.contains("connection-badge") || source.contains("sftp-panel-connection-badge"),
-        "quick browser header should render the connection badge shell"
+        source.contains("active: root.sftp-panel-binding-mode-active;")
+            && source.contains("tooltip-text: \"Follow active terminal\";")
+            && source.contains("tooltip-text: \"Refresh files\";")
+            && source.contains("tooltip-text: \"Open in SFTP workspace\";"),
+        "quick browser toolbar should expose explicit follow state and clear tooltips for every icon action"
+    );
+    assert!(
+        source.contains("out property <string> tooltip-text <=> root.tooltip-text-value;")
+            && source.contains("function schedule-tooltip(")
+            && source.contains("tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {")
+            && source.contains("root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);")
+            && source.contains("root.queue-tooltip-close(source-id);"),
+        "quick browser should wire toolbar hover events into a reusable tooltip state machine"
+    );
+    assert!(
+        (source.contains("connection-badge := Rectangle {") || source.contains("connection-badge := StatusPill {"))
+            && source.contains("\"Current connection: \" + root.sftp-panel-connection-badge-text")
+            && source.contains("border-color: ThemeTokens.status-pill-border;")
+            && source.contains("background: ThemeTokens.status-pill-surface;"),
+        "quick browser header should render the connection shell as a badge with its own tooltip instead of an input-like field"
     );
     assert!(
         source.contains("breadcrumb-row") || source.contains("breadcrumb-shell"),
@@ -90,6 +108,7 @@ fn app_window_source_threads_quick_browser_contract_into_right_panel() {
     assert!(
         source.contains("sftp-panel-connection-badge: root.sftp-panel-connection-badge;")
             && source.contains("sftp-panel-binding-mode-label: root.sftp-panel-binding-mode-label;")
+            && source.contains("sftp-panel-binding-mode-active: root.sftp-panel-binding-mode-active;")
             && source.contains("sftp-panel-path-editing: root.sftp-panel-path-editing;"),
         "app window should forward quick browser header state into the right panel"
     );
@@ -104,5 +123,21 @@ fn app_window_source_threads_quick_browser_contract_into_right_panel() {
             && source.contains("sftp-panel-binding-mode-toggle-requested => {")
             && source.contains("root.sftp-panel-binding-mode-toggle-requested();"),
         "app window should proxy quick browser header callbacks from the right panel"
+    );
+}
+
+#[test]
+fn app_window_source_mounts_a_dedicated_quick_browser_tooltip_overlay() {
+    let source = std::fs::read_to_string("ui/app-window.slint").unwrap();
+
+    assert!(
+        source.contains("quick-browser-tooltip-overlay := TitlebarTooltip {")
+            && source.contains("text: right-panel.tooltip-text;")
+            && source.contains("anchor-x: right-panel.tooltip-anchor-x;")
+            && source.contains("anchor-y: right-panel.tooltip-anchor-y;")
+            && source.contains("anchor-width: right-panel.tooltip-anchor-width;")
+            && source.contains("tooltip-visible: right-panel.tooltip-visible;")
+            && source.contains("place-right: false;"),
+        "app window should reuse the shared tooltip overlay for the quick browser toolbar and connection badge"
     );
 }

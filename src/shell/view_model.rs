@@ -101,6 +101,53 @@ impl RightPanelView {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransferCenterFilter {
+    #[default]
+    All,
+    Running,
+    Queued,
+    Paused,
+    Failed,
+    Completed,
+}
+
+impl TransferCenterFilter {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Running => "running",
+            Self::Queued => "queued",
+            Self::Paused => "paused",
+            Self::Failed => "failed",
+            Self::Completed => "completed",
+        }
+    }
+
+    pub fn from_id(value: &str) -> Option<Self> {
+        match value {
+            "all" => Some(Self::All),
+            "running" => Some(Self::Running),
+            "queued" => Some(Self::Queued),
+            "paused" => Some(Self::Paused),
+            "failed" => Some(Self::Failed),
+            "completed" => Some(Self::Completed),
+            _ => None,
+        }
+    }
+
+    pub fn matches(self, task: &crate::app::sftp::TransferTask) -> bool {
+        match self {
+            Self::All => true,
+            Self::Running => task.state == crate::app::sftp::TransferTaskState::Running,
+            Self::Queued => task.state == crate::app::sftp::TransferTaskState::Queued,
+            Self::Paused => task.state == crate::app::sftp::TransferTaskState::Paused,
+            Self::Failed => task.state.needs_attention(),
+            Self::Completed => task.state == crate::app::sftp::TransferTaskState::Completed,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncModalMode {
     NotConfigured,
@@ -223,10 +270,11 @@ impl Default for VaultPanelViewState {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SftpConflictModalState {
     pub open: bool,
+    pub task_id: Option<String>,
     pub source_path: String,
     pub target_path: String,
-    pub can_resume: bool,
-    pub apply_to_all: bool,
+    pub batch_task_ids: Vec<String>,
+    pub apply_to_batch: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -456,10 +504,20 @@ struct PendingSnippetActivation {
     mode: SnippetActivation,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingSftpContextAction {
+    OpenRemote { entry_id: String },
+    UploadFiles,
+    UploadFolder,
+    DownloadSelection { entry_ids: Vec<String> },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct QuickBrowserState {
     pub follows_active_terminal: bool,
+    pub pending_terminal_session_id: Option<String>,
     pub path_editing: bool,
+    pub drop_target_active: bool,
     pub sort_state: FileBrowserSortState,
     pub column_layout: crate::app::sftp::FileBrowserColumnLayout,
 }
@@ -468,7 +526,9 @@ impl Default for QuickBrowserState {
     fn default() -> Self {
         Self {
             follows_active_terminal: true,
+            pending_terminal_session_id: None,
             path_editing: false,
+            drop_target_active: false,
             sort_state: FileBrowserSortState::default(),
             column_layout: crate::app::sftp::FileBrowserColumnLayout::default(),
         }
@@ -480,6 +540,7 @@ pub struct ShellViewModel {
     pub show_welcome: bool,
     pub show_right_panel: bool,
     pub transfer_center_open: bool,
+    pub transfer_center_filter: TransferCenterFilter,
     pub right_panel_view: RightPanelView,
     pub show_global_menu: bool,
     pub show_assets_sidebar: bool,
@@ -510,6 +571,7 @@ pub struct ShellViewModel {
     pub quick_browser_session_id: Option<String>,
     pub quick_browser_state: QuickBrowserState,
     pub sftp_queue_summary: TransferQueueSummary,
+    pub sftp_transfer_tasks: Vec<crate::app::sftp::TransferTask>,
     pub sftp_queue_drawer_open: bool,
     workspace_tabs: Vec<WorkspaceTab>,
     hidden_workspace_terminal_session_ids: HashSet<String>,
@@ -519,6 +581,7 @@ pub struct ShellViewModel {
     pending_ssh_modal_action: Option<PendingSshModalAction>,
     pending_snippet_create_action: Option<SnippetCreateAction>,
     pending_snippet_activation: Option<PendingSnippetActivation>,
+    pending_sftp_context_action: Option<PendingSftpContextAction>,
     ssh_modal_action_state: SshModalActionState,
     pub editing_asset_id: Option<String>,
     pub editing_asset_text: String,
@@ -551,6 +614,7 @@ impl Default for ShellViewModel {
             show_welcome: true,
             show_right_panel: false,
             transfer_center_open: false,
+            transfer_center_filter: TransferCenterFilter::All,
             right_panel_view: RightPanelView::Sftp,
             show_global_menu: false,
             show_assets_sidebar: true,
@@ -581,6 +645,7 @@ impl Default for ShellViewModel {
             quick_browser_session_id: None,
             quick_browser_state: QuickBrowserState::default(),
             sftp_queue_summary: TransferQueueSummary::default(),
+            sftp_transfer_tasks: Vec::new(),
             sftp_queue_drawer_open: false,
             workspace_tabs: Vec::new(),
             hidden_workspace_terminal_session_ids: HashSet::new(),
@@ -590,6 +655,7 @@ impl Default for ShellViewModel {
             pending_ssh_modal_action: None,
             pending_snippet_create_action: None,
             pending_snippet_activation: None,
+            pending_sftp_context_action: None,
             ssh_modal_action_state: SshModalActionState::Idle,
             editing_asset_id: None,
             editing_asset_text: String::new(),
@@ -1062,6 +1128,7 @@ impl ShellViewModel {
         anchor_x: f32,
         anchor_y: f32,
     ) {
+        let target_kind = self.resolve_context_target_kind_for_selection(target_kind, target_id.as_deref());
         self.context_menu_open = true;
         self.context_menu_target_kind = Some(target_kind);
         self.context_target_asset_id = target_id.clone();
@@ -1342,10 +1409,33 @@ impl ShellViewModel {
             .context_menu_target_kind
             .is_some_and(is_sftp_context_target)
         {
+            let (selected_file_count, selected_directory_count) = self
+                .active_sftp_session_state()
+                .map(|state| {
+                    state
+                        .entries
+                        .iter()
+                        .filter(|entry| {
+                            state
+                                .selected_entry_ids
+                                .iter()
+                                .any(|selected_id| selected_id == &entry.id)
+                        })
+                        .fold((0usize, 0usize), |(files, directories), entry| {
+                            if entry.kind == crate::app::sftp::SftpDirectoryEntryKind::Directory {
+                                (files, directories + 1)
+                            } else {
+                                (files + 1, directories)
+                            }
+                        })
+                })
+                .unwrap_or((0, 0));
             return SelectionContext {
                 selected_ids: self.sftp_panel_selected_entry_ids().to_vec(),
                 clipboard_has_asset_payload: false,
                 target_mutable: matches!(self.sftp_panel_mode_id(), "ready"),
+                selected_file_count,
+                selected_directory_count,
             };
         }
 
@@ -1357,6 +1447,8 @@ impl ShellViewModel {
                 selected_ids: self.selected_keychain_ids.clone(),
                 clipboard_has_asset_payload: false,
                 target_mutable: true,
+                selected_file_count: 0,
+                selected_directory_count: 0,
             };
         }
 
@@ -1364,6 +1456,36 @@ impl ShellViewModel {
             selected_ids: self.selected_asset_ids.clone(),
             clipboard_has_asset_payload: false,
             target_mutable: true,
+            selected_file_count: 0,
+            selected_directory_count: 0,
+        }
+    }
+
+    fn resolve_context_target_kind_for_selection(
+        &self,
+        target_kind: ContextTargetKind,
+        target_id: Option<&str>,
+    ) -> ContextTargetKind {
+        if !is_sftp_context_target(target_kind) {
+            return target_kind;
+        }
+
+        let Some(target_id) = target_id else {
+            return target_kind;
+        };
+        let Some(state) = self.active_sftp_session_state() else {
+            return target_kind;
+        };
+
+        if state.selected_entry_ids.len() > 1
+            && state
+                .selected_entry_ids
+                .iter()
+                .any(|selected_id| selected_id == target_id)
+        {
+            ContextTargetKind::SftpMultiSelection
+        } else {
+            target_kind
         }
     }
 
@@ -1433,6 +1555,11 @@ impl ShellViewModel {
             self.active_workspace_terminal_surface = None;
         }
         self.show_welcome = self.workspace_tabs.is_empty();
+        let next_summary = crate::app::sftp::TransferQueueSummary::from_tasks(
+            &self.sftp_transfer_tasks,
+            self.active_workspace_terminal_session_id(),
+        );
+        self.sftp_queue_summary = next_summary;
     }
 
     fn normalize_folder_parent_id(&self, parent_id: Option<String>) -> Option<String> {

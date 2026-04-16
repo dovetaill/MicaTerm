@@ -13,6 +13,7 @@ import { AssetsSnippetPackageModal } from "components/assets-snippet-package-mod
 import { AssetsSshConnectionModal } from "components/assets-ssh-connection-modal.slint";
 import { BlockingModalShell } from "components/blocking-modal-shell.slint";
 import { OpenSavedSshModal } from "components/open-saved-ssh-modal.slint";
+import { SftpConflictModal } from "components/sftp-conflict-modal.slint";
 import { SftpRemoteFileModal } from "components/sftp-remote-file-modal.slint";
 import { SettingsModal } from "components/settings-modal.slint";
 import { SyncVaultModal } from "components/sync-vault-modal.slint";
@@ -30,7 +31,7 @@ import { Sidebar, SidebarNavItem } from "shell/sidebar.slint";
 import { ConnectionProgressDiagnosticRow, ConnectionProgressStepRow } from "shell/terminal-session-host.slint";
 import { WorkspaceTabItem } from "shell/tabbar.slint";
 import { Titlebar } from "shell/titlebar.slint";
-import { TransferCenter } from "shell/transfer-center.slint";
+import { TransferCenter, TransferCenterItem } from "shell/transfer-center.slint";
 import { WorkspacePane } from "shell/workspace-pane.slint";
 
 export component AppWindow inherits Window {
@@ -73,6 +74,15 @@ export component AppWindow inherits Window {
     in-out property <bool> show-right-panel: false;
     in-out property <bool> transfer-center-open: false;
     in-out property <int> transfer-queue-total: 0;
+    in-out property <int> transfer-queue-active: 0;
+    in-out property <int> transfer-queue-queued: 0;
+    in-out property <int> transfer-queue-running: 0;
+    in-out property <int> transfer-queue-paused: 0;
+    in-out property <int> transfer-queue-failed: 0;
+    in-out property <int> transfer-queue-completed: 0;
+    in-out property <int> transfer-queue-current-session: 0;
+    in-out property <string> transfer-center-active-filter: "all";
+    in-out property <[TransferCenterItem]> transfer-center-items: [];
     in-out property <string> right-panel-view: "sftp";
     in-out property <string> sftp-panel-mode: "empty";
     in-out property <string> sftp-panel-host-label: "";
@@ -80,6 +90,7 @@ export component AppWindow inherits Window {
     in-out property <string> sftp-panel-follow-mode: "follow-cwd";
     in-out property <string> sftp-panel-connection-badge: "";
     in-out property <string> sftp-panel-binding-mode-label: "Follow";
+    in-out property <bool> sftp-panel-binding-mode-active: true;
     in-out property <bool> sftp-panel-path-editing: false;
     in-out property <bool> sftp-panel-can-go-back: false;
     in-out property <bool> sftp-panel-can-go-forward: false;
@@ -97,6 +108,8 @@ export component AppWindow inherits Window {
     in-out property <int> sftp-panel-queue-failed: 0;
     in-out property <int> sftp-panel-queue-current-session: 0;
     in-out property <bool> sftp-queue-drawer-open: false;
+    in-out property <bool> sftp-panel-drop-target-active: false;
+    in-out property <[string]> sftp-panel-external-drop-paths: [];
     in-out property <bool> show-global-menu: false;
     in-out property <bool> is-window-maximized: false;
     in-out property <bool> is-window-active: true;
@@ -138,6 +151,12 @@ export component AppWindow inherits Window {
     in-out property <bool> workspace-paste-warning-editor-mode: false;
     in-out property <string> workspace-paste-warning-text: "";
     in-out property <int> workspace-paste-warning-focus-sequence: 0;
+    in-out property <bool> sftp-conflict-modal-open: false;
+    in-out property <string> sftp-conflict-modal-source-path: "";
+    in-out property <string> sftp-conflict-modal-target-path: "";
+    in-out property <int> sftp-conflict-modal-batch-conflict-count: 0;
+    in-out property <bool> sftp-conflict-modal-apply-to-batch: false;
+    in-out property <int> sftp-conflict-modal-focus-sequence: 0;
     in-out property <bool> sftp-remote-file-modal-open: false;
     in-out property <string> sftp-remote-file-modal-title: "";
     in-out property <string> sftp-remote-file-modal-path: "";
@@ -307,6 +326,10 @@ export component AppWindow inherits Window {
     out property <length> layout-right-panel-height: right-panel.height;
     out property <length> layout-right-panel-radius: right-panel.layout-radius;
     out property <length> layout-right-panel-border-width: right-panel.layout-border-width;
+    out property <length> layout-sftp-drop-target-x: right-panel.x + right-panel.sftp-drop-target-x;
+    out property <length> layout-sftp-drop-target-y: right-panel.y + right-panel.sftp-drop-target-y;
+    out property <length> layout-sftp-drop-target-width: right-panel.sftp-drop-target-width;
+    out property <length> layout-sftp-drop-target-height: right-panel.sftp-drop-target-height;
     out property <length> layout-activity-bar-width: sidebar.activity-bar-width;
     out property <length> layout-assets-sidebar-width: sidebar.assets-sidebar-width;
     out property <length> layout-assets-search-row-height: sidebar.search-row-height;
@@ -328,6 +351,10 @@ export component AppWindow inherits Window {
     callback toggle-right-panel-requested();
     callback sync-now-requested();
     callback open-transfer-center-requested();
+    callback transfer-center-filter-toggle-requested(string);
+    callback transfer-center-retry-requested(string);
+    callback transfer-center-resolve-conflict-requested(string);
+    callback transfer-center-open-workspace-requested(string);
     callback open-sync-modal-requested();
     callback sync-modal-close-requested();
     callback sync-modal-submit-master-password(string);
@@ -360,6 +387,8 @@ export component AppWindow inherits Window {
     callback sftp-panel-open-queue-requested();
     callback sftp-panel-retry-requested();
     callback sftp-panel-reenable-follow-requested();
+    callback sftp-panel-external-drop-hover-changed(bool);
+    callback sftp-panel-external-drop-requested();
     callback sftp-remote-file-modal-close-requested();
     callback sftp-remote-file-modal-save-requested();
     callback sftp-remote-file-modal-content-changed(string);
@@ -396,6 +425,10 @@ export component AppWindow inherits Window {
     callback ssh-host-key-modal-reject-requested();
     callback workspace-paste-warning-confirm-requested();
     callback workspace-paste-warning-cancel-requested();
+    callback sftp-conflict-modal-close-requested();
+    callback sftp-conflict-modal-apply-to-batch-toggled(bool);
+    callback sftp-conflict-modal-replace-requested();
+    callback sftp-conflict-modal-skip-requested();
     callback blocking-modal-drag-requested(length, length);
     callback blocking-modal-drag-moved(length, length);
     callback blocking-modal-drag-ended();
@@ -558,6 +591,9 @@ export component AppWindow inherits Window {
                 show-right-panel: root.effective-show-right-panel;
                 transfer-center-open: root.transfer-center-open;
                 transfer-queue-total: root.transfer-queue-total;
+                transfer-queue-active: root.transfer-queue-active;
+                transfer-queue-failed: root.transfer-queue-failed;
+                transfer-queue-current-session: root.transfer-queue-current-session;
                 show-global-menu: root.show-global-menu;
                 is-window-maximized: root.is-window-maximized;
                 is-window-active: root.is-window-active;
@@ -893,6 +929,7 @@ export component AppWindow inherits Window {
                         sftp-panel-follow-mode: root.sftp-panel-follow-mode;
                         sftp-panel-connection-badge: root.sftp-panel-connection-badge;
                         sftp-panel-binding-mode-label: root.sftp-panel-binding-mode-label;
+                        sftp-panel-binding-mode-active: root.sftp-panel-binding-mode-active;
                         sftp-panel-path-editing: root.sftp-panel-path-editing;
                         sftp-panel-can-go-back: root.sftp-panel-can-go-back;
                         sftp-panel-can-go-forward: root.sftp-panel-can-go-forward;
@@ -910,6 +947,7 @@ export component AppWindow inherits Window {
                         sftp-panel-queue-failed: root.sftp-panel-queue-failed;
                         sftp-panel-queue-current-session: root.sftp-panel-queue-current-session;
                         sftp-queue-drawer-open: root.sftp-queue-drawer-open;
+                        sftp-panel-drop-target-active: root.sftp-panel-drop-target-active;
 
                         sftp-panel-back-requested => {
                             root.sftp-panel-back-requested();
@@ -991,6 +1029,25 @@ export component AppWindow inherits Window {
                         height: max(0px, parent.height - 32px);
                         open: root.transfer-center-open;
                         queue-total: root.transfer-queue-total;
+                        queued-count: root.transfer-queue-queued;
+                        running-count: root.transfer-queue-running;
+                        paused-count: root.transfer-queue-paused;
+                        failed-count: root.transfer-queue-failed;
+                        completed-count: root.transfer-queue-completed;
+                        active-filter: root.transfer-center-active-filter;
+                        items: root.transfer-center-items;
+                        filter-toggle-requested(filter-id) => {
+                            root.transfer-center-filter-toggle-requested(filter-id);
+                        }
+                        retry-requested(task-id) => {
+                            root.transfer-center-retry-requested(task-id);
+                        }
+                        resolve-conflict-requested(task-id) => {
+                            root.transfer-center-resolve-conflict-requested(task-id);
+                        }
+                        open-workspace-requested(task-id) => {
+                            root.transfer-center-open-workspace-requested(task-id);
+                        }
                     }
                 }
             }
@@ -1033,6 +1090,28 @@ export component AppWindow inherits Window {
         host-width: root.width;
         host-height: root.height;
         place-right: true;
+    }
+
+    quick-browser-tooltip-overlay := TitlebarTooltip {
+        text: right-panel.tooltip-text;
+        anchor-x: right-panel.tooltip-anchor-x;
+        anchor-y: right-panel.tooltip-anchor-y;
+        anchor-width: right-panel.tooltip-anchor-width;
+        tooltip-visible: right-panel.tooltip-visible;
+        host-width: root.width;
+        host-height: root.height;
+        place-right: false;
+    }
+
+    transfer-center-tooltip-overlay := TitlebarTooltip {
+        text: transfer-center.tooltip-text;
+        anchor-x: transfer-center.tooltip-anchor-x;
+        anchor-y: transfer-center.tooltip-anchor-y;
+        anchor-width: transfer-center.tooltip-anchor-width;
+        tooltip-visible: transfer-center.tooltip-visible;
+        host-width: root.width;
+        host-height: root.height;
+        place-right: false;
     }
 
     shell-body-empty-search-dismiss-layer := TouchArea {
@@ -1141,7 +1220,7 @@ export component AppWindow inherits Window {
         y: titlebar.height;
         width: root.width;
         height: root.height - titlebar.height;
-        enabled: root.sync-modal-open || root.settings-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open || root.open-saved-ssh-modal-open;
+        enabled: root.sync-modal-open || root.settings-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open || root.open-saved-ssh-modal-open || root.sftp-conflict-modal-open;
 
         clicked => { }
     }
@@ -1900,6 +1979,65 @@ export component AppWindow inherits Window {
 
             cancel-requested => {
                 root.workspace-paste-warning-cancel-requested();
+            }
+
+            drag-requested(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-requested(pointer-x, pointer-y);
+            }
+
+            drag-moved(pointer-x, pointer-y) => {
+                root.blocking-modal-drag-moved(pointer-x, pointer-y);
+            }
+
+            drag-ended => {
+                root.blocking-modal-drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.blocking-modal-focus-restore-requested();
+            }
+        }
+    }
+
+    if root.sftp-conflict-modal-open : sftp-conflict-modal-shell := BlockingModalShell {
+        host-titlebar-height: titlebar.height;
+        modal-width: 520px;
+        modal-height: 396px;
+        offset-x: root.blocking-modal-offset-x;
+        offset-y: root.blocking-modal-offset-y;
+
+        focus-restore-requested => {
+            root.blocking-modal-focus-restore-requested();
+        }
+
+        consume-event => {
+        }
+
+        sftp-conflict-modal-overlay := SftpConflictModal {
+            x: 0px;
+            y: 0px;
+            width: sftp-conflict-modal-shell.content-width;
+            height: sftp-conflict-modal-shell.content-height;
+            source-path: root.sftp-conflict-modal-source-path;
+            target-path: root.sftp-conflict-modal-target-path;
+            batch-conflict-count: root.sftp-conflict-modal-batch-conflict-count;
+            apply-to-batch: root.sftp-conflict-modal-apply-to-batch;
+            focus-sequence: root.sftp-conflict-modal-focus-sequence;
+
+            close-requested => {
+                root.sftp-conflict-modal-close-requested();
+            }
+
+            apply-to-batch-toggled(value) => {
+                root.sftp-conflict-modal-apply-to-batch-toggled(value);
+            }
+
+            replace-requested => {
+                root.sftp-conflict-modal-replace-requested();
+            }
+
+            skip-requested => {
+                root.sftp-conflict-modal-skip-requested();
             }
 
             drag-requested(pointer-x, pointer-y) => {

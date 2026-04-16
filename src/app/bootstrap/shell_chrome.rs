@@ -2,6 +2,155 @@
 
 use super::*;
 
+fn transfer_state_priority(state: crate::app::sftp::TransferTaskState) -> usize {
+    match state {
+        crate::app::sftp::TransferTaskState::Running => 0,
+        crate::app::sftp::TransferTaskState::Queued => 1,
+        crate::app::sftp::TransferTaskState::Paused => 2,
+        crate::app::sftp::TransferTaskState::Failed => 3,
+        crate::app::sftp::TransferTaskState::Conflict => 4,
+        crate::app::sftp::TransferTaskState::Completed => 5,
+        crate::app::sftp::TransferTaskState::Cancelled => 6,
+    }
+}
+
+fn transfer_status_label(state: crate::app::sftp::TransferTaskState) -> &'static str {
+    match state {
+        crate::app::sftp::TransferTaskState::Queued => "Queued",
+        crate::app::sftp::TransferTaskState::Running => "Running",
+        crate::app::sftp::TransferTaskState::Paused => "Paused",
+        crate::app::sftp::TransferTaskState::Completed => "Completed",
+        crate::app::sftp::TransferTaskState::Failed => "Failed",
+        crate::app::sftp::TransferTaskState::Cancelled => "Cancelled",
+        crate::app::sftp::TransferTaskState::Conflict => "Conflict",
+    }
+}
+
+fn transfer_status_tone(state: crate::app::sftp::TransferTaskState) -> &'static str {
+    match state {
+        crate::app::sftp::TransferTaskState::Queued
+        | crate::app::sftp::TransferTaskState::Running
+        | crate::app::sftp::TransferTaskState::Paused => "busy",
+        crate::app::sftp::TransferTaskState::Completed => "success",
+        crate::app::sftp::TransferTaskState::Failed
+        | crate::app::sftp::TransferTaskState::Conflict => "error",
+        crate::app::sftp::TransferTaskState::Cancelled => "muted",
+    }
+}
+
+fn format_transfer_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+
+    let bytes = bytes as f64;
+    if bytes >= GIB {
+        format!("{:.1} GB", bytes / GIB)
+    } else if bytes >= MIB {
+        format!("{:.1} MB", bytes / MIB)
+    } else if bytes >= KIB {
+        format!("{:.0} KB", bytes / KIB)
+    } else {
+        format!("{bytes:.0} B")
+    }
+}
+
+fn transfer_progress_label(task: &crate::app::sftp::TransferTask) -> String {
+    if task.bytes_total > 0 {
+        let transferred = match task.state {
+            crate::app::sftp::TransferTaskState::Completed => task.bytes_total.max(task.bytes_transferred),
+            _ => task.bytes_transferred,
+        };
+        return format!(
+            "{} / {}",
+            format_transfer_bytes(transferred),
+            format_transfer_bytes(task.bytes_total)
+        );
+    }
+
+    match task.state {
+        crate::app::sftp::TransferTaskState::Queued => "Pending".into(),
+        crate::app::sftp::TransferTaskState::Running => "Working".into(),
+        crate::app::sftp::TransferTaskState::Paused => "Paused".into(),
+        crate::app::sftp::TransferTaskState::Completed => "Done".into(),
+        crate::app::sftp::TransferTaskState::Cancelled => "Cancelled".into(),
+        crate::app::sftp::TransferTaskState::Failed
+        | crate::app::sftp::TransferTaskState::Conflict => "Needs attention".into(),
+    }
+}
+
+fn transfer_error_summary(task: &crate::app::sftp::TransferTask) -> String {
+    task.error_message.clone().unwrap_or_default()
+}
+
+fn transfer_show_error(task: &crate::app::sftp::TransferTask) -> bool {
+    task.state.needs_attention() && !transfer_error_summary(task).trim().is_empty()
+}
+
+fn transfer_task_title(task: &crate::app::sftp::TransferTask) -> String {
+    let path = match task.direction {
+        crate::app::sftp::TransferDirection::Upload | crate::app::sftp::TransferDirection::Move => {
+            task.target_path.as_str()
+        }
+        crate::app::sftp::TransferDirection::Download | crate::app::sftp::TransferDirection::Delete => {
+            task.source_path.as_str()
+        }
+    };
+    path.rsplit('/')
+        .next()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(path)
+        .to_string()
+}
+
+fn transfer_task_detail(task: &crate::app::sftp::TransferTask) -> String {
+    match task.direction {
+        crate::app::sftp::TransferDirection::Upload => format!("Upload → {}", task.target_path),
+        crate::app::sftp::TransferDirection::Download => format!("Download → {}", task.target_path),
+        crate::app::sftp::TransferDirection::Delete => format!("Delete → {}", task.source_path),
+        crate::app::sftp::TransferDirection::Move => format!("Move → {}", task.target_path),
+    }
+}
+
+fn project_transfer_center_items(state: &ShellViewModel) -> Vec<TransferCenterItem> {
+    let mut indexed = state
+        .sftp_transfer_tasks()
+        .iter()
+        .enumerate()
+        .filter(|(_, task)| state.transfer_center_includes_task(task))
+        .map(|(index, task)| (index, task))
+        .collect::<Vec<_>>();
+    indexed.sort_by_key(|(index, task)| {
+        (
+            transfer_state_priority(task.state),
+            usize::MAX.saturating_sub(*index),
+        )
+    });
+
+    indexed
+        .into_iter()
+        .map(|(_, task)| {
+            let session_ready = state.has_connected_terminal_session(task.session_id.as_str());
+            TransferCenterItem {
+                id: task.id.clone().into(),
+                title: transfer_task_title(task).into(),
+                detail: transfer_task_detail(task).into(),
+                status_label: transfer_status_label(task.state).into(),
+                status_tone: transfer_status_tone(task.state).into(),
+                progress_label: transfer_progress_label(task).into(),
+                error_summary: transfer_error_summary(task).into(),
+                error_tooltip: transfer_error_summary(task).into(),
+                show_error: transfer_show_error(task),
+                can_retry: session_ready
+                    && task.state == crate::app::sftp::TransferTaskState::Failed,
+                can_resolve_conflict: session_ready
+                    && task.state == crate::app::sftp::TransferTaskState::Conflict,
+                can_open_workspace: session_ready && task.state.needs_attention(),
+            }
+        })
+        .collect()
+}
+
 fn native_window_appearance_request_for_workspace(
     theme_mode: ThemeMode,
 ) -> crate::app::window_effects::NativeWindowAppearanceRequest {
@@ -57,6 +206,32 @@ pub(super) fn sync_top_status_bar_state(
     window.set_transfer_queue_total(
         i32::try_from(state.sftp_queue_summary.total_count).unwrap_or(i32::MAX),
     );
+    window.set_transfer_queue_active(
+        i32::try_from(state.sftp_queue_summary.active_count).unwrap_or(i32::MAX),
+    );
+    window.set_transfer_queue_queued(
+        i32::try_from(state.sftp_queue_summary.queued_count).unwrap_or(i32::MAX),
+    );
+    window.set_transfer_queue_running(
+        i32::try_from(state.sftp_queue_summary.running_count).unwrap_or(i32::MAX),
+    );
+    window.set_transfer_queue_paused(
+        i32::try_from(state.sftp_queue_summary.paused_count).unwrap_or(i32::MAX),
+    );
+    window.set_transfer_queue_failed(
+        i32::try_from(state.sftp_queue_summary.failed_count).unwrap_or(i32::MAX),
+    );
+    window.set_transfer_queue_completed(
+        i32::try_from(state.sftp_queue_summary.completed_count).unwrap_or(i32::MAX),
+    );
+    window.set_transfer_queue_current_session(
+        i32::try_from(state.sftp_queue_summary.current_session_count).unwrap_or(i32::MAX),
+    );
+    window.set_transfer_center_active_filter(state.transfer_center_filter_id().into());
+    let transfer_items = project_transfer_center_items(state);
+    super::sync_vec_model(window.get_transfer_center_items(), transfer_items, |model| {
+        window.set_transfer_center_items(model)
+    });
     window.set_show_global_menu(state.show_global_menu);
     window.set_is_window_maximized(state.is_window_maximized());
     window.set_is_window_active(state.is_window_active);
