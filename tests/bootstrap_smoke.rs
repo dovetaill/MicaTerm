@@ -10671,6 +10671,155 @@ fn transfer_center_filters_toggle_failed_completed_and_all_views() {
 }
 
 #[test]
+fn failed_filter_includes_failed_and_conflict_rows() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    sftp_state.fail_upload_attempts("/srv/app/release.env", 1);
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-failed-filter");
+    let failed_path = temp_root.join("release.env");
+    let conflict_path = temp_root.join("logs");
+    fs::create_dir_all(temp_root.as_path())
+        .expect("create transfer-center failed filter temp root");
+    fs::write(&failed_path, b"PORT=22\n").expect("write transfer-center failed upload source");
+    fs::write(&conflict_path, b"pretend archive bytes")
+        .expect("write transfer-center conflict upload source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        failed_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .any(|row| row.title.as_str() == "release.env" && row.status_label.as_str() == "Failed")
+    });
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        conflict_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        let statuses = (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .map(|row| (row.title.to_string(), row.status_label.to_string()))
+            .collect::<Vec<_>>();
+        statuses
+            .iter()
+            .any(|(title, status)| title == "release.env" && status == "Failed")
+            && statuses
+                .iter()
+                .any(|(title, status)| title == "logs" && status == "Conflict")
+    });
+
+    app.invoke_transfer_center_filter_toggle_requested("failed".into());
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        let statuses = (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .map(|row| row.status_label.to_string())
+            .collect::<Vec<_>>();
+        statuses.len() == 2
+            && statuses.iter().any(|status| status == "Failed")
+            && statuses.iter().any(|status| status == "Conflict")
+    });
+}
+
+#[test]
+fn clear_completed_only_removes_completed_rows() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-clear-completed");
+    let completed_path = temp_root.join("release.env");
+    let conflict_path = temp_root.join("logs");
+    fs::create_dir_all(temp_root.as_path())
+        .expect("create transfer-center clear-completed temp root");
+    fs::write(&completed_path, b"PORT=22\n")
+        .expect("write transfer-center completed upload source");
+    fs::write(&conflict_path, b"pretend archive bytes")
+        .expect("write transfer-center conflict upload source");
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        completed_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![SharedString::from(
+        conflict_path.to_string_lossy().to_string(),
+    )])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        let statuses = (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .map(|row| (row.title.to_string(), row.status_label.to_string()))
+            .collect::<Vec<_>>();
+        statuses
+            .iter()
+            .any(|(title, status)| title == "release.env" && status == "Completed")
+            && statuses
+                .iter()
+                .any(|(title, status)| title == "logs" && status == "Conflict")
+    });
+
+    app.invoke_transfer_center_clear_completed_requested();
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        let entries = (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .map(|row| (row.title.to_string(), row.status_label.to_string()))
+            .collect::<Vec<_>>();
+        !entries
+            .iter()
+            .any(|(title, status)| title == "release.env" && status == "Completed")
+            && entries
+                .iter()
+                .any(|(title, status)| title == "logs" && status == "Conflict")
+    });
+}
+
+#[test]
 fn transfer_center_failed_rows_expose_retry_and_retry_real_transfer() {
     i_slint_backend_testing::init_no_event_loop();
 

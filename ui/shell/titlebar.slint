@@ -44,18 +44,12 @@ export component Titlebar inherits Rectangle {
     private property <length> tooltip-anchor-x-value: 0px;
     private property <length> tooltip-anchor-y-value: 0px;
     private property <bool> transfer-summary-visible: root.transfer-queue-active > 0
-        || root.transfer-queue-failed > 0
-        || root.transfer-queue-current-session > 0;
+        || root.transfer-queue-failed > 0;
     private property <string> transfer-summary-text: root.transfer-queue-failed > 0
-        && root.transfer-queue-active > 0
-        ? "" + root.transfer-queue-active + " active / " + root.transfer-queue-failed + " issues"
-        : root.transfer-queue-failed > 0
-            ? "" + root.transfer-queue-failed + " issues"
-            : root.transfer-queue-active > 0
-                ? "" + root.transfer-queue-active + " active"
-                : "" + root.transfer-queue-current-session + " this session";
+        ? "Transfer issues need attention"
+        : "Transfers active";
     private property <string> transfer-summary-tooltip: root.transfer-summary-visible
-        ? "Open transfer center - " + root.transfer-summary-text
+        ? "Open transfer center"
         : "Open transfer center";
     private property <brush> transfer-summary-surface: root.transfer-queue-failed > 0
         ? ThemeTokens.status-error-surface

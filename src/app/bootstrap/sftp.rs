@@ -1726,6 +1726,52 @@ pub(super) fn bind_sftp_callbacks(
     });
 
     let state = Rc::clone(view_model);
+    window.on_transfer_center_open_file_requested(move |task_id| {
+        let local_path = {
+            let state = state.borrow();
+            state.transfer_task_local_open_file_path(task_id.as_str())
+        };
+        if let Some(local_path) = local_path {
+            crate::app::sftp::open_path_locally(local_path.as_path());
+        }
+    });
+
+    let state = Rc::clone(view_model);
+    window.on_transfer_center_open_folder_requested(move |task_id| {
+        let local_path = {
+            let state = state.borrow();
+            state.transfer_task_local_open_folder_path(task_id.as_str())
+        };
+        if let Some(local_path) = local_path {
+            crate::app::sftp::open_path_locally(local_path.as_path());
+        }
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    window.on_transfer_center_remove_requested(move |task_id| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.remove_transfer_task(task_id.as_str()) {
+            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+            sync_sftp_conflict_modal_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    window.on_transfer_center_clear_completed_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.clear_completed_transfer_tasks() {
+            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+            sync_sftp_conflict_modal_state(&window, &state);
+        }
+    });
+
+    let state = Rc::clone(view_model);
     let handle = window.as_weak();
     let effects_ref = Rc::clone(effects);
     window.on_sftp_conflict_modal_close_requested(move || {

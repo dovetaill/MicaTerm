@@ -460,6 +460,23 @@ fn titlebar_exposes_transfer_activity_summary_binding() {
 }
 
 #[test]
+fn titlebar_shows_semantic_transfer_summary_without_numeric_badge() {
+    let titlebar = std::fs::read_to_string("ui/shell/titlebar.slint").unwrap();
+
+    assert!(
+        titlebar.contains("Transfers active")
+            && titlebar.contains("Transfer issues need attention"),
+        "titlebar should use semantic transfer summary copy instead of raw numeric badge text"
+    );
+    assert!(
+        !titlebar.contains("\"\" + root.transfer-queue-active + \" active\"")
+            && !titlebar.contains("\"\" + root.transfer-queue-failed + \" issues\"")
+            && !titlebar.contains("\"\" + root.transfer-queue-current-session + \" this session\""),
+        "titlebar should stop concatenating raw numeric transfer counts into the summary pill"
+    );
+}
+
+#[test]
 fn clicking_transfer_icon_opens_transfer_center_surface() {
     i_slint_backend_testing::init_no_event_loop();
 

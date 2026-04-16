@@ -355,6 +355,10 @@ export component AppWindow inherits Window {
     callback transfer-center-retry-requested(string);
     callback transfer-center-resolve-conflict-requested(string);
     callback transfer-center-open-workspace-requested(string);
+    callback transfer-center-open-file-requested(string);
+    callback transfer-center-open-folder-requested(string);
+    callback transfer-center-remove-requested(string);
+    callback transfer-center-clear-completed-requested();
     callback open-sync-modal-requested();
     callback sync-modal-close-requested();
     callback sync-modal-submit-master-password(string);
@@ -1047,6 +1051,18 @@ export component AppWindow inherits Window {
                         }
                         open-workspace-requested(task-id) => {
                             root.transfer-center-open-workspace-requested(task-id);
+                        }
+                        open-file-requested(task-id) => {
+                            root.transfer-center-open-file-requested(task-id);
+                        }
+                        open-folder-requested(task-id) => {
+                            root.transfer-center-open-folder-requested(task-id);
+                        }
+                        remove-requested(task-id) => {
+                            root.transfer-center-remove-requested(task-id);
+                        }
+                        clear-completed-requested => {
+                            root.transfer-center-clear-completed-requested();
                         }
                     }
                 }
