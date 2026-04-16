@@ -134,6 +134,9 @@ impl ShellViewModel {
                 editing_asset_id.as_deref(),
                 draft,
             ),
+            Some(AssetModalState::SftpNewFile { draft_name }) => {
+                asset_name_validation_message(self.sftp_name_validation(draft_name, None))
+            }
             Some(AssetModalState::SftpNewFolder { draft_name }) => {
                 asset_name_validation_message(self.sftp_name_validation(draft_name, None))
             }
@@ -196,6 +199,9 @@ impl ShellViewModel {
                 ..
             }) => {
                 self.ssh_modal_can_confirm(parent_id.as_deref(), editing_asset_id.as_deref(), draft)
+            }
+            Some(AssetModalState::SftpNewFile { draft_name }) => {
+                self.sftp_name_validation(draft_name, None) == AssetNameValidation::Valid
             }
             Some(AssetModalState::SftpNewFolder { draft_name }) => {
                 self.sftp_name_validation(draft_name, None) == AssetNameValidation::Valid

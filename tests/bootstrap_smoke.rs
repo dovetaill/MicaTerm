@@ -9846,6 +9846,89 @@ fn refresh_and_path_submit_trigger_real_directory_reads() {
 }
 
 #[test]
+fn pointer_clicking_an_sftp_row_selects_it() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let (window_width, window_height) = default_window_size();
+    app.window()
+        .set_size(slint::PhysicalSize::new(window_width, window_height));
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    let position = LogicalPosition::new(
+        (window_width - 392) as f32 + 64.0,
+        48.0 + 90.0 + 44.0 + 22.0,
+    );
+    app.window().dispatch_event(WindowEvent::PointerMoved { position });
+    app.window().dispatch_event(WindowEvent::PointerPressed {
+        position,
+        button: PointerEventButton::Left,
+    });
+    i_slint_backend_testing::mock_elapsed_time(Duration::from_millis(50));
+    app.window().dispatch_event(WindowEvent::PointerReleased {
+        position,
+        button: PointerEventButton::Left,
+    });
+    flush_runtime_projection();
+
+    assert!(
+        app.get_sftp_panel_items()
+            .row_data(1)
+            .expect("logs row")
+            .selected,
+        "left-clicking a visible quick-browser row should select it again"
+    );
+}
+
+#[test]
+fn sftp_context_menu_refresh_dispatches_a_real_directory_reload() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+    assert_eq!(sftp_state.take_read_dir_calls(), vec!["/srv/app".to_string()]);
+
+    app.invoke_sftp_panel_context_menu_requested("".into(), "sftp-blank".into(), 64.0, 96.0);
+    app.invoke_assets_context_menu_action_invoked("refresh-sftp".into());
+    flush_runtime_projection();
+
+    assert_eq!(
+        sftp_state.take_read_dir_calls(),
+        vec!["/srv/app".to_string()],
+        "refresh from the SFTP blank-area context menu should trigger the same remote read path as the toolbar button"
+    );
+}
+
+#[test]
 fn revisiting_a_previous_remote_path_keeps_its_cached_snapshot_visible_while_refreshing() {
     i_slint_backend_testing::init_no_event_loop();
 
@@ -10290,6 +10373,61 @@ fn sftp_new_folder_dispatches_backend_mkdir_instead_of_local_push() {
     assert!(
         !item_names.iter().any(|name| name == "shared"),
         "quick-browser new-folder should stop inserting a local-only row before the backend refresh completes"
+    );
+}
+
+#[test]
+fn sftp_new_file_dispatches_backend_empty_upload_instead_of_local_push() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.invoke_sftp_panel_context_menu_requested("".into(), "sftp-blank".into(), 64.0, 96.0);
+    app.invoke_assets_context_menu_action_invoked("new-file".into());
+    assert_eq!(
+        app.get_asset_modal_kind().as_str(),
+        "new-file",
+        "new-file should open a dedicated creation modal instead of falling through to a placeholder action"
+    );
+
+    app.invoke_asset_folder_modal_name_changed("notes.txt".into());
+    app.invoke_confirm_asset_modal_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        sftp_state
+            .upload_file_calls
+            .lock()
+            .expect("lock sftp upload file calls")
+            .len()
+            == 1
+    });
+
+    assert_eq!(
+        sftp_state.take_upload_file_calls(),
+        vec![("/srv/app/notes.txt".to_string(), Vec::new())]
+    );
+    let item_names = (0..app.get_sftp_panel_items().row_count())
+        .filter_map(|index| app.get_sftp_panel_items().row_data(index))
+        .map(|row| row.name.to_string())
+        .collect::<Vec<_>>();
+    assert!(
+        !item_names.iter().any(|name| name == "notes.txt"),
+        "quick-browser new-file should wait for the backend refresh instead of pushing a local-only row"
     );
 }
 

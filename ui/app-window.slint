@@ -351,6 +351,7 @@ export component AppWindow inherits Window {
     callback toggle-right-panel-requested();
     callback sync-now-requested();
     callback open-transfer-center-requested();
+    callback close-transfer-center-requested();
     callback transfer-center-filter-toggle-requested(string);
     callback transfer-center-retry-requested(string);
     callback transfer-center-resolve-conflict-requested(string);
@@ -1026,6 +1027,17 @@ export component AppWindow inherits Window {
                         }
                     }
 
+                    if root.transfer-center-open : transfer-center-dismiss-layer := TouchArea {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.height;
+
+                        clicked => {
+                            root.close-transfer-center-requested();
+                        }
+                    }
+
                     transfer-center := TransferCenter {
                         x: sidebar.width + 24px;
                         y: 16px;
@@ -1435,7 +1447,9 @@ export component AppWindow inherits Window {
         }
     }
 
-    if root.asset-modal-open && root.asset-modal-kind == "new-folder" : asset-folder-modal-shell := BlockingModalShell {
+    if root.asset-modal-open
+        && (root.asset-modal-kind == "new-folder" || root.asset-modal-kind == "new-file")
+        : asset-folder-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 420px;
         modal-height: 230px;
@@ -1454,7 +1468,7 @@ export component AppWindow inherits Window {
             y: 0px;
             width: asset-folder-modal-shell.content-width;
             height: asset-folder-modal-shell.content-height;
-            dialog-title: "New Folder";
+            dialog-title: root.asset-modal-kind == "new-file" ? "New File" : "New Folder";
             folder-name: root.asset-folder-modal-name;
             validation-message: root.asset-modal-validation-message;
             can-confirm: root.asset-modal-can-confirm;

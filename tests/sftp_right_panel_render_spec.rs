@@ -152,6 +152,10 @@ fn right_panel_source_uses_two_line_rows_instead_of_dense_file_headers() {
         !source.contains("text: \"Size\"") && !source.contains("label: \"Size\""),
         "right panel should stop rendering the legacy Size table header"
     );
+    assert!(
+        !source.contains("Refreshing remote directory"),
+        "quick-browser refreshes should stop surfacing the noisy `Refreshing remote directory` status copy"
+    );
 }
 
 #[test]

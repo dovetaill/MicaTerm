@@ -1227,6 +1227,45 @@ pub(super) fn apply_pending_sftp_context_action(
                     crate::app::sftp::SftpOpenAction::EditLocally,
                 )
         }
+        PendingSftpContextAction::Refresh => {
+            let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
+                return false;
+            };
+            controller.refresh(session_id).is_some_and(|request| {
+                queue_sftp_browser_request(
+                    state,
+                    controller,
+                    &session_bridge.manager,
+                    request,
+                    async_runtime,
+                    browser_result_tx,
+                )
+            })
+        }
+        PendingSftpContextAction::CreateFile { path, refresh_path } => {
+            let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
+                return false;
+            };
+            let runtime_handle = async_runtime
+                .cloned()
+                .unwrap_or_else(|| session_bridge.manager.runtime_handle());
+            let manager = session_bridge.manager.clone();
+            let result_tx = transfer_result_tx.clone();
+            runtime_handle.spawn(async move {
+                let error = manager
+                    .sftp_upload_file_async(session_id, path.as_str(), Vec::new())
+                    .await
+                    .err()
+                    .map(|err| err.to_string());
+                let _ = result_tx.send(SftpTransferBackgroundMessage {
+                    session_id: session_id.to_string(),
+                    tasks: Vec::new(),
+                    refresh_remote_path: error.is_none().then_some(refresh_path),
+                    error,
+                });
+            });
+            true
+        }
         PendingSftpContextAction::CreateFolder { path, refresh_path } => {
             let Some(session_id) = quick_browser_terminal_session_uuid(state) else {
                 return false;

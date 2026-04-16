@@ -106,6 +106,15 @@ impl ShellViewModel {
         });
     }
 
+    pub fn open_sftp_new_file_modal(&mut self) {
+        self.dismiss_active_asset_rename();
+        self.close_context_menu();
+        self.close_asset_create_menu();
+        self.asset_modal_state = Some(AssetModalState::SftpNewFile {
+            draft_name: self.next_default_sftp_file_name(),
+        });
+    }
+
     pub fn open_new_snippet_modal(&mut self, parent_package_id: Option<String>) {
         let parent_package_id = self.normalize_snippet_package_parent_id(parent_package_id);
         self.dismiss_active_asset_rename();
@@ -203,6 +212,7 @@ impl ShellViewModel {
 
         match modal_state {
             AssetModalState::NewFolder { draft_name, .. }
+            | AssetModalState::SftpNewFile { draft_name }
             | AssetModalState::SftpNewFolder { draft_name } => {
                 *draft_name = value;
             }

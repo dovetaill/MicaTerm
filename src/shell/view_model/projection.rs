@@ -236,6 +236,10 @@ impl ShellViewModel {
         self.transfer_center_open = !self.transfer_center_open;
     }
 
+    pub fn close_transfer_center(&mut self) {
+        self.transfer_center_open = false;
+    }
+
     pub fn transfer_center_filter_id(&self) -> &'static str {
         self.transfer_center_filter.id()
     }

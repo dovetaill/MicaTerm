@@ -349,6 +349,28 @@ pub(super) fn sync_asset_modal_state(window: &AppWindow, state: &ShellViewModel)
             window.set_asset_delete_confirm_descendant_count(0);
             clear_asset_ssh_modal_fields(window);
         }
+        Some(AssetModalState::SftpNewFile { draft_name }) => {
+            window.set_asset_modal_open(true);
+            window.set_asset_modal_kind("new-file".into());
+            window.set_asset_ssh_modal_dialog_title("New SSH Connection".into());
+            window.set_asset_modal_can_confirm(state.asset_create_modal_can_confirm());
+            window.set_asset_modal_validation_message(
+                state.asset_create_modal_validation_message().into(),
+            );
+            window.set_asset_ssh_modal_connect_family_enabled(false);
+            window.set_asset_ssh_modal_feedback_state("idle".into());
+            window.set_asset_ssh_modal_feedback_message("".into());
+            window.set_asset_folder_modal_name(draft_name.clone().into());
+            clear_asset_snippet_modal_fields(window);
+            window.set_asset_rename_modal_open(false);
+            window.set_asset_rename_modal_name("".into());
+            window.set_asset_rename_modal_validation_message("".into());
+            window.set_asset_rename_modal_can_confirm(false);
+            window.set_asset_delete_confirm_modal_open(false);
+            window.set_asset_delete_confirm_target_label("".into());
+            window.set_asset_delete_confirm_descendant_count(0);
+            clear_asset_ssh_modal_fields(window);
+        }
         Some(AssetModalState::SftpNewFolder { draft_name }) => {
             window.set_asset_modal_open(true);
             window.set_asset_modal_kind("new-folder".into());
@@ -995,13 +1017,13 @@ pub(super) fn bind_assets_keychain_callbacks(
         };
         let should_save_keychain_catalog =
             pending_identity_draft.is_some() || pending_keychain_draft.is_some();
-        let is_sftp_new_folder_modal = matches!(
+        let is_sftp_create_modal = matches!(
             state.asset_modal_state.as_ref(),
-            Some(AssetModalState::SftpNewFolder { .. })
+            Some(AssetModalState::SftpNewFile { .. } | AssetModalState::SftpNewFolder { .. })
         );
         let did_mutate = state.confirm_asset_modal();
         if did_mutate {
-            if is_sftp_new_folder_modal {
+            if is_sftp_create_modal {
                 let mut sftp_browser_controller = sftp_browser_controller_ref.borrow_mut();
                 let _ = super::sftp::apply_pending_sftp_context_action(
                     &mut state,
@@ -1041,7 +1063,7 @@ pub(super) fn bind_assets_keychain_callbacks(
                     "failed to persist keychain SSH key secret bundle"
                 );
             }
-            if !is_sftp_new_folder_modal {
+            if !is_sftp_create_modal {
                 save_asset_catalog_if_available(&asset_repo_ref, &state);
                 if should_save_keychain_catalog {
                     save_keychain_catalog_if_available(&keychain_repo_ref, &state);

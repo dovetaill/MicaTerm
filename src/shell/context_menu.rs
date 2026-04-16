@@ -559,7 +559,11 @@ fn resolve_sftp_blank_area_actions(selection: &SelectionContext) -> Vec<ContextM
             "new-file",
             "New File",
             "document",
-            planned_mutable_state(selection),
+            if selection.target_mutable {
+                ContextMenuActionState::Enabled
+            } else {
+                ContextMenuActionState::Disabled
+            },
             false,
         ),
         action_with_state(

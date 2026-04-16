@@ -92,6 +92,21 @@ fn transfer_center_contract_includes_completed_file_actions() {
 }
 
 #[test]
+fn app_window_exposes_transfer_center_outside_dismiss_contract() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window source");
+
+    assert!(
+        app_window.contains("callback close-transfer-center-requested();"),
+        "app window should expose a dedicated close-transfer-center callback so outside-dismiss does not rely on toggle semantics"
+    );
+    assert!(
+        app_window.contains("transfer-center-dismiss-layer := TouchArea")
+            && app_window.contains("root.close-transfer-center-requested();"),
+        "transfer center should render a dismiss layer behind the panel that closes it when the user clicks outside"
+    );
+}
+
+#[test]
 fn completed_transfer_rows_expose_open_file_open_folder_and_remove() {
     let content =
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");

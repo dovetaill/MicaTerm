@@ -18,7 +18,13 @@ pub fn scan_local_sources(paths: &[PathBuf]) -> Result<Vec<LocalTransferEntry>> 
         let metadata = fs::metadata(path)
             .with_context(|| format!("failed to inspect local path `{}`", path.display()))?;
         if metadata.is_dir() {
-            scan_directory(path.as_path(), path.as_path(), &mut entries)?;
+            let relative_root = PathBuf::from(
+                path.file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| "upload".to_string()),
+            );
+            scan_directory(path.as_path(), relative_root.as_path(), &mut entries)?;
         } else if metadata.is_file() {
             entries.push(LocalTransferEntry {
                 local_path: path.clone(),
@@ -72,10 +78,16 @@ pub fn build_local_download_path(local_root: &Path, remote_path: &str) -> PathBu
 }
 
 fn scan_directory(
-    root: &Path,
     current: &Path,
+    relative_path: &Path,
     entries: &mut Vec<LocalTransferEntry>,
 ) -> Result<()> {
+    entries.push(LocalTransferEntry {
+        local_path: current.to_path_buf(),
+        relative_path: relative_path.to_path_buf(),
+        bytes_total: 0,
+    });
+
     let directory = fs::read_dir(current)
         .with_context(|| format!("failed to read local directory `{}`", current.display()))?;
 
@@ -91,21 +103,12 @@ fn scan_directory(
             .metadata()
             .with_context(|| format!("failed to inspect local path `{}`", path.display()))?;
         if metadata.is_dir() {
-            scan_directory(root, path.as_path(), entries)?;
+            let child_relative_path = relative_path.join(child.file_name());
+            scan_directory(path.as_path(), child_relative_path.as_path(), entries)?;
         } else if metadata.is_file() {
-            let relative_path = path
-                .strip_prefix(root)
-                .with_context(|| {
-                    format!(
-                        "failed to compute local relative path for `{}` against `{}`",
-                        path.display(),
-                        root.display()
-                    )
-                })?
-                .to_path_buf();
             entries.push(LocalTransferEntry {
                 local_path: path,
-                relative_path,
+                relative_path: relative_path.join(child.file_name()),
                 bytes_total: metadata.len(),
             });
         }

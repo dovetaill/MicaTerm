@@ -469,3 +469,36 @@ async fn recursive_folder_download_preserves_nested_files_and_empty_directories(
         "recursive folder download should preserve empty directories instead of dropping them"
     );
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn recursive_folder_upload_preserves_root_directory_and_empty_directories() {
+    let root = temp_test_root("upload-folder");
+    let folder_path = root.join("releases");
+    let nested_file = folder_path.join("current").join("app.yml");
+    fs::create_dir_all(folder_path.join("current")).expect("create nested upload dir");
+    fs::create_dir_all(folder_path.join("empty-dir")).expect("create empty upload dir");
+    fs::write(&nested_file, b"port=22").expect("write nested upload file");
+
+    let backend = Arc::new(MemoryBackend::with_directories(&["/srv", "/srv/app"]));
+    let runtime = SftpRuntimeHandle::new(backend.clone());
+    let sources = scan_local_sources(&[folder_path]).expect("scan recursive folder upload");
+
+    let mut queue = TransferQueue::default();
+    queue.enqueue_upload("session-a", "/srv/app", &sources);
+    execute_queued_transfers(&runtime, &mut queue)
+        .await
+        .expect("run recursive folder upload");
+
+    assert_eq!(
+        backend.file_bytes("/srv/app/releases/current/app.yml"),
+        Some(b"port=22".to_vec())
+    );
+    assert!(
+        backend
+            .directories
+            .lock()
+            .expect("lock directories")
+            .contains("/srv/app/releases/empty-dir"),
+        "recursive folder upload should create empty remote directories instead of dropping them"
+    );
+}

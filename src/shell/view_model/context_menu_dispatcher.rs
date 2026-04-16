@@ -272,6 +272,7 @@ impl ShellViewModel {
                     self.close_context_menu();
                 }
             }
+            "new-file" => self.open_sftp_new_file_modal(),
             "new-folder" => self.open_sftp_new_folder_modal(),
             "upload-files" => {
                 self.pending_sftp_context_action = Some(PendingSftpContextAction::UploadFiles);
@@ -320,7 +321,7 @@ impl ShellViewModel {
                 }
             }
             "refresh-sftp" => {
-                let _ = self.refresh_sftp_panel();
+                self.pending_sftp_context_action = Some(PendingSftpContextAction::Refresh);
                 self.close_context_menu();
             }
             "select-all-sftp" => {

@@ -278,6 +278,47 @@ async fn execute_transfer(
             queue.mark_completed(task_id, transferred);
             on_queue_updated(queue);
         }
+        TransferTaskAction::UploadDirectory { local_path: _local_path } => {
+            let remote_exists = runtime.path_exists(&task.target_path).await?;
+            if remote_exists {
+                match task.conflict_policy {
+                    None => {
+                        queue.mark_conflict(task_id, "Remote path already exists");
+                        on_queue_updated(queue);
+                        return Ok(());
+                    }
+                    Some(TransferConflictPolicy::Skip) => {
+                        queue.cancel_task(task_id, "Skipped existing remote path");
+                        on_queue_updated(queue);
+                        return Ok(());
+                    }
+                    Some(TransferConflictPolicy::Overwrite) => {
+                        if runtime.read_dir(&task.target_path).await.is_err() {
+                            runtime.delete_file(&task.target_path).await.with_context(|| {
+                                format!(
+                                    "failed to replace conflicting remote file `{}`",
+                                    task.target_path
+                                )
+                            })?;
+                        }
+                    }
+                }
+            }
+
+            queue.mark_running(task_id);
+            on_queue_updated(queue);
+            ensure_remote_parent_dirs(runtime, &task.target_path).await?;
+            if !runtime.path_exists(&task.target_path).await? {
+                runtime
+                    .mkdir(&task.target_path)
+                    .await
+                    .with_context(|| {
+                        format!("failed to create remote directory `{}`", task.target_path)
+                    })?;
+            }
+            queue.mark_completed(task_id, 0);
+            on_queue_updated(queue);
+        }
         TransferTaskAction::Download { local_path } => {
             let local_exists = local_path.exists();
             if local_exists {

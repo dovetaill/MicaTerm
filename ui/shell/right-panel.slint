@@ -95,10 +95,11 @@ export component RightPanel inherits Rectangle {
     callback sftp-panel-reenable-follow-requested();
     private property <length> sftp-status-row-height:
         root.sftp-panel-mode == "connecting"
-        || root.sftp-panel-mode == "loading"
         || root.sftp-panel-mode == "disconnected"
         || root.sftp-panel-mode == "error"
             ? 60px
+            : root.sftp-panel-mode == "loading" && root.sftp-panel-items.length == 0
+                ? 60px
             : 0px;
     private property <length> sftp-table-header-height: 28px;
     private property <length> sftp-table-row-height: 30px;
@@ -163,7 +164,7 @@ export component RightPanel inherits Rectangle {
             return "Connecting SFTP channel";
         }
         if (root.sftp-panel-mode == "loading") {
-            return "Refreshing remote directory";
+            return "Loading remote directory";
         }
         if (root.sftp-panel-mode == "disconnected") {
             return "Session disconnected";
@@ -180,7 +181,7 @@ export component RightPanel inherits Rectangle {
             return "Opening the browser for the active SSH session.";
         }
         if (root.sftp-panel-mode == "loading") {
-            return "Reading the latest remote path and keeping the current table context.";
+            return "Loading the latest remote path.";
         }
         if (root.sftp-panel-mode == "disconnected") {
             return "Reconnect the SSH session or retry to restore remote browsing.";
@@ -604,6 +605,24 @@ export component RightPanel inherits Rectangle {
                 }
             }
 
+            if root.sftp-panel-mode != "empty" : list-host-blank-area-touch := TouchArea {
+                x: 0px;
+                y: root.sftp-status-row-height;
+                width: parent.width;
+                height: parent.height - root.sftp-status-row-height;
+
+                pointer-event(event) => {
+                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                        root.sftp-panel-context-menu-requested(
+                            "",
+                            "sftp-blank",
+                            self.mouse-x + self.absolute-position.x,
+                            self.mouse-y + self.absolute-position.y,
+                        );
+                    }
+                }
+            }
+
             if root.sftp-panel-mode != "empty" : list-host := ListView {
                 x: 0px;
                 y: root.sftp-status-row-height;
@@ -670,39 +689,14 @@ export component RightPanel inherits Rectangle {
                         overflow: elide;
                     }
 
-                    Text {
+                    meta-text := Text {
                         x: 40px;
                         y: 22px;
-                        width: 56px;
+                        width: parent.width - 52px;
                         height: 16px;
-                        text: item.type_label;
+                        text: item.meta_label;
                         color: ThemeTokens.text-secondary;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-
-                    Text {
-                        x: 100px;
-                        y: 22px;
-                        width: parent.width - 182px;
-                        height: 16px;
-                        text: item.modified_label;
-                        color: ThemeTokens.text-secondary;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-
-                    Text {
-                        x: parent.width - 78px;
-                        y: 22px;
-                        width: 64px;
-                        height: 16px;
-                        text: item.size_label;
-                        color: ThemeTokens.text-secondary;
-                        font-size: 12px;
-                        horizontal-alignment: right;
+                        font-size: 11px;
                         vertical-alignment: center;
                         overflow: elide;
                     }
@@ -735,23 +729,6 @@ export component RightPanel inherits Rectangle {
                 }
             }
 
-            if root.sftp-panel-mode != "empty" : list-host-blank-area-touch := TouchArea {
-                x: 0px;
-                y: root.sftp-status-row-height;
-                width: parent.width;
-                height: parent.height - root.sftp-status-row-height;
-
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
-                        root.sftp-panel-context-menu-requested(
-                            "",
-                            "sftp-blank",
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    }
-                }
-            }
         }
     }
 

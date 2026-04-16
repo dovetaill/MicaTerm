@@ -136,3 +136,35 @@ fn conflict_task_can_resume_with_selected_policy() {
         Some(TransferConflictPolicy::Overwrite)
     );
 }
+
+#[test]
+fn folder_upload_tasks_preserve_selected_root_directory_name() {
+    let root = temp_test_root("queue-upload-folder-root");
+    let folder_path = root.join("releases");
+    let nested_path = folder_path.join("app.yml");
+    fs::create_dir_all(folder_path.join("empty-dir")).expect("create nested empty dir");
+    fs::write(&nested_path, b"port=22").expect("write nested upload source");
+
+    let sources = scan_local_sources(&[folder_path]).expect("scan local folder source");
+    let mut queue = TransferQueue::default();
+
+    let task_ids = queue.enqueue_upload("session-a", "/srv/app", &sources);
+    let target_paths = task_ids
+        .iter()
+        .filter_map(|task_id| queue.task(task_id))
+        .map(|task| task.target_path.clone())
+        .collect::<Vec<_>>();
+
+    assert!(
+        target_paths
+            .iter()
+            .any(|path| path == "/srv/app/releases/app.yml"),
+        "folder upload should preserve the selected folder name when projecting remote upload targets"
+    );
+    assert!(
+        target_paths
+            .iter()
+            .any(|path| path == "/srv/app/releases/empty-dir"),
+        "folder upload should keep empty nested directories in the transfer queue"
+    );
+}

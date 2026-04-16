@@ -320,6 +320,9 @@ pub enum AssetModalState {
         editing_asset_id: Option<String>,
         draft: AssetSshConnectionDraft,
     },
+    SftpNewFile {
+        draft_name: String,
+    },
     SftpNewFolder {
         draft_name: String,
     },
@@ -514,6 +517,11 @@ pub enum PendingSftpContextAction {
     },
     EditLocally {
         entry_id: String,
+    },
+    Refresh,
+    CreateFile {
+        path: String,
+        refresh_path: String,
     },
     CreateFolder {
         path: String,
@@ -1671,6 +1679,25 @@ fn sftp_child_path(parent: &str, name: &str) -> String {
 }
 
 impl ShellViewModel {
+    fn next_default_sftp_file_name(&self) -> String {
+        let Some(state) = self.active_sftp_session_state() else {
+            return "new-file.txt".into();
+        };
+
+        let mut candidate_index = 1usize;
+        loop {
+            let candidate = if candidate_index == 1 {
+                "new-file.txt".to_string()
+            } else {
+                format!("new-file-{candidate_index}.txt")
+            };
+            if state.entries.iter().all(|entry| entry.name != candidate) {
+                return candidate;
+            }
+            candidate_index += 1;
+        }
+    }
+
     fn next_default_sftp_folder_name(&self) -> String {
         let Some(state) = self.active_sftp_session_state() else {
             return "New Folder".into();

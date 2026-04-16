@@ -6,6 +6,7 @@ impl ShellViewModel {
     pub fn can_confirm_asset_modal(&self) -> bool {
         match &self.asset_modal_state {
             Some(AssetModalState::NewFolder { .. })
+            | Some(AssetModalState::SftpNewFile { .. })
             | Some(AssetModalState::SftpNewFolder { .. })
             | Some(AssetModalState::NewSnippet { .. })
             | Some(AssetModalState::NewSnippetPackage { .. })
@@ -49,8 +50,24 @@ impl ShellViewModel {
                 parent_id,
                 ConsoleAssetKind::Folder,
                 draft_name,
-                AssetNodePayload::Folder,
+                    AssetNodePayload::Folder,
             ),
+            AssetModalState::SftpNewFile { draft_name } => {
+                if self.sftp_name_validation(&draft_name, None) != AssetNameValidation::Valid {
+                    return false;
+                }
+                if self.quick_browser_linked_terminal_session_id().is_none() {
+                    return false;
+                }
+
+                let refresh_path = self.sftp_panel_path();
+                let path = sftp_child_path(refresh_path.as_str(), draft_name.trim());
+                self.pending_sftp_context_action =
+                    Some(PendingSftpContextAction::CreateFile { path, refresh_path });
+                self.context_target_asset_id = None;
+                self.asset_modal_state = None;
+                return true;
+            }
             AssetModalState::SftpNewFolder { draft_name } => {
                 if self.sftp_name_validation(&draft_name, None) != AssetNameValidation::Valid {
                     return false;

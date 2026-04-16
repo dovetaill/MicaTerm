@@ -26,6 +26,7 @@ pub enum TransferConflictPolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferTaskAction {
     Upload { local_path: PathBuf },
+    UploadDirectory { local_path: PathBuf },
     Download { local_path: PathBuf },
     DownloadDirectory { local_path: PathBuf },
     Delete { entry_kind: SftpDirectoryEntryKind },
@@ -261,6 +262,15 @@ impl TransferQueue {
         sources
             .iter()
             .map(|source| {
+                let action = if source.local_path.is_dir() {
+                    TransferTaskAction::UploadDirectory {
+                        local_path: source.local_path.clone(),
+                    }
+                } else {
+                    TransferTaskAction::Upload {
+                        local_path: source.local_path.clone(),
+                    }
+                };
                 let task = TransferTask {
                     id: Uuid::new_v4().to_string(),
                     session_id: session_id.into(),
@@ -270,9 +280,7 @@ impl TransferQueue {
                         source.relative_path.as_path(),
                     ),
                     direction: TransferDirection::Upload,
-                    action: TransferTaskAction::Upload {
-                        local_path: source.local_path.clone(),
-                    },
+                    action,
                     state: TransferTaskState::Queued,
                     bytes_total: source.bytes_total,
                     bytes_transferred: 0,

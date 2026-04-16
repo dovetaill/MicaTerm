@@ -5004,6 +5004,16 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    let effects_ref = Rc::clone(&effects);
+    window.on_close_transfer_center_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.close_transfer_center();
+        shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(&effects);
     let vault_session_ref = Rc::clone(&vault_session);
