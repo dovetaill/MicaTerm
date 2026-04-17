@@ -2180,6 +2180,12 @@ fn ensure_workspace_terminal_presenter(
     })?;
 
     if let Some(active_render_mode) = initialized_render_mode {
+        tracing::info!(
+            target: "app.terminal",
+            requested_render_mode = profile.terminal_render_mode_label(),
+            active_render_mode = active_render_mode.as_str(),
+            "initialized workspace terminal presenter"
+        );
         match active_render_mode {
             TerminalRenderMode::Native => {
                 WORKSPACE_NATIVE_TERMINAL_SURFACE.with(|surface| {
