@@ -183,7 +183,8 @@ fn transfer_center_motion_aligns_with_titlebar_transfer_trigger() {
     );
     assert!(
         transfer_center.contains("private property <length> stage-inset: root.open ? 0px : 14px;")
-            && transfer_center.contains("private property <length> stage-offset-y: root.open ? 0px : 8px;")
+            && transfer_center
+                .contains("private property <length> stage-offset-y: root.open ? 0px : 8px;")
             && transfer_center.contains("panel-frame := Rectangle {"),
         "transfer center should slightly compress its own surface before open so the anchored motion feels like an unfolding utility panel rather than a plain slide"
     );
@@ -213,7 +214,8 @@ fn transfer_center_footer_copy_uses_adaptive_width_and_non_truncated_copy() {
         "transfer center footer copy should reclaim width when the clear-completed action is hidden and wrap instead of truncating utility copy too aggressively"
     );
     assert!(
-        content.contains("\"Stays here without blocking the terminal\"")
+        content.contains("\"Completed transfers stay here until you clear them\"")
+            && content.contains("\"Transfers stay close without interrupting the terminal\"")
             && content.contains("\"Ready for the next transfer\""),
         "transfer center footer should keep short, readable utility copy that fits the compact panel"
     );
@@ -223,7 +225,8 @@ fn transfer_center_footer_copy_uses_adaptive_width_and_non_truncated_copy() {
 fn transfer_center_escape_contract_covers_panel_focus_and_right_panel_path_editor() {
     let content =
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
-    let right_panel = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel source");
+    let right_panel =
+        fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel source");
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window source");
 
     assert!(
@@ -276,6 +279,37 @@ fn completed_transfer_rows_expose_open_file_open_folder_and_remove() {
 }
 
 #[test]
+fn completed_transfer_rows_use_compact_icon_buttons_with_disabled_state_contract() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("component TransferCenterRowActionButton inherits Rectangle")
+            && content.contains("in property <image> icon-source;")
+            && content.contains("in property <bool> enabled: true;"),
+        "completed transfer rows should use a dedicated compact action-button component instead of raw text links so the utility panel reads like a desktop control strip"
+    );
+    assert!(
+        content.contains("open-file-action := TransferCenterRowActionButton {")
+            && content.contains("open-folder-action := TransferCenterRowActionButton {")
+            && content.contains("remove-action := TransferCenterRowActionButton {"),
+        "completed transfer rows should render Open File, Open Folder, and Remove through the shared action-button component"
+    );
+    assert!(
+        content.contains("document-20-regular.svg")
+            && content.contains("folder-open-20-regular.svg")
+            && content.contains("dismiss-20-regular.svg"),
+        "completed transfer actions should use Fluent-style document, folder-open, and dismiss glyphs so the row keeps a Windows utility-panel feel"
+    );
+    assert!(
+        content.contains("height: 28px;")
+            && content.contains("background: !root.enabled")
+            && content.contains("touch.clicked();"),
+        "transfer-center action buttons should expose a 28px hit target plus hover/press/disabled handling through the shared button surface contract"
+    );
+}
+
+#[test]
 fn failed_transfer_rows_expose_retry_show_error_and_remove() {
     let content =
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
@@ -290,6 +324,12 @@ fn failed_transfer_rows_expose_retry_show_error_and_remove() {
         content.contains("\"Details\"") && content.contains("\"Remove\""),
         "failed transfer rows should surface compact Details and Remove actions alongside Retry"
     );
+    assert!(
+        content.contains("retry-action := TransferCenterRowActionButton {")
+            && content.contains("details-action := TransferCenterRowActionButton {")
+            && content.contains("remove-action := TransferCenterRowActionButton {"),
+        "failed transfer rows should graduate to the same compact icon-button language as completed rows instead of mixing chips and text links"
+    );
 }
 
 #[test]
@@ -300,8 +340,40 @@ fn transfer_center_rows_use_compact_primary_and_workspace_actions() {
     assert!(
         content.contains("\"Resolve\"")
             && content.contains("\"Workspace\"")
-            && content.contains("secondary-action-touch := TouchArea"),
-        "transfer-center rows should expose a compact primary action plus a lighter workspace shortcut for narrow widths"
+            && content.contains("resolve-action := TransferCenterRowActionButton {")
+            && content.contains("open-workspace-action := TransferCenterRowActionButton {"),
+        "transfer-center conflict rows should use the same compact icon-button treatment for Resolve and Workspace instead of mixing heavy chips with lighter text actions"
+    );
+}
+
+#[test]
+fn transfer_center_footer_and_completed_badge_share_the_same_calm_button_language() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("clear-completed-action := TransferCenterRowActionButton {")
+            && content.contains("label: \"Clear Completed\";")
+            && content.contains("icon-source: root.close-icon;"),
+        "transfer center footer should restyle Clear Completed on the shared compact action-button component so the footer no longer falls back to a text-link treatment"
+    );
+    assert!(
+        content.contains("? ThemeTokens.status-pill-surface")
+            && content.contains("? ThemeTokens.status-success-accent"),
+        "completed badges should tone down their fill and rely on a calmer success foreground so the utility panel stays refined instead of overly saturated"
+    );
+}
+
+#[test]
+fn transfer_center_rows_gain_a_subtle_hover_lift_instead_of_only_a_border_swap() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("row-hover-shadow := Rectangle {")
+            && content.contains("background: ThemeTokens.utility-panel-shadow-soft;")
+            && content.contains("opacity: row.has-hover ?"),
+        "transfer rows should gain a restrained hover-lift layer so the active card feels more premium than a plain border-color swap"
     );
 }
 #[test]
@@ -458,18 +530,19 @@ fn transfer_center_row_actions_expose_fluent_focus_ring_contract() {
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
 
     assert!(
-        content.contains("component TransferCenterActionChip inherits Rectangle")
-            && content.contains("component TransferCenterActionLink inherits Rectangle")
+        !content.contains("component TransferCenterActionChip inherits Rectangle")
+            && !content.contains("component TransferCenterActionLink inherits Rectangle")
+            && content.contains("component TransferCenterRowActionButton inherits Rectangle")
             && content.contains("private property <brush> chrome-border: root.has-focus")
             && content.contains("focus-halo := Rectangle {")
             && content.contains("border-color: ThemeTokens.focus-ring;"),
-        "transfer-center row actions should expose a stronger Fluent focus-ring treatment instead of relying on minimal border changes alone"
+        "transfer-center row actions should consolidate on the shared compact button component while keeping a stronger Fluent focus-ring treatment"
     );
     assert!(
-        content.contains("border-width: root.has-focus || root.has-hover ? 1px : 0px;")
-            && content.contains("opacity: root.has-focus ? 0.44 : 0;")
-            && content.contains("opacity: root.has-focus ? 0.42 : 0;"),
-        "transfer-center row actions should keep a subtle hover contour and a separate focus halo so keyboard and pointer states read differently"
+        content.contains("height: 28px;")
+            && content.contains("border-width: 1px;")
+            && content.contains("opacity: root.has-focus ? 0.46 : 0;"),
+        "transfer-center row actions should keep the compact 28px utility-button size plus a distinct focus halo so keyboard and pointer states read differently"
     );
 }
 
@@ -581,13 +654,13 @@ fn transfer_center_row_actions_keep_a_stable_source_focus_order() {
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
 
     let retry_index = content
-        .find("retry-action := TransferCenterActionChip {")
+        .find("retry-action := TransferCenterRowActionButton {")
         .expect("retry action contract");
     let resolve_index = content
-        .find("resolve-action := TransferCenterActionChip {")
+        .find("resolve-action := TransferCenterRowActionButton {")
         .expect("resolve action contract");
     let workspace_index = content
-        .find("open-workspace-action := TransferCenterActionLink {")
+        .find("open-workspace-action := TransferCenterRowActionButton {")
         .expect("workspace action contract");
 
     assert!(
@@ -595,8 +668,9 @@ fn transfer_center_row_actions_keep_a_stable_source_focus_order() {
         "transfer-center row actions should stay declared in their intended left-to-right focus order so source-contract smoke can catch accidental reordering"
     );
     assert!(
-        content.contains("x: parent.width - 188px;")
-            && content.contains("x: parent.width - 104px;")
+        content.contains("x: row.action-start-x;")
+            && content.contains("x: row.attention-secondary-x;")
+            && content.contains("? row.attention-tertiary-x")
             && content.contains("forward-focus: action-focus;"),
         "transfer-center action affordances should keep a compact left-to-right layout backed by explicit focus forwarding"
     );

@@ -1070,7 +1070,14 @@ fn queue_sftp_local_file_action(
             start_sftp_working_copy_upload_monitor(manager.clone(), working_copy);
         }
 
-        crate::app::sftp::open_path_locally(local_path.as_path());
+        if let Err(err) = crate::app::sftp::open_path_locally(local_path.as_path()) {
+            tracing::warn!(
+                target: "app.sftp",
+                local_path = %local_path.display(),
+                error = %err,
+                "failed to hand off downloaded SFTP file to the local platform opener"
+            );
+        }
     });
     true
 }
@@ -1765,24 +1772,56 @@ pub(super) fn bind_sftp_callbacks(
     });
 
     let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
     window.on_transfer_center_open_file_requested(move |task_id| {
+        let window = handle.unwrap();
         let local_path = {
             let state = state.borrow();
             state.transfer_task_local_open_file_path(task_id.as_str())
         };
-        if let Some(local_path) = local_path {
-            crate::app::sftp::open_path_locally(local_path.as_path());
+        let outcome = match local_path {
+            Some(local_path) => crate::app::sftp::open_path_locally(local_path.as_path()),
+            None => Err(anyhow::anyhow!("The local file is no longer available.")),
+        };
+
+        if let Err(err) = outcome {
+            tracing::warn!(
+                target: "app.sftp",
+                task_id = task_id.as_str(),
+                error = %err,
+                "failed to open a transfer-center file action locally"
+            );
+            let mut state = state.borrow_mut();
+            state.show_transfer_center_feedback("error", format!("Open File failed: {err}"));
+            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         }
     });
 
     let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
     window.on_transfer_center_open_folder_requested(move |task_id| {
+        let window = handle.unwrap();
         let local_path = {
             let state = state.borrow();
             state.transfer_task_local_open_folder_path(task_id.as_str())
         };
-        if let Some(local_path) = local_path {
-            crate::app::sftp::open_path_locally(local_path.as_path());
+        let outcome = match local_path {
+            Some(local_path) => crate::app::sftp::open_path_in_folder_locally(local_path.as_path()),
+            None => Err(anyhow::anyhow!("The local folder is no longer available.")),
+        };
+
+        if let Err(err) = outcome {
+            tracing::warn!(
+                target: "app.sftp",
+                task_id = task_id.as_str(),
+                error = %err,
+                "failed to open a transfer-center folder action locally"
+            );
+            let mut state = state.borrow_mut();
+            state.show_transfer_center_feedback("error", format!("Open Folder failed: {err}"));
+            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         }
     });
 

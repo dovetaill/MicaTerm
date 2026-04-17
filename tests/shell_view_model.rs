@@ -1,9 +1,14 @@
 //! Stateful shell view-model coverage for toolbar, sidebar, window toggles, and asset explorer state.
 
 use std::fs;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use mica_term::app::keychain::{
     KeychainCatalog, KeychainNode, KeychainNodeKind, KeychainNodePayload,
+};
+use mica_term::app::sftp::{
+    TransferDirection, TransferTask, TransferTaskAction, TransferTaskState,
 };
 use mica_term::app::window_state::WindowPlacementKind;
 use mica_term::shell::assets::{
@@ -1990,5 +1995,85 @@ fn snippets_activation_defaults_to_paste_for_snippet_rows() {
     assert_eq!(
         view_model.pending_snippet_activation(),
         Some(SnippetActivation::Paste)
+    );
+}
+
+fn unique_transfer_temp_path(label: &str) -> PathBuf {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time before unix epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "mica-term-shell-view-model-{label}-{}-{timestamp}",
+        std::process::id()
+    ))
+}
+
+fn completed_download_task(local_path: PathBuf) -> TransferTask {
+    TransferTask {
+        id: "download-task".into(),
+        session_id: "session-1".into(),
+        source_path: "/srv/app/releases/release.env".into(),
+        target_path: String::new(),
+        direction: TransferDirection::Download,
+        action: TransferTaskAction::Download { local_path },
+        state: TransferTaskState::Completed,
+        bytes_total: 8,
+        bytes_transferred: 8,
+        conflict_policy: None,
+        error_message: None,
+    }
+}
+
+#[test]
+fn completed_download_paths_only_open_existing_local_file_targets() {
+    let mut view_model = ShellViewModel::default();
+    let temp_root = unique_transfer_temp_path("existing-file");
+    fs::create_dir_all(&temp_root).expect("create transfer temp root");
+    let local_path = temp_root.join("release.env");
+    fs::write(&local_path, b"PORT=22\n").expect("write local transfer target");
+
+    view_model.sftp_transfer_tasks = vec![completed_download_task(local_path.clone())];
+
+    assert_eq!(
+        view_model.transfer_task_local_open_file_path("download-task"),
+        Some(local_path.clone())
+    );
+    assert_eq!(
+        view_model.transfer_task_local_open_folder_path("download-task"),
+        Some(local_path.clone())
+    );
+
+    fs::remove_file(&local_path).expect("remove local transfer target");
+
+    assert_eq!(
+        view_model.transfer_task_local_open_file_path("download-task"),
+        None,
+        "open-file should disable itself once the local file disappears"
+    );
+    assert_eq!(
+        view_model.transfer_task_local_open_folder_path("download-task"),
+        Some(local_path.clone()),
+        "open-folder should still point at the original file so the platform opener can fall back to the containing directory"
+    );
+
+    fs::remove_dir_all(&temp_root).expect("remove transfer temp root");
+}
+
+#[test]
+fn completed_download_paths_disable_open_folder_when_parent_directory_is_missing() {
+    let mut view_model = ShellViewModel::default();
+    let temp_root = unique_transfer_temp_path("missing-parent");
+    let local_path = temp_root.join("release.env");
+    view_model.sftp_transfer_tasks = vec![completed_download_task(local_path)];
+
+    assert_eq!(
+        view_model.transfer_task_local_open_file_path("download-task"),
+        None
+    );
+    assert_eq!(
+        view_model.transfer_task_local_open_folder_path("download-task"),
+        None,
+        "open-folder should disable itself when neither the file nor its containing directory exists"
     );
 }

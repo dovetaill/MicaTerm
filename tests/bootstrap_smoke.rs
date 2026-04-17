@@ -9874,7 +9874,8 @@ fn pointer_clicking_an_sftp_row_selects_it() {
         (window_width - 392) as f32 + 64.0,
         48.0 + 90.0 + 44.0 + 22.0,
     );
-    app.window().dispatch_event(WindowEvent::PointerMoved { position });
+    app.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
     app.window().dispatch_event(WindowEvent::PointerPressed {
         position,
         button: PointerEventButton::Left,
@@ -9915,7 +9916,10 @@ fn sftp_context_menu_refresh_dispatches_a_real_directory_reload() {
 
     app.invoke_open_sftp_panel_requested();
     flush_runtime_projection();
-    assert_eq!(sftp_state.take_read_dir_calls(), vec!["/srv/app".to_string()]);
+    assert_eq!(
+        sftp_state.take_read_dir_calls(),
+        vec!["/srv/app".to_string()]
+    );
 
     app.invoke_sftp_panel_context_menu_requested("".into(), "sftp-blank".into(), 64.0, 96.0);
     app.invoke_assets_context_menu_action_invoked("refresh-sftp".into());
@@ -11023,6 +11027,33 @@ fn transfer_center_failed_rows_expose_retry_and_retry_real_transfer() {
                 .map(|row| row.status_label.as_str() == "Completed")
                 .unwrap_or(false)
     });
+}
+
+#[test]
+fn transfer_center_open_actions_route_through_platform_helpers_and_visible_feedback() {
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+    let local_open_source =
+        fs::read_to_string("src/app/sftp/local_open.rs").expect("read local open helper");
+
+    assert!(
+        bootstrap_sftp.contains("window.on_transfer_center_open_file_requested")
+            && bootstrap_sftp.contains("window.on_transfer_center_open_folder_requested")
+            && bootstrap_sftp.contains("show_transfer_center_feedback("),
+        "transfer-center row actions should route open failures through a visible feedback path instead of failing silently"
+    );
+    assert!(
+        bootstrap_sftp.contains("open_path_locally(local_path.as_path())")
+            && bootstrap_sftp.contains("open_path_in_folder_locally(local_path.as_path())"),
+        "transfer-center Open File and Open Folder should call dedicated platform helpers instead of sharing a single file-open path"
+    );
+    assert!(
+        local_open_source.contains("pub fn open_path_in_folder_locally(path: &Path) -> Result<()>")
+            && local_open_source.contains("/select,")
+            && local_open_source.contains("xdg-open")
+            && local_open_source.contains("arg(\"-R\")"),
+        "the local-open helper should expose cross-platform file-open plus containing-folder reveal logic with an Explorer reveal path on Windows"
+    );
 }
 
 #[test]

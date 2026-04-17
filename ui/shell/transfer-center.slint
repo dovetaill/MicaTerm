@@ -65,15 +65,49 @@ component TransferProgressBar inherits Rectangle {
     }
 }
 
-component TransferCenterActionChip inherits Rectangle {
+component TransferCenterRowActionButton inherits Rectangle {
     in property <string> label;
+    in property <image> icon-source;
+    in property <bool> emphasized: false;
+    in property <bool> danger: false;
+    in property <bool> enabled: true;
     in property <string> tooltip-text: "";
     in property <string> tooltip-source-id: "";
+    private property <brush> idle-border: !root.enabled
+        ? ThemeTokens.divider-subtle
+        : root.danger
+            ? ThemeTokens.divider-subtle
+            : root.emphasized
+                ? ThemeTokens.status-pill-border
+                : ThemeTokens.divider-subtle;
     private property <brush> chrome-border: root.has-focus
         ? ThemeTokens.focus-ring
-        : touch.pressed
-            ? ThemeTokens.divider-strong
-            : ThemeTokens.status-pill-border;
+        : !root.enabled
+            ? ThemeTokens.divider-subtle
+            : touch.pressed
+                ? root.danger
+                    ? ThemeTokens.status-error-accent
+                    : root.emphasized
+                        ? ThemeTokens.accent
+                        : ThemeTokens.divider-strong
+                : touch.has-hover
+                    ? root.danger
+                        ? ThemeTokens.status-error-accent
+                        : root.emphasized
+                            ? ThemeTokens.accent
+                            : ThemeTokens.status-pill-border
+                    : root.idle-border;
+    private property <brush> content-color: !root.enabled
+        ? ThemeTokens.text-muted
+        : root.danger
+            ? (touch.has-hover || touch.pressed || root.has-focus
+                ? ThemeTokens.status-error-accent
+                : ThemeTokens.text-muted)
+            : root.emphasized
+                ? ThemeTokens.text-primary
+                : (touch.has-hover || touch.pressed || root.has-focus
+                    ? ThemeTokens.text-primary
+                    : ThemeTokens.text-secondary);
     out property <bool> has-hover: touch.has-hover;
     out property <bool> has-focus: action-focus.has-focus;
     out property <bool> tooltip-active: (root.has-hover || root.has-focus) && root.tooltip-text != "";
@@ -82,13 +116,25 @@ component TransferCenterActionChip inherits Rectangle {
     callback tooltip-close-requested(string);
     callback tooltip-activity-changed(bool);
 
-    border-radius: 9px;
+    height: 28px;
+    border-radius: 8px;
     border-width: 1px;
     border-color: root.chrome-border;
-    background: touch.pressed ? ThemeTokens.control-pressed-surface
-        : root.has-focus ? ThemeTokens.control-active-surface
-        : touch.has-hover ? ThemeTokens.control-hover-surface
-        : ThemeTokens.utility-panel-section-surface;
+    background: !root.enabled
+        ? ThemeTokens.control-disabled-surface
+        : touch.pressed
+            ? root.danger
+                ? ThemeTokens.status-error-surface
+                : ThemeTokens.control-pressed-surface
+            : root.has-focus
+                ? ThemeTokens.control-active-surface
+                : touch.has-hover
+                    ? root.danger
+                        ? ThemeTokens.status-error-surface
+                        : ThemeTokens.control-hover-surface
+                    : root.emphasized
+                        ? ThemeTokens.utility-panel-empty-surface
+                        : ThemeTokens.utility-panel-section-surface;
     accessible-role: AccessibleRole.button;
     accessible-label: root.label;
     accessible-action-default => { touch.clicked(); }
@@ -103,19 +149,29 @@ component TransferCenterActionChip inherits Rectangle {
         border-width: root.has-focus ? 1px : 0px;
         border-color: ThemeTokens.focus-ring;
         background: transparent;
-        opacity: root.has-focus ? 0.44 : 0;
+        opacity: root.has-focus ? 0.46 : 0;
         animate opacity { duration: 120ms; }
     }
 
+    if (root.icon-source.width > 0 && root.icon-source.height > 0) : Image {
+        x: 10px;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        source: root.icon-source;
+        image-fit: contain;
+        colorize: root.content-color;
+    }
+
     Text {
-        x: 0px;
+        x: 32px;
         y: 0px;
-        width: parent.width;
+        width: max(0px, parent.width - 40px);
         height: parent.height;
         text: root.label;
-        color: ThemeTokens.text-primary;
+        color: root.content-color;
         vertical-alignment: center;
-        horizontal-alignment: center;
+        horizontal-alignment: left;
         font-size: 10px;
         font-weight: 700;
         overflow: elide;
@@ -138,15 +194,17 @@ component TransferCenterActionChip inherits Rectangle {
 
     touch := TouchArea {
         clicked => {
-            root.tooltip-close-requested(root.tooltip-source-id);
-            root.clicked();
+            if root.enabled {
+                root.tooltip-close-requested(root.tooltip-source-id);
+                root.clicked();
+            }
         }
     }
 
     action-focus := FocusScope {
         x: 0px;
         width: 0px;
-        enabled: root.visible;
+        enabled: root.visible && root.enabled;
 
         key-pressed(event) => {
             if (event.text == " " || event.text == "\n") {
@@ -159,97 +217,33 @@ component TransferCenterActionChip inherits Rectangle {
     }
 }
 
-component TransferCenterActionLink inherits Rectangle {
+component TransferCenterFeedbackBanner inherits Rectangle {
     in property <string> label;
-    in property <string> tooltip-text: "";
-    in property <string> tooltip-source-id: "";
-    private property <brush> chrome-border: root.has-focus
-        ? ThemeTokens.focus-ring
-        : root.has-hover
-            ? ThemeTokens.divider-subtle
-            : transparent;
-    out property <bool> has-hover: secondary-action-touch.has-hover;
-    out property <bool> has-focus: action-focus.has-focus;
-    out property <bool> tooltip-active: (root.has-hover || root.has-focus) && root.tooltip-text != "";
-    callback clicked();
-    callback tooltip-open-requested(string, string, length, length, length);
-    callback tooltip-close-requested(string);
-    callback tooltip-activity-changed(bool);
+    in property <string> tone: "neutral";
 
-    border-radius: 8px;
-    border-width: root.has-focus || root.has-hover ? 1px : 0px;
-    border-color: root.chrome-border;
-    background: secondary-action-touch.pressed ? ThemeTokens.control-pressed-surface
-        : root.has-focus ? ThemeTokens.control-active-surface
-        : root.has-hover ? ThemeTokens.control-hover-surface
-        : transparent;
-    accessible-role: AccessibleRole.button;
-    accessible-label: root.label;
-    accessible-action-default => { secondary-action-touch.clicked(); }
-    forward-focus: action-focus;
-
-    focus-halo := Rectangle {
-        x: -2px;
-        y: -2px;
-        width: parent.width + 4px;
-        height: parent.height + 4px;
-        border-radius: parent.border-radius + 2px;
-        border-width: root.has-focus ? 1px : 0px;
-        border-color: ThemeTokens.focus-ring;
-        background: transparent;
-        opacity: root.has-focus ? 0.42 : 0;
-        animate opacity { duration: 120ms; }
-    }
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: root.tone == "error"
+        ? ThemeTokens.status-error-accent
+        : ThemeTokens.status-pill-border;
+    background: root.tone == "error"
+        ? ThemeTokens.status-error-surface
+        : ThemeTokens.status-pill-surface;
 
     Text {
-        x: 0px;
+        x: 10px;
         y: 0px;
-        width: parent.width;
+        width: parent.width - 20px;
         height: parent.height;
         text: root.label;
-        color: root.has-focus || root.has-hover ? ThemeTokens.text-primary : ThemeTokens.accent;
+        color: root.tone == "error"
+            ? ThemeTokens.status-error-accent
+            : ThemeTokens.text-secondary;
         vertical-alignment: center;
-        horizontal-alignment: center;
+        horizontal-alignment: left;
         font-size: 10px;
         font-weight: 700;
         overflow: elide;
-    }
-
-    changed tooltip-active => {
-        root.tooltip-activity-changed(self.tooltip-active);
-        if self.tooltip-active {
-            root.tooltip-open-requested(
-                root.tooltip-source-id,
-                root.tooltip-text,
-                self.absolute-position.x + self.width / 2,
-                self.absolute-position.y + self.height + 8px,
-                self.width,
-            );
-        } else {
-            root.tooltip-close-requested(root.tooltip-source-id);
-        }
-    }
-
-    secondary-action-touch := TouchArea {
-        clicked => {
-            root.tooltip-close-requested(root.tooltip-source-id);
-            root.clicked();
-        }
-    }
-
-    action-focus := FocusScope {
-        x: 0px;
-        width: 0px;
-        enabled: root.visible;
-
-        key-pressed(event) => {
-            if (event.text == " " || event.text == "\n") {
-                secondary-action-touch.clicked();
-                accept
-            } else {
-                reject
-            }
-        }
     }
 }
 
@@ -317,6 +311,9 @@ export component TransferCenter inherits Rectangle {
     in property <int> completed-count: 0;
     in property <string> active-filter: "all";
     in property <[TransferCenterItem]> items: [];
+    in property <string> feedback-text: "";
+    in property <string> feedback-tone: "neutral";
+    in property <int> feedback-sequence: 0;
     callback close-requested();
     callback pin-toggle-requested();
     callback collapse-toggle-requested();
@@ -338,8 +335,14 @@ export component TransferCenter inherits Rectangle {
     private property <image> download-icon: @image-url("../../assets/icons/fluent/arrow-download-20-regular.svg");
     private property <image> delete-icon: @image-url("../../assets/icons/fluent/delete-20-regular.svg");
     private property <image> move-icon: @image-url("../../assets/icons/fluent/arrow-sync-20-regular.svg");
+    private property <image> document-icon: @image-url("../../assets/icons/fluent/document-20-regular.svg");
+    private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
+    private property <image> retry-icon: @image-url("../../assets/icons/fluent/arrow-clockwise-20-regular.svg");
+    private property <image> workspace-icon: @image-url("../../assets/icons/fluent/link-20-regular.svg");
+    private property <image> details-icon: @image-url("../../assets/icons/fluent/list-20-regular.svg");
     private property <string> tooltip-text-value: "";
     private property <bool> tooltip-visible-value: false;
+    private property <bool> feedback-visible-value: false;
     private property <string> tooltip-source-id-value: "";
     private property <string> tooltip-close-source-id-value: "";
     private property <length> tooltip-anchor-x-value: 0px;
@@ -390,7 +393,7 @@ export component TransferCenter inherits Rectangle {
         if root.queue-total > 0 {
             return "" + root.queue-total + " tasks across sessions";
         }
-        return "Queue activity stays here so the terminal remains unobstructed.";
+        return "Keeps transfer history close without covering the terminal.";
     }
 
     function schedule-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length, anchor-width: length) {
@@ -432,6 +435,16 @@ export component TransferCenter inherits Rectangle {
     changed open => {
         if !root.open {
             root.close-tooltip("");
+            feedback-hide.stop();
+            root.feedback-visible-value = false;
+        }
+    }
+
+    changed feedback-sequence => {
+        feedback-hide.stop();
+        root.feedback-visible-value = root.feedback-text != "";
+        if root.feedback-visible-value {
+            feedback-hide.start();
         }
     }
 
@@ -761,11 +774,11 @@ export component TransferCenter inherits Rectangle {
                     height: parent.height;
 
                     for item in root.items : row := Rectangle {
-                        private property <bool> show-actions: item.can_retry
+                        private property <bool> show-completed-actions: item.status_label == "Completed";
+                        private property <bool> show-actions: self.show-completed-actions
+                            || item.can_retry
                             || item.can_resolve_conflict
                             || item.can_open_workspace
-                            || item.can_open_file
-                            || item.can_open_folder
                             || item.can_remove
                             || item.can_show_error;
                         private property <bool> retry-tooltip-active: false;
@@ -798,12 +811,56 @@ export component TransferCenter inherits Rectangle {
                                 : item.status_tone == "muted"
                                     ? ThemeTokens.text-muted
                                     : ThemeTokens.accent;
+                        private property <brush> status-border: item.status_tone == "error"
+                            ? ThemeTokens.status-error-accent
+                            : item.status_tone == "success"
+                                ? ThemeTokens.status-pill-border
+                                : item.status_tone == "muted"
+                                    ? ThemeTokens.status-pill-border
+                                    : ThemeTokens.status-pill-border;
+                        private property <brush> status-background: item.status_tone == "error"
+                            ? ThemeTokens.status-error-surface
+                            : item.status_tone == "success"
+                                ? ThemeTokens.status-pill-surface
+                                : item.status_tone == "muted"
+                                    ? ThemeTokens.status-pill-surface
+                                    : ThemeTokens.status-busy-surface;
+                        private property <brush> status-foreground: item.status_tone == "error"
+                            ? ThemeTokens.status-error-accent
+                            : item.status_tone == "success"
+                                ? ThemeTokens.status-success-accent
+                                : item.status_tone == "muted"
+                                    ? ThemeTokens.text-secondary
+                                    : ThemeTokens.status-busy-accent;
+                        private property <length> action-row-y: item.show_error ? 86px : 72px;
+                        private property <length> action-divider-y: item.show_error ? 76px : 64px;
+                        private property <length> action-start-x: 54px;
+                        private property <length> action-gap: 8px;
+                        private property <length> completed-open-file-width: 96px;
+                        private property <length> completed-open-folder-width: 104px;
+                        private property <length> attention-primary-width: 84px;
+                        private property <length> attention-secondary-width: 96px;
+                        private property <length> attention-danger-width: 80px;
+                        private property <length> attention-secondary-x: row.action-start-x + row.attention-primary-width + row.action-gap;
+                        private property <length> attention-tertiary-x: row.attention-secondary-x + row.attention-secondary-width + row.action-gap;
                         private property <bool> has-hover: touch.has-hover;
                         height: item.show_error
-                            ? (self.show-actions ? 118px : 92px)
-                            : (self.show-actions ? 100px : 76px);
+                            ? (self.show-actions ? 128px : 92px)
+                            : (self.show-actions ? 114px : 78px);
                         background: transparent;
                         border-width: 0px;
+
+                        row-hover-shadow := Rectangle {
+                            x: 12px;
+                            y: row.has-hover ? 6px : 8px;
+                            width: parent.width - 24px;
+                            height: parent.height - 12px;
+                            border-radius: 16px;
+                            background: ThemeTokens.utility-panel-shadow-soft;
+                            opacity: row.has-hover ? 0.78 : 0;
+                            animate y { duration: 120ms; easing: ease-out; }
+                            animate opacity { duration: 120ms; }
+                        }
 
                         card := Rectangle {
                             x: 10px;
@@ -839,7 +896,7 @@ export component TransferCenter inherits Rectangle {
                             Text {
                                 x: 54px;
                                 y: 12px;
-                                width: max(0px, parent.width - 150px);
+                                width: max(0px, parent.width - 158px);
                                 text: item.title;
                                 color: ThemeTokens.text-primary;
                                 font-size: 13px;
@@ -850,7 +907,7 @@ export component TransferCenter inherits Rectangle {
                             Text {
                                 x: 54px;
                                 y: 30px;
-                                width: max(0px, parent.width - 150px);
+                                width: max(0px, parent.width - 158px);
                                 text: row.row-meta;
                                 color: ThemeTokens.text-secondary;
                                 font-size: 10px;
@@ -858,32 +915,20 @@ export component TransferCenter inherits Rectangle {
                             }
 
                             Rectangle {
-                                x: parent.width - 96px;
+                                x: parent.width - 102px;
                                 y: 12px;
-                                width: 78px;
+                                width: 84px;
                                 height: 22px;
                                 border-radius: 11px;
                                 border-width: 1px;
-                                border-color: item.status_tone == "error"
-                                    ? ThemeTokens.status-error-accent
-                                    : item.status_tone == "success"
-                                        ? ThemeTokens.status-success-accent
-                                        : item.status_tone == "muted"
-                                            ? ThemeTokens.text-muted
-                                            : ThemeTokens.status-pill-border;
-                                background: item.status_tone == "error"
-                                    ? ThemeTokens.status-error-surface
-                                    : item.status_tone == "success"
-                                        ? ThemeTokens.status-success-surface
-                                        : item.status_tone == "muted"
-                                            ? ThemeTokens.status-pill-surface
-                                            : ThemeTokens.status-busy-surface;
+                                border-color: row.status-border;
+                                background: row.status-background;
 
                                 Text {
                                     width: parent.width;
                                     height: parent.height;
                                     text: item.status_label;
-                                    color: ThemeTokens.text-primary;
+                                    color: row.status-foreground;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
                                     font-size: 10px;
@@ -895,16 +940,16 @@ export component TransferCenter inherits Rectangle {
                             progress-bar := TransferProgressBar {
                                 x: 54px;
                                 y: 52px;
-                                width: max(0px, parent.width - 146px);
+                                width: max(0px, parent.width - 154px);
                                 height: 5px;
                                 value: item.progress_value;
                                 tone: item.status_tone;
                             }
 
                             Text {
-                                x: parent.width - 92px;
+                                x: parent.width - 98px;
                                 y: 44px;
-                                width: 74px;
+                                width: 80px;
                                 text: item.progress_label;
                                 color: ThemeTokens.text-secondary;
                                 horizontal-alignment: right;
@@ -922,14 +967,26 @@ export component TransferCenter inherits Rectangle {
                                 overflow: elide;
                             }
 
-                            if row.show-actions : open-file-action := TransferCenterActionChip {
-                                x: parent.width - 256px;
-                                y: item.show_error ? 84px : 68px;
-                                width: 78px;
-                                height: 22px;
-                                visible: item.can_open_file;
+                            if row.show-actions : action-divider := Rectangle {
+                                x: 12px;
+                                y: row.action-divider-y;
+                                width: parent.width - 24px;
+                                height: 1px;
+                                background: ThemeTokens.divider-subtle;
+                            }
+
+                            if row.show-completed-actions : open-file-action := TransferCenterRowActionButton {
+                                x: row.action-start-x;
+                                y: row.action-row-y;
+                                width: row.completed-open-file-width;
+                                visible: row.show-completed-actions;
+                                enabled: item.can_open_file;
+                                emphasized: true;
+                                icon-source: root.document-icon;
                                 label: "Open File";
-                                tooltip-text: "Open the downloaded file locally";
+                                tooltip-text: item.can_open_file
+                                    ? "Open this local file with the default app"
+                                    : "This local file is no longer available";
                                 tooltip-source-id: item.id + "-open-file";
                                 clicked => {
                                     root.open-file-requested(item.id);
@@ -945,12 +1002,64 @@ export component TransferCenter inherits Rectangle {
                                 }
                             }
 
-                            if row.show-actions : details-action := TransferCenterActionLink {
-                                x: parent.width - 272px;
-                                y: item.show_error ? 84px : 68px;
-                                width: 78px;
-                                height: 22px;
-                                visible: item.can_show_error && !item.can_open_workspace;
+                            if row.show-completed-actions : open-folder-action := TransferCenterRowActionButton {
+                                x: row.action-start-x + row.completed-open-file-width + row.action-gap;
+                                y: row.action-row-y;
+                                width: row.completed-open-folder-width;
+                                visible: row.show-completed-actions;
+                                enabled: item.can_open_folder;
+                                icon-source: root.folder-open-icon;
+                                label: "Open Folder";
+                                tooltip-text: item.can_open_folder
+                                    ? "Open the containing folder for this transfer"
+                                    : "The containing folder is no longer available";
+                                tooltip-source-id: item.id + "-open-folder";
+                                clicked => {
+                                    root.open-folder-requested(item.id);
+                                }
+                                tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                                }
+                                tooltip-close-requested(source-id) => {
+                                    root.queue-tooltip-close(source-id);
+                                }
+                                tooltip-activity-changed(active) => {
+                                    row.open-folder-tooltip-active = active;
+                                }
+                            }
+
+                            if row.show-completed-actions : completed-remove-action := TransferCenterRowActionButton {
+                                x: row.action-start-x + row.completed-open-file-width + row.action-gap + row.completed-open-folder-width + row.action-gap;
+                                y: row.action-row-y;
+                                width: row.attention-danger-width;
+                                visible: row.show-completed-actions;
+                                enabled: item.can_remove;
+                                danger: true;
+                                icon-source: root.close-icon;
+                                label: "Remove";
+                                tooltip-text: "Remove this record from the transfer center";
+                                tooltip-source-id: item.id + "-remove";
+                                clicked => {
+                                    root.remove-requested(item.id);
+                                }
+                                tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
+                                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
+                                }
+                                tooltip-close-requested(source-id) => {
+                                    root.queue-tooltip-close(source-id);
+                                }
+                                tooltip-activity-changed(active) => {
+                                    row.remove-tooltip-active = active;
+                                }
+                            }
+
+                            if row.show-actions : details-action := TransferCenterRowActionButton {
+                                x: row.attention-secondary-x;
+                                y: row.action-row-y;
+                                width: row.attention-secondary-width;
+                                visible: !row.show-completed-actions && item.can_show_error && !item.can_open_workspace;
+                                enabled: true;
+                                icon-source: root.details-icon;
                                 label: "Details";
                                 tooltip-text: item.error_tooltip;
                                 tooltip-source-id: item.id + "-details";
@@ -974,12 +1083,13 @@ export component TransferCenter inherits Rectangle {
                                 }
                             }
 
-                            if row.show-actions : retry-action := TransferCenterActionChip {
-                                x: parent.width - 188px;
-                                y: item.show_error ? 84px : 68px;
-                                width: 76px;
-                                height: 22px;
+                            if row.show-actions : retry-action := TransferCenterRowActionButton {
+                                x: row.action-start-x;
+                                y: row.action-row-y;
+                                width: row.attention-primary-width;
                                 visible: item.can_retry;
+                                emphasized: true;
+                                icon-source: root.retry-icon;
                                 label: "Retry";
                                 tooltip-text: "Retry failed transfer";
                                 tooltip-source-id: item.id + "-retry";
@@ -997,12 +1107,13 @@ export component TransferCenter inherits Rectangle {
                                 }
                             }
 
-                            if row.show-actions : resolve-action := TransferCenterActionChip {
-                                x: parent.width - 188px;
-                                y: item.show_error ? 84px : 68px;
-                                width: 76px;
-                                height: 22px;
+                            if row.show-actions : resolve-action := TransferCenterRowActionButton {
+                                x: row.action-start-x;
+                                y: row.action-row-y;
+                                width: row.attention-primary-width;
                                 visible: item.can_resolve_conflict;
+                                emphasized: true;
+                                icon-source: root.move-icon;
                                 label: "Resolve";
                                 tooltip-text: "Resolve transfer conflict";
                                 tooltip-source-id: item.id + "-resolve";
@@ -1020,35 +1131,13 @@ export component TransferCenter inherits Rectangle {
                                 }
                             }
 
-                            if row.show-actions : open-folder-action := TransferCenterActionLink {
-                                x: parent.width - 188px;
-                                y: item.show_error ? 84px : 68px;
-                                width: 84px;
-                                height: 22px;
-                                visible: item.can_open_folder;
-                                label: "Open Folder";
-                                tooltip-text: "Open the local containing folder";
-                                tooltip-source-id: item.id + "-open-folder";
-                                clicked => {
-                                    root.open-folder-requested(item.id);
-                                }
-                                tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {
-                                    root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);
-                                }
-                                tooltip-close-requested(source-id) => {
-                                    root.queue-tooltip-close(source-id);
-                                }
-                                tooltip-activity-changed(active) => {
-                                    row.open-folder-tooltip-active = active;
-                                }
-                            }
-
-                            if row.show-actions : open-workspace-action := TransferCenterActionLink {
-                                x: parent.width - 188px;
-                                y: item.show_error ? 84px : 68px;
-                                width: 76px;
-                                height: 22px;
-                                visible: item.can_open_workspace;
+                            if row.show-actions : open-workspace-action := TransferCenterRowActionButton {
+                                x: row.attention-secondary-x;
+                                y: row.action-row-y;
+                                width: row.attention-secondary-width;
+                                visible: !row.show-completed-actions && item.can_open_workspace;
+                                enabled: true;
+                                icon-source: root.workspace-icon;
                                 label: "Workspace";
                                 tooltip-text: "Open task in SFTP workspace";
                                 tooltip-source-id: item.id + "-workspace";
@@ -1066,12 +1155,18 @@ export component TransferCenter inherits Rectangle {
                                 }
                             }
 
-                            if row.show-actions : remove-action := TransferCenterActionLink {
-                                x: parent.width - 104px;
-                                y: item.show_error ? 84px : 68px;
-                                width: 70px;
-                                height: 22px;
-                                visible: item.can_remove;
+                            if row.show-actions : remove-action := TransferCenterRowActionButton {
+                                x: item.can_open_workspace || (item.can_show_error && !item.can_open_workspace)
+                                    ? row.attention-tertiary-x
+                                    : item.can_retry || item.can_resolve_conflict
+                                        ? row.attention-secondary-x
+                                        : row.action-start-x;
+                                y: row.action-row-y;
+                                width: row.attention-danger-width;
+                                visible: !row.show-completed-actions && item.can_remove;
+                                enabled: true;
+                                danger: true;
+                                icon-source: root.close-icon;
                                 label: "Remove";
                                 tooltip-text: "Remove task from the transfer center";
                                 tooltip-source-id: item.id + "-remove";
@@ -1138,6 +1233,15 @@ export component TransferCenter inherits Rectangle {
             }
         }
 
+        if root.feedback-visible-value && root.feedback-text != "" : feedback-banner := TransferCenterFeedbackBanner {
+            x: 14px;
+            y: root.footer-height > 0px ? parent.height - root.footer-height - 38px : parent.height - 42px;
+            width: min(parent.width - 28px, 320px);
+            height: 28px;
+            label: root.feedback-text;
+            tone: root.feedback-tone;
+        }
+
         if !root.collapsed && root.footer-height > 0px : footer-strip := Rectangle {
             x: 14px;
             y: parent.height - root.footer-height;
@@ -1145,7 +1249,7 @@ export component TransferCenter inherits Rectangle {
             height: root.footer-height - 10px;
             background: transparent;
             private property <length> footer-copy-width: root.completed-count > 0
-                ? max(0px, parent.width - 138px)
+                ? max(0px, parent.width - 146px)
                 : parent.width;
 
             Rectangle {
@@ -1162,22 +1266,24 @@ export component TransferCenter inherits Rectangle {
                 width: footer-strip.footer-copy-width;
                 height: parent.height - 8px;
                 text: root.failed-count > 0
-                    ? "Resolve or remove failed transfers to clear this list"
-                    : root.queue-total > 0
-                        ? "Stays here without blocking the terminal"
-                        : "Ready for the next transfer";
+                    ? "Failed transfers stay here until you retry or remove them"
+                    : root.completed-count > 0
+                        ? "Completed transfers stay here until you clear them"
+                        : root.queue-total > 0
+                            ? "Transfers stay close without interrupting the terminal"
+                            : "Ready for the next transfer";
                 color: ThemeTokens.text-secondary;
                 font-size: 10px;
                 wrap: word-wrap;
             }
 
-            clear-completed-action := TransferCenterActionLink {
-                x: parent.width - 124px;
-                y: 8px;
-                width: 124px;
-                height: 24px;
+            clear-completed-action := TransferCenterRowActionButton {
+                x: parent.width - 132px;
+                y: 6px;
+                width: 132px;
                 visible: root.completed-count > 0;
                 label: "Clear Completed";
+                icon-source: root.close-icon;
                 tooltip-text: "Remove finished rows from the transfer center";
                 tooltip-source-id: "transfer-clear-completed";
                 clicked => {
@@ -1222,6 +1328,16 @@ export component TransferCenter inherits Rectangle {
             if root.tooltip-close-source-id-value != "" {
                 root.close-tooltip(root.tooltip-close-source-id-value);
             }
+        }
+    }
+
+    feedback-hide := Timer {
+        interval: 3200ms;
+        running: false;
+
+        triggered => {
+            self.running = false;
+            root.feedback-visible-value = false;
         }
     }
 }

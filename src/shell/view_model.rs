@@ -235,6 +235,13 @@ pub struct SyncFeedbackViewState {
     pub running: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TransferCenterFeedbackViewState {
+    pub text: String,
+    pub tone: String,
+    pub sequence: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsModalViewState {
     pub open: bool,
@@ -633,6 +640,7 @@ pub struct ShellViewModel {
     sync_modal_state: SyncModalViewState,
     settings_modal_state: SettingsModalViewState,
     sync_feedback_state: SyncFeedbackViewState,
+    transfer_center_feedback_state: TransferCenterFeedbackViewState,
     vault_panel_state: VaultPanelViewState,
     console_asset_tree: AssetTree,
     snippet_asset_tree: AssetTree,
@@ -709,6 +717,7 @@ impl Default for ShellViewModel {
             sync_modal_state: SyncModalViewState::default(),
             settings_modal_state: SettingsModalViewState::default(),
             sync_feedback_state: SyncFeedbackViewState::default(),
+            transfer_center_feedback_state: TransferCenterFeedbackViewState::default(),
             vault_panel_state: VaultPanelViewState::default(),
             console_asset_tree: AssetTree::new(),
             snippet_asset_tree: AssetTree::new(),

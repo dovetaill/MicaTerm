@@ -72,6 +72,9 @@ export component AppWindow inherits Window {
     in-out property <string> sync-feedback-text: "";
     in-out property <int> sync-feedback-sequence: 0;
     in-out property <bool> sync-feedback-running: false;
+    in-out property <string> transfer-center-feedback-text: "";
+    in-out property <string> transfer-center-feedback-tone: "neutral";
+    in-out property <int> transfer-center-feedback-sequence: 0;
     in-out property <bool> show-right-panel: false;
     in-out property <bool> transfer-center-open: false;
     in-out property <bool> transfer-center-pinned: false;
@@ -1104,6 +1107,9 @@ export component AppWindow inherits Window {
                         completed-count: root.transfer-queue-completed;
                         active-filter: root.transfer-center-active-filter;
                         items: root.transfer-center-items;
+                        feedback-text: root.transfer-center-feedback-text;
+                        feedback-tone: root.transfer-center-feedback-tone;
+                        feedback-sequence: root.transfer-center-feedback-sequence;
                         close-requested => {
                             root.close-transfer-center-requested();
                         }

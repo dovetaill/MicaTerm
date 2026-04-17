@@ -117,19 +117,23 @@ fn transfer_show_error(task: &crate::app::sftp::TransferTask) -> bool {
 
 fn transfer_can_open_file(task: &crate::app::sftp::TransferTask) -> bool {
     task.state == crate::app::sftp::TransferTaskState::Completed
-        && matches!(
-            task.action,
-            crate::app::sftp::TransferTaskAction::Download { .. }
-        )
+        && match &task.action {
+            crate::app::sftp::TransferTaskAction::Download { local_path } => {
+                crate::app::sftp::can_open_file_path_locally(local_path.as_path())
+            }
+            _ => false,
+        }
 }
 
 fn transfer_can_open_folder(task: &crate::app::sftp::TransferTask) -> bool {
     task.state == crate::app::sftp::TransferTaskState::Completed
-        && matches!(
-            task.action,
-            crate::app::sftp::TransferTaskAction::Download { .. }
-                | crate::app::sftp::TransferTaskAction::DownloadDirectory { .. }
-        )
+        && match &task.action {
+            crate::app::sftp::TransferTaskAction::Download { local_path }
+            | crate::app::sftp::TransferTaskAction::DownloadDirectory { local_path } => {
+                crate::app::sftp::can_open_folder_path_locally(local_path.as_path())
+            }
+            _ => false,
+        }
 }
 
 fn transfer_can_remove(task: &crate::app::sftp::TransferTask) -> bool {
@@ -138,8 +142,9 @@ fn transfer_can_remove(task: &crate::app::sftp::TransferTask) -> bool {
 
 fn transfer_task_title(task: &crate::app::sftp::TransferTask) -> String {
     let path = match task.direction {
-        crate::app::sftp::TransferDirection::Upload
-        | crate::app::sftp::TransferDirection::Move => task.target_path.as_str(),
+        crate::app::sftp::TransferDirection::Upload | crate::app::sftp::TransferDirection::Move => {
+            task.target_path.as_str()
+        }
         crate::app::sftp::TransferDirection::Download
         | crate::app::sftp::TransferDirection::Delete => task.source_path.as_str(),
     };
@@ -195,7 +200,9 @@ fn project_transfer_center_items(state: &ShellViewModel) -> Vec<TransferCenterIt
             TransferCenterItem {
                 id: task.id.clone().into(),
                 title: transfer_task_title(task).into(),
-                host_label: state.transfer_task_host_label(task.session_id.as_str()).into(),
+                host_label: state
+                    .transfer_task_host_label(task.session_id.as_str())
+                    .into(),
                 direction_label: transfer_direction_label(task).into(),
                 detail: transfer_task_detail(task).into(),
                 status_label: transfer_status_label(task.state).into(),
@@ -319,6 +326,13 @@ pub(super) fn sync_top_status_bar_state(
     window.set_sync_feedback_text(state.sync_feedback_state().text.clone().into());
     window.set_sync_feedback_sequence(state.sync_feedback_state().sequence);
     window.set_sync_feedback_running(state.sync_feedback_state().running);
+    window.set_transfer_center_feedback_text(
+        state.transfer_center_feedback_state().text.clone().into(),
+    );
+    window.set_transfer_center_feedback_tone(
+        state.transfer_center_feedback_state().tone.clone().into(),
+    );
+    window.set_transfer_center_feedback_sequence(state.transfer_center_feedback_state().sequence);
     super::sync_workspace_native_terminal_surface_geometry(window);
 }
 

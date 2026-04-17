@@ -8,18 +8,22 @@ pub mod local_ops;
 pub mod model;
 pub mod operation_dispatch;
 pub mod queue;
-pub mod working_copy;
 pub mod runtime;
 pub mod session_binding;
+pub mod working_copy;
 
 pub use browser_controller::{SftpBrowserController, SftpBrowserLoadRequest};
 pub use browser_session::{
     FILE_BROWSER_MODIFIED_COLUMN_MIN_PX, FILE_BROWSER_SIZE_COLUMN_MIN_PX,
     FILE_BROWSER_TYPE_COLUMN_MIN_PX, FileBrowserColumnLayout, FileBrowserSession,
-    FileBrowserSessionId, FileBrowserSortColumn, FileBrowserSortDirection,
-    FileBrowserSortState, HostProfileRef,
+    FileBrowserSessionId, FileBrowserSortColumn, FileBrowserSortDirection, FileBrowserSortState,
+    HostProfileRef,
 };
 pub use browser_state::SftpBrowserSessionState;
+pub use local_open::{
+    SftpOpenAction, can_open_file_path_locally, can_open_folder_path_locally,
+    open_path_in_folder_locally, open_path_locally, prepare_local_open_path,
+};
 pub use local_ops::{
     LocalTransferEntry, build_local_download_path, build_remote_upload_path, scan_local_sources,
 };
@@ -27,13 +31,9 @@ pub use model::{
     SftpDirectoryEntry, SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode, SftpPathHistory,
     SftpSessionBindingState,
 };
-pub use local_open::{SftpOpenAction, open_path_locally, prepare_local_open_path};
 pub use operation_dispatch::{
     SftpBrowserOperationResult, SftpOperationKind, SftpOperationToken,
     dispatch_sftp_load_dir_operation,
-};
-pub use working_copy::{
-    SftpWorkingCopy, WorkingCopySnapshot, snapshot_working_copy, working_copy_has_changed,
 };
 pub use queue::{
     DownloadTransferEntry, TransferConflictPolicy, TransferDirection, TransferQueue,
@@ -43,4 +43,7 @@ pub use runtime::{SftpBackend, SftpOperationFuture, SftpRuntimeHandle};
 pub use session_binding::{
     SftpSessionBinding, collect_download_targets, delete_entries, execute_queued_transfers,
     execute_queued_transfers_with_progress, move_entry_between_directories,
+};
+pub use working_copy::{
+    SftpWorkingCopy, WorkingCopySnapshot, snapshot_working_copy, working_copy_has_changed,
 };

@@ -127,6 +127,10 @@ impl ShellViewModel {
         &self.sync_feedback_state
     }
 
+    pub fn transfer_center_feedback_state(&self) -> &TransferCenterFeedbackViewState {
+        &self.transfer_center_feedback_state
+    }
+
     pub fn settings_modal_open(&self) -> bool {
         self.settings_modal_state.open
     }
@@ -154,6 +158,19 @@ impl ShellViewModel {
 
     pub fn clear_sync_feedback(&mut self) {
         self.sync_feedback_state.running = false;
+    }
+
+    pub fn show_transfer_center_feedback(
+        &mut self,
+        tone: impl Into<String>,
+        text: impl Into<String>,
+    ) {
+        self.transfer_center_feedback_state.tone = tone.into();
+        self.transfer_center_feedback_state.text = text.into();
+        self.transfer_center_feedback_state.sequence = self
+            .transfer_center_feedback_state
+            .sequence
+            .saturating_add(1);
     }
 
     pub fn right_panel_view_id(&self) -> &'static str {
@@ -292,7 +309,9 @@ impl ShellViewModel {
             return None;
         }
         match &task.action {
-            crate::app::sftp::TransferTaskAction::Download { local_path } => {
+            crate::app::sftp::TransferTaskAction::Download { local_path }
+                if crate::app::sftp::can_open_file_path_locally(local_path.as_path()) =>
+            {
                 Some(local_path.clone())
             }
             _ => None,
@@ -308,11 +327,14 @@ impl ShellViewModel {
             return None;
         }
         match &task.action {
-            crate::app::sftp::TransferTaskAction::Download { local_path } => local_path
-                .parent()
-                .map(|parent| parent.to_path_buf())
-                .or_else(|| Some(local_path.clone())),
-            crate::app::sftp::TransferTaskAction::DownloadDirectory { local_path } => {
+            crate::app::sftp::TransferTaskAction::Download { local_path }
+                if crate::app::sftp::can_open_folder_path_locally(local_path.as_path()) =>
+            {
+                Some(local_path.clone())
+            }
+            crate::app::sftp::TransferTaskAction::DownloadDirectory { local_path }
+                if crate::app::sftp::can_open_folder_path_locally(local_path.as_path()) =>
+            {
                 Some(local_path.clone())
             }
             _ => None,
