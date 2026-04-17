@@ -59,6 +59,49 @@ fn selecting_sidebar_destination_auto_expands_assets_sidebar() {
 }
 
 #[test]
+fn selecting_active_destination_collapses_assets_sidebar() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.select_sidebar_destination(SidebarDestination::Console);
+
+    assert!(!view_model.show_assets_sidebar);
+    assert_eq!(
+        view_model.active_sidebar_destination,
+        SidebarDestination::Console
+    );
+}
+
+#[test]
+fn selecting_active_destination_again_reopens_assets_sidebar() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.select_sidebar_destination(SidebarDestination::Console);
+    assert!(!view_model.show_assets_sidebar);
+
+    view_model.select_sidebar_destination(SidebarDestination::Console);
+
+    assert!(view_model.show_assets_sidebar);
+    assert_eq!(
+        view_model.active_sidebar_destination,
+        SidebarDestination::Console
+    );
+}
+
+#[test]
+fn selecting_active_destination_collapse_hides_sidebar_search() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.activate_asset_search();
+    view_model.set_asset_search_query("prod".into());
+
+    view_model.select_sidebar_destination(SidebarDestination::Console);
+
+    assert!(!view_model.show_assets_sidebar);
+    assert!(!view_model.asset_search_expanded);
+    assert_eq!(view_model.asset_search_query, "prod");
+}
+
+#[test]
 fn keychain_toolbar_uses_create_popover_with_keychain_specific_actions() {
     let mut view_model = ShellViewModel::default();
     view_model.select_sidebar_destination(SidebarDestination::Keychain);

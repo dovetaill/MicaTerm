@@ -172,3 +172,29 @@ fn dismissing_empty_search_on_shell_interaction_only_closes_blank_queries() {
     assert!(!view_model.dismiss_empty_asset_search_on_shell_interaction());
     assert!(view_model.asset_search_expanded);
 }
+
+#[test]
+fn collapsing_sidebar_hides_search_without_clearing_query() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.activate_asset_search();
+    view_model.set_asset_search_query("prod".into());
+    view_model.toggle_assets_sidebar();
+
+    assert!(!view_model.show_assets_sidebar);
+    assert!(!view_model.asset_search_expanded);
+    assert_eq!(view_model.asset_search_query, "prod");
+}
+
+#[test]
+fn collapsing_sidebar_hides_create_menu() {
+    let mut view_model = ShellViewModel::default();
+
+    view_model.toggle_asset_create_menu();
+    assert!(view_model.asset_create_menu_open);
+
+    view_model.toggle_assets_sidebar();
+
+    assert!(!view_model.show_assets_sidebar);
+    assert!(!view_model.asset_create_menu_open);
+}

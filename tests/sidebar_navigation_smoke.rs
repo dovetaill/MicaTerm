@@ -73,6 +73,58 @@ fn selecting_destination_auto_expands_assets_sidebar() {
 }
 
 #[test]
+fn clicking_active_destination_toggles_assets_sidebar() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let temp_path = std::env::temp_dir()
+        .join("mica-term")
+        .join("tests")
+        .join("sidebar-active-destination-toggle.json");
+    let _ = fs::remove_file(&temp_path);
+
+    bind_top_status_bar_with_store(&app, Some(UiPreferencesStore::new(temp_path.clone())));
+
+    assert!(app.get_show_assets_sidebar());
+    assert_eq!(app.get_active_sidebar_destination().as_str(), "console");
+
+    app.invoke_sidebar_destination_selected("console".into());
+    assert!(!app.get_show_assets_sidebar());
+    assert_eq!(app.get_active_sidebar_destination().as_str(), "console");
+
+    app.invoke_sidebar_destination_selected("console".into());
+    assert!(app.get_show_assets_sidebar());
+    assert_eq!(app.get_active_sidebar_destination().as_str(), "console");
+
+    let _ = fs::remove_file(temp_path);
+}
+
+#[test]
+fn collapsing_sidebar_hides_search_and_create_menu_bindings() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+
+    app.invoke_toggle_assets_search_requested();
+    app.invoke_assets_search_query_changed("prod".into());
+    assert!(app.get_asset_search_expanded());
+
+    app.invoke_toggle_assets_sidebar_requested();
+    assert!(!app.get_show_assets_sidebar());
+    assert!(!app.get_asset_search_expanded());
+    assert_eq!(app.get_assets_search_query().as_str(), "prod");
+
+    app.invoke_toggle_assets_sidebar_requested();
+    app.invoke_toggle_assets_create_menu_requested();
+    assert!(app.get_asset_create_menu_open());
+
+    app.invoke_sidebar_destination_selected("console".into());
+    assert!(!app.get_show_assets_sidebar());
+    assert!(!app.get_asset_create_menu_open());
+}
+
+#[test]
 fn narrow_width_preserves_requested_right_panel_but_hides_it_effectively() {
     i_slint_backend_testing::init_no_event_loop();
 

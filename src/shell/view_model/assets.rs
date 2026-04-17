@@ -3,6 +3,12 @@
 use super::*;
 
 impl ShellViewModel {
+    fn collapse_assets_sidebar(&mut self) {
+        self.show_assets_sidebar = false;
+        self.asset_search_expanded = false;
+        self.asset_create_menu_open = false;
+    }
+
     pub fn toggle_global_menu(&mut self) {
         self.show_global_menu = !self.show_global_menu;
     }
@@ -12,10 +18,19 @@ impl ShellViewModel {
     }
 
     pub fn toggle_assets_sidebar(&mut self) {
-        self.show_assets_sidebar = !self.show_assets_sidebar;
+        if self.show_assets_sidebar {
+            self.collapse_assets_sidebar();
+        } else {
+            self.show_assets_sidebar = true;
+        }
     }
 
     pub fn select_sidebar_destination(&mut self, destination: SidebarDestination) {
+        if self.active_sidebar_destination == destination && self.show_assets_sidebar {
+            self.collapse_assets_sidebar();
+            return;
+        }
+
         self.active_sidebar_destination = destination;
         self.show_assets_sidebar = true;
         if destination != SidebarDestination::Console {
