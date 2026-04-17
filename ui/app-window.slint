@@ -33,6 +33,7 @@ import { WorkspaceTabItem } from "shell/tabbar.slint";
 import { Titlebar } from "shell/titlebar.slint";
 import { TransferCenter, TransferCenterItem } from "shell/transfer-center.slint";
 import { WorkspacePane } from "shell/workspace-pane.slint";
+import { MotionTokens } from "theme/motion.slint";
 
 export component AppWindow inherits Window {
     default-font-family: AppTypography.ui-font-family;
@@ -73,6 +74,8 @@ export component AppWindow inherits Window {
     in-out property <bool> sync-feedback-running: false;
     in-out property <bool> show-right-panel: false;
     in-out property <bool> transfer-center-open: false;
+    in-out property <bool> transfer-center-pinned: false;
+    in-out property <bool> transfer-center-collapsed: false;
     in-out property <int> transfer-queue-total: 0;
     in-out property <int> transfer-queue-active: 0;
     in-out property <int> transfer-queue-queued: 0;
@@ -83,6 +86,26 @@ export component AppWindow inherits Window {
     in-out property <int> transfer-queue-current-session: 0;
     in-out property <string> transfer-center-active-filter: "all";
     in-out property <[TransferCenterItem]> transfer-center-items: [];
+    private property <length> transfer-center-target-width: min(
+        max(
+            420px,
+            min(
+                520px,
+                root.width
+                    - (44px + (root.effective-show-assets-sidebar ? 320px : 0px))
+                    - (root.effective-show-right-panel ? 392px : 0px)
+                    - 36px,
+            ),
+        ),
+        max(
+            280px,
+            root.width
+                - (44px + (root.effective-show-assets-sidebar ? 320px : 0px))
+                - (root.effective-show-right-panel ? 392px : 0px)
+                - 20px,
+        ),
+    );
+    private property <length> transfer-center-closed-width: max(280px, root.transfer-center-target-width - 18px);
     in-out property <string> right-panel-view: "sftp";
     in-out property <string> sftp-panel-mode: "empty";
     in-out property <string> sftp-panel-host-label: "";
@@ -352,6 +375,8 @@ export component AppWindow inherits Window {
     callback sync-now-requested();
     callback open-transfer-center-requested();
     callback close-transfer-center-requested();
+    callback transfer-center-pin-toggle-requested();
+    callback transfer-center-collapse-toggle-requested();
     callback transfer-center-filter-toggle-requested(string);
     callback transfer-center-retry-requested(string);
     callback transfer-center-resolve-conflict-requested(string);
@@ -443,6 +468,7 @@ export component AppWindow inherits Window {
     callback workspace-new-tab-requested();
     callback workspace-session-text-input(string);
     callback workspace-session-key-input(string, bool, bool, bool);
+
     callback workspace-session-resize-requested(int, int);
     callback workspace-session-normalize-hit-col(int, int) -> int;
     callback workspace-session-normalize-selection-hit-col(int, int) -> int;
@@ -951,6 +977,8 @@ export component AppWindow inherits Window {
                         sftp-panel-queue-active: root.sftp-panel-queue-active;
                         sftp-panel-queue-failed: root.sftp-panel-queue-failed;
                         sftp-panel-queue-current-session: root.sftp-panel-queue-current-session;
+                        transfer-center-open: root.transfer-center-open;
+                        transfer-center-pinned: root.transfer-center-pinned;
                         sftp-queue-drawer-open: root.sftp-queue-drawer-open;
                         sftp-panel-drop-target-active: root.sftp-panel-drop-target-active;
 
@@ -1025,25 +1053,38 @@ export component AppWindow inherits Window {
                         sftp-panel-reenable-follow-requested => {
                             root.sftp-panel-reenable-follow-requested();
                         }
-                    }
 
-                    if root.transfer-center-open : transfer-center-dismiss-layer := TouchArea {
-                        x: 0px;
-                        y: 0px;
-                        width: parent.width;
-                        height: parent.height;
-
-                        clicked => {
+                        transfer-center-close-requested => {
                             root.close-transfer-center-requested();
                         }
                     }
 
                     transfer-center := TransferCenter {
-                        x: sidebar.width + 24px;
-                        y: 16px;
-                        width: max(0px, parent.width - sidebar.width - 48px);
-                        height: max(0px, parent.height - 32px);
+                        z: 20;
+                        x: root.transfer-center-open
+                            ? max(
+                                sidebar.width + 12px,
+                                parent.width - self.width - right-panel.width - 20px,
+                            )
+                            : parent.width + 24px;
+                        y: root.transfer-center-open
+                            ? 12px
+                            : max(12px, titlebar.layout-transfer-button-anchor-y - 18px);
+                        width: root.transfer-center-open
+                            ? root.transfer-center-target-width
+                            : root.transfer-center-closed-width;
+                        height: root.transfer-center-collapsed
+                            ? 76px
+                            : min(max(320px, min(460px, parent.height - 24px)), max(260px, parent.height - 12px));
+                        opacity: root.transfer-center-open ? 1 : 0;
+                        animate x { duration: MotionTokens.drawer-duration; easing: ease-out; }
+                        animate y { duration: MotionTokens.utility-panel-frame-duration; easing: ease-out; }
+                        animate width { duration: MotionTokens.utility-panel-frame-duration; easing: ease-out; }
+                        animate height { duration: MotionTokens.utility-panel-frame-duration; easing: ease-out; }
+                        animate opacity { duration: MotionTokens.utility-panel-opacity-duration; }
                         open: root.transfer-center-open;
+                        pinned: root.transfer-center-pinned;
+                        collapsed: root.transfer-center-collapsed;
                         queue-total: root.transfer-queue-total;
                         queued-count: root.transfer-queue-queued;
                         running-count: root.transfer-queue-running;
@@ -1052,6 +1093,18 @@ export component AppWindow inherits Window {
                         completed-count: root.transfer-queue-completed;
                         active-filter: root.transfer-center-active-filter;
                         items: root.transfer-center-items;
+                        close-requested => {
+                            root.close-transfer-center-requested();
+                        }
+                        pin-toggle-requested => {
+                            root.transfer-center-pin-toggle-requested();
+                        }
+                        collapse-toggle-requested => {
+                            root.transfer-center-collapse-toggle-requested();
+                        }
+                        open-sftp-requested => {
+                            root.open-sftp-panel-requested();
+                        }
                         filter-toggle-requested(filter-id) => {
                             root.transfer-center-filter-toggle-requested(filter-id);
                         }

@@ -38,6 +38,15 @@ fn transfer_status_tone(state: crate::app::sftp::TransferTaskState) -> &'static 
     }
 }
 
+fn transfer_direction_label(task: &crate::app::sftp::TransferTask) -> &'static str {
+    match task.direction {
+        crate::app::sftp::TransferDirection::Upload => "Upload",
+        crate::app::sftp::TransferDirection::Download => "Download",
+        crate::app::sftp::TransferDirection::Delete => "Delete",
+        crate::app::sftp::TransferDirection::Move => "Move",
+    }
+}
+
 fn format_transfer_bytes(bytes: u64) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = KIB * 1024.0;
@@ -81,6 +90,23 @@ fn transfer_progress_label(task: &crate::app::sftp::TransferTask) -> String {
     }
 }
 
+fn transfer_progress_value(task: &crate::app::sftp::TransferTask) -> f32 {
+    if task.bytes_total > 0 {
+        let transferred = match task.state {
+            crate::app::sftp::TransferTaskState::Completed => {
+                task.bytes_total.max(task.bytes_transferred)
+            }
+            _ => task.bytes_transferred,
+        };
+        return (transferred as f32 / task.bytes_total as f32).clamp(0.0, 1.0);
+    }
+
+    match task.state {
+        crate::app::sftp::TransferTaskState::Completed => 1.0,
+        _ => 0.0,
+    }
+}
+
 fn transfer_error_summary(task: &crate::app::sftp::TransferTask) -> String {
     task.error_message.clone().unwrap_or_default()
 }
@@ -112,9 +138,8 @@ fn transfer_can_remove(task: &crate::app::sftp::TransferTask) -> bool {
 
 fn transfer_task_title(task: &crate::app::sftp::TransferTask) -> String {
     let path = match task.direction {
-        crate::app::sftp::TransferDirection::Upload | crate::app::sftp::TransferDirection::Move => {
-            task.target_path.as_str()
-        }
+        crate::app::sftp::TransferDirection::Upload
+        | crate::app::sftp::TransferDirection::Move => task.target_path.as_str(),
         crate::app::sftp::TransferDirection::Download
         | crate::app::sftp::TransferDirection::Delete => task.source_path.as_str(),
     };
@@ -126,11 +151,25 @@ fn transfer_task_title(task: &crate::app::sftp::TransferTask) -> String {
 }
 
 fn transfer_task_detail(task: &crate::app::sftp::TransferTask) -> String {
+    let direction = transfer_direction_label(task);
+    let location = match &task.action {
+        crate::app::sftp::TransferTaskAction::Upload { .. }
+        | crate::app::sftp::TransferTaskAction::UploadDirectory { .. }
+        | crate::app::sftp::TransferTaskAction::Move => task.target_path.clone(),
+        crate::app::sftp::TransferTaskAction::Download { local_path }
+        | crate::app::sftp::TransferTaskAction::DownloadDirectory { local_path } => {
+            local_path.to_string_lossy().to_string()
+        }
+        crate::app::sftp::TransferTaskAction::Delete { .. } => task.source_path.clone(),
+    };
+
+    if location.trim().is_empty() {
+        return direction.to_string();
+    }
+
     match task.direction {
-        crate::app::sftp::TransferDirection::Upload => format!("Upload → {}", task.target_path),
-        crate::app::sftp::TransferDirection::Download => format!("Download → {}", task.target_path),
-        crate::app::sftp::TransferDirection::Delete => format!("Delete → {}", task.source_path),
-        crate::app::sftp::TransferDirection::Move => format!("Move → {}", task.target_path),
+        crate::app::sftp::TransferDirection::Delete => format!("{direction} {location}"),
+        _ => format!("{direction} to {location}"),
     }
 }
 
@@ -156,9 +195,12 @@ fn project_transfer_center_items(state: &ShellViewModel) -> Vec<TransferCenterIt
             TransferCenterItem {
                 id: task.id.clone().into(),
                 title: transfer_task_title(task).into(),
+                host_label: state.transfer_task_host_label(task.session_id.as_str()).into(),
+                direction_label: transfer_direction_label(task).into(),
                 detail: transfer_task_detail(task).into(),
                 status_label: transfer_status_label(task.state).into(),
                 status_tone: transfer_status_tone(task.state).into(),
+                progress_value: transfer_progress_value(task),
                 progress_label: transfer_progress_label(task).into(),
                 error_summary: transfer_error_summary(task).into(),
                 error_tooltip: transfer_error_summary(task).into(),
@@ -230,6 +272,8 @@ pub(super) fn sync_top_status_bar_state(
     sync_theme_and_window_effects(window, state, effects);
     window.set_show_right_panel(state.show_right_panel);
     window.set_transfer_center_open(state.transfer_center_open());
+    window.set_transfer_center_pinned(state.transfer_center_pinned());
+    window.set_transfer_center_collapsed(state.transfer_center_collapsed());
     window.set_transfer_queue_total(
         i32::try_from(state.sftp_queue_summary.total_count).unwrap_or(i32::MAX),
     );

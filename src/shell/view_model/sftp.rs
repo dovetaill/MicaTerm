@@ -666,7 +666,9 @@ impl ShellViewModel {
                 browser_session.last_error = None;
             }
             let _ = self.activate_workspace_tab(tab_id.as_str());
-            self.transfer_center_open = false;
+            if !self.transfer_center_pinned {
+                self.transfer_center_open = false;
+            }
             return true;
         }
 
@@ -677,7 +679,7 @@ impl ShellViewModel {
             .map(|session| session.clone_for_workspace())
             .unwrap_or_else(|| {
                 FileBrowserSession::quick_browser(
-                    HostProfileRef::new(self.transfer_task_workspace_host_label(session_id.as_str())),
+                    HostProfileRef::new(self.transfer_task_host_label(session_id.as_str())),
                     remote_dir.clone(),
                 )
             });
@@ -693,7 +695,9 @@ impl ShellViewModel {
         self.set_file_browser_session(workspace_session);
         self.workspace_tabs.push(tab);
         let _ = self.activate_workspace_tab(tab_id.as_str());
-        self.transfer_center_open = false;
+        if !self.transfer_center_pinned {
+            self.transfer_center_open = false;
+        }
         true
     }
 
@@ -813,7 +817,7 @@ impl ShellViewModel {
         &mut self.vault_panel_state
     }
 
-    fn transfer_task_workspace_host_label(&self, session_id: &str) -> String {
+    pub fn transfer_task_host_label(&self, session_id: &str) -> String {
         self.file_browser_sessions
             .get(session_id)
             .map(|session| session.host_profile_ref.label.clone())

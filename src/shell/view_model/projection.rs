@@ -232,12 +232,30 @@ impl ShellViewModel {
         self.transfer_center_open
     }
 
+    pub fn transfer_center_pinned(&self) -> bool {
+        self.transfer_center_pinned
+    }
+
+    pub fn transfer_center_collapsed(&self) -> bool {
+        self.transfer_center_collapsed
+    }
+
     pub fn toggle_transfer_center(&mut self) {
         self.transfer_center_open = !self.transfer_center_open;
     }
 
     pub fn close_transfer_center(&mut self) {
         self.transfer_center_open = false;
+    }
+
+    pub fn toggle_transfer_center_pin(&mut self) -> bool {
+        self.transfer_center_pinned = !self.transfer_center_pinned;
+        true
+    }
+
+    pub fn toggle_transfer_center_collapse(&mut self) -> bool {
+        self.transfer_center_collapsed = !self.transfer_center_collapsed;
+        true
     }
 
     pub fn transfer_center_filter_id(&self) -> &'static str {

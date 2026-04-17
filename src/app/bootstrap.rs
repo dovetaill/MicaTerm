@@ -5020,6 +5020,28 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
     let state = Rc::clone(&view_model);
     let handle = window.as_weak();
+    let effects_ref = Rc::clone(&effects);
+    window.on_transfer_center_pin_toggle_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.toggle_transfer_center_pin() {
+            shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(&effects);
+    window.on_transfer_center_collapse_toggle_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.toggle_transfer_center_collapse() {
+            shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
+    });
+
+    let state = Rc::clone(&view_model);
+    let handle = window.as_weak();
     let store_ref = store.clone();
     let effects_ref = Rc::clone(&effects);
     let vault_session_ref = Rc::clone(&vault_session);
@@ -6017,8 +6039,22 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
     let input_projection_refresh_timer_ref = Rc::clone(&input_projection_refresh_timer);
     let input_projection_refresh_gate_ref = Rc::clone(&input_projection_refresh_gate);
+    let effects_ref = Rc::clone(&effects);
     window.on_workspace_session_key_input(move |key, alt, ctrl, shift| {
         let mut state = view_model_ref.borrow_mut();
+        if key == "escape"
+            && !alt
+            && !ctrl
+            && !shift
+            && state.transfer_center_open()
+            && !state.transfer_center_pinned()
+        {
+            state.close_transfer_center();
+            if let Some(window) = window_handle.upgrade() {
+                shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+            }
+            return;
+        }
         workspace_terminal::forward_active_workspace_key_input(
             &state,
             session_bridge_ref.as_deref(),

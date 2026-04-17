@@ -42,6 +42,8 @@ export component RightPanel inherits Rectangle {
     in property <int> sftp-panel-queue-active: 0;
     in property <int> sftp-panel-queue-failed: 0;
     in property <int> sftp-panel-queue-current-session: 0;
+    in property <bool> transfer-center-open: false;
+    in property <bool> transfer-center-pinned: false;
     in property <bool> sftp-queue-drawer-open: false;
     in property <bool> sftp-panel-drop-target-active: false;
     out property <length> layout-radius: root.border-radius;
@@ -93,6 +95,7 @@ export component RightPanel inherits Rectangle {
     callback sftp-panel-open-queue-requested();
     callback sftp-panel-retry-requested();
     callback sftp-panel-reenable-follow-requested();
+    callback transfer-center-close-requested();
     private property <length> sftp-status-row-height:
         root.sftp-panel-mode == "connecting"
         || root.sftp-panel-mode == "disconnected"
@@ -379,7 +382,11 @@ export component RightPanel inherits Rectangle {
                             root.sftp-panel-path-submitted(self.text);
                             accept
                         } else if (event.text == Key.Escape) {
-                            root.sftp-panel-reenable-follow-requested();
+                            if root.transfer-center-open && !root.transfer-center-pinned {
+                                root.transfer-center-close-requested();
+                            } else {
+                                root.sftp-panel-reenable-follow-requested();
+                            }
                             accept
                         } else {
                             reject

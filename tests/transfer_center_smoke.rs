@@ -69,6 +69,44 @@ fn transfer_center_exposes_filter_and_row_action_contracts() {
 }
 
 #[test]
+fn transfer_center_exposes_compact_utility_panel_contract() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window source");
+
+    assert!(
+        content.contains("callback pin-toggle-requested();")
+            && content.contains("callback collapse-toggle-requested();")
+            && content.contains("callback open-sftp-requested();"),
+        "transfer center should expose utility-panel header controls plus an empty-state Open SFTP CTA callback"
+    );
+    assert!(
+        app_window.contains("in-out property <bool> transfer-center-pinned: false;")
+            && app_window.contains("in-out property <bool> transfer-center-collapsed: false;")
+            && app_window.contains("callback transfer-center-pin-toggle-requested();")
+            && app_window.contains("callback transfer-center-collapse-toggle-requested();"),
+        "app window should own pinned/collapsed transfer-center state and forward the new utility-panel callbacks"
+    );
+}
+
+#[test]
+fn transfer_center_row_projection_supports_host_direction_and_progress_bar() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("host_label: string")
+            && content.contains("direction_label: string")
+            && content.contains("progress_value: float"),
+        "transfer rows should project host, direction, and determinate progress so the compact panel can stay dense without turning into a giant card"
+    );
+    assert!(
+        content.contains("\"Open SFTP\""),
+        "the empty state should provide an explicit Open SFTP CTA instead of leaving a large blank card"
+    );
+}
+
+#[test]
 fn transfer_center_contract_includes_completed_file_actions() {
     let content =
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
@@ -92,17 +130,97 @@ fn transfer_center_contract_includes_completed_file_actions() {
 }
 
 #[test]
-fn app_window_exposes_transfer_center_outside_dismiss_contract() {
+fn app_window_exposes_transfer_center_non_modal_docked_contract() {
     let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window source");
+    let bootstrap = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap source");
 
     assert!(
         app_window.contains("callback close-transfer-center-requested();"),
-        "app window should expose a dedicated close-transfer-center callback so outside-dismiss does not rely on toggle semantics"
+        "app window should expose a dedicated close-transfer-center callback so Escape and header close actions do not rely on toggle semantics"
     );
     assert!(
-        app_window.contains("transfer-center-dismiss-layer := TouchArea")
+        !app_window.contains("transfer-center-dismiss-layer := TouchArea"),
+        "transfer center should no longer render a full-body dismiss layer once it becomes a non-modal utility panel"
+    );
+    assert!(
+        app_window.contains("right-panel.width")
+            && app_window.contains("MotionTokens.drawer-duration")
+            && bootstrap.contains("state.transfer_center_open()")
+            && bootstrap.contains("!state.transfer_center_pinned()")
+            && bootstrap.contains("state.close_transfer_center();"),
+        "transfer center should dock against the right edge, animate like a utility drawer, and let the active terminal Escape key dismiss it when unpinned"
+    );
+}
+
+#[test]
+fn transfer_center_motion_aligns_with_titlebar_transfer_trigger() {
+    let titlebar = fs::read_to_string("ui/shell/titlebar.slint").expect("read titlebar source");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window source");
+    let transfer_center =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+    let motion = fs::read_to_string("ui/theme/motion.slint").expect("read motion token source");
+
+    assert!(
+        titlebar.contains("layout-transfer-button-anchor-x")
+            && titlebar.contains("layout-transfer-button-anchor-y")
+            && titlebar.contains("transfer-summary-anchor-width"),
+        "titlebar should export a transfer-trigger anchor so the compact panel can animate from the same affordance the user clicks"
+    );
+    assert!(
+        app_window.contains("titlebar.layout-transfer-button-anchor-y - 18px")
+            && app_window.contains("private property <length> transfer-center-target-width:")
+            && app_window.contains("private property <length> transfer-center-closed-width:")
+            && app_window.contains(
+                "animate width { duration: MotionTokens.utility-panel-frame-duration; easing: ease-out; }"
+            ),
+        "app window should align the closed-state motion with the titlebar transfer trigger and slightly stage width as the utility drawer opens"
+    );
+    assert!(
+        transfer_center.contains("private property <length> stage-inset: root.open ? 0px : 14px;")
+            && transfer_center.contains("private property <length> stage-offset-y: root.open ? 0px : 8px;")
+            && transfer_center.contains("panel-frame := Rectangle {"),
+        "transfer center should slightly compress its own surface before open so the anchored motion feels like an unfolding utility panel rather than a plain slide"
+    );
+    assert!(
+        motion.contains("out property <duration> utility-panel-frame-duration: 180ms;")
+            && motion.contains("out property <duration> utility-panel-shadow-duration: 200ms;")
+            && motion.contains("out property <duration> utility-panel-opacity-duration: 150ms;")
+            && transfer_center.contains(
+                "animate x { duration: MotionTokens.utility-panel-shadow-duration; easing: ease-out; }"
+            )
+            && transfer_center.contains(
+                "animate opacity { duration: MotionTokens.utility-panel-opacity-duration; }"
+            ),
+        "utility-panel motion should be driven by shared frame/shadow/opacity timing tokens instead of hardcoded per-layer values"
+    );
+}
+
+#[test]
+fn transfer_center_escape_contract_covers_panel_focus_and_right_panel_path_editor() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+    let right_panel = fs::read_to_string("ui/shell/right-panel.slint").expect("read right panel source");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window source");
+
+    assert!(
+        content.contains("focus-host := FocusScope {")
+            && content.contains("event.text == Key.Escape && !root.pinned")
+            && content.contains("root.close-requested();"),
+        "transfer center should own a panel-level Escape focus scope so action buttons can bubble unhandled Esc back to the utility panel"
+    );
+    assert!(
+        right_panel.contains("in property <bool> transfer-center-open: false;")
+            && right_panel.contains("in property <bool> transfer-center-pinned: false;")
+            && right_panel.contains("callback transfer-center-close-requested();")
+            && right_panel.contains("root.transfer-center-open && !root.transfer-center-pinned"),
+        "right panel should bridge plain Escape from its path editor into the transfer-center close path when the utility panel is open and unpinned"
+    );
+    assert!(
+        app_window.contains("transfer-center-open: root.transfer-center-open;")
+            && app_window.contains("transfer-center-pinned: root.transfer-center-pinned;")
+            && app_window.contains("transfer-center-close-requested => {")
             && app_window.contains("root.close-transfer-center-requested();"),
-        "transfer center should render a dismiss layer behind the panel that closes it when the user clicks outside"
+        "app window should forward the right-panel Escape bridge into the existing transfer-center close callback"
     );
 }
 
@@ -307,6 +425,58 @@ fn transfer_center_attention_actions_expose_tooltips_and_keyboard_button_contrac
             && content.contains("root.tooltip-open-requested(")
             && content.contains("root.tooltip-close-requested(root.tooltip-source-id);"),
         "transfer-center action affordances should surface their tooltip on hover or focus and close it again once attention leaves"
+    );
+}
+
+#[test]
+fn transfer_center_row_actions_expose_fluent_focus_ring_contract() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("component TransferCenterActionChip inherits Rectangle")
+            && content.contains("component TransferCenterActionLink inherits Rectangle")
+            && content.contains("private property <brush> chrome-border: root.has-focus")
+            && content.contains("focus-halo := Rectangle {")
+            && content.contains("border-color: ThemeTokens.focus-ring;"),
+        "transfer-center row actions should expose a stronger Fluent focus-ring treatment instead of relying on minimal border changes alone"
+    );
+    assert!(
+        content.contains("border-width: root.has-focus || root.has-hover ? 1px : 0px;")
+            && content.contains("opacity: root.has-focus ? 0.44 : 0;")
+            && content.contains("opacity: root.has-focus ? 0.42 : 0;"),
+        "transfer-center row actions should keep a subtle hover contour and a separate focus halo so keyboard and pointer states read differently"
+    );
+}
+
+#[test]
+fn transfer_center_header_buttons_use_focusable_sidebar_toolbar_contract() {
+    let button = fs::read_to_string("ui/components/sidebar-toolbar-icon-button.slint")
+        .expect("read sidebar toolbar icon button source");
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        button.contains("accessible-role: AccessibleRole.button;")
+            && button.contains("accessible-action-default => { touch.clicked(); }")
+            && button.contains("forward-focus: button-focus;")
+            && button.contains("button-focus := FocusScope {"),
+        "sidebar toolbar icon buttons should expose a real keyboard focus contract so compact utility-panel header actions are not pointer-only"
+    );
+    assert!(
+        button.contains("event.text == \" \" || event.text == \"\\n\"")
+            && button.contains("out property <bool> has-focus: button-focus.has-focus;")
+            && button.contains("changed tooltip-active => {")
+            && button.contains("private property <brush> chrome-border: root.has-focus")
+            && button.contains("focus-halo := Rectangle {")
+            && button.contains("border-color: ThemeTokens.focus-ring;"),
+        "sidebar toolbar icon buttons should support keyboard activation, a visible focus ring, and tooltip visibility on focus"
+    );
+    assert!(
+        content.contains("collapse-button := SidebarToolbarIconButton {")
+            && content.contains("pin-button := SidebarToolbarIconButton {")
+            && content.contains("close-button := SidebarToolbarIconButton {"),
+        "transfer center header should keep Collapse, Pin, and Close on the shared focusable toolbar button component"
     );
 }
 

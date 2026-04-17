@@ -18,22 +18,48 @@ export component SidebarToolbarIconButton inherits Rectangle {
         && root.active-icon-source.height > 0
         ? root.active-icon-source
         : root.icon-source;
+    private property <brush> chrome-border: root.has-focus
+        ? ThemeTokens.focus-ring
+        : root.active || touch.pressed
+            ? ThemeTokens.divider-strong
+            : ThemeTokens.divider-subtle;
     out property <bool> has-hover: touch.has-hover;
+    out property <bool> has-focus: button-focus.has-focus;
+    out property <bool> tooltip-active: root.enabled && (root.has-hover || root.has-focus) && root.tooltip-text != "";
 
     width: 28px;
     height: 28px;
     border-radius: 6px;
-    border-width: root.active || root.has-hover ? 1px : 0px;
-    border-color: root.active ? ThemeTokens.divider-strong : ThemeTokens.divider-subtle;
+    border-width: root.enabled && (root.active || root.has-hover || root.has-focus) ? 1px : 0px;
+    border-color: root.chrome-border;
     background: !root.enabled
         ? transparent
         : touch.pressed
             ? ThemeTokens.control-pressed-surface
+            : root.has-focus
+                ? ThemeTokens.control-active-surface
             : root.active
                 ? ThemeTokens.control-active-surface
                 : touch.has-hover
                     ? ThemeTokens.control-hover-surface
                 : transparent;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.tooltip-text;
+    accessible-action-default => { touch.clicked(); }
+    forward-focus: button-focus;
+
+    focus-halo := Rectangle {
+        x: -2px;
+        y: -2px;
+        width: parent.width + 4px;
+        height: parent.height + 4px;
+        border-radius: parent.border-radius + 2px;
+        border-width: root.has-focus ? 1px : 0px;
+        border-color: ThemeTokens.focus-ring;
+        background: transparent;
+        opacity: root.has-focus ? 0.52 : 0;
+        animate opacity { duration: 120ms; }
+    }
 
     if (root.displayed-icon.width > 0 && root.displayed-icon.height > 0) : Image {
         x: (parent.width - self.width) / 2;
@@ -42,11 +68,15 @@ export component SidebarToolbarIconButton inherits Rectangle {
         height: 20px;
         source <=> root.displayed-icon;
         image-fit: contain;
-        colorize: root.active || touch.has-hover ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
+        colorize: !root.enabled
+            ? ThemeTokens.text-muted
+            : root.active || root.has-hover || root.has-focus
+                ? ThemeTokens.text-primary
+                : ThemeTokens.text-secondary;
     }
 
-    changed has-hover => {
-        if self.has-hover && root.tooltip-text != "" {
+    changed tooltip-active => {
+        if self.tooltip-active {
             root.tooltip-open-requested(
                 root.tooltip-source-id,
                 root.tooltip-text,
@@ -64,6 +94,21 @@ export component SidebarToolbarIconButton inherits Rectangle {
             if root.enabled {
                 root.tooltip-close-requested(root.tooltip-source-id);
                 root.clicked();
+            }
+        }
+    }
+
+    button-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible && root.enabled;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                touch.clicked();
+                accept
+            } else {
+                reject
             }
         }
     }

@@ -66,6 +66,7 @@ export component Titlebar inherits Rectangle {
         : root.transfer-queue-active > 0
             ? ThemeTokens.status-busy-accent
             : ThemeTokens.accent;
+    private property <length> transfer-summary-anchor-width: max(0px, min(196px, drag-zone.width - 12px));
     out property <string> tooltip-text <=> root.tooltip-text-value;
     out property <bool> tooltip-visible <=> root.tooltip-visible-value;
     out property <length> tooltip-anchor-x <=> root.tooltip-anchor-x-value;
@@ -79,6 +80,12 @@ export component Titlebar inherits Rectangle {
     out property <length> layout-maximize-button-y: maximize-button.absolute-position.y;
     out property <length> layout-maximize-button-width: 36px;
     out property <length> layout-maximize-button-height: 36px;
+    out property <length> layout-transfer-button-anchor-x: root.transfer-summary-visible
+        ? drag-zone.absolute-position.x + max(0px, drag-zone.width - root.transfer-summary-anchor-width - 12px) + root.transfer-summary-anchor-width / 2
+        : transfer-button.absolute-position.x + transfer-button.width / 2;
+    out property <length> layout-transfer-button-anchor-y: root.transfer-summary-visible
+        ? drag-zone.absolute-position.y + 38px
+        : transfer-button.absolute-position.y + transfer-button.height + 10px;
     out property <bool> sync-feedback-visible <=> root.sync-feedback-visible-value;
     out property <length> sync-feedback-anchor-x: sync-button.absolute-position.x + sync-button.width / 2;
     out property <length> sync-feedback-anchor-y: sync-button.absolute-position.y + sync-button.height + 8px;
