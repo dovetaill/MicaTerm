@@ -1144,6 +1144,9 @@ export component TransferCenter inherits Rectangle {
             width: parent.width - 28px;
             height: root.footer-height - 10px;
             background: transparent;
+            private property <length> footer-copy-width: root.completed-count > 0
+                ? max(0px, parent.width - 138px)
+                : parent.width;
 
             Rectangle {
                 x: 0px;
@@ -1155,16 +1158,17 @@ export component TransferCenter inherits Rectangle {
 
             Text {
                 x: 0px;
-                y: 11px;
-                width: max(0px, parent.width - 138px);
+                y: 7px;
+                width: footer-strip.footer-copy-width;
+                height: parent.height - 8px;
                 text: root.failed-count > 0
-                    ? "Failed items stay visible until you resolve or remove them"
+                    ? "Resolve or remove failed transfers to clear this list"
                     : root.queue-total > 0
-                        ? "Compact transfer center stays on top without blocking the terminal"
+                        ? "Stays here without blocking the terminal"
                         : "Ready for the next transfer";
                 color: ThemeTokens.text-secondary;
                 font-size: 10px;
-                overflow: elide;
+                wrap: word-wrap;
             }
 
             clear-completed-action := TransferCenterActionLink {

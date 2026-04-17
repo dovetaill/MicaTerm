@@ -150,6 +150,12 @@ fn app_window_exposes_transfer_center_non_modal_docked_contract() {
             && bootstrap.contains("state.close_transfer_center();"),
         "transfer center should dock against the right edge, animate like a utility drawer, and let the active terminal Escape key dismiss it when unpinned"
     );
+    assert!(
+        app_window.contains("transfer-center-outside-dismiss-hitbox := TouchArea")
+            && app_window.contains("if root.transfer-center-open && !root.transfer-center-pinned")
+            && app_window.contains("root.close-transfer-center-requested();"),
+        "transfer center should close on outside click while unpinned so the compact utility panel behaves like a transient flyout instead of a permanent sheet"
+    );
 }
 
 #[test]
@@ -192,6 +198,24 @@ fn transfer_center_motion_aligns_with_titlebar_transfer_trigger() {
                 "animate opacity { duration: MotionTokens.utility-panel-opacity-duration; }"
             ),
         "utility-panel motion should be driven by shared frame/shadow/opacity timing tokens instead of hardcoded per-layer values"
+    );
+}
+
+#[test]
+fn transfer_center_footer_copy_uses_adaptive_width_and_non_truncated_copy() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("private property <length> footer-copy-width: root.completed-count > 0")
+            && content.contains("width: footer-strip.footer-copy-width;")
+            && content.contains("wrap: word-wrap;"),
+        "transfer center footer copy should reclaim width when the clear-completed action is hidden and wrap instead of truncating utility copy too aggressively"
+    );
+    assert!(
+        content.contains("\"Stays here without blocking the terminal\"")
+            && content.contains("\"Ready for the next transfer\""),
+        "transfer center footer should keep short, readable utility copy that fits the compact panel"
     );
 }
 

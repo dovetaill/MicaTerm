@@ -1059,6 +1059,17 @@ export component AppWindow inherits Window {
                         }
                     }
 
+                    if root.transfer-center-open && !root.transfer-center-pinned : transfer-center-outside-dismiss-hitbox := TouchArea {
+                        x: 0px;
+                        y: titlebar.height;
+                        width: parent.width;
+                        height: parent.height - titlebar.height;
+
+                        clicked => {
+                            root.close-transfer-center-requested();
+                        }
+                    }
+
                     transfer-center := TransferCenter {
                         z: 20;
                         x: root.transfer-center-open
