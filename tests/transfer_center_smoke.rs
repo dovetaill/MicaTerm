@@ -315,6 +315,27 @@ fn completed_transfer_rows_use_compact_icon_buttons_with_disabled_state_contract
 }
 
 #[test]
+fn transfer_center_row_hover_hit_target_stays_behind_action_buttons() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    let row_touch_index = content
+        .find("touch := TouchArea {}")
+        .expect("row hover touch area should exist");
+    let open_file_index = content
+        .find("open-file-action := TransferCenterRowActionButton {")
+        .expect("completed open-file action should exist");
+    let resolve_index = content
+        .find("resolve-action := TransferCenterRowActionButton {")
+        .expect("conflict resolve action should exist");
+
+    assert!(
+        row_touch_index < open_file_index && row_touch_index < resolve_index,
+        "the row-level hover TouchArea should stay behind action buttons so Resolve, Open File, Open Folder, and Remove remain clickable instead of being covered by a full-row hit target"
+    );
+}
+
+#[test]
 fn failed_transfer_rows_expose_retry_show_error_and_remove() {
     let content =
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");

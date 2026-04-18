@@ -851,6 +851,8 @@ export component TransferCenter inherits Rectangle {
                         background: transparent;
                         border-width: 0px;
 
+                        touch := TouchArea {}
+
                         row-hover-shadow := Rectangle {
                             x: 12px;
                             y: row.has-hover ? 6px : 8px;
@@ -1185,8 +1187,6 @@ export component TransferCenter inherits Rectangle {
                                 }
                             }
                         }
-
-                        touch := TouchArea {}
 
                         changed has-hover => {
                             if !self.row-action-tooltip-active && self.has-hover && item.error_tooltip != "" && !self.row-extra-action-tooltip-active {

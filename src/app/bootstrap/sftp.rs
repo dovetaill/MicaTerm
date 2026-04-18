@@ -281,6 +281,42 @@ pub(super) struct SftpTransferBackgroundMessage {
     pub error: Option<String>,
 }
 
+#[derive(Debug)]
+pub(super) enum SftpLocalActionBackgroundMessage {
+    OpenFileFailed { error: String },
+    OpenFolderFailed { error: String },
+    RemoveFinished {
+        task_id: String,
+        error: Option<String>,
+        missing_after_remove: bool,
+    },
+}
+
+fn apply_download_conflict_default(
+    tasks: &mut [crate::app::sftp::TransferTask],
+    default: crate::app::ui_preferences::DownloadConflictDefault,
+) {
+    let policy = match default {
+        crate::app::ui_preferences::DownloadConflictDefault::Ask => None,
+        crate::app::ui_preferences::DownloadConflictDefault::Overwrite => {
+            Some(crate::app::sftp::TransferConflictPolicy::Overwrite)
+        }
+        crate::app::ui_preferences::DownloadConflictDefault::AutoRename => {
+            Some(crate::app::sftp::TransferConflictPolicy::AutoRename)
+        }
+    };
+
+    for task in tasks {
+        if matches!(
+            task.action,
+            crate::app::sftp::TransferTaskAction::Download { .. }
+                | crate::app::sftp::TransferTaskAction::DownloadDirectory { .. }
+        ) {
+            task.conflict_policy = policy;
+        }
+    }
+}
+
 pub(super) fn schedule_sftp_upload_paths(
     manager: &SessionManager,
     session_id: Uuid,
@@ -348,6 +384,7 @@ pub(super) fn schedule_sftp_download_entries(
     session_id: Uuid,
     local_root: PathBuf,
     entries: Vec<SftpDirectoryEntry>,
+    download_conflict_default: crate::app::ui_preferences::DownloadConflictDefault,
     result_tx: &std::sync::mpsc::Sender<SftpTransferBackgroundMessage>,
 ) -> bool {
     if entries.is_empty() {
@@ -375,6 +412,7 @@ pub(super) fn schedule_sftp_download_entries(
                 }
             };
         queue.enqueue_download_targets(session_id_text.as_str(), &download_targets);
+        apply_download_conflict_default(&mut queue.tasks, download_conflict_default);
         let _ = result_tx.send(SftpTransferBackgroundMessage {
             session_id: session_id_text.clone(),
             tasks: queue.tasks.clone(),
@@ -888,6 +926,20 @@ pub(super) fn drain_sftp_transfer_background_messages(
 
         changed |= state.merge_sftp_transfer_tasks(&message.tasks);
         changed |= state.recompute_sftp_queue_summary();
+        if state.settings_modal_download_conflict_default()
+            == crate::app::ui_preferences::DownloadConflictDefault::Ask
+            && !state.sftp_conflict_modal_state().open
+            && let Some(conflict_task) = message.tasks.iter().find(|task| {
+                task.state == crate::app::sftp::TransferTaskState::Conflict
+                    && matches!(
+                        task.action,
+                        crate::app::sftp::TransferTaskAction::Download { .. }
+                            | crate::app::sftp::TransferTaskAction::DownloadDirectory { .. }
+                    )
+            })
+        {
+            changed |= state.open_transfer_conflict_modal(conflict_task.id.as_str());
+        }
 
         if let Some(error) = message.error.as_deref() {
             tracing::error!(
@@ -915,6 +967,54 @@ pub(super) fn drain_sftp_transfer_background_messages(
         }
     }
 
+    changed
+}
+
+pub(super) fn drain_sftp_local_action_background_messages(
+    state: &mut ShellViewModel,
+    result_rx: &std::sync::mpsc::Receiver<SftpLocalActionBackgroundMessage>,
+) -> bool {
+    let mut changed = false;
+    loop {
+        let Ok(message) = result_rx.try_recv() else {
+            break;
+        };
+
+        match message {
+            SftpLocalActionBackgroundMessage::OpenFileFailed { error } => {
+                state.show_transfer_center_feedback("error", format!("Open File failed: {error}"));
+                changed = true;
+            }
+            SftpLocalActionBackgroundMessage::OpenFolderFailed { error } => {
+                state.show_transfer_center_feedback(
+                    "error",
+                    format!("Open Folder failed: {error}"),
+                );
+                changed = true;
+            }
+            SftpLocalActionBackgroundMessage::RemoveFinished {
+                task_id,
+                error,
+                missing_after_remove,
+            } => {
+                if let Some(error) = error {
+                    state.show_transfer_center_feedback("error", format!("Remove failed: {error}"));
+                    changed = true;
+                    continue;
+                }
+
+                if state.remove_transfer_task(task_id.as_str()) {
+                    if missing_after_remove {
+                        state.show_transfer_center_feedback(
+                            "neutral",
+                            "The local file is already missing, so only the transfer record was removed.",
+                        );
+                    }
+                    changed = true;
+                }
+            }
+        }
+    }
     changed
 }
 
@@ -1083,6 +1183,99 @@ fn queue_sftp_local_file_action(
     true
 }
 
+fn queue_transfer_center_open_file_action(
+    task_id: &str,
+    local_path: Option<PathBuf>,
+    result_tx: &std::sync::mpsc::Sender<SftpLocalActionBackgroundMessage>,
+) {
+    let task_id = task_id.to_string();
+    let result_tx = result_tx.clone();
+    std::thread::spawn(move || {
+        let outcome = match local_path {
+            Some(local_path) => crate::app::sftp::open_path_locally(local_path.as_path())
+                .map_err(|err| err.to_string()),
+            None => Err("The local file is no longer available.".into()),
+        };
+
+        if let Err(error) = outcome {
+            tracing::warn!(
+                target: "app.sftp",
+                task_id,
+                error,
+                "failed to open a transfer-center file action locally"
+            );
+            let _ = result_tx.send(SftpLocalActionBackgroundMessage::OpenFileFailed { error });
+        }
+    });
+}
+
+fn queue_transfer_center_open_folder_action(
+    task_id: &str,
+    local_path: Option<PathBuf>,
+    result_tx: &std::sync::mpsc::Sender<SftpLocalActionBackgroundMessage>,
+) {
+    let task_id = task_id.to_string();
+    let result_tx = result_tx.clone();
+    std::thread::spawn(move || {
+        let outcome = match local_path {
+            Some(local_path) => crate::app::sftp::reveal_path_locally(local_path.as_path())
+                .map_err(|err| err.to_string()),
+            None => Err("The local folder is no longer available.".into()),
+        };
+
+        if let Err(error) = outcome {
+            tracing::warn!(
+                target: "app.sftp",
+                task_id,
+                error,
+                "failed to open a transfer-center folder action locally"
+            );
+            let _ = result_tx.send(SftpLocalActionBackgroundMessage::OpenFolderFailed { error });
+        }
+    });
+}
+
+fn queue_transfer_center_remove_action(
+    task_id: &str,
+    local_path: Option<PathBuf>,
+    missing_download: bool,
+    result_tx: &std::sync::mpsc::Sender<SftpLocalActionBackgroundMessage>,
+) {
+    let task_id = task_id.to_string();
+    let result_tx = result_tx.clone();
+    std::thread::spawn(move || {
+        let trash_result = local_path
+            .as_ref()
+            .map(|local_path| crate::app::sftp::trash_path_locally(local_path.as_path()));
+        let missing_after_trash = trash_result
+            .as_ref()
+            .and_then(|result| result.as_ref().err())
+            .is_some_and(|err| err.to_string().contains("Local file already missing."))
+            || missing_download;
+        let error = if let Some(Err(err)) = trash_result {
+            if err.to_string().contains("Local file already missing.") {
+                None
+            } else {
+                tracing::warn!(
+                    target: "app.sftp",
+                    task_id,
+                    error = %err,
+                    "failed to move a downloaded transfer artifact to Trash"
+                );
+                Some(err.to_string())
+            }
+        } else {
+            None
+        };
+
+        let _ = result_tx.send(SftpLocalActionBackgroundMessage::RemoveFinished {
+            task_id,
+            error,
+            missing_after_remove: missing_after_trash,
+        });
+    });
+}
+
 pub(super) fn initial_sftp_browser_path(
     manager: &SessionManager,
     session_id: Uuid,
@@ -1161,6 +1354,7 @@ pub(super) fn schedule_quick_browser_download_selection(
         session_id,
         local_root,
         entries,
+        state.settings_modal_download_conflict_default(),
         transfer_result_tx,
     );
     if scheduled {
@@ -1656,12 +1850,14 @@ pub(super) fn bind_sftp_callbacks(
     async_runtime: Option<&tokio::runtime::Handle>,
     sftp_result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
     sftp_transfer_result_tx: &std::sync::mpsc::Sender<SftpTransferBackgroundMessage>,
+    sftp_local_action_result_tx: &std::sync::mpsc::Sender<SftpLocalActionBackgroundMessage>,
     workspace_follow_tracker: &Rc<RefCell<WorkspaceFollowTracker>>,
     sftp_browser_controller: &Rc<RefCell<SftpBrowserController>>,
 ) {
     let async_runtime_handle = async_runtime.cloned();
     let sftp_result_tx = sftp_result_tx.clone();
     let sftp_transfer_result_tx = sftp_transfer_result_tx.clone();
+    let sftp_local_action_result_tx = sftp_local_action_result_tx.clone();
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     let store_ref = store.clone();
@@ -1773,64 +1969,36 @@ pub(super) fn bind_sftp_callbacks(
     });
 
     let state = Rc::clone(view_model);
-    let handle = window.as_weak();
-    let effects_ref = Rc::clone(effects);
+    let local_action_result_tx_ref = sftp_local_action_result_tx.clone();
     window.on_transfer_center_open_file_requested(move |task_id| {
-        let window = handle.unwrap();
         let local_path = {
             let state = state.borrow();
             state.transfer_task_local_open_file_path(task_id.as_str())
         };
-        let outcome = match local_path {
-            Some(local_path) => crate::app::sftp::open_path_locally(local_path.as_path()),
-            None => Err(anyhow::anyhow!("The local file is no longer available.")),
-        };
-
-        if let Err(err) = outcome {
-            tracing::warn!(
-                target: "app.sftp",
-                task_id = task_id.as_str(),
-                error = %err,
-                "failed to open a transfer-center file action locally"
-            );
-            let mut state = state.borrow_mut();
-            state.show_transfer_center_feedback("error", format!("Open File failed: {err}"));
-            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        }
+        queue_transfer_center_open_file_action(
+            task_id.as_str(),
+            local_path,
+            &local_action_result_tx_ref,
+        );
     });
 
     let state = Rc::clone(view_model);
-    let handle = window.as_weak();
-    let effects_ref = Rc::clone(effects);
+    let local_action_result_tx_ref = sftp_local_action_result_tx.clone();
     window.on_transfer_center_open_folder_requested(move |task_id| {
-        let window = handle.unwrap();
         let local_path = {
             let state = state.borrow();
             state.transfer_task_local_open_folder_path(task_id.as_str())
         };
-        let outcome = match local_path {
-            Some(local_path) => crate::app::sftp::reveal_path_locally(local_path.as_path()),
-            None => Err(anyhow::anyhow!("The local folder is no longer available.")),
-        };
-
-        if let Err(err) = outcome {
-            tracing::warn!(
-                target: "app.sftp",
-                task_id = task_id.as_str(),
-                error = %err,
-                "failed to open a transfer-center folder action locally"
-            );
-            let mut state = state.borrow_mut();
-            state.show_transfer_center_feedback("error", format!("Open Folder failed: {err}"));
-            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        }
+        queue_transfer_center_open_folder_action(
+            task_id.as_str(),
+            local_path,
+            &local_action_result_tx_ref,
+        );
     });
 
     let state = Rc::clone(view_model);
-    let handle = window.as_weak();
-    let effects_ref = Rc::clone(effects);
+    let local_action_result_tx_ref = sftp_local_action_result_tx.clone();
     window.on_transfer_center_remove_requested(move |task_id| {
-        let window = handle.unwrap();
         let local_path = {
             let state = state.borrow();
             state.transfer_task_local_remove_path(task_id.as_str())
@@ -1839,42 +2007,12 @@ pub(super) fn bind_sftp_callbacks(
             let state = state.borrow();
             state.transfer_task_remove_missing_download(task_id.as_str())
         };
-        let trash_result = local_path
-            .as_ref()
-            .map(|local_path| crate::app::sftp::trash_path_locally(local_path.as_path()));
-        let missing_after_trash = trash_result
-            .as_ref()
-            .and_then(|result| result.as_ref().err())
-            .is_some_and(|err| err.to_string().contains("Local file already missing."))
-            || missing_download;
-
-        if let Some(Err(err)) = trash_result
-            && !err.to_string().contains("Local file already missing.")
-        {
-            tracing::warn!(
-                target: "app.sftp",
-                task_id = task_id.as_str(),
-                error = %err,
-                "failed to move a downloaded transfer artifact to Trash"
-            );
-            let mut state = state.borrow_mut();
-            state.show_transfer_center_feedback("error", format!("Remove failed: {err}"));
-            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-            sync_sftp_conflict_modal_state(&window, &state);
-            return;
-        }
-
-        let mut state = state.borrow_mut();
-        if state.remove_transfer_task(task_id.as_str()) {
-            if missing_after_trash {
-                state.show_transfer_center_feedback(
-                    "neutral",
-                    "The local file is already missing, so only the transfer record was removed.",
-                );
-            }
-            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-            sync_sftp_conflict_modal_state(&window, &state);
-        }
+        queue_transfer_center_remove_action(
+            task_id.as_str(),
+            local_path,
+            missing_download,
+            &local_action_result_tx_ref,
+        );
     });
 
     let state = Rc::clone(view_model);

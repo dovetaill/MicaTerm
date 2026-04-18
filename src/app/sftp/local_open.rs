@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
 use anyhow::{Result, anyhow, bail};

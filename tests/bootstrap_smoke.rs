@@ -11097,6 +11097,34 @@ fn transfer_center_open_actions_route_through_platform_helpers_and_visible_feedb
 }
 
 #[test]
+fn transfer_center_local_shell_actions_leave_the_ui_thread_free() {
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+
+    assert!(
+        bootstrap_sftp.contains("queue_transfer_center_open_file_action(")
+            && bootstrap_sftp.contains("queue_transfer_center_open_folder_action(")
+            && bootstrap_sftp.contains("queue_transfer_center_remove_action(")
+            && bootstrap_sftp.contains("drain_sftp_local_action_background_messages(")
+            && bootstrap_sftp.contains("std::thread::spawn(move || {"),
+        "transfer-center local shell actions should be queued onto background threads and drained back onto the UI model so Explorer or trash handoff cannot freeze the terminal surface"
+    );
+}
+
+#[test]
+fn download_conflicts_apply_preferred_default_and_auto_open_when_asking() {
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+
+    assert!(
+        bootstrap_sftp.contains("state.settings_modal_download_conflict_default()")
+            && bootstrap_sftp.contains("crate::app::ui_preferences::DownloadConflictDefault::Ask")
+            && bootstrap_sftp.contains("state.open_transfer_conflict_modal("),
+        "download scheduling should honor the persisted default conflict policy, and Ask should auto-open the conflict modal when a local download collision is reported"
+    );
+}
+
+#[test]
 fn transfer_center_attention_rows_can_open_linked_sftp_workspace() {
     i_slint_backend_testing::init_no_event_loop();
 

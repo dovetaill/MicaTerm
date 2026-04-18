@@ -4309,6 +4309,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let (sftp_transfer_result_tx, sftp_transfer_result_rx) =
         std::sync::mpsc::channel::<sftp::SftpTransferBackgroundMessage>();
     let sftp_transfer_result_rx = Rc::new(RefCell::new(sftp_transfer_result_rx));
+    let (sftp_local_action_result_tx, sftp_local_action_result_rx) =
+        std::sync::mpsc::channel::<sftp::SftpLocalActionBackgroundMessage>();
+    let sftp_local_action_result_rx = Rc::new(RefCell::new(sftp_local_action_result_rx));
     let session_projection_timer = Rc::new(Timer::default());
     let input_projection_refresh_timer = Rc::new(Timer::default());
     let input_projection_refresh_gate = Rc::new(RefCell::new(
@@ -4343,6 +4346,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let sftp_browser_result_rx_ref = Rc::clone(&sftp_browser_result_rx);
         let sftp_browser_result_tx_ref = sftp_browser_result_tx.clone();
         let sftp_transfer_result_rx_ref = Rc::clone(&sftp_transfer_result_rx);
+        let sftp_local_action_result_rx_ref = Rc::clone(&sftp_local_action_result_rx);
         let sftp_browser_async_runtime_ref = sftp_browser_async_runtime.clone();
         let workspace_terminal_active_surface_fingerprint_ref =
             Rc::clone(&workspace_terminal_active_surface_fingerprint);
@@ -4376,8 +4380,13 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &receiver,
                 )
             };
-            if sftp_transfer_changed {
+            let sftp_local_action_changed = {
+                let receiver = sftp_local_action_result_rx_ref.borrow();
+                sftp::drain_sftp_local_action_background_messages(&mut state, &receiver)
+            };
+            if sftp_transfer_changed || sftp_local_action_changed {
                 shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+                sftp::sync_sftp_conflict_modal_state(&window, &state);
             }
             let had_active_surface = state.active_workspace_terminal_surface().is_some();
             let projection_delta =
@@ -5274,6 +5283,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sftp_browser_async_runtime.as_ref(),
         &sftp_browser_result_tx,
         &sftp_transfer_result_tx,
+        &sftp_local_action_result_tx,
         &workspace_follow_tracker,
         &sftp_browser_controller,
     );
