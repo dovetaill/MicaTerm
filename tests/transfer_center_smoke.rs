@@ -440,13 +440,18 @@ fn conflict_modal_uses_labeled_cards_instead_of_raw_source_target_lines() {
     let modal =
         fs::read_to_string("ui/components/sftp-conflict-modal.slint").expect("read conflict modal");
 
-    for label in ["Incoming item", "Existing target", "Destination scope"] {
-        assert!(
-            modal.contains(&format!("label: \"{label}\";"))
-                || modal.contains(&format!("text: \"{label}\";")),
-            "conflict modal should render a labeled `{label}` card so the narrow dialog reads like a mature transfer sheet instead of raw concatenated path text"
-        );
-    }
+    assert!(
+        modal.contains("label: root.kind == \"download\" ? \"Remote item\" : \"Incoming item\";"),
+        "conflict modal should keep a dedicated incoming-item card label for remote conflicts while renaming it for download targets"
+    );
+    assert!(
+        modal.contains("label: root.kind == \"download\" ? \"Local target\" : \"Existing target\";"),
+        "conflict modal should keep a dedicated existing-target card label for remote conflicts while renaming it for download targets"
+    );
+    assert!(
+        modal.contains("text: \"Destination scope\";"),
+        "conflict modal should render a labeled `Destination scope` card so the narrow dialog reads like a mature transfer sheet instead of raw concatenated path text"
+    );
 
     assert!(
         !modal.contains("text: \"Source: \" + root.source-path;")
