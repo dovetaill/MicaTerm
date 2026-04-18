@@ -167,7 +167,10 @@ fn workspace_can_activate_sftp_tab_without_losing_terminal_tab_identity() {
 
     assert!(view_model.activate_workspace_tab(sftp_tab.tab_id.as_str()));
     assert_eq!(
-        view_model.active_workspace_tab().expect("active workspace tab").title,
+        view_model
+            .active_workspace_tab()
+            .expect("active workspace tab")
+            .title,
         "Files: Prod"
     );
     assert!(view_model.active_workspace_terminal_session_id().is_none());

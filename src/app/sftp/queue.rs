@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 use crate::app::sftp::local_ops::{
-    LocalTransferEntry, build_local_download_path, build_remote_upload_path,
+    LocalTransferEntry, build_local_download_path, build_remote_upload_path, next_auto_rename_path,
 };
 use crate::app::sftp::model::{SftpDirectoryEntry, SftpDirectoryEntryKind};
 
@@ -21,6 +21,8 @@ pub enum TransferDirection {
 pub enum TransferConflictPolicy {
     Overwrite,
     Skip,
+    AutoRename,
+    CancelCurrent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,16 +213,59 @@ impl TransferQueue {
     }
 
     pub fn resume_conflict(&mut self, task_id: &str, policy: TransferConflictPolicy) -> bool {
-        let Some(task) = self.tasks.iter_mut().find(|task| task.id == task_id) else {
+        let Some(task_index) = self.tasks.iter().position(|task| task.id == task_id) else {
             return false;
         };
-        if task.state != TransferTaskState::Conflict {
+        if self.tasks[task_index].state != TransferTaskState::Conflict {
             return false;
+        }
+
+        let is_download = transfer_task_local_path(&self.tasks[task_index]).is_some();
+        if !is_download
+            && matches!(
+                policy,
+                TransferConflictPolicy::AutoRename | TransferConflictPolicy::CancelCurrent
+            )
+        {
+            return false;
+        }
+        if is_download && policy == TransferConflictPolicy::AutoRename {
+            let _ = self.apply_download_auto_rename(task_id);
+        }
+
+        let task = &mut self.tasks[task_index];
+        if policy == TransferConflictPolicy::CancelCurrent {
+            task.state = TransferTaskState::Cancelled;
+            task.conflict_policy = Some(policy);
+            task.error_message = Some("Cancelled conflicting local download".into());
+            task.bytes_transferred = 0;
+            return true;
         }
 
         task.state = TransferTaskState::Queued;
         task.conflict_policy = Some(policy);
+        task.bytes_transferred = 0;
         task.error_message = None;
+        true
+    }
+
+    pub fn apply_download_auto_rename(&mut self, task_id: &str) -> bool {
+        let Some(task_index) = self.tasks.iter().position(|task| task.id == task_id) else {
+            return false;
+        };
+        let Some(old_root) =
+            transfer_task_local_path(&self.tasks[task_index]).map(Path::to_path_buf)
+        else {
+            return false;
+        };
+        let session_id = self.tasks[task_index].session_id.clone();
+        let new_root = next_auto_rename_path(&old_root);
+        rewrite_download_subtree_root(
+            &mut self.tasks,
+            session_id.as_str(),
+            old_root.as_path(),
+            new_root.as_path(),
+        );
         true
     }
 
@@ -403,5 +448,57 @@ impl TransferQueue {
         let id = task.id.clone();
         self.tasks.push(task);
         id
+    }
+}
+
+fn transfer_task_local_path(task: &TransferTask) -> Option<&Path> {
+    match &task.action {
+        TransferTaskAction::Download { local_path }
+        | TransferTaskAction::DownloadDirectory { local_path } => Some(local_path.as_path()),
+        _ => None,
+    }
+}
+
+fn set_transfer_task_local_path(task: &mut TransferTask, local_path: PathBuf) {
+    match &mut task.action {
+        TransferTaskAction::Download {
+            local_path: task_local_path,
+        }
+        | TransferTaskAction::DownloadDirectory {
+            local_path: task_local_path,
+        } => {
+            *task_local_path = local_path.clone();
+            task.target_path = local_path.to_string_lossy().to_string();
+        }
+        _ => {}
+    }
+}
+
+fn rewrite_download_subtree_root(
+    tasks: &mut [TransferTask],
+    session_id: &str,
+    old_root: &Path,
+    new_root: &Path,
+) {
+    for task in tasks {
+        if task.session_id != session_id {
+            continue;
+        }
+        let Some(local_path) = transfer_task_local_path(task).map(Path::to_path_buf) else {
+            continue;
+        };
+        if local_path != old_root && !local_path.starts_with(old_root) {
+            continue;
+        }
+
+        let suffix = local_path
+            .strip_prefix(old_root)
+            .unwrap_or_else(|_| Path::new(""));
+        let rewritten = if suffix.as_os_str().is_empty() {
+            new_root.to_path_buf()
+        } else {
+            new_root.join(suffix)
+        };
+        set_transfer_task_local_path(task, rewritten);
     }
 }

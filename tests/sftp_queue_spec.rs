@@ -3,8 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use mica_term::app::sftp::{
-    TransferConflictPolicy, TransferDirection, TransferQueue, TransferQueueSummary, TransferTask,
-    TransferTaskAction, TransferTaskState, scan_local_sources,
+    DownloadTransferEntry, SftpDirectoryEntryKind, TransferConflictPolicy, TransferDirection,
+    TransferQueue, TransferQueueSummary, TransferTask, TransferTaskAction, TransferTaskState,
+    scan_local_sources,
 };
 use uuid::Uuid;
 
@@ -166,5 +167,52 @@ fn folder_upload_tasks_preserve_selected_root_directory_name() {
             .iter()
             .any(|path| path == "/srv/app/releases/empty-dir"),
         "folder upload should keep empty nested directories in the transfer queue"
+    );
+}
+
+#[test]
+fn download_conflict_cancel_only_cancels_current_task() {
+    let root = temp_test_root("queue-download-conflict-cancel-current");
+    let current_path = root.join("report.txt");
+    let later_path = root.join("notes.txt");
+    fs::write(&current_path, b"existing report").expect("write current download target");
+    fs::write(&later_path, b"existing notes").expect("write later download target");
+
+    let mut queue = TransferQueue::default();
+    let task_ids = queue.enqueue_download_targets(
+        "session-a",
+        &[
+            DownloadTransferEntry {
+                remote_path: "/srv/report.txt".into(),
+                local_path: current_path,
+                entry_kind: SftpDirectoryEntryKind::File,
+                bytes_total: 12,
+            },
+            DownloadTransferEntry {
+                remote_path: "/srv/notes.txt".into(),
+                local_path: later_path,
+                entry_kind: SftpDirectoryEntryKind::File,
+                bytes_total: 12,
+            },
+        ],
+    );
+
+    let cancelled_id = task_ids.first().expect("current conflict task id").clone();
+    let later_conflict_id = task_ids.get(1).expect("later conflict task id").clone();
+
+    assert!(queue.mark_conflict(&cancelled_id, "Local path already exists"));
+    assert!(queue.mark_conflict(&later_conflict_id, "Local path already exists"));
+    assert!(queue.resume_conflict(&cancelled_id, TransferConflictPolicy::CancelCurrent));
+
+    assert_eq!(
+        queue.task(&cancelled_id).expect("cancelled task").state,
+        TransferTaskState::Cancelled
+    );
+    assert_eq!(
+        queue
+            .task(&later_conflict_id)
+            .expect("later conflict task")
+            .state,
+        TransferTaskState::Conflict
     );
 }

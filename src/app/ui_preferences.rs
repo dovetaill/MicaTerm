@@ -11,6 +11,33 @@ use crate::app::vault::model::SnapshotUiPreferences;
 use crate::shell::view_model::{RightPanelView, ShellViewModel};
 use crate::theme::ThemeMode;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum DownloadConflictDefault {
+    #[default]
+    Ask,
+    Overwrite,
+    AutoRename,
+}
+
+impl DownloadConflictDefault {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Overwrite => "overwrite",
+            Self::AutoRename => "auto-rename",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "overwrite" => Self::Overwrite,
+            "auto-rename" => Self::AutoRename,
+            _ => Self::Ask,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UiPreferences {
     #[serde(default = "default_theme_mode")]
@@ -23,6 +50,8 @@ pub struct UiPreferences {
     pub terminal_scrollback_limit: usize,
     #[serde(default = "default_terminal_active_idle_shrink_enabled")]
     pub terminal_active_idle_shrink_enabled: bool,
+    #[serde(default)]
+    pub download_conflict_default: DownloadConflictDefault,
 }
 
 fn default_theme_mode() -> ThemeMode {
@@ -49,6 +78,7 @@ impl Default for UiPreferences {
             right_panel_view: default_right_panel_view(),
             terminal_scrollback_limit: default_terminal_scrollback_limit(),
             terminal_active_idle_shrink_enabled: default_terminal_active_idle_shrink_enabled(),
+            download_conflict_default: DownloadConflictDefault::Ask,
         }
     }
 }
@@ -97,6 +127,7 @@ impl From<&ShellViewModel> for UiPreferences {
             terminal_scrollback_limit: value.settings_modal_terminal_scrollback_limit(),
             terminal_active_idle_shrink_enabled: value
                 .settings_modal_terminal_active_idle_shrink_enabled(),
+            download_conflict_default: value.settings_modal_download_conflict_default(),
         }
     }
 }
@@ -125,5 +156,6 @@ pub fn ui_preferences_from_snapshot(snapshot: &SnapshotUiPreferences) -> UiPrefe
         right_panel_view: default_right_panel_view(),
         terminal_scrollback_limit: default_terminal_scrollback_limit(),
         terminal_active_idle_shrink_enabled: default_terminal_active_idle_shrink_enabled(),
+        download_conflict_default: DownloadConflictDefault::Ask,
     }
 }

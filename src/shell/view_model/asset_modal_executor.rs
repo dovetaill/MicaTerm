@@ -50,7 +50,7 @@ impl ShellViewModel {
                 parent_id,
                 ConsoleAssetKind::Folder,
                 draft_name,
-                    AssetNodePayload::Folder,
+                AssetNodePayload::Folder,
             ),
             AssetModalState::SftpNewFile { draft_name } => {
                 if self.sftp_name_validation(&draft_name, None) != AssetNameValidation::Valid {

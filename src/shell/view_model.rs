@@ -31,6 +31,7 @@ use crate::app::ssh::credentials::{
     ssh_credential_ref,
 };
 use crate::app::ssh::runtime::TerminalSurfaceState;
+use crate::app::ui_preferences::DownloadConflictDefault;
 use crate::app::window_state::WindowPlacementKind;
 use crate::shell::assets::{
     AssetNameValidation, AssetNodePayload, AssetSocks5ProxySpec, AssetSshConnectionSpec,
@@ -247,6 +248,7 @@ pub struct SettingsModalViewState {
     pub open: bool,
     pub terminal_scrollback_limit: usize,
     pub terminal_active_idle_shrink_enabled: bool,
+    pub download_conflict_default: DownloadConflictDefault,
 }
 
 impl Default for SettingsModalViewState {
@@ -255,6 +257,7 @@ impl Default for SettingsModalViewState {
             open: false,
             terminal_scrollback_limit: 1500,
             terminal_active_idle_shrink_enabled: true,
+            download_conflict_default: DownloadConflictDefault::Ask,
         }
     }
 }
@@ -274,9 +277,26 @@ impl Default for VaultPanelViewState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SftpConflictModalKind {
+    #[default]
+    Remote,
+    Download,
+}
+
+impl SftpConflictModalKind {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Remote => "remote",
+            Self::Download => "download",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SftpConflictModalState {
     pub open: bool,
+    pub kind: SftpConflictModalKind,
     pub task_id: Option<String>,
     pub source_path: String,
     pub target_path: String,

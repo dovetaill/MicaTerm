@@ -56,13 +56,18 @@ fn right_panel_source_uses_two_row_icon_first_quick_browser_header() {
     assert!(
         source.contains("out property <string> tooltip-text <=> root.tooltip-text-value;")
             && source.contains("function schedule-tooltip(")
-            && source.contains("tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {")
-            && source.contains("root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);")
+            && source.contains(
+                "tooltip-open-requested(source-id, text, anchor-x, anchor-y, anchor-width) => {"
+            )
+            && source.contains(
+                "root.schedule-tooltip(source-id, text, anchor-x, anchor-y, anchor-width);"
+            )
             && source.contains("root.queue-tooltip-close(source-id);"),
         "quick browser should wire toolbar hover events into a reusable tooltip state machine"
     );
     assert!(
-        (source.contains("connection-badge := Rectangle {") || source.contains("connection-badge := StatusPill {"))
+        (source.contains("connection-badge := Rectangle {")
+            || source.contains("connection-badge := StatusPill {"))
             && source.contains("\"Current connection: \" + root.sftp-panel-connection-badge-text")
             && source.contains("border-color: ThemeTokens.status-pill-border;")
             && source.contains("background: ThemeTokens.status-pill-surface;"),
@@ -101,14 +106,17 @@ fn app_window_source_threads_quick_browser_contract_into_right_panel() {
 
     assert!(
         source.contains("in-out property <string> sftp-panel-connection-badge: \"\";")
-            && source.contains("in-out property <string> sftp-panel-binding-mode-label: \"Follow\";")
+            && source
+                .contains("in-out property <string> sftp-panel-binding-mode-label: \"Follow\";")
             && source.contains("in-out property <bool> sftp-panel-path-editing: false;"),
         "app window should own the quick browser header state contract"
     );
     assert!(
         source.contains("sftp-panel-connection-badge: root.sftp-panel-connection-badge;")
-            && source.contains("sftp-panel-binding-mode-label: root.sftp-panel-binding-mode-label;")
-            && source.contains("sftp-panel-binding-mode-active: root.sftp-panel-binding-mode-active;")
+            && source
+                .contains("sftp-panel-binding-mode-label: root.sftp-panel-binding-mode-label;")
+            && source
+                .contains("sftp-panel-binding-mode-active: root.sftp-panel-binding-mode-active;")
             && source.contains("sftp-panel-path-editing: root.sftp-panel-path-editing;"),
         "app window should forward quick browser header state into the right panel"
     );

@@ -106,6 +106,7 @@ pub(super) fn sync_sftp_remote_file_modal_state(window: &AppWindow, state: &Shel
 pub(super) fn sync_sftp_conflict_modal_state(window: &AppWindow, state: &ShellViewModel) {
     let conflict = state.sftp_conflict_modal_state();
     window.set_sftp_conflict_modal_open(conflict.open);
+    window.set_sftp_conflict_modal_kind(state.sftp_conflict_modal_kind_id().into());
     window.set_sftp_conflict_modal_source_path(conflict.source_path.clone().into());
     window.set_sftp_conflict_modal_target_path(conflict.target_path.clone().into());
     window.set_sftp_conflict_modal_batch_conflict_count(
@@ -1808,7 +1809,7 @@ pub(super) fn bind_sftp_callbacks(
             state.transfer_task_local_open_folder_path(task_id.as_str())
         };
         let outcome = match local_path {
-            Some(local_path) => crate::app::sftp::open_path_in_folder_locally(local_path.as_path()),
+            Some(local_path) => crate::app::sftp::reveal_path_locally(local_path.as_path()),
             None => Err(anyhow::anyhow!("The local folder is no longer available.")),
         };
 
@@ -1830,8 +1831,47 @@ pub(super) fn bind_sftp_callbacks(
     let effects_ref = Rc::clone(effects);
     window.on_transfer_center_remove_requested(move |task_id| {
         let window = handle.unwrap();
+        let local_path = {
+            let state = state.borrow();
+            state.transfer_task_local_remove_path(task_id.as_str())
+        };
+        let missing_download = {
+            let state = state.borrow();
+            state.transfer_task_remove_missing_download(task_id.as_str())
+        };
+        let trash_result = local_path
+            .as_ref()
+            .map(|local_path| crate::app::sftp::trash_path_locally(local_path.as_path()));
+        let missing_after_trash = trash_result
+            .as_ref()
+            .and_then(|result| result.as_ref().err())
+            .is_some_and(|err| err.to_string().contains("Local file already missing."))
+            || missing_download;
+
+        if let Some(Err(err)) = trash_result
+            && !err.to_string().contains("Local file already missing.")
+        {
+            tracing::warn!(
+                target: "app.sftp",
+                task_id = task_id.as_str(),
+                error = %err,
+                "failed to move a downloaded transfer artifact to Trash"
+            );
+            let mut state = state.borrow_mut();
+            state.show_transfer_center_feedback("error", format!("Remove failed: {err}"));
+            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+            sync_sftp_conflict_modal_state(&window, &state);
+            return;
+        }
+
         let mut state = state.borrow_mut();
         if state.remove_transfer_task(task_id.as_str()) {
+            if missing_after_trash {
+                state.show_transfer_center_feedback(
+                    "neutral",
+                    "The local file is already missing, so only the transfer record was removed.",
+                );
+            }
             super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
             sync_sftp_conflict_modal_state(&window, &state);
         }
@@ -1909,6 +1949,58 @@ pub(super) fn bind_sftp_callbacks(
                 &session_bridge.manager,
                 tasks.as_slice(),
                 crate::app::sftp::TransferConflictPolicy::Skip,
+                &transfer_result_tx_ref,
+            )
+        });
+        let _ = state.close_sftp_conflict_modal();
+        if resolved {
+            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
+        sync_sftp_conflict_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let transfer_result_tx_ref = sftp_transfer_result_tx.clone();
+    window.on_sftp_conflict_modal_auto_rename_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let resolved = session_bridge_ref.as_ref().is_some_and(|session_bridge| {
+            let tasks = state.active_sftp_conflict_tasks();
+            resolve_conflict_transfer_tasks(
+                &session_bridge.manager,
+                tasks.as_slice(),
+                crate::app::sftp::TransferConflictPolicy::AutoRename,
+                &transfer_result_tx_ref,
+            )
+        });
+        let _ = state.close_sftp_conflict_modal();
+        if resolved {
+            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        }
+        sync_sftp_conflict_modal_state(&window, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let transfer_result_tx_ref = sftp_transfer_result_tx.clone();
+    window.on_sftp_conflict_modal_cancel_download_requested(move || {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        let resolved = session_bridge_ref.as_ref().is_some_and(|session_bridge| {
+            // Cancel only the focused download via state.current_sftp_conflict_task().
+            let tasks = state
+                .current_sftp_conflict_task()
+                .into_iter()
+                .collect::<Vec<_>>();
+            resolve_conflict_transfer_tasks(
+                &session_bridge.manager,
+                tasks.as_slice(),
+                crate::app::sftp::TransferConflictPolicy::CancelCurrent,
                 &transfer_result_tx_ref,
             )
         });

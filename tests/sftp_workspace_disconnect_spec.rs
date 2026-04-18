@@ -201,7 +201,8 @@ fn flush_runtime_projection() {
 }
 
 #[test]
-fn closing_the_source_terminal_keeps_the_sftp_workspace_tab_and_reconnects_without_restoring_a_terminal_tab() {
+fn closing_the_source_terminal_keeps_the_sftp_workspace_tab_and_reconnects_without_restoring_a_terminal_tab()
+ {
     i_slint_backend_testing::init_no_event_loop();
 
     let app = AppWindow::new().unwrap();
@@ -227,7 +228,10 @@ fn closing_the_source_terminal_keeps_the_sftp_workspace_tab_and_reconnects_witho
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 2);
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "sftp");
-    assert_eq!(app.get_workspace_session_title().as_str(), "Files: Prod Bastion");
+    assert_eq!(
+        app.get_workspace_session_title().as_str(),
+        "Files: Prod Bastion"
+    );
 
     app.invoke_workspace_tab_close_requested(prod_session_id.into());
     flush_runtime_projection();

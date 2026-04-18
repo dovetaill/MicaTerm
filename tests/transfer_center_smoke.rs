@@ -112,7 +112,8 @@ fn transfer_center_contract_includes_completed_file_actions() {
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
 
     assert!(
-        content.contains("callback open-file-requested(string);"),
+        content.contains("remove_tooltip: string,")
+            && content.contains("callback open-file-requested(string);"),
         "transfer center should expose a completed-row file open callback"
     );
     assert!(
@@ -126,6 +127,10 @@ fn transfer_center_contract_includes_completed_file_actions() {
     assert!(
         content.contains("callback clear-completed-requested();"),
         "transfer center should expose a clear-completed toolbar callback"
+    );
+    assert!(
+        content.contains("tooltip-text: item.remove_tooltip;"),
+        "completed transfer remove actions should project explicit copy so downloaded artifacts can advertise trash semantics without overloading every row with the same message"
     );
 }
 
@@ -623,6 +628,52 @@ fn conflict_modal_footer_buttons_expose_focusable_button_contract() {
             && modal.contains("skip-button := ConflictDialogButton {")
             && modal.contains("replace-button := ConflictDialogButton {"),
         "conflict modal footer should keep all three actions in the shared focusable button component"
+    );
+}
+
+#[test]
+fn transfer_center_conflict_modal_exposes_download_actions() {
+    let modal =
+        fs::read_to_string("ui/components/sftp-conflict-modal.slint").expect("read conflict modal");
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    assert!(
+        modal.contains("in property <string> kind: \"remote\";")
+            && modal.contains("callback auto-rename-requested();")
+            && modal.contains("callback cancel-download-requested();"),
+        "conflict modal should project a distinct download mode contract instead of hard-coding replace/skip semantics for every conflict type"
+    );
+    assert!(
+        modal.contains("label: \"Auto Rename\";")
+            && modal.contains("label: \"Cancel Download\";")
+            && modal.contains("root.kind == \"download\""),
+        "download conflict modals should expose explicit Auto Rename and Cancel Download actions with mode-specific copy"
+    );
+    assert!(
+        app_window.contains("in-out property <string> sftp-conflict-modal-kind: \"remote\";")
+            && app_window.contains("callback sftp-conflict-modal-auto-rename-requested();")
+            && app_window.contains("callback sftp-conflict-modal-cancel-download-requested();"),
+        "AppWindow should thread the download conflict modal kind and callbacks through the generated Slint API"
+    );
+}
+
+#[test]
+fn transfer_center_conflict_modal_cancel_keeps_batch_toggle_inactive() {
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+    let view_model_sftp =
+        fs::read_to_string("src/shell/view_model/sftp.rs").expect("read shell view-model sftp");
+
+    assert!(
+        view_model_sftp.contains("pub fn current_sftp_conflict_task(&self)")
+            && view_model_sftp.contains("self.sftp_conflict_modal_state.task_id.as_deref()"),
+        "ShellViewModel should expose the currently focused conflict task separately from the apply-to-batch expansion"
+    );
+    assert!(
+        bootstrap_sftp
+            .contains("window.on_sftp_conflict_modal_cancel_download_requested(move || {")
+            && bootstrap_sftp.contains("state.current_sftp_conflict_task()"),
+        "cancel-download handling should resolve only the current conflict instead of inheriting the apply-to-batch selection"
     );
 }
 

@@ -83,7 +83,10 @@ fn file_browser_sort_cycle_is_session_local_state() {
     quick.sort_state.direction = Some(FileBrowserSortDirection::Asc);
     let workspace = quick.clone_for_workspace();
 
-    assert_eq!(workspace.sort_state.column, Some(FileBrowserSortColumn::Name));
+    assert_eq!(
+        workspace.sort_state.column,
+        Some(FileBrowserSortColumn::Name)
+    );
     assert_eq!(
         workspace.sort_state.direction,
         Some(FileBrowserSortDirection::Asc)

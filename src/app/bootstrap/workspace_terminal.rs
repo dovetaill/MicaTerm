@@ -69,7 +69,11 @@ pub(super) fn sync_workspace_projection_from_manager(
         .collect::<Vec<_>>();
     next_tabs.extend(preserved_error_tabs);
     next_tabs.extend(preserved_launcher_tabs);
-    next_tabs.extend(sync_workspace_sftp_tabs(state, manager, preserved_sftp_tabs));
+    next_tabs.extend(sync_workspace_sftp_tabs(
+        state,
+        manager,
+        preserved_sftp_tabs,
+    ));
     let active_id = projected_active_workspace_tab_id(state, &next_tabs);
     for tab in &mut next_tabs {
         tab.active = active_id.as_deref() == Some(tab.tab_id.as_str());
@@ -136,7 +140,8 @@ fn sync_workspace_sftp_tabs(
 
             tab.state = browser_session.mode.id().into();
             if browser_session.mode == SftpPanelMode::Disconnected {
-                tab.error_detail = "Reconnect the file workspace to restore remote browsing.".into();
+                tab.error_detail =
+                    "Reconnect the file workspace to restore remote browsing.".into();
             } else if let Some(last_error) = browser_session.last_error.as_deref() {
                 tab.error_detail = last_error.to_string();
             } else {

@@ -144,6 +144,16 @@ impl ShellViewModel {
             .terminal_active_idle_shrink_enabled
     }
 
+    pub fn settings_modal_download_conflict_default(
+        &self,
+    ) -> crate::app::ui_preferences::DownloadConflictDefault {
+        self.settings_modal_state.download_conflict_default
+    }
+
+    pub fn settings_modal_download_conflict_default_id(&self) -> &'static str {
+        self.settings_modal_state.download_conflict_default.as_str()
+    }
+
     pub fn start_sync_feedback(&mut self, text: impl Into<String>) {
         self.sync_feedback_state.text = text.into();
         self.sync_feedback_state.running = true;
@@ -199,6 +209,11 @@ impl ShellViewModel {
     pub fn set_settings_modal_terminal_active_idle_shrink_enabled(&mut self, value: bool) {
         self.settings_modal_state
             .terminal_active_idle_shrink_enabled = value;
+    }
+
+    pub fn set_settings_modal_download_conflict_default(&mut self, value: &str) {
+        self.settings_modal_state.download_conflict_default =
+            crate::app::ui_preferences::DownloadConflictDefault::from_str(value);
     }
 
     pub fn open_sync_modal(&mut self) {
@@ -338,6 +353,61 @@ impl ShellViewModel {
                 Some(local_path.clone())
             }
             _ => None,
+        }
+    }
+
+    pub fn transfer_task_local_remove_path(&self, task_id: &str) -> Option<std::path::PathBuf> {
+        let task = self.transfer_task_by_id(task_id)?;
+        if task.state != crate::app::sftp::TransferTaskState::Completed {
+            return None;
+        }
+
+        match &task.action {
+            crate::app::sftp::TransferTaskAction::Download { local_path }
+            | crate::app::sftp::TransferTaskAction::DownloadDirectory { local_path }
+                if local_path.exists() =>
+            {
+                Some(local_path.clone())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn transfer_task_remove_tooltip(&self, task_id: &str) -> String {
+        let Some(task) = self.transfer_task_by_id(task_id) else {
+            return "Remove this record from the transfer center".into();
+        };
+
+        if task.state == crate::app::sftp::TransferTaskState::Completed {
+            match &task.action {
+                crate::app::sftp::TransferTaskAction::Download { local_path }
+                | crate::app::sftp::TransferTaskAction::DownloadDirectory { local_path } => {
+                    if local_path.exists() {
+                        return "Trash the downloaded artifact and remove this record".into();
+                    }
+                    return "The local file is already missing; remove this record only".into();
+                }
+                _ => {}
+            }
+        }
+
+        "Remove this record from the transfer center".into()
+    }
+
+    pub fn transfer_task_remove_missing_download(&self, task_id: &str) -> bool {
+        let Some(task) = self.transfer_task_by_id(task_id) else {
+            return false;
+        };
+        if task.state != crate::app::sftp::TransferTaskState::Completed {
+            return false;
+        }
+
+        match &task.action {
+            crate::app::sftp::TransferTaskAction::Download { local_path }
+            | crate::app::sftp::TransferTaskAction::DownloadDirectory { local_path } => {
+                !local_path.exists()
+            }
+            _ => false,
         }
     }
 

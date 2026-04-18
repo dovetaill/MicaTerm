@@ -14,11 +14,7 @@ impl ShellViewModel {
             .insert(session.file_browser_session_id.clone(), session);
     }
 
-    pub fn set_sftp_session_state(
-        &mut self,
-        session_id: String,
-        state: SftpSessionBindingState,
-    ) {
+    pub fn set_sftp_session_state(&mut self, session_id: String, state: SftpSessionBindingState) {
         let mut session = self
             .file_browser_sessions
             .get(session_id.as_str())
@@ -65,7 +61,8 @@ impl ShellViewModel {
             return None;
         }
 
-        self.file_browser_sessions.get(tab.file_browser_session_id.as_str())
+        self.file_browser_sessions
+            .get(tab.file_browser_session_id.as_str())
     }
 
     pub(super) fn active_workspace_sftp_session_mut(&mut self) -> Option<&mut FileBrowserSession> {
@@ -79,7 +76,10 @@ impl ShellViewModel {
     pub fn active_file_browser_session_id(&self) -> Option<&str> {
         self.active_workspace_sftp_session()
             .map(|session| session.file_browser_session_id.as_str())
-            .or_else(|| self.quick_browser_session().map(|session| session.file_browser_session_id.as_str()))
+            .or_else(|| {
+                self.quick_browser_session()
+                    .map(|session| session.file_browser_session_id.as_str())
+            })
     }
 
     pub fn active_sftp_session_state(&self) -> Option<&FileBrowserSession> {
@@ -470,7 +470,11 @@ impl ShellViewModel {
             return false;
         };
         if self.quick_browser_session_id.as_deref() == Some(active_session_id)
-            && self.quick_browser_state.pending_terminal_session_id.as_deref() == Some(active_session_id)
+            && self
+                .quick_browser_state
+                .pending_terminal_session_id
+                .as_deref()
+                == Some(active_session_id)
         {
             return false;
         }
@@ -533,6 +537,7 @@ impl ShellViewModel {
 
         self.sftp_conflict_modal_state = SftpConflictModalState {
             open: true,
+            kind: conflict_modal_kind(&task),
             task_id: Some(task.id),
             source_path: task.source_path,
             target_path: task.target_path,
@@ -570,6 +575,13 @@ impl ShellViewModel {
             .collect()
     }
 
+    pub fn current_sftp_conflict_task(&self) -> Option<crate::app::sftp::TransferTask> {
+        let task_id = self.sftp_conflict_modal_state.task_id.as_deref()?;
+        self.transfer_task_by_id(task_id)
+            .cloned()
+            .filter(|task| task.state == crate::app::sftp::TransferTaskState::Conflict)
+    }
+
     pub fn sftp_conflict_modal_batch_conflict_count(&self) -> i32 {
         let related = self
             .sftp_conflict_modal_state
@@ -582,6 +594,10 @@ impl ShellViewModel {
     pub fn sftp_conflict_modal_apply_to_batch(&self) -> bool {
         self.sftp_conflict_modal_state.apply_to_batch
             && self.sftp_conflict_modal_state.batch_task_ids.len() > 1
+    }
+
+    pub fn sftp_conflict_modal_kind_id(&self) -> &'static str {
+        self.sftp_conflict_modal_state.kind.id()
     }
 
     pub fn set_sftp_conflict_modal_apply_to_batch(&mut self, apply_to_batch: bool) -> bool {
@@ -620,7 +636,9 @@ impl ShellViewModel {
         changed
     }
 
-    pub fn expand_quick_browser_to_workspace(&mut self) -> Option<crate::shell::tabs::WorkspaceTabId> {
+    pub fn expand_quick_browser_to_workspace(
+        &mut self,
+    ) -> Option<crate::shell::tabs::WorkspaceTabId> {
         let quick_browser = self.quick_browser_session()?.clone();
         let workspace_session = quick_browser.clone_for_workspace();
         let tab_id = format!("workspace-{}", workspace_session.file_browser_session_id);
@@ -837,7 +855,8 @@ impl ShellViewModel {
         &self,
         task: &crate::app::sftp::TransferTask,
     ) -> Vec<String> {
-        let scope_dir = remote_parent_dir(task.target_path.as_str());
+        let scope_dir = transfer_conflict_scope_dir(task);
+        let kind = conflict_modal_kind(task);
 
         self.sftp_transfer_tasks
             .iter()
@@ -845,21 +864,54 @@ impl ShellViewModel {
                 candidate.state == crate::app::sftp::TransferTaskState::Conflict
                     && candidate.session_id == task.session_id
                     && candidate.direction == task.direction
-                    && remote_parent_dir(candidate.target_path.as_str()) == scope_dir
+                    && conflict_modal_kind(candidate) == kind
+                    && transfer_conflict_scope_dir(candidate) == scope_dir
             })
             .map(|candidate| candidate.id.clone())
             .collect()
     }
 }
 
+fn conflict_modal_kind(task: &crate::app::sftp::TransferTask) -> SftpConflictModalKind {
+    match &task.action {
+        crate::app::sftp::TransferTaskAction::Download { .. }
+        | crate::app::sftp::TransferTaskAction::DownloadDirectory { .. } => {
+            SftpConflictModalKind::Download
+        }
+        _ => SftpConflictModalKind::Remote,
+    }
+}
+
+fn transfer_conflict_scope_dir(task: &crate::app::sftp::TransferTask) -> Option<String> {
+    match &task.action {
+        crate::app::sftp::TransferTaskAction::Download { .. }
+        | crate::app::sftp::TransferTaskAction::DownloadDirectory { .. } => {
+            local_parent_dir(task.target_path.as_str())
+        }
+        _ => remote_parent_dir(task.target_path.as_str()),
+    }
+}
+
 fn transfer_task_workspace_dir(task: &crate::app::sftp::TransferTask) -> Option<String> {
     let path = match task.direction {
-        crate::app::sftp::TransferDirection::Upload
-        | crate::app::sftp::TransferDirection::Move => task.target_path.as_str(),
+        crate::app::sftp::TransferDirection::Upload | crate::app::sftp::TransferDirection::Move => {
+            task.target_path.as_str()
+        }
         crate::app::sftp::TransferDirection::Download
         | crate::app::sftp::TransferDirection::Delete => task.source_path.as_str(),
     };
     remote_parent_dir(path)
+}
+
+fn local_parent_dir(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    std::path::Path::new(trimmed)
+        .parent()
+        .map(|parent| parent.to_string_lossy().to_string())
 }
 
 fn remote_parent_dir(path: &str) -> Option<String> {

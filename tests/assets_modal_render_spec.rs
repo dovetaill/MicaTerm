@@ -77,8 +77,10 @@ fn count_changed_pixels(
 
     for sample_y in y..(y + height) {
         for sample_x in x..(x + width) {
-            if color_distance(pixel_at(before, sample_x, sample_y), pixel_at(after, sample_x, sample_y))
-                >= threshold
+            if color_distance(
+                pixel_at(before, sample_x, sample_y),
+                pixel_at(after, sample_x, sample_y),
+            ) >= threshold
             {
                 changed += 1;
             }
@@ -764,12 +766,11 @@ fn sftp_conflict_modal_close_tooltip_renders_when_close_affordance_is_hovered() 
         renderer.render(base.make_mut_slice(), stride);
     }));
 
-    let close_position = LogicalPosition::new(
-        (modal.x + modal.width - 26) as f32,
-        (modal.y + 26) as f32,
-    );
-    app.window()
-        .dispatch_event(WindowEvent::PointerMoved { position: close_position });
+    let close_position =
+        LogicalPosition::new((modal.x + modal.width - 26) as f32, (modal.y + 26) as f32);
+    app.window().dispatch_event(WindowEvent::PointerMoved {
+        position: close_position,
+    });
     std::thread::sleep(Duration::from_millis(320));
     slint::platform::update_timers_and_animations();
 

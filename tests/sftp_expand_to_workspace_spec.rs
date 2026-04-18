@@ -6,8 +6,10 @@ use uuid::Uuid;
 #[test]
 fn expanding_quick_browser_creates_an_active_sftp_workspace_tab_with_a_cloned_browser_session() {
     let mut view_model = ShellViewModel::default();
-    let mut quick_browser =
-        FileBrowserSession::quick_browser(HostProfileRef::with_label("asset-prod", "Prod"), "/srv/app");
+    let mut quick_browser = FileBrowserSession::quick_browser(
+        HostProfileRef::with_label("asset-prod", "Prod"),
+        "/srv/app",
+    );
     quick_browser.selected_entry_ids = vec!["entry-current".into()];
     quick_browser.attach_terminal_session_id(Uuid::new_v4().to_string());
     let quick_browser_id = quick_browser.file_browser_session_id.clone();

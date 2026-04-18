@@ -222,6 +222,7 @@ fn project_transfer_center_items(state: &ShellViewModel) -> Vec<TransferCenterIt
                 can_open_file: transfer_can_open_file(task),
                 can_open_folder: transfer_can_open_folder(task),
                 can_remove: transfer_can_remove(task),
+                remove_tooltip: state.transfer_task_remove_tooltip(task.id.as_str()).into(),
             }
         })
         .collect()
@@ -323,6 +324,9 @@ pub(super) fn sync_top_status_bar_state(
     window.set_settings_modal_terminal_active_idle_shrink_enabled(
         state.settings_modal_terminal_active_idle_shrink_enabled(),
     );
+    window.set_settings_modal_download_conflict_default(
+        state.settings_modal_download_conflict_default_id().into(),
+    );
     window.set_sync_feedback_text(state.sync_feedback_state().text.clone().into());
     window.set_sync_feedback_sequence(state.sync_feedback_state().sequence);
     window.set_sync_feedback_running(state.sync_feedback_state().running);
@@ -396,6 +400,18 @@ pub(super) fn bind_shell_chrome_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.set_settings_modal_terminal_active_idle_shrink_enabled(value);
+        sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
+        save_ui_preferences(&store_ref, &state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    let store_ref = store.clone();
+    let effects_ref = Rc::clone(effects);
+    window.on_settings_modal_download_conflict_default_changed(move |value| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        state.set_settings_modal_download_conflict_default(value.as_str());
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         save_ui_preferences(&store_ref, &state);
     });

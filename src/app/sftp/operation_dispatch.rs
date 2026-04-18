@@ -38,12 +38,8 @@ pub fn dispatch_sftp_load_dir_operation(
     result_tx: Sender<SftpBrowserOperationResult>,
 ) {
     runtime_handle.spawn(async move {
-        let (result, disconnected) = load_sftp_directory_result(
-            manager,
-            request.session_id,
-            request.path.clone(),
-        )
-        .await;
+        let (result, disconnected) =
+            load_sftp_directory_result(manager, request.session_id, request.path.clone()).await;
         let _ = result_tx.send(SftpBrowserOperationResult {
             kind: SftpOperationKind::LoadDir,
             request,

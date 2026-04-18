@@ -265,6 +265,7 @@ fn seed_locked_vault_runtime(
             right_panel_view: "appearance".into(),
             terminal_scrollback_limit: 1500,
             terminal_active_idle_shrink_enabled: true,
+            download_conflict_default: mica_term::app::ui_preferences::DownloadConflictDefault::Ask,
         },
     )
     .expect("export seeded snapshot");

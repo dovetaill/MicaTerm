@@ -11030,6 +11030,46 @@ fn transfer_center_failed_rows_expose_retry_and_retry_real_transfer() {
 }
 
 #[test]
+fn transfer_center_open_actions_use_native_shell_and_reveal_helpers() {
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+    let local_open_source =
+        fs::read_to_string("src/app/sftp/local_open.rs").expect("read local open helper");
+
+    assert!(
+        bootstrap_sftp.contains("reveal_path_locally(local_path.as_path())"),
+        "transfer-center folder actions should route through a reveal helper so file downloads can select the finished artifact inside the native file manager"
+    );
+    assert!(
+        local_open_source.contains("pub fn reveal_path_locally(path: &Path) -> Result<()>")
+            && local_open_source.contains("org.freedesktop.FileManager1")
+            && local_open_source.contains("ShowItems")
+            && local_open_source.contains("shell-open"),
+        "the local-open helper should distinguish native shell-open from native reveal handling, including a Linux FileManager1 reveal path before directory fallback"
+    );
+}
+
+#[test]
+fn transfer_center_windows_open_helpers_use_shell_api_contracts() {
+    let local_open_source =
+        fs::read_to_string("src/app/sftp/local_open.rs").expect("read local open helper");
+
+    assert!(
+        local_open_source.contains("ShellExecuteW")
+            && local_open_source.contains("SHOpenFolderAndSelectItems")
+            && local_open_source.contains("ILCreateFromPathW")
+            && local_open_source.contains("CoInitializeEx")
+            && local_open_source.contains("CoUninitialize"),
+        "Windows local-open helpers should route through Shell APIs instead of command-shell fallbacks so downloaded files and reveal actions use native Explorer semantics"
+    );
+    assert!(
+        !local_open_source.contains("Command::new(\"cmd\")")
+            && !local_open_source.contains("Command::new(\"explorer\")"),
+        "Windows local-open helpers should stop spawning cmd/explorer directly once the Shell API path exists"
+    );
+}
+
+#[test]
 fn transfer_center_open_actions_route_through_platform_helpers_and_visible_feedback() {
     let bootstrap_sftp =
         fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
@@ -11044,15 +11084,15 @@ fn transfer_center_open_actions_route_through_platform_helpers_and_visible_feedb
     );
     assert!(
         bootstrap_sftp.contains("open_path_locally(local_path.as_path())")
-            && bootstrap_sftp.contains("open_path_in_folder_locally(local_path.as_path())"),
+            && bootstrap_sftp.contains("reveal_path_locally(local_path.as_path())"),
         "transfer-center Open File and Open Folder should call dedicated platform helpers instead of sharing a single file-open path"
     );
     assert!(
-        local_open_source.contains("pub fn open_path_in_folder_locally(path: &Path) -> Result<()>")
-            && local_open_source.contains("/select,")
+        local_open_source.contains("pub fn reveal_path_locally(path: &Path) -> Result<()>")
+            && local_open_source.contains("SHOpenFolderAndSelectItems")
             && local_open_source.contains("xdg-open")
             && local_open_source.contains("arg(\"-R\")"),
-        "the local-open helper should expose cross-platform file-open plus containing-folder reveal logic with an Explorer reveal path on Windows"
+        "the local-open helper should expose cross-platform file-open plus containing-folder reveal logic with a native Shell reveal path on Windows"
     );
 }
 
@@ -11116,6 +11156,24 @@ fn transfer_center_attention_rows_can_open_linked_sftp_workspace() {
     assert_eq!(
         app.get_workspace_session_title().as_str(),
         "Files: Prod Bastion"
+    );
+}
+
+#[test]
+fn transfer_center_remove_missing_download_only_clears_record() {
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
+    let local_open_source =
+        fs::read_to_string("src/app/sftp/local_open.rs").expect("read local open helper");
+
+    assert!(
+        bootstrap_sftp.contains("trash_path_locally(local_path.as_path())")
+            && bootstrap_sftp.contains("local file is already missing"),
+        "remove should trash finished downloads when the artifact exists, but fall back to record-only cleanup with explicit feedback once the local file is gone"
+    );
+    assert!(
+        local_open_source.contains("pub fn trash_path_locally(path: &Path) -> Result<()>"),
+        "local-open helpers should expose an explicit trash helper so transfer-center removal does not silently bypass the desktop recycle bin or trash"
     );
 }
 

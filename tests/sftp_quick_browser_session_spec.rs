@@ -4,7 +4,8 @@ use mica_term::shell::view_model::ShellViewModel;
 
 #[test]
 fn quick_browser_and_workspace_browser_do_not_share_mutable_selection_or_sort_identity() {
-    let mut quick = FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
+    let mut quick =
+        FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
     quick.selected_entry_ids = vec!["entry-current".into()];
     quick.sort_state.column = Some(mica_term::app::sftp::FileBrowserSortColumn::Modified);
     quick.sort_state.direction = Some(mica_term::app::sftp::FileBrowserSortDirection::Desc);

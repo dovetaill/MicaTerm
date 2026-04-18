@@ -77,6 +77,44 @@ pub fn build_local_download_path(local_root: &Path, remote_path: &str) -> PathBu
     local_root.join(name)
 }
 
+pub fn next_auto_rename_path(path: &Path) -> PathBuf {
+    let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let file_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "download".into());
+    let (base_name, extension) = if let Some(extension) = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        let stem = path
+            .file_stem()
+            .map(|value| value.to_string_lossy().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| file_name.clone());
+        (stem, format!(".{extension}"))
+    } else {
+        (file_name, String::new())
+    };
+    let base_name = trim_auto_rename_suffix(base_name.as_str()).to_string();
+
+    for index in 1.. {
+        let candidate_name = format!("{base_name} ({index}){extension}");
+        let candidate = if parent.as_os_str().is_empty() {
+            PathBuf::from(&candidate_name)
+        } else {
+            parent.join(&candidate_name)
+        };
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    unreachable!("auto rename path generation should always find a free suffix")
+}
+
 fn scan_directory(
     current: &Path,
     relative_path: &Path,
@@ -124,4 +162,20 @@ fn normalize_remote_dir(path: &str) -> String {
     } else {
         format!("/{}", trimmed.trim_matches('/'))
     }
+}
+
+fn trim_auto_rename_suffix(name: &str) -> &str {
+    let Some(start) = name.rfind(" (") else {
+        return name;
+    };
+    if !name.ends_with(')') {
+        return name;
+    }
+
+    let digits = &name[start + 2..name.len() - 1];
+    if digits.is_empty() || !digits.chars().all(|value| value.is_ascii_digit()) {
+        return name;
+    }
+
+    &name[..start]
 }

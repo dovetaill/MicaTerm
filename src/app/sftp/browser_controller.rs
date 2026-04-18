@@ -37,7 +37,11 @@ impl SftpBrowserController {
         let browser_session_id = session_id.to_string();
         let request = self.new_request(browser_session_id.clone(), session_id, path);
         let state = self.sessions.entry(browser_session_id).or_default();
-        state.set_connecting(request.path.as_str(), request.generation, request.request_id);
+        state.set_connecting(
+            request.path.as_str(),
+            request.generation,
+            request.request_id,
+        );
         request
     }
 
@@ -59,7 +63,11 @@ impl SftpBrowserController {
             .sessions
             .entry(browser_session.file_browser_session_id)
             .or_default();
-        state.set_connecting(request.path.as_str(), request.generation, request.request_id);
+        state.set_connecting(
+            request.path.as_str(),
+            request.generation,
+            request.request_id,
+        );
         request
     }
 
@@ -75,7 +83,11 @@ impl SftpBrowserController {
             .sessions
             .get_mut(&browser_session_id)
             .expect("state must exist");
-        state.set_loading_follow(request.path.as_str(), request.generation, request.request_id);
+        state.set_loading_follow(
+            request.path.as_str(),
+            request.generation,
+            request.request_id,
+        );
         Some(request)
     }
 
@@ -93,7 +105,11 @@ impl SftpBrowserController {
 
         let request = self.new_request(browser_session_id.clone(), session_id, path);
         let state = self.sessions.entry(browser_session_id).or_default();
-        state.set_loading_follow(request.path.as_str(), request.generation, request.request_id);
+        state.set_loading_follow(
+            request.path.as_str(),
+            request.generation,
+            request.request_id,
+        );
         Some(request)
     }
 
@@ -101,7 +117,11 @@ impl SftpBrowserController {
         let browser_session_id = session_id.to_string();
         let request = self.new_request(browser_session_id.clone(), session_id, path);
         let state = self.sessions.entry(browser_session_id).or_default();
-        state.set_loading_manual(request.path.as_str(), request.generation, request.request_id);
+        state.set_loading_manual(
+            request.path.as_str(),
+            request.generation,
+            request.request_id,
+        );
         request
     }
 
@@ -118,9 +138,17 @@ impl SftpBrowserController {
             .get_mut(&browser_session_id)
             .expect("state must exist");
         if state.follow_mode == crate::app::sftp::SftpFollowMode::FollowCwd {
-            state.set_loading_follow(request.path.as_str(), request.generation, request.request_id);
+            state.set_loading_follow(
+                request.path.as_str(),
+                request.generation,
+                request.request_id,
+            );
         } else {
-            state.set_loading_manual(request.path.as_str(), request.generation, request.request_id);
+            state.set_loading_manual(
+                request.path.as_str(),
+                request.generation,
+                request.request_id,
+            );
         }
         Some(request)
     }
@@ -137,7 +165,11 @@ impl SftpBrowserController {
             .sessions
             .get_mut(&browser_session_id)
             .expect("state must exist");
-        state.set_retrying(request.path.as_str(), request.generation, request.request_id);
+        state.set_retrying(
+            request.path.as_str(),
+            request.generation,
+            request.request_id,
+        );
         Some(request)
     }
 
@@ -317,7 +349,10 @@ impl SftpBrowserController {
         state.set_ready(path, entries);
     }
 
-    pub fn browser_session_state(&self, browser_session_id: &str) -> Option<&SftpBrowserSessionState> {
+    pub fn browser_session_state(
+        &self,
+        browser_session_id: &str,
+    ) -> Option<&SftpBrowserSessionState> {
         self.sessions.get(browser_session_id)
     }
 

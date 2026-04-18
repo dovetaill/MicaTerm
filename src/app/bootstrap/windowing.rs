@@ -139,25 +139,29 @@ pub(super) fn bind_windows_window_state_tracking(
                 let handle = handle.clone();
                 let sftp_drop_hover_active_ref = Rc::clone(&sftp_drop_hover_active);
                 let sftp_drop_paths_ref = Rc::clone(&sftp_drop_paths);
-                timer_ref.start(TimerMode::SingleShot, Duration::from_millis(24), move || {
-                    let Some(window) = handle.upgrade() else {
-                        return;
-                    };
-                    let pending_paths = std::mem::take(&mut *sftp_drop_paths_ref.borrow_mut());
-                    if pending_paths.is_empty() {
-                        return;
-                    }
+                timer_ref.start(
+                    TimerMode::SingleShot,
+                    Duration::from_millis(24),
+                    move || {
+                        let Some(window) = handle.upgrade() else {
+                            return;
+                        };
+                        let pending_paths = std::mem::take(&mut *sftp_drop_paths_ref.borrow_mut());
+                        if pending_paths.is_empty() {
+                            return;
+                        }
 
-                    let dropped_paths = pending_paths
-                        .into_iter()
-                        .map(|path| SharedString::from(path.to_string_lossy().to_string()))
-                        .collect::<Vec<_>>();
-                    window.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(
-                        dropped_paths,
-                    )));
-                    window.invoke_sftp_panel_external_drop_requested();
-                    update_sftp_drop_hover_state(&window, &sftp_drop_hover_active_ref, false);
-                });
+                        let dropped_paths = pending_paths
+                            .into_iter()
+                            .map(|path| SharedString::from(path.to_string_lossy().to_string()))
+                            .collect::<Vec<_>>();
+                        window.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(
+                            dropped_paths,
+                        )));
+                        window.invoke_sftp_panel_external_drop_requested();
+                        update_sftp_drop_hover_state(&window, &sftp_drop_hover_active_ref, false);
+                    },
+                );
             }
 
             if matches!(
@@ -203,11 +207,7 @@ fn sftp_drop_target_contains(window: &AppWindow, pointer: Option<(f32, f32)>) ->
         && pointer_y <= origin_y + height
 }
 
-fn update_sftp_drop_hover_state(
-    window: &AppWindow,
-    hover_state: &Rc<RefCell<bool>>,
-    active: bool,
-) {
+fn update_sftp_drop_hover_state(window: &AppWindow, hover_state: &Rc<RefCell<bool>>, active: bool) {
     if *hover_state.borrow() == active {
         return;
     }

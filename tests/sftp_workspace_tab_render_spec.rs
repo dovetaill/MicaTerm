@@ -6,11 +6,14 @@ fn workspace_pane_source_branches_to_sftp_workspace_host() {
         fs::read_to_string("ui/shell/workspace-pane.slint").expect("read workspace pane");
 
     assert!(
-        workspace_pane.contains("import { SftpWorkspaceHost } from \"./sftp-workspace-host.slint\";"),
+        workspace_pane
+            .contains("import { SftpWorkspaceHost } from \"./sftp-workspace-host.slint\";"),
         "WorkspacePane should import the dedicated SFTP workspace host"
     );
     assert!(
-        workspace_pane.contains("if root.workspace-session-host-mode == \"sftp\" : sftp-host := SftpWorkspaceHost {"),
+        workspace_pane.contains(
+            "if root.workspace-session-host-mode == \"sftp\" : sftp-host := SftpWorkspaceHost {"
+        ),
         "WorkspacePane should switch to SftpWorkspaceHost when the active workspace tab is an sftp tab"
     );
     assert!(
@@ -23,8 +26,8 @@ fn workspace_pane_source_branches_to_sftp_workspace_host() {
 
 #[test]
 fn sftp_workspace_host_source_exposes_core_file_table_headers() {
-    let source = fs::read_to_string("ui/shell/sftp-workspace-host.slint")
-        .expect("read sftp workspace host");
+    let source =
+        fs::read_to_string("ui/shell/sftp-workspace-host.slint").expect("read sftp workspace host");
 
     assert!(
         source.contains("export component SftpWorkspaceHost"),

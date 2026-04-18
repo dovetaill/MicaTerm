@@ -138,6 +138,39 @@ fn settings_modal_terminal_preferences_update_window_state_and_persist() {
 }
 
 #[test]
+fn settings_modal_download_conflict_preference_updates_window_state_and_persist() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let temp_path = std::env::temp_dir()
+        .join("mica-term")
+        .join("tests")
+        .join("settings-modal-download-conflict-default.json");
+    let _ = std::fs::remove_file(&temp_path);
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, Some(UiPreferencesStore::new(temp_path.clone())));
+
+    app.invoke_open_settings_panel_requested();
+
+    assert_eq!(
+        app.get_settings_modal_download_conflict_default().as_str(),
+        "ask"
+    );
+
+    app.invoke_settings_modal_download_conflict_default_changed("auto-rename".into());
+
+    assert_eq!(
+        app.get_settings_modal_download_conflict_default().as_str(),
+        "auto-rename"
+    );
+
+    let content = fs::read_to_string(&temp_path).expect("read persisted ui preferences");
+    assert!(content.contains("\"download_conflict_default\": \"auto-rename\""));
+
+    let _ = std::fs::remove_file(temp_path);
+}
+
+#[test]
 fn formal_ui_no_longer_contains_vault_right_panel_entry() {
     let source = fs::read_to_string("ui/shell/right-panel.slint").unwrap();
 

@@ -242,6 +242,9 @@ async fn execute_transfer(
     let Some(task) = queue.task(task_id).cloned() else {
         return Ok(());
     };
+    if has_blocking_download_directory_conflict(queue, &task) {
+        return Ok(());
+    }
 
     match task.action {
         TransferTaskAction::Upload { local_path } => {
@@ -255,6 +258,12 @@ async fn execute_transfer(
                     }
                     Some(TransferConflictPolicy::Skip) => {
                         queue.cancel_task(task_id, "Skipped existing remote path");
+                        on_queue_updated(queue);
+                        return Ok(());
+                    }
+                    Some(TransferConflictPolicy::AutoRename)
+                    | Some(TransferConflictPolicy::CancelCurrent) => {
+                        queue.mark_conflict(task_id, "Unsupported conflict policy for remote path");
                         on_queue_updated(queue);
                         return Ok(());
                     }
@@ -278,7 +287,9 @@ async fn execute_transfer(
             queue.mark_completed(task_id, transferred);
             on_queue_updated(queue);
         }
-        TransferTaskAction::UploadDirectory { local_path: _local_path } => {
+        TransferTaskAction::UploadDirectory {
+            local_path: _local_path,
+        } => {
             let remote_exists = runtime.path_exists(&task.target_path).await?;
             if remote_exists {
                 match task.conflict_policy {
@@ -292,14 +303,23 @@ async fn execute_transfer(
                         on_queue_updated(queue);
                         return Ok(());
                     }
+                    Some(TransferConflictPolicy::AutoRename)
+                    | Some(TransferConflictPolicy::CancelCurrent) => {
+                        queue.mark_conflict(task_id, "Unsupported conflict policy for remote path");
+                        on_queue_updated(queue);
+                        return Ok(());
+                    }
                     Some(TransferConflictPolicy::Overwrite) => {
                         if runtime.read_dir(&task.target_path).await.is_err() {
-                            runtime.delete_file(&task.target_path).await.with_context(|| {
-                                format!(
-                                    "failed to replace conflicting remote file `{}`",
-                                    task.target_path
-                                )
-                            })?;
+                            runtime
+                                .delete_file(&task.target_path)
+                                .await
+                                .with_context(|| {
+                                    format!(
+                                        "failed to replace conflicting remote file `{}`",
+                                        task.target_path
+                                    )
+                                })?;
                         }
                     }
                 }
@@ -309,17 +329,15 @@ async fn execute_transfer(
             on_queue_updated(queue);
             ensure_remote_parent_dirs(runtime, &task.target_path).await?;
             if !runtime.path_exists(&task.target_path).await? {
-                runtime
-                    .mkdir(&task.target_path)
-                    .await
-                    .with_context(|| {
-                        format!("failed to create remote directory `{}`", task.target_path)
-                    })?;
+                runtime.mkdir(&task.target_path).await.with_context(|| {
+                    format!("failed to create remote directory `{}`", task.target_path)
+                })?;
             }
             queue.mark_completed(task_id, 0);
             on_queue_updated(queue);
         }
         TransferTaskAction::Download { local_path } => {
+            let mut local_path = local_path;
             let local_exists = local_path.exists();
             if local_exists {
                 match task.conflict_policy {
@@ -332,6 +350,26 @@ async fn execute_transfer(
                         queue.cancel_task(task_id, "Skipped existing local path");
                         on_queue_updated(queue);
                         return Ok(());
+                    }
+                    Some(TransferConflictPolicy::CancelCurrent) => {
+                        queue.cancel_task(task_id, "Cancelled conflicting local download");
+                        on_queue_updated(queue);
+                        return Ok(());
+                    }
+                    Some(TransferConflictPolicy::AutoRename) => {
+                        if !queue.apply_download_auto_rename(task_id) {
+                            queue.mark_failed(task_id, "Failed to auto rename local download path");
+                            on_queue_updated(queue);
+                            return Ok(());
+                        }
+                        on_queue_updated(queue);
+                        let Some(updated_task) = queue.task(task_id).cloned() else {
+                            return Ok(());
+                        };
+                        local_path = match updated_task.action {
+                            TransferTaskAction::Download { local_path } => local_path,
+                            _ => local_path,
+                        };
                     }
                     Some(TransferConflictPolicy::Overwrite) => {}
                 }
@@ -358,25 +396,48 @@ async fn execute_transfer(
             on_queue_updated(queue);
         }
         TransferTaskAction::DownloadDirectory { local_path } => {
-            if local_path.exists() && !local_path.is_dir() {
+            let mut local_path = local_path;
+            if local_path.exists() {
                 match task.conflict_policy {
                     None => {
-                        queue.mark_conflict(task_id, "Local path already exists as a file");
+                        queue.mark_conflict(task_id, "Local path already exists");
                         on_queue_updated(queue);
                         return Ok(());
                     }
                     Some(TransferConflictPolicy::Skip) => {
-                        queue.cancel_task(task_id, "Skipped existing local file path");
+                        queue.cancel_task(task_id, "Skipped existing local path");
                         on_queue_updated(queue);
                         return Ok(());
                     }
+                    Some(TransferConflictPolicy::CancelCurrent) => {
+                        queue.cancel_task(task_id, "Cancelled conflicting local download");
+                        on_queue_updated(queue);
+                        return Ok(());
+                    }
+                    Some(TransferConflictPolicy::AutoRename) => {
+                        if !queue.apply_download_auto_rename(task_id) {
+                            queue.mark_failed(task_id, "Failed to auto rename local download path");
+                            on_queue_updated(queue);
+                            return Ok(());
+                        }
+                        on_queue_updated(queue);
+                        let Some(updated_task) = queue.task(task_id).cloned() else {
+                            return Ok(());
+                        };
+                        local_path = match updated_task.action {
+                            TransferTaskAction::DownloadDirectory { local_path } => local_path,
+                            _ => local_path,
+                        };
+                    }
                     Some(TransferConflictPolicy::Overwrite) => {
-                        fs::remove_file(&local_path).with_context(|| {
-                            format!(
-                                "failed to remove conflicting local file `{}`",
-                                local_path.display()
-                            )
-                        })?;
+                        if !local_path.is_dir() {
+                            fs::remove_file(&local_path).with_context(|| {
+                                format!(
+                                    "failed to remove conflicting local file `{}`",
+                                    local_path.display()
+                                )
+                            })?;
+                        }
                     }
                 }
             }
@@ -413,6 +474,15 @@ async fn execute_transfer(
                         on_queue_updated(queue);
                         return Ok(());
                     }
+                    Some(TransferConflictPolicy::AutoRename)
+                    | Some(TransferConflictPolicy::CancelCurrent) => {
+                        queue.mark_conflict(
+                            task_id,
+                            "Unsupported conflict policy for remote target",
+                        );
+                        on_queue_updated(queue);
+                        return Ok(());
+                    }
                     Some(TransferConflictPolicy::Overwrite) => {}
                 }
             }
@@ -435,6 +505,28 @@ async fn execute_transfer(
     }
 
     Ok(())
+}
+
+fn has_blocking_download_directory_conflict(
+    queue: &TransferQueue,
+    task: &crate::app::sftp::TransferTask,
+) -> bool {
+    let task_path = match &task.action {
+        TransferTaskAction::Download { local_path }
+        | TransferTaskAction::DownloadDirectory { local_path } => local_path.as_path(),
+        _ => return false,
+    };
+
+    queue.tasks.iter().any(|candidate| {
+        candidate.id != task.id
+            && candidate.session_id == task.session_id
+            && candidate.state == crate::app::sftp::TransferTaskState::Conflict
+            && matches!(
+                &candidate.action,
+                TransferTaskAction::DownloadDirectory { local_path }
+                    if task_path.starts_with(local_path.as_path())
+            )
+    })
 }
 
 async fn delete_remote_entry(

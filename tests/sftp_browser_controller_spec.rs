@@ -100,7 +100,13 @@ fn navigate_switches_to_manual_browse_and_pushes_history() {
     let mut controller = SftpBrowserController::default();
 
     let open = controller.open(session_id, "/srv/app");
-    controller.apply_loaded_directory(session_id, open.generation, open.request_id, "/srv/app", Vec::new());
+    controller.apply_loaded_directory(
+        session_id,
+        open.generation,
+        open.request_id,
+        "/srv/app",
+        Vec::new(),
+    );
 
     let navigate = controller.navigate(session_id, "/srv/app/releases");
 
@@ -123,7 +129,13 @@ fn follow_cwd_only_updates_when_follow_mode_is_enabled() {
     let mut controller = SftpBrowserController::default();
 
     let open = controller.open(session_id, "/srv/app");
-    controller.apply_loaded_directory(session_id, open.generation, open.request_id, "/srv/app", Vec::new());
+    controller.apply_loaded_directory(
+        session_id,
+        open.generation,
+        open.request_id,
+        "/srv/app",
+        Vec::new(),
+    );
 
     let follow = controller
         .follow_cwd(session_id, "/srv/app/current")
@@ -131,7 +143,13 @@ fn follow_cwd_only_updates_when_follow_mode_is_enabled() {
     assert_eq!(follow.path, "/srv/app/current");
 
     let manual = controller.navigate(session_id, "/srv/manual");
-    controller.apply_loaded_directory(session_id, manual.generation, manual.request_id, "/srv/manual", Vec::new());
+    controller.apply_loaded_directory(
+        session_id,
+        manual.generation,
+        manual.request_id,
+        "/srv/manual",
+        Vec::new(),
+    );
 
     assert!(
         controller
@@ -153,7 +171,13 @@ fn retry_moves_disconnected_session_back_to_connecting() {
     let mut controller = SftpBrowserController::default();
 
     let open = controller.open(session_id, "/srv/app");
-    controller.apply_loaded_directory(session_id, open.generation, open.request_id, "/srv/app", Vec::new());
+    controller.apply_loaded_directory(
+        session_id,
+        open.generation,
+        open.request_id,
+        "/srv/app",
+        Vec::new(),
+    );
     controller.mark_disconnected(session_id);
 
     let retry = controller
@@ -174,7 +198,13 @@ fn back_forward_and_up_navigation_issue_real_load_requests() {
     let mut controller = SftpBrowserController::default();
 
     let open = controller.open(session_id, "/srv/app");
-    controller.apply_loaded_directory(session_id, open.generation, open.request_id, "/srv/app", Vec::new());
+    controller.apply_loaded_directory(
+        session_id,
+        open.generation,
+        open.request_id,
+        "/srv/app",
+        Vec::new(),
+    );
 
     let navigate = controller.navigate(session_id, "/srv/app/releases");
     controller.apply_loaded_directory(
@@ -190,7 +220,13 @@ fn back_forward_and_up_navigation_issue_real_load_requests() {
         .expect("history back should produce a load request");
     assert_eq!(back.path, "/srv/app");
 
-    controller.apply_loaded_directory(session_id, back.generation, back.request_id, "/srv/app", Vec::new());
+    controller.apply_loaded_directory(
+        session_id,
+        back.generation,
+        back.request_id,
+        "/srv/app",
+        Vec::new(),
+    );
 
     let forward = controller
         .navigate_forward(session_id)
@@ -288,7 +324,8 @@ fn revisiting_a_cached_path_reuses_the_previous_snapshot_while_loading() {
     assert_eq!(state.mode, SftpPanelMode::Loading);
     assert_eq!(state.current_path, "/srv/app");
     assert_eq!(
-        state.entries
+        state
+            .entries
             .iter()
             .map(|entry| entry.name.as_str())
             .collect::<Vec<_>>(),

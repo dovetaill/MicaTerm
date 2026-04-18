@@ -12,7 +12,8 @@ impl ShellViewModel {
     }
 
     pub fn workspace_terminal_session_hidden(&self, session_id: &str) -> bool {
-        self.hidden_workspace_terminal_session_ids.contains(session_id)
+        self.hidden_workspace_terminal_session_ids
+            .contains(session_id)
     }
 
     pub fn hide_workspace_terminal_session(&mut self, session_id: &str) {
@@ -21,7 +22,8 @@ impl ShellViewModel {
     }
 
     pub fn unhide_workspace_terminal_session(&mut self, session_id: &str) {
-        self.hidden_workspace_terminal_session_ids.remove(session_id);
+        self.hidden_workspace_terminal_session_ids
+            .remove(session_id);
     }
 
     pub fn set_workspace_tabs(&mut self, tabs: Vec<WorkspaceTab>) {
@@ -36,7 +38,10 @@ impl ShellViewModel {
 
     pub fn active_workspace_terminal_session_id(&self) -> Option<&str> {
         let tab = self.active_workspace_tab()?;
-        if !tab.uses_terminal_surface() && !tab.uses_connection_progress_surface() && !tab.can_reconnect() {
+        if !tab.uses_terminal_surface()
+            && !tab.uses_connection_progress_surface()
+            && !tab.can_reconnect()
+        {
             return None;
         }
 
@@ -56,7 +61,9 @@ impl ShellViewModel {
 
     pub fn active_workspace_tab(&self) -> Option<&WorkspaceTab> {
         let active_id = self.active_workspace_tab_id.as_deref()?;
-        self.workspace_tabs.iter().find(|tab| tab.tab_id == active_id)
+        self.workspace_tabs
+            .iter()
+            .find(|tab| tab.tab_id == active_id)
     }
 
     pub fn activate_workspace_tab(&mut self, tab_id: &str) -> bool {

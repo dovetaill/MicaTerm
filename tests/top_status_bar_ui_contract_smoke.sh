@@ -60,6 +60,7 @@ grep -F 'callback open-sync-modal-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'callback settings-modal-close-requested();' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> sync-modal-open: false;' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <bool> settings-modal-open: false;' "$APP_WINDOW" >/dev/null
+grep -F 'in-out property <string> settings-modal-download-conflict-default: "ask";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-local-last-sync-text: "Never synced";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-remote-last-update-text: "Unknown";' "$APP_WINDOW" >/dev/null
 grep -F 'in-out property <string> sync-modal-primary-revision-text: "Unknown";' "$APP_WINDOW" >/dev/null
@@ -148,6 +149,11 @@ grep -F 'remote-status-loading: root.sync-modal-remote-status-loading;' "$APP_WI
 grep -F 'if root.settings-modal-open : settings-modal-shell := BlockingModalShell {' "$APP_WINDOW" >/dev/null
 grep -F 'settings-modal-overlay := SettingsModal {' "$APP_WINDOW" >/dev/null
 [[ -f "$SETTINGS_MODAL" ]]
+grep -F 'in property <string> download-conflict-default: "ask";' "$SETTINGS_MODAL" >/dev/null
+grep -F 'callback download-conflict-default-changed(string);' "$SETTINGS_MODAL" >/dev/null
+grep -F 'text: "Download conflict default"' "$SETTINGS_MODAL" >/dev/null
+grep -F 'root.download-conflict-default == "ask" ? "Ask every time" : root.download-conflict-default == "overwrite" ? "Overwrite existing files" : "Auto rename downloads"' "$SETTINGS_MODAL" >/dev/null
+grep -F 'root.download-conflict-default-changed(' "$SETTINGS_MODAL" >/dev/null
 grep -F 'in property <string> local-last-sync-text: "Never synced";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> remote-last-update-text: "Unknown";' "$SYNC_MODAL" >/dev/null
 grep -F 'in property <string> primary-revision-text: "Unknown";' "$SYNC_MODAL" >/dev/null

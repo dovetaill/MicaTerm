@@ -2,7 +2,7 @@
 
 use std::fs;
 
-use mica_term::app::ui_preferences::{UiPreferences, UiPreferencesStore};
+use mica_term::app::ui_preferences::{DownloadConflictDefault, UiPreferences, UiPreferencesStore};
 use mica_term::shell::view_model::RightPanelView;
 use mica_term::theme::ThemeMode;
 
@@ -21,6 +21,16 @@ fn ui_preferences_default_terminal_settings_match_memory_plan() {
 
     assert_eq!(prefs.terminal_scrollback_limit, 1500);
     assert!(prefs.terminal_active_idle_shrink_enabled);
+}
+
+#[test]
+fn ui_preferences_defaults_to_ask_for_download_conflicts() {
+    let prefs = UiPreferences::default();
+
+    assert_eq!(
+        prefs.download_conflict_default,
+        DownloadConflictDefault::Ask
+    );
 }
 
 #[test]
@@ -56,6 +66,26 @@ fn ui_preferences_roundtrip_terminal_settings() {
     let prefs = UiPreferences {
         terminal_scrollback_limit: 3000,
         terminal_active_idle_shrink_enabled: false,
+        ..UiPreferences::default()
+    };
+
+    store.save(&prefs).unwrap();
+    let loaded = store.load_or_default().unwrap();
+
+    assert_eq!(loaded, prefs);
+    let _ = std::fs::remove_file(temp_path);
+}
+
+#[test]
+fn ui_preferences_roundtrip_download_conflict_default() {
+    let temp_path = std::env::temp_dir()
+        .join("mica-term")
+        .join("tests")
+        .join("ui-preferences-download-conflict-default-roundtrip.json");
+
+    let store = UiPreferencesStore::new(temp_path.clone());
+    let prefs = UiPreferences {
+        download_conflict_default: DownloadConflictDefault::AutoRename,
         ..UiPreferences::default()
     };
 

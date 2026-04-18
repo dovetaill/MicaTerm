@@ -22,7 +22,8 @@ pub use browser_session::{
 pub use browser_state::SftpBrowserSessionState;
 pub use local_open::{
     SftpOpenAction, can_open_file_path_locally, can_open_folder_path_locally,
-    open_path_in_folder_locally, open_path_locally, prepare_local_open_path,
+    open_path_in_folder_locally, open_path_locally, prepare_local_open_path, reveal_path_locally,
+    trash_path_locally,
 };
 pub use local_ops::{
     LocalTransferEntry, build_local_download_path, build_remote_upload_path, scan_local_sources,

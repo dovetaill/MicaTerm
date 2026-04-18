@@ -26,13 +26,15 @@ fn active_workspace_identity_tracks_tab_id_instead_of_terminal_session_id() {
     let sftp_tab = WorkspaceTab::sftp("tab-files-1", "browser-1", "Files: Prod");
     let mut view_model = ShellViewModel::default();
     view_model.set_workspace_tabs(vec![terminal_tab.clone(), sftp_tab.clone()]);
-    view_model.set_active_workspace_terminal_surface(Some(TerminalSurfaceState::from_visible_lines(
-        Uuid::parse_str(terminal_tab.session_id.as_str()).expect("terminal session uuid"),
-        1,
-        24,
-        80,
-        vec!["pwd".into()],
-    )));
+    view_model.set_active_workspace_terminal_surface(Some(
+        TerminalSurfaceState::from_visible_lines(
+            Uuid::parse_str(terminal_tab.session_id.as_str()).expect("terminal session uuid"),
+            1,
+            24,
+            80,
+            vec!["pwd".into()],
+        ),
+    ));
 
     assert_eq!(
         view_model.active_workspace_tab_id(),

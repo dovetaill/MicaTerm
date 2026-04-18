@@ -10,8 +10,10 @@ export component SettingsModal inherits Rectangle {
     callback focus-restore-requested();
     in property <int> terminal-scrollback-limit: 1500;
     in property <bool> terminal-active-idle-shrink-enabled: true;
+    in property <string> download-conflict-default: "ask";
     callback terminal-scrollback-limit-changed(int);
     callback terminal-active-idle-shrink-enabled-changed(bool);
+    callback download-conflict-default-changed(string);
 
     background: ThemeTokens.assets-surface;
     border-radius: 0px;
@@ -188,6 +190,45 @@ export component SettingsModal inherits Rectangle {
                     clicked => {
                         root.terminal-active-idle-shrink-enabled-changed(
                             !root.terminal-active-idle-shrink-enabled
+                        );
+                    }
+                }
+            }
+
+            download-conflict-label := Text {
+                x: 20px;
+                y: 288px;
+                width: parent.width - 40px;
+                text: "Download conflict default";
+                color: ThemeTokens.text-primary;
+                opacity: 0.82;
+            }
+
+            download-conflict-toggle := Rectangle {
+                x: 20px;
+                y: 316px;
+                width: parent.width - 40px;
+                height: 32px;
+                border-radius: 6px;
+                background: ThemeTokens.control-hover-surface;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.download-conflict-default == "ask" ? "Ask every time" : root.download-conflict-default == "overwrite" ? "Overwrite existing files" : "Auto rename downloads";
+                    color: ThemeTokens.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                TouchArea {
+                    clicked => {
+                        root.download-conflict-default-changed(
+                            root.download-conflict-default == "ask"
+                                ? "overwrite"
+                                : root.download-conflict-default == "overwrite"
+                                    ? "auto-rename"
+                                    : "ask"
                         );
                     }
                 }

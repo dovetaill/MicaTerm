@@ -239,6 +239,7 @@ component ConflictBatchToggleRow inherits Rectangle {
 }
 
 export component SftpConflictModal inherits Rectangle {
+    in property <string> kind: "remote";
     in property <string> source-path: "";
     in property <string> target-path: "";
     in property <int> batch-conflict-count: 0;
@@ -248,6 +249,8 @@ export component SftpConflictModal inherits Rectangle {
     callback apply-to-batch-toggled(bool);
     callback replace-requested();
     callback skip-requested();
+    callback auto-rename-requested();
+    callback cancel-download-requested();
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
@@ -433,7 +436,7 @@ export component SftpConflictModal inherits Rectangle {
                 x: 20px;
                 y: 18px;
                 width: parent.width - 40px;
-                text: "The target already exists.";
+                text: root.kind == "download" ? "The local download target already exists." : "The target already exists.";
                 color: ThemeTokens.text-primary;
                 font-size: 15px;
                 font-weight: AppTypography.ui-font-weight-regular;
@@ -444,7 +447,9 @@ export component SftpConflictModal inherits Rectangle {
                 x: 20px;
                 y: 44px;
                 width: parent.width - 40px;
-                text: "Replace overwrites the existing target. Skip keeps it and marks this transfer as skipped.";
+                text: root.kind == "download"
+                    ? "Overwrite replaces the existing local target. Auto Rename picks a new local path. Cancel Download stops only this download."
+                    : "Replace overwrites the existing target. Skip keeps it and marks this transfer as skipped.";
                 color: ThemeTokens.text-secondary;
                 font-size: 12px;
                 wrap: word-wrap;
@@ -454,7 +459,7 @@ export component SftpConflictModal inherits Rectangle {
                 x: 20px;
                 y: 88px;
                 width: parent.width - 40px;
-                label: "Incoming item";
+                label: root.kind == "download" ? "Remote item" : "Incoming item";
                 value: root.source-path;
             }
 
@@ -462,7 +467,7 @@ export component SftpConflictModal inherits Rectangle {
                 x: 20px;
                 y: incoming-card.y + incoming-card.height + 10px;
                 width: parent.width - 40px;
-                label: "Existing target";
+                label: root.kind == "download" ? "Local target" : "Existing target";
                 value: root.target-path;
             }
 
@@ -526,7 +531,7 @@ export component SftpConflictModal inherits Rectangle {
             }
 
             cancel-button := ConflictDialogButton {
-                x: parent.width - 300px;
+                x: root.kind == "download" ? parent.width - 412px : parent.width - 300px;
                 y: 16px;
                 width: 88px;
                 label: "Cancel";
@@ -542,9 +547,34 @@ export component SftpConflictModal inherits Rectangle {
                 y: 16px;
                 width: 88px;
                 label: "Skip";
+                visible: root.kind != "download";
 
                 clicked => {
                     root.skip-requested();
+                }
+            }
+
+            cancel-download-button := ConflictDialogButton {
+                x: parent.width - 308px;
+                y: 16px;
+                width: 96px;
+                label: "Cancel Download";
+                visible: root.kind == "download";
+
+                clicked => {
+                    root.cancel-download-requested();
+                }
+            }
+
+            auto-rename-button := ConflictDialogButton {
+                x: parent.width - 204px;
+                y: 16px;
+                width: 92px;
+                label: "Auto Rename";
+                visible: root.kind == "download";
+
+                clicked => {
+                    root.auto-rename-requested();
                 }
             }
 
@@ -552,7 +582,7 @@ export component SftpConflictModal inherits Rectangle {
                 x: parent.width - 104px;
                 y: 16px;
                 width: 84px;
-                label: "Replace";
+                label: root.kind == "download" ? "Overwrite" : "Replace";
                 primary: true;
 
                 clicked => {

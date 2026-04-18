@@ -1870,7 +1870,9 @@ fn close_workspace_tab_by_id(
         .and_then(|browser_session| browser_session.linked_terminal_session_id.clone())
         .filter(|session_id| state.workspace_terminal_session_hidden(session_id));
 
-    state.file_browser_sessions.remove(tab.file_browser_session_id.as_str());
+    state
+        .file_browser_sessions
+        .remove(tab.file_browser_session_id.as_str());
     let closed = state.close_workspace_tab(tab_id);
     if !closed {
         return false;
@@ -4205,6 +4207,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     initial_view_model.set_settings_modal_terminal_active_idle_shrink_enabled(
         prefs.terminal_active_idle_shrink_enabled,
     );
+    initial_view_model
+        .set_settings_modal_download_conflict_default(prefs.download_conflict_default.as_str());
     let vault_root_dir = vault_runtime
         .root_dir
         .clone()
@@ -4405,41 +4409,45 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     Some(&manager),
                 );
             }
-            let (sftp_projection_changed, sftp_open_changed, sftp_retry_changed, sftp_follow_changed) =
-                if state.show_right_panel {
-                    let sftp_projection_changed =
-                        sftp::sync_active_sftp_projection_from_manager(&mut state, &manager);
-                    let mut controller = sftp_browser_controller_ref.borrow_mut();
-                    let open_changed = sftp::ensure_active_sftp_browser_started(
-                        &mut state,
-                        &mut controller,
-                        &manager,
-                        sftp_browser_async_runtime_ref.as_ref(),
-                        &sftp_browser_result_tx_ref,
-                    );
-                    let retry_changed = sftp::sync_active_sftp_browser_pending_request(
-                        &mut state,
-                        &mut controller,
-                        &manager,
-                        sftp_browser_async_runtime_ref.as_ref(),
-                        &sftp_browser_result_tx_ref,
-                    );
-                    let follow_changed = sftp::sync_active_sftp_browser_follow_request(
-                        &mut state,
-                        &mut controller,
-                        &manager,
-                        sftp_browser_async_runtime_ref.as_ref(),
-                        &sftp_browser_result_tx_ref,
-                    );
-                    (
-                        sftp_projection_changed,
-                        open_changed,
-                        retry_changed,
-                        follow_changed,
-                    )
-                } else {
-                    (false, false, false, false)
-                };
+            let (
+                sftp_projection_changed,
+                sftp_open_changed,
+                sftp_retry_changed,
+                sftp_follow_changed,
+            ) = if state.show_right_panel {
+                let sftp_projection_changed =
+                    sftp::sync_active_sftp_projection_from_manager(&mut state, &manager);
+                let mut controller = sftp_browser_controller_ref.borrow_mut();
+                let open_changed = sftp::ensure_active_sftp_browser_started(
+                    &mut state,
+                    &mut controller,
+                    &manager,
+                    sftp_browser_async_runtime_ref.as_ref(),
+                    &sftp_browser_result_tx_ref,
+                );
+                let retry_changed = sftp::sync_active_sftp_browser_pending_request(
+                    &mut state,
+                    &mut controller,
+                    &manager,
+                    sftp_browser_async_runtime_ref.as_ref(),
+                    &sftp_browser_result_tx_ref,
+                );
+                let follow_changed = sftp::sync_active_sftp_browser_follow_request(
+                    &mut state,
+                    &mut controller,
+                    &manager,
+                    sftp_browser_async_runtime_ref.as_ref(),
+                    &sftp_browser_result_tx_ref,
+                );
+                (
+                    sftp_projection_changed,
+                    open_changed,
+                    retry_changed,
+                    follow_changed,
+                )
+            } else {
+                (false, false, false, false)
+            };
             if projection_delta.sftp_changed
                 || sftp_projection_changed
                 || sftp_open_changed
@@ -4462,13 +4470,14 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
             let (workspace_sftp_open_changed, workspace_sftp_retry_changed) = {
                 let mut controller = sftp_browser_controller_ref.borrow_mut();
-                let workspace_sftp_open_changed = sftp::ensure_active_workspace_sftp_browser_started(
-                    &mut state,
-                    &mut controller,
-                    &manager,
-                    sftp_browser_async_runtime_ref.as_ref(),
-                    &sftp_browser_result_tx_ref,
-                );
+                let workspace_sftp_open_changed =
+                    sftp::ensure_active_workspace_sftp_browser_started(
+                        &mut state,
+                        &mut controller,
+                        &manager,
+                        sftp_browser_async_runtime_ref.as_ref(),
+                        &sftp_browser_result_tx_ref,
+                    );
                 let workspace_sftp_retry_changed =
                     sftp::sync_active_workspace_sftp_browser_pending_request(
                         &mut state,
@@ -5800,8 +5809,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 windowing::sync_ssh_host_key_modal_state(&window, &state);
             }
             "close-tab" => {
-                let Some(tab_id) = state.active_workspace_tab_id().map(str::to_owned)
-                else {
+                let Some(tab_id) = state.active_workspace_tab_id().map(str::to_owned) else {
                     return;
                 };
                 let had_active_surface = state.active_workspace_terminal_surface().is_some();

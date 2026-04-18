@@ -619,7 +619,10 @@ fn expanding_to_workspace_keeps_the_quick_browser_following_terminal_switches() 
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 3);
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "sftp");
-    assert_eq!(app.get_workspace_session_title().as_str(), "Files: Prod Bastion");
+    assert_eq!(
+        app.get_workspace_session_title().as_str(),
+        "Files: Prod Bastion"
+    );
 
     app.invoke_workspace_tab_selected(db_session_id.into());
     flush_runtime_projection();

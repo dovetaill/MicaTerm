@@ -297,6 +297,7 @@ export struct TransferCenterItem {
     can_open_file: bool,
     can_open_folder: bool,
     can_remove: bool,
+    remove_tooltip: string,
 }
 
 export component TransferCenter inherits Rectangle {
@@ -1037,7 +1038,7 @@ export component TransferCenter inherits Rectangle {
                                 danger: true;
                                 icon-source: root.close-icon;
                                 label: "Remove";
-                                tooltip-text: "Remove this record from the transfer center";
+                                tooltip-text: item.remove_tooltip;
                                 tooltip-source-id: item.id + "-remove";
                                 clicked => {
                                     root.remove-requested(item.id);

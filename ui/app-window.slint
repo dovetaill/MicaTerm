@@ -45,6 +45,7 @@ export component AppWindow inherits Window {
     in-out property <bool> settings-modal-open: false;
     in-out property <int> settings-modal-terminal-scrollback-limit: 1500;
     in-out property <bool> settings-modal-terminal-active-idle-shrink-enabled: true;
+    in-out property <string> settings-modal-download-conflict-default: "ask";
     in-out property <string> sync-modal-mode: "not-configured";
     in-out property <string> sync-modal-title: "Sync Settings";
     in-out property <string> sync-modal-headline: "";
@@ -178,6 +179,7 @@ export component AppWindow inherits Window {
     in-out property <string> workspace-paste-warning-text: "";
     in-out property <int> workspace-paste-warning-focus-sequence: 0;
     in-out property <bool> sftp-conflict-modal-open: false;
+    in-out property <string> sftp-conflict-modal-kind: "remote";
     in-out property <string> sftp-conflict-modal-source-path: "";
     in-out property <string> sftp-conflict-modal-target-path: "";
     in-out property <int> sftp-conflict-modal-batch-conflict-count: 0;
@@ -399,6 +401,7 @@ export component AppWindow inherits Window {
     callback settings-modal-close-requested();
     callback settings-modal-terminal-scrollback-limit-changed(int);
     callback settings-modal-terminal-active-idle-shrink-enabled-changed(bool);
+    callback settings-modal-download-conflict-default-changed(string);
     callback open-settings-panel-requested();
     callback open-appearance-panel-requested();
     callback open-sftp-panel-requested();
@@ -462,6 +465,8 @@ export component AppWindow inherits Window {
     callback sftp-conflict-modal-apply-to-batch-toggled(bool);
     callback sftp-conflict-modal-replace-requested();
     callback sftp-conflict-modal-skip-requested();
+    callback sftp-conflict-modal-auto-rename-requested();
+    callback sftp-conflict-modal-cancel-download-requested();
     callback blocking-modal-drag-requested(length, length);
     callback blocking-modal-drag-moved(length, length);
     callback blocking-modal-drag-ended();
@@ -1468,7 +1473,7 @@ export component AppWindow inherits Window {
     if root.settings-modal-open : settings-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
         modal-width: 560px;
-        modal-height: 340px;
+        modal-height: 420px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
 
@@ -1486,6 +1491,7 @@ export component AppWindow inherits Window {
             height: settings-modal-shell.content-height;
             terminal-scrollback-limit: root.settings-modal-terminal-scrollback-limit;
             terminal-active-idle-shrink-enabled: root.settings-modal-terminal-active-idle-shrink-enabled;
+            download-conflict-default: root.settings-modal-download-conflict-default;
 
             close-requested => {
                 root.settings-modal-close-requested();
@@ -1497,6 +1503,10 @@ export component AppWindow inherits Window {
 
             terminal-active-idle-shrink-enabled-changed(value) => {
                 root.settings-modal-terminal-active-idle-shrink-enabled-changed(value);
+            }
+
+            download-conflict-default-changed(value) => {
+                root.settings-modal-download-conflict-default-changed(value);
             }
 
             drag-requested(pointer-x, pointer-y) => {
@@ -2118,6 +2128,7 @@ export component AppWindow inherits Window {
             y: 0px;
             width: sftp-conflict-modal-shell.content-width;
             height: sftp-conflict-modal-shell.content-height;
+            kind: root.sftp-conflict-modal-kind;
             source-path: root.sftp-conflict-modal-source-path;
             target-path: root.sftp-conflict-modal-target-path;
             batch-conflict-count: root.sftp-conflict-modal-batch-conflict-count;
@@ -2138,6 +2149,14 @@ export component AppWindow inherits Window {
 
             skip-requested => {
                 root.sftp-conflict-modal-skip-requested();
+            }
+
+            auto-rename-requested => {
+                root.sftp-conflict-modal-auto-rename-requested();
+            }
+
+            cancel-download-requested => {
+                root.sftp-conflict-modal-cancel-download-requested();
             }
 
             drag-requested(pointer-x, pointer-y) => {

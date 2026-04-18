@@ -2077,3 +2077,29 @@ fn completed_download_paths_disable_open_folder_when_parent_directory_is_missing
         "open-folder should disable itself when neither the file nor its containing directory exists"
     );
 }
+
+#[test]
+fn transfer_center_completed_download_remove_uses_trash_semantics() {
+    let mut view_model = ShellViewModel::default();
+    let temp_root = unique_transfer_temp_path("remove-trash");
+    fs::create_dir_all(&temp_root).expect("create transfer remove temp root");
+    let local_path = temp_root.join("release.env");
+    fs::write(&local_path, b"PORT=22\n").expect("write local transfer target");
+
+    view_model.sftp_transfer_tasks = vec![completed_download_task(local_path.clone())];
+
+    assert_eq!(
+        view_model.transfer_task_local_remove_path("download-task"),
+        Some(local_path.clone()),
+        "completed downloads should hand the existing artifact to the remove flow so the desktop trash helper can run before the row disappears"
+    );
+    assert!(
+        view_model
+            .transfer_task_remove_tooltip("download-task")
+            .contains("Trash"),
+        "completed downloads should advertise trash semantics instead of implying a record-only delete"
+    );
+
+    fs::remove_file(&local_path).expect("remove local transfer target");
+    fs::remove_dir_all(&temp_root).expect("remove transfer temp root");
+}

@@ -10,8 +10,8 @@ use anyhow::{Result, anyhow};
 use mica_term::app::sftp::{
     LocalTransferEntry, SftpBackend, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpPanelMode,
     SftpRuntimeHandle, SftpSessionBindingState, TransferConflictPolicy, TransferQueue,
-    TransferTaskState, collect_download_targets, delete_entries, execute_queued_transfers,
-    move_entry_between_directories, scan_local_sources,
+    TransferTask, TransferTaskAction, TransferTaskState, collect_download_targets, delete_entries,
+    execute_queued_transfers, move_entry_between_directories, scan_local_sources,
 };
 use uuid::Uuid;
 
@@ -200,6 +200,14 @@ fn directory_entry(id: &str, name: &str, path: &str) -> SftpDirectoryEntry {
         kind: SftpDirectoryEntryKind::Directory,
         modified_unix_seconds: None,
         size_bytes: None,
+    }
+}
+
+fn task_local_download_path(task: &TransferTask) -> Option<PathBuf> {
+    match &task.action {
+        TransferTaskAction::Download { local_path }
+        | TransferTaskAction::DownloadDirectory { local_path } => Some(local_path.clone()),
+        _ => None,
     }
 }
 
@@ -467,6 +475,127 @@ async fn recursive_folder_download_preserves_nested_files_and_empty_directories(
     assert!(
         root.join("releases/empty-dir").is_dir(),
         "recursive folder download should preserve empty directories instead of dropping them"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn download_auto_rename_uses_numeric_suffixes() {
+    let root = temp_test_root("download-auto-rename");
+    let existing_path = root.join("report.txt");
+    fs::write(&existing_path, b"existing report").expect("seed conflicting local file");
+
+    let backend = Arc::new(MemoryBackend::with_directories(&["/srv"]));
+    backend.insert_remote_file("/srv/report.txt", b"fresh report");
+    let runtime = SftpRuntimeHandle::new(backend);
+
+    let mut queue = TransferQueue::default();
+    let task_id = queue
+        .enqueue_download(
+            "session-a",
+            root.as_path(),
+            &[file_entry("report", "report.txt", "/srv/report.txt")],
+        )
+        .into_iter()
+        .next()
+        .expect("download task id");
+
+    execute_queued_transfers(&runtime, &mut queue)
+        .await
+        .expect("run queued download to conflict");
+
+    assert_eq!(
+        queue.task(&task_id).expect("conflicted task").state,
+        TransferTaskState::Conflict
+    );
+    assert!(queue.resume_conflict(&task_id, TransferConflictPolicy::AutoRename));
+    assert_eq!(
+        task_local_download_path(queue.task(&task_id).expect("renamed task")).as_deref(),
+        Some(root.join("report (1).txt").as_path())
+    );
+
+    execute_queued_transfers(&runtime, &mut queue)
+        .await
+        .expect("rerun auto-renamed download");
+
+    assert_eq!(
+        queue.task(&task_id).expect("completed task").state,
+        TransferTaskState::Completed
+    );
+    assert_eq!(
+        fs::read(root.join("report (1).txt")).expect("read renamed download"),
+        b"fresh report".to_vec()
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn directory_download_auto_rename_rewrites_nested_targets() {
+    let root = temp_test_root("download-directory-auto-rename");
+    fs::create_dir_all(root.join("logs")).expect("seed conflicting download root");
+
+    let backend = Arc::new(MemoryBackend::with_directories(&["/srv", "/srv/logs"]));
+    backend.set_directory_entries(
+        "/srv/logs",
+        vec![file_entry("app-log", "app.log", "/srv/logs/app.log")],
+    );
+    backend.insert_remote_file("/srv/logs/app.log", b"log-bytes");
+    let runtime = SftpRuntimeHandle::new(backend);
+
+    let download_targets = collect_download_targets(
+        &runtime,
+        root.as_path(),
+        &[directory_entry("logs-dir", "logs", "/srv/logs")],
+    )
+    .await
+    .expect("collect recursive folder download targets");
+
+    let mut queue = TransferQueue::default();
+    let task_ids = queue.enqueue_download_targets("session-a", &download_targets);
+    let root_task_id = task_ids.first().expect("root task id").clone();
+    let child_task_id = task_ids.get(1).expect("child task id").clone();
+
+    execute_queued_transfers(&runtime, &mut queue)
+        .await
+        .expect("run queued directory download to conflict");
+
+    assert_eq!(
+        queue
+            .task(&root_task_id)
+            .expect("conflicted root task")
+            .state,
+        TransferTaskState::Conflict
+    );
+    assert_eq!(
+        queue.task(&child_task_id).expect("queued child task").state,
+        TransferTaskState::Queued
+    );
+
+    assert!(queue.resume_conflict(&root_task_id, TransferConflictPolicy::AutoRename));
+    assert_eq!(
+        task_local_download_path(queue.task(&child_task_id).expect("renamed child")).as_deref(),
+        Some(root.join("logs (1)").join("app.log").as_path())
+    );
+
+    execute_queued_transfers(&runtime, &mut queue)
+        .await
+        .expect("rerun auto-renamed directory download");
+
+    assert_eq!(
+        queue
+            .task(&root_task_id)
+            .expect("completed root task")
+            .state,
+        TransferTaskState::Completed
+    );
+    assert_eq!(
+        queue
+            .task(&child_task_id)
+            .expect("completed child task")
+            .state,
+        TransferTaskState::Completed
+    );
+    assert_eq!(
+        fs::read(root.join("logs (1)").join("app.log")).expect("read renamed nested download"),
+        b"log-bytes".to_vec()
     );
 }
 
