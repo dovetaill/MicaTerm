@@ -2,6 +2,14 @@
 
 use super::*;
 
+fn transfer_was_skipped(task: &crate::app::sftp::TransferTask) -> bool {
+    task.state == crate::app::sftp::TransferTaskState::Cancelled
+        && task
+            .error_message
+            .as_deref()
+            .is_some_and(|message| message.starts_with("Skipped "))
+}
+
 fn transfer_state_priority(state: crate::app::sftp::TransferTaskState) -> usize {
     match state {
         crate::app::sftp::TransferTaskState::Running => 0,
@@ -14,8 +22,12 @@ fn transfer_state_priority(state: crate::app::sftp::TransferTaskState) -> usize 
     }
 }
 
-fn transfer_status_label(state: crate::app::sftp::TransferTaskState) -> &'static str {
-    match state {
+fn transfer_status_label(task: &crate::app::sftp::TransferTask) -> &'static str {
+    if transfer_was_skipped(task) {
+        return "Skipped";
+    }
+
+    match task.state {
         crate::app::sftp::TransferTaskState::Queued => "Queued",
         crate::app::sftp::TransferTaskState::Running => "Running",
         crate::app::sftp::TransferTaskState::Paused => "Paused",
@@ -84,7 +96,13 @@ fn transfer_progress_label(task: &crate::app::sftp::TransferTask) -> String {
         crate::app::sftp::TransferTaskState::Running => "Working".into(),
         crate::app::sftp::TransferTaskState::Paused => "Paused".into(),
         crate::app::sftp::TransferTaskState::Completed => "Done".into(),
-        crate::app::sftp::TransferTaskState::Cancelled => "Cancelled".into(),
+        crate::app::sftp::TransferTaskState::Cancelled => {
+            if transfer_was_skipped(task) {
+                "Skipped".into()
+            } else {
+                "Cancelled".into()
+            }
+        }
         crate::app::sftp::TransferTaskState::Failed
         | crate::app::sftp::TransferTaskState::Conflict => "Needs attention".into(),
     }
@@ -108,6 +126,23 @@ fn transfer_progress_value(task: &crate::app::sftp::TransferTask) -> f32 {
 }
 
 fn transfer_error_summary(task: &crate::app::sftp::TransferTask) -> String {
+    if task.state == crate::app::sftp::TransferTaskState::Conflict {
+        return match &task.action {
+            crate::app::sftp::TransferTaskAction::Download { .. }
+            | crate::app::sftp::TransferTaskAction::DownloadDirectory { .. } => {
+                "A local file with the same name already exists locally.".into()
+            }
+            crate::app::sftp::TransferTaskAction::Upload { .. }
+            | crate::app::sftp::TransferTaskAction::UploadDirectory { .. }
+            | crate::app::sftp::TransferTaskAction::Move => {
+                "An item with the same name already exists at the destination.".into()
+            }
+            crate::app::sftp::TransferTaskAction::Delete { .. } => {
+                "The target item already exists and needs a decision.".into()
+            }
+        };
+    }
+
     task.error_message.clone().unwrap_or_default()
 }
 
@@ -205,7 +240,7 @@ fn project_transfer_center_items(state: &ShellViewModel) -> Vec<TransferCenterIt
                     .into(),
                 direction_label: transfer_direction_label(task).into(),
                 detail: transfer_task_detail(task).into(),
-                status_label: transfer_status_label(task.state).into(),
+                status_label: transfer_status_label(task).into(),
                 status_tone: transfer_status_tone(task.state).into(),
                 progress_value: transfer_progress_value(task),
                 progress_label: transfer_progress_label(task).into(),

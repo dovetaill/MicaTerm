@@ -69,6 +69,7 @@ component TransferCenterRowActionButton inherits Rectangle {
     in property <string> label;
     in property <image> icon-source;
     in property <bool> emphasized: false;
+    in property <bool> recommended: false;
     in property <bool> danger: false;
     in property <bool> enabled: true;
     in property <string> tooltip-text: "";
@@ -77,6 +78,8 @@ component TransferCenterRowActionButton inherits Rectangle {
         ? ThemeTokens.divider-subtle
         : root.danger
             ? ThemeTokens.divider-subtle
+            : root.recommended
+                ? ThemeTokens.accent
             : root.emphasized
                 ? ThemeTokens.status-pill-border
                 : ThemeTokens.divider-subtle;
@@ -87,12 +90,16 @@ component TransferCenterRowActionButton inherits Rectangle {
             : touch.pressed
                 ? root.danger
                     ? ThemeTokens.status-error-accent
+                    : root.recommended
+                        ? ThemeTokens.conflict-dialog-recommended-hover-surface
                     : root.emphasized
                         ? ThemeTokens.accent
                         : ThemeTokens.divider-strong
                 : touch.has-hover
                     ? root.danger
                         ? ThemeTokens.status-error-accent
+                        : root.recommended
+                            ? ThemeTokens.accent
                         : root.emphasized
                             ? ThemeTokens.accent
                             : ThemeTokens.status-pill-border
@@ -103,6 +110,8 @@ component TransferCenterRowActionButton inherits Rectangle {
             ? (touch.has-hover || touch.pressed || root.has-focus
                 ? ThemeTokens.status-error-accent
                 : ThemeTokens.text-muted)
+            : root.recommended
+                ? ThemeTokens.danger-fg
             : root.emphasized
                 ? ThemeTokens.text-primary
                 : (touch.has-hover || touch.pressed || root.has-focus
@@ -125,14 +134,24 @@ component TransferCenterRowActionButton inherits Rectangle {
         : touch.pressed
             ? root.danger
                 ? ThemeTokens.status-error-surface
+                : root.recommended
+                    ? ThemeTokens.conflict-dialog-recommended-hover-surface
                 : ThemeTokens.control-pressed-surface
             : root.has-focus
-                ? ThemeTokens.control-active-surface
+                ? root.danger
+                    ? ThemeTokens.status-error-surface
+                    : root.recommended
+                        ? ThemeTokens.conflict-dialog-recommended-surface
+                        : ThemeTokens.control-active-surface
                 : touch.has-hover
                     ? root.danger
                         ? ThemeTokens.status-error-surface
+                        : root.recommended
+                            ? ThemeTokens.conflict-dialog-recommended-hover-surface
                         : ThemeTokens.control-hover-surface
-                    : root.emphasized
+                    : root.recommended
+                        ? ThemeTokens.conflict-dialog-recommended-surface
+                        : root.emphasized
                         ? ThemeTokens.utility-panel-empty-surface
                         : ThemeTokens.utility-panel-section-surface;
     accessible-role: AccessibleRole.button;
@@ -336,6 +355,7 @@ export component TransferCenter inherits Rectangle {
     private property <image> download-icon: @image-url("../../assets/icons/fluent/arrow-download-20-regular.svg");
     private property <image> delete-icon: @image-url("../../assets/icons/fluent/delete-20-regular.svg");
     private property <image> move-icon: @image-url("../../assets/icons/fluent/arrow-sync-20-regular.svg");
+    private property <image> resolve-icon: @image-url("../../assets/icons/fluent/edit-20-regular.svg");
     private property <image> document-icon: @image-url("../../assets/icons/fluent/document-20-regular.svg");
     private property <image> folder-open-icon: @image-url("../../assets/icons/fluent/folder-open-20-regular.svg");
     private property <image> retry-icon: @image-url("../../assets/icons/fluent/arrow-clockwise-20-regular.svg");
@@ -1115,10 +1135,10 @@ export component TransferCenter inherits Rectangle {
                                 y: row.action-row-y;
                                 width: row.attention-primary-width;
                                 visible: item.can_resolve_conflict;
-                                emphasized: true;
-                                icon-source: root.move-icon;
+                                recommended: true;
+                                icon-source: root.resolve-icon;
                                 label: "Resolve";
-                                tooltip-text: "Resolve transfer conflict";
+                                tooltip-text: "Review conflict options for this transfer";
                                 tooltip-source-id: item.id + "-resolve";
                                 clicked => {
                                     root.resolve-conflict-requested(item.id);
@@ -1142,7 +1162,7 @@ export component TransferCenter inherits Rectangle {
                                 enabled: true;
                                 icon-source: root.workspace-icon;
                                 label: "Workspace";
-                                tooltip-text: "Open task in SFTP workspace";
+                                tooltip-text: "Open this conflict in the SFTP workspace";
                                 tooltip-source-id: item.id + "-workspace";
                                 clicked => {
                                     root.open-workspace-requested(item.id);

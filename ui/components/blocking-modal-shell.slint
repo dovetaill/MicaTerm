@@ -6,6 +6,12 @@ export component BlockingModalShell inherits Rectangle {
     in property <length> modal-height: 240px;
     in-out property <length> offset-x: 0px;
     in-out property <length> offset-y: 0px;
+    in property <length> modal-radius: 0px;
+    in property <brush> modal-surface: ThemeTokens.dark-mode ? #1b2230 : #fbfdff;
+    in property <brush> modal-border-color: ThemeTokens.dark-mode ? #ffffff30 : #0f172a38;
+    in property <brush> modal-shadow-soft: ThemeTokens.dark-mode ? #00000024 : #0f172a12;
+    in property <brush> modal-shadow-strong: ThemeTokens.dark-mode ? #00000036 : #0f172a14;
+    in property <brush> modal-glow: transparent;
     out property <length> content-width: content-host.width;
     out property <length> content-height: content-host.height;
     callback drag-requested(length, length);
@@ -61,13 +67,31 @@ export component BlockingModalShell inherits Rectangle {
         }
     }
 
-    modal-shadow := Rectangle {
-        x: root.resolved-modal-x + 6px;
-        y: root.resolved-modal-y + 12px;
+    modal-shadow-far := Rectangle {
+        x: root.resolved-modal-x + 8px;
+        y: root.resolved-modal-y + 14px;
         width: root.resolved-modal-width;
         height: root.resolved-modal-height;
-        border-radius: 0px;
-        background: ThemeTokens.dark-mode ? #00000036 : #0f172a14;
+        border-radius: root.modal-radius + 2px;
+        background: root.modal-shadow-strong;
+    }
+
+    modal-shadow-near := Rectangle {
+        x: root.resolved-modal-x + 3px;
+        y: root.resolved-modal-y + 7px;
+        width: root.resolved-modal-width;
+        height: root.resolved-modal-height;
+        border-radius: root.modal-radius + 1px;
+        background: root.modal-shadow-soft;
+    }
+
+    modal-glow := Rectangle {
+        x: root.resolved-modal-x - 2px;
+        y: root.resolved-modal-y - 2px;
+        width: root.resolved-modal-width + 4px;
+        height: root.resolved-modal-height + 4px;
+        border-radius: root.modal-radius + 2px;
+        background: root.modal-glow;
     }
 
     modal-frame := Rectangle {
@@ -76,10 +100,10 @@ export component BlockingModalShell inherits Rectangle {
         width: root.resolved-modal-width;
         height: root.resolved-modal-height;
         clip: true;
-        border-radius: 0px;
+        border-radius: root.modal-radius;
         border-width: 1px;
-        border-color: ThemeTokens.dark-mode ? #ffffff30 : #0f172a38;
-        background: ThemeTokens.dark-mode ? #1b2230 : #fbfdff;
+        border-color: root.modal-border-color;
+        background: root.modal-surface;
 
         content-host := Rectangle {
             x: 0px;

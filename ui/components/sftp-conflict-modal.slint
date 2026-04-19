@@ -1,35 +1,66 @@
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
 import { TitlebarTooltip } from "titlebar-tooltip.slint";
+import { ModalBodyScrollArea, ModalFooterBar } from "modal-chrome.slint";
 
 component ConflictDialogButton inherits Rectangle {
     in property <string> label: "";
     in property <bool> primary: false;
+    in property <bool> destructive: false;
     out property <bool> has-focus: button-focus.has-focus;
     callback clicked();
 
-    height: 34px;
-    border-radius: 0px;
+    min-width: 104px;
+    preferred-width: max(104px, label-metric.preferred-width + 34px);
+    height: 40px;
+    border-radius: 10px;
     border-width: 1px;
     border-color: root.has-focus ? ThemeTokens.focus-ring
+        : root.destructive ? ThemeTokens.conflict-dialog-destructive-border
         : root.primary ? ThemeTokens.accent
         : ThemeTokens.divider-subtle;
-    background: button-touch.pressed ? ThemeTokens.control-pressed-surface
-        : root.has-focus ? ThemeTokens.control-active-surface
-        : button-touch.has-hover ? ThemeTokens.control-hover-surface
-        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
+    background: button-touch.pressed
+        ? root.destructive ? ThemeTokens.conflict-dialog-destructive-hover-surface
+            : root.primary ? ThemeTokens.conflict-dialog-recommended-hover-surface
+            : ThemeTokens.control-pressed-surface
+        : root.has-focus
+            ? root.destructive ? ThemeTokens.conflict-dialog-destructive-surface
+                : root.primary ? ThemeTokens.conflict-dialog-recommended-surface
+                : ThemeTokens.control-hover-surface
+            : button-touch.has-hover
+                ? root.destructive ? ThemeTokens.conflict-dialog-destructive-hover-surface
+                    : root.primary ? ThemeTokens.conflict-dialog-recommended-hover-surface
+                    : ThemeTokens.control-hover-surface
+                : root.destructive ? ThemeTokens.conflict-dialog-destructive-surface
+                    : root.primary ? ThemeTokens.conflict-dialog-recommended-surface
+                    : ThemeTokens.control-active-surface;
     accessible-role: AccessibleRole.button;
     accessible-label: root.label;
     accessible-action-default => { button-touch.clicked(); }
     forward-focus: button-focus;
 
+    public function focus-button() {
+        button-focus.focus();
+    }
+
+    label-metric := Text {
+        width: 0px;
+        height: 0px;
+        text: root.label;
+        color: transparent;
+        font-family: AppTypography.ui-font-family;
+        font-size: 12px;
+        font-weight: AppTypography.ui-font-weight-regular;
+    }
+
     Text {
         width: parent.width;
         height: parent.height;
         text: root.label;
-        color: ThemeTokens.text-primary;
+        color: root.primary ? ThemeTokens.danger-fg : ThemeTokens.text-primary;
         horizontal-alignment: center;
         vertical-alignment: center;
+        font-family: AppTypography.ui-font-family;
         font-size: 12px;
         font-weight: AppTypography.ui-font-weight-regular;
     }
@@ -57,7 +88,7 @@ component ConflictDialogButton inherits Rectangle {
 }
 
 component ConflictIconButton inherits Rectangle {
-    in property <string> glyph: "";
+    in property <image> icon-source;
     in property <string> action-label: "";
     in property <string> tooltip-text: "";
     in property <string> tooltip-source-id: "";
@@ -68,25 +99,28 @@ component ConflictIconButton inherits Rectangle {
     callback tooltip-open-requested(string, string, length, length, length);
     callback tooltip-close-requested(string);
 
-    border-radius: 0px;
+    border-radius: 10px;
     border-width: 1px;
-    border-color: root.has-focus ? ThemeTokens.focus-ring : ThemeTokens.divider-subtle;
+    border-color: root.has-focus ? ThemeTokens.focus-ring
+        : root.has-hover ? ThemeTokens.divider-strong
+        : ThemeTokens.divider-subtle;
     background: button-touch.pressed ? ThemeTokens.control-pressed-surface
-        : root.has-focus ? ThemeTokens.control-active-surface
+        : root.has-focus ? ThemeTokens.control-hover-surface
         : button-touch.has-hover ? ThemeTokens.control-hover-surface
-        : ThemeTokens.control-active-surface;
+        : transparent;
     accessible-role: AccessibleRole.button;
     accessible-label: root.action-label;
     accessible-action-default => { button-touch.clicked(); }
     forward-focus: button-focus;
 
-    Text {
-        width: parent.width;
-        height: parent.height;
-        text: root.glyph;
-        color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    if (root.icon-source.width > 0 && root.icon-source.height > 0) : Image {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        source <=> root.icon-source;
+        image-fit: contain;
+        colorize: root.has-hover || root.has-focus ? ThemeTokens.text-primary : ThemeTokens.text-secondary;
     }
 
     changed tooltip-active => {
@@ -130,31 +164,36 @@ component ConflictInfoCard inherits Rectangle {
     in property <string> label: "";
     in property <string> value: "";
 
-    height: max(58px, value-copy.preferred-height + 30px);
-    border-radius: 0px;
+    height: max(64px, path-value.preferred-height + 34px);
+    border-radius: 12px;
     border-width: 1px;
-    border-color: ThemeTokens.divider-subtle;
-    background: ThemeTokens.control-active-surface;
+    border-color: ThemeTokens.conflict-dialog-section-border;
+    background: ThemeTokens.conflict-dialog-path-surface;
+    clip: true;
 
     Text {
-        x: 12px;
-        y: 8px;
-        width: parent.width - 24px;
+        x: 14px;
+        y: 10px;
+        width: parent.width - 28px;
         text: root.label;
-        color: ThemeTokens.text-secondary;
+        color: ThemeTokens.text-muted;
+        font-family: AppTypography.ui-font-family;
         font-size: 11px;
         font-weight: AppTypography.ui-font-weight-regular;
+        overflow: elide;
     }
 
-    value-copy := Text {
-        x: 12px;
-        y: 24px;
-        width: parent.width - 24px;
+    path-value := Text {
+        x: 14px;
+        y: 29px;
+        width: parent.width - 28px;
         text: root.value;
         color: ThemeTokens.text-primary;
+        font-family: AppTypography.ui-font-family;
         font-size: 12px;
         font-weight: AppTypography.ui-font-weight-regular;
-        wrap: word-wrap;
+        vertical-alignment: center;
+        overflow: elide;
     }
 }
 
@@ -165,15 +204,15 @@ component ConflictBatchToggleRow inherits Rectangle {
     out property <bool> has-focus: toggle-focus.has-focus;
     callback toggled(bool);
 
-    border-radius: 0px;
+    border-radius: 10px;
     border-width: 1px;
     border-color: root.has-focus ? ThemeTokens.focus-ring
         : root.has-hover ? ThemeTokens.divider-strong
-        : ThemeTokens.divider-subtle;
+        : ThemeTokens.conflict-dialog-section-border;
     background: toggle-touch.pressed ? ThemeTokens.control-pressed-surface
-        : root.has-focus ? ThemeTokens.control-active-surface
+        : root.has-focus ? ThemeTokens.control-hover-surface
         : root.has-hover ? ThemeTokens.control-hover-surface
-        : ThemeTokens.workspace-surface;
+        : ThemeTokens.conflict-dialog-path-surface;
     accessible-role: AccessibleRole.checkbox;
     accessible-checkable: true;
     accessible-label: root.label;
@@ -182,11 +221,11 @@ component ConflictBatchToggleRow inherits Rectangle {
     forward-focus: toggle-focus;
 
     checkbox := Rectangle {
-        x: 10px;
-        y: 10px;
+        x: 12px;
+        y: 11px;
         width: 18px;
         height: 18px;
-        border-radius: 0px;
+        border-radius: 6px;
         border-width: 1px;
         border-color: root.checked ? ThemeTokens.accent
             : root.has-focus ? ThemeTokens.focus-ring
@@ -197,20 +236,22 @@ component ConflictBatchToggleRow inherits Rectangle {
             width: parent.width;
             height: parent.height;
             text: root.checked ? "✓" : "";
-            color: ThemeTokens.text-primary;
+            color: ThemeTokens.danger-fg;
             horizontal-alignment: center;
             vertical-alignment: center;
+            font-family: AppTypography.ui-font-family;
             font-size: 12px;
             font-weight: AppTypography.ui-font-weight-regular;
         }
     }
 
     Text {
-        x: 38px;
-        y: 5px;
-        width: parent.width - 50px;
+        x: 40px;
+        y: 10px;
+        width: parent.width - 52px;
         text: root.label;
         color: ThemeTokens.text-primary;
+        font-family: AppTypography.ui-font-family;
         font-size: 12px;
         font-weight: AppTypography.ui-font-weight-regular;
         wrap: word-wrap;
@@ -250,12 +291,13 @@ export component SftpConflictModal inherits Rectangle {
     callback replace-requested();
     callback skip-requested();
     callback auto-rename-requested();
-    callback cancel-download-requested();
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
-    private property <length> footer-height: 66px;
+    private property <image> close-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
+    private property <length> header-height: 76px;
+    private property <length> footer-height: 84px;
     private property <string> tooltip-text-value: "";
     private property <bool> tooltip-visible-value: false;
     private property <string> tooltip-source-id-value: "";
@@ -264,18 +306,46 @@ export component SftpConflictModal inherits Rectangle {
     private property <length> tooltip-anchor-y-value: 0px;
     private property <length> tooltip-anchor-width-value: 0px;
 
+    function subtitle-copy() -> string {
+        if root.kind == "download" {
+            return "This affects the current download only.";
+        }
+        return "This affects the current transfer only.";
+    }
+
+    function lead-copy() -> string {
+        if root.kind == "download" {
+            return "A file with the same name already exists locally.";
+        }
+        return "An item with the same name already exists at the destination.";
+    }
+
+    function detail-copy() -> string {
+        if root.kind == "download" {
+            return "Choose how to continue this download.";
+        }
+        return "Choose how to continue this transfer.";
+    }
+
     function batch-scope-copy() -> string {
         if root.batch-conflict-count == 1 {
-            return "1 other conflict is waiting in this folder.";
+            return "Auto Rename or Replace Existing can also be applied to the other conflict in this folder. Skip This Download always affects only this item.";
         }
-        return root.batch-conflict-count + " other conflicts are waiting in this folder.";
+        return "Auto Rename or Replace Existing can also be applied to the other " + root.batch-conflict-count + " conflicts in this folder. Skip This Download always affects only this item.";
     }
 
     function batch-toggle-copy() -> string {
         if root.batch-conflict-count == 1 {
-            return "Apply this choice to the other conflict in this folder.";
+            return "Apply the selected action to the other conflict in this folder.";
         }
-        return "Apply this choice to the other " + root.batch-conflict-count + " conflicts in this folder.";
+        return "Apply the selected action to the other " + root.batch-conflict-count + " conflicts in this folder.";
+    }
+
+    function close-action-label() -> string {
+        if root.kind == "download" {
+            return "Skip this download";
+        }
+        return "Skip this transfer";
     }
 
     function schedule-tooltip(source-id: string, text: string, anchor-x: length, anchor-y: length, anchor-width: length) {
@@ -328,7 +398,11 @@ export component SftpConflictModal inherits Rectangle {
     }
 
     public function focus-dialog() {
-        modal-focus.focus();
+        if root.kind == "download" {
+            auto-rename-button.focus-button();
+        } else {
+            replace-button.focus-button();
+        }
     }
 
     modal-focus := FocusScope {
@@ -340,12 +414,6 @@ export component SftpConflictModal inherits Rectangle {
                 root.focus-restore-requested();
                 root.close-requested();
                 accept
-            } else if (event.text == Key.Space && root.batch-conflict-count > 0) {
-                root.apply-to-batch-toggled(!root.apply-to-batch);
-                accept
-            } else if (event.text == Key.Return) {
-                root.replace-requested();
-                accept
             } else {
                 reject
             }
@@ -355,23 +423,35 @@ export component SftpConflictModal inherits Rectangle {
             x: 0px;
             y: 0px;
             width: parent.width;
-            height: 56px;
-            background: ThemeTokens.assets-surface;
+            height: root.header-height;
+            background: ThemeTokens.conflict-dialog-header-surface;
 
             Text {
-                x: 20px;
-                y: 0px;
-                width: parent.width - 72px;
-                height: parent.height;
+                x: 22px;
+                y: 14px;
+                width: parent.width - 86px;
                 text: "Resolve Transfer Conflict";
                 color: ThemeTokens.text-primary;
+                font-family: AppTypography.ui-font-family;
                 font-size: 18px;
                 font-weight: AppTypography.ui-font-weight-regular;
-                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                x: 22px;
+                y: 40px;
+                width: parent.width - 86px;
+                text: root.subtitle-copy();
+                color: ThemeTokens.text-secondary;
+                font-family: AppTypography.ui-font-family;
+                font-size: 11px;
+                font-weight: AppTypography.ui-font-weight-regular;
+                overflow: elide;
             }
 
             drag-touch := TouchArea {
-                width: parent.width - 48px;
+                width: parent.width - 60px;
                 height: parent.height;
 
                 pointer-event(event) => {
@@ -394,13 +474,13 @@ export component SftpConflictModal inherits Rectangle {
             }
 
             close-button := ConflictIconButton {
-                x: parent.width - 40px;
-                y: 12px;
+                x: parent.width - 46px;
+                y: 18px;
                 width: 28px;
                 height: 28px;
-                glyph: "×";
-                action-label: "Close conflict dialog";
-                tooltip-text: "Close conflict dialog";
+                icon-source: root.close-icon;
+                action-label: root.close-action-label();
+                tooltip-text: root.close-action-label();
                 tooltip-source-id: "sftp-conflict-close";
 
                 clicked => {
@@ -421,91 +501,91 @@ export component SftpConflictModal inherits Rectangle {
                 y: parent.height - 1px;
                 width: parent.width;
                 height: 1px;
-                background: ThemeTokens.divider-subtle;
+                background: ThemeTokens.conflict-dialog-section-border;
             }
         }
 
-        body := Rectangle {
+        body := ModalBodyScrollArea {
             x: 0px;
             y: header.height;
             width: parent.width;
-            height: parent.height - header.height - root.footer-height;
-            background: transparent;
+            height: parent.height - header.height - footer.height;
+            frame-padding: 0px;
+            content-padding-horizontal: 22px;
+            content-padding-vertical: 18px;
+            content-padding-bottom: 18px;
+            content-spacing: 12px;
+            viewport-surface: ThemeTokens.conflict-dialog-surface;
+            panel-surface: ThemeTokens.conflict-dialog-surface;
+            panel-border-color: transparent;
 
             Text {
-                x: 20px;
-                y: 18px;
-                width: parent.width - 40px;
-                text: root.kind == "download" ? "The local download target already exists." : "The target already exists.";
+                text: root.lead-copy();
                 color: ThemeTokens.text-primary;
-                font-size: 15px;
+                font-family: AppTypography.ui-font-family;
+                font-size: 14px;
                 font-weight: AppTypography.ui-font-weight-regular;
                 wrap: word-wrap;
             }
 
             Text {
-                x: 20px;
-                y: 44px;
-                width: parent.width - 40px;
-                text: root.kind == "download"
-                    ? "Overwrite replaces the existing local target. Auto Rename picks a new local path. Cancel Download stops only this download."
-                    : "Replace overwrites the existing target. Skip keeps it and marks this transfer as skipped.";
+                text: root.detail-copy();
                 color: ThemeTokens.text-secondary;
+                font-family: AppTypography.ui-font-family;
                 font-size: 12px;
+                font-weight: AppTypography.ui-font-weight-regular;
                 wrap: word-wrap;
             }
 
             incoming-card := ConflictInfoCard {
-                x: 20px;
-                y: 88px;
-                width: parent.width - 40px;
+                width: body.content-column-width;
                 label: root.kind == "download" ? "Remote item" : "Incoming item";
                 value: root.source-path;
             }
 
             target-card := ConflictInfoCard {
-                x: 20px;
-                y: incoming-card.y + incoming-card.height + 10px;
-                width: parent.width - 40px;
+                width: body.content-column-width;
                 label: root.kind == "download" ? "Local target" : "Existing target";
                 value: root.target-path;
             }
 
             if root.batch-conflict-count > 0 : scope-card := Rectangle {
-                x: 20px;
-                y: target-card.y + target-card.height + 10px;
-                width: parent.width - 40px;
-                height: 106px;
-                border-radius: 0px;
+                width: body.content-column-width;
+                height: 118px;
+                border-radius: 12px;
                 border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.control-active-surface;
+                border-color: ThemeTokens.conflict-dialog-section-border;
+                background: ThemeTokens.conflict-dialog-section-surface;
+                clip: true;
 
                 Text {
-                    x: 12px;
-                    y: 8px;
-                    width: parent.width - 24px;
-                    text: "Destination scope";
-                    color: ThemeTokens.text-secondary;
+                    x: 14px;
+                    y: 12px;
+                    width: parent.width - 28px;
+                    text: "Folder scope";
+                    color: ThemeTokens.text-muted;
+                    font-family: AppTypography.ui-font-family;
                     font-size: 11px;
                     font-weight: AppTypography.ui-font-weight-regular;
+                    overflow: elide;
                 }
 
                 Text {
-                    x: 12px;
-                    y: 24px;
-                    width: parent.width - 24px;
+                    x: 14px;
+                    y: 30px;
+                    width: parent.width - 28px;
                     text: root.batch-scope-copy();
                     color: ThemeTokens.text-primary;
+                    font-family: AppTypography.ui-font-family;
                     font-size: 12px;
                     font-weight: AppTypography.ui-font-weight-regular;
                     wrap: word-wrap;
                 }
 
                 batch-toggle-row := ConflictBatchToggleRow {
-                    x: 12px;
-                    y: 56px;
-                    width: parent.width - 24px;
+                    x: 14px;
+                    y: 68px;
+                    width: parent.width - 28px;
                     height: 38px;
                     label: root.batch-toggle-copy();
                     checked: root.apply-to-batch;
@@ -517,76 +597,62 @@ export component SftpConflictModal inherits Rectangle {
             }
         }
 
-        footer := Rectangle {
+        footer := ModalFooterBar {
             x: 0px;
             y: parent.height - root.footer-height;
             width: parent.width;
             height: root.footer-height;
-            background: ThemeTokens.assets-surface;
+            surface: ThemeTokens.conflict-dialog-header-surface;
+            divider-color: ThemeTokens.conflict-dialog-section-border;
+            content-padding-left: 22px;
+            content-padding-right: 22px;
+            content-padding-top: 14px;
+            content-padding-bottom: 14px;
+            content-spacing: 0px;
 
-            footer-divider := Rectangle {
-                width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
+            Rectangle {
+                height: 0px;
+                vertical-stretch: 1;
+                background: transparent;
             }
 
-            cancel-button := ConflictDialogButton {
-                x: root.kind == "download" ? parent.width - 412px : parent.width - 300px;
-                y: 16px;
-                width: 88px;
-                label: "Cancel";
+            action-row := HorizontalLayout {
+                height: 40px;
+                spacing: 10px;
 
-                clicked => {
-                    root.focus-restore-requested();
-                    root.close-requested();
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
                 }
-            }
 
-            skip-button := ConflictDialogButton {
-                x: parent.width - 200px;
-                y: 16px;
-                width: 88px;
-                label: "Skip";
-                visible: root.kind != "download";
+                skip-button := ConflictDialogButton {
+                    label: root.kind == "download" ? "Skip This Download" : "Skip";
 
-                clicked => {
-                    root.skip-requested();
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.skip-requested();
+                    }
                 }
-            }
 
-            cancel-download-button := ConflictDialogButton {
-                x: parent.width - 308px;
-                y: 16px;
-                width: 96px;
-                label: "Cancel Download";
-                visible: root.kind == "download";
+                auto-rename-button := ConflictDialogButton {
+                    label: "Auto Rename";
+                    primary: true;
+                    visible: root.kind == "download";
 
-                clicked => {
-                    root.cancel-download-requested();
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.auto-rename-requested();
+                    }
                 }
-            }
 
-            auto-rename-button := ConflictDialogButton {
-                x: parent.width - 204px;
-                y: 16px;
-                width: 92px;
-                label: "Auto Rename";
-                visible: root.kind == "download";
+                replace-button := ConflictDialogButton {
+                    label: root.kind == "download" ? "Replace Existing" : "Replace Existing";
+                    destructive: true;
 
-                clicked => {
-                    root.auto-rename-requested();
-                }
-            }
-
-            replace-button := ConflictDialogButton {
-                x: parent.width - 104px;
-                y: 16px;
-                width: 84px;
-                label: root.kind == "download" ? "Overwrite" : "Replace";
-                primary: true;
-
-                clicked => {
-                    root.replace-requested();
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.replace-requested();
+                    }
                 }
             }
         }

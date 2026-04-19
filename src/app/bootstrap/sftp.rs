@@ -283,8 +283,12 @@ pub(super) struct SftpTransferBackgroundMessage {
 
 #[derive(Debug)]
 pub(super) enum SftpLocalActionBackgroundMessage {
-    OpenFileFailed { error: String },
-    OpenFolderFailed { error: String },
+    OpenFileFailed {
+        error: String,
+    },
+    OpenFolderFailed {
+        error: String,
+    },
     RemoveFinished {
         task_id: String,
         error: Option<String>,
@@ -986,10 +990,8 @@ pub(super) fn drain_sftp_local_action_background_messages(
                 changed = true;
             }
             SftpLocalActionBackgroundMessage::OpenFolderFailed { error } => {
-                state.show_transfer_center_feedback(
-                    "error",
-                    format!("Open Folder failed: {error}"),
-                );
+                state
+                    .show_transfer_center_feedback("error", format!("Open Folder failed: {error}"));
                 changed = true;
             }
             SftpLocalActionBackgroundMessage::RemoveFinished {
@@ -2030,13 +2032,28 @@ pub(super) fn bind_sftp_callbacks(
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     let effects_ref = Rc::clone(effects);
+    let session_bridge_ref = session_bridge.clone();
+    let transfer_result_tx_ref = sftp_transfer_result_tx.clone();
     window.on_sftp_conflict_modal_close_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        if state.close_sftp_conflict_modal() {
+        let resolved = session_bridge_ref.as_ref().is_some_and(|session_bridge| {
+            let tasks = state
+                .current_sftp_conflict_task()
+                .into_iter()
+                .collect::<Vec<_>>();
+            resolve_conflict_transfer_tasks(
+                &session_bridge.manager,
+                tasks.as_slice(),
+                crate::app::sftp::TransferConflictPolicy::Skip,
+                &transfer_result_tx_ref,
+            )
+        });
+        let _ = state.close_sftp_conflict_modal();
+        if resolved {
             super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-            sync_sftp_conflict_modal_state(&window, &state);
         }
+        sync_sftp_conflict_modal_state(&window, &state);
     });
 
     let state = Rc::clone(view_model);
@@ -2082,7 +2099,10 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let resolved = session_bridge_ref.as_ref().is_some_and(|session_bridge| {
-            let tasks = state.active_sftp_conflict_tasks();
+            let tasks = state
+                .current_sftp_conflict_task()
+                .into_iter()
+                .collect::<Vec<_>>();
             resolve_conflict_transfer_tasks(
                 &session_bridge.manager,
                 tasks.as_slice(),
@@ -2111,34 +2131,6 @@ pub(super) fn bind_sftp_callbacks(
                 &session_bridge.manager,
                 tasks.as_slice(),
                 crate::app::sftp::TransferConflictPolicy::AutoRename,
-                &transfer_result_tx_ref,
-            )
-        });
-        let _ = state.close_sftp_conflict_modal();
-        if resolved {
-            super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        }
-        sync_sftp_conflict_modal_state(&window, &state);
-    });
-
-    let state = Rc::clone(view_model);
-    let handle = window.as_weak();
-    let effects_ref = Rc::clone(effects);
-    let session_bridge_ref = session_bridge.clone();
-    let transfer_result_tx_ref = sftp_transfer_result_tx.clone();
-    window.on_sftp_conflict_modal_cancel_download_requested(move || {
-        let window = handle.unwrap();
-        let mut state = state.borrow_mut();
-        let resolved = session_bridge_ref.as_ref().is_some_and(|session_bridge| {
-            // Cancel only the focused download via state.current_sftp_conflict_task().
-            let tasks = state
-                .current_sftp_conflict_task()
-                .into_iter()
-                .collect::<Vec<_>>();
-            resolve_conflict_transfer_tasks(
-                &session_bridge.manager,
-                tasks.as_slice(),
-                crate::app::sftp::TransferConflictPolicy::CancelCurrent,
                 &transfer_result_tx_ref,
             )
         });

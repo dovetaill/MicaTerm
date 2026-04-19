@@ -11257,6 +11257,10 @@ fn transfer_center_conflict_rows_can_open_resolve_modal_and_replace() {
         .get_transfer_center_items()
         .row_data(0)
         .expect("transfer-center conflict row");
+    assert_eq!(
+        row.error_summary.as_str(),
+        "An item with the same name already exists at the destination."
+    );
     app.invoke_transfer_center_resolve_conflict_requested(row.id.clone());
     wait_for_condition(Duration::from_millis(300), || {
         flush_runtime_projection();
@@ -11579,8 +11583,113 @@ fn transfer_center_conflict_rows_can_skip_conflicted_transfer() {
             && rows.row_count() > 0
             && rows
                 .row_data(0)
-                .map(|updated| updated.status_label.as_str() == "Cancelled")
+                .map(|updated| updated.status_label.as_str() == "Skipped")
                 .unwrap_or(false)
+    });
+}
+
+#[test]
+fn transfer_center_conflict_modal_close_skips_only_the_current_download() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let sftp_state = RecordingSftpState::default();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(RecordingSftpLauncher {
+            state: sftp_state.clone(),
+        }),
+    );
+
+    let temp_root = sample_vault_runtime_root("transfer-center-conflict-close-skip-current");
+    let release_a_path = temp_root.join("release-a.tar.gz");
+    let release_b_path = temp_root.join("release-b.tar.gz");
+    fs::create_dir_all(temp_root.as_path())
+        .expect("create transfer-center close-skip-current temp root");
+    fs::write(&release_a_path, b"archive a")
+        .expect("write transfer-center close-skip-current source a");
+    fs::write(&release_b_path, b"archive b")
+        .expect("write transfer-center close-skip-current source b");
+    sftp_state.set_remote_file("/srv/app/releases/release-a.tar.gz", b"existing a".to_vec());
+    sftp_state.set_remote_file("/srv/app/releases/release-b.tar.gz", b"existing b".to_vec());
+
+    let ssh_id = create_root_ssh(&app, "Prod Bastion", "10.0.0.12");
+    app.invoke_asset_activated(ssh_id.into());
+    flush_runtime_projection();
+    app.invoke_open_sftp_panel_requested();
+    flush_runtime_projection();
+
+    app.invoke_sftp_panel_path_submitted("/srv/app/releases".into());
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        app.get_sftp_panel_path().as_str() == "/srv/app/releases"
+    });
+
+    app.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![
+        SharedString::from(release_a_path.to_string_lossy().to_string()),
+        SharedString::from(release_b_path.to_string_lossy().to_string()),
+    ])));
+    app.invoke_sftp_panel_external_drop_requested();
+
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        let mut conflict_titles = Vec::new();
+        for index in 0..rows.row_count() {
+            let Some(row) = rows.row_data(index) else {
+                continue;
+            };
+            if row.status_label.as_str() == "Conflict" {
+                conflict_titles.push(row.title.to_string());
+            }
+        }
+        conflict_titles
+            .iter()
+            .any(|title| title == "release-a.tar.gz")
+            && conflict_titles
+                .iter()
+                .any(|title| title == "release-b.tar.gz")
+    });
+
+    let release_a_row = {
+        let rows = app.get_transfer_center_items();
+        (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .find(|row| row.title.as_str() == "release-a.tar.gz")
+            .expect("release-a conflict row")
+    };
+    app.invoke_transfer_center_resolve_conflict_requested(release_a_row.id.clone());
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        app.get_sftp_conflict_modal_open()
+    });
+
+    assert_eq!(app.get_sftp_conflict_modal_batch_conflict_count(), 1);
+    app.invoke_sftp_conflict_modal_apply_to_batch_toggled(true);
+    wait_for_condition(Duration::from_millis(300), || {
+        flush_runtime_projection();
+        app.get_sftp_conflict_modal_apply_to_batch()
+    });
+
+    app.invoke_sftp_conflict_modal_close_requested();
+    wait_for_condition(Duration::from_secs(2), || {
+        flush_runtime_projection();
+        let rows = app.get_transfer_center_items();
+        let mut release_a_skipped = false;
+        let mut release_b_conflict = false;
+        for index in 0..rows.row_count() {
+            let Some(row) = rows.row_data(index) else {
+                continue;
+            };
+            if row.title.as_str() == "release-a.tar.gz" && row.status_label.as_str() == "Skipped" {
+                release_a_skipped = true;
+            }
+            if row.title.as_str() == "release-b.tar.gz" && row.status_label.as_str() == "Conflict" {
+                release_b_conflict = true;
+            }
+        }
+        !app.get_sftp_conflict_modal_open() && release_a_skipped && release_b_conflict
     });
 }
 

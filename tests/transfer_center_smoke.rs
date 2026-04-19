@@ -373,6 +373,21 @@ fn transfer_center_rows_use_compact_primary_and_workspace_actions() {
 }
 
 #[test]
+fn transfer_center_resolve_action_uses_modal_recommended_tone() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains(
+            "private property <image> resolve-icon: @image-url(\"../../assets/icons/fluent/edit-20-regular.svg\");"
+        ) && content.contains("resolve-action := TransferCenterRowActionButton {")
+            && content.contains("recommended: true;")
+            && content.contains("icon-source: root.resolve-icon;"),
+        "transfer-center Resolve should reuse the modal's recommended Auto Rename tone and a clearer review/edit icon so conflicts read as a guided next step instead of another sync action"
+    );
+}
+
+#[test]
 fn transfer_center_footer_and_completed_badge_share_the_same_calm_button_language() {
     let content =
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
@@ -466,12 +481,13 @@ fn conflict_modal_uses_labeled_cards_instead_of_raw_source_target_lines() {
         "conflict modal should keep a dedicated incoming-item card label for remote conflicts while renaming it for download targets"
     );
     assert!(
-        modal.contains("label: root.kind == \"download\" ? \"Local target\" : \"Existing target\";"),
+        modal
+            .contains("label: root.kind == \"download\" ? \"Local target\" : \"Existing target\";"),
         "conflict modal should keep a dedicated existing-target card label for remote conflicts while renaming it for download targets"
     );
     assert!(
-        modal.contains("text: \"Destination scope\";"),
-        "conflict modal should render a labeled `Destination scope` card so the narrow dialog reads like a mature transfer sheet instead of raw concatenated path text"
+        modal.contains("text: \"Folder scope\";"),
+        "conflict modal should render a labeled `Folder scope` card so the narrow dialog reads like a mature transfer sheet instead of raw concatenated path text"
     );
 
     assert!(
@@ -480,10 +496,10 @@ fn conflict_modal_uses_labeled_cards_instead_of_raw_source_target_lines() {
         "conflict modal should stop rendering raw `Source:` / `Target:` lines once the labeled cards exist"
     );
     assert!(
-        modal.contains("other conflict is waiting in this folder.")
-            && modal.contains("other conflicts are waiting in this folder.")
-            && modal.contains("Apply this choice to the other ")
-            && modal.contains(" conflicts in this folder."),
+        modal.contains("Auto Rename or Replace Existing can also be applied to the other conflict in this folder.")
+            && modal.contains("Auto Rename or Replace Existing can also be applied to the other ")
+            && modal.contains("Skip This Download always affects only this item.")
+            && modal.contains("Apply the selected action to the other "),
         "conflict modal batch copy should clearly describe folder-scoped impact in both singular and plural states"
     );
 }
@@ -498,13 +514,14 @@ fn conflict_modal_exposes_keyboard_shortcuts_for_batch_toggle_and_primary_action
         "conflict modal should own keyboard handling directly so the dialog remains usable without pointer interaction"
     );
     assert!(
-        modal.contains("event.text == Key.Space")
-            && modal.contains("root.apply-to-batch-toggled(!root.apply-to-batch);"),
-        "conflict modal should let Space toggle the destination batch checkbox when the scope card is present"
+        modal.contains("event.text == Key.Escape") && modal.contains("root.close-requested();"),
+        "conflict modal should treat Escape as the explicit skip-this-download dismissal path"
     );
     assert!(
-        modal.contains("event.text == Key.Return") && modal.contains("root.replace-requested();"),
-        "conflict modal should treat Enter as the default Replace action so the dialog behaves like a mature transfer sheet"
+        modal.contains("public function focus-dialog()")
+            && modal.contains("auto-rename-button.focus-button();")
+            && !modal.contains("event.text == Key.Return"),
+        "conflict modal should default focus to Auto Rename and avoid a modal-level Enter override that bypasses button focus"
     );
 }
 
@@ -525,7 +542,7 @@ fn conflict_modal_batch_toggle_row_exposes_focus_and_checkbox_accessibility_cont
         modal.contains("border-color: root.has-focus ? ThemeTokens.focus-ring")
             && modal
                 .contains("background: toggle-touch.pressed ? ThemeTokens.control-pressed-surface")
-            && modal.contains(": root.has-focus ? ThemeTokens.control-active-surface"),
+            && modal.contains(": root.has-focus ? ThemeTokens.control-hover-surface"),
         "conflict modal batch-toggle row should reserve a distinct focus treatment instead of looking identical to the passive scope card"
     );
 }
@@ -536,8 +553,8 @@ fn transfer_center_attention_actions_expose_tooltips_and_keyboard_button_contrac
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
 
     assert!(
-        content.contains("tooltip-text: \"Resolve transfer conflict\";")
-            && content.contains("tooltip-text: \"Open task in SFTP workspace\";"),
+        content.contains("tooltip-text: \"Review conflict options for this transfer\";")
+            && content.contains("tooltip-text: \"Open this conflict in the SFTP workspace\";"),
         "transfer-center resolve/workspace affordances should expose explicit tooltip copy so narrow action labels stay understandable"
     );
     assert!(
@@ -641,7 +658,7 @@ fn conflict_modal_footer_buttons_expose_focusable_button_contract() {
             && modal.contains("accessible-action-default => { button-touch.clicked(); }")
             && modal.contains("forward-focus: button-focus;")
             && modal.contains("out property <bool> has-focus: button-focus.has-focus;"),
-        "conflict modal footer buttons should expose a real button contract so Tab navigation can reach Cancel, Skip, and Replace"
+        "conflict modal footer buttons should expose a real button contract so Tab navigation can reach Skip This Download, Auto Rename, and Replace Existing"
     );
     assert!(
         modal.contains("button-focus := FocusScope {")
@@ -650,8 +667,8 @@ fn conflict_modal_footer_buttons_expose_focusable_button_contract() {
         "conflict modal footer buttons should respond to keyboard activation instead of remaining pointer-only"
     );
     assert!(
-        modal.contains("cancel-button := ConflictDialogButton {")
-            && modal.contains("skip-button := ConflictDialogButton {")
+        modal.contains("skip-button := ConflictDialogButton {")
+            && modal.contains("auto-rename-button := ConflictDialogButton {")
             && modal.contains("replace-button := ConflictDialogButton {"),
         "conflict modal footer should keep all three actions in the shared focusable button component"
     );
@@ -666,25 +683,27 @@ fn transfer_center_conflict_modal_exposes_download_actions() {
     assert!(
         modal.contains("in property <string> kind: \"remote\";")
             && modal.contains("callback auto-rename-requested();")
-            && modal.contains("callback cancel-download-requested();"),
+            && modal.contains("callback skip-requested();"),
         "conflict modal should project a distinct download mode contract instead of hard-coding replace/skip semantics for every conflict type"
     );
     assert!(
-        modal.contains("label: \"Auto Rename\";")
-            && modal.contains("label: \"Cancel Download\";")
-            && modal.contains("root.kind == \"download\""),
-        "download conflict modals should expose explicit Auto Rename and Cancel Download actions with mode-specific copy"
+        modal.contains("Skip This Download")
+            && modal.contains("Auto Rename")
+            && modal.contains("Replace Existing")
+            && modal.contains("This affects the current download only.")
+            && !modal.contains("Cancel Download"),
+        "download conflict modals should expose explicit Skip This Download, Auto Rename, and Replace Existing actions with current-download scope copy"
     );
     assert!(
         app_window.contains("in-out property <string> sftp-conflict-modal-kind: \"remote\";")
             && app_window.contains("callback sftp-conflict-modal-auto-rename-requested();")
-            && app_window.contains("callback sftp-conflict-modal-cancel-download-requested();"),
-        "AppWindow should thread the download conflict modal kind and callbacks through the generated Slint API"
+            && !app_window.contains("callback sftp-conflict-modal-cancel-download-requested();"),
+        "AppWindow should thread the download conflict modal kind and keep the old cancel-download callback out of the generated Slint API"
     );
 }
 
 #[test]
-fn transfer_center_conflict_modal_cancel_keeps_batch_toggle_inactive() {
+fn transfer_center_conflict_modal_skip_uses_only_the_current_task() {
     let bootstrap_sftp =
         fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp");
     let view_model_sftp =
@@ -696,25 +715,27 @@ fn transfer_center_conflict_modal_cancel_keeps_batch_toggle_inactive() {
         "ShellViewModel should expose the currently focused conflict task separately from the apply-to-batch expansion"
     );
     assert!(
-        bootstrap_sftp
-            .contains("window.on_sftp_conflict_modal_cancel_download_requested(move || {")
-            && bootstrap_sftp.contains("state.current_sftp_conflict_task()"),
-        "cancel-download handling should resolve only the current conflict instead of inheriting the apply-to-batch selection"
+        bootstrap_sftp.contains("window.on_sftp_conflict_modal_skip_requested(move || {")
+            && bootstrap_sftp.contains("window.on_sftp_conflict_modal_close_requested(move || {")
+            && bootstrap_sftp.contains("current_sftp_conflict_task()"),
+        "skip and close handling should resolve only the current conflict instead of inheriting the apply-to-batch selection"
     );
 }
 
 #[test]
-fn conflict_modal_close_button_exposes_focus_and_tooltip_contract() {
+fn conflict_modal_close_button_exposes_fluent_icon_and_skip_tooltip_contract() {
     let modal =
         fs::read_to_string("ui/components/sftp-conflict-modal.slint").expect("read conflict modal");
 
     assert!(
         modal.contains("component ConflictIconButton inherits Rectangle")
-            && modal.contains("tooltip-text: \"Close conflict dialog\";")
+            && modal.contains("@image-url(\"../../assets/icons/fluent/dismiss-20-regular.svg\")")
+            && modal.contains("tooltip-text: root.close-action-label();")
+            && modal.contains("return \"Skip this download\";")
             && modal.contains("tooltip-source-id: \"sftp-conflict-close\";")
             && modal.contains("accessible-role: AccessibleRole.button;")
             && modal.contains("forward-focus: button-focus;"),
-        "conflict modal close affordance should graduate from a bare rectangle to a real focusable icon button with explicit close tooltip copy"
+        "conflict modal close affordance should use the Fluent dismiss icon and explicit skip-this-download tooltip copy"
     );
     assert!(
         modal.contains("close-tooltip-overlay := TitlebarTooltip {")
@@ -722,6 +743,67 @@ fn conflict_modal_close_button_exposes_focus_and_tooltip_contract() {
             && modal.contains("tooltip-visible: root.tooltip-visible-value;")
             && modal.contains("function schedule-tooltip("),
         "conflict modal should own a lightweight tooltip state machine so the close affordance can show the same kind of explicit hint as other shell actions"
+    );
+}
+
+#[test]
+fn conflict_modal_uses_elevated_shell_and_separate_footer_structure() {
+    let modal =
+        fs::read_to_string("ui/components/sftp-conflict-modal.slint").expect("read conflict modal");
+    let shell =
+        fs::read_to_string("ui/components/blocking-modal-shell.slint").expect("read modal shell");
+    let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
+
+    assert!(
+        modal.contains("ModalBodyScrollArea")
+            && modal.contains("ModalFooterBar")
+            && modal.contains("clip: true;")
+            && !modal.contains("cancel-button := ConflictDialogButton {"),
+        "conflict modal should move to a clear header/body/footer structure instead of the old absolutely positioned cancel cluster"
+    );
+    assert!(
+        shell.contains("modal-glow := Rectangle {")
+            && shell.contains("modal-shadow-far := Rectangle {")
+            && shell.contains("modal-shadow-near := Rectangle {"),
+        "blocking modal shell should expose elevated glow and shadow layers for the redesigned conflict modal"
+    );
+    assert!(
+        tokens.contains("out property <brush> conflict-dialog-glow:")
+            && tokens.contains("out property <brush> conflict-dialog-border:")
+            && tokens.contains("out property <brush> conflict-dialog-surface:"),
+        "theme tokens should expose dedicated conflict-dialog visual slots so dark/light themes can stay aligned"
+    );
+}
+
+#[test]
+fn conflict_modal_light_theme_tokens_stay_soft_and_fluent() {
+    let tokens = fs::read_to_string("ui/theme/tokens.slint").expect("read theme tokens");
+
+    assert!(
+        tokens.contains(
+            "out property <brush> conflict-dialog-surface: dark-mode ? #1a2330 : #f2f6fb;"
+        ) && tokens.contains(
+            "out property <brush> conflict-dialog-path-surface: dark-mode ? #101822 : #f7faff;"
+        ) && tokens.contains(
+            "out property <brush> conflict-dialog-border: dark-mode ? #ffffff2d : #8ea4bf36;"
+        ) && tokens.contains(
+            "out property <brush> conflict-dialog-glow: dark-mode ? #7da8d91a : #7c9fc914;"
+        ),
+        "light-theme conflict dialog tokens should stay soft and elevated instead of drifting into stark white cards or noisy blue glow"
+    );
+}
+
+#[test]
+fn transfer_center_conflict_actions_use_clearer_workspace_and_resolve_copy() {
+    let content =
+        fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
+
+    assert!(
+        content.contains("tooltip-text: \"Review conflict options for this transfer\";")
+            && content.contains("tooltip-text: \"Open this conflict in the SFTP workspace\";")
+            && !content.contains("tooltip-text: \"Resolve transfer conflict\";")
+            && !content.contains("tooltip-text: \"Open task in SFTP workspace\";"),
+        "transfer-center conflict actions should use clearer review/workspace wording that matches the new modal semantics"
     );
 }
 

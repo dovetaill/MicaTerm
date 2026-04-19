@@ -466,7 +466,6 @@ export component AppWindow inherits Window {
     callback sftp-conflict-modal-replace-requested();
     callback sftp-conflict-modal-skip-requested();
     callback sftp-conflict-modal-auto-rename-requested();
-    callback sftp-conflict-modal-cancel-download-requested();
     callback blocking-modal-drag-requested(length, length);
     callback blocking-modal-drag-moved(length, length);
     callback blocking-modal-drag-ended();
@@ -2111,8 +2110,14 @@ export component AppWindow inherits Window {
 
     if root.sftp-conflict-modal-open : sftp-conflict-modal-shell := BlockingModalShell {
         host-titlebar-height: titlebar.height;
-        modal-width: 520px;
-        modal-height: 396px;
+        modal-width: 560px;
+        modal-height: 432px;
+        modal-radius: 18px;
+        modal-surface: ThemeTokens.conflict-dialog-surface;
+        modal-border-color: ThemeTokens.conflict-dialog-border;
+        modal-shadow-soft: ThemeTokens.conflict-dialog-shadow-soft;
+        modal-shadow-strong: ThemeTokens.conflict-dialog-shadow-strong;
+        modal-glow: ThemeTokens.conflict-dialog-glow;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
 
@@ -2153,10 +2158,6 @@ export component AppWindow inherits Window {
 
             auto-rename-requested => {
                 root.sftp-conflict-modal-auto-rename-requested();
-            }
-
-            cancel-download-requested => {
-                root.sftp-conflict-modal-cancel-download-requested();
             }
 
             drag-requested(pointer-x, pointer-y) => {
