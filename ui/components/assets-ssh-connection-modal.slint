@@ -1,6 +1,7 @@
 import { ComboBox } from "std-widgets.slint";
 import {
     DialogActionButton,
+    DialogFormSection,
     DialogInlineBanner,
     DialogSectionCard,
     DialogSegmentButton,
@@ -56,7 +57,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
     callback focus-restore-requested();
 
     private property <bool> compact-layout: root.width < 620px;
-    private property <bool> dense-layout: root.height < 576px;
+    private property <bool> dense-layout: root.height < 620px;
     private property <length> footer-height: root.feedback-message != "" || root.validation-message != ""
         ? root.dense-layout ? 114px : 132px
         : ThemeTokens.modal-footer-min-height;
@@ -80,7 +81,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: root.dialog-title;
-            subtitle: "Desktop-native SSH profiles with calmer sections, consistent actions, and predictable dismissal.";
+            subtitle: root.dense-layout ? "" : "Edit the connection profile, authentication, and optional proxy settings.";
             prominent: true;
 
             close-requested => {
@@ -110,10 +111,10 @@ export component AssetsSshConnectionModal inherits Rectangle {
             width: parent.width;
             height: parent.height - header.height - footer.height;
             frame-padding: root.dense-layout ? 12px : 14px;
-            content-padding-horizontal: root.dense-layout ? 16px : 17px;
-            content-padding-vertical: root.dense-layout ? 14px : 16px;
-            content-padding-bottom: root.dense-layout ? 14px : 18px;
-            content-spacing: root.dense-layout ? 12px : 14px;
+            content-padding-horizontal: root.dense-layout ? 15px : 17px;
+            content-padding-vertical: root.dense-layout ? 12px : 16px;
+            content-padding-bottom: root.dense-layout ? 12px : 18px;
+            content-spacing: root.dense-layout ? 10px : 14px;
             viewport-surface: ThemeTokens.modal-body-surface;
             panel-surface: ThemeTokens.modal-body-surface;
             panel-border-color: transparent;
@@ -127,26 +128,10 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     width: parent.width;
                     spacing: body-scroll.content-spacing;
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-
-                        Text {
-                            width: parent.width;
-                            text: "Connection";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
-
-                        Text {
-                            width: parent.width;
-                            text: "Keep the core profile compact. The connection identity, proxy chain, and notes live in dedicated sections below.";
-                            color: ThemeTokens.text-muted;
-                            font-size: 11px;
-                            wrap: word-wrap;
-                        }
+                        title: "Connection";
+                        description: root.dense-layout ? "" : "Keep the core profile compact. Authentication, proxy chain, and notes live in the sections below.";
 
                         if root.compact-layout : VerticalLayout {
                             width: parent.width;
@@ -198,29 +183,30 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
 
-                        if !root.compact-layout : Rectangle {
+                        if !root.compact-layout : name-host-row := Rectangle {
                             width: parent.width;
-                            height: 76px;
+                            height: max(wide-name-field.height, host-field.height);
                             background: transparent;
 
                             HorizontalLayout {
                                 width: parent.width;
-                                spacing: 12px;
+                                spacing: 14px;
 
                                 wide-name-field := DialogTextField {
-                                    horizontal-stretch: 1;
+                                    width: max(0px, (parent.width - 14px) / 2);
                                     label: "Name";
                                     required: true;
                                     value: root.name;
                                     invalid: root.validation-message != "";
+                                    helper-text: root.validation-message;
 
                                     value-changed(value) => {
                                         root.draft-changed("name", value);
                                     }
                                 }
 
-                                DialogTextField {
-                                    horizontal-stretch: 1;
+                                host-field := DialogTextField {
+                                    width: max(0px, (parent.width - 14px) / 2);
                                     label: "Host";
                                     required: true;
                                     value: root.host;
@@ -232,17 +218,17 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
 
-                        if !root.compact-layout : Rectangle {
+                        if !root.compact-layout : user-port-row := Rectangle {
                             width: parent.width;
-                            height: 76px;
+                            height: max(user-field.height, port-field.height);
                             background: transparent;
 
                             HorizontalLayout {
                                 width: parent.width;
-                                spacing: 12px;
+                                spacing: 14px;
 
-                                DialogTextField {
-                                    horizontal-stretch: 1;
+                                user-field := DialogTextField {
+                                    width: max(0px, parent.width - 156px);
                                     label: "User";
                                     required: true;
                                     value: root.user;
@@ -252,8 +238,8 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     }
                                 }
 
-                                DialogTextField {
-                                    width: 138px;
+                                port-field := DialogTextField {
+                                    width: 142px;
                                     label: "Port";
                                     value: root.port;
 
@@ -265,19 +251,10 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-                        surface: ThemeTokens.modal-section-alt-surface;
-
-                        Text {
-                            width: parent.width;
-                            text: "Authentication";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Authentication";
+                        description: root.dense-layout ? "" : "Choose whether this connection stores its own secret material or points at a shared identity.";
 
                         Rectangle {
                             width: parent.width;
@@ -475,18 +452,10 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-
-                        Text {
-                            width: parent.width;
-                            text: "Proxy chain";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Proxy chain";
+                        description: root.dense-layout ? "" : "Add a jump host or local proxy only when the target network requires it.";
 
                         Rectangle {
                             width: parent.width;
@@ -566,17 +535,17 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 }
                             }
 
-                            if !root.compact-layout : Rectangle {
+                            if !root.compact-layout : proxy-host-port-row := Rectangle {
                                 width: parent.width;
-                                height: 76px;
+                                height: max(proxy-host-field.height, proxy-port-field.height);
                                 background: transparent;
 
                                 HorizontalLayout {
                                     width: parent.width;
-                                    spacing: 12px;
+                                    spacing: 14px;
 
-                                    DialogTextField {
-                                        horizontal-stretch: 1;
+                                    proxy-host-field := DialogTextField {
+                                        width: max(0px, parent.width - 156px);
                                         label: root.proxy-type == "http" ? "HTTP host" : "SOCKS5 host";
                                         value: root.proxy-socks5-host;
 
@@ -585,8 +554,8 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                         }
                                     }
 
-                                    DialogTextField {
-                                        width: 138px;
+                                    proxy-port-field := DialogTextField {
+                                        width: 142px;
                                         label: root.proxy-type == "http" ? "HTTP port" : "SOCKS5 port";
                                         value: root.proxy-socks5-port;
 
@@ -655,19 +624,10 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-                        surface: ThemeTokens.modal-section-alt-surface;
-
-                        Text {
-                            width: parent.width;
-                            text: "Notes";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Notes";
+                        description: root.dense-layout ? "" : "Use this for host purpose, environment, or operator hints instead of overloading the profile name.";
 
                         DialogTextField {
                             width: parent.width;

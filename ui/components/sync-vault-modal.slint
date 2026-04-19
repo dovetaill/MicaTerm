@@ -1,5 +1,6 @@
 import {
     DialogActionButton,
+    DialogFormSection,
     DialogInlineBanner,
     DialogSectionCard,
     DialogSegmentButton,
@@ -79,7 +80,7 @@ export component SyncVaultModal inherits Rectangle {
     callback drag-ended();
     callback focus-restore-requested();
 
-    private property <bool> compact-layout: root.height < 576px;
+    private property <bool> compact-layout: root.height < 620px;
     private property <length> footer-height: ThemeTokens.modal-footer-min-height;
 
     background: transparent;
@@ -93,7 +94,7 @@ export component SyncVaultModal inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: root.title;
-            subtitle: root.headline != "" ? root.headline : "Vault sync surfaces status, credentials, and recovery copies without falling back to a flat admin form.";
+            subtitle: root.headline != "" ? root.headline : "Review sync status, repository settings, and authentication.";
             prominent: true;
             show-drag-handle: true;
 
@@ -124,10 +125,10 @@ export component SyncVaultModal inherits Rectangle {
             width: parent.width;
             height: parent.height - header.height - footer.height;
             frame-padding: root.compact-layout ? 12px : 14px;
-            content-padding-horizontal: root.compact-layout ? 16px : 17px;
-            content-padding-vertical: root.compact-layout ? 14px : 16px;
-            content-padding-bottom: root.compact-layout ? 14px : 18px;
-            content-spacing: root.compact-layout ? 12px : 14px;
+            content-padding-horizontal: root.compact-layout ? 15px : 17px;
+            content-padding-vertical: root.compact-layout ? 12px : 16px;
+            content-padding-bottom: root.compact-layout ? 12px : 18px;
+            content-spacing: root.compact-layout ? 10px : 14px;
             viewport-surface: ThemeTokens.modal-body-surface;
             panel-surface: ThemeTokens.modal-body-surface;
             panel-border-color: transparent;
@@ -174,7 +175,7 @@ export component SyncVaultModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    if root.mode != "not-configured" : DialogSectionCard {
                         width: parent.width;
                         spacing: 12px;
                         surface: ThemeTokens.modal-section-alt-surface;
@@ -245,18 +246,28 @@ export component SyncVaultModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    if root.mode == "not-configured" : DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
+                        title: "Vault bootstrap";
+                        description: root.compact-layout ? "" : "Provide the master password only during first-time setup or unlock-style flows.";
 
-                        Text {
+                        DialogTextField {
                             width: parent.width;
-                            text: "Repository";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
+                            label: "Master password";
+                            value: root.master-password;
+                            password-mode: true;
+                            helper-text: "Used only during initial setup or unlock-style flows. The actual mode-specific action still comes from the view model.";
+
+                            value-changed(value) => {
+                                root.draft-changed("master-password", value);
+                            }
                         }
+                    }
+
+                    DialogFormSection {
+                        width: parent.width;
+                        title: "Repository";
+                        description: root.compact-layout ? "" : "Keep the remote URL and branch together so the sync target is easy to verify.";
 
                         git-remote-url-field := DialogTextField {
                             width: parent.width;
@@ -280,19 +291,10 @@ export component SyncVaultModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-                        surface: ThemeTokens.modal-section-alt-surface;
-
-                        Text {
-                            width: parent.width;
-                            text: "Auth mode";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Auth mode";
+                        description: root.compact-layout ? "" : "Switch between HTTPS and SSH credentials without duplicating repository settings.";
 
                         HorizontalLayout {
                             width: parent.width;
@@ -365,31 +367,6 @@ export component SyncVaultModal inherits Rectangle {
                         }
                     }
 
-                    if root.mode == "not-configured" : DialogSectionCard {
-                        width: parent.width;
-                        spacing: 14px;
-
-                        Text {
-                            width: parent.width;
-                            text: "Vault bootstrap";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
-
-                        DialogTextField {
-                            width: parent.width;
-                            label: "Master password";
-                            value: root.master-password;
-                            password-mode: true;
-                            helper-text: "Used only during initial setup or unlock-style flows. The actual mode-specific action still comes from the view model.";
-
-                            value-changed(value) => {
-                                root.draft-changed("master-password", value);
-                            }
-                        }
-                    }
                 }
             }
         }

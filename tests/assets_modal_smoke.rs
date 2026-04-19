@@ -366,7 +366,7 @@ fn ssh_modal_no_longer_renders_dead_connection_options_group() {
     assert!(!ssh_modal.contains("text: \"Connection Options\""));
     assert!(!ssh_modal.contains("label: \"Proxy Method\""));
     assert!(!ssh_modal.contains("label: \"Session Environment\""));
-    assert!(ssh_modal.contains("text: \"Proxy chain\""));
+    assert!(ssh_modal.contains("title: \"Proxy chain\";"));
     assert!(ssh_modal.contains("text: \"Proxy type\""));
     assert!(ssh_modal.contains("label: root.proxy-type == \"http\" ? \"HTTP host\" : \"SOCKS5 host\";"));
     assert!(ssh_modal.contains("label: root.proxy-type == \"http\" ? \"HTTP port\" : \"SOCKS5 port\";"));
@@ -681,10 +681,10 @@ fn blocking_modal_children_own_shared_asset_modal_chrome_contract() {
     assert!(!shell.contains("header := Rectangle {"));
     assert!(!shell.contains("close-button := Rectangle {"));
     assert!(folder.contains("in property <string> dialog-title: \"New Folder\";"));
-    assert!(folder.contains("DialogSectionCard"));
+    assert!(!folder.contains("DialogSectionCard"));
     assert!(folder.contains("DialogTextField"));
     assert!(ssh.contains("in property <string> dialog-title: \"New SSH Connection\";"));
-    assert!(ssh.contains("DialogSectionCard"));
+    assert!(ssh.contains("DialogFormSection"));
     assert!(ssh.contains("header := ModalHeaderBar {"));
     assert!(ssh.contains("footer := ModalFooterBar {"));
     assert!(rename.contains("header := ModalHeaderBar {"));
@@ -911,11 +911,10 @@ fn sync_modal_header_body_and_footer_are_explicitly_anchored_and_scrollable() {
         modal_chrome.contains("horizontal-scrollbar-policy: always-off;")
             && modal_chrome.contains("scroll-body := Rectangle {")
             && modal_chrome.contains(
-                "body-panel := Rectangle {\n                x: root.resolved-frame-padding;"
+                "body-content-host := Rectangle {\n                x: root.resolved-frame-padding + root.resolved-content-padding-horizontal;"
             )
-            && modal_chrome.contains("width: root.resolved-panel-width;")
             && modal_chrome.contains("width: root.content-column-width;"),
-        "shared modal scroll host should derive panel and content widths from explicit shared measurements so padded body panels cannot visually bleed into the workspace"
+        "shared modal scroll host should derive content widths from explicit shared measurements even after the extra body panel shell is removed"
     );
     assert!(
         modal_chrome.contains("private property <length> resolved-content-padding-bottom:")
@@ -1164,6 +1163,39 @@ fn ssh_form_field_contract_allows_horizontal_rows_to_shrink_without_overflow() {
             && chrome.contains("min-width: 0px;")
             && chrome.contains("preferred-width: 0px;"),
         "shared dialog text fields should opt into shrinking so SSH modal horizontal rows do not steal width from siblings"
+    );
+}
+
+#[test]
+fn modal_refinement_regression_contract() {
+    let chrome = fs::read_to_string("ui/components/modal-chrome.slint")
+        .expect("read modal chrome");
+    let folder_modal = fs::read_to_string("ui/components/assets-folder-create-modal.slint")
+        .expect("read folder modal");
+    let ssh_modal = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
+        .expect("read ssh modal");
+    let snippet_modal = fs::read_to_string("ui/components/assets-snippet-modal.slint")
+        .expect("read snippet modal");
+
+    assert!(
+        !chrome.contains("action-rail := Rectangle {"),
+        "the shared footer should stop rendering the heavy inner action rail once the modal chrome is slimmed down"
+    );
+    assert!(
+        !folder_modal.contains("DialogSectionCard"),
+        "the single-field folder modal should not keep an unnecessary card wrapper around its only form control"
+    );
+    assert!(
+        !ssh_modal.contains(
+            "Desktop-native SSH profiles with calmer sections, consistent actions, and predictable dismissal."
+        ),
+        "ssh modal should replace the current slogan-style subtitle with product copy that fits a real header"
+    );
+    assert!(
+        !snippet_modal.contains(
+            "Keep command snippets compact, searchable, and ready for quick execution."
+        ),
+        "snippet modal should replace the current slogan-style subtitle with product copy that fits a real header"
     );
 }
 

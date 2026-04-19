@@ -285,6 +285,48 @@ export component DialogSectionCard inherits Rectangle {
     }
 }
 
+export component DialogFormSection inherits Rectangle {
+    in property <string> title: "";
+    in property <string> description: "";
+    in property <length> spacing: 12px;
+    in property <length> heading-spacing: root.description == "" ? 4px : 6px;
+
+    height: section-content.preferred-height;
+    background: transparent;
+
+    section-content := VerticalLayout {
+        width: parent.width;
+        spacing: root.spacing;
+
+        if root.title != "" : heading-stack := VerticalLayout {
+            width: parent.width;
+            spacing: root.heading-spacing;
+
+            Text {
+                width: parent.width;
+                text: root.title;
+                color: ThemeTokens.text-primary;
+                font-family: AppTypography.ui-font-family;
+                font-size: 13px;
+                font-weight: 700;
+                overflow: elide;
+            }
+
+            if root.description != "" : Text {
+                width: parent.width;
+                text: root.description;
+                color: ThemeTokens.text-muted;
+                font-family: AppTypography.ui-font-family;
+                font-size: 11px;
+                font-weight: AppTypography.ui-font-weight-regular;
+                wrap: word-wrap;
+            }
+        }
+
+        @children
+    }
+}
+
 export component DialogInlineBanner inherits Rectangle {
     in property <string> tone: "neutral";
     in property <string> message: "";
@@ -325,14 +367,14 @@ export component DialogTextField inherits Rectangle {
     callback trailing-action-requested();
     callback submitted();
 
-    private property <length> field-height: root.multiline ? 120px : 42px;
+    private property <length> field-height: root.multiline ? 120px : 40px;
     private property <length> helper-height: root.helper-text == "" ? 0px : helper-metric.preferred-height + 2px;
     private property <bool> active: field-input.has-focus;
     private property <bool> hovered: field-touch.has-hover;
 
     min-width: 0px;
     preferred-width: 0px;
-    height: 22px + 8px + root.field-height + (root.helper-text == "" ? 0px : 10px + root.helper-height);
+    height: 20px + 8px + root.field-height + (root.helper-text == "" ? 0px : 8px + root.helper-height);
     background: transparent;
 
     public function focus-input() {
@@ -371,7 +413,7 @@ export component DialogTextField inherits Rectangle {
         border-width: 1px;
         border-color: root.invalid ? ThemeTokens.status-error-accent : ThemeTokens.input-focus-ring;
         background: transparent;
-        opacity: root.active ? (ThemeTokens.dark-mode ? 0.32 : 0.22) : 0;
+        opacity: root.active ? (ThemeTokens.dark-mode ? 0.22 : 0.14) : 0;
     }
 
     field-frame := Rectangle {
@@ -438,7 +480,7 @@ export component DialogTextField inherits Rectangle {
 
     if root.helper-text != "" : helper-copy := Text {
         x: 0px;
-        y: field-frame.y + field-frame.height + 10px;
+        y: field-frame.y + field-frame.height + 8px;
         width: parent.width;
         text: root.helper-text;
         color: root.invalid ? ThemeTokens.status-error-accent : ThemeTokens.text-muted;
@@ -491,13 +533,13 @@ export component ModalHeaderBar inherits Rectangle {
 
     Text {
         x: root.horizontal-padding;
-        y: root.subtitle == "" ? 0px : 14px;
+        y: root.subtitle == "" ? 0px : 10px;
         width: parent.width - root.horizontal-padding - 68px;
-        height: root.subtitle == "" ? parent.height : 22px;
+        height: root.subtitle == "" ? parent.height : 20px;
         text: root.title;
         color: ThemeTokens.text-primary;
         font-family: AppTypography.ui-font-family;
-        font-size: 19px;
+        font-size: 18px;
         font-weight: 700;
         vertical-alignment: center;
         overflow: elide;
@@ -505,14 +547,15 @@ export component ModalHeaderBar inherits Rectangle {
 
     if root.subtitle != "" : subtitle-copy := Text {
         x: root.horizontal-padding;
-        y: 38px;
+        y: 31px;
         width: parent.width - root.horizontal-padding - 68px;
         text: root.subtitle;
         color: ThemeTokens.text-secondary;
         font-family: AppTypography.ui-font-family;
         font-size: 11px;
         font-weight: AppTypography.ui-font-weight-regular;
-        overflow: elide;
+        wrap: word-wrap;
+        max-height: 24px;
     }
 
     if root.show-drag-handle : drag-handle := Rectangle {
@@ -561,10 +604,7 @@ export component ModalBodyScrollArea inherits Rectangle {
     private property <length> resolved-content-padding-vertical: root.compact-layout ? max(12px, root.content-padding-vertical - 4px) : root.content-padding-vertical;
     private property <length> resolved-content-padding-bottom: root.compact-layout ? max(12px, root.content-padding-bottom - 4px) : root.content-padding-bottom;
     private property <length> resolved-content-spacing: root.compact-layout ? max(10px, root.content-spacing - 4px) : root.content-spacing;
-    private property <length> resolved-panel-width: max(
-        0px,
-        body-scroll.visible-width - (root.resolved-frame-padding * 2)
-    );
+    private property <length> resolved-panel-width: max(0px, body-scroll.visible-width - (root.resolved-frame-padding * 2));
     out property <length> content-column-width: max(
         0px,
         root.resolved-panel-width - (root.resolved-content-padding-horizontal * 2)
@@ -585,37 +625,23 @@ export component ModalBodyScrollArea inherits Rectangle {
             width: body-scroll.visible-width;
             height: max(
                 body-scroll.visible-height,
-                body-panel.y + body-panel.height + root.resolved-frame-padding
+                body-content-host.y + body-content-host.height + root.resolved-content-padding-bottom + root.resolved-frame-padding
             );
             background: root.viewport-surface;
 
-            body-panel := Rectangle {
-                x: root.resolved-frame-padding;
-                y: root.resolved-frame-padding;
-                width: root.resolved-panel-width;
-                height: body-content-host.height
-                    + root.resolved-content-padding-vertical
-                    + root.resolved-content-padding-bottom;
-                border-radius: ThemeTokens.modal-section-radius;
-                border-width: 1px;
-                border-color: root.panel-border-color;
-                background: root.panel-surface;
+            body-content-host := Rectangle {
+                x: root.resolved-frame-padding + root.resolved-content-padding-horizontal;
+                y: root.resolved-frame-padding + root.resolved-content-padding-vertical;
+                width: root.content-column-width;
+                height: body-content.preferred-height;
+                background: transparent;
 
-                body-content-host := Rectangle {
-                    x: root.resolved-content-padding-horizontal;
-                    y: root.resolved-content-padding-vertical;
+                body-content := VerticalLayout {
                     width: root.content-column-width;
-                    height: body-content.preferred-height;
-                    background: transparent;
+                    alignment: start;
+                    spacing: root.resolved-content-spacing;
 
-                    body-content := VerticalLayout {
-                        width: root.content-column-width;
-                        alignment: start;
-                        padding-bottom: root.resolved-content-padding-bottom;
-                        spacing: root.resolved-content-spacing;
-
-                        @children
-                    }
+                    @children
                 }
             }
         }
@@ -629,9 +655,9 @@ export component ModalFooterBar inherits Rectangle {
     in property <color> action-rail-border: ThemeTokens.modal-footer-rail-border;
     in property <length> content-padding-left: 18px;
     in property <length> content-padding-right: 18px;
-    in property <length> content-padding-top: 14px;
-    in property <length> content-padding-bottom: 14px;
-    in property <length> content-spacing: 10px;
+    in property <length> content-padding-top: 10px;
+    in property <length> content-padding-bottom: 12px;
+    in property <length> content-spacing: 8px;
 
     background: root.surface;
 
@@ -641,20 +667,6 @@ export component ModalFooterBar inherits Rectangle {
         width: parent.width;
         height: 1px;
         background: root.divider-color;
-    }
-
-    action-rail := Rectangle {
-        x: 12px;
-        y: max(
-            12px,
-            parent.height - self.height - max(8px, root.content-padding-bottom - 2px)
-        );
-        width: max(0px, parent.width - 24px);
-        height: 48px;
-        border-radius: ThemeTokens.modal-section-radius;
-        border-width: 1px;
-        border-color: root.action-rail-border;
-        background: root.action-rail-surface;
     }
 
     footer-content := VerticalLayout {

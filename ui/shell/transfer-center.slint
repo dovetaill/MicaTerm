@@ -484,10 +484,10 @@ export component TransferCenter inherits Rectangle {
         }
 
     shadow-far := Rectangle {
-        x: 10px + root.stage-inset;
-        y: 16px + root.stage-offset-y;
-        width: max(0px, parent.width - 8px - root.stage-inset * 2);
-        height: max(0px, parent.height - 8px - root.stage-offset-y);
+        x: 7px + root.stage-inset;
+        y: 11px + root.stage-offset-y;
+        width: max(0px, parent.width - 6px - root.stage-inset * 2);
+        height: max(0px, parent.height - 6px - root.stage-offset-y);
         border-radius: root.panel-radius + 2px;
         background: ThemeTokens.utility-panel-shadow-strong;
         opacity: root.open ? 1 : 0.82;
@@ -499,8 +499,8 @@ export component TransferCenter inherits Rectangle {
     }
 
     shadow-near := Rectangle {
-        x: 3px + root.stage-inset / 2;
-        y: 7px + root.stage-offset-y / 2;
+        x: 2px + root.stage-inset / 2;
+        y: 4px + root.stage-offset-y / 2;
         width: max(0px, parent.width - 2px - root.stage-inset);
         height: max(0px, parent.height - 2px - root.stage-offset-y / 2);
         border-radius: root.panel-radius + 1px;
@@ -514,11 +514,11 @@ export component TransferCenter inherits Rectangle {
     }
 
     glow-halo := Rectangle {
-        x: -2px + root.stage-inset / 2;
-        y: -2px + root.stage-offset-y / 2;
-        width: parent.width + 4px - root.stage-inset;
-        height: parent.height + 4px - root.stage-offset-y / 2;
-        border-radius: root.panel-radius + 2px;
+        x: -1px + root.stage-inset / 2;
+        y: -1px + root.stage-offset-y / 2;
+        width: parent.width + 2px - root.stage-inset;
+        height: parent.height + 2px - root.stage-offset-y / 2;
+        border-radius: root.panel-radius + 1px;
         background: ThemeTokens.utility-panel-glow;
         opacity: root.open ? 1 : 0.72;
         animate x { duration: MotionTokens.utility-panel-shadow-duration; easing: ease-out; }

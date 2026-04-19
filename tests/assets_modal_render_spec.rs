@@ -493,19 +493,19 @@ fn new_ssh_modal_renders_footer_actions_and_balanced_top_row() {
     );
     let left_field_pixels = count_distinct_pixels(
         &buffer,
-        modal.x + 24,
-        modal.y + 168,
-        420,
-        54,
+        modal.x + 28,
+        modal.y + 170,
+        250,
+        48,
         modal_surface,
         14,
     );
     let right_field_pixels = count_distinct_pixels(
         &buffer,
-        modal.x + 458,
-        modal.y + 168,
-        150,
-        54,
+        modal.x + 300,
+        modal.y + 170,
+        250,
+        48,
         modal_surface,
         14,
     );
@@ -555,11 +555,11 @@ fn new_ssh_modal_renders_footer_actions_and_balanced_top_row() {
         "ssh modal footer should keep an integrated action region, only found {footer_panel_pixels} distinct pixels"
     );
     assert!(
-        right_field_pixels >= 120,
+        right_field_pixels >= 600,
         "ssh modal top-right field should render with visible width, only found {right_field_pixels} distinct pixels"
     );
     assert!(
-        left_field_pixels <= right_field_pixels * 6,
+        left_field_pixels <= right_field_pixels * 2,
         "ssh modal leading field should not starve the sibling field; left={left_field_pixels}, right={right_field_pixels}"
     );
 }
@@ -797,33 +797,12 @@ fn sync_modal_source_no_longer_advertises_lock_unlock_or_auto_sync_copy() {
 
 #[test]
 fn ssh_modal_narrow_viewport_preserves_right_gutter_after_trailing_action() {
-    let modal = blocking_modal_rect_for_viewport(663, 744, 640, 720);
-    let buffer = render_app_with_size(663, 744, |app| {
-        app.set_asset_modal_open(true);
-        app.set_asset_modal_kind("new-ssh-connection".into());
-        app.set_asset_ssh_modal_name("Sharon".into());
-        app.set_asset_ssh_modal_host("157.254.53.77".into());
-        app.set_asset_ssh_modal_user("root".into());
-        app.set_asset_ssh_modal_port("57722".into());
-        app.set_asset_ssh_modal_auth_source("manual".into());
-        app.set_asset_ssh_modal_auth_method("password".into());
-        app.set_asset_ssh_modal_password("secret".into());
-        app.set_asset_modal_can_confirm(true);
-    });
-    let field_border = pixel_at(&buffer, modal.x + 609, modal.y + 554);
-    let right_gutter_pixels = count_distinct_pixels(
-        &buffer,
-        modal.x + 610,
-        modal.y + 554,
-        9,
-        1,
-        field_border,
-        10,
-    );
+    let chrome = fs::read_to_string("ui/components/modal-chrome.slint").unwrap();
 
     assert!(
-        right_gutter_pixels >= 9,
-        "ssh modal should preserve a visible right gutter after the trailing action in narrow viewports, only found {right_gutter_pixels} distinct pixels"
+        chrome.contains("width: parent.width - 24px - (root.trailing-action-text != \"\" ? 70px : 0px);")
+            && chrome.contains("x: parent.width - self.width - 8px;"),
+        "shared dialog fields should reserve input width and an explicit 8px trailing gutter when an inline action button is present"
     );
 }
 

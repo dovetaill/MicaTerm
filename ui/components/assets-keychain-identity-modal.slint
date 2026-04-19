@@ -1,5 +1,6 @@
 import {
     DialogActionButton,
+    DialogFormSection,
     DialogInlineBanner,
     DialogSectionCard,
     DialogSegmentButton,
@@ -59,7 +60,7 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: root.dialog-title;
-            subtitle: "Shared credentials for SSH connections, snippets, and sync flows.";
+            subtitle: "Store shared credentials for reusable connection flows.";
             prominent: true;
 
             close-requested => {
@@ -105,18 +106,10 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
                     width: parent.width;
                     spacing: body-scroll.content-spacing;
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-
-                        Text {
-                            width: parent.width;
-                            text: "Identity profile";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Identity profile";
+                        description: "Use a stable label so SSH pickers and sync setup can reuse this identity.";
 
                         name-field := DialogTextField {
                             width: parent.width;
@@ -124,9 +117,7 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
                             required: true;
                             value: root.name;
                             invalid: root.validation-message != "";
-                            helper-text: root.validation-message != ""
-                                ? root.validation-message
-                                : "Use a stable label. SSH connection pickers and sync setup reuse this identity.";
+                            helper-text: root.validation-message;
 
                             value-changed(value) => {
                                 root.draft-changed("name", value);
@@ -145,19 +136,10 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-                        surface: ThemeTokens.modal-section-alt-surface;
-
-                        Text {
-                            width: parent.width;
-                            text: "Authentication";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Authentication";
+                        description: "Choose whether this identity stores a password or references a managed SSH key.";
 
                         Rectangle {
                             width: parent.width;
@@ -251,18 +233,10 @@ export component AssetsKeychainIdentityModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-
-                        Text {
-                            width: parent.width;
-                            text: "Notes";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Notes";
+                        description: "Use this for environment or owner hints when the same username appears across systems.";
 
                         DialogTextField {
                             width: parent.width;

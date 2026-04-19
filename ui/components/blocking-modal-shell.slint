@@ -71,8 +71,8 @@ export component BlockingModalShell inherits Rectangle {
     }
 
     modal-shadow-far := Rectangle {
-        x: root.resolved-modal-x + 9px;
-        y: root.resolved-modal-y + 14px;
+        x: root.resolved-modal-x + 6px;
+        y: root.resolved-modal-y + 10px;
         width: root.resolved-modal-width;
         height: root.resolved-modal-height;
         border-radius: root.modal-radius + 2px;
@@ -80,8 +80,8 @@ export component BlockingModalShell inherits Rectangle {
     }
 
     modal-shadow-near := Rectangle {
-        x: root.resolved-modal-x + 3px;
-        y: root.resolved-modal-y + 7px;
+        x: root.resolved-modal-x + 2px;
+        y: root.resolved-modal-y + 4px;
         width: root.resolved-modal-width;
         height: root.resolved-modal-height;
         border-radius: root.modal-radius + 1px;
@@ -89,11 +89,11 @@ export component BlockingModalShell inherits Rectangle {
     }
 
     modal-glow-frame := Rectangle {
-        x: root.resolved-modal-x - 2px;
-        y: root.resolved-modal-y - 2px;
-        width: root.resolved-modal-width + 4px;
-        height: root.resolved-modal-height + 4px;
-        border-radius: root.modal-radius + 2px;
+        x: root.resolved-modal-x - 1px;
+        y: root.resolved-modal-y - 1px;
+        width: root.resolved-modal-width + 2px;
+        height: root.resolved-modal-height + 2px;
+        border-radius: root.modal-radius + 1px;
         background: root.modal-glow;
     }
 

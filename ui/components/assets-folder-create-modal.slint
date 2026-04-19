@@ -1,6 +1,5 @@
 import {
     DialogActionButton,
-    DialogSectionCard,
     DialogTextField,
     ModalFooterBar,
     ModalHeaderBar,
@@ -50,7 +49,7 @@ export component AssetsFolderCreateModal inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: root.dialog-title;
-            subtitle: "Create a new item in the current location.";
+            subtitle: "Create a folder in the current asset location.";
             prominent: true;
 
             close-requested => {
@@ -81,48 +80,33 @@ export component AssetsFolderCreateModal inherits Rectangle {
             height: parent.height - header.height - footer.height;
             background: ThemeTokens.modal-body-surface;
 
-            VerticalLayout {
+            body-layout := VerticalLayout {
                 x: 16px;
                 y: 16px;
                 width: parent.width - 32px;
                 spacing: 0px;
 
-                DialogSectionCard {
+                name-field := DialogTextField {
                     width: parent.width;
-                    spacing: 12px;
-                    surface: ThemeTokens.modal-section-surface;
+                    label: "Folder name";
+                    required: true;
+                    value: root.folder-name;
+                    invalid: root.validation-message != "";
+                    helper-text: root.validation-message != ""
+                        ? root.validation-message
+                        : "Shown in the asset tree and quick actions.";
 
-                    Text {
-                        width: parent.width;
-                        text: "Name";
-                        color: ThemeTokens.text-primary;
-                        font-size: 13px;
-                        font-weight: 700;
-                        overflow: elide;
+                    value-changed(value) => {
+                        root.folder-name-changed(value);
                     }
 
-                        name-field := DialogTextField {
-                            width: parent.width;
-                            label: "Folder name";
-                            required: true;
-                        value: root.folder-name;
-                        invalid: root.validation-message != "";
-                        helper-text: root.validation-message != ""
-                            ? root.validation-message
-                            : "Shown in the assets tree, the create menu, and SFTP quick actions.";
-
-                            value-changed(value) => {
-                                root.folder-name-changed(value);
-                            }
-
-                            submitted => {
-                                if root.can-confirm {
-                                    root.confirm-requested();
-                                }
-                            }
+                    submitted => {
+                        if root.can-confirm {
+                            root.confirm-requested();
                         }
                     }
                 }
+            }
         }
 
         footer := ModalFooterBar {

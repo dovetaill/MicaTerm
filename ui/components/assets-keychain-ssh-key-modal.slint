@@ -1,5 +1,6 @@
 import {
     DialogActionButton,
+    DialogFormSection,
     DialogInlineBanner,
     DialogSectionCard,
     DialogTextField,
@@ -56,7 +57,7 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: root.dialog-title;
-            subtitle: "Bring imported keys, pasted keys, and generated keys into one consistent editor surface.";
+            subtitle: "Manage one reusable SSH key profile.";
             prominent: true;
 
             close-requested => {
@@ -102,18 +103,10 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
                     width: parent.width;
                     spacing: body-scroll.content-spacing;
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-
-                        Text {
-                            width: parent.width;
-                            text: "Key profile";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Key profile";
+                        description: "Use a stable label so identities and SSH profiles can reference this key clearly.";
 
                         name-field := DialogTextField {
                             width: parent.width;
@@ -130,19 +123,10 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-                        surface: ThemeTokens.modal-section-alt-surface;
-
-                        Text {
-                            width: parent.width;
-                            text: "Private key";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Private key";
+                        description: "Import, paste, or edit the private key material used for SSH auth.";
 
                         HorizontalLayout {
                             width: parent.width;
@@ -181,18 +165,10 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-
-                        Text {
-                            width: parent.width;
-                            text: "Public key and fingerprint";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Public key and fingerprint";
+                        description: "Review the derived public key and fingerprint that other surfaces will reference.";
 
                         VerticalLayout {
                             width: parent.width;

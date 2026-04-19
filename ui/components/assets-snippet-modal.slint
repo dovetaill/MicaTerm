@@ -1,7 +1,7 @@
 import { ComboBox } from "std-widgets.slint";
 import {
     DialogActionButton,
-    DialogSectionCard,
+    DialogFormSection,
     DialogTextField,
     ModalBodyScrollArea,
     ModalFooterBar,
@@ -57,7 +57,7 @@ export component AssetsSnippetModal inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: root.dialog-title;
-            subtitle: "Keep command snippets compact, searchable, and ready for quick execution.";
+            subtitle: "Create a reusable command snippet.";
             prominent: true;
 
             close-requested => {
@@ -103,18 +103,10 @@ export component AssetsSnippetModal inherits Rectangle {
                     width: parent.width;
                     spacing: body.content-spacing;
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-
-                        Text {
-                            width: parent.width;
-                            text: "Snippet details";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Snippet details";
+                        description: "Short, action-oriented labels scan best in quick launch and search.";
 
                         name-field := DialogTextField {
                             width: parent.width;
@@ -122,74 +114,56 @@ export component AssetsSnippetModal inherits Rectangle {
                             required: true;
                             value: root.name;
                             invalid: root.validation-message != "";
-                            helper-text: root.validation-message != ""
-                                ? root.validation-message
-                                : "Short, action-oriented labels work best in quick launch and search.";
+                            helper-text: root.validation-message;
 
                             value-changed(value) => {
                                 root.draft-changed("name", value);
                             }
                         }
 
-                        Rectangle {
+                        VerticalLayout {
                             width: parent.width;
-                            height: 88px;
-                            background: transparent;
+                            spacing: 8px;
 
-                            VerticalLayout {
+                            Text {
                                 width: parent.width;
-                                spacing: 8px;
+                                text: "Package";
+                                color: ThemeTokens.text-secondary;
+                                font-size: 11px;
+                                overflow: elide;
+                            }
 
-                                Text {
-                                    width: parent.width;
-                                    text: "Package";
-                                    color: ThemeTokens.text-secondary;
-                                    font-size: 11px;
-                                    overflow: elide;
+                            ComboBox {
+                                width: parent.width;
+                                height: 34px;
+                                model: root.package-options;
+                                current-value: root.package-selected-label;
+
+                                selected(value) => {
+                                    root.draft-changed("package", value == "No Package" ? "" : value);
                                 }
+                            }
 
-                                ComboBox {
-                                    width: parent.width;
-                                    height: 34px;
-                                    model: root.package-options;
-                                    current-value: root.package-selected-label;
-
-                                    selected(value) => {
-                                        root.draft-changed("package", value == "No Package" ? "" : value);
-                                    }
-                                }
-
-                                Text {
-                                    width: parent.width;
-                                    text: "Optional. Group snippets into packages for a cleaner palette and sidebar.";
-                                    color: ThemeTokens.text-muted;
-                                    font-size: 11px;
-                                    wrap: word-wrap;
-                                }
+                            Text {
+                                width: parent.width;
+                                text: "Optional. Group snippets into packages for a cleaner palette and sidebar.";
+                                color: ThemeTokens.text-muted;
+                                font-size: 11px;
+                                wrap: word-wrap;
                             }
                         }
                     }
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-                        surface: ThemeTokens.modal-section-alt-surface;
-
-                        Text {
-                            width: parent.width;
-                            text: "Script";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Script";
+                        description: "Use multiline shell content without falling back to a web-style textarea.";
 
                         DialogTextField {
                             width: parent.width;
                             label: "Command body";
                             multiline: true;
                             value: root.script;
-                            helper-text: "Supports multiline shell snippets without falling back to a flat web-style textarea.";
 
                             value-changed(value) => {
                                 root.draft-changed("script", value);

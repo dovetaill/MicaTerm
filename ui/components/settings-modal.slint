@@ -1,6 +1,6 @@
 import {
     DialogActionButton,
-    DialogSectionCard,
+    DialogFormSection,
     DialogSegmentButton,
     ModalBodyScrollArea,
     ModalFooterBar,
@@ -32,7 +32,7 @@ export component SettingsModal inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: "Settings";
-            subtitle: "Shell defaults, transfer preferences, and performance guardrails in one calmer surface.";
+            subtitle: "Adjust terminal history, memory, and conflict defaults.";
             prominent: true;
 
             close-requested => {
@@ -78,18 +78,10 @@ export component SettingsModal inherits Rectangle {
                     width: parent.width;
                     spacing: body.content-spacing;
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-
-                        Text {
-                            width: parent.width;
-                            text: "Terminal history";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Terminal history";
+                        description: "Adjust how much output each live terminal keeps before older lines are trimmed.";
 
                         Text {
                             width: parent.width;
@@ -138,19 +130,10 @@ export component SettingsModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-                        surface: ThemeTokens.modal-section-alt-surface;
-
-                        Text {
-                            width: parent.width;
-                            text: "Memory behavior";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Memory behavior";
+                        description: "Control whether long-running idle tabs release memory more aggressively.";
 
                         Text {
                             width: parent.width;
@@ -196,18 +179,10 @@ export component SettingsModal inherits Rectangle {
                         }
                     }
 
-                    DialogSectionCard {
+                    DialogFormSection {
                         width: parent.width;
-                        spacing: 14px;
-
-                        Text {
-                            width: parent.width;
-                            text: "Download conflicts";
-                            color: ThemeTokens.text-primary;
-                            font-size: 13px;
-                            font-weight: 700;
-                            overflow: elide;
-                        }
+                        title: "Download conflicts";
+                        description: "Choose the default policy before the transfer center or resolve dialog needs to intervene.";
 
                         Text {
                             width: parent.width;
