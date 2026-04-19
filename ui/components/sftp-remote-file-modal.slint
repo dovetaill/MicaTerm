@@ -1,41 +1,12 @@
+import {
+    DialogActionButton,
+    DialogInlineBanner,
+    DialogSectionCard,
+    ModalFooterBar,
+    ModalHeaderBar,
+} from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
-
-component DialogButton inherits Rectangle {
-    in property <string> label: "";
-    in property <bool> primary: false;
-    in property <bool> enabled: true;
-    callback clicked();
-
-    height: 34px;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: root.primary && root.enabled ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-    background: !root.enabled ? ThemeTokens.control-disabled-surface
-        : touch.pressed ? ThemeTokens.control-pressed-surface
-        : touch.has-hover ? ThemeTokens.control-hover-surface
-        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
-    opacity: root.enabled ? 1.0 : 0.56;
-
-    Text {
-        width: parent.width;
-        height: parent.height;
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-
-    touch := TouchArea {
-        width: parent.width;
-        height: parent.height;
-        enabled: root.enabled;
-
-        clicked => {
-            root.clicked();
-        }
-    }
-}
 
 export component SftpRemoteFileModal inherits Rectangle {
     in property <string> dialog-title: "Remote File";
@@ -52,6 +23,7 @@ export component SftpRemoteFileModal inherits Rectangle {
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
+    private property <length> footer-height: ThemeTokens.modal-footer-min-height;
 
     background: transparent;
 
@@ -59,113 +31,40 @@ export component SftpRemoteFileModal inherits Rectangle {
         editor-input.focus();
     }
 
+    changed focus-sequence => {
+        root.focus-input();
+    }
+
     modal-focus := FocusScope {
         width: parent.width;
         height: parent.height;
 
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.focus-restore-requested();
-                root.close-requested();
-                accept
-            } else {
-                reject
-            }
-        }
-
-        header := Rectangle {
+        header := ModalHeaderBar {
             x: 0px;
             y: 0px;
             width: parent.width;
-            height: 72px;
-            background: ThemeTokens.assets-surface;
+            title: root.dialog-title;
+            subtitle: "Edit the remote file in place without leaving the current workspace.";
+            prominent: true;
 
-            Text {
-                x: 20px;
-                y: 12px;
-                width: parent.width - 72px;
-                height: 22px;
-                text: root.dialog-title;
-                color: ThemeTokens.text-primary;
-                font-size: 18px;
-                font-weight: AppTypography.ui-font-weight-regular;
-                vertical-alignment: center;
-                overflow: elide;
+            close-requested => {
+                root.close-requested();
             }
 
-            Text {
-                x: 20px;
-                y: 38px;
-                width: parent.width - 72px;
-                height: 18px;
-                text: root.remote-path;
-                color: ThemeTokens.text-primary;
-                opacity: 0.72;
-                font-size: 11px;
-                vertical-alignment: center;
-                overflow: elide;
+            drag-requested(pointer-x, pointer-y) => {
+                root.drag-requested(pointer-x, pointer-y);
             }
 
-            drag-touch := TouchArea {
-                width: parent.width - 48px;
-                height: parent.height;
-
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down
-                        && event.button == PointerEventButton.left
-                    {
-                        root.drag-requested(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.move {
-                        root.drag-moved(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.up {
-                        root.drag-ended();
-                    }
-                }
+            drag-moved(pointer-x, pointer-y) => {
+                root.drag-moved(pointer-x, pointer-y);
             }
 
-            close-button := Rectangle {
-                x: parent.width - 40px;
-                y: 12px;
-                width: 28px;
-                height: 28px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
-
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: "×";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                close-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        root.focus-restore-requested();
-                        root.close-requested();
-                    }
-                }
+            drag-ended => {
+                root.drag-ended();
             }
 
-            header-divider := Rectangle {
-                y: parent.height - 1px;
-                width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
+            focus-restore-requested => {
+                root.focus-restore-requested();
             }
         }
 
@@ -174,94 +73,133 @@ export component SftpRemoteFileModal inherits Rectangle {
             y: header.height;
             width: parent.width;
             height: parent.height - header.height - footer.height;
-            background: ThemeTokens.assets-surface;
+            background: ThemeTokens.modal-body-surface;
 
-            if root.status-text != "" : status-line := Text {
-                x: 20px;
-                y: 12px;
-                width: parent.width - 40px;
-                height: 18px;
-                text: root.status-text;
-                color: ThemeTokens.text-primary;
-                opacity: 0.72;
-                font-size: 11px;
-                overflow: elide;
-            }
+            body-layout := VerticalLayout {
+                x: 14px;
+                y: 14px;
+                width: parent.width - 28px;
+                height: parent.height - 28px;
+                spacing: 10px;
 
-            if root.error-text != "" : error-line := Text {
-                x: 20px;
-                y: root.status-text != "" ? 32px : 12px;
-                width: parent.width - 40px;
-                height: 18px;
-                text: root.error-text;
-                color: ThemeTokens.accent;
-                font-size: 11px;
-                overflow: elide;
-            }
+                DialogSectionCard {
+                    width: parent.width;
+                    padding-horizontal: 16px;
+                    padding-vertical: 14px;
+                    spacing: 8px;
+                    surface: ThemeTokens.modal-section-alt-surface;
 
-            editor-frame := Rectangle {
-                x: 20px;
-                y: root.error-text != "" ? 58px : root.status-text != "" ? 38px : 12px;
-                width: parent.width - 40px;
-                height: parent.height - self.y - 16px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.inspector-surface;
+                    Text {
+                        width: parent.width;
+                        text: "Remote path";
+                        color: ThemeTokens.text-secondary;
+                        font-size: 11px;
+                        overflow: elide;
+                    }
 
-                editor-input := TextInput {
-                    x: 12px;
-                    y: 10px;
-                    width: parent.width - 24px;
-                    height: parent.height - 20px;
-                    text: root.content;
-                    color: ThemeTokens.text-primary;
-                    single-line: false;
-                    selection-background-color: ThemeTokens.accent;
-                    selection-foreground-color: ThemeTokens.text-primary;
+                    Text {
+                        width: parent.width;
+                        text: root.remote-path;
+                        color: ThemeTokens.text-primary;
+                        wrap: word-wrap;
+                    }
+                }
 
-                    edited => {
-                        root.content-changed(self.text);
+                if root.status-text != "" : DialogInlineBanner {
+                    width: parent.width;
+                    tone: "neutral";
+                    message: root.status-text;
+                }
+
+                if root.error-text != "" : DialogInlineBanner {
+                    width: parent.width;
+                    tone: "error";
+                    message: root.error-text;
+                }
+
+                editor-frame := Rectangle {
+                    width: parent.width;
+                    height: 0px;
+                    vertical-stretch: 1;
+                    preferred-height: 220px;
+                    border-radius: ThemeTokens.modal-section-radius;
+                    border-width: 1px;
+                    border-color: editor-input.has-focus
+                        ? ThemeTokens.input-focus-ring
+                        : ThemeTokens.modal-inner-border;
+                    background: ThemeTokens.modal-section-surface;
+                    clip: true;
+
+                    Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: 1px;
+                        background: ThemeTokens.modal-inner-border;
+                    }
+
+                    editor-input := TextInput {
+                        x: 16px;
+                        y: 14px;
+                        width: parent.width - 32px;
+                        height: parent.height - 28px;
+                        text: root.content;
+                        color: ThemeTokens.text-primary;
+                        single-line: false;
+                        selection-background-color: ThemeTokens.focus-ring;
+                        selection-foreground-color: ThemeTokens.text-primary;
+                        font-family: AppTypography.ui-font-family;
+                        font-size: AppTypography.ui-font-size-body;
+                        font-weight: AppTypography.ui-font-weight-regular;
+
+                        edited => {
+                            root.content-changed(self.text);
+                        }
                     }
                 }
             }
         }
 
-        footer := Rectangle {
+        footer := ModalFooterBar {
             x: 0px;
-            y: parent.height - 74px;
+            y: parent.height - root.footer-height;
             width: parent.width;
-            height: 74px;
-            background: ThemeTokens.assets-surface;
+            height: root.footer-height;
 
-            footer-divider := Rectangle {
-                width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
+            Rectangle {
+                height: 0px;
+                vertical-stretch: 1;
+                background: transparent;
             }
 
-            cancel-button := DialogButton {
-                x: parent.width - 204px;
-                y: 20px;
-                width: 88px;
-                label: "Close";
+            HorizontalLayout {
+                height: 38px;
+                spacing: 10px;
 
-                clicked => {
-                    root.focus-restore-requested();
-                    root.close-requested();
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
                 }
-            }
 
-            save-button := DialogButton {
-                x: parent.width - 108px;
-                y: 20px;
-                width: 88px;
-                label: "Save";
-                primary: true;
-                enabled: root.can-save;
+                DialogActionButton {
+                    width: 96px;
+                    label: "Close";
 
-                clicked => {
-                    root.save-requested();
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.close-requested();
+                    }
+                }
+
+                DialogActionButton {
+                    width: 96px;
+                    label: "Save";
+                    primary: true;
+                    enabled: root.can-save;
+
+                    clicked => {
+                        root.save-requested();
+                    }
                 }
             }
         }

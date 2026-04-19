@@ -6,12 +6,14 @@ export component BlockingModalShell inherits Rectangle {
     in property <length> modal-height: 240px;
     in-out property <length> offset-x: 0px;
     in-out property <length> offset-y: 0px;
-    in property <length> modal-radius: 0px;
-    in property <brush> modal-surface: ThemeTokens.dark-mode ? #1b2230 : #fbfdff;
-    in property <brush> modal-border-color: ThemeTokens.dark-mode ? #ffffff30 : #0f172a38;
-    in property <brush> modal-shadow-soft: ThemeTokens.dark-mode ? #00000024 : #0f172a12;
-    in property <brush> modal-shadow-strong: ThemeTokens.dark-mode ? #00000036 : #0f172a14;
-    in property <brush> modal-glow: transparent;
+    in property <int> focus-sequence: 0;
+    in property <bool> escape-enabled: true;
+    in property <length> modal-radius: ThemeTokens.modal-radius;
+    in property <brush> modal-surface: ThemeTokens.modal-surface;
+    in property <brush> modal-border-color: ThemeTokens.modal-border;
+    in property <brush> modal-shadow-soft: ThemeTokens.modal-shadow-soft;
+    in property <brush> modal-shadow-strong: ThemeTokens.modal-shadow-strong;
+    in property <brush> modal-glow: ThemeTokens.modal-glow;
     out property <length> content-width: content-host.width;
     out property <length> content-height: content-host.height;
     callback drag-requested(length, length);
@@ -19,6 +21,7 @@ export component BlockingModalShell inherits Rectangle {
     callback drag-ended();
     callback focus-restore-requested();
     callback consume-event();
+    callback escape-requested();
 
     width: 100%;
     height: 100%;
@@ -55,7 +58,7 @@ export component BlockingModalShell inherits Rectangle {
     backdrop-scrim := Rectangle {
         width: parent.width;
         height: parent.height;
-        background: ThemeTokens.dark-mode ? #040812c8 : #0f172a24;
+        background: ThemeTokens.modal-backdrop;
     }
 
     backdrop := TouchArea {
@@ -68,7 +71,7 @@ export component BlockingModalShell inherits Rectangle {
     }
 
     modal-shadow-far := Rectangle {
-        x: root.resolved-modal-x + 8px;
+        x: root.resolved-modal-x + 9px;
         y: root.resolved-modal-y + 14px;
         width: root.resolved-modal-width;
         height: root.resolved-modal-height;
@@ -85,7 +88,7 @@ export component BlockingModalShell inherits Rectangle {
         background: root.modal-shadow-soft;
     }
 
-    modal-glow := Rectangle {
+    modal-glow-frame := Rectangle {
         x: root.resolved-modal-x - 2px;
         y: root.resolved-modal-y - 2px;
         width: root.resolved-modal-width + 4px;
@@ -105,14 +108,42 @@ export component BlockingModalShell inherits Rectangle {
         border-color: root.modal-border-color;
         background: root.modal-surface;
 
-        content-host := Rectangle {
+        edge-highlight := Rectangle {
             x: 0px;
             y: 0px;
             width: parent.width;
-            height: parent.height;
-            background: transparent;
-
-            @children
+            height: 1px;
+            background: ThemeTokens.dark-mode ? #ffffff12 : #ffffff66;
         }
+
+        modal-event-scope := FocusScope {
+            width: parent.width;
+            height: parent.height;
+            focus-on-tab-navigation: false;
+
+            capture-key-pressed(event) => {
+                if root.escape-enabled && event.text == Key.Escape {
+                    root.focus-restore-requested();
+                    root.escape-requested();
+                    accept
+                } else {
+                    reject
+                }
+            }
+
+            content-host := Rectangle {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                background: transparent;
+
+                @children
+            }
+        }
+    }
+
+    changed focus-sequence => {
+        modal-event-scope.focus();
     }
 }

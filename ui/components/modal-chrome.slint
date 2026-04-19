@@ -2,25 +2,472 @@ import { ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
 
+component DialogIconButton inherits Rectangle {
+    in property <image> icon-source;
+    in property <string> action-label: "";
+    in property <bool> destructive: false;
+    in property <bool> enabled: true;
+    out property <bool> has-hover: button-touch.has-hover;
+    out property <bool> has-focus: button-focus.has-focus;
+    callback clicked();
+
+    width: 32px;
+    height: 32px;
+    border-radius: ThemeTokens.modal-control-radius;
+    border-width: 1px;
+    border-color: !root.enabled ? ThemeTokens.modal-inner-border
+        : root.has-focus ? ThemeTokens.focus-ring
+        : root.has-hover ? ThemeTokens.modal-field-hover-border
+        : ThemeTokens.modal-inner-border;
+    background: !root.enabled ? ThemeTokens.control-disabled-surface
+        : button-touch.pressed
+            ? root.destructive ? ThemeTokens.modal-button-danger-hover-surface
+                : ThemeTokens.modal-button-secondary-pressed-surface
+            : root.has-hover || root.has-focus
+                ? root.destructive ? ThemeTokens.modal-button-danger-hover-surface
+                    : ThemeTokens.modal-button-secondary-hover-surface
+                : root.destructive ? ThemeTokens.modal-button-danger-surface
+                    : ThemeTokens.modal-button-secondary-surface;
+    opacity: root.enabled ? 1 : 0.48;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.action-label;
+    accessible-action-default => { button-touch.clicked(); }
+    forward-focus: button-focus;
+
+    if (root.icon-source.width > 0 && root.icon-source.height > 0) : icon := Image {
+        x: 8px;
+        y: 8px;
+        width: 16px;
+        height: 16px;
+        source <=> root.icon-source;
+        image-fit: contain;
+        colorize: root.destructive ? ThemeTokens.status-error-accent : ThemeTokens.text-primary;
+    }
+
+    button-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    button-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible && root.enabled;
+        focus-on-tab-navigation: root.enabled;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                button-touch.clicked();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+}
+
+export component DialogActionButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> primary: false;
+    in property <bool> destructive: false;
+    in property <bool> enabled: true;
+    out property <bool> has-focus: button-focus.has-focus;
+    callback clicked();
+
+    min-width: 104px;
+    preferred-width: max(104px, label-metric.preferred-width + 36px);
+    height: 38px;
+    border-radius: ThemeTokens.modal-control-radius;
+    border-width: 1px;
+    border-color: !root.enabled ? ThemeTokens.modal-inner-border
+        : root.has-focus ? ThemeTokens.focus-ring
+        : root.destructive ? ThemeTokens.modal-button-danger-border
+        : root.primary ? ThemeTokens.modal-button-primary-surface
+        : ThemeTokens.modal-inner-border;
+    background: !root.enabled ? ThemeTokens.control-disabled-surface
+        : button-touch.pressed
+            ? root.destructive ? ThemeTokens.modal-button-danger-hover-surface
+                : root.primary ? ThemeTokens.modal-button-primary-pressed-surface
+                : ThemeTokens.modal-button-secondary-pressed-surface
+            : root.has-focus || button-touch.has-hover
+                ? root.destructive ? ThemeTokens.modal-button-danger-hover-surface
+                    : root.primary ? ThemeTokens.modal-button-primary-hover-surface
+                    : ThemeTokens.modal-button-secondary-hover-surface
+                : root.destructive ? ThemeTokens.modal-button-danger-surface
+                    : root.primary ? ThemeTokens.modal-button-primary-surface
+                    : ThemeTokens.modal-button-secondary-surface;
+    opacity: root.enabled ? 1 : 0.54;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.label;
+    accessible-action-default => { button-touch.clicked(); }
+    forward-focus: button-focus;
+
+    public function focus-button() {
+        button-focus.focus();
+    }
+
+    label-metric := Text {
+        width: 0px;
+        height: 0px;
+        text: root.label;
+        color: transparent;
+        font-family: AppTypography.ui-font-family;
+        font-size: 12px;
+        font-weight: AppTypography.ui-font-weight-regular;
+    }
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: root.primary ? ThemeTokens.danger-fg
+            : root.destructive ? ThemeTokens.status-error-accent
+            : ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-family: AppTypography.ui-font-family;
+        font-size: 12px;
+        font-weight: root.primary ? 700 : AppTypography.ui-font-weight-regular;
+    }
+
+    button-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    button-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible && root.enabled;
+        focus-on-tab-navigation: root.enabled;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                button-touch.clicked();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+}
+
+export component DialogSegmentButton inherits Rectangle {
+    in property <string> label: "";
+    in property <bool> active: false;
+    in property <bool> enabled: true;
+    out property <bool> has-focus: button-focus.has-focus;
+    callback clicked();
+
+    min-width: 0px;
+    preferred-width: max(88px, label-metric.preferred-width + 28px);
+    height: 34px;
+    border-radius: ThemeTokens.modal-control-radius;
+    border-width: 1px;
+    border-color: !root.enabled ? ThemeTokens.modal-inner-border
+        : root.has-focus ? ThemeTokens.focus-ring
+        : root.active ? ThemeTokens.modal-button-primary-surface
+        : ThemeTokens.modal-inner-border;
+    background: !root.enabled ? ThemeTokens.control-disabled-surface
+        : button-touch.pressed
+            ? root.active ? ThemeTokens.modal-button-primary-pressed-surface
+                : ThemeTokens.modal-button-secondary-pressed-surface
+            : root.has-focus || button-touch.has-hover
+                ? root.active ? ThemeTokens.modal-button-primary-hover-surface
+                    : ThemeTokens.modal-button-secondary-hover-surface
+                : root.active ? ThemeTokens.modal-button-primary-surface
+                    : ThemeTokens.modal-button-secondary-surface;
+    opacity: root.enabled ? 1 : 0.54;
+    accessible-role: AccessibleRole.button;
+    accessible-label: root.label;
+    accessible-action-default => { button-touch.clicked(); }
+    forward-focus: button-focus;
+
+    public function focus-button() {
+        button-focus.focus();
+    }
+
+    label-metric := Text {
+        width: 0px;
+        height: 0px;
+        text: root.label;
+        color: transparent;
+        font-family: AppTypography.ui-font-family;
+        font-size: 12px;
+        font-weight: AppTypography.ui-font-weight-regular;
+    }
+
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.label;
+        color: root.active ? ThemeTokens.danger-fg : ThemeTokens.text-primary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-family: AppTypography.ui-font-family;
+        font-size: 12px;
+        font-weight: root.active ? 700 : AppTypography.ui-font-weight-regular;
+        overflow: elide;
+    }
+
+    button-touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+
+        clicked => {
+            root.clicked();
+        }
+    }
+
+    button-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.visible && root.enabled;
+        focus-on-tab-navigation: root.enabled;
+
+        key-pressed(event) => {
+            if (event.text == " " || event.text == "\n") {
+                button-touch.clicked();
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+}
+
+export component DialogSectionCard inherits Rectangle {
+    in property <length> padding-horizontal: 18px;
+    in property <length> padding-vertical: 16px;
+    in property <length> spacing: 12px;
+    in property <brush> surface: ThemeTokens.modal-section-surface;
+    in property <brush> stroke-color: ThemeTokens.modal-inner-border;
+    in property <length> content-min-height: 0px;
+    out property <length> content-width: max(0px, root.width - (root.padding-horizontal * 2));
+
+    height: max(
+        root.content-min-height,
+        section-content.preferred-height + (root.padding-vertical * 2)
+    );
+    border-radius: ThemeTokens.modal-section-radius;
+    border-width: 1px;
+    border-color: root.stroke-color;
+    background: root.surface;
+    clip: true;
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        border-radius: ThemeTokens.modal-section-radius;
+        background: transparent;
+    }
+
+    section-content := VerticalLayout {
+        x: root.padding-horizontal;
+        y: root.padding-vertical;
+        width: root.content-width;
+        spacing: root.spacing;
+
+        @children
+    }
+}
+
+export component DialogInlineBanner inherits Rectangle {
+    in property <string> tone: "neutral";
+    in property <string> message: "";
+
+    visible: root.message != "";
+    height: root.message == "" ? 0px : max(40px, message-copy.preferred-height + 18px);
+    border-radius: ThemeTokens.modal-control-radius;
+    border-width: root.message == "" ? 0px : 1px;
+    border-color: root.tone == "busy" ? ThemeTokens.status-busy-accent
+        : root.tone == "success" ? ThemeTokens.status-success-accent
+        : root.tone == "error" ? ThemeTokens.status-error-accent
+        : ThemeTokens.modal-inner-border;
+    background: root.tone == "busy" ? ThemeTokens.status-busy-surface
+        : root.tone == "success" ? ThemeTokens.status-success-surface
+        : root.tone == "error" ? ThemeTokens.status-error-surface
+        : ThemeTokens.modal-section-alt-surface;
+
+    message-copy := Text {
+        x: 12px;
+        y: 9px;
+        width: parent.width - 24px;
+        text: root.message;
+        color: ThemeTokens.text-primary;
+        wrap: word-wrap;
+    }
+}
+
+export component DialogTextField inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "";
+    in property <bool> required: false;
+    in property <bool> multiline: false;
+    in property <bool> password-mode: false;
+    in property <bool> invalid: false;
+    in property <string> helper-text: "";
+    in property <string> trailing-action-text: "";
+    callback value-changed(string);
+    callback trailing-action-requested();
+    callback submitted();
+
+    private property <length> field-height: root.multiline ? 120px : 42px;
+    private property <length> helper-height: root.helper-text == "" ? 0px : helper-metric.preferred-height + 2px;
+    private property <bool> active: field-input.has-focus;
+    private property <bool> hovered: field-touch.has-hover;
+
+    min-width: 0px;
+    preferred-width: 0px;
+    height: 22px + 8px + root.field-height + (root.helper-text == "" ? 0px : 10px + root.helper-height);
+    background: transparent;
+
+    public function focus-input() {
+        field-input.focus();
+    }
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        text: root.required ? root.label + " *" : root.label;
+        color: ThemeTokens.text-secondary;
+        font-family: AppTypography.ui-font-family;
+        font-size: 11px;
+        font-weight: AppTypography.ui-font-weight-regular;
+        overflow: elide;
+    }
+
+    helper-metric := Text {
+        width: parent.width;
+        height: 0px;
+        text: root.helper-text;
+        color: transparent;
+        font-family: AppTypography.ui-font-family;
+        font-size: 11px;
+        font-weight: AppTypography.ui-font-weight-regular;
+        wrap: word-wrap;
+    }
+
+    glow-frame := Rectangle {
+        x: 0px;
+        y: 24px;
+        width: parent.width;
+        height: root.field-height;
+        border-radius: ThemeTokens.modal-control-radius + 1px;
+        border-width: 1px;
+        border-color: root.invalid ? ThemeTokens.status-error-accent : ThemeTokens.input-focus-ring;
+        background: transparent;
+        opacity: root.active ? (ThemeTokens.dark-mode ? 0.32 : 0.22) : 0;
+    }
+
+    field-frame := Rectangle {
+        x: 0px;
+        y: 24px;
+        width: parent.width;
+        height: root.field-height;
+        border-radius: ThemeTokens.modal-control-radius;
+        border-width: 1px;
+        border-color: root.invalid ? ThemeTokens.status-error-accent
+            : root.active ? ThemeTokens.input-focus-ring
+            : root.hovered ? ThemeTokens.modal-field-hover-border
+            : ThemeTokens.modal-field-border;
+        background: ThemeTokens.modal-field-surface;
+
+        field-input := TextInput {
+            x: 12px;
+            y: root.multiline ? 10px : 10px;
+            width: parent.width - 24px - (root.trailing-action-text != "" ? 70px : 0px);
+            height: parent.height - (root.multiline ? 20px : 20px);
+            text: root.value;
+            color: ThemeTokens.text-primary;
+            single-line: !root.multiline;
+            input-type: root.password-mode ? InputType.password : InputType.text;
+            selection-background-color: ThemeTokens.focus-ring;
+            selection-foreground-color: ThemeTokens.text-primary;
+            font-family: AppTypography.ui-font-family;
+            font-size: AppTypography.ui-font-size-body;
+            font-weight: AppTypography.ui-font-weight-regular;
+
+            edited => {
+                root.value-changed(self.text);
+            }
+
+            accepted => {
+                if !root.multiline {
+                    root.submitted();
+                }
+            }
+        }
+
+        if root.trailing-action-text != "" : trailing-action := DialogActionButton {
+            x: parent.width - self.width - 8px;
+            y: (parent.height - self.height) / 2;
+            width: 64px;
+            height: 28px;
+            label: root.trailing-action-text;
+
+            clicked => {
+                root.trailing-action-requested();
+            }
+        }
+
+        field-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            mouse-cursor: MouseCursor.text;
+
+            clicked => {
+                field-input.focus();
+            }
+        }
+    }
+
+    if root.helper-text != "" : helper-copy := Text {
+        x: 0px;
+        y: field-frame.y + field-frame.height + 10px;
+        width: parent.width;
+        text: root.helper-text;
+        color: root.invalid ? ThemeTokens.status-error-accent : ThemeTokens.text-muted;
+        font-family: AppTypography.ui-font-family;
+        font-size: 11px;
+        font-weight: AppTypography.ui-font-weight-regular;
+        wrap: word-wrap;
+    }
+}
+
 export component ModalHeaderBar inherits Rectangle {
     in property <string> title: "";
     in property <string> subtitle: "";
     in property <bool> prominent: true;
     in property <bool> show-drag-handle: false;
-    in property <length> horizontal-padding: 20px;
+    in property <length> horizontal-padding: 22px;
+    in property <bool> close-enabled: true;
     callback close-requested();
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
+    private property <image> close-icon: @image-url("../../assets/icons/fluent/dismiss-20-regular.svg");
 
-    height: root.subtitle == "" ? 56px : 60px;
-    border-radius: 0px;
-    border-width: 0px;
-    background: root.prominent ? ThemeTokens.titlebar-surface : ThemeTokens.assets-surface;
+    height: root.subtitle == "" ? ThemeTokens.modal-header-height : ThemeTokens.modal-header-height + 10px;
+    background: root.prominent ? ThemeTokens.modal-header-surface : ThemeTokens.modal-section-surface;
 
     drag-touch := TouchArea {
-        width: parent.width - 48px;
+        width: parent.width - 62px;
         height: parent.height;
 
         pointer-event(event) => {
@@ -44,66 +491,49 @@ export component ModalHeaderBar inherits Rectangle {
 
     Text {
         x: root.horizontal-padding;
-        y: root.subtitle == "" ? 0px : 8px;
-        width: parent.width - root.horizontal-padding - 56px;
-        height: root.subtitle == "" ? parent.height : 20px;
+        y: root.subtitle == "" ? 0px : 14px;
+        width: parent.width - root.horizontal-padding - 68px;
+        height: root.subtitle == "" ? parent.height : 22px;
         text: root.title;
         color: ThemeTokens.text-primary;
-        font-size: 18px;
-        font-weight: AppTypography.ui-font-weight-regular;
+        font-family: AppTypography.ui-font-family;
+        font-size: 19px;
+        font-weight: 700;
         vertical-alignment: center;
         overflow: elide;
     }
 
     if root.subtitle != "" : subtitle-copy := Text {
         x: root.horizontal-padding;
-        y: 32px;
-        width: parent.width - root.horizontal-padding - 56px;
+        y: 38px;
+        width: parent.width - root.horizontal-padding - 68px;
         text: root.subtitle;
-        color: ThemeTokens.text-primary;
-        opacity: 0.74;
+        color: ThemeTokens.text-secondary;
+        font-family: AppTypography.ui-font-family;
         font-size: 11px;
+        font-weight: AppTypography.ui-font-weight-regular;
         overflow: elide;
     }
 
     if root.show-drag-handle : drag-handle := Rectangle {
         x: root.horizontal-padding;
-        y: parent.height - 8px;
-        width: 64px;
+        y: parent.height - 11px;
+        width: 54px;
         height: 2px;
-        background: ThemeTokens.divider-strong;
+        border-radius: 1px;
+        background: ThemeTokens.modal-inner-border;
     }
 
-    close-button := Rectangle {
-        x: parent.width - 44px;
-        y: (parent.height - 32px) / 2;
-        width: 32px;
-        height: 32px;
-        border-radius: 0px;
-        border-width: 1px;
-        border-color: ThemeTokens.divider-subtle;
-        background: close-touch.pressed ? ThemeTokens.control-pressed-surface
-            : close-touch.has-hover ? ThemeTokens.control-hover-surface
-            : ThemeTokens.control-active-surface;
+    close-button := DialogIconButton {
+        x: parent.width - self.width - 16px;
+        y: (parent.height - self.height) / 2;
+        icon-source: root.close-icon;
+        action-label: "Close dialog";
+        enabled: root.close-enabled;
 
-        Text {
-            width: parent.width;
-            height: parent.height;
-            text: "×";
-            color: ThemeTokens.text-primary;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            font-size: 18px;
-        }
-
-        close-touch := TouchArea {
-            width: parent.width;
-            height: parent.height;
-
-            clicked => {
-                root.focus-restore-requested();
-                root.close-requested();
-            }
+        clicked => {
+            root.focus-restore-requested();
+            root.close-requested();
         }
     }
 
@@ -112,25 +542,25 @@ export component ModalHeaderBar inherits Rectangle {
         y: parent.height - 1px;
         width: parent.width;
         height: 1px;
-        background: ThemeTokens.divider-subtle;
+        background: ThemeTokens.modal-inner-border;
     }
 }
 
 export component ModalBodyScrollArea inherits Rectangle {
-    in property <length> frame-padding: 12px;
-    in property <length> content-padding-horizontal: 16px;
-    in property <length> content-padding-vertical: 12px;
+    in property <length> frame-padding: 14px;
+    in property <length> content-padding-horizontal: 18px;
+    in property <length> content-padding-vertical: 16px;
     in property <length> content-padding-bottom: root.content-padding-vertical;
-    in property <length> content-spacing: 12px;
-    in property <color> viewport-surface: ThemeTokens.inspector-surface;
-    in property <color> panel-surface: ThemeTokens.window-surface;
-    in property <color> panel-border-color: ThemeTokens.divider-strong;
+    in property <length> content-spacing: 14px;
+    in property <color> viewport-surface: ThemeTokens.modal-body-surface;
+    in property <color> panel-surface: ThemeTokens.modal-section-surface;
+    in property <color> panel-border-color: ThemeTokens.modal-inner-border;
     private property <bool> compact-layout: root.height < 400px;
-    private property <length> resolved-frame-padding: root.compact-layout ? max(8px, root.frame-padding - 4px) : root.frame-padding;
-    private property <length> resolved-content-padding-horizontal: root.compact-layout ? max(12px, root.content-padding-horizontal - 4px) : root.content-padding-horizontal;
-    private property <length> resolved-content-padding-vertical: root.compact-layout ? max(8px, root.content-padding-vertical - 4px) : root.content-padding-vertical;
-    private property <length> resolved-content-padding-bottom: root.compact-layout ? max(10px, root.content-padding-bottom - 6px) : root.content-padding-bottom;
-    private property <length> resolved-content-spacing: root.compact-layout ? max(8px, root.content-spacing - 4px) : root.content-spacing;
+    private property <length> resolved-frame-padding: root.compact-layout ? max(10px, root.frame-padding - 4px) : root.frame-padding;
+    private property <length> resolved-content-padding-horizontal: root.compact-layout ? max(14px, root.content-padding-horizontal - 4px) : root.content-padding-horizontal;
+    private property <length> resolved-content-padding-vertical: root.compact-layout ? max(12px, root.content-padding-vertical - 4px) : root.content-padding-vertical;
+    private property <length> resolved-content-padding-bottom: root.compact-layout ? max(12px, root.content-padding-bottom - 4px) : root.content-padding-bottom;
+    private property <length> resolved-content-spacing: root.compact-layout ? max(10px, root.content-spacing - 4px) : root.content-spacing;
     private property <length> resolved-panel-width: max(
         0px,
         body-scroll.visible-width - (root.resolved-frame-padding * 2)
@@ -139,7 +569,6 @@ export component ModalBodyScrollArea inherits Rectangle {
         0px,
         root.resolved-panel-width - (root.resolved-content-padding-horizontal * 2)
     );
-
     background: root.viewport-surface;
 
     body-scroll := ScrollView {
@@ -167,7 +596,7 @@ export component ModalBodyScrollArea inherits Rectangle {
                 height: body-content-host.height
                     + root.resolved-content-padding-vertical
                     + root.resolved-content-padding-bottom;
-                border-radius: 0px;
+                border-radius: ThemeTokens.modal-section-radius;
                 border-width: 1px;
                 border-color: root.panel-border-color;
                 background: root.panel-surface;
@@ -194,13 +623,15 @@ export component ModalBodyScrollArea inherits Rectangle {
 }
 
 export component ModalFooterBar inherits Rectangle {
-    in property <color> surface: ThemeTokens.activity-surface;
-    in property <color> divider-color: ThemeTokens.divider-strong;
-    in property <length> content-padding-left: 20px;
-    in property <length> content-padding-right: 20px;
-    in property <length> content-padding-top: 12px;
-    in property <length> content-padding-bottom: 12px;
-    in property <length> content-spacing: 8px;
+    in property <color> surface: ThemeTokens.modal-footer-surface;
+    in property <color> divider-color: ThemeTokens.modal-inner-border;
+    in property <color> action-rail-surface: ThemeTokens.modal-footer-rail-surface;
+    in property <color> action-rail-border: ThemeTokens.modal-footer-rail-border;
+    in property <length> content-padding-left: 18px;
+    in property <length> content-padding-right: 18px;
+    in property <length> content-padding-top: 14px;
+    in property <length> content-padding-bottom: 14px;
+    in property <length> content-spacing: 10px;
 
     background: root.surface;
 
@@ -210,6 +641,20 @@ export component ModalFooterBar inherits Rectangle {
         width: parent.width;
         height: 1px;
         background: root.divider-color;
+    }
+
+    action-rail := Rectangle {
+        x: 12px;
+        y: max(
+            12px,
+            parent.height - self.height - max(8px, root.content-padding-bottom - 2px)
+        );
+        width: max(0px, parent.width - 24px);
+        height: 48px;
+        border-radius: ThemeTokens.modal-section-radius;
+        border-width: 1px;
+        border-color: root.action-rail-border;
+        background: root.action-rail-surface;
     }
 
     footer-content := VerticalLayout {

@@ -1,103 +1,14 @@
-import { ScrollView } from "std-widgets.slint";
-import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";
+import {
+    DialogActionButton,
+    DialogInlineBanner,
+    DialogSectionCard,
+    DialogSegmentButton,
+    DialogTextField,
+    ModalBodyScrollArea,
+    ModalFooterBar,
+    ModalHeaderBar,
+} from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
-
-component SyncModalActionButton inherits Rectangle {
-    in property <string> label: "";
-    in property <bool> primary: false;
-    callback clicked();
-
-    min-width: 0px;
-    preferred-width: 0px;
-    horizontal-stretch: 1;
-    height: 38px;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: root.primary ? ThemeTokens.accent : ThemeTokens.divider-strong;
-    background: root.primary
-        ? action-touch.pressed
-            ? ThemeTokens.control-pressed-surface
-            : action-touch.has-hover
-                ? #5aabff
-                : ThemeTokens.accent
-        : action-touch.pressed
-            ? ThemeTokens.control-pressed-surface
-            : action-touch.has-hover
-                ? ThemeTokens.control-hover-surface
-                : ThemeTokens.workspace-surface;
-
-    Text {
-        x: 8px;
-        width: parent.width - 16px;
-        height: parent.height;
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        overflow: elide;
-        font-weight: root.primary ? 700 : 600;
-    }
-
-    action-touch := TouchArea {
-        width: parent.width;
-        height: parent.height;
-
-        clicked => {
-            root.clicked();
-        }
-    }
-}
-
-component SyncModalTextField inherits Rectangle {
-    in property <string> label: "";
-    in property <string> value: "";
-    in property <bool> password-mode: false;
-    callback value-changed(string);
-
-    min-width: 0px;
-    preferred-width: 0px;
-    horizontal-stretch: 1;
-    height: 64px;
-    background: transparent;
-
-    Text {
-        x: 0px;
-        y: 0px;
-        width: parent.width;
-        height: 18px;
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        opacity: 0.78;
-    }
-
-    field-shell := Rectangle {
-        x: 0px;
-        y: 26px;
-        width: parent.width;
-        height: 40px;
-        border-radius: 0px;
-        border-width: 1px;
-        border-color: ThemeTokens.divider-strong;
-        background: ThemeTokens.workspace-surface;
-
-        field-input := TextInput {
-            x: 12px;
-            y: 9px;
-            width: parent.width - 24px;
-            height: parent.height - 18px;
-            text: root.value;
-            color: ThemeTokens.text-primary;
-            single-line: true;
-            input-type: root.password-mode ? InputType.password : InputType.text;
-            selection-background-color: ThemeTokens.accent;
-            selection-foreground-color: ThemeTokens.text-primary;
-
-            edited => {
-                root.value-changed(self.text);
-            }
-        }
-    }
-}
 
 component SyncStatusMetricRow inherits Rectangle {
     in property <string> label: "";
@@ -111,17 +22,17 @@ component SyncStatusMetricRow inherits Rectangle {
     Text {
         x: 0px;
         y: 0px;
-        width: min(136px, parent.width * 0.42);
+        width: min(144px, parent.width * 0.42);
         height: parent.height;
         text: root.label;
-        color: ThemeTokens.text-primary;
-        opacity: 0.7;
+        color: ThemeTokens.text-secondary;
+        font-size: 11px;
         vertical-alignment: center;
         overflow: elide;
     }
 
     Text {
-        x: min(144px, parent.width * 0.44);
+        x: min(152px, parent.width * 0.44);
         y: 0px;
         width: max(0px, parent.width - self.x);
         height: parent.height;
@@ -169,9 +80,7 @@ export component SyncVaultModal inherits Rectangle {
     callback focus-restore-requested();
 
     private property <bool> compact-layout: root.height < 576px;
-    private property <length> header-height: 60px;
-    private property <length> footer-height: root.compact-layout ? 60px : 82px;
-    private property <length> body-height: max(0px, root.height - root.header-height - root.footer-height);
+    private property <length> footer-height: ThemeTokens.modal-footer-min-height;
 
     background: transparent;
 
@@ -179,22 +88,12 @@ export component SyncVaultModal inherits Rectangle {
         width: parent.width;
         height: parent.height;
 
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.focus-restore-requested();
-                root.close-requested();
-                accept
-            } else {
-                reject
-            }
-        }
-
         header := ModalHeaderBar {
             x: 0px;
             y: 0px;
             width: parent.width;
             title: root.title;
-            subtitle: root.headline;
+            subtitle: root.headline != "" ? root.headline : "Vault sync surfaces status, credentials, and recovery copies without falling back to a flat admin form.";
             prominent: true;
             show-drag-handle: true;
 
@@ -224,14 +123,14 @@ export component SyncVaultModal inherits Rectangle {
             y: header.height;
             width: parent.width;
             height: parent.height - header.height - footer.height;
-            frame-padding: root.compact-layout ? 10px : 12px;
-            content-padding-horizontal: root.compact-layout ? 14px : 16px;
-            content-padding-vertical: root.compact-layout ? 10px : 12px;
-            content-padding-bottom: root.compact-layout ? 12px : 16px;
-            content-spacing: root.compact-layout ? 8px : 10px;
-            viewport-surface: ThemeTokens.inspector-surface;
-            panel-surface: ThemeTokens.window-surface;
-            panel-border-color: ThemeTokens.divider-strong;
+            frame-padding: root.compact-layout ? 12px : 14px;
+            content-padding-horizontal: root.compact-layout ? 16px : 17px;
+            content-padding-vertical: root.compact-layout ? 14px : 16px;
+            content-padding-bottom: root.compact-layout ? 14px : 18px;
+            content-spacing: root.compact-layout ? 12px : 14px;
+            viewport-surface: ThemeTokens.modal-body-surface;
+            panel-surface: ThemeTokens.modal-body-surface;
+            panel-border-color: transparent;
 
             content-column := Rectangle {
                 width: body.content-column-width;
@@ -242,261 +141,253 @@ export component SyncVaultModal inherits Rectangle {
                     width: parent.width;
                     spacing: body.content-spacing;
 
-                    Text {
+                    if root.status-text != "" : DialogInlineBanner {
                         width: parent.width;
-                        text: root.status-text;
-                        color: ThemeTokens.text-primary;
-                        opacity: 0.84;
-                        wrap: word-wrap;
+                        tone: root.remote-status-loading ? "busy" : "neutral";
+                        message: root.status-text;
                     }
 
-                    if root.error-text != "" : error-banner := Rectangle {
+                    if root.error-text != "" : DialogInlineBanner {
                         width: parent.width;
-                        height: max(40px, error-copy.preferred-height + 16px);
-                        border-radius: 0px;
-                        border-width: 1px;
-                        border-color: ThemeTokens.divider-strong;
-                        background: ThemeTokens.status-error-surface;
+                        tone: "error";
+                        message: root.error-text;
+                    }
 
-                        error-copy := Text {
-                            x: 10px;
-                            y: 8px;
-                            width: parent.width - 20px;
-                            text: root.error-text;
+                    if root.provider-label != "" || root.target-label != "" : DialogSectionCard {
+                        width: parent.width;
+                        spacing: 8px;
+
+                        Text {
+                            width: parent.width;
+                            text: "Remote target";
+                            color: ThemeTokens.text-secondary;
+                            font-size: 11px;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: (root.provider-label != "" ? root.provider-label : "Vault provider pending")
+                                + (root.target-label != "" ? " - " + root.target-label : "");
                             color: ThemeTokens.text-primary;
                             wrap: word-wrap;
                         }
                     }
 
-                    if root.provider-label != "" || root.target-label != "" : summary-card := Rectangle {
+                    DialogSectionCard {
                         width: parent.width;
-                        height: 44px;
-                        border-radius: 0px;
-                        border-width: 1px;
-                        border-color: ThemeTokens.divider-strong;
-                        background: ThemeTokens.workspace-surface;
+                        spacing: 12px;
+                        surface: ThemeTokens.modal-section-alt-surface;
 
                         Text {
-                            x: 12px;
-                            y: 0px;
-                            width: parent.width - 24px;
-                            height: parent.height;
-                            text: (root.provider-label != "" ? "Provider: " + root.provider-label : "")
-                                + (root.target-label != "" ? "  •  " + root.target-label : "");
-                            color: ThemeTokens.text-primary;
-                            vertical-alignment: center;
-                            overflow: elide;
-                        }
-                    }
-
-                    sync-status-card := Rectangle {
-                        width: parent.width;
-                        height: max(118px, status-copy.preferred-height + 98px);
-                        border-radius: 0px;
-                        border-width: 1px;
-                        border-color: ThemeTokens.divider-strong;
-                        background: ThemeTokens.workspace-surface;
-
-                        Text {
-                            x: 12px;
-                            y: 10px;
-                            width: parent.width - 24px;
+                            width: parent.width;
                             text: "Latest sync status";
                             color: ThemeTokens.text-primary;
+                            font-size: 13px;
                             font-weight: 700;
                             overflow: elide;
                         }
 
-                        if root.remote-status-loading : loading-copy := Text {
-                            x: parent.width - 140px;
-                            y: 10px;
-                            width: 128px;
-                            text: "Refreshing...";
-                            color: ThemeTokens.accent;
-                            horizontal-alignment: right;
+                        if root.remote-status-loading : Text {
+                            width: parent.width;
+                            text: "Refreshing remote head...";
+                            color: ThemeTokens.status-busy-accent;
+                            font-size: 11px;
                             overflow: elide;
                         }
 
                         SyncStatusMetricRow {
-                            x: 12px;
-                            y: 36px;
-                            width: parent.width - 24px;
+                            width: parent.width;
                             label: "Local last sync";
                             value: root.local-last-sync-text;
                         }
 
                         SyncStatusMetricRow {
-                            x: 12px;
-                            y: 58px;
-                            width: parent.width - 24px;
+                            width: parent.width;
                             label: "Remote last update";
                             value: root.remote-last-update-text;
                         }
 
                         SyncStatusMetricRow {
-                            x: 12px;
-                            y: 80px;
-                            width: parent.width - 24px;
+                            width: parent.width;
                             label: "Primary revision";
                             value: root.primary-revision-text;
                         }
 
-                        status-copy := Text {
-                            x: 12px;
-                            y: 106px;
-                            width: parent.width - 24px;
+                        Text {
+                            width: parent.width;
                             text: root.remote-status-text != "" ? root.remote-status-text : root.status-text;
                             color: ThemeTokens.text-primary;
-                            opacity: 0.78;
                             wrap: word-wrap;
                         }
                     }
 
-                    if root.conflict-count > 0 : conflict-summary-card := Rectangle {
+                    if root.conflict-count > 0 : DialogSectionCard {
                         width: parent.width;
-                        height: max(56px, conflict-summary-copy.preferred-height + 30px);
-                        border-radius: 0px;
-                        border-width: 1px;
-                        border-color: ThemeTokens.divider-strong;
-                        background: ThemeTokens.workspace-surface;
+                        spacing: 10px;
 
                         Text {
-                            x: 12px;
-                            y: 8px;
-                            width: parent.width - 24px;
+                            width: parent.width;
                             text: root.conflict-count == 1
                                 ? "1 conflict/recovery copy needs review"
                                 : root.conflict-count + " conflict/recovery copies need review";
                             color: ThemeTokens.text-primary;
+                            font-size: 13px;
                             font-weight: 700;
                             overflow: elide;
                         }
 
-                        conflict-summary-copy := Text {
-                            x: 12px;
-                            y: 28px;
-                            width: parent.width - 24px;
+                        Text {
+                            width: parent.width;
                             text: root.conflict-summary;
                             color: ThemeTokens.text-primary;
-                            opacity: 0.78;
                             wrap: word-wrap;
                         }
                     }
 
-                    SyncModalTextField {
+                    DialogSectionCard {
                         width: parent.width;
-                        label: "Git remote URL";
-                        value: root.git-remote-url;
-
-                        value-changed(value) => {
-                            root.draft-changed("git-remote-url", value);
-                        }
-                    }
-
-                    SyncModalTextField {
-                        width: parent.width;
-                        label: "Branch";
-                        value: root.git-branch;
-
-                        value-changed(value) => {
-                            root.draft-changed("git-branch", value);
-                        }
-                    }
-
-                    auth-mode-card := Rectangle {
-                        width: parent.width;
-                        height: 84px;
-                        border-radius: 0px;
-                        border-width: 1px;
-                        border-color: ThemeTokens.divider-strong;
-                        background: ThemeTokens.workspace-surface;
+                        spacing: 14px;
 
                         Text {
-                            x: 12px;
-                            y: 10px;
-                            width: parent.width - 24px;
+                            width: parent.width;
+                            text: "Repository";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+
+                        git-remote-url-field := DialogTextField {
+                            width: parent.width;
+                            label: "Git remote URL";
+                            value: root.git-remote-url;
+                            helper-text: "HTTPS and SSH targets both live here so the rest of the dialog can stay mode-driven instead of duplicating fields.";
+
+                            value-changed(value) => {
+                                root.draft-changed("git-remote-url", value);
+                            }
+                        }
+
+                        DialogTextField {
+                            width: parent.width;
+                            label: "Branch";
+                            value: root.git-branch;
+
+                            value-changed(value) => {
+                                root.draft-changed("git-branch", value);
+                            }
+                        }
+                    }
+
+                    DialogSectionCard {
+                        width: parent.width;
+                        spacing: 14px;
+                        surface: ThemeTokens.modal-section-alt-surface;
+
+                        Text {
+                            width: parent.width;
                             text: "Auth mode";
                             color: ThemeTokens.text-primary;
-                            opacity: 0.78;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
                         }
 
                         HorizontalLayout {
-                            x: 12px;
-                            y: 36px;
-                            width: parent.width - 24px;
+                            width: parent.width;
+                            height: 34px;
                             spacing: 8px;
 
-                            SyncModalActionButton {
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
                                 label: "HTTPS";
-                                primary: root.git-auth-mode == "https";
+                                active: root.git-auth-mode == "https";
 
                                 clicked => {
                                     root.draft-changed("git-auth-mode", "https");
                                 }
                             }
 
-                            SyncModalActionButton {
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
                                 label: "SSH";
-                                primary: root.git-auth-mode == "ssh";
+                                active: root.git-auth-mode == "ssh";
 
                                 clicked => {
                                     root.draft-changed("git-auth-mode", "ssh");
                                 }
                             }
                         }
-                    }
 
-                    if root.git-auth-mode == "https" : https-username-field := SyncModalTextField {
-                        width: parent.width;
-                        label: "HTTPS username";
-                        value: root.git-https-username;
+                        if root.git-auth-mode == "https" : DialogTextField {
+                            width: parent.width;
+                            label: "HTTPS username";
+                            value: root.git-https-username;
 
-                        value-changed(value) => {
-                            root.draft-changed("git-https-username", value);
+                            value-changed(value) => {
+                                root.draft-changed("git-https-username", value);
+                            }
+                        }
+
+                        if root.git-auth-mode == "https" : DialogTextField {
+                            width: parent.width;
+                            label: "HTTPS secret";
+                            value: root.git-https-secret;
+                            password-mode: true;
+
+                            value-changed(value) => {
+                                root.draft-changed("git-https-secret", value);
+                            }
+                        }
+
+                        if root.git-auth-mode == "ssh" : DialogTextField {
+                            width: parent.width;
+                            label: "SSH private key";
+                            value: root.git-ssh-private-key;
+                            password-mode: true;
+                            multiline: true;
+
+                            value-changed(value) => {
+                                root.draft-changed("git-ssh-private-key", value);
+                            }
+                        }
+
+                        if root.git-auth-mode == "ssh" : DialogTextField {
+                            width: parent.width;
+                            label: "SSH passphrase";
+                            value: root.git-ssh-passphrase;
+                            password-mode: true;
+
+                            value-changed(value) => {
+                                root.draft-changed("git-ssh-passphrase", value);
+                            }
                         }
                     }
 
-                    if root.git-auth-mode == "https" : https-secret-field := SyncModalTextField {
+                    if root.mode == "not-configured" : DialogSectionCard {
                         width: parent.width;
-                        label: "HTTPS secret";
-                        value: root.git-https-secret;
-                        password-mode: true;
+                        spacing: 14px;
 
-                        value-changed(value) => {
-                            root.draft-changed("git-https-secret", value);
+                        Text {
+                            width: parent.width;
+                            text: "Vault bootstrap";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
                         }
-                    }
 
-                    if root.git-auth-mode == "ssh" : ssh-private-key-field := SyncModalTextField {
-                        width: parent.width;
-                        label: "SSH private key";
-                        value: root.git-ssh-private-key;
-                        password-mode: true;
+                        DialogTextField {
+                            width: parent.width;
+                            label: "Master password";
+                            value: root.master-password;
+                            password-mode: true;
+                            helper-text: "Used only during initial setup or unlock-style flows. The actual mode-specific action still comes from the view model.";
 
-                        value-changed(value) => {
-                            root.draft-changed("git-ssh-private-key", value);
-                        }
-                    }
-
-                    if root.git-auth-mode == "ssh" : ssh-passphrase-field := SyncModalTextField {
-                        width: parent.width;
-                        label: "SSH passphrase";
-                        value: root.git-ssh-passphrase;
-                        password-mode: true;
-
-                        value-changed(value) => {
-                            root.draft-changed("git-ssh-passphrase", value);
-                        }
-                    }
-
-                    if root.mode == "not-configured" : password-field := SyncModalTextField {
-                        width: parent.width;
-                        label: "Master Password";
-                        value: root.master-password;
-                        password-mode: true;
-
-                        value-changed(value) => {
-                            root.draft-changed("master-password", value);
+                            value-changed(value) => {
+                                root.draft-changed("master-password", value);
+                            }
                         }
                     }
                 }
@@ -508,11 +399,9 @@ export component SyncVaultModal inherits Rectangle {
             y: parent.height - root.footer-height;
             width: parent.width;
             height: root.footer-height;
-            surface: ThemeTokens.activity-surface;
-            divider-color: ThemeTokens.divider-strong;
-            content-padding-top: root.compact-layout ? 6px : 12px;
-            content-padding-bottom: root.compact-layout ? 6px : 12px;
-            content-spacing: root.compact-layout ? 4px : 6px;
+            content-padding-top: root.compact-layout ? 10px : 14px;
+            content-padding-bottom: root.compact-layout ? 10px : 14px;
+            content-spacing: 8px;
 
             Rectangle {
                 height: 0px;
@@ -521,19 +410,25 @@ export component SyncVaultModal inherits Rectangle {
             }
 
             HorizontalLayout {
-                height: root.compact-layout ? 34px : 36px;
-                spacing: 12px;
+                height: 38px;
+                spacing: 10px;
 
-                if root.secondary-action-label != "" : secondary-button := SyncModalActionButton {
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
+                }
+
+                if root.secondary-action-label != "" : DialogActionButton {
+                    width: 120px;
                     label: root.secondary-action-label;
-                    primary: false;
 
                     clicked => {
                         root.secondary-action-requested();
                     }
                 }
 
-                primary-button := SyncModalActionButton {
+                DialogActionButton {
+                    width: 132px;
                     label: root.primary-action-label;
                     primary: true;
 

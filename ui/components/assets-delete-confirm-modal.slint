@@ -1,62 +1,36 @@
+import {
+    DialogActionButton,
+    DialogSectionCard,
+    ModalFooterBar,
+    ModalHeaderBar,
+} from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
-import { AppTypography } from "../theme/typography.slint";
-
-component DialogButton inherits Rectangle {
-    in property <string> label: "";
-    in property <bool> primary: false;
-    callback clicked();
-
-    height: 34px;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: root.primary ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-    background: button-touch.pressed ? ThemeTokens.control-pressed-surface
-        : button-touch.has-hover ? ThemeTokens.control-hover-surface
-        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
-
-    Text {
-        width: parent.width;
-        height: parent.height;
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-
-    button-touch := TouchArea {
-        width: parent.width;
-        height: parent.height;
-
-        clicked => {
-            root.clicked();
-        }
-    }
-}
 
 export component AssetsDeleteConfirmModal inherits Rectangle {
     in property <string> dialog-title: "Delete Asset";
     in property <string> target-label;
     in property <int> descendant-count;
+    in property <int> focus-sequence: 0;
     callback confirm-requested();
     callback close-requested();
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
-    private property <length> footer-height: 66px;
+    private property <length> footer-height: ThemeTokens.modal-footer-min-height;
 
     background: transparent;
+
+    changed focus-sequence => {
+        confirm-button.focus-button();
+    }
 
     modal-focus := FocusScope {
         width: parent.width;
         height: parent.height;
 
         key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.focus-restore-requested();
-                root.close-requested();
-                accept
-            } else if (event.text == Key.Return) {
+            if (event.text == Key.Return) {
                 root.confirm-requested();
                 accept
             } else {
@@ -64,85 +38,32 @@ export component AssetsDeleteConfirmModal inherits Rectangle {
             }
         }
 
-        header := Rectangle {
+        header := ModalHeaderBar {
             x: 0px;
             y: 0px;
             width: parent.width;
-            height: 56px;
-            background: ThemeTokens.assets-surface;
+            title: root.dialog-title;
+            subtitle: "Review the target one last time before removing it from the current asset scope.";
+            prominent: true;
 
-            Text {
-                x: 20px;
-                y: 0px;
-                width: parent.width - 72px;
-                height: parent.height;
-                text: root.dialog-title;
-                color: ThemeTokens.text-primary;
-                font-size: 18px;
-                font-weight: AppTypography.ui-font-weight-regular;
-                vertical-alignment: center;
+            close-requested => {
+                root.close-requested();
             }
 
-            drag-touch := TouchArea {
-                width: parent.width - 48px;
-                height: parent.height;
-
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down
-                        && event.button == PointerEventButton.left
-                    {
-                        root.drag-requested(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.move {
-                        root.drag-moved(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.up {
-                        root.drag-ended();
-                    }
-                }
+            drag-requested(pointer-x, pointer-y) => {
+                root.drag-requested(pointer-x, pointer-y);
             }
 
-            close-button := Rectangle {
-                x: parent.width - 40px;
-                y: 12px;
-                width: 28px;
-                height: 28px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
-
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: "×";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                close-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        root.focus-restore-requested();
-                        root.close-requested();
-                    }
-                }
+            drag-moved(pointer-x, pointer-y) => {
+                root.drag-moved(pointer-x, pointer-y);
             }
 
-            divider := Rectangle {
-                y: parent.height - 1px;
-                width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
+            drag-ended => {
+                root.drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.focus-restore-requested();
             }
         }
 
@@ -150,77 +71,90 @@ export component AssetsDeleteConfirmModal inherits Rectangle {
             x: 0px;
             y: header.height;
             width: parent.width;
-            height: parent.height - header.height - root.footer-height;
-            background: transparent;
+            height: parent.height - header.height - footer.height;
+            background: ThemeTokens.modal-body-surface;
 
-            Text {
-                x: 20px;
-                y: 18px;
-                width: parent.width - 40px;
-                text: "Delete \"" + root.target-label + "\"?";
-                color: ThemeTokens.text-primary;
-                font-size: 16px;
-                font-weight: AppTypography.ui-font-weight-regular;
-                wrap: word-wrap;
+            VerticalLayout {
+                x: 14px;
+                y: 14px;
+                width: parent.width - 28px;
+                spacing: 0px;
+
+                DialogSectionCard {
+                    width: parent.width;
+                    spacing: 12px;
+                    surface: ThemeTokens.modal-section-alt-surface;
+                    stroke-color: ThemeTokens.modal-button-danger-border;
+
+                    Text {
+                        width: parent.width;
+                        text: "Delete \"" + root.target-label + "\"?";
+                        color: ThemeTokens.text-primary;
+                        font-size: 14px;
+                        font-weight: 700;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        width: parent.width;
+                        text: root.descendant-count == 0
+                            ? "This action cannot be undone."
+                            : "This action removes the selected folder and all nested assets.";
+                        color: ThemeTokens.text-muted;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+
+                    if root.descendant-count > 0 : Text {
+                        width: parent.width;
+                        text: "Nested assets removed: " + root.descendant-count;
+                        color: ThemeTokens.status-error-accent;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+                }
             }
-
-            Text {
-                x: 20px;
-                y: 58px;
-                width: parent.width - 40px;
-                text: root.descendant-count == 0
-                    ? "This action cannot be undone."
-                    : "This action removes the selected folder and all nested assets.";
-                color: ThemeTokens.text-primary;
-                opacity: 0.72;
-                wrap: word-wrap;
-            }
-
-            if root.descendant-count > 0 : Text {
-                x: 20px;
-                y: 104px;
-                width: parent.width - 40px;
-                text: "Nested assets removed: " + root.descendant-count;
-                color: ThemeTokens.text-primary;
-                opacity: 0.72;
-            }
-
         }
 
-        footer := Rectangle {
+        footer := ModalFooterBar {
             x: 0px;
             y: parent.height - root.footer-height;
             width: parent.width;
             height: root.footer-height;
-            background: ThemeTokens.assets-surface;
 
-            footer-divider := Rectangle {
-                width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
+            Rectangle {
+                height: 0px;
+                vertical-stretch: 1;
+                background: transparent;
             }
 
-            cancel-button := DialogButton {
-                x: parent.width - 204px;
-                y: 16px;
-                width: 88px;
-                label: "Cancel";
+            HorizontalLayout {
+                height: 38px;
+                spacing: 10px;
 
-                clicked => {
-                    root.focus-restore-requested();
-                    root.close-requested();
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
                 }
-            }
 
-            confirm-button := DialogButton {
-                x: parent.width - 104px;
-                y: 16px;
-                width: 84px;
-                label: "Delete";
-                primary: true;
+                DialogActionButton {
+                    width: 96px;
+                    label: "Cancel";
 
-                clicked => {
-                    root.confirm-requested();
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.close-requested();
+                    }
+                }
+
+                confirm-button := DialogActionButton {
+                    width: 96px;
+                    label: "Delete";
+                    destructive: true;
+
+                    clicked => {
+                        root.confirm-requested();
+                    }
                 }
             }
         }

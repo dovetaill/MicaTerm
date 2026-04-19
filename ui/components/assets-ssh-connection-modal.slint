@@ -1,198 +1,15 @@
-import { ComboBox, ScrollView } from "std-widgets.slint";
-import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";
+import { ComboBox } from "std-widgets.slint";
+import {
+    DialogActionButton,
+    DialogInlineBanner,
+    DialogSectionCard,
+    DialogSegmentButton,
+    DialogTextField,
+    ModalBodyScrollArea,
+    ModalFooterBar,
+    ModalHeaderBar,
+} from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
-import { AppTypography } from "../theme/typography.slint";
-
-component ModalTabButton inherits Rectangle {
-    in property <string> label: "";
-    in property <bool> active: false;
-    callback clicked();
-
-    min-width: 0px;
-    preferred-width: 0px;
-    horizontal-stretch: 1;
-    height: 34px;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: root.active ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-    background: tab-touch.pressed ? ThemeTokens.control-pressed-surface
-        : tab-touch.has-hover ? ThemeTokens.control-hover-surface
-        : root.active ? ThemeTokens.control-active-surface : ThemeTokens.assets-surface;
-
-    Text {
-        width: parent.width - 16px;
-        height: parent.height;
-        x: 8px;
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    tab-touch := TouchArea {
-        width: parent.width;
-        height: parent.height;
-
-        clicked => {
-            root.clicked();
-        }
-    }
-}
-
-component DialogActionButton inherits Rectangle {
-    in property <string> label: "";
-    in property <bool> primary: false;
-    in property <bool> action-enabled: true;
-    callback clicked();
-
-    min-width: 0px;
-    preferred-width: 0px;
-    horizontal-stretch: 1;
-    height: 34px;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: root.action-enabled ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-    background: !root.action-enabled ? ThemeTokens.control-disabled-surface
-        : action-touch.pressed ? ThemeTokens.control-pressed-surface
-        : action-touch.has-hover ? ThemeTokens.control-hover-surface
-        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
-    opacity: root.action-enabled ? 1.0 : 0.56;
-
-    Text {
-        width: parent.width - 16px;
-        height: parent.height;
-        x: 8px;
-        text: root.label;
-        color: !root.action-enabled ? ThemeTokens.text-primary
-            : root.primary ? ThemeTokens.text-primary
-            : ThemeTokens.accent;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    action-touch := TouchArea {
-        width: parent.width;
-        height: parent.height;
-        enabled: root.action-enabled;
-
-        clicked => {
-            root.clicked();
-        }
-    }
-}
-
-component FormField inherits Rectangle {
-    in property <string> label: "";
-    in property <string> value: "";
-    in property <bool> required: false;
-    in property <bool> password-mode: false;
-    in property <bool> multiline: false;
-    in property <string> trailing-action-text: "";
-    callback value-changed(string);
-    callback trailing-action-requested();
-
-    min-width: 0px;
-    preferred-width: 0px;
-    private property <length> field-height: root.multiline ? 120px : 40px;
-
-    height: root.multiline ? 154px : 72px;
-    background: transparent;
-
-    VerticalLayout {
-        width: parent.width;
-        height: parent.height;
-        spacing: 6px;
-
-        Text {
-            text: root.required ? root.label + " *" : root.label;
-            color: ThemeTokens.text-primary;
-            opacity: 0.8;
-        }
-
-        Rectangle {
-            height: root.field-height;
-            border-radius: 0px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.inspector-surface;
-
-            field-input := TextInput {
-                x: 12px;
-                y: root.multiline ? 8px : 9px;
-                width: parent.width - 24px - (root.trailing-action-text != "" ? 70px : 0px);
-                height: parent.height - (root.multiline ? 16px : 18px);
-                text: root.value;
-                color: ThemeTokens.text-primary;
-                single-line: !root.multiline;
-                input-type: root.password-mode ? InputType.password : InputType.text;
-                selection-background-color: ThemeTokens.accent;
-                selection-foreground-color: ThemeTokens.text-primary;
-
-                edited => {
-                    root.value-changed(self.text);
-                }
-            }
-
-            if root.trailing-action-text != "" : trailing-action := Rectangle {
-                x: parent.width - 62px;
-                y: 6px;
-                width: 50px;
-                height: 28px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: trailing-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : trailing-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
-
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: root.trailing-action-text;
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                    font-size: 11px;
-                }
-
-                trailing-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        root.trailing-action-requested();
-                    }
-                }
-            }
-        }
-    }
-}
-
-component FeedbackBanner inherits Rectangle {
-    in property <string> state: "idle";
-    in property <string> message: "";
-
-    height: root.message == "" ? 0px : 28px;
-    visible: root.message != "";
-    border-radius: 0px;
-    border-width: root.message == "" ? 0px : 1px;
-    border-color: root.state == "busy" ? ThemeTokens.accent : ThemeTokens.divider-strong;
-    background: root.state == "busy" ? ThemeTokens.status-busy-surface
-        : root.state == "success" ? ThemeTokens.status-success-surface
-        : root.state == "error" ? ThemeTokens.status-error-surface
-        : transparent;
-
-    Text {
-        x: 10px;
-        y: 5px;
-        width: parent.width - 20px;
-        text: root.message;
-        color: ThemeTokens.text-primary;
-        overflow: elide;
-    }
-}
 
 export component AssetsSshConnectionModal inherits Rectangle {
     in property <string> dialog-title: "New SSH Connection";
@@ -240,33 +57,30 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
     private property <bool> compact-layout: root.width < 620px;
     private property <bool> dense-layout: root.height < 576px;
-    private property <length> header-height: 56px;
     private property <length> footer-height: root.feedback-message != "" || root.validation-message != ""
-        ? root.dense-layout ? 96px : 112px
-        : root.dense-layout ? 64px : 84px;
-    private property <length> body-height: max(0px, root.height - root.header-height - root.footer-height);
+        ? root.dense-layout ? 114px : 132px
+        : ThemeTokens.modal-footer-min-height;
 
     background: transparent;
+
+    public function focus-input() {
+        modal-focus.focus();
+    }
+
+    changed focus-sequence => {
+        root.focus-input();
+    }
 
     modal-focus := FocusScope {
         width: parent.width;
         height: parent.height;
-
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.focus-restore-requested();
-                root.close-requested();
-                accept
-            } else {
-                reject
-            }
-        }
 
         header := ModalHeaderBar {
             x: 0px;
             y: 0px;
             width: parent.width;
             title: root.dialog-title;
+            subtitle: "Desktop-native SSH profiles with calmer sections, consistent actions, and predictable dismissal.";
             prominent: true;
 
             close-requested => {
@@ -292,17 +106,17 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
         body-scroll := ModalBodyScrollArea {
             x: 0px;
-            y: root.header-height;
+            y: header.height;
             width: parent.width;
-            height: root.body-height;
-            frame-padding: root.dense-layout ? 10px : 12px;
-            content-padding-horizontal: root.dense-layout ? 14px : 16px;
-            content-padding-vertical: root.dense-layout ? 10px : 14px;
-            content-padding-bottom: root.dense-layout ? 12px : 18px;
-            content-spacing: root.dense-layout ? 14px : 18px;
-            viewport-surface: ThemeTokens.inspector-surface;
-            panel-surface: ThemeTokens.window-surface;
-            panel-border-color: ThemeTokens.divider-strong;
+            height: parent.height - header.height - footer.height;
+            frame-padding: root.dense-layout ? 12px : 14px;
+            content-padding-horizontal: root.dense-layout ? 16px : 17px;
+            content-padding-vertical: root.dense-layout ? 14px : 16px;
+            content-padding-bottom: root.dense-layout ? 14px : 18px;
+            content-spacing: root.dense-layout ? 12px : 14px;
+            viewport-surface: ThemeTokens.modal-body-surface;
+            panel-surface: ThemeTokens.modal-body-surface;
+            panel-border-color: transparent;
 
             content-column := Rectangle {
                 width: body-scroll.content-column-width;
@@ -313,33 +127,45 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     width: parent.width;
                     spacing: body-scroll.content-spacing;
 
-                    Text {
-                        width: body-scroll.content-column-width;
-                        text: "Basic";
-                        color: ThemeTokens.text-primary;
-                        font-weight: AppTypography.ui-font-weight-regular;
-                    }
+                    DialogSectionCard {
+                        width: parent.width;
+                        spacing: 14px;
 
-                    VerticalLayout {
-                        width: body-scroll.content-column-width;
-                        spacing: 16px;
+                        Text {
+                            width: parent.width;
+                            text: "Connection";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: "Keep the core profile compact. The connection identity, proxy chain, and notes live in dedicated sections below.";
+                            color: ThemeTokens.text-muted;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
 
                         if root.compact-layout : VerticalLayout {
                             width: parent.width;
                             spacing: 12px;
 
-                            FormField {
+                            compact-name-field := DialogTextField {
                                 width: parent.width;
                                 label: "Name";
                                 required: true;
                                 value: root.name;
+                                invalid: root.validation-message != "";
+                                helper-text: root.validation-message;
 
                                 value-changed(value) => {
                                     root.draft-changed("name", value);
                                 }
                             }
 
-                            FormField {
+                            DialogTextField {
                                 width: parent.width;
                                 label: "Host";
                                 required: true;
@@ -350,7 +176,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 }
                             }
 
-                            FormField {
+                            DialogTextField {
                                 width: parent.width;
                                 label: "User";
                                 required: true;
@@ -361,7 +187,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 }
                             }
 
-                            FormField {
+                            DialogTextField {
                                 width: parent.width;
                                 label: "Port";
                                 value: root.port;
@@ -374,29 +200,27 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
                         if !root.compact-layout : Rectangle {
                             width: parent.width;
-                            height: 72px;
+                            height: 76px;
                             background: transparent;
 
                             HorizontalLayout {
                                 width: parent.width;
-                                height: parent.height;
                                 spacing: 12px;
 
-                                FormField {
+                                wide-name-field := DialogTextField {
                                     horizontal-stretch: 1;
-                                    height: parent.height;
                                     label: "Name";
                                     required: true;
                                     value: root.name;
+                                    invalid: root.validation-message != "";
 
                                     value-changed(value) => {
                                         root.draft-changed("name", value);
                                     }
                                 }
 
-                                FormField {
+                                DialogTextField {
                                     horizontal-stretch: 1;
-                                    height: parent.height;
                                     label: "Host";
                                     required: true;
                                     value: root.host;
@@ -410,17 +234,15 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
                         if !root.compact-layout : Rectangle {
                             width: parent.width;
-                            height: 72px;
+                            height: 76px;
                             background: transparent;
 
                             HorizontalLayout {
                                 width: parent.width;
-                                height: parent.height;
                                 spacing: 12px;
 
-                                FormField {
+                                DialogTextField {
                                     horizontal-stretch: 1;
-                                    height: parent.height;
                                     label: "User";
                                     required: true;
                                     value: root.user;
@@ -430,9 +252,8 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     }
                                 }
 
-                                FormField {
-                                    width: 132px;
-                                    height: parent.height;
+                                DialogTextField {
+                                    width: 138px;
                                     label: "Port";
                                     value: root.port;
 
@@ -444,124 +265,156 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         }
                     }
 
-                    Text {
-                        width: body-scroll.content-column-width;
-                        text: "Authentication";
-                        color: ThemeTokens.text-primary;
-                        font-weight: AppTypography.ui-font-weight-regular;
-                    }
+                    DialogSectionCard {
+                        width: parent.width;
+                        spacing: 14px;
+                        surface: ThemeTokens.modal-section-alt-surface;
 
-                    VerticalLayout {
-                        width: body-scroll.content-column-width;
-                        spacing: 16px;
+                        Text {
+                            width: parent.width;
+                            text: "Authentication";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
 
                         Rectangle {
                             width: parent.width;
-                            height: root.auth-source == "keychain-identity" ? 164px : 118px;
+                            height: 88px;
                             background: transparent;
 
                             VerticalLayout {
                                 width: parent.width;
-                                height: parent.height;
                                 spacing: 8px;
 
-                                VerticalLayout {
+                                Text {
                                     width: parent.width;
-                                    spacing: 8px;
-
-                                    Text {
-                                        width: parent.width;
-                                        text: "Source";
-                                        color: ThemeTokens.text-primary;
-                                        opacity: 0.8;
-                                    }
-
-                                    ComboBox {
-                                        width: parent.width;
-                                        height: 34px;
-                                        model: ["Manual", "Keychain Identity"];
-                                        current-value: root.auth-source == "keychain-identity" ? "Keychain Identity" : "Manual";
-
-                                        selected(value) => {
-                                            root.draft-changed("auth_source", value == "Keychain Identity" ? "keychain-identity" : "manual");
-                                        }
-                                    }
+                                    text: "Source";
+                                    color: ThemeTokens.text-secondary;
+                                    font-size: 11px;
+                                    overflow: elide;
                                 }
 
-                                if root.auth-source == "manual" : HorizontalLayout {
+                                ComboBox {
                                     width: parent.width;
                                     height: 34px;
-                                    spacing: 8px;
+                                    model: ["Manual", "Keychain Identity"];
+                                    current-value: root.auth-source == "keychain-identity" ? "Keychain Identity" : "Manual";
 
-                                    for auth-option in ["password", "private-key"] : ModalTabButton {
-                                        label: auth-option == "password" ? "Password" : "Private Key";
-                                        active: root.auth-method == auth-option;
-
-                                        clicked => {
-                                            root.draft-changed("auth_method", auth-option);
-                                        }
+                                    selected(value) => {
+                                        root.draft-changed("auth_source", value == "Keychain Identity" ? "keychain-identity" : "manual");
                                     }
                                 }
 
-                                if root.auth-source == "keychain-identity" : VerticalLayout {
+                                Text {
                                     width: parent.width;
-                                    spacing: 8px;
+                                    text: root.auth-source == "manual"
+                                        ? "Keep secrets local to this connection, or switch to a shared keychain identity."
+                                        : "The selected keychain identity controls username and auth material for this profile.";
+                                    color: ThemeTokens.text-muted;
+                                    font-size: 11px;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
 
-                                    Text {
-                                        width: parent.width;
-                                        text: "Identity";
-                                        color: ThemeTokens.text-primary;
-                                        opacity: 0.8;
+                        if root.auth-source == "manual" : Rectangle {
+                            width: parent.width;
+                            height: 34px;
+                            background: transparent;
+
+                            HorizontalLayout {
+                                width: parent.width;
+                                spacing: 8px;
+
+                                DialogSegmentButton {
+                                    horizontal-stretch: 1;
+                                    label: "Password";
+                                    active: root.auth-method == "password";
+
+                                    clicked => {
+                                        root.draft-changed("auth_method", "password");
                                     }
+                                }
 
-                                    ComboBox {
-                                        width: parent.width;
-                                        height: 34px;
-                                        model: root.keychain-identity-options;
-                                        current-value: root.keychain-identity-selected-label;
+                                DialogSegmentButton {
+                                    horizontal-stretch: 1;
+                                    label: "Private Key";
+                                    active: root.auth-method == "private-key";
 
-                                        selected(value) => {
-                                            root.draft-changed("keychain_identity_label", value);
-                                        }
-                                    }
-
-                                    Text {
-                                        width: parent.width;
-                                        text: "Username";
-                                        color: ThemeTokens.text-primary;
-                                        opacity: 0.8;
-                                    }
-
-                                    Text {
-                                        width: parent.width;
-                                        text: root.keychain-identity-username == "" ? "Not selected" : root.keychain-identity-username;
-                                        color: ThemeTokens.text-primary;
-                                    }
-
-                                    Text {
-                                        width: parent.width;
-                                        text: "Authentication Summary";
-                                        color: ThemeTokens.text-primary;
-                                        opacity: 0.8;
-                                    }
-
-                                    Text {
-                                        width: parent.width;
-                                        text: root.keychain-identity-auth-summary == "" ? "Not selected" : root.keychain-identity-auth-summary;
-                                        color: ThemeTokens.text-primary;
-                                        wrap: word-wrap;
+                                    clicked => {
+                                        root.draft-changed("auth_method", "private-key");
                                     }
                                 }
                             }
                         }
 
-                        if root.auth-source == "manual" && root.auth-method == "password" : FormField {
+                        if root.auth-source == "keychain-identity" : DialogSectionCard {
+                            width: parent.width;
+                            padding-horizontal: 16px;
+                            padding-vertical: 14px;
+                            spacing: 10px;
+                            surface: ThemeTokens.modal-section-surface;
+
+                            Text {
+                                width: parent.width;
+                                text: "Identity";
+                                color: ThemeTokens.text-secondary;
+                                font-size: 11px;
+                                overflow: elide;
+                            }
+
+                            ComboBox {
+                                width: parent.width;
+                                height: 34px;
+                                model: root.keychain-identity-options;
+                                current-value: root.keychain-identity-selected-label;
+
+                                selected(value) => {
+                                    root.draft-changed("keychain_identity_label", value);
+                                }
+                            }
+
+                            Text {
+                                width: parent.width;
+                                text: "Username";
+                                color: ThemeTokens.text-secondary;
+                                font-size: 11px;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                width: parent.width;
+                                text: root.keychain-identity-username == "" ? "Not selected" : root.keychain-identity-username;
+                                color: ThemeTokens.text-primary;
+                                wrap: word-wrap;
+                            }
+
+                            Text {
+                                width: parent.width;
+                                text: "Authentication summary";
+                                color: ThemeTokens.text-secondary;
+                                font-size: 11px;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                width: parent.width;
+                                text: root.keychain-identity-auth-summary == "" ? "Not selected" : root.keychain-identity-auth-summary;
+                                color: ThemeTokens.text-primary;
+                                wrap: word-wrap;
+                            }
+                        }
+
+                        if root.auth-source == "manual" && root.auth-method == "password" : DialogTextField {
                             width: parent.width;
                             label: "Password";
                             required: true;
                             value: root.password;
                             password-mode: !root.password-visible;
                             trailing-action-text: root.password-visible ? "Hide" : "Show";
+                            helper-text: "Use the keychain source above if you want this secret managed outside the connection profile.";
 
                             value-changed(value) => {
                                 root.draft-changed("password", value);
@@ -579,45 +432,26 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             width: parent.width;
                             spacing: 12px;
 
-                            Text {
+                            if root.private-key-source == "path" : DialogTextField {
                                 width: parent.width;
-                                text: "Only the private key is needed here. The public key must already be installed on the server.";
-                                color: ThemeTokens.text-primary;
-                                opacity: 0.72;
-                                wrap: word-wrap;
-                            }
+                                label: "Legacy file path";
+                                required: true;
+                                value: root.private-key-path;
+                                helper-text: "Paste or import a fresh key below to replace the legacy path reference.";
 
-                            if root.private-key-source == "path" : VerticalLayout {
-                                width: parent.width;
-                                spacing: 8px;
-
-                                FormField {
-                                    width: parent.width;
-                                    label: "Legacy File Path";
-                                    required: true;
-                                    value: root.private-key-path;
-
-                                    value-changed(value) => {
-                                        root.draft-changed("private_key_path", value);
-                                    }
-                                }
-
-                                Text {
-                                    width: parent.width;
-                                    text: "Paste or import a new private key to replace the legacy path.";
-                                    color: ThemeTokens.text-primary;
-                                    opacity: 0.72;
-                                    wrap: word-wrap;
+                                value-changed(value) => {
+                                    root.draft-changed("private_key_path", value);
                                 }
                             }
 
-                            FormField {
+                            DialogTextField {
                                 width: parent.width;
-                                label: "Private Key";
+                                label: "Private key";
                                 required: root.private-key-source != "path";
                                 multiline: true;
                                 value: root.private-key-content;
                                 trailing-action-text: "Import";
+                                helper-text: "Only the private key is needed here. The public key stays on the server.";
 
                                 value-changed(value) => {
                                     root.draft-changed("private_key_content", value);
@@ -628,7 +462,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 }
                             }
 
-                            FormField {
+                            DialogTextField {
                                 width: parent.width;
                                 label: "Passphrase";
                                 value: root.passphrase;
@@ -638,54 +472,72 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     root.draft-changed("passphrase", value);
                                 }
                             }
-
                         }
                     }
 
-                    Text {
-                        width: body-scroll.content-column-width;
-                        text: "Proxy";
-                        color: ThemeTokens.text-primary;
-                        font-weight: AppTypography.ui-font-weight-regular;
-                    }
+                    DialogSectionCard {
+                        width: parent.width;
+                        spacing: 14px;
 
-                    VerticalLayout {
-                        width: body-scroll.content-column-width;
-                        spacing: 16px;
-
-                        VerticalLayout {
+                        Text {
                             width: parent.width;
-                            spacing: 8px;
+                            text: "Proxy chain";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
 
-                            Text {
+                        Rectangle {
+                            width: parent.width;
+                            height: 88px;
+                            background: transparent;
+
+                            VerticalLayout {
                                 width: parent.width;
-                                text: "Proxy Type";
-                                color: ThemeTokens.text-primary;
-                                opacity: 0.8;
-                            }
+                                spacing: 8px;
 
-                            ComboBox {
-                                width: parent.width;
-                                height: 34px;
-                                model: ["None", "SOCKS5", "HTTP", "Existing SSH Connection"];
-                                current-value: root.proxy-type == "socks5" ? "SOCKS5"
-                                    : root.proxy-type == "http" ? "HTTP"
-                                    : root.proxy-type == "ssh-asset" ? "Existing SSH Connection"
-                                    : "None";
+                                Text {
+                                    width: parent.width;
+                                    text: "Proxy type";
+                                    color: ThemeTokens.text-secondary;
+                                    font-size: 11px;
+                                    overflow: elide;
+                                }
 
-                                selected(value) => {
-                                    root.draft-changed(
-                                        "proxy_type",
-                                        value == "SOCKS5" ? "socks5"
-                                            : value == "HTTP" ? "http"
-                                            : value == "Existing SSH Connection" ? "ssh-asset"
-                                            : "none"
-                                    );
+                                ComboBox {
+                                    width: parent.width;
+                                    height: 34px;
+                                    model: ["None", "SOCKS5", "HTTP", "Existing SSH Connection"];
+                                    current-value: root.proxy-type == "socks5" ? "SOCKS5"
+                                        : root.proxy-type == "http" ? "HTTP"
+                                        : root.proxy-type == "ssh-asset" ? "Existing SSH Connection"
+                                        : "None";
+
+                                    selected(value) => {
+                                        root.draft-changed(
+                                            "proxy_type",
+                                            value == "SOCKS5" ? "socks5"
+                                                : value == "HTTP" ? "http"
+                                                : value == "Existing SSH Connection" ? "ssh-asset"
+                                                : "none"
+                                        );
+                                    }
+                                }
+
+                                Text {
+                                    width: parent.width;
+                                    text: root.proxy-type == "none"
+                                        ? "Add a jump host or local proxy only when the target network requires it."
+                                        : "Proxy credentials and upstream targets are grouped here to keep the main connection clean.";
+                                    color: ThemeTokens.text-muted;
+                                    font-size: 11px;
+                                    wrap: word-wrap;
                                 }
                             }
                         }
 
-                        if root.proxy-type == "socks5" : VerticalLayout {
+                        if root.proxy-type == "socks5" || root.proxy-type == "http" : VerticalLayout {
                             width: parent.width;
                             spacing: 12px;
 
@@ -693,9 +545,9 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 width: parent.width;
                                 spacing: 12px;
 
-                                FormField {
+                                DialogTextField {
                                     width: parent.width;
-                                    label: "SOCKS5 Host";
+                                    label: root.proxy-type == "http" ? "HTTP host" : "SOCKS5 host";
                                     value: root.proxy-socks5-host;
 
                                     value-changed(value) => {
@@ -703,9 +555,9 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                     }
                                 }
 
-                                FormField {
+                                DialogTextField {
                                     width: parent.width;
-                                    label: "SOCKS5 Port";
+                                    label: root.proxy-type == "http" ? "HTTP port" : "SOCKS5 port";
                                     value: root.proxy-socks5-port;
 
                                     value-changed(value) => {
@@ -716,18 +568,16 @@ export component AssetsSshConnectionModal inherits Rectangle {
 
                             if !root.compact-layout : Rectangle {
                                 width: parent.width;
-                                height: 72px;
+                                height: 76px;
                                 background: transparent;
 
                                 HorizontalLayout {
                                     width: parent.width;
-                                    height: parent.height;
                                     spacing: 12px;
 
-                                    FormField {
+                                    DialogTextField {
                                         horizontal-stretch: 1;
-                                        height: parent.height;
-                                        label: "SOCKS5 Host";
+                                        label: root.proxy-type == "http" ? "HTTP host" : "SOCKS5 host";
                                         value: root.proxy-socks5-host;
 
                                         value-changed(value) => {
@@ -735,10 +585,9 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                         }
                                     }
 
-                                    FormField {
-                                        width: 132px;
-                                        height: parent.height;
-                                        label: "SOCKS5 Port";
+                                    DialogTextField {
+                                        width: 138px;
+                                        label: root.proxy-type == "http" ? "HTTP port" : "SOCKS5 port";
                                         value: root.proxy-socks5-port;
 
                                         value-changed(value) => {
@@ -748,7 +597,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 }
                             }
 
-                            FormField {
+                            DialogTextField {
                                 width: parent.width;
                                 label: "Username";
                                 value: root.proxy-socks5-username;
@@ -758,7 +607,7 @@ export component AssetsSshConnectionModal inherits Rectangle {
                                 }
                             }
 
-                            FormField {
+                            DialogTextField {
                                 width: parent.width;
                                 label: "Password";
                                 value: root.proxy-socks5-password;
@@ -778,108 +627,19 @@ export component AssetsSshConnectionModal inherits Rectangle {
                             }
                         }
 
-                        if root.proxy-type == "http" : VerticalLayout {
+                        if root.proxy-type == "ssh-asset" : DialogSectionCard {
                             width: parent.width;
-                            spacing: 12px;
-
-                            if root.compact-layout : VerticalLayout {
-                                width: parent.width;
-                                spacing: 12px;
-
-                                FormField {
-                                    width: parent.width;
-                                    label: "HTTP Host";
-                                    value: root.proxy-socks5-host;
-
-                                    value-changed(value) => {
-                                        root.draft-changed("proxy_socks5_host", value);
-                                    }
-                                }
-
-                                FormField {
-                                    width: parent.width;
-                                    label: "HTTP Port";
-                                    value: root.proxy-socks5-port;
-
-                                    value-changed(value) => {
-                                        root.draft-changed("proxy_socks5_port", value);
-                                    }
-                                }
-                            }
-
-                            if !root.compact-layout : Rectangle {
-                                width: parent.width;
-                                height: 72px;
-                                background: transparent;
-
-                                HorizontalLayout {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    spacing: 12px;
-
-                                    FormField {
-                                        horizontal-stretch: 1;
-                                        height: parent.height;
-                                        label: "HTTP Host";
-                                        value: root.proxy-socks5-host;
-
-                                        value-changed(value) => {
-                                            root.draft-changed("proxy_socks5_host", value);
-                                        }
-                                    }
-
-                                    FormField {
-                                        width: 132px;
-                                        height: parent.height;
-                                        label: "HTTP Port";
-                                        value: root.proxy-socks5-port;
-
-                                        value-changed(value) => {
-                                            root.draft-changed("proxy_socks5_port", value);
-                                        }
-                                    }
-                                }
-                            }
-
-                            FormField {
-                                width: parent.width;
-                                label: "Username";
-                                value: root.proxy-socks5-username;
-
-                                value-changed(value) => {
-                                    root.draft-changed("proxy_socks5_username", value);
-                                }
-                            }
-
-                            FormField {
-                                width: parent.width;
-                                label: "Password";
-                                value: root.proxy-socks5-password;
-                                password-mode: !root.proxy-socks5-password-visible;
-                                trailing-action-text: root.proxy-socks5-password-visible ? "Hide" : "Show";
-
-                                value-changed(value) => {
-                                    root.draft-changed("proxy_socks5_password", value);
-                                }
-
-                                trailing-action-requested => {
-                                    root.draft-changed(
-                                        "proxy_socks5_password_visibility",
-                                        root.proxy-socks5-password-visible ? "hidden" : "visible"
-                                    );
-                                }
-                            }
-                        }
-
-                        if root.proxy-type == "ssh-asset" : VerticalLayout {
-                            width: parent.width;
-                            spacing: 8px;
+                            padding-horizontal: 16px;
+                            padding-vertical: 14px;
+                            spacing: 10px;
+                            surface: ThemeTokens.modal-section-alt-surface;
 
                             Text {
                                 width: parent.width;
-                                text: "Upstream SSH Connection";
-                                color: ThemeTokens.text-primary;
-                                opacity: 0.8;
+                                text: "Upstream SSH connection";
+                                color: ThemeTokens.text-secondary;
+                                font-size: 11px;
+                                overflow: elide;
                             }
 
                             ComboBox {
@@ -895,22 +655,26 @@ export component AssetsSshConnectionModal inherits Rectangle {
                         }
                     }
 
-                    Text {
-                        width: body-scroll.content-column-width;
-                        text: "Notes";
-                        color: ThemeTokens.text-primary;
-                        font-weight: AppTypography.ui-font-weight-regular;
-                    }
+                    DialogSectionCard {
+                        width: parent.width;
+                        spacing: 14px;
+                        surface: ThemeTokens.modal-section-alt-surface;
 
-                    VerticalLayout {
-                        width: body-scroll.content-column-width;
-                        spacing: 12px;
+                        Text {
+                            width: parent.width;
+                            text: "Notes";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
 
-                        FormField {
+                        DialogTextField {
                             width: parent.width;
                             label: "Remark";
                             value: root.remark;
                             multiline: true;
+                            helper-text: "Use this area for host purpose, environment, or operator hints instead of overloading the profile name.";
 
                             value-changed(value) => {
                                 root.draft-changed("remark", value);
@@ -926,24 +690,23 @@ export component AssetsSshConnectionModal inherits Rectangle {
             y: parent.height - root.footer-height;
             width: parent.width;
             height: root.footer-height;
-            surface: ThemeTokens.activity-surface;
-            divider-color: ThemeTokens.divider-strong;
-            content-padding-top: root.dense-layout ? 6px : 14px;
-            content-padding-bottom: root.dense-layout ? 6px : 14px;
-            content-spacing: root.dense-layout ? 6px : 8px;
+            content-padding-top: root.dense-layout ? 8px : 14px;
+            content-padding-bottom: root.dense-layout ? 8px : 14px;
+            content-spacing: 8px;
 
-            if root.feedback-message != "" : FeedbackBanner {
+            if root.feedback-message != "" : DialogInlineBanner {
                 width: parent.width;
-                state: root.feedback-state;
+                tone: root.feedback-state == "busy" ? "busy"
+                    : root.feedback-state == "success" ? "success"
+                    : root.feedback-state == "error" ? "error"
+                    : "neutral";
                 message: root.feedback-message;
             }
 
-            if root.feedback-message == "" && root.validation-message != "" : Text {
+            if root.feedback-message == "" && root.validation-message != "" : DialogInlineBanner {
                 width: parent.width;
-                text: root.validation-message;
-                color: ThemeTokens.text-primary;
-                opacity: 0.72;
-                wrap: word-wrap;
+                tone: "error";
+                message: root.validation-message;
             }
 
             Rectangle {
@@ -953,15 +716,13 @@ export component AssetsSshConnectionModal inherits Rectangle {
             }
 
             HorizontalLayout {
-                height: 34px;
-                spacing: 12px;
+                height: 38px;
+                spacing: 10px;
 
-                test-button := DialogActionButton {
-                    width: 84px;
-                    height: 34px;
-                    horizontal-stretch: 0;
+                DialogActionButton {
+                    width: 92px;
                     label: "Test";
-                    action-enabled: root.connect-family-enabled;
+                    enabled: root.connect-family-enabled;
 
                     clicked => {
                         root.action-requested("test");
@@ -973,13 +734,21 @@ export component AssetsSshConnectionModal inherits Rectangle {
                     background: transparent;
                 }
 
-                save-button := DialogActionButton {
-                    width: 84px;
-                    height: 34px;
-                    horizontal-stretch: 0;
+                DialogActionButton {
+                    width: 96px;
+                    label: "Cancel";
+
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.close-requested();
+                    }
+                }
+
+                DialogActionButton {
+                    width: 108px;
                     label: "Save";
                     primary: true;
-                    action-enabled: root.can-confirm;
+                    enabled: root.can-confirm;
 
                     clicked => {
                         root.action-requested("save");
@@ -988,5 +757,4 @@ export component AssetsSshConnectionModal inherits Rectangle {
             }
         }
     }
-
 }

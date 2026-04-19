@@ -1,6 +1,12 @@
-import { ModalHeaderBar } from "./modal-chrome.slint";
+import {
+    DialogActionButton,
+    DialogSectionCard,
+    DialogSegmentButton,
+    ModalBodyScrollArea,
+    ModalFooterBar,
+    ModalHeaderBar,
+} from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
-import { AppTypography } from "../theme/typography.slint";
 
 export component SettingsModal inherits Rectangle {
     callback close-requested();
@@ -15,30 +21,18 @@ export component SettingsModal inherits Rectangle {
     callback terminal-active-idle-shrink-enabled-changed(bool);
     callback download-conflict-default-changed(string);
 
-    background: ThemeTokens.assets-surface;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: ThemeTokens.divider-subtle;
+    background: transparent;
 
     modal-focus := FocusScope {
         width: parent.width;
         height: parent.height;
-
-        key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.focus-restore-requested();
-                root.close-requested();
-                accept
-            } else {
-                reject
-            }
-        }
 
         header := ModalHeaderBar {
             x: 0px;
             y: 0px;
             width: parent.width;
             title: "Settings";
+            subtitle: "Shell defaults, transfer preferences, and performance guardrails in one calmer surface.";
             prominent: true;
 
             close-requested => {
@@ -62,174 +56,236 @@ export component SettingsModal inherits Rectangle {
             }
         }
 
-        body := Rectangle {
+        body := ModalBodyScrollArea {
             x: 0px;
             y: header.height;
             width: parent.width;
-            height: parent.height - header.height;
-            background: ThemeTokens.inspector-surface;
+            height: parent.height - header.height - footer.height;
+            frame-padding: 14px;
+            content-padding-horizontal: 18px;
+            content-padding-vertical: 16px;
+            content-spacing: 14px;
+            viewport-surface: ThemeTokens.modal-body-surface;
+            panel-surface: ThemeTokens.modal-body-surface;
+            panel-border-color: transparent;
 
-            title-copy := Text {
-                x: 20px;
-                y: 18px;
-                width: parent.width - 40px;
-                text: "Terminal settings";
-                color: ThemeTokens.text-primary;
-                font-size: 16px;
-                font-weight: AppTypography.ui-font-weight-regular;
-            }
+            content-column := Rectangle {
+                width: body.content-column-width;
+                height: content-layout.preferred-height;
+                background: transparent;
 
-            subtitle-copy := Text {
-                x: 20px;
-                y: 48px;
-                width: parent.width - 40px;
-                text: "Scrollback and memory controls are configured here.";
-                color: ThemeTokens.text-primary;
-                opacity: 0.74;
-                wrap: word-wrap;
-            }
-
-            scrollback-label := Text {
-                x: 20px;
-                y: 96px;
-                width: parent.width - 40px;
-                text: "Scrollback limit";
-                color: ThemeTokens.text-primary;
-                opacity: 0.82;
-            }
-
-            scrollback-value := Text {
-                x: 20px;
-                y: 124px;
-                width: parent.width - 40px;
-                text: root.terminal-scrollback-limit + " lines";
-                color: ThemeTokens.text-primary;
-                font-size: 16px;
-                font-weight: AppTypography.ui-font-weight-regular;
-            }
-
-            scrollback-dec := Rectangle {
-                x: 20px;
-                y: 156px;
-                width: 120px;
-                height: 32px;
-                border-radius: 6px;
-                background: ThemeTokens.control-hover-surface;
-
-                Text {
+                content-layout := VerticalLayout {
                     width: parent.width;
-                    height: parent.height;
-                    text: "-500";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
+                    spacing: body.content-spacing;
 
-                TouchArea {
-                    clicked => {
-                        root.terminal-scrollback-limit-changed(
-                            root.terminal-scrollback-limit > 500
-                                ? root.terminal-scrollback-limit - 500
-                                : 1
-                        );
+                    DialogSectionCard {
+                        width: parent.width;
+                        spacing: 14px;
+
+                        Text {
+                            width: parent.width;
+                            text: "Terminal history";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-scrollback-limit + " lines";
+                            color: ThemeTokens.text-primary;
+                            font-size: 22px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: "Adjust how much history stays attached to each live terminal session before the shell trims older output.";
+                            color: ThemeTokens.text-muted;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 38px;
+                            spacing: 10px;
+
+                            DialogActionButton {
+                                horizontal-stretch: 1;
+                                label: "-500";
+
+                                clicked => {
+                                    root.terminal-scrollback-limit-changed(
+                                        root.terminal-scrollback-limit > 500
+                                            ? root.terminal-scrollback-limit - 500
+                                            : 1
+                                    );
+                                }
+                            }
+
+                            DialogActionButton {
+                                horizontal-stretch: 1;
+                                label: "+500";
+                                primary: true;
+
+                                clicked => {
+                                    root.terminal-scrollback-limit-changed(root.terminal-scrollback-limit + 500);
+                                }
+                            }
+                        }
+                    }
+
+                    DialogSectionCard {
+                        width: parent.width;
+                        spacing: 14px;
+                        surface: ThemeTokens.modal-section-alt-surface;
+
+                        Text {
+                            width: parent.width;
+                            text: "Memory behavior";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: root.terminal-active-idle-shrink-enabled
+                                ? "Active idle cache shrink is enabled."
+                                : "Active idle cache shrink is disabled.";
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: "Keep this on when you want long-running tabs to free memory more aggressively while they sit idle.";
+                            color: ThemeTokens.text-muted;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 38px;
+                            spacing: 10px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Enabled";
+                                active: root.terminal-active-idle-shrink-enabled;
+
+                                clicked => {
+                                    root.terminal-active-idle-shrink-enabled-changed(true);
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Disabled";
+                                active: !root.terminal-active-idle-shrink-enabled;
+
+                                clicked => {
+                                    root.terminal-active-idle-shrink-enabled-changed(false);
+                                }
+                            }
+                        }
+                    }
+
+                    DialogSectionCard {
+                        width: parent.width;
+                        spacing: 14px;
+
+                        Text {
+                            width: parent.width;
+                            text: "Download conflicts";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: "Choose the default conflict policy before the transfer center or resolve dialog needs to intervene.";
+                            color: ThemeTokens.text-muted;
+                            font-size: 11px;
+                            wrap: word-wrap;
+                        }
+
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 34px;
+                            spacing: 8px;
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Ask";
+                                active: root.download-conflict-default == "ask";
+
+                                clicked => {
+                                    root.download-conflict-default-changed("ask");
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Overwrite";
+                                active: root.download-conflict-default == "overwrite";
+
+                                clicked => {
+                                    root.download-conflict-default-changed("overwrite");
+                                }
+                            }
+
+                            DialogSegmentButton {
+                                horizontal-stretch: 1;
+                                label: "Auto Rename";
+                                active: root.download-conflict-default == "auto-rename";
+
+                                clicked => {
+                                    root.download-conflict-default-changed("auto-rename");
+                                }
+                            }
+                        }
                     }
                 }
             }
+        }
 
-            scrollback-inc := Rectangle {
-                x: 152px;
-                y: 156px;
-                width: 120px;
-                height: 32px;
-                border-radius: 6px;
-                background: ThemeTokens.control-hover-surface;
+        footer := ModalFooterBar {
+            x: 0px;
+            y: parent.height - self.height;
+            width: parent.width;
+            height: ThemeTokens.modal-footer-min-height;
 
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: "+500";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+            Rectangle {
+                height: 0px;
+                vertical-stretch: 1;
+                background: transparent;
+            }
+
+            HorizontalLayout {
+                height: 38px;
+                spacing: 10px;
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
                 }
 
-                TouchArea {
+                done-button := DialogActionButton {
+                    width: 108px;
+                    label: "Done";
+                    primary: true;
+
                     clicked => {
-                        root.terminal-scrollback-limit-changed(root.terminal-scrollback-limit + 500);
-                    }
-                }
-            }
-
-            idle-label := Text {
-                x: 20px;
-                y: 208px;
-                width: parent.width - 40px;
-                text: "Active idle cache shrink";
-                color: ThemeTokens.text-primary;
-                opacity: 0.82;
-            }
-
-            idle-toggle := Rectangle {
-                x: 20px;
-                y: 236px;
-                width: 252px;
-                height: 32px;
-                border-radius: 6px;
-                background: ThemeTokens.control-hover-surface;
-
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: root.terminal-active-idle-shrink-enabled ? "Enabled" : "Disabled";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                TouchArea {
-                    clicked => {
-                        root.terminal-active-idle-shrink-enabled-changed(
-                            !root.terminal-active-idle-shrink-enabled
-                        );
-                    }
-                }
-            }
-
-            download-conflict-label := Text {
-                x: 20px;
-                y: 288px;
-                width: parent.width - 40px;
-                text: "Download conflict default";
-                color: ThemeTokens.text-primary;
-                opacity: 0.82;
-            }
-
-            download-conflict-toggle := Rectangle {
-                x: 20px;
-                y: 316px;
-                width: parent.width - 40px;
-                height: 32px;
-                border-radius: 6px;
-                background: ThemeTokens.control-hover-surface;
-
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: root.download-conflict-default == "ask" ? "Ask every time" : root.download-conflict-default == "overwrite" ? "Overwrite existing files" : "Auto rename downloads";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                TouchArea {
-                    clicked => {
-                        root.download-conflict-default-changed(
-                            root.download-conflict-default == "ask"
-                                ? "overwrite"
-                                : root.download-conflict-default == "overwrite"
-                                    ? "auto-rename"
-                                    : "ask"
-                        );
+                        root.focus-restore-requested();
+                        root.close-requested();
                     }
                 }
             }

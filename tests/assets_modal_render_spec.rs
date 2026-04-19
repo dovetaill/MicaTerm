@@ -155,6 +155,22 @@ fn render_app_with_size_and_after_show(
     setup: impl FnOnce(&AppWindow),
     after_show: impl FnOnce(&AppWindow),
 ) -> SharedPixelBuffer<Rgb8Pixel> {
+    render_app_with_size_and_theme_and_after_show(
+        window_width,
+        window_height,
+        false,
+        setup,
+        after_show,
+    )
+}
+
+fn render_app_with_size_and_theme_and_after_show(
+    window_width: u32,
+    window_height: u32,
+    dark_mode: bool,
+    setup: impl FnOnce(&AppWindow),
+    after_show: impl FnOnce(&AppWindow),
+) -> SharedPixelBuffer<Rgb8Pixel> {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
     slint::platform::set_platform(Box::new(SoftwareTestPlatform {
         window: window.clone(),
@@ -164,7 +180,7 @@ fn render_app_with_size_and_after_show(
 
     let app = AppWindow::new().unwrap();
     bind_top_status_bar_with_store(&app, None);
-    app.set_dark_mode(false);
+    app.set_dark_mode(dark_mode);
     app.window()
         .set_size(PhysicalSize::new(window_width, window_height));
     setup(&app);
@@ -187,6 +203,225 @@ fn write_ppm(buffer: &SharedPixelBuffer<Rgb8Pixel>, path: impl AsRef<Path>) {
         bytes.push(pixel.b);
     }
     fs::write(path, bytes).expect("write ppm");
+}
+
+#[test]
+fn rename_modal_renders_shared_section_field_and_footer_actions() {
+    let modal = blocking_modal_rect(420, 230);
+    let buffer = render_app(|app| {
+        app.set_asset_rename_modal_open(true);
+        app.set_asset_rename_modal_name("Prod Bastion".into());
+        app.set_asset_rename_modal_can_confirm(true);
+    });
+
+    let modal_surface = pixel_at(&buffer, modal.x + 10, modal.y + 10);
+    let body_card_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 24,
+        modal.y + 78,
+        modal.width - 48,
+        88,
+        modal_surface,
+        14,
+    );
+    let footer_surface = pixel_at(&buffer, modal.x + 6, modal.y + modal.height - 20);
+    let footer_panel_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 24,
+        modal.y + modal.height - 56,
+        modal.width - 48,
+        30,
+        footer_surface,
+        12,
+    );
+
+    assert!(
+        body_card_pixels >= 2200,
+        "rename modal should render a visible shared section-backed body surface, only found {body_card_pixels} distinct pixels"
+    );
+    assert!(
+        footer_panel_pixels >= 1000,
+        "rename modal footer should render a visible shared action rail, only found {footer_panel_pixels} distinct pixels"
+    );
+}
+
+#[test]
+fn delete_confirm_modal_renders_structured_warning_and_destructive_footer() {
+    let modal = blocking_modal_rect(440, 268);
+    let buffer = render_app(|app| {
+        app.set_asset_delete_confirm_modal_open(true);
+        app.set_asset_delete_confirm_target_label("Prod Bastion".into());
+        app.set_asset_delete_confirm_descendant_count(3);
+    });
+
+    let modal_surface = pixel_at(&buffer, modal.x + 10, modal.y + 10);
+    let warning_card_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 24,
+        modal.y + 84,
+        modal.width - 48,
+        118,
+        modal_surface,
+        14,
+    );
+    let footer_surface = pixel_at(&buffer, modal.x + 6, modal.y + modal.height - 20);
+    let footer_panel_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 24,
+        modal.y + modal.height - 56,
+        modal.width - 48,
+        30,
+        footer_surface,
+        12,
+    );
+
+    assert!(
+        warning_card_pixels >= 2600,
+        "delete confirm modal should render a structured warning card instead of flat body copy, only found {warning_card_pixels} distinct pixels"
+    );
+    assert!(
+        footer_panel_pixels >= 1100,
+        "delete confirm modal footer should render a visible destructive action rail, only found {footer_panel_pixels} distinct pixels"
+    );
+}
+
+#[test]
+fn ssh_host_key_modal_renders_verification_card_and_action_row() {
+    let modal = blocking_modal_rect(420, 332);
+    let buffer = render_app(|app| {
+        app.set_ssh_host_key_modal_open(true);
+        app.set_ssh_host_key_modal_host("db.example.com".into());
+        app.set_ssh_host_key_modal_fingerprint(
+            "SHA256:X2j2f3Ag9rQm0tJ4wQ4Jw7WiyR5QH1O3m2Q2n4v6QzA".into(),
+        );
+    });
+
+    let modal_surface = pixel_at(&buffer, modal.x + 10, modal.y + 10);
+    let verification_card_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 24,
+        modal.y + 86,
+        modal.width - 48,
+        164,
+        modal_surface,
+        14,
+    );
+    let footer_surface = pixel_at(&buffer, modal.x + 6, modal.y + modal.height - 20);
+    let footer_panel_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 24,
+        modal.y + modal.height - 56,
+        modal.width - 48,
+        30,
+        footer_surface,
+        12,
+    );
+
+    assert!(
+        verification_card_pixels >= 3200,
+        "host-key confirm modal should render a visible structured verification surface, only found {verification_card_pixels} distinct pixels"
+    );
+    assert!(
+        footer_panel_pixels >= 1000,
+        "host-key confirm modal should render a shared action row for reject/accept, only found {footer_panel_pixels} distinct pixels"
+    );
+}
+
+#[test]
+fn sftp_remote_file_modal_renders_editor_surface_status_and_footer_actions() {
+    let modal = blocking_modal_rect(860, 620);
+    let buffer = render_app(|app| {
+        app.set_sftp_remote_file_modal_open(true);
+        app.set_sftp_remote_file_modal_title("Edit Remote File".into());
+        app.set_sftp_remote_file_modal_path("/srv/app/.env".into());
+        app.set_sftp_remote_file_modal_content("APP_ENV=production\nAPI_PORT=443\n".into());
+        app.set_sftp_remote_file_modal_status_text("Remote file loaded".into());
+        app.set_sftp_remote_file_modal_can_save(true);
+    });
+
+    let modal_surface = pixel_at(&buffer, modal.x + 10, modal.y + 10);
+    let editor_surface_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 28,
+        modal.y + 128,
+        modal.width - 56,
+        modal.height - 236,
+        modal_surface,
+        14,
+    );
+    let footer_surface = pixel_at(&buffer, modal.x + 6, modal.y + modal.height - 20);
+    let footer_panel_pixels = count_distinct_pixels(
+        &buffer,
+        modal.x + 24,
+        modal.y + modal.height - 58,
+        modal.width - 48,
+        32,
+        footer_surface,
+        12,
+    );
+
+    assert!(
+        editor_surface_pixels >= 12000,
+        "remote-file modal should render a visible elevated editor work surface, only found {editor_surface_pixels} distinct pixels"
+    );
+    assert!(
+        footer_panel_pixels >= 2500,
+        "remote-file modal footer should render a visible shared action rail, only found {footer_panel_pixels} distinct pixels"
+    );
+}
+
+#[test]
+fn migrated_remaining_modals_preserve_distinct_light_and_dark_shells() {
+    let modal = blocking_modal_rect(860, 620);
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+    slint::platform::set_platform(Box::new(SoftwareTestPlatform {
+        window: window.clone(),
+        started_at: Instant::now(),
+    }))
+    .unwrap();
+
+    let app = AppWindow::new().unwrap();
+    bind_top_status_bar_with_store(&app, None);
+    app.window()
+        .set_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
+    app.set_dark_mode(false);
+    app.set_sftp_remote_file_modal_open(true);
+    app.set_sftp_remote_file_modal_title("Edit Remote File".into());
+    app.set_sftp_remote_file_modal_path("/srv/app/.env".into());
+    app.set_sftp_remote_file_modal_content("APP_ENV=production\nAPI_PORT=443\n".into());
+    app.set_sftp_remote_file_modal_status_text("Remote file loaded".into());
+    app.set_sftp_remote_file_modal_can_save(true);
+    app.show().unwrap();
+
+    let mut light = SharedPixelBuffer::<Rgb8Pixel>::new(WINDOW_WIDTH, WINDOW_HEIGHT);
+    let light_stride = light.width() as usize;
+    assert!(window.draw_if_needed(|renderer| {
+        renderer.render(light.make_mut_slice(), light_stride);
+    }));
+
+    app.set_dark_mode(true);
+    slint::platform::update_timers_and_animations();
+
+    let mut dark = SharedPixelBuffer::<Rgb8Pixel>::new(WINDOW_WIDTH, WINDOW_HEIGHT);
+    let dark_stride = dark.width() as usize;
+    assert!(window.draw_if_needed(|renderer| {
+        renderer.render(dark.make_mut_slice(), dark_stride);
+    }));
+
+    let shell_delta = count_changed_pixels(
+        &light,
+        &dark,
+        modal.x + 4,
+        modal.y + 4,
+        modal.width - 8,
+        modal.height - 8,
+        18,
+    );
+
+    assert!(
+        shell_delta >= 25000,
+        "migrated remaining dialogs should preserve a clearly distinct shell between light and dark themes, only found {shell_delta} changed pixels"
+    );
 }
 
 #[test]
@@ -331,7 +566,7 @@ fn new_ssh_modal_renders_footer_actions_and_balanced_top_row() {
 
 #[test]
 fn sync_modal_renders_state_driven_content_and_footer_actions() {
-    let modal = blocking_modal_rect(560, 360);
+    let modal = blocking_modal_rect(640, 680);
     let buffer = render_app(|app| {
         app.set_sync_modal_open(true);
         app.set_sync_modal_mode("not-configured".into());
@@ -375,7 +610,7 @@ fn sync_modal_renders_state_driven_content_and_footer_actions() {
 
 #[test]
 fn sync_modal_renders_sync_status_card_with_timestamps() {
-    let modal = blocking_modal_rect(560, 360);
+    let modal = blocking_modal_rect(640, 680);
     let buffer = render_app(|app| {
         app.set_sync_modal_open(true);
         app.set_sync_modal_mode("ready".into());
@@ -415,8 +650,7 @@ fn sync_modal_renders_sync_status_card_with_timestamps() {
 #[test]
 fn sync_modal_footer_stays_visible_in_short_viewport() {
     let short_height = 640;
-    let modal_height = 528;
-    let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, modal_height);
+    let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, 680);
     let buffer = render_app_with_size(WINDOW_WIDTH, short_height, |app| {
         app.set_sync_modal_open(true);
         app.set_sync_modal_mode("not-configured".into());
@@ -452,8 +686,7 @@ fn sync_modal_footer_stays_visible_in_short_viewport() {
 #[test]
 fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
     let short_height = 640;
-    let modal_height = 528;
-    let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, modal_height);
+    let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, 680);
     let footer_height = 82;
     let footer_top = modal.y + modal.height - footer_height;
     let buffer = render_app_with_size(WINDOW_WIDTH, short_height, |app| {
@@ -490,8 +723,7 @@ fn sync_modal_short_viewport_keeps_master_password_field_actionable() {
 #[test]
 fn blocking_modal_tints_workspace_behind_the_dialog() {
     let short_height = 640;
-    let modal_height = 528;
-    let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, modal_height);
+    let modal = blocking_modal_rect_for_viewport(WINDOW_WIDTH, short_height, 640, 680);
     let sample_x = modal.x + modal.width + 64;
     let sample_y = modal.y + 180;
     let workspace_surface = Rgb8Pixel {
@@ -578,14 +810,14 @@ fn ssh_modal_narrow_viewport_preserves_right_gutter_after_trailing_action() {
         app.set_asset_ssh_modal_password("secret".into());
         app.set_asset_modal_can_confirm(true);
     });
-    let trailing_action_surface = pixel_at(&buffer, modal.x + 600, modal.y + 517);
+    let field_border = pixel_at(&buffer, modal.x + 609, modal.y + 554);
     let right_gutter_pixels = count_distinct_pixels(
         &buffer,
-        modal.x + 601,
-        modal.y + 517,
+        modal.x + 610,
+        modal.y + 554,
         9,
         1,
-        trailing_action_surface,
+        field_border,
         10,
     );
 

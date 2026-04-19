@@ -234,6 +234,7 @@ export component AppWindow inherits Window {
     in-out property <bool> asset-tree-controls-enabled: true;
     in-out property <length> blocking-modal-offset-x: 0px;
     in-out property <length> blocking-modal-offset-y: 0px;
+    in-out property <int> blocking-modal-focus-sequence: 0;
     in-out property <[ConsoleAssetItem]> console-asset-items: [];
     in-out property <[ConsoleAssetItem]> snippet-asset-items: [];
     in-out property <[ConsoleAssetItem]> keychain-asset-items: [];
@@ -548,6 +549,7 @@ export component AppWindow inherits Window {
         if root.asset-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
         }
     }
 
@@ -555,6 +557,7 @@ export component AppWindow inherits Window {
         if root.sync-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
         }
     }
 
@@ -562,6 +565,7 @@ export component AppWindow inherits Window {
         if root.settings-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
         }
     }
 
@@ -569,6 +573,7 @@ export component AppWindow inherits Window {
         if root.asset-rename-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
         }
     }
 
@@ -576,6 +581,7 @@ export component AppWindow inherits Window {
         if root.asset-delete-confirm-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
         }
     }
 
@@ -583,6 +589,7 @@ export component AppWindow inherits Window {
         if root.ssh-host-key-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
         }
     }
 
@@ -590,7 +597,32 @@ export component AppWindow inherits Window {
         if root.workspace-paste-warning-modal-open {
             root.blocking-modal-offset-x = 0px;
             root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
             root.workspace-paste-warning-focus-sequence = root.workspace-paste-warning-focus-sequence + 1;
+        }
+    }
+
+    changed open-saved-ssh-modal-open => {
+        if root.open-saved-ssh-modal-open {
+            root.blocking-modal-offset-x = 0px;
+            root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
+        }
+    }
+
+    changed sftp-conflict-modal-open => {
+        if root.sftp-conflict-modal-open {
+            root.blocking-modal-offset-x = 0px;
+            root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
+        }
+    }
+
+    changed sftp-remote-file-modal-open => {
+        if root.sftp-remote-file-modal-open {
+            root.blocking-modal-offset-x = 0px;
+            root.blocking-modal-offset-y = 0px;
+            root.blocking-modal-focus-sequence = root.blocking-modal-focus-sequence + 1;
         }
     }
 
@@ -1322,7 +1354,7 @@ export component AppWindow inherits Window {
         y: titlebar.height;
         width: root.width;
         height: root.height - titlebar.height;
-        enabled: root.sync-modal-open || root.settings-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open || root.open-saved-ssh-modal-open || root.sftp-conflict-modal-open;
+        enabled: root.sync-modal-open || root.settings-modal-open || root.asset-modal-open || root.asset-rename-modal-open || root.asset-delete-confirm-modal-open || root.ssh-host-key-modal-open || root.workspace-paste-warning-modal-open || root.open-saved-ssh-modal-open || root.sftp-conflict-modal-open || root.sftp-remote-file-modal-open;
 
         clicked => { }
     }
@@ -1333,12 +1365,18 @@ export component AppWindow inherits Window {
         modal-height: 600px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.open-saved-ssh-modal-close-requested();
         }
 
         open-saved-ssh-modal-overlay := OpenSavedSshModal {
@@ -1382,6 +1420,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -1393,12 +1432,18 @@ export component AppWindow inherits Window {
         modal-height: 680px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.sync-modal-close-requested();
         }
 
         sync-vault-modal-overlay := SyncVaultModal {
@@ -1464,6 +1509,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -1475,12 +1521,18 @@ export component AppWindow inherits Window {
         modal-height: 420px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.settings-modal-close-requested();
         }
 
         settings-modal-overlay := SettingsModal {
@@ -1521,6 +1573,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -1534,12 +1587,18 @@ export component AppWindow inherits Window {
         modal-height: 230px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.close-asset-modal-requested();
         }
 
         asset-folder-modal-overlay := AssetsFolderCreateModal {
@@ -1578,6 +1637,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -1589,12 +1649,18 @@ export component AppWindow inherits Window {
         modal-height: 600px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.close-asset-modal-requested();
         }
 
         asset-snippet-modal-overlay := AssetsSnippetModal {
@@ -1637,6 +1703,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -1648,12 +1715,18 @@ export component AppWindow inherits Window {
         modal-height: 230px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.close-asset-modal-requested();
         }
 
         asset-snippet-package-modal-overlay := AssetsSnippetPackageModal {
@@ -1692,6 +1765,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -1703,12 +1777,18 @@ export component AppWindow inherits Window {
         modal-height: 720px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.close-asset-modal-requested();
         }
 
         asset-ssh-modal-overlay := AssetsSshConnectionModal {
@@ -1777,6 +1857,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -1788,12 +1869,18 @@ export component AppWindow inherits Window {
         modal-height: 600px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.close-asset-modal-requested();
         }
 
         keychain-identity-modal-overlay := AssetsKeychainIdentityModal {
@@ -1840,6 +1927,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -1851,12 +1939,18 @@ export component AppWindow inherits Window {
         modal-height: 720px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.close-asset-modal-requested();
         }
 
         keychain-ssh-key-modal-overlay := AssetsKeychainSshKeyModal {
@@ -1901,6 +1995,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -1912,12 +2007,18 @@ export component AppWindow inherits Window {
         modal-height: 230px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.close-asset-modal-requested();
         }
 
         asset-rename-modal-overlay := AssetsRenameModal {
@@ -1925,6 +2026,7 @@ export component AppWindow inherits Window {
             y: 0px;
             width: asset-rename-modal-shell.content-width;
             height: asset-rename-modal-shell.content-height;
+            focus-sequence: root.blocking-modal-focus-sequence;
             dialog-title: "Rename Asset";
             item-name: root.asset-rename-modal-name;
             validation-message: root.asset-rename-modal-validation-message;
@@ -1955,6 +2057,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -1966,12 +2069,18 @@ export component AppWindow inherits Window {
         modal-height: 268px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.close-asset-modal-requested();
         }
 
         asset-delete-confirm-modal-overlay := AssetsDeleteConfirmModal {
@@ -1979,6 +2088,7 @@ export component AppWindow inherits Window {
             y: 0px;
             width: asset-delete-confirm-modal-shell.content-width;
             height: asset-delete-confirm-modal-shell.content-height;
+            focus-sequence: root.blocking-modal-focus-sequence;
             dialog-title: "Delete Asset";
             target-label: root.asset-delete-confirm-target-label;
             descendant-count: root.asset-delete-confirm-descendant-count;
@@ -2004,6 +2114,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -2015,12 +2126,18 @@ export component AppWindow inherits Window {
         modal-height: 332px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.ssh-host-key-modal-reject-requested();
         }
 
         ssh-host-key-modal-overlay := SshHostKeyConfirmModal {
@@ -2028,6 +2145,7 @@ export component AppWindow inherits Window {
             y: 0px;
             width: ssh-host-key-modal-shell.content-width;
             height: ssh-host-key-modal-shell.content-height;
+            focus-sequence: root.blocking-modal-focus-sequence;
             dialog-title: "Verify Host Key";
             host: root.ssh-host-key-modal-host;
             fingerprint: root.ssh-host-key-modal-fingerprint;
@@ -2053,6 +2171,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -2064,12 +2183,18 @@ export component AppWindow inherits Window {
         modal-height: root.workspace-paste-warning-editor-mode ? 432px : 248px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.workspace-paste-warning-cancel-requested();
         }
 
         workspace-paste-warning-modal-overlay := WorkspacePasteWarningModal {
@@ -2103,6 +2228,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -2120,12 +2246,18 @@ export component AppWindow inherits Window {
         modal-glow: ThemeTokens.conflict-dialog-glow;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.sftp-conflict-modal-close-requested();
         }
 
         sftp-conflict-modal-overlay := SftpConflictModal {
@@ -2173,6 +2305,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }
@@ -2184,12 +2317,18 @@ export component AppWindow inherits Window {
         modal-height: 620px;
         offset-x: root.blocking-modal-offset-x;
         offset-y: root.blocking-modal-offset-y;
+        focus-sequence: root.blocking-modal-focus-sequence;
 
         focus-restore-requested => {
+            main-workspace.restore-primary-focus();
             root.blocking-modal-focus-restore-requested();
         }
 
         consume-event => {
+        }
+
+        escape-requested => {
+            root.sftp-remote-file-modal-close-requested();
         }
 
         sftp-remote-file-modal-overlay := SftpRemoteFileModal {
@@ -2203,7 +2342,7 @@ export component AppWindow inherits Window {
             status-text: root.sftp-remote-file-modal-status-text;
             error-text: root.sftp-remote-file-modal-error-text;
             can-save: root.sftp-remote-file-modal-can-save;
-            focus-sequence: root.sftp-remote-file-modal-focus-sequence;
+            focus-sequence: root.blocking-modal-focus-sequence;
 
             close-requested => {
                 root.sftp-remote-file-modal-close-requested();
@@ -2230,6 +2369,7 @@ export component AppWindow inherits Window {
             }
 
             focus-restore-requested => {
+                main-workspace.restore-primary-focus();
                 root.blocking-modal-focus-restore-requested();
             }
         }

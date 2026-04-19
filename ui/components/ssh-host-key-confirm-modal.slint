@@ -1,62 +1,36 @@
+import {
+    DialogActionButton,
+    DialogSectionCard,
+    ModalFooterBar,
+    ModalHeaderBar,
+} from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
-import { AppTypography } from "../theme/typography.slint";
-
-component DialogButton inherits Rectangle {
-    in property <string> label: "";
-    in property <bool> primary: false;
-    callback clicked();
-
-    height: 34px;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: root.primary ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-    background: button-touch.pressed ? ThemeTokens.control-pressed-surface
-        : button-touch.has-hover ? ThemeTokens.control-hover-surface
-        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
-
-    Text {
-        width: parent.width;
-        height: parent.height;
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-
-    button-touch := TouchArea {
-        width: parent.width;
-        height: parent.height;
-
-        clicked => {
-            root.clicked();
-        }
-    }
-}
 
 export component SshHostKeyConfirmModal inherits Rectangle {
     in property <string> dialog-title: "Verify Host Key";
     in property <string> host: "";
     in property <string> fingerprint: "";
+    in property <int> focus-sequence: 0;
     callback accept-requested();
     callback reject-requested();
     callback drag-requested(length, length);
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
-    private property <length> footer-height: 66px;
+    private property <length> footer-height: ThemeTokens.modal-footer-min-height;
 
     background: transparent;
+
+    changed focus-sequence => {
+        accept-button.focus-button();
+    }
 
     modal-focus := FocusScope {
         width: parent.width;
         height: parent.height;
 
         key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.focus-restore-requested();
-                root.reject-requested();
-                accept
-            } else if (event.text == Key.Return) {
+            if (event.text == Key.Return) {
                 root.accept-requested();
                 accept
             } else {
@@ -64,85 +38,32 @@ export component SshHostKeyConfirmModal inherits Rectangle {
             }
         }
 
-        header := Rectangle {
+        header := ModalHeaderBar {
             x: 0px;
             y: 0px;
             width: parent.width;
-            height: 56px;
-            background: ThemeTokens.assets-surface;
+            title: root.dialog-title;
+            subtitle: "Confirm the server fingerprint before trusting it with TOFU storage.";
+            prominent: true;
 
-            Text {
-                x: 20px;
-                y: 0px;
-                width: parent.width - 72px;
-                height: parent.height;
-                text: root.dialog-title;
-                color: ThemeTokens.text-primary;
-                font-size: 18px;
-                font-weight: AppTypography.ui-font-weight-regular;
-                vertical-alignment: center;
+            close-requested => {
+                root.reject-requested();
             }
 
-            drag-touch := TouchArea {
-                width: parent.width - 48px;
-                height: parent.height;
-
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down
-                        && event.button == PointerEventButton.left
-                    {
-                        root.drag-requested(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.move {
-                        root.drag-moved(
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    } else if event.kind == PointerEventKind.up {
-                        root.drag-ended();
-                    }
-                }
+            drag-requested(pointer-x, pointer-y) => {
+                root.drag-requested(pointer-x, pointer-y);
             }
 
-            close-button := Rectangle {
-                x: parent.width - 40px;
-                y: 12px;
-                width: 28px;
-                height: 28px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: close-touch.pressed ? ThemeTokens.control-pressed-surface
-                    : close-touch.has-hover ? ThemeTokens.control-hover-surface
-                    : ThemeTokens.control-active-surface;
-
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: "×";
-                    color: ThemeTokens.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                close-touch := TouchArea {
-                    width: parent.width;
-                    height: parent.height;
-
-                    clicked => {
-                        root.focus-restore-requested();
-                        root.reject-requested();
-                    }
-                }
+            drag-moved(pointer-x, pointer-y) => {
+                root.drag-moved(pointer-x, pointer-y);
             }
 
-            divider := Rectangle {
-                y: parent.height - 1px;
-                width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
+            drag-ended => {
+                root.drag-ended();
+            }
+
+            focus-restore-requested => {
+                root.focus-restore-requested();
             }
         }
 
@@ -150,86 +71,101 @@ export component SshHostKeyConfirmModal inherits Rectangle {
             x: 0px;
             y: header.height;
             width: parent.width;
-            height: parent.height - header.height - root.footer-height;
-            background: transparent;
+            height: parent.height - header.height - footer.height;
+            background: ThemeTokens.modal-body-surface;
 
-            Text {
-                x: 20px;
-                y: 18px;
-                width: parent.width - 40px;
-                text: "Trust the SSH host key for " + root.host + "?";
-                color: ThemeTokens.text-primary;
-                font-size: 16px;
-                font-weight: AppTypography.ui-font-weight-regular;
-                wrap: word-wrap;
-            }
+            VerticalLayout {
+                x: 14px;
+                y: 14px;
+                width: parent.width - 28px;
+                spacing: 0px;
 
-            fingerprint-panel := Rectangle {
-                x: 20px;
-                y: 62px;
-                width: parent.width - 40px;
-                height: 72px;
-                border-radius: 0px;
-                border-width: 1px;
-                border-color: ThemeTokens.divider-subtle;
-                background: ThemeTokens.inspector-surface;
+                DialogSectionCard {
+                    width: parent.width;
+                    spacing: 12px;
 
-                Text {
-                    x: 12px;
-                    y: 12px;
-                    width: parent.width - 24px;
-                    text: root.fingerprint;
-                    color: ThemeTokens.text-primary;
-                    wrap: word-wrap;
+                    Text {
+                        width: parent.width;
+                        text: "Trust the SSH host key for " + root.host + "?";
+                        color: ThemeTokens.text-primary;
+                        font-size: 14px;
+                        font-weight: 700;
+                        wrap: word-wrap;
+                    }
+
+                    Text {
+                        width: parent.width;
+                        text: "Accept to store this host key using TOFU, or reject to cancel the connection attempt.";
+                        color: ThemeTokens.text-muted;
+                        font-size: 11px;
+                        wrap: word-wrap;
+                    }
+
+                    DialogSectionCard {
+                        width: parent.width;
+                        padding-horizontal: 14px;
+                        padding-vertical: 12px;
+                        spacing: 8px;
+                        surface: ThemeTokens.modal-section-alt-surface;
+
+                        Text {
+                            width: parent.width;
+                            text: "Fingerprint";
+                            color: ThemeTokens.text-secondary;
+                            font-size: 11px;
+                            overflow: elide;
+                        }
+
+                        Text {
+                            width: parent.width;
+                            text: root.fingerprint;
+                            color: ThemeTokens.text-primary;
+                            wrap: word-wrap;
+                        }
+                    }
                 }
             }
-
-            Text {
-                x: 20px;
-                y: 146px;
-                width: parent.width - 40px;
-                text: "Accept to store this host key using TOFU, or reject to cancel the connection attempt.";
-                color: ThemeTokens.text-primary;
-                opacity: 0.72;
-                wrap: word-wrap;
-            }
-
         }
 
-        footer := Rectangle {
+        footer := ModalFooterBar {
             x: 0px;
             y: parent.height - root.footer-height;
             width: parent.width;
             height: root.footer-height;
-            background: ThemeTokens.assets-surface;
 
-            footer-divider := Rectangle {
-                width: parent.width;
-                height: 1px;
-                background: ThemeTokens.divider-subtle;
+            Rectangle {
+                height: 0px;
+                vertical-stretch: 1;
+                background: transparent;
             }
 
-            reject-button := DialogButton {
-                x: parent.width - 204px;
-                y: 16px;
-                width: 88px;
-                label: "Reject";
+            HorizontalLayout {
+                height: 38px;
+                spacing: 10px;
 
-                clicked => {
-                    root.focus-restore-requested();
-                    root.reject-requested();
+                Rectangle {
+                    horizontal-stretch: 1;
+                    background: transparent;
                 }
-            }
 
-            accept-button := DialogButton {
-                x: parent.width - 104px;
-                y: 16px;
-                width: 84px;
-                label: "Accept";
-                primary: true;
+                DialogActionButton {
+                    width: 96px;
+                    label: "Reject";
 
-                clicked => {
-                    root.accept-requested();
+                    clicked => {
+                        root.focus-restore-requested();
+                        root.reject-requested();
+                    }
+                }
+
+                accept-button := DialogActionButton {
+                    width: 96px;
+                    label: "Accept";
+                    primary: true;
+
+                    clicked => {
+                        root.accept-requested();
+                    }
                 }
             }
         }

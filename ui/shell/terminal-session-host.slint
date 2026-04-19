@@ -180,6 +180,12 @@ export component TerminalSessionHost inherits Rectangle {
     callback welcome-quick-launch-reveal-in-assets-requested(string);
     callback welcome-open-saved-ssh-requested();
 
+    public function restore-primary-focus() {
+        if root.mode == "terminal" {
+            terminal-input.focus();
+        }
+    }
+
     private property <length> terminal-font-size: 16px;
     private property <length> terminal-cell-width: max(1px, root.session-cell-width);
     private property <length> terminal-cell-height: max(1px, root.session-cell-height);
@@ -709,51 +715,7 @@ export component TerminalSessionHost inherits Rectangle {
         }
     }
 
-    if root.mode == "welcome" : WelcomeView {
-        width: parent.width;
-        height: parent.height;
-        recent-items: root.welcome-quick-launch-recent-items;
-        favorite-items: root.welcome-quick-launch-favorite-items;
-        group-items: root.welcome-quick-launch-group-items;
-        visible-group-items: root.welcome-quick-launch-visible-group-items;
-        selected-detail: root.welcome-quick-launch-selected-detail;
-        search-query: root.welcome-quick-launch-search-query;
-
-        asset-selected(asset-id) => {
-            root.welcome-quick-launch-asset-selected(asset-id);
-        }
-
-        search-changed(query) => {
-            root.welcome-quick-launch-search-changed(query);
-        }
-
-        connect-requested(asset-id) => {
-            root.welcome-quick-launch-connect-requested(asset-id);
-        }
-
-        connect-in-new-tab-requested(asset-id) => {
-            root.welcome-quick-launch-connect-in-new-tab-requested(asset-id);
-        }
-
-        toggle-favorite-requested(asset-id) => {
-            root.welcome-quick-launch-toggle-favorite-requested(asset-id);
-        }
-
-        reveal-in-assets-requested(asset-id) => {
-            root.welcome-quick-launch-reveal-in-assets-requested(asset-id);
-        }
-
-        open-saved-ssh-requested => {
-            root.welcome-open-saved-ssh-requested();
-        }
-    }
-
-    if root.mode == "terminal" : Rectangle {
-        width: parent.width;
-        height: parent.height;
-        background: transparent;
-
-        terminal-input := TextInput {
+    terminal-input := TextInput {
             x: 0px;
             y: 0px;
             width: 1px;
@@ -950,6 +912,52 @@ export component TerminalSessionHost inherits Rectangle {
                 }
             }
         }
+
+    if root.mode == "welcome" : WelcomeView {
+        width: parent.width;
+        height: parent.height;
+        recent-items: root.welcome-quick-launch-recent-items;
+        favorite-items: root.welcome-quick-launch-favorite-items;
+        group-items: root.welcome-quick-launch-group-items;
+        visible-group-items: root.welcome-quick-launch-visible-group-items;
+        selected-detail: root.welcome-quick-launch-selected-detail;
+        search-query: root.welcome-quick-launch-search-query;
+
+        asset-selected(asset-id) => {
+            root.welcome-quick-launch-asset-selected(asset-id);
+        }
+
+        search-changed(query) => {
+            root.welcome-quick-launch-search-changed(query);
+        }
+
+        connect-requested(asset-id) => {
+            root.welcome-quick-launch-connect-requested(asset-id);
+        }
+
+        connect-in-new-tab-requested(asset-id) => {
+            root.welcome-quick-launch-connect-in-new-tab-requested(asset-id);
+        }
+
+        toggle-favorite-requested(asset-id) => {
+            root.welcome-quick-launch-toggle-favorite-requested(asset-id);
+        }
+
+        reveal-in-assets-requested(asset-id) => {
+            root.welcome-quick-launch-reveal-in-assets-requested(asset-id);
+        }
+
+        open-saved-ssh-requested => {
+            root.welcome-open-saved-ssh-requested();
+        }
+    }
+
+    if root.mode == "terminal" : Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: transparent;
+
+
 
         surface-frame := Rectangle {
             width: parent.width;

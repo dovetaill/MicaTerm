@@ -1,95 +1,13 @@
-import { ScrollView } from "std-widgets.slint";
-import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from "./modal-chrome.slint";
+import {
+    DialogActionButton,
+    DialogInlineBanner,
+    DialogSectionCard,
+    DialogTextField,
+    ModalBodyScrollArea,
+    ModalFooterBar,
+    ModalHeaderBar,
+} from "./modal-chrome.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
-import { AppTypography } from "../theme/typography.slint";
-
-component DialogButton inherits Rectangle {
-    in property <string> label: "";
-    in property <bool> primary: false;
-    in property <bool> enabled: true;
-    callback clicked();
-
-    height: 34px;
-    border-radius: 0px;
-    border-width: 1px;
-    border-color: root.primary && root.enabled ? ThemeTokens.accent : ThemeTokens.divider-subtle;
-    background: !root.enabled ? ThemeTokens.control-disabled-surface
-        : button-touch.pressed ? ThemeTokens.control-pressed-surface
-        : button-touch.has-hover ? ThemeTokens.control-hover-surface
-        : root.primary ? ThemeTokens.accent : ThemeTokens.control-active-surface;
-    opacity: root.enabled ? 1.0 : 0.56;
-
-    Text {
-        width: parent.width;
-        height: parent.height;
-        text: root.label;
-        color: ThemeTokens.text-primary;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-
-    button-touch := TouchArea {
-        width: parent.width;
-        height: parent.height;
-        enabled: root.enabled;
-
-        clicked => {
-            root.clicked();
-        }
-    }
-}
-
-component TextField inherits Rectangle {
-    in property <string> label: "";
-    in property <string> value: "";
-    in property <bool> multiline: false;
-    callback value-changed(string);
-
-    min-width: 0px;
-    preferred-width: 0px;
-    height: root.multiline ? 138px : 72px;
-    background: transparent;
-
-    public function focus-input() {
-        field-input.focus();
-    }
-
-    VerticalLayout {
-        width: parent.width;
-        height: parent.height;
-        spacing: 6px;
-
-        Text {
-            text: root.label;
-            color: ThemeTokens.text-primary;
-            opacity: 0.8;
-        }
-
-        Rectangle {
-            height: root.multiline ? 104px : 40px;
-            border-radius: 0px;
-            border-width: 1px;
-            border-color: ThemeTokens.divider-subtle;
-            background: ThemeTokens.inspector-surface;
-
-            field-input := TextInput {
-                x: 12px;
-                y: root.multiline ? 8px : 9px;
-                width: parent.width - 24px;
-                height: parent.height - (root.multiline ? 16px : 18px);
-                text: root.value;
-                color: ThemeTokens.text-primary;
-                single-line: !root.multiline;
-                selection-background-color: ThemeTokens.accent;
-                selection-foreground-color: ThemeTokens.text-primary;
-
-                edited => {
-                    root.value-changed(self.text);
-                }
-            }
-        }
-    }
-}
 
 export component AssetsKeychainSshKeyModal inherits Rectangle {
     in property <string> dialog-title: "SSH Key";
@@ -108,8 +26,7 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
     callback drag-moved(length, length);
     callback drag-ended();
     callback focus-restore-requested();
-    private property <length> header-height: 56px;
-    private property <length> footer-height: root.validation-message == "" ? 78px : 100px;
+    private property <length> footer-height: root.validation-message == "" ? ThemeTokens.modal-footer-min-height : 116px;
 
     background: transparent;
 
@@ -126,14 +43,8 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
         height: parent.height;
 
         key-pressed(event) => {
-            if (event.text == Key.Escape) {
-                root.focus-restore-requested();
-                root.close-requested();
-                accept
-            } else if (event.text == Key.Return) {
-                if (root.can-confirm) {
-                    root.confirm-requested();
-                }
+            if (event.text == Key.Return && root.can-confirm) {
+                root.confirm-requested();
                 accept
             } else {
                 reject
@@ -145,6 +56,7 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: root.dialog-title;
+            subtitle: "Bring imported keys, pasted keys, and generated keys into one consistent editor surface.";
             prominent: true;
 
             close-requested => {
@@ -170,16 +82,16 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
 
         body-scroll := ModalBodyScrollArea {
             x: 0px;
-            y: root.header-height;
+            y: header.height;
             width: parent.width;
-            height: parent.height - root.header-height - root.footer-height;
-            frame-padding: 12px;
-            content-padding-horizontal: 16px;
-            content-padding-vertical: 14px;
+            height: parent.height - header.height - footer.height;
+            frame-padding: 14px;
+            content-padding-horizontal: 18px;
+            content-padding-vertical: 16px;
             content-spacing: 14px;
-            viewport-surface: ThemeTokens.inspector-surface;
-            panel-surface: ThemeTokens.window-surface;
-            panel-border-color: ThemeTokens.divider-strong;
+            viewport-surface: ThemeTokens.modal-body-surface;
+            panel-surface: ThemeTokens.modal-body-surface;
+            panel-border-color: transparent;
 
             content-column := Rectangle {
                 width: body-scroll.content-column-width;
@@ -190,123 +102,171 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
                     width: parent.width;
                     spacing: body-scroll.content-spacing;
 
-                    name-field := TextField {
+                    DialogSectionCard {
                         width: parent.width;
-                        label: "Name";
-                        value: root.name;
+                        spacing: 14px;
 
-                        value-changed(value) => {
-                            root.draft-changed("name", value);
-                        }
-                    }
-
-                    Text {
-                        width: parent.width;
-                        text: "Private Key";
-                        color: ThemeTokens.text-primary;
-                        font-weight: AppTypography.ui-font-weight-regular;
-                    }
-
-                    HorizontalLayout {
-                        width: parent.width;
-                        spacing: 8px;
-
-                        DialogButton {
-                            horizontal-stretch: 1;
-                            label: "Import Private Key";
-
-                            clicked => {
-                                root.action-requested("import-private-key");
-                            }
+                        Text {
+                            width: parent.width;
+                            text: "Key profile";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
                         }
 
-                        DialogButton {
-                            horizontal-stretch: 1;
-                            label: "Paste Private Key";
+                        name-field := DialogTextField {
+                            width: parent.width;
+                            label: "Name";
+                            value: root.name;
+                            invalid: root.validation-message != "";
+                            helper-text: root.validation-message != ""
+                                ? root.validation-message
+                                : "Use a stable label so identities and SSH profiles can reference this key without ambiguity.";
 
-                            clicked => {
-                                root.action-requested("paste-private-key");
+                            value-changed(value) => {
+                                root.draft-changed("name", value);
                             }
                         }
                     }
 
-                    TextField {
+                    DialogSectionCard {
                         width: parent.width;
-                        label: "Private Key";
-                        value: root.private-key;
-                        multiline: true;
+                        spacing: 14px;
+                        surface: ThemeTokens.modal-section-alt-surface;
 
-                        value-changed(value) => {
-                            root.draft-changed("private_key", value);
+                        Text {
+                            width: parent.width;
+                            text: "Private key";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
                         }
-                    }
 
-                    Text {
-                        width: parent.width;
-                        text: "Public Key";
-                        color: ThemeTokens.text-primary;
-                        font-weight: AppTypography.ui-font-weight-regular;
-                    }
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: 38px;
+                            spacing: 10px;
 
-                    HorizontalLayout {
-                        width: parent.width;
-                        spacing: 8px;
+                            DialogActionButton {
+                                horizontal-stretch: 1;
+                                label: "Import Private Key";
 
-                        DialogButton {
-                            horizontal-stretch: 1;
-                            label: "Import Public Key";
+                                clicked => {
+                                    root.action-requested("import-private-key");
+                                }
+                            }
 
-                            clicked => {
-                                root.action-requested("import-public-key");
+                            DialogActionButton {
+                                horizontal-stretch: 1;
+                                label: "Paste Private Key";
+
+                                clicked => {
+                                    root.action-requested("paste-private-key");
+                                }
                             }
                         }
 
-                        DialogButton {
-                            horizontal-stretch: 1;
-                            label: "Paste Public Key";
+                        DialogTextField {
+                            width: parent.width;
+                            label: "Private key";
+                            value: root.private-key;
+                            multiline: true;
+                            helper-text: "Keep the private key material here; the matching public key and fingerprint are shown below for confirmation.";
 
-                            clicked => {
-                                root.action-requested("paste-public-key");
-                            }
-                        }
-
-                        DialogButton {
-                            horizontal-stretch: 1;
-                            label: "Generate Key Pair";
-
-                            clicked => {
-                                root.action-requested("generate-key-pair");
-                            }
-                        }
-
-                        DialogButton {
-                            horizontal-stretch: 1;
-                            label: "Copy Public Key";
-
-                            clicked => {
-                                root.action-requested("copy-public-key");
+                            value-changed(value) => {
+                                root.draft-changed("private_key", value);
                             }
                         }
                     }
 
-                    TextField {
+                    DialogSectionCard {
                         width: parent.width;
-                        label: "Public Key";
-                        value: root.public-key;
-                        multiline: true;
+                        spacing: 14px;
 
-                        value-changed(value) => {
-                            root.draft-changed("public_key", value);
+                        Text {
+                            width: parent.width;
+                            text: "Public key and fingerprint";
+                            color: ThemeTokens.text-primary;
+                            font-size: 13px;
+                            font-weight: 700;
+                            overflow: elide;
                         }
-                    }
 
-                    TextField {
-                        width: parent.width;
-                        label: "Fingerprint";
-                        value: root.fingerprint;
+                        VerticalLayout {
+                            width: parent.width;
+                            spacing: 10px;
 
-                        value-changed(value) => {
-                            root.draft-changed("fingerprint", value);
+                            HorizontalLayout {
+                                width: parent.width;
+                                height: 38px;
+                                spacing: 10px;
+
+                                DialogActionButton {
+                                    horizontal-stretch: 1;
+                                    label: "Import Public Key";
+
+                                    clicked => {
+                                        root.action-requested("import-public-key");
+                                    }
+                                }
+
+                                DialogActionButton {
+                                    horizontal-stretch: 1;
+                                    label: "Paste Public Key";
+
+                                    clicked => {
+                                        root.action-requested("paste-public-key");
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                width: parent.width;
+                                height: 38px;
+                                spacing: 10px;
+
+                                DialogActionButton {
+                                    horizontal-stretch: 1;
+                                    label: "Generate Key Pair";
+
+                                    clicked => {
+                                        root.action-requested("generate-key-pair");
+                                    }
+                                }
+
+                                DialogActionButton {
+                                    horizontal-stretch: 1;
+                                    label: "Copy Public Key";
+
+                                    clicked => {
+                                        root.action-requested("copy-public-key");
+                                    }
+                                }
+                            }
+                        }
+
+                        DialogTextField {
+                            width: parent.width;
+                            label: "Public key";
+                            value: root.public-key;
+                            multiline: true;
+
+                            value-changed(value) => {
+                                root.draft-changed("public_key", value);
+                            }
+                        }
+
+                        DialogTextField {
+                            width: parent.width;
+                            label: "Fingerprint";
+                            value: root.fingerprint;
+                            helper-text: "This fingerprint is shown in identity pickers and conflict confirmation surfaces.";
+
+                            value-changed(value) => {
+                                root.draft-changed("fingerprint", value);
+                            }
                         }
                     }
                 }
@@ -318,35 +278,31 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
             y: parent.height - root.footer-height;
             width: parent.width;
             height: root.footer-height;
-            surface: ThemeTokens.activity-surface;
-            divider-color: ThemeTokens.divider-strong;
-            content-padding-top: 14px;
-            content-padding-bottom: 14px;
+            content-spacing: 8px;
 
-            if root.validation-message != "" : Text {
+            if root.validation-message != "" : DialogInlineBanner {
                 width: parent.width;
-                text: root.validation-message;
-                color: ThemeTokens.text-primary;
-                opacity: 0.72;
-                wrap: word-wrap;
+                tone: "error";
+                message: root.validation-message;
             }
 
             Rectangle {
+                height: 0px;
                 vertical-stretch: 1;
                 background: transparent;
             }
 
             HorizontalLayout {
-                height: 34px;
-                spacing: 12px;
+                height: 38px;
+                spacing: 10px;
 
                 Rectangle {
                     horizontal-stretch: 1;
                     background: transparent;
                 }
 
-                DialogButton {
-                    width: 88px;
+                DialogActionButton {
+                    width: 96px;
                     label: "Cancel";
 
                     clicked => {
@@ -355,8 +311,8 @@ export component AssetsKeychainSshKeyModal inherits Rectangle {
                     }
                 }
 
-                DialogButton {
-                    width: 88px;
+                DialogActionButton {
+                    width: 108px;
                     label: "Save";
                     primary: true;
                     enabled: root.can-confirm;

@@ -366,13 +366,13 @@ fn ssh_modal_no_longer_renders_dead_connection_options_group() {
     assert!(!ssh_modal.contains("text: \"Connection Options\""));
     assert!(!ssh_modal.contains("label: \"Proxy Method\""));
     assert!(!ssh_modal.contains("label: \"Session Environment\""));
-    assert!(ssh_modal.contains("text: \"Proxy\""));
-    assert!(ssh_modal.contains("text: \"Proxy Type\""));
-    assert!(ssh_modal.contains("label: \"SOCKS5 Host\""));
-    assert!(ssh_modal.contains("label: \"SOCKS5 Port\""));
+    assert!(ssh_modal.contains("text: \"Proxy chain\""));
+    assert!(ssh_modal.contains("text: \"Proxy type\""));
+    assert!(ssh_modal.contains("label: root.proxy-type == \"http\" ? \"HTTP host\" : \"SOCKS5 host\";"));
+    assert!(ssh_modal.contains("label: root.proxy-type == \"http\" ? \"HTTP port\" : \"SOCKS5 port\";"));
     assert!(ssh_modal.contains("label: \"Username\""));
     assert!(ssh_modal.contains("label: \"Password\""));
-    assert!(ssh_modal.contains("text: \"Upstream SSH Connection\""));
+    assert!(ssh_modal.contains("text: \"Upstream SSH connection\""));
     assert!(ssh_modal.contains("None"));
     assert!(ssh_modal.contains("SOCKS5"));
     assert!(ssh_modal.contains("Existing SSH Connection"));
@@ -385,7 +385,7 @@ fn ssh_modal_exposes_private_key_import_guidance() {
 
     assert!(
         ssh_modal.contains(
-            "Only the private key is needed here. The public key must already be installed on the server."
+            "Only the private key is needed here. The public key stays on the server."
         ),
         "ssh modal should explain that users only provide the private key locally"
     );
@@ -411,7 +411,7 @@ fn ssh_modal_contract_exposes_auth_source_switch_and_keychain_identity_summary()
     assert!(ssh_modal.contains("Keychain Identity"));
     assert!(ssh_modal.contains("text: \"Identity\""));
     assert!(ssh_modal.contains("text: \"Username\""));
-    assert!(ssh_modal.contains("text: \"Authentication Summary\""));
+    assert!(ssh_modal.contains("text: \"Authentication summary\""));
     assert!(ssh_modal.contains("root.draft-changed(\"auth_source\""));
     assert!(ssh_modal.contains("root.draft-changed(\"keychain_identity_label\""));
     assert!(!ssh_modal.contains("Use Existing Keychain Identity"));
@@ -423,11 +423,11 @@ fn ssh_modal_labels_saved_path_mode_as_legacy_file_path() {
         .expect("read ssh modal");
 
     assert!(
-        ssh_modal.contains("label: \"Legacy File Path\""),
+        ssh_modal.contains("label: \"Legacy file path\""),
         "ssh modal should relabel saved path-mode assets as legacy file path"
     );
     assert!(
-        ssh_modal.contains("Paste or import a new private key to replace the legacy path."),
+        ssh_modal.contains("Paste or import a fresh key below to replace the legacy path reference."),
         "ssh modal should explain how a legacy path asset migrates to imported key content"
     );
 }
@@ -681,14 +681,22 @@ fn blocking_modal_children_own_shared_asset_modal_chrome_contract() {
     assert!(!shell.contains("header := Rectangle {"));
     assert!(!shell.contains("close-button := Rectangle {"));
     assert!(folder.contains("in property <string> dialog-title: \"New Folder\";"));
-    assert!(folder.contains("drag-touch := TouchArea {"));
+    assert!(folder.contains("DialogSectionCard"));
+    assert!(folder.contains("DialogTextField"));
     assert!(ssh.contains("in property <string> dialog-title: \"New SSH Connection\";"));
-    assert!(ssh.contains("import { ModalBodyScrollArea, ModalFooterBar, ModalHeaderBar } from \"./modal-chrome.slint\";"));
+    assert!(ssh.contains("DialogSectionCard"));
     assert!(ssh.contains("header := ModalHeaderBar {"));
     assert!(ssh.contains("footer := ModalFooterBar {"));
-    assert!(rename.contains("drag-touch := TouchArea {"));
-    assert!(delete.contains("drag-touch := TouchArea {"));
-    assert!(host_key.contains("drag-touch := TouchArea {"));
+    assert!(rename.contains("header := ModalHeaderBar {"));
+    assert!(rename.contains("footer := ModalFooterBar {"));
+    assert!(rename.contains("DialogSectionCard"));
+    assert!(rename.contains("DialogTextField"));
+    assert!(delete.contains("header := ModalHeaderBar {"));
+    assert!(delete.contains("footer := ModalFooterBar {"));
+    assert!(delete.contains("DialogSectionCard"));
+    assert!(host_key.contains("header := ModalHeaderBar {"));
+    assert!(host_key.contains("footer := ModalFooterBar {"));
+    assert!(host_key.contains("DialogSectionCard"));
 }
 
 #[test]
@@ -697,7 +705,8 @@ fn blocking_modal_shell_exposes_a_full_frame_for_child_owned_chrome() {
         .expect("read blocking modal shell");
 
     assert!(
-        shell.contains("content-host := Rectangle {\n            x: 0px;\n            y: 0px;"),
+        shell.contains("modal-event-scope := FocusScope {")
+            && shell.contains("content-host := Rectangle {\n                x: 0px;\n                y: 0px;"),
         "blocking modal shell content host must expose the full frame so child modals can own header and footer geometry"
     );
     assert!(
@@ -722,6 +731,76 @@ fn blocking_modal_shell_clamps_dragged_frames_inside_the_viewport() {
 }
 
 #[test]
+fn blocking_modal_shell_claims_focus_and_captures_escape_for_the_topmost_dialog() {
+    let shell = fs::read_to_string("ui/components/blocking-modal-shell.slint")
+        .expect("read blocking modal shell");
+
+    assert!(
+        shell.contains("in property <int> focus-sequence: 0;"),
+        "blocking modal shell should expose a shared focus sequence so every dialog can claim keyboard focus when it opens"
+    );
+    assert!(
+        shell.contains("callback escape-requested();"),
+        "blocking modal shell should expose a shared escape callback so AppWindow can route close requests consistently"
+    );
+    assert!(
+        shell.contains("capture-key-pressed(event) => {")
+            && shell.contains("event.text == Key.Escape")
+            && shell.contains("root.focus-restore-requested();")
+            && shell.contains("root.escape-requested();"),
+        "blocking modal shell should capture Escape before it falls through to the underlying terminal or workspace"
+    );
+    assert!(
+        shell.contains("changed focus-sequence => {")
+            && shell.contains("modal-event-scope.focus();"),
+        "blocking modal shell should actively focus its keyboard host whenever the shared focus sequence changes"
+    );
+}
+
+#[test]
+fn shared_modal_chrome_exports_unified_dialog_controls_for_forms_and_action_rows() {
+    let chrome = fs::read_to_string("ui/components/modal-chrome.slint")
+        .expect("read shared modal chrome");
+
+    assert!(
+        chrome.contains("export component DialogActionButton")
+            && chrome.contains("export component DialogSegmentButton")
+            && chrome.contains("export component DialogSectionCard")
+            && chrome.contains("export component DialogTextField"),
+        "modal chrome should export reusable action buttons, segmented controls, section cards, and text fields so forms stop reimplementing their own chrome"
+    );
+}
+
+#[test]
+fn app_window_routes_shell_escape_requests_to_the_same_close_paths_as_the_x_button() {
+    let app_window = fs::read_to_string("ui/app-window.slint").expect("read app window");
+
+    for marker in [
+        "open-saved-ssh-modal-shell := BlockingModalShell {\n",
+        "sync-modal-shell := BlockingModalShell {\n",
+        "settings-modal-shell := BlockingModalShell {\n",
+        "asset-folder-modal-shell := BlockingModalShell {\n",
+        "asset-ssh-modal-shell := BlockingModalShell {\n",
+        "keychain-identity-modal-shell := BlockingModalShell {\n",
+        "keychain-ssh-key-modal-shell := BlockingModalShell {\n",
+    ] {
+        let block = app_window
+            .split(marker)
+            .nth(1)
+            .expect("extract shell block");
+        let block = block
+            .split("\n    }\n")
+            .next()
+            .expect("truncate shell block");
+
+        assert!(
+            block.contains("escape-requested => {"),
+            "{marker} should route shell Escape handling through the same close path as the dialog close affordances"
+        );
+    }
+}
+
+#[test]
 fn simple_asset_modals_anchor_header_and_footer_to_the_frame_edges() {
     let folder = fs::read_to_string("ui/components/assets-folder-create-modal.slint")
         .expect("read folder modal");
@@ -732,16 +811,57 @@ fn simple_asset_modals_anchor_header_and_footer_to_the_frame_edges() {
     let host_key = fs::read_to_string("ui/components/ssh-host-key-confirm-modal.slint")
         .expect("read host key modal");
 
-    for modal in [&folder, &rename, &delete, &host_key] {
+    assert!(
+        folder.contains("header := ModalHeaderBar {\n            x: 0px;\n            y: 0px;"),
+        "folder modal header should be pinned to the frame origin via the shared header bar"
+    );
+    assert!(
+        folder.contains("footer := ModalFooterBar {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
+        "folder modal footer should be pinned to the bottom edge via the shared footer bar"
+    );
+
+    for modal in [&rename, &delete, &host_key] {
         assert!(
-            modal.contains("header := Rectangle {\n            x: 0px;\n            y: 0px;"),
-            "simple asset modal headers must be pinned to the frame origin"
+            modal.contains("header := ModalHeaderBar {\n            x: 0px;\n            y: 0px;"),
+            "remaining simple asset modals should delegate their header chrome to the shared header bar"
         );
         assert!(
-            modal.contains("footer := Rectangle {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
-            "simple asset modal footers must be pinned to the bottom edge"
+            modal.contains("footer := ModalFooterBar {\n            x: 0px;\n            y: parent.height - root.footer-height;"),
+            "remaining simple asset modals should pin their shared footer bar to the bottom edge"
         );
     }
+}
+
+#[test]
+fn remaining_old_dialogs_adopt_shared_modal_chrome_contract() {
+    let rename =
+        fs::read_to_string("ui/components/assets-rename-modal.slint").expect("read rename modal");
+    let delete = fs::read_to_string("ui/components/assets-delete-confirm-modal.slint")
+        .expect("read delete modal");
+    let host_key = fs::read_to_string("ui/components/ssh-host-key-confirm-modal.slint")
+        .expect("read host key modal");
+    let remote_file = fs::read_to_string("ui/components/sftp-remote-file-modal.slint")
+        .expect("read remote file modal");
+
+    for modal in [&rename, &delete, &host_key, &remote_file] {
+        assert!(
+            modal.contains("ModalHeaderBar") && modal.contains("ModalFooterBar"),
+            "remaining blocking dialogs should move to the shared modal header/footer primitives"
+        );
+        assert!(
+            !modal.contains("component DialogButton inherits Rectangle {"),
+            "remaining dialogs should stop defining bespoke local dialog buttons once shared modal chrome is adopted"
+        );
+    }
+
+    assert!(rename.contains("DialogTextField"));
+    assert!(rename.contains("DialogSectionCard"));
+    assert!(delete.contains("DialogSectionCard"));
+    assert!(host_key.contains("DialogSectionCard"));
+    assert!(
+        remote_file.contains("DialogInlineBanner") || remote_file.contains("DialogSectionCard"),
+        "the remote-file dialog should reuse shared inline status or card surfaces instead of bespoke flat status rows"
+    );
 }
 
 #[test]
@@ -754,7 +874,7 @@ fn ssh_modal_header_body_and_footer_are_explicitly_anchored() {
         "ssh modal should delegate its header chrome to the shared modal header"
     );
     assert!(
-        ssh.contains("body-scroll := ModalBodyScrollArea {\n            x: 0px;\n            y: root.header-height;"),
+        ssh.contains("body-scroll := ModalBodyScrollArea {\n            x: 0px;\n            y: header.height;"),
         "ssh modal body scroll host must start directly below the shared header"
     );
     assert!(
@@ -896,16 +1016,13 @@ fn sync_modal_uses_distinct_header_body_and_footer_surfaces() {
         "sync modal should request the stronger shared header chrome"
     );
     assert!(
-        sync.contains("panel-surface: ThemeTokens.window-surface;"),
-        "sync modal should render the body content inside a dedicated panel surface"
+        sync.contains("viewport-surface: ThemeTokens.modal-body-surface;")
+            && sync.contains("panel-surface: ThemeTokens.modal-body-surface;"),
+        "sync modal should render the body content inside the shared elevated modal body surface"
     );
     assert!(
-        sync.contains("surface: ThemeTokens.activity-surface;"),
-        "sync modal footer should use a stronger shared footer surface"
-    );
-    assert!(
-        sync.contains("divider-color: ThemeTokens.divider-strong;"),
-        "sync modal footer should expose an explicit divider so actions stay visually separated from error and form content"
+        sync.contains("footer := ModalFooterBar {"),
+        "sync modal footer should stay on the shared footer scaffold"
     );
 }
 
@@ -977,10 +1094,6 @@ fn keychain_identity_modal_scrolls_body_inside_the_shared_scaffold() {
         .expect("read keychain identity modal");
 
     assert!(
-        identity_modal.contains("import { ScrollView } from \"std-widgets.slint\";"),
-        "keychain identity modal should import ScrollView so long forms can stay reachable"
-    );
-    assert!(
         identity_modal.contains("ModalBodyScrollArea {"),
         "keychain identity modal should use the shared scroll body wrapper"
     );
@@ -1043,12 +1156,14 @@ fn blocking_modal_children_bind_overlay_parent_dimensions() {
 
 #[test]
 fn ssh_form_field_contract_allows_horizontal_rows_to_shrink_without_overflow() {
-    let ssh = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
-        .expect("read ssh modal");
+    let chrome = fs::read_to_string("ui/components/modal-chrome.slint")
+        .expect("read modal chrome");
 
     assert!(
-        ssh.contains("component FormField inherits Rectangle {\n    in property <string> label: \"\";\n    in property <string> value: \"\";\n    in property <bool> required: false;\n    in property <bool> password-mode: false;\n    in property <bool> multiline: false;\n    in property <string> trailing-action-text: \"\";\n    callback value-changed(string);\n    callback trailing-action-requested();\n\n    min-width: 0px;\n    preferred-width: 0px;"),
-        "form fields rendered inside SSH modal horizontal rows must opt into shrinking so Name/Host/User rows do not steal width from siblings"
+        chrome.contains("export component DialogTextField inherits Rectangle {")
+            && chrome.contains("min-width: 0px;")
+            && chrome.contains("preferred-width: 0px;"),
+        "shared dialog text fields should opt into shrinking so SSH modal horizontal rows do not steal width from siblings"
     );
 }
 

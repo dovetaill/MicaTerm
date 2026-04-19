@@ -101,6 +101,10 @@ export component WorkspacePane inherits Rectangle {
     callback welcome-quick-launch-reveal-in-assets-requested(string);
     callback welcome-open-saved-ssh-requested();
 
+    public function restore-primary-focus() {
+        session-host.restore-primary-focus();
+    }
+
     horizontal-stretch: 1;
     min-width: 0px;
     background: ThemeTokens.workspace-surface;
