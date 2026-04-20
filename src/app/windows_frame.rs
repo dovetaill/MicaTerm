@@ -283,7 +283,7 @@ fn rect_from_win32_rect(rect: windows_sys::Win32::Foundation::RECT) -> Option<Re
 
 #[cfg(target_os = "windows")]
 pub fn work_area_from_hmonitor(
-    hmonitor: windows_sys::Win32::Graphics::Gdi::HMONITOR,
+    hmonitor: slint::winit_030::winit::platform::windows::HMONITOR,
 ) -> Option<MonitorWorkArea> {
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITORINFO};
 
@@ -294,7 +294,11 @@ pub fn work_area_from_hmonitor(
             rcWork: core::mem::zeroed(),
             dwFlags: 0,
         };
-        if GetMonitorInfoW(hmonitor, &mut monitor_info) == 0 {
+        if GetMonitorInfoW(
+            hmonitor as windows_sys::Win32::Graphics::Gdi::HMONITOR,
+            &mut monitor_info,
+        ) == 0
+        {
             return None;
         }
 
