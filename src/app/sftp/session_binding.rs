@@ -12,7 +12,7 @@ use crate::app::sftp::{
     TransferTask, TransferTaskAction,
 };
 
-use super::transfer_engine::execute_download_task;
+use super::transfer_engine::{execute_download_task, execute_upload_task};
 
 #[derive(Clone)]
 pub struct SftpSessionBinding {
@@ -276,18 +276,28 @@ async fn execute_transfer(
             queue.mark_running(task_id);
             on_queue_updated(queue);
             ensure_remote_parent_dirs(runtime, &task.target_path).await?;
-            let bytes = fs::read(&local_path).with_context(|| {
-                format!(
-                    "failed to read local upload source `{}`",
-                    local_path.display()
-                )
-            })?;
-            let transferred = runtime
-                .upload_file(&task.target_path, bytes)
-                .await
-                .with_context(|| format!("failed to upload `{}`", local_path.display()))?;
-            queue.mark_completed(task_id, transferred);
-            on_queue_updated(queue);
+            let Some(mut queued_task) = queue.task(task_id).cloned() else {
+                return Ok(());
+            };
+            if !matches!(queued_task.action, TransferTaskAction::Upload { .. }) {
+                return Ok(());
+            }
+            if queued_task.source_path != local_path.to_string_lossy() {
+                queued_task.source_path = local_path.to_string_lossy().to_string();
+            }
+
+            let mut sync_progress = |updated_task: &TransferTask| {
+                let _ = queue.replace_task(updated_task.clone());
+                on_queue_updated(queue);
+            };
+
+            let result = execute_upload_task(runtime, &mut queued_task, &mut sync_progress).await;
+            let _ = queue.replace_task(queued_task);
+
+            match result {
+                Ok(()) => on_queue_updated(queue),
+                Err(err) => return Err(err),
+            }
         }
         TransferTaskAction::UploadDirectory {
             local_path: _local_path,

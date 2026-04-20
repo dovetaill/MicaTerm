@@ -404,6 +404,37 @@ fn seeded_download_queue(part_path: PathBuf, confirmed: u64) -> TransferQueue {
     queue
 }
 
+fn resumable_runtime_with_remote_part(path: &str, bytes: &[u8]) -> Arc<MemoryBackend> {
+    let backend = Arc::new(MemoryBackend::with_directories(&["/srv", "/srv/app"]));
+    backend.insert_remote_file(path, bytes);
+    backend
+}
+
+fn seeded_upload_queue(local_path: PathBuf, confirmed: u64) -> TransferQueue {
+    let remote_target = "/srv/app/archive.zip";
+    let bytes_total = fs::metadata(&local_path)
+        .expect("stat local upload source")
+        .len();
+    let mut queue = TransferQueue::default();
+    queue.tasks.push(TransferTask {
+        id: "upload-1".into(),
+        session_id: "session-a".into(),
+        source_path: local_path.to_string_lossy().to_string(),
+        target_path: remote_target.into(),
+        direction: mica_term::app::sftp::TransferDirection::Upload,
+        action: TransferTaskAction::Upload { local_path },
+        state: TransferTaskState::Queued,
+        bytes_total,
+        bytes_transferred: confirmed,
+        bytes_confirmed: confirmed,
+        temp_target_path: Some(PathBuf::from("/srv/app/archive.zip.part")),
+        resume_mode: TransferResumeMode::ResumeIfPossible,
+        conflict_policy: Some(TransferConflictPolicy::Overwrite),
+        error_message: None,
+    });
+    queue
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn upload_and_download_tasks_reach_completed_and_update_session_summary() {
     let root = temp_test_root("transfer-flow");
@@ -534,6 +565,60 @@ async fn download_resume_falls_back_to_restart_when_remote_shrinks() {
     assert!(
         !root.join("archive.zip").exists(),
         "invalid resume should not silently overwrite the final target"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn interrupted_upload_resumes_from_remote_part_file() {
+    let root = temp_test_root("resume-upload");
+    let local_path = root.join("archive.zip");
+    fs::write(&local_path, b"abcdefghi").expect("write local upload source");
+    let backend = resumable_runtime_with_remote_part("/srv/app/archive.zip.part", b"abc");
+    let runtime = SftpRuntimeHandle::new(backend.clone());
+    let mut queue = seeded_upload_queue(local_path, 3);
+
+    execute_queued_transfers_with_progress(&runtime, &mut queue, |_| {})
+        .await
+        .expect("resume upload");
+
+    assert_eq!(
+        backend.file_bytes("/srv/app/archive.zip"),
+        Some(b"abcdefghi".to_vec())
+    );
+    assert!(
+        backend.file_bytes("/srv/app/archive.zip.part").is_none(),
+        "completed resumable upload should rename the remote part file into the final target"
+    );
+    let task = queue.task("upload-1").expect("resumed upload task");
+    assert_eq!(task.state, TransferTaskState::Completed);
+    assert_eq!(task.bytes_confirmed, 9);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn upload_resume_requires_restart_when_local_source_changes() {
+    let root = temp_test_root("resume-upload-changed-source");
+    let local_path = root.join("archive.zip");
+    fs::write(&local_path, b"abc").expect("write original upload source");
+    let backend = resumable_runtime_with_remote_part("/srv/app/archive.zip.part", b"abc");
+    let runtime = SftpRuntimeHandle::new(backend.clone());
+    let mut queue = seeded_upload_queue(local_path.clone(), 3);
+    fs::write(&local_path, b"abcdefghi").expect("mutate local upload source");
+
+    let error = execute_queued_transfers_with_progress(&runtime, &mut queue, |_| {})
+        .await
+        .expect_err("changed local source should reject resume");
+
+    assert!(error.to_string().contains("restart required"));
+    let task = queue.task("upload-1").expect("failed upload task");
+    assert_eq!(task.state, TransferTaskState::Failed);
+    assert_eq!(task.resume_mode, TransferResumeMode::RestartOnly);
+    assert_eq!(
+        backend.file_bytes("/srv/app/archive.zip.part"),
+        Some(b"abc".to_vec())
+    );
+    assert!(
+        backend.file_bytes("/srv/app/archive.zip").is_none(),
+        "invalid upload resume should not silently finalize the remote target"
     );
 }
 
