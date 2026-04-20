@@ -299,9 +299,7 @@ impl ShellViewModel {
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
-        if let Some(state) = self.active_sftp_session_state_mut() {
-            state.selected_entry_ids = vec![entry.id.clone()];
-        }
+        let _ = self.replace_active_sftp_selection(vec![entry.id.clone()]);
         self.context_target_asset_id = Some(entry.id.clone());
         self.asset_modal_state = Some(AssetModalState::SftpRenameEntry {
             entry_id: entry.id,
@@ -406,9 +404,7 @@ impl ShellViewModel {
         self.dismiss_active_asset_rename();
         self.close_context_menu();
         self.close_asset_create_menu();
-        if let Some(state) = self.active_sftp_session_state_mut() {
-            state.selected_entry_ids = entry_ids.clone();
-        }
+        let _ = self.replace_active_sftp_selection(entry_ids.clone());
         self.context_target_asset_id = entry_ids.first().cloned();
         self.asset_modal_state = Some(AssetModalState::SftpDeleteEntriesConfirm {
             entry_ids,

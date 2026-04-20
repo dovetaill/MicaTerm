@@ -829,6 +829,7 @@ pub(super) fn bind_assets_keychain_callbacks(
     sftp_async_runtime: Option<&tokio::runtime::Handle>,
     sftp_result_tx: &std::sync::mpsc::Sender<super::sftp::SftpBrowserBackgroundMessage>,
     sftp_transfer_result_tx: &std::sync::mpsc::Sender<super::sftp::SftpTransferBackgroundMessage>,
+    ssh_modal_result_tx: &std::sync::mpsc::Sender<super::SshModalBackgroundMessage>,
     sftp_browser_controller: &Rc<RefCell<SftpBrowserController>>,
     credential_store: &Arc<dyn CredentialStore>,
     private_key_importer: &Arc<dyn PrivateKeyImporter>,
@@ -842,10 +843,13 @@ pub(super) fn bind_assets_keychain_callbacks(
     run_vault_sync: &Rc<dyn Fn(VaultSyncTrigger)>,
     asset_click_tracker: &Rc<RefCell<Option<PendingAssetClick>>>,
     pending_double_click_activation: &Rc<RefCell<Option<String>>>,
+    next_ssh_modal_test_request_id: &Rc<Cell<u64>>,
+    active_ssh_modal_test_request_id: &Rc<RefCell<Option<u64>>>,
 ) {
     let sftp_async_runtime = sftp_async_runtime.cloned();
     let sftp_result_tx = sftp_result_tx.clone();
     let sftp_transfer_result_tx = sftp_transfer_result_tx.clone();
+    let ssh_modal_result_tx = ssh_modal_result_tx.clone();
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     window.on_toggle_assets_search_requested(move || {
@@ -1287,6 +1291,9 @@ pub(super) fn bind_assets_keychain_callbacks(
     let vault_sync_scheduler_ref = Rc::clone(vault_sync_scheduler);
     let vault_auto_sync_timer_ref = Rc::clone(vault_auto_sync_timer);
     let run_vault_sync_ref = Rc::clone(run_vault_sync);
+    let ssh_modal_result_tx_ref = ssh_modal_result_tx.clone();
+    let next_ssh_modal_test_request_id_ref = Rc::clone(next_ssh_modal_test_request_id);
+    let active_ssh_modal_test_request_id_ref = Rc::clone(active_ssh_modal_test_request_id);
     window.on_asset_ssh_modal_action_requested(move |action| {
         let _keep_runtime_alive = &session_runtime_guard_ref;
         let window = handle.unwrap();
@@ -1349,10 +1356,12 @@ pub(super) fn bind_assets_keychain_callbacks(
                     match runtime_profile_for_modal_action(&state, &request.draft) {
                         Ok(profile) => {
                             if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                                attempt_test_connection(
-                                    &mut state,
-                                    session_bridge.as_ref(),
-                                    &pending_host_key_approval_ref,
+                                queue_modal_test_connection(
+                                    &session_bridge.manager,
+                                    session_bridge.manager.runtime_handle(),
+                                    &ssh_modal_result_tx_ref,
+                                    &next_ssh_modal_test_request_id_ref,
+                                    &active_ssh_modal_test_request_id_ref,
                                     profile,
                                 );
                             } else {
@@ -1516,6 +1525,9 @@ pub(super) fn bind_assets_keychain_callbacks(
     let pending_host_key_approval_ref = Rc::clone(pending_host_key_approval);
     let session_bridge_ref = session_bridge.clone();
     let workspace_follow_tracker_ref = Rc::clone(workspace_follow_tracker);
+    let ssh_modal_result_tx_ref = ssh_modal_result_tx.clone();
+    let next_ssh_modal_test_request_id_ref = Rc::clone(next_ssh_modal_test_request_id);
+    let active_ssh_modal_test_request_id_ref = Rc::clone(active_ssh_modal_test_request_id);
     window.on_ssh_host_key_modal_accept_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -1525,6 +1537,9 @@ pub(super) fn bind_assets_keychain_callbacks(
             &mut state,
             session_bridge_ref.as_deref(),
             &pending_host_key_approval_ref,
+            &ssh_modal_result_tx_ref,
+            &next_ssh_modal_test_request_id_ref,
+            &active_ssh_modal_test_request_id_ref,
             true,
         );
         window.set_blocking_modal_offset_x(0.0);
@@ -1816,7 +1831,7 @@ pub(super) fn bind_assets_keychain_callbacks(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
-        super::sftp::sync_right_panel_state(&window, &state);
+        super::sftp::sync_right_panel_state(&window, &mut state);
         sync_asset_modal_state(&window, &state);
         super::sftp::sync_sftp_remote_file_modal_state(&window, &state);
         update_context_menu_placement(&window, &mut state);
@@ -1863,7 +1878,7 @@ pub(super) fn bind_assets_keychain_callbacks(
 
         sync_assets_toolbar_state(&window, &state);
         sync_console_assets(&window, &state);
-        super::sftp::sync_right_panel_state(&window, &state);
+        super::sftp::sync_right_panel_state(&window, &mut state);
         super::sftp::sync_sftp_remote_file_modal_state(&window, &state);
         update_context_menu_placement(&window, &mut state);
         sync_assets_context_menu_state(&window, &state);

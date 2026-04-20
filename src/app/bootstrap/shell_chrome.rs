@@ -394,7 +394,7 @@ pub(super) fn bind_shell_chrome_callbacks(
         let (width, height) = current_window_size(&window);
         state.open_settings_panel();
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sftp::sync_right_panel_state(&window, &state);
+        sftp::sync_right_panel_state(&window, &mut state);
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
     });
@@ -461,7 +461,7 @@ pub(super) fn bind_shell_chrome_callbacks(
         let (width, height) = current_window_size(&window);
         state.open_appearance_panel();
         sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sftp::sync_right_panel_state(&window, &state);
+        sftp::sync_right_panel_state(&window, &mut state);
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
     });

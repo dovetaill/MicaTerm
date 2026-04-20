@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
 use tokio::sync::mpsc;
@@ -176,6 +177,7 @@ impl SessionManager {
         profile: ConnectionProfile,
         mode: OpenSessionMode,
     ) -> Result<SessionHandle> {
+        let started_at = Instant::now();
         let asset_id = profile
             .asset_id
             .clone()
@@ -213,6 +215,9 @@ impl SessionManager {
             registry
                 .session_profiles
                 .insert(session_id, profile.clone());
+            registry
+                .session_open_started_at
+                .insert(session_id, started_at);
             registry.connection_attempts.insert(
                 session_id,
                 ConnectionAttemptState::with_attempt_id(
@@ -222,6 +227,19 @@ impl SessionManager {
             );
             registry.open_order.push(session_id);
         }
+
+        tracing::debug!(
+            target: "app.async_latency",
+            flow = "ssh-open",
+            stage = "request-queued",
+            elapsed_ms = started_at.elapsed().as_millis() as u64,
+            elapsed_us = started_at.elapsed().as_micros() as u64,
+            session_id = session_id.to_string(),
+            asset_id = handle.asset_id.as_str(),
+            host = profile.host.as_str(),
+            user = profile.user.as_str(),
+            "queued async SSH session open request"
+        );
 
         self.spawn_session_attempt(session_id, profile, attempt_id);
 
@@ -500,8 +518,8 @@ impl SessionManager {
         ))
     }
 
-    pub fn probe_connection(&self, profile: ConnectionProfile) -> Result<()> {
-        let result = self.runtime_handle.block_on(self.launcher.probe(profile));
+    pub async fn probe_connection_async(&self, profile: ConnectionProfile) -> Result<()> {
+        let result = self.launcher.probe(profile).await;
         match &result {
             Ok(()) => {}
             Err(error) => tracing::error!(
@@ -511,6 +529,11 @@ impl SessionManager {
             ),
         }
         result
+    }
+
+    pub fn probe_connection(&self, profile: ConnectionProfile) -> Result<()> {
+        self.runtime_handle
+            .block_on(self.probe_connection_async(profile))
     }
 
     pub fn retry_session(&self, session_id: Uuid) -> Result<SessionHandle> {
@@ -568,6 +591,7 @@ impl SessionManager {
             session.state = SessionState::Cancelled;
             session.can_reconnect = true;
             let updated = session.clone();
+            registry.session_open_started_at.remove(&session_id);
             let runtime_control = registry.runtime_controls.remove(&session_id);
             mark_sftp_binding_disconnected(&mut registry, session_id);
             registry.pending_disconnects.remove(&session_id);
@@ -600,6 +624,7 @@ impl SessionManager {
                 message,
             );
         }
+        registry.session_open_started_at.remove(&session_id);
         let session = registry.sessions.get_mut(&session_id)?;
         session.state = SessionState::Cancelled;
         session.can_reconnect = true;
@@ -614,6 +639,7 @@ impl SessionManager {
             session.state = SessionState::Disconnected;
             session.can_reconnect = true;
             let updated = session.clone();
+            registry.session_open_started_at.remove(&session_id);
             let runtime_control = registry.runtime_controls.remove(&session_id);
             mark_sftp_binding_disconnected(&mut registry, session_id);
             if runtime_control.is_none() {
@@ -966,6 +992,7 @@ struct SessionRegistry {
     asset_sessions: HashMap<String, Uuid>,
     open_order: Vec<Uuid>,
     session_profiles: HashMap<Uuid, ConnectionProfile>,
+    session_open_started_at: HashMap<Uuid, Instant>,
     enhancement_fallback_cache: HashSet<EnhancementCacheKey>,
     connection_attempts: HashMap<Uuid, ConnectionAttemptState>,
     terminal_surfaces: HashMap<Uuid, TerminalSurfaceState>,
@@ -986,6 +1013,7 @@ impl Default for SessionRegistry {
             asset_sessions: HashMap::new(),
             open_order: Vec::new(),
             session_profiles: HashMap::new(),
+            session_open_started_at: HashMap::new(),
             enhancement_fallback_cache: HashSet::new(),
             connection_attempts: HashMap::new(),
             terminal_surfaces: HashMap::new(),
@@ -1013,6 +1041,22 @@ fn apply_runtime_event(
 
     match event {
         SessionRuntimeEvent::Connected => {
+            let started_at = registry
+                .lock()
+                .expect("lock session registry")
+                .session_open_started_at
+                .remove(&session_id);
+            if let Some(started_at) = started_at {
+                tracing::debug!(
+                    target: "app.async_latency",
+                    flow = "ssh-open",
+                    stage = "session-connected",
+                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    elapsed_us = started_at.elapsed().as_micros() as u64,
+                    session_id = session_id.to_string(),
+                    "SSH session reached connected runtime state"
+                );
+            }
             update_connection_attempt_headline(
                 registry,
                 session_id,
@@ -1021,6 +1065,11 @@ fn apply_runtime_event(
             update_session(registry, session_id, SessionState::Connected, false);
         }
         SessionRuntimeEvent::Disconnected => {
+            registry
+                .lock()
+                .expect("lock session registry")
+                .session_open_started_at
+                .remove(&session_id);
             clear_runtime_control(registry, session_id);
             update_connection_attempt_headline(
                 registry,
@@ -1030,6 +1079,11 @@ fn apply_runtime_event(
             update_session(registry, session_id, SessionState::Disconnected, true);
         }
         SessionRuntimeEvent::Error(message) => {
+            registry
+                .lock()
+                .expect("lock session registry")
+                .session_open_started_at
+                .remove(&session_id);
             tracing::error!(
                 target: "app.ssh",
                 session_id = session_id.to_string(),

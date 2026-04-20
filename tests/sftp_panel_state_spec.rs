@@ -1,6 +1,9 @@
+use std::fs;
+
 use mica_term::app::sftp::{
-    FileBrowserSortColumn, FileBrowserSortDirection, SftpDirectoryEntry, SftpDirectoryEntryKind,
-    SftpFollowMode, SftpPanelMode, SftpPathHistory, SftpSessionBindingState,
+    FileBrowserSession, FileBrowserSortColumn, FileBrowserSortDirection, HostProfileRef,
+    SftpDirectoryEntry, SftpDirectoryEntryKind, SftpFollowMode, SftpPanelMode, SftpPathHistory,
+    SftpSessionBindingState,
 };
 use mica_term::shell::view_model::ShellViewModel;
 
@@ -191,4 +194,125 @@ fn shell_view_model_clamps_sftp_column_widths_in_window_runtime_state() {
 
     assert!(view_model.set_sftp_panel_column_width("size", 24.0));
     assert_eq!(view_model.sftp_panel_size_column_width_px(), 72.0);
+}
+
+#[test]
+fn sftp_panel_render_cache_only_marks_changed_selection_rows_dirty() {
+    let mut view_model = ShellViewModel::default();
+    let mut session = FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
+    let session_id = session.file_browser_session_id.clone();
+    session.entries = vec![
+        SftpDirectoryEntry {
+            id: "file-zeta".into(),
+            name: "zeta.log".into(),
+            path: "/srv/app/zeta.log".into(),
+            kind: SftpDirectoryEntryKind::File,
+            modified_unix_seconds: Some(3),
+            size_bytes: Some(100),
+        },
+        SftpDirectoryEntry {
+            id: "dir-app".into(),
+            name: "app".into(),
+            path: "/srv/app/app".into(),
+            kind: SftpDirectoryEntryKind::Directory,
+            modified_unix_seconds: Some(2),
+            size_bytes: None,
+        },
+        SftpDirectoryEntry {
+            id: "file-alpha".into(),
+            name: "alpha.log".into(),
+            path: "/srv/app/alpha.log".into(),
+            kind: SftpDirectoryEntryKind::File,
+            modified_unix_seconds: Some(1),
+            size_bytes: Some(10),
+        },
+    ];
+    session.selected_entry_ids = vec!["file-alpha".into()];
+
+    view_model.quick_browser_session_id = Some(session_id);
+    view_model.set_file_browser_session(session);
+
+    assert!(
+        view_model.active_sftp_panel_render_requires_full_resync(),
+        "a freshly rebuilt directory snapshot should request one full right-panel sync"
+    );
+    assert!(view_model.mark_active_sftp_panel_render_clean());
+    assert!(!view_model.active_sftp_panel_render_requires_full_resync());
+    assert!(
+        view_model.active_sftp_panel_render_dirty_indices().is_empty(),
+        "once the panel sync consumes the fresh snapshot, the render cache should go clean until another real change lands"
+    );
+
+    assert!(view_model.select_sftp_panel_entry("file-zeta"));
+
+    assert!(
+        !view_model.active_sftp_panel_render_requires_full_resync(),
+        "changing the selected row should not force a full panel rebuild when the directory snapshot itself is unchanged"
+    );
+    assert_eq!(
+        view_model.active_sftp_panel_render_dirty_indices(),
+        &[2, 3],
+        "switching selection between two file rows should only dirty the previously selected row and the newly selected row; the parent row and unaffected directory row should stay clean"
+    );
+    assert_eq!(
+        view_model
+            .active_sftp_panel_render_rows()
+            .iter()
+            .map(|row| (row.id.as_str(), row.selected))
+            .collect::<Vec<_>>(),
+        vec![
+            ("__sftp_parent__", false),
+            ("dir-app", false),
+            ("file-alpha", false),
+            ("file-zeta", true),
+        ]
+    );
+}
+
+#[test]
+fn sftp_panel_projection_stays_cached_between_shell_sync_passes() {
+    let view_model_source =
+        fs::read_to_string("src/shell/view_model.rs").expect("read shell view model source");
+    let sftp_view_model_source =
+        fs::read_to_string("src/shell/view_model/sftp.rs").expect("read sftp view model source");
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp source");
+
+    assert!(
+        view_model_source.contains("sftp_panel_projection_cache"),
+        "shell view model should keep a cached SFTP panel projection so reopening or switching the right sidebar can reuse the last sorted snapshot instead of rebuilding it synchronously on every UI sync"
+    );
+    assert!(
+        sftp_view_model_source.contains("refresh_sftp_panel_projection_cache(")
+            && sftp_view_model_source.contains("sftp_panel_projected_entries("),
+        "SFTP view-model helpers should expose explicit projection-cache refresh/read paths for the quick browser"
+    );
+    assert!(
+        view_model_source.contains("sftp_panel_render_cache")
+            && sftp_view_model_source.contains("active_sftp_panel_render_rows("),
+        "shell view model should keep a second-stage render cache so the right panel can reuse preformatted rows instead of rebuilding them on every shell sync"
+    );
+    assert!(
+        !bootstrap_sftp.contains(".project_sftp_panel_entries(state.sftp_panel_entries())"),
+        "bootstrap SFTP sync should stop rebuilding the sorted entry projection inline on every right-panel refresh"
+    );
+    assert!(
+        bootstrap_sftp.contains("state.active_sftp_panel_render_rows()"),
+        "bootstrap SFTP sync should consume the cached render rows instead of mapping raw directory entries into panel rows on every sync pass"
+    );
+}
+
+#[test]
+fn sftp_panel_sync_uses_incremental_row_updates_instead_of_generic_full_reconcile() {
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp source");
+
+    assert!(
+        bootstrap_sftp.contains("sync_sftp_panel_items_model("),
+        "right-panel bootstrap should route SFTP row updates through a dedicated incremental sync helper so large directories can patch dirty rows without paying a full generic reconcile on every shell sync"
+    );
+    assert!(
+        !bootstrap_sftp.contains("sync_vec_model(window.get_sftp_panel_items(), items"),
+        "right-panel bootstrap should stop feeding SFTP rows through the generic full-list reconcile path once incremental row patching exists"
+    );
 }

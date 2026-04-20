@@ -6,20 +6,89 @@ use crate::shell::view_model::PendingSftpContextAction;
 
 const SFTP_PARENT_ITEM_ID: &str = "__sftp_parent__";
 
-fn sftp_parent_panel_item() -> SftpPanelItem {
+#[derive(Clone, Copy)]
+struct SftpAsyncLatencySeed {
+    flow: &'static str,
+    started_at: Instant,
+}
+
+fn log_sftp_async_latency(
+    flow: &str,
+    stage: &str,
+    started_at: Instant,
+    browser_session_id: &str,
+    request_id: Option<u64>,
+    path: &str,
+    result: Option<&str>,
+    row_count: Option<usize>,
+) {
+    tracing::debug!(
+        target: "app.async_latency",
+        flow,
+        stage,
+        elapsed_ms = started_at.elapsed().as_millis() as u64,
+        elapsed_us = started_at.elapsed().as_micros() as u64,
+        browser_session_id,
+        request_id = request_id.map(|value| value.to_string()).unwrap_or_default(),
+        path,
+        result = result.unwrap_or_default(),
+        row_count = row_count.unwrap_or_default(),
+        "measured SFTP async flow latency"
+    );
+}
+
+fn project_sftp_panel_item(row: &crate::shell::view_model::SftpPanelRenderRow) -> SftpPanelItem {
     SftpPanelItem {
-        id: SFTP_PARENT_ITEM_ID.into(),
-        name: "..".into(),
-        meta_label: "Go to parent directory".into(),
-        type_label: "Up".into(),
-        modified_label: String::new().into(),
-        size_label: String::new().into(),
-        kind: "parent-directory".into(),
-        selected: false,
+        id: row.id.as_str().into(),
+        name: row.name.as_str().into(),
+        meta_label: row.meta_label.as_str().into(),
+        type_label: row.type_label.as_str().into(),
+        modified_label: row.modified_label.as_str().into(),
+        size_label: row.size_label.as_str().into(),
+        kind: row.kind.as_str().into(),
+        selected: row.selected,
     }
 }
 
-pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) {
+fn replace_sftp_panel_items_model(
+    rows: &[crate::shell::view_model::SftpPanelRenderRow],
+    replace: impl FnOnce(ModelRc<SftpPanelItem>),
+) {
+    let rows = rows.iter().map(project_sftp_panel_item).collect::<Vec<_>>();
+    replace(ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+
+fn sync_sftp_panel_items_model(
+    current: ModelRc<SftpPanelItem>,
+    rows: &[crate::shell::view_model::SftpPanelRenderRow],
+    dirty_indices: &[usize],
+    force_full_resync: bool,
+    replace: impl FnOnce(ModelRc<SftpPanelItem>),
+) {
+    if force_full_resync {
+        replace_sftp_panel_items_model(rows, replace);
+        return;
+    }
+
+    let Some(model) = current.as_any().downcast_ref::<VecModel<SftpPanelItem>>() else {
+        replace_sftp_panel_items_model(rows, replace);
+        return;
+    };
+    if model.row_count() != rows.len() {
+        replace_sftp_panel_items_model(rows, replace);
+        return;
+    }
+
+    for &index in dirty_indices {
+        let Some(row) = rows.get(index) else {
+            replace_sftp_panel_items_model(rows, replace);
+            return;
+        };
+        model.set_row_data(index, project_sftp_panel_item(row));
+    }
+}
+
+pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &mut ShellViewModel) {
     window.set_sftp_panel_mode(state.sftp_panel_mode_id().into());
     window.set_sftp_panel_host_label(state.sftp_panel_host_label().into());
     window.set_sftp_panel_path(state.sftp_panel_path().into());
@@ -41,31 +110,24 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) 
     window.set_sftp_queue_drawer_open(state.sftp_queue_drawer_open());
     window.set_sftp_panel_drop_target_active(state.quick_browser_drop_target_active());
 
-    let mut items = Vec::new();
-    if state.sftp_panel_can_go_up() {
-        items.push(sftp_parent_panel_item());
+    let active_session_id = state.quick_browser_session_id().map(str::to_owned);
+    let force_full_resync = active_session_id != state.sftp_panel_last_rendered_session_id
+        || state.active_sftp_panel_render_requires_full_resync();
+    let dirty_row_indices = if force_full_resync {
+        Vec::new()
+    } else {
+        state.active_sftp_panel_render_dirty_indices().to_vec()
+    };
+    if force_full_resync || !dirty_row_indices.is_empty() {
+        sync_sftp_panel_items_model(
+            window.get_sftp_panel_items(),
+            state.active_sftp_panel_render_rows(),
+            dirty_row_indices.as_slice(),
+            force_full_resync,
+            |model| window.set_sftp_panel_items(model),
+        );
+        let _ = state.mark_active_sftp_panel_render_clean();
     }
-    items.extend(
-        state
-            .project_sftp_panel_entries(state.sftp_panel_entries())
-            .iter()
-            .map(|entry| SftpPanelItem {
-                id: entry.id.as_str().into(),
-                name: entry.name.as_str().into(),
-                meta_label: sftp_panel_entry_meta_label(entry).into(),
-                type_label: sftp_panel_entry_type_label(entry).into(),
-                modified_label: sftp_panel_entry_modified_label(entry).into(),
-                size_label: sftp_panel_entry_size_label(entry).into(),
-                kind: sftp_panel_entry_kind(entry).into(),
-                selected: state
-                    .sftp_panel_selected_entry_ids()
-                    .iter()
-                    .any(|selected_id| selected_id == &entry.id),
-            }),
-    );
-    sync_vec_model(window.get_sftp_panel_items(), items, |model| {
-        window.set_sftp_panel_items(model)
-    });
 
     let selected_ids = state
         .sftp_panel_selected_entry_ids()
@@ -86,7 +148,7 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &ShellViewModel) 
     );
 }
 
-pub(super) fn sync_right_panel_state(window: &AppWindow, state: &ShellViewModel) {
+pub(super) fn sync_right_panel_state(window: &AppWindow, state: &mut ShellViewModel) {
     window.set_right_panel_view(state.right_panel_view_id().into());
     sync_sftp_panel_state(window, state);
 }
@@ -114,161 +176,6 @@ pub(super) fn sync_sftp_conflict_modal_state(window: &AppWindow, state: &ShellVi
     );
     window.set_sftp_conflict_modal_apply_to_batch(state.sftp_conflict_modal_apply_to_batch());
     super::sync_workspace_native_terminal_surface_geometry(window);
-}
-
-pub(super) fn sftp_panel_entry_type_label(
-    entry: &crate::app::sftp::SftpDirectoryEntry,
-) -> &'static str {
-    match sftp_panel_entry_kind(entry) {
-        "directory" => "Folder",
-        "symlink" => "Link",
-        "archive" => "Archive",
-        "image" => "Image",
-        "config" => "Config",
-        "executable" => "Executable",
-        "unknown" => "Unknown",
-        _ => "File",
-    }
-}
-
-pub(super) fn sftp_panel_entry_modified_label(
-    entry: &crate::app::sftp::SftpDirectoryEntry,
-) -> String {
-    let Some(unix_seconds) = entry.modified_unix_seconds else {
-        return String::new();
-    };
-    let Some(timestamp) = DateTime::<Utc>::from_timestamp(unix_seconds as i64, 0) else {
-        return String::new();
-    };
-    timestamp.format("%Y-%m-%d %H:%M").to_string()
-}
-
-pub(super) fn sftp_panel_entry_size_label(entry: &crate::app::sftp::SftpDirectoryEntry) -> String {
-    entry.size_bytes.map(format_binary_size).unwrap_or_default()
-}
-
-pub(super) fn sftp_panel_entry_meta_label(entry: &crate::app::sftp::SftpDirectoryEntry) -> String {
-    let type_label = sftp_panel_entry_type_label(entry);
-    let size_label = sftp_panel_entry_size_label(entry);
-    let modified_label = sftp_panel_entry_modified_label(entry);
-
-    if type_label.is_empty() {
-        return modified_label;
-    }
-    if !size_label.is_empty() && !modified_label.is_empty() {
-        return format!("{type_label} · {size_label} · {modified_label}");
-    }
-    if !size_label.is_empty() {
-        return format!("{type_label} · {size_label}");
-    }
-    if !modified_label.is_empty() {
-        return format!("{type_label} · {modified_label}");
-    }
-
-    type_label.to_string()
-}
-
-fn format_binary_size(bytes: u64) -> String {
-    const KIB: f64 = 1024.0;
-    const MIB: f64 = KIB * 1024.0;
-    const GIB: f64 = MIB * 1024.0;
-
-    let bytes = bytes as f64;
-    if bytes >= GIB {
-        format!("{:.1} GB", bytes / GIB)
-    } else if bytes >= MIB {
-        format!("{:.1} MB", bytes / MIB)
-    } else if bytes >= KIB {
-        format!("{:.0} KB", bytes / KIB)
-    } else {
-        format!("{bytes:.0} B")
-    }
-}
-
-pub(super) fn sftp_panel_entry_kind(entry: &crate::app::sftp::SftpDirectoryEntry) -> &'static str {
-    match entry.kind {
-        SftpDirectoryEntryKind::Directory => "directory",
-        SftpDirectoryEntryKind::Symlink => "symlink",
-        SftpDirectoryEntryKind::Unknown => "unknown",
-        SftpDirectoryEntryKind::File => classify_sftp_file_visual_kind(entry.name.as_str()),
-    }
-}
-
-fn classify_sftp_file_visual_kind(name: &str) -> &'static str {
-    let lowercase = name.to_ascii_lowercase();
-    if lowercase.ends_with(".tar.gz")
-        || lowercase.ends_with(".tgz")
-        || lowercase.ends_with(".tar.bz2")
-        || lowercase.ends_with(".tbz2")
-        || lowercase.ends_with(".tar.xz")
-        || lowercase.ends_with(".txz")
-        || has_any_suffix(
-            lowercase.as_str(),
-            &[".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".jar"],
-        )
-    {
-        return "archive";
-    }
-    if has_any_suffix(
-        lowercase.as_str(),
-        &[
-            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico", ".tif", ".tiff",
-            ".avif",
-        ],
-    ) {
-        return "image";
-    }
-    if lowercase.starts_with(".env")
-        || matches!(
-            lowercase.as_str(),
-            "dockerfile" | "compose.yml" | "compose.yaml" | "makefile" | "justfile"
-        )
-        || has_any_suffix(
-            lowercase.as_str(),
-            &[
-                ".json",
-                ".yaml",
-                ".yml",
-                ".toml",
-                ".ini",
-                ".cfg",
-                ".conf",
-                ".config",
-                ".service",
-                ".xml",
-                ".lock",
-                ".properties",
-            ],
-        )
-    {
-        return "config";
-    }
-    if matches!(
-        lowercase.as_str(),
-        "gradlew" | "configure" | "install" | "run" | "start" | "deploy"
-    ) || has_any_suffix(
-        lowercase.as_str(),
-        &[
-            ".sh",
-            ".bash",
-            ".zsh",
-            ".fish",
-            ".ps1",
-            ".cmd",
-            ".bat",
-            ".exe",
-            ".bin",
-            ".run",
-            ".appimage",
-        ],
-    ) {
-        return "executable";
-    }
-    "file"
-}
-
-fn has_any_suffix(value: &str, suffixes: &[&str]) -> bool {
-    suffixes.iter().any(|suffix| value.ends_with(suffix))
 }
 
 pub(super) type SftpBrowserBackgroundMessage = crate::app::sftp::SftpBrowserOperationResult;
@@ -639,6 +546,7 @@ pub(super) fn open_transfer_task_in_workspace(
         controller,
         manager,
         request,
+        None,
         async_runtime,
         result_tx,
     ) || opened
@@ -827,11 +735,12 @@ fn project_pending_sftp_browser_request(
         })
 }
 
-pub(super) fn queue_sftp_browser_request(
+fn queue_sftp_browser_request(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
     request: SftpBrowserLoadRequest,
+    latency_seed: Option<SftpAsyncLatencySeed>,
     async_runtime: Option<&tokio::runtime::Handle>,
     result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
 ) -> bool {
@@ -843,6 +752,26 @@ pub(super) fn queue_sftp_browser_request(
 
     if !controller.mark_request_in_flight(request.request_id) {
         return pending_changed;
+    }
+
+    if let Some(seed) = latency_seed {
+        state.begin_sftp_request_latency_trace(
+            request.request_id,
+            seed.flow,
+            request.file_browser_session_id.as_str(),
+            request.path.as_str(),
+            seed.started_at,
+        );
+        log_sftp_async_latency(
+            seed.flow,
+            "request-queued",
+            seed.started_at,
+            request.file_browser_session_id.as_str(),
+            Some(request.request_id),
+            request.path.as_str(),
+            None,
+            None,
+        );
     }
 
     let Some(runtime_handle) = async_runtime.cloned() else {
@@ -863,7 +792,10 @@ pub(super) fn apply_sftp_browser_background_message(
     controller: &mut SftpBrowserController,
     message: SftpBrowserBackgroundMessage,
 ) -> bool {
-    controller.complete_request(message.request.request_id);
+    let request_id = message.request.request_id;
+    let request_result = if message.result.is_ok() { "ok" } else { "error" };
+    let row_count = message.result.as_ref().ok().map(Vec::len);
+    controller.complete_request(request_id);
     if message.kind != crate::app::sftp::SftpOperationKind::LoadDir {
         return false;
     }
@@ -890,6 +822,19 @@ pub(super) fn apply_sftp_browser_background_message(
                 );
             }
         }
+    }
+
+    if let Some(trace) = state.finish_sftp_request_latency_trace(request_id) {
+        log_sftp_async_latency(
+            trace.flow,
+            "request-finished",
+            trace.started_at,
+            trace.browser_session_id.as_str(),
+            Some(request_id),
+            trace.path.as_str(),
+            Some(request_result),
+            row_count,
+        );
     }
 
     project_pending_sftp_browser_request(
@@ -965,6 +910,7 @@ pub(super) fn drain_sftp_transfer_background_messages(
                 controller,
                 manager,
                 request,
+                None,
                 async_runtime,
                 browser_result_tx,
             );
@@ -1397,6 +1343,7 @@ pub(super) fn apply_pending_sftp_context_action(
                 controller,
                 &session_bridge.manager,
                 request,
+                None,
                 async_runtime,
                 browser_result_tx,
             )
@@ -1441,6 +1388,7 @@ pub(super) fn apply_pending_sftp_context_action(
                     controller,
                     &session_bridge.manager,
                     request,
+                    None,
                     async_runtime,
                     browser_result_tx,
                 )
@@ -1602,11 +1550,26 @@ pub(super) fn ensure_active_sftp_browser_started(
 
     initial_sftp_browser_path(manager, session_id).is_some_and(|path| {
         let request = controller.open(session_id, path.as_str());
+        let latency_seed = state
+            .take_sftp_panel_open_latency()
+            .map(|started_at| SftpAsyncLatencySeed {
+                flow: "sftp-panel-open",
+                started_at,
+            })
+            .or_else(|| {
+                state
+                    .take_sftp_panel_switch_latency(request.file_browser_session_id.as_str())
+                    .map(|started_at| SftpAsyncLatencySeed {
+                        flow: "sftp-panel-switch",
+                        started_at,
+                    })
+            });
         queue_sftp_browser_request(
             state,
             controller,
             manager,
             request,
+            latency_seed,
             async_runtime,
             result_tx,
         )
@@ -1643,11 +1606,18 @@ pub(super) fn open_active_sftp_browser_for_current_session(
         None
     };
     request.is_some_and(|request| {
+        let latency_seed = state
+            .take_sftp_panel_switch_latency(request.file_browser_session_id.as_str())
+            .map(|started_at| SftpAsyncLatencySeed {
+                flow: "sftp-panel-switch",
+                started_at,
+            });
         queue_sftp_browser_request(
             state,
             controller,
             manager,
             request,
+            latency_seed,
             async_runtime,
             result_tx,
         )
@@ -1704,6 +1674,7 @@ pub(super) fn sync_active_sftp_browser_follow_request(
                 controller,
                 manager,
                 request,
+                None,
                 async_runtime,
                 result_tx,
             )
@@ -1741,6 +1712,7 @@ pub(super) fn sync_active_sftp_browser_pending_request(
                 controller,
                 manager,
                 request,
+                None,
                 async_runtime,
                 result_tx,
             )
@@ -1789,6 +1761,7 @@ pub(super) fn ensure_active_workspace_sftp_browser_started(
         controller,
         manager,
         request,
+        None,
         async_runtime,
         result_tx,
     )
@@ -1837,6 +1810,7 @@ pub(super) fn sync_active_workspace_sftp_browser_pending_request(
                 controller,
                 manager,
                 request,
+                None,
                 async_runtime,
                 result_tx,
             )
@@ -1871,22 +1845,39 @@ pub(super) fn bind_sftp_callbacks(
     window.on_open_sftp_panel_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let started = Instant::now();
+        state.begin_sftp_panel_open_latency(started);
         let (width, height) = current_window_size(&window);
         state.open_sftp_panel();
-        if let Some(session_bridge) = session_bridge_ref.as_ref() {
+        let opened = if let Some(session_bridge) = session_bridge_ref.as_ref() {
             let mut controller = sftp_browser_controller_ref.borrow_mut();
-            let _ = open_active_sftp_browser_for_current_session(
+            open_active_sftp_browser_for_current_session(
                 &mut state,
                 &mut controller,
                 &session_bridge.manager,
                 open_runtime_handle.as_ref(),
                 &open_result_tx,
-            );
+            )
+        } else {
+            false
+        };
+        if !opened {
+            state.clear_sftp_panel_open_latency();
         }
         super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sync_right_panel_state(&window, &state);
+        sync_right_panel_state(&window, &mut state);
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
+        log_sftp_async_latency(
+            "sftp-panel-open",
+            "ui-return",
+            started,
+            state.quick_browser_session_id().unwrap_or_default(),
+            None,
+            state.sftp_panel_path().as_str(),
+            None,
+            None,
+        );
     });
 
     let state = Rc::clone(view_model);
@@ -1960,7 +1951,7 @@ pub(super) fn bind_sftp_callbacks(
         });
         if opened {
             super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
             super::sync_workspace_tabs_with_manager(
                 &window,
                 &state,
@@ -2157,7 +2148,7 @@ pub(super) fn bind_sftp_callbacks(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
-        sync_right_panel_state(&window, &state);
+        sync_right_panel_state(&window, &mut state);
     });
 
     let state = Rc::clone(view_model);
@@ -2187,7 +2178,7 @@ pub(super) fn bind_sftp_callbacks(
             );
         }
 
-        sync_right_panel_state(&window, &state);
+        sync_right_panel_state(&window, &mut state);
     });
 
     let state = Rc::clone(view_model);
@@ -2196,7 +2187,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         if state.begin_quick_browser_path_edit() {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 
@@ -2227,7 +2218,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         if state.set_quick_browser_drop_target_active(active) {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 
@@ -2254,7 +2245,7 @@ pub(super) fn bind_sftp_callbacks(
         let _ = state.set_quick_browser_drop_target_active(false);
         window.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![])));
         let _ = scheduled;
-        sync_right_panel_state(&window, &state);
+        sync_right_panel_state(&window, &mut state);
     });
 
     let state = Rc::clone(view_model);
@@ -2266,7 +2257,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         if state.select_sftp_panel_entry(entry_id.as_str()) {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 
@@ -2305,6 +2296,7 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        None,
                         item_activated_runtime_handle.as_ref(),
                         &item_activated_result_tx,
                     );
@@ -2328,6 +2320,7 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        None,
                         item_activated_runtime_handle.as_ref(),
                         &item_activated_result_tx,
                     );
@@ -2345,7 +2338,7 @@ pub(super) fn bind_sftp_callbacks(
         }
 
         if panel_changed {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
         sync_sftp_remote_file_modal_state(&window, &state);
         if !was_modal_open && state.sftp_remote_file_editor_state().open {
@@ -2359,7 +2352,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         state.toggle_sftp_queue_drawer();
-        sync_right_panel_state(&window, &state);
+        sync_right_panel_state(&window, &mut state);
     });
 
     let state = Rc::clone(view_model);
@@ -2387,6 +2380,7 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        None,
                         path_submit_runtime_handle.as_ref(),
                         &path_submit_result_tx,
                     )
@@ -2398,7 +2392,7 @@ pub(super) fn bind_sftp_callbacks(
             state.submit_sftp_panel_path(path.to_string())
         };
         if changed {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 
@@ -2424,6 +2418,7 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        None,
                         back_runtime_handle.as_ref(),
                         &back_result_tx,
                     )
@@ -2437,7 +2432,7 @@ pub(super) fn bind_sftp_callbacks(
             state.navigate_sftp_panel_back()
         };
         if changed {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 
@@ -2463,6 +2458,7 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        None,
                         forward_runtime_handle.as_ref(),
                         &forward_result_tx,
                     )
@@ -2476,7 +2472,7 @@ pub(super) fn bind_sftp_callbacks(
             state.navigate_sftp_panel_forward()
         };
         if changed {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 
@@ -2502,6 +2498,7 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        None,
                         up_runtime_handle.as_ref(),
                         &up_result_tx,
                     )
@@ -2515,7 +2512,7 @@ pub(super) fn bind_sftp_callbacks(
             state.navigate_sftp_panel_up()
         };
         if changed {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 
@@ -2541,6 +2538,7 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        None,
                         refresh_runtime_handle.as_ref(),
                         &refresh_result_tx,
                     )
@@ -2554,7 +2552,7 @@ pub(super) fn bind_sftp_callbacks(
             state.refresh_sftp_panel()
         };
         if changed {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 
@@ -2590,6 +2588,7 @@ pub(super) fn bind_sftp_callbacks(
                                 &mut controller,
                                 &session_bridge.manager,
                                 request,
+                                None,
                                 retry_runtime_handle.as_ref(),
                                 &retry_result_tx,
                             )
@@ -2609,7 +2608,7 @@ pub(super) fn bind_sftp_callbacks(
             state.retry_sftp_panel()
         };
         if retried {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 
@@ -2635,6 +2634,7 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
+                        None,
                         follow_runtime_handle.as_ref(),
                         &follow_result_tx,
                     )
@@ -2648,7 +2648,7 @@ pub(super) fn bind_sftp_callbacks(
             state.reenable_sftp_follow()
         };
         if changed {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 
@@ -2658,7 +2658,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         if state.cycle_sftp_panel_sort(column_id.as_str()) {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 
@@ -2668,7 +2668,7 @@ pub(super) fn bind_sftp_callbacks(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         if state.set_sftp_panel_column_width(column_id.as_str(), width) {
-            sync_right_panel_state(&window, &state);
+            sync_right_panel_state(&window, &mut state);
         }
     });
 

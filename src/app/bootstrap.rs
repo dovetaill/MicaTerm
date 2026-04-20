@@ -7,7 +7,7 @@ mod vault_sync;
 mod windowing;
 mod workspace_terminal;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::future::Future;
@@ -241,7 +241,15 @@ thread_local! {
 struct PendingHostKeyApproval {
     profile: ConnectionProfile,
     public_key_openssh: String,
-    intent: HostKeyApprovalIntent,
+}
+
+#[derive(Debug)]
+enum SshModalBackgroundMessage {
+    TestConnectionFinished {
+        request_id: u64,
+        profile: ConnectionProfile,
+        result: Result<()>,
+    },
 }
 
 #[derive(Clone)]
@@ -262,12 +270,6 @@ struct PendingWorkspacePasteWarning {
 enum WorkspacePastePromptMode {
     Confirm,
     Editor,
-}
-
-#[derive(Clone, Copy)]
-enum HostKeyApprovalIntent {
-    ModalTestConnection,
-    OpenSession(OpenSessionMode),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1425,16 +1427,49 @@ struct WorkspaceScrollInput {
     alt: bool,
 }
 
+fn log_ssh_async_latency(
+    stage: &str,
+    started_at: Instant,
+    session_id: Option<Uuid>,
+    asset_id: Option<&str>,
+    host: &str,
+    user: &str,
+) {
+    tracing::debug!(
+        target: "app.async_latency",
+        flow = "ssh-open",
+        stage,
+        elapsed_ms = started_at.elapsed().as_millis() as u64,
+        elapsed_us = started_at.elapsed().as_micros() as u64,
+        session_id = session_id.map(|value| value.to_string()).unwrap_or_default(),
+        asset_id = asset_id.unwrap_or_default(),
+        host,
+        user,
+        "measured SSH open async latency"
+    );
+}
+
 fn open_session_with_profile(
     state: &mut ShellViewModel,
     bridge: &ShellSessionBridge,
     profile: ConnectionProfile,
     mode: OpenSessionMode,
 ) -> anyhow::Result<()> {
+    let started = Instant::now();
+    let host = profile.host.clone();
+    let user = profile.user.clone();
     let handle = bridge.manager.open_session(profile, mode)?;
     let resolved = bridge.manager.session(handle.session_id).unwrap_or(handle);
     merge_session_handle_into_tabs(state, &resolved);
     let _ = workspace_terminal::sync_workspace_projection_from_manager(state, &bridge.manager);
+    log_ssh_async_latency(
+        "ui-return",
+        started,
+        Some(resolved.session_id),
+        Some(resolved.asset_id.as_str()),
+        host.as_str(),
+        user.as_str(),
+    );
     Ok(())
 }
 
@@ -1500,14 +1535,12 @@ fn prompt_unknown_host_key(
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
     profile: ConnectionProfile,
     error: &UnknownHostKeyError,
-    intent: HostKeyApprovalIntent,
 ) {
     pending_host_key_approval
         .borrow_mut()
         .replace(PendingHostKeyApproval {
             profile,
             public_key_openssh: error.public_key_openssh.clone(),
-            intent,
         });
     state.open_ssh_host_key_prompt(
         format!("{}:{}", error.host, error.port),
@@ -1515,39 +1548,34 @@ fn prompt_unknown_host_key(
     );
 }
 
-fn attempt_test_connection(
-    state: &mut ShellViewModel,
-    bridge: &ShellSessionBridge,
-    pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+fn queue_modal_test_connection(
+    manager: &SessionManager,
+    runtime_handle: tokio::runtime::Handle,
+    result_tx: &std::sync::mpsc::Sender<SshModalBackgroundMessage>,
+    next_request_id: &Rc<Cell<u64>>,
+    active_request_id: &Rc<RefCell<Option<u64>>>,
     profile: ConnectionProfile,
 ) {
-    match bridge.manager.probe_connection(profile.clone()) {
-        Ok(()) => state.finish_ssh_modal_action_success("Connection test succeeded."),
-        Err(err) => {
-            if let Some(unknown) = err.downcast_ref::<UnknownHostKeyError>() {
-                prompt_unknown_host_key(
-                    state,
-                    pending_host_key_approval,
-                    profile,
-                    unknown,
-                    HostKeyApprovalIntent::ModalTestConnection,
-                );
-            } else {
-                tracing::error!(
-                    target: "app.ssh",
-                    error = %err,
-                    "ssh probe failed"
-                );
-                state.finish_ssh_modal_action_error(err.to_string());
-            }
-        }
-    }
+    let request_id = next_request_id.get().saturating_add(1);
+    next_request_id.set(request_id);
+    active_request_id.borrow_mut().replace(request_id);
+
+    let manager = manager.clone();
+    let result_tx = result_tx.clone();
+    runtime_handle.spawn(async move {
+        let result = manager.probe_connection_async(profile.clone()).await;
+        let _ = result_tx.send(SshModalBackgroundMessage::TestConnectionFinished {
+            request_id,
+            profile,
+            result,
+        });
+    });
 }
 
 fn attempt_open_session_with_profile(
     state: &mut ShellViewModel,
     bridge: &ShellSessionBridge,
-    pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    _pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
     profile: ConnectionProfile,
     mode: OpenSessionMode,
 ) -> anyhow::Result<()> {
@@ -1558,33 +1586,9 @@ fn attempt_open_session_with_profile(
         return open_session_with_profile(state, bridge, profile, mode);
     }
 
-    match bridge.manager.probe_connection(profile.clone()) {
-        Ok(()) => {
-            open_session_with_profile(state, bridge, profile.clone(), mode).inspect_err(|err| {
-                show_failed_session_tab(state, &profile, err.to_string());
-            })
-        }
-        Err(err) => {
-            if let Some(unknown) = err.downcast_ref::<UnknownHostKeyError>() {
-                prompt_unknown_host_key(
-                    state,
-                    pending_host_key_approval,
-                    profile,
-                    unknown,
-                    HostKeyApprovalIntent::OpenSession(mode),
-                );
-                Ok(())
-            } else {
-                tracing::error!(
-                    target: "app.ssh",
-                    error = %err,
-                    "ssh probe failed before opening workspace session"
-                );
-                show_failed_session_tab(state, &profile, err.to_string());
-                Err(err)
-            }
-        }
-    }
+    open_session_with_profile(state, bridge, profile.clone(), mode).inspect_err(|err| {
+        show_failed_session_tab(state, &profile, err.to_string());
+    })
 }
 
 fn register_asset_click(
@@ -1730,6 +1734,9 @@ fn resolve_pending_host_key(
     state: &mut ShellViewModel,
     bridge: Option<&ShellSessionBridge>,
     pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    ssh_modal_result_tx: &std::sync::mpsc::Sender<SshModalBackgroundMessage>,
+    next_ssh_modal_test_request_id: &Rc<Cell<u64>>,
+    active_ssh_modal_test_request_id: &Rc<RefCell<Option<u64>>>,
     accept: bool,
 ) {
     let Some(pending) = pending_host_key_approval.borrow_mut().take() else {
@@ -1748,62 +1755,84 @@ fn resolve_pending_host_key(
         })();
 
         if let Err(err) = result {
-            match pending.intent {
-                HostKeyApprovalIntent::ModalTestConnection => {
-                    state.finish_ssh_modal_action_error(err.to_string());
-                }
-                HostKeyApprovalIntent::OpenSession(_) => {
-                    show_failed_session_tab(state, &pending.profile, err.to_string());
-                }
-            }
+            state.finish_ssh_modal_action_error(err.to_string());
             return;
         }
 
         let Some(bridge) = bridge else {
             let message = "SSH session bridge is unavailable.".to_string();
-            match pending.intent {
-                HostKeyApprovalIntent::ModalTestConnection => {
-                    state.finish_ssh_modal_action_error(message);
-                }
-                HostKeyApprovalIntent::OpenSession(_) => {
-                    show_failed_session_tab(state, &pending.profile, message);
-                }
-            }
+            state.finish_ssh_modal_action_error(message);
             return;
         };
 
-        match pending.intent {
-            HostKeyApprovalIntent::ModalTestConnection => {
-                attempt_test_connection(state, bridge, pending_host_key_approval, pending.profile);
-            }
-            HostKeyApprovalIntent::OpenSession(mode) => {
-                if let Err(err) = attempt_open_session_with_profile(
-                    state,
-                    bridge,
-                    pending_host_key_approval,
-                    pending.profile,
-                    mode,
-                ) {
-                    tracing::error!(
-                        target: "app.ssh",
-                        error = %err,
-                        "failed to open ssh session after host key acceptance"
-                    );
-                }
-            }
-        }
+        queue_modal_test_connection(
+            &bridge.manager,
+            bridge.manager.runtime_handle(),
+            ssh_modal_result_tx,
+            next_ssh_modal_test_request_id,
+            active_ssh_modal_test_request_id,
+            pending.profile,
+        );
         return;
     }
 
     let message = format!("Rejected unknown SSH host key for `{}`:{}.", host, port);
-    match pending.intent {
-        HostKeyApprovalIntent::ModalTestConnection => {
-            state.finish_ssh_modal_action_error(message);
-        }
-        HostKeyApprovalIntent::OpenSession(_) => {
-            show_failed_session_tab(state, &pending.profile, message);
+    state.finish_ssh_modal_action_error(message);
+}
+
+fn drain_ssh_modal_background_messages(
+    state: &mut ShellViewModel,
+    pending_host_key_approval: &Rc<RefCell<Option<PendingHostKeyApproval>>>,
+    active_request_id: &Rc<RefCell<Option<u64>>>,
+    result_rx: &std::sync::mpsc::Receiver<SshModalBackgroundMessage>,
+) -> bool {
+    let mut changed = false;
+
+    loop {
+        let Ok(message) = result_rx.try_recv() else {
+            break;
+        };
+
+        match message {
+            SshModalBackgroundMessage::TestConnectionFinished {
+                request_id,
+                profile,
+                result,
+            } => {
+                if active_request_id.borrow().as_ref() != Some(&request_id) {
+                    continue;
+                }
+                active_request_id.borrow_mut().take();
+                if !matches!(
+                    state.ssh_modal_action_state(),
+                    crate::shell::view_model::SshModalActionState::Busy(
+                        crate::shell::view_model::SshModalAction::TestConnection
+                    )
+                ) {
+                    continue;
+                }
+
+                match result {
+                    Ok(()) => state.finish_ssh_modal_action_success("Connection test succeeded."),
+                    Err(err) => {
+                        if let Some(unknown) = err.downcast_ref::<UnknownHostKeyError>() {
+                            prompt_unknown_host_key(
+                                state,
+                                pending_host_key_approval,
+                                profile,
+                                unknown,
+                            );
+                        } else {
+                            state.finish_ssh_modal_action_error(err.to_string());
+                        }
+                    }
+                }
+                changed = true;
+            }
         }
     }
+
+    changed
 }
 
 fn target_session_id_for_asset(state: &ShellViewModel, asset_id: &str) -> Option<String> {
@@ -3175,7 +3204,7 @@ fn sync_workspace_tabs_with_manager(
 
 fn sync_shell_state(
     window: &AppWindow,
-    state: &ShellViewModel,
+    state: &mut ShellViewModel,
     effects: &dyn PlatformWindowEffects,
     follow_tracker: &mut WorkspaceFollowTracker,
 ) {
@@ -4287,7 +4316,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     );
     sync_shell_state(
         window,
-        &view_model.borrow(),
+        &mut view_model.borrow_mut(),
         effects.as_ref(),
         &mut workspace_follow_tracker.borrow_mut(),
     );
@@ -4312,6 +4341,11 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let (sftp_local_action_result_tx, sftp_local_action_result_rx) =
         std::sync::mpsc::channel::<sftp::SftpLocalActionBackgroundMessage>();
     let sftp_local_action_result_rx = Rc::new(RefCell::new(sftp_local_action_result_rx));
+    let (ssh_modal_result_tx, ssh_modal_result_rx) =
+        std::sync::mpsc::channel::<SshModalBackgroundMessage>();
+    let ssh_modal_result_rx = Rc::new(RefCell::new(ssh_modal_result_rx));
+    let next_ssh_modal_test_request_id = Rc::new(Cell::new(0u64));
+    let active_ssh_modal_test_request_id = Rc::new(RefCell::new(None::<u64>));
     let session_projection_timer = Rc::new(Timer::default());
     let input_projection_refresh_timer = Rc::new(Timer::default());
     let input_projection_refresh_gate = Rc::new(RefCell::new(
@@ -4347,6 +4381,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let sftp_browser_result_tx_ref = sftp_browser_result_tx.clone();
         let sftp_transfer_result_rx_ref = Rc::clone(&sftp_transfer_result_rx);
         let sftp_local_action_result_rx_ref = Rc::clone(&sftp_local_action_result_rx);
+        let ssh_modal_result_rx_ref = Rc::clone(&ssh_modal_result_rx);
+        let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
+        let active_ssh_modal_test_request_id_ref = Rc::clone(&active_ssh_modal_test_request_id);
         let sftp_browser_async_runtime_ref = sftp_browser_async_runtime.clone();
         let workspace_terminal_active_surface_fingerprint_ref =
             Rc::clone(&workspace_terminal_active_surface_fingerprint);
@@ -4384,9 +4421,22 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 let receiver = sftp_local_action_result_rx_ref.borrow();
                 sftp::drain_sftp_local_action_background_messages(&mut state, &receiver)
             };
+            let ssh_modal_changed = {
+                let receiver = ssh_modal_result_rx_ref.borrow();
+                drain_ssh_modal_background_messages(
+                    &mut state,
+                    &pending_host_key_approval_ref,
+                    &active_ssh_modal_test_request_id_ref,
+                    &receiver,
+                )
+            };
             if sftp_transfer_changed || sftp_local_action_changed {
                 shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
                 sftp::sync_sftp_conflict_modal_state(&window, &state);
+            }
+            if ssh_modal_changed {
+                assets_keychain::sync_asset_modal_state(&window, &state);
+                windowing::sync_ssh_host_key_modal_state(&window, &state);
             }
             let had_active_surface = state.active_workspace_terminal_surface().is_some();
             let projection_delta =
@@ -4474,7 +4524,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 right_panel_changed = true;
             }
             if right_panel_changed {
-                sftp::sync_right_panel_state(&window, &state);
+                sftp::sync_right_panel_state(&window, &mut state);
             }
 
             let (workspace_sftp_open_changed, workspace_sftp_retry_changed) = {
@@ -4503,7 +4553,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 sftp::drain_sftp_browser_background_messages(&mut state, &mut controller, &receiver)
             };
             if sftp_result_changed_after_queue {
-                sftp::sync_right_panel_state(&window, &state);
+                sftp::sync_right_panel_state(&window, &mut state);
             }
 
             let workspace_sftp_projection_delta = if workspace_sftp_open_changed
@@ -4527,7 +4577,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     Some(&manager),
                 );
                 if workspace_sftp_projection_delta.sftp_changed {
-                    sftp::sync_right_panel_state(&window, &state);
+                    sftp::sync_right_panel_state(&window, &mut state);
                 }
             }
 
@@ -4659,7 +4709,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 });
                 sync_shell_state(
                     &window,
-                    &state,
+                    &mut state,
                     effects_ref.as_ref(),
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                 );
@@ -4844,7 +4894,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
             sync_shell_state(
                 &window,
-                &state,
+                &mut state,
                 effects_ref.as_ref(),
                 &mut workspace_follow_tracker_ref.borrow_mut(),
             );
@@ -4972,7 +5022,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
                     sync_shell_state(
                         &window,
-                        &state,
+                        &mut state,
                         effects_ref.as_ref(),
                         &mut workspace_follow_tracker_ref.borrow_mut(),
                     );
@@ -5006,7 +5056,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let (width, height) = current_window_size(&window);
         state.toggle_right_panel();
         shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
-        sftp::sync_right_panel_state(&window, &state);
+        sftp::sync_right_panel_state(&window, &mut state);
         sync_shell_layout(&window, &mut state, width, height);
         sync_workspace_session_state_with_manager(
             &window,
@@ -5092,7 +5142,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
 
         sync_shell_state(
             &window,
-            &state,
+            &mut state,
             effects_ref.as_ref(),
             &mut workspace_follow_tracker_ref.borrow_mut(),
         );
@@ -5182,7 +5232,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
         sync_shell_state(
             &window,
-            &state,
+            &mut state,
             effects_ref.as_ref(),
             &mut workspace_follow_tracker_ref.borrow_mut(),
         );
@@ -5246,7 +5296,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         }
         sync_shell_state(
             &window,
-            &state,
+            &mut state,
             effects_ref.as_ref(),
             &mut workspace_follow_tracker_ref.borrow_mut(),
         );
@@ -5266,7 +5316,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         state.close_sync_modal();
         sync_shell_state(
             &window,
-            &state,
+            &mut state,
             effects_ref.as_ref(),
             &mut workspace_follow_tracker_ref.borrow_mut(),
         );
@@ -5307,6 +5357,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sftp_browser_async_runtime.as_ref(),
         &sftp_browser_result_tx,
         &sftp_transfer_result_tx,
+        &ssh_modal_result_tx,
         &sftp_browser_controller,
         &credential_store,
         &private_key_importer,
@@ -5320,6 +5371,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         &run_vault_sync,
         &asset_click_tracker,
         &pending_double_click_activation,
+        &next_ssh_modal_test_request_id,
+        &active_ssh_modal_test_request_id,
     );
 
     let state = Rc::clone(&view_model);
@@ -5556,6 +5609,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let session_bridge_ref = session_bridge.clone();
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let ssh_modal_result_tx_ref = ssh_modal_result_tx.clone();
+    let next_ssh_modal_test_request_id_ref = Rc::clone(&next_ssh_modal_test_request_id);
+    let active_ssh_modal_test_request_id_ref = Rc::clone(&active_ssh_modal_test_request_id);
     window.on_ssh_host_key_modal_accept_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
@@ -5565,6 +5621,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut state,
             session_bridge_ref.as_deref(),
             &pending_host_key_approval_ref,
+            &ssh_modal_result_tx_ref,
+            &next_ssh_modal_test_request_id_ref,
+            &active_ssh_modal_test_request_id_ref,
             true,
         );
         window.set_blocking_modal_offset_x(0.0);
@@ -5621,12 +5680,23 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     let modal_drag_state_ref = Rc::clone(&modal_drag_state);
     let pending_host_key_approval_ref = Rc::clone(&pending_host_key_approval);
     let workspace_follow_tracker_ref = Rc::clone(&workspace_follow_tracker);
+    let ssh_modal_result_tx_ref = ssh_modal_result_tx.clone();
+    let next_ssh_modal_test_request_id_ref = Rc::clone(&next_ssh_modal_test_request_id);
+    let active_ssh_modal_test_request_id_ref = Rc::clone(&active_ssh_modal_test_request_id);
     window.on_ssh_host_key_modal_reject_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         modal_drag_state_ref.borrow_mut().take();
         state.reject_ssh_host_key_prompt();
-        resolve_pending_host_key(&mut state, None, &pending_host_key_approval_ref, false);
+        resolve_pending_host_key(
+            &mut state,
+            None,
+            &pending_host_key_approval_ref,
+            &ssh_modal_result_tx_ref,
+            &next_ssh_modal_test_request_id_ref,
+            &active_ssh_modal_test_request_id_ref,
+            false,
+        );
         window.set_blocking_modal_offset_x(0.0);
         window.set_blocking_modal_offset_y(0.0);
         sync_workspace_tabs_with_manager(
@@ -5700,9 +5770,18 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_workspace_tab_selected(move |tab_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
+        let started = Instant::now();
         if state.activate_workspace_tab(tab_id.as_str()) {
             let defer_quick_browser_sync =
                 state.show_right_panel && state.quick_browser_follows_active_terminal();
+            let switch_browser_session_id = if defer_quick_browser_sync {
+                state.active_workspace_terminal_session_id().map(str::to_owned)
+            } else {
+                None
+            };
+            if let Some(browser_session_id) = switch_browser_session_id.as_deref() {
+                state.begin_sftp_panel_switch_latency(browser_session_id, started);
+            }
             if defer_quick_browser_sync {
                 let _ = state.defer_quick_browser_follow_to_active_terminal();
             }
@@ -5730,9 +5809,21 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             );
             shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
             if !defer_quick_browser_sync {
-                sftp::sync_right_panel_state(&window, &state);
+                sftp::sync_right_panel_state(&window, &mut state);
             }
             assets_keychain::sync_assets_context_menu_state(&window, &state);
+            if let Some(browser_session_id) = switch_browser_session_id.as_deref() {
+                tracing::debug!(
+                    target: "app.async_latency",
+                    flow = "sftp-panel-switch",
+                    stage = "ui-return",
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    elapsed_us = started.elapsed().as_micros() as u64,
+                    browser_session_id,
+                    tab_id = tab_id.as_str(),
+                    "measured SFTP panel switch UI handoff latency"
+                );
+            }
         }
     });
 
@@ -5951,7 +6042,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                     &mut workspace_follow_tracker_ref.borrow_mut(),
                     Some(&session_bridge.manager),
                 );
-                sftp::sync_right_panel_state(&window, &state);
+                sftp::sync_right_panel_state(&window, &mut state);
             }
             "trust-host-key" => {
                 let Some(session_bridge) = session_bridge_ref.as_ref() else {

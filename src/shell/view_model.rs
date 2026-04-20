@@ -15,6 +15,7 @@ use self::asset_modal_executor::normalized_keychain_identity_auth_kind_id;
 pub use self::asset_modal_executor::welcome_actions;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::time::Instant;
 
 use crate::app::keychain::{
     KeychainCatalog, KeychainIdentityAuthKind, KeychainNodePayload, KeychainSshKeySpec,
@@ -593,6 +594,40 @@ impl Default for QuickBrowserState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SftpPanelRenderRow {
+    pub id: String,
+    pub name: String,
+    pub meta_label: String,
+    pub type_label: String,
+    pub modified_label: String,
+    pub size_label: String,
+    pub kind: String,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SftpPanelRenderCache {
+    pub rows: Vec<SftpPanelRenderRow>,
+    pub row_index_by_entry_id: HashMap<String, usize>,
+    pub dirty_row_indices: Vec<usize>,
+    pub full_resync_required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingSftpSwitchLatencyTrace {
+    pub started_at: Instant,
+    pub browser_session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SftpRequestLatencyTrace {
+    pub flow: &'static str,
+    pub started_at: Instant,
+    pub browser_session_id: String,
+    pub path: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellViewModel {
     pub show_welcome: bool,
@@ -628,6 +663,12 @@ pub struct ShellViewModel {
     saved_ssh_picker_query: String,
     saved_ssh_picker_selected_asset_id: Option<String>,
     pub file_browser_sessions: HashMap<String, FileBrowserSession>,
+    pub sftp_panel_projection_cache: HashMap<String, Vec<SftpDirectoryEntry>>,
+    pub sftp_panel_render_cache: HashMap<String, SftpPanelRenderCache>,
+    pub sftp_panel_last_rendered_session_id: Option<String>,
+    pub pending_sftp_panel_open_latency_started_at: Option<Instant>,
+    pub pending_sftp_panel_switch_latency: Option<PendingSftpSwitchLatencyTrace>,
+    pub sftp_request_latency_traces: HashMap<u64, SftpRequestLatencyTrace>,
     pub quick_browser_session_id: Option<String>,
     pub quick_browser_state: QuickBrowserState,
     pub sftp_queue_summary: TransferQueueSummary,
@@ -705,6 +746,12 @@ impl Default for ShellViewModel {
             saved_ssh_picker_query: String::new(),
             saved_ssh_picker_selected_asset_id: None,
             file_browser_sessions: HashMap::new(),
+            sftp_panel_projection_cache: HashMap::new(),
+            sftp_panel_render_cache: HashMap::new(),
+            sftp_panel_last_rendered_session_id: None,
+            pending_sftp_panel_open_latency_started_at: None,
+            pending_sftp_panel_switch_latency: None,
+            sftp_request_latency_traces: HashMap::new(),
             quick_browser_session_id: None,
             quick_browser_state: QuickBrowserState::default(),
             sftp_queue_summary: TransferQueueSummary::default(),

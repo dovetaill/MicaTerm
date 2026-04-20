@@ -457,6 +457,12 @@ struct TofuAwareLauncher {
     host_key: PublicKey,
 }
 
+#[derive(Clone)]
+struct DelayedTofuAwareLauncher {
+    host_key: PublicKey,
+    probe_delay: Duration,
+}
+
 #[derive(Clone, Default)]
 struct PendingConnectionLauncher;
 
@@ -1623,6 +1629,22 @@ impl TofuAwareLauncher {
     }
 }
 
+impl DelayedTofuAwareLauncher {
+    fn new(host_key: PublicKey, probe_delay: Duration) -> Self {
+        Self {
+            host_key,
+            probe_delay,
+        }
+    }
+
+    fn ensure_trusted(&self, profile: &ConnectionProfile) -> Result<()> {
+        TofuAwareLauncher {
+            host_key: self.host_key.clone(),
+        }
+        .ensure_trusted(profile)
+    }
+}
+
 impl SessionRuntimeLauncher for TofuAwareLauncher {
     fn launch(
         &self,
@@ -1646,6 +1668,36 @@ impl SessionRuntimeLauncher for TofuAwareLauncher {
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
         let launcher = self.clone();
         Box::pin(async move { launcher.ensure_trusted(&profile) })
+    }
+}
+
+impl SessionRuntimeLauncher for DelayedTofuAwareLauncher {
+    fn launch(
+        &self,
+        profile: ConnectionProfile,
+        _session_id: uuid::Uuid,
+        _attempt_id: uuid::Uuid,
+        event_tx: mpsc::UnboundedSender<SessionRuntimeEvent>,
+    ) -> Pin<Box<dyn Future<Output = Result<Box<dyn SessionRuntimeControl>>> + Send + 'static>>
+    {
+        let launcher = self.clone();
+        Box::pin(async move {
+            launcher.ensure_trusted(&profile)?;
+            let _ = event_tx.send(SessionRuntimeEvent::Connected);
+            Ok(Box::new(NoopRuntimeControl) as Box<dyn SessionRuntimeControl>)
+        })
+    }
+
+    fn probe(
+        &self,
+        profile: ConnectionProfile,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>> {
+        let launcher = self.clone();
+        Box::pin(async move {
+            launcher.ensure_trusted(&profile)?;
+            tokio::time::sleep(launcher.probe_delay).await;
+            Ok(())
+        })
     }
 }
 
@@ -5613,6 +5665,7 @@ fn editing_legacy_saved_ssh_asset_reuses_fallback_saved_secret_for_test_connecti
     assert!(!app.get_asset_ssh_modal_password_visible());
 
     app.invoke_asset_ssh_modal_action_requested("test".into());
+    flush_runtime_projection();
 
     assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "success");
     assert_eq!(
@@ -6637,7 +6690,7 @@ fn connect_action_keeps_session_ephemeral_and_does_not_persist_asset() {
     assert_eq!(app.get_console_asset_items().row_count(), 0);
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
     assert!(repo_state.borrow().save_attempts.is_empty());
-    assert_eq!(launcher_state.probe_profiles.len(), 1);
+    assert!(launcher_state.probe_profiles.is_empty());
     assert_eq!(launcher_state.launch_profiles.len(), 1);
     assert!(
         launcher_state.launch_profiles[0]
@@ -6645,6 +6698,48 @@ fn connect_action_keeps_session_ephemeral_and_does_not_persist_asset() {
             .as_deref()
             .expect("ephemeral asset id")
             .starts_with("session:")
+    );
+}
+
+#[test]
+fn connect_action_returns_before_any_probe_completes() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let launcher_state = Arc::new(Mutex::new(RecordingLauncherState::default()));
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(SlowOpeningLauncher {
+            state: Arc::clone(&launcher_state),
+            probe_delay: Duration::from_millis(250),
+            launch_delay: Duration::from_millis(250),
+        }),
+    );
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+
+    let started = Instant::now();
+    app.invoke_asset_ssh_modal_action_requested("connect".into());
+
+    assert!(
+        started.elapsed() < Duration::from_millis(120),
+        "opening an ephemeral SSH session from the modal should not block on probe_connection()"
+    );
+    assert!(!app.get_asset_modal_open());
+    assert_eq!(app.get_workspace_tab_items().row_count(), 1);
+    assert_eq!(app.get_workspace_session_state().as_str(), "connecting");
+    assert!(
+        launcher_state
+            .lock()
+            .expect("lock slow opening launcher state")
+            .probe_profiles
+            .is_empty(),
+        "modal connect should open the workspace tab without waiting for a synchronous probe"
     );
 }
 
@@ -7324,12 +7419,61 @@ fn test_connection_updates_feedback_without_creating_workspace_tab() {
     app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
     app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     app.invoke_asset_ssh_modal_action_requested("test".into());
+    flush_runtime_projection();
 
     let launcher_state = launcher_state
         .lock()
         .expect("lock recording launcher state");
     assert!(app.get_asset_modal_open());
     assert_eq!(app.get_workspace_tab_items().row_count(), 0);
+    assert_eq!(launcher_state.probe_profiles.len(), 1);
+    assert!(launcher_state.launch_profiles.is_empty());
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "success");
+    assert_eq!(
+        app.get_asset_ssh_modal_feedback_message().as_str(),
+        "Connection test succeeded."
+    );
+}
+
+#[test]
+fn test_connection_action_returns_before_slow_probe_completes() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let app = AppWindow::new().unwrap();
+    let launcher_state = Arc::new(Mutex::new(RecordingLauncherState::default()));
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(SlowOpeningLauncher {
+            state: Arc::clone(&launcher_state),
+            probe_delay: Duration::from_millis(250),
+            launch_delay: Duration::from_millis(250),
+        }),
+    );
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+
+    let started = Instant::now();
+    app.invoke_asset_ssh_modal_action_requested("test".into());
+
+    assert!(
+        started.elapsed() < Duration::from_millis(120),
+        "testing an SSH connection from the modal should not block the UI while probe_connection() runs"
+    );
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_workspace_tab_items().row_count(), 0);
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "busy");
+
+    std::thread::sleep(Duration::from_millis(280));
+    flush_runtime_projection();
+
+    let launcher_state = launcher_state
+        .lock()
+        .expect("lock slow opening launcher state");
     assert_eq!(launcher_state.probe_profiles.len(), 1);
     assert!(launcher_state.launch_profiles.is_empty());
     assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "success");
@@ -7518,6 +7662,7 @@ fn accepting_unknown_host_key_retries_test_connection_and_persists_known_host() 
     app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
     app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
     app.invoke_asset_ssh_modal_action_requested("test".into());
+    flush_runtime_projection();
 
     assert!(app.get_ssh_host_key_modal_open());
     assert_eq!(app.get_ssh_host_key_modal_host().as_str(), "10.0.0.12:22");
@@ -7527,6 +7672,7 @@ fn accepting_unknown_host_key_retries_test_connection_and_persists_known_host() 
     );
 
     app.invoke_ssh_host_key_modal_accept_requested();
+    flush_runtime_projection();
 
     assert!(!app.get_ssh_host_key_modal_open());
     assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "success");
@@ -7540,6 +7686,66 @@ fn accepting_unknown_host_key_retries_test_connection_and_persists_known_host() 
         known_hosts
             .check("10.0.0.12", 22, &host_key)
             .expect("check trusted host"),
+        KnownHostCheck::Trusted
+    );
+
+    let _ = fs::remove_file(known_hosts_path);
+    unsafe {
+        std::env::remove_var("MICA_TERM_KNOWN_HOSTS_PATH");
+    }
+}
+
+#[test]
+fn accepting_unknown_host_key_retries_modal_test_without_blocking_ui() {
+    i_slint_backend_testing::init_no_event_loop();
+
+    let _env_lock = lock_known_hosts_env();
+    let known_hosts_path = sample_known_hosts_path("accept-test-nonblocking");
+    let host_key = sample_public_key();
+    let _ = fs::remove_file(&known_hosts_path);
+    unsafe {
+        std::env::set_var("MICA_TERM_KNOWN_HOSTS_PATH", &known_hosts_path);
+    }
+
+    let app = AppWindow::new().unwrap();
+    bind_with_launcher(
+        &app,
+        None,
+        Arc::new(DelayedTofuAwareLauncher::new(
+            host_key.clone(),
+            Duration::from_millis(250),
+        )),
+    );
+
+    app.invoke_assets_create_action_selected("new-ssh-connection".into());
+    app.invoke_asset_ssh_modal_draft_changed("name".into(), "Prod Bastion".into());
+    app.invoke_asset_ssh_modal_draft_changed("host".into(), "10.0.0.12".into());
+    app.invoke_asset_ssh_modal_draft_changed("user".into(), "ops".into());
+    app.invoke_asset_ssh_modal_draft_changed("password".into(), "secret".into());
+    app.invoke_asset_ssh_modal_action_requested("test".into());
+    flush_runtime_projection();
+
+    assert!(app.get_ssh_host_key_modal_open());
+
+    let started = Instant::now();
+    app.invoke_ssh_host_key_modal_accept_requested();
+
+    assert!(
+        started.elapsed() < Duration::from_millis(120),
+        "accepting the SSH host key from the modal should queue the follow-up test probe instead of blocking the UI thread"
+    );
+    assert!(!app.get_ssh_host_key_modal_open());
+    assert!(app.get_asset_modal_open());
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "busy");
+
+    std::thread::sleep(Duration::from_millis(280));
+    flush_runtime_projection();
+
+    assert_eq!(app.get_asset_ssh_modal_feedback_state().as_str(), "success");
+    assert_eq!(
+        KnownHostsService::new(&known_hosts_path)
+            .check("10.0.0.12", 22, &host_key)
+            .expect("check trusted host after modal confirmation"),
         KnownHostCheck::Trusted
     );
 

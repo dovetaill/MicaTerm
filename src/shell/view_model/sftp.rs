@@ -1,8 +1,82 @@
 //! ShellViewModel SFTP domain impls.
 
 use super::*;
+use chrono::{DateTime, Utc};
+use std::time::Instant;
+
+fn sftp_parent_render_row() -> SftpPanelRenderRow {
+    SftpPanelRenderRow {
+        id: "__sftp_parent__".into(),
+        name: "..".into(),
+        meta_label: "Go to parent directory".into(),
+        type_label: "Up".into(),
+        modified_label: String::new(),
+        size_label: String::new(),
+        kind: "parent-directory".into(),
+        selected: false,
+    }
+}
 
 impl ShellViewModel {
+    pub fn begin_sftp_panel_open_latency(&mut self, started_at: Instant) {
+        self.pending_sftp_panel_open_latency_started_at = Some(started_at);
+    }
+
+    pub fn take_sftp_panel_open_latency(&mut self) -> Option<Instant> {
+        self.pending_sftp_panel_open_latency_started_at.take()
+    }
+
+    pub fn clear_sftp_panel_open_latency(&mut self) {
+        self.pending_sftp_panel_open_latency_started_at = None;
+    }
+
+    pub fn begin_sftp_panel_switch_latency(
+        &mut self,
+        browser_session_id: impl Into<String>,
+        started_at: Instant,
+    ) {
+        self.pending_sftp_panel_switch_latency = Some(PendingSftpSwitchLatencyTrace {
+            started_at,
+            browser_session_id: browser_session_id.into(),
+        });
+    }
+
+    pub fn take_sftp_panel_switch_latency(&mut self, browser_session_id: &str) -> Option<Instant> {
+        let trace = self.pending_sftp_panel_switch_latency.take()?;
+        if trace.browser_session_id == browser_session_id {
+            Some(trace.started_at)
+        } else {
+            self.pending_sftp_panel_switch_latency = Some(trace);
+            None
+        }
+    }
+
+    pub fn begin_sftp_request_latency_trace(
+        &mut self,
+        request_id: u64,
+        flow: &'static str,
+        browser_session_id: &str,
+        path: &str,
+        started_at: Instant,
+    ) {
+        self.sftp_request_latency_traces.insert(
+            request_id,
+            SftpRequestLatencyTrace {
+                flow,
+                started_at,
+                browser_session_id: browser_session_id.to_string(),
+                path: path.to_string(),
+            },
+        );
+    }
+
+    pub fn finish_sftp_request_latency_trace(
+        &mut self,
+        request_id: u64,
+    ) -> Option<SftpRequestLatencyTrace> {
+        self.sftp_request_latency_traces.remove(&request_id)
+    }
+
     pub fn open_sftp_panel(&mut self) {
         self.right_panel_view = RightPanelView::Sftp;
         self.show_right_panel = true;
@@ -10,8 +84,85 @@ impl ShellViewModel {
     }
 
     pub fn set_file_browser_session(&mut self, session: FileBrowserSession) {
+        let projection = self.build_sftp_panel_projection(&session);
+        let render_cache = self.build_sftp_panel_render_cache(&session, projection.as_slice());
+        self.sftp_panel_projection_cache
+            .insert(session.file_browser_session_id.clone(), projection);
+        self.sftp_panel_render_cache
+            .insert(session.file_browser_session_id.clone(), render_cache);
         self.file_browser_sessions
             .insert(session.file_browser_session_id.clone(), session);
+    }
+
+    fn build_sftp_panel_projection(
+        &self,
+        session: &FileBrowserSession,
+    ) -> Vec<SftpDirectoryEntry> {
+        let mut projection = session.entries.clone();
+        projection.sort_by(|left, right| {
+            compare_sftp_panel_entries(left, right, session.sort_state)
+        });
+        projection
+    }
+
+    pub fn refresh_sftp_panel_projection_cache(&mut self, file_browser_session_id: &str) -> bool {
+        let Some(session) = self.file_browser_sessions.get(file_browser_session_id).cloned() else {
+            return false;
+        };
+        let projection = self.build_sftp_panel_projection(&session);
+        self.sftp_panel_projection_cache
+            .insert(file_browser_session_id.to_string(), projection);
+        let _ = self.refresh_sftp_panel_render_cache(file_browser_session_id);
+        true
+    }
+
+    fn build_sftp_panel_render_cache(
+        &self,
+        session: &FileBrowserSession,
+        projection: &[SftpDirectoryEntry],
+    ) -> SftpPanelRenderCache {
+        let selected_entry_ids = session
+            .selected_entry_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        let mut rows = Vec::with_capacity(projection.len() + 1);
+        let mut row_index_by_entry_id = HashMap::with_capacity(projection.len());
+
+        if session.can_navigate_up() {
+            rows.push(sftp_parent_render_row());
+        }
+
+        for entry in projection {
+            row_index_by_entry_id.insert(entry.id.clone(), rows.len());
+            rows.push(build_sftp_panel_render_row(
+                entry,
+                selected_entry_ids.contains(entry.id.as_str()),
+            ));
+        }
+
+        SftpPanelRenderCache {
+            rows,
+            row_index_by_entry_id,
+            dirty_row_indices: Vec::new(),
+            full_resync_required: true,
+        }
+    }
+
+    pub fn refresh_sftp_panel_render_cache(&mut self, file_browser_session_id: &str) -> bool {
+        let Some(session) = self.file_browser_sessions.get(file_browser_session_id).cloned() else {
+            return false;
+        };
+        let projection = self
+            .sftp_panel_projection_cache
+            .get(file_browser_session_id)
+            .cloned()
+            .unwrap_or_else(|| self.build_sftp_panel_projection(&session));
+        self.sftp_panel_render_cache.insert(
+            file_browser_session_id.to_string(),
+            self.build_sftp_panel_render_cache(&session, projection.as_slice()),
+        );
+        true
     }
 
     pub fn set_sftp_session_state(&mut self, session_id: String, state: SftpSessionBindingState) {
@@ -92,15 +243,69 @@ impl ShellViewModel {
         self.file_browser_sessions.get_mut(&session_id)
     }
 
-    pub fn select_sftp_panel_entry(&mut self, entry_id: &str) -> bool {
-        {
+    fn active_sftp_panel_render_cache(&self) -> Option<&SftpPanelRenderCache> {
+        let session_id = self.active_file_browser_session_id()?;
+        self.sftp_panel_render_cache.get(session_id)
+    }
+
+    fn update_sftp_panel_render_selection_cache(
+        &mut self,
+        file_browser_session_id: &str,
+        previous_selection: &[String],
+        next_selection: &[String],
+    ) -> bool {
+        let Some(render_cache) = self.sftp_panel_render_cache.get_mut(file_browser_session_id) else {
+            return false;
+        };
+
+        let next_selection = next_selection
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        let mut dirty_row_indices = previous_selection
+            .iter()
+            .map(String::as_str)
+            .chain(next_selection.iter().copied())
+            .filter_map(|entry_id| render_cache.row_index_by_entry_id.get(entry_id).copied())
+            .collect::<Vec<_>>();
+        dirty_row_indices.sort_unstable();
+        dirty_row_indices.dedup();
+        if dirty_row_indices.is_empty() {
+            return false;
+        }
+
+        for &index in &dirty_row_indices {
+            if let Some(row) = render_cache.rows.get_mut(index) {
+                row.selected = next_selection.contains(row.id.as_str());
+            }
+        }
+        render_cache.dirty_row_indices = dirty_row_indices;
+        render_cache.full_resync_required = false;
+        true
+    }
+
+    pub(super) fn replace_active_sftp_selection(&mut self, next_selection: Vec<String>) -> bool {
+        let (file_browser_session_id, previous_selection) = {
             let Some(state) = self.active_sftp_session_state_mut() else {
                 return false;
             };
-            if state.selected_entry_ids.len() == 1 && state.selected_entry_ids[0] == entry_id {
+            if state.selected_entry_ids == next_selection {
                 return false;
             }
-            state.selected_entry_ids = vec![entry_id.to_string()];
+            let previous_selection = std::mem::replace(&mut state.selected_entry_ids, next_selection.clone());
+            (state.file_browser_session_id.clone(), previous_selection)
+        };
+        self.update_sftp_panel_render_selection_cache(
+            file_browser_session_id.as_str(),
+            previous_selection.as_slice(),
+            next_selection.as_slice(),
+        );
+        true
+    }
+
+    pub fn select_sftp_panel_entry(&mut self, entry_id: &str) -> bool {
+        if !self.replace_active_sftp_selection(vec![entry_id.to_string()]) {
+            return false;
         }
         self.context_target_asset_id = Some(entry_id.to_string());
         true
@@ -117,6 +322,50 @@ impl ShellViewModel {
         self.quick_browser_session()
             .map(|state| state.mode.id())
             .unwrap_or(SftpPanelMode::Empty.id())
+    }
+
+    pub fn sftp_panel_projected_entries(&self) -> &[SftpDirectoryEntry] {
+        let Some(session_id) = self.quick_browser_session_id() else {
+            return &[];
+        };
+        if let Some(entries) = self.sftp_panel_projection_cache.get(session_id) {
+            entries.as_slice()
+        } else {
+            self.quick_browser_session()
+                .map(|state| state.entries.as_slice())
+                .unwrap_or(&[])
+        }
+    }
+
+    pub fn active_sftp_panel_render_rows(&self) -> &[SftpPanelRenderRow] {
+        self.active_sftp_panel_render_cache()
+            .map(|cache| cache.rows.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn active_sftp_panel_render_dirty_indices(&self) -> &[usize] {
+        self.active_sftp_panel_render_cache()
+            .map(|cache| cache.dirty_row_indices.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn active_sftp_panel_render_requires_full_resync(&self) -> bool {
+        self.active_sftp_panel_render_cache()
+            .map(|cache| cache.full_resync_required)
+            .unwrap_or(self.sftp_panel_last_rendered_session_id.is_some())
+    }
+
+    pub fn mark_active_sftp_panel_render_clean(&mut self) -> bool {
+        let active_session_id = self.active_file_browser_session_id().map(str::to_owned);
+        if let Some(session_id) = active_session_id.as_deref()
+            && let Some(render_cache) = self.sftp_panel_render_cache.get_mut(session_id)
+        {
+            render_cache.full_resync_required = false;
+            render_cache.dirty_row_indices.clear();
+        }
+        let changed = self.sftp_panel_last_rendered_session_id != active_session_id;
+        self.sftp_panel_last_rendered_session_id = active_session_id;
+        changed || self.active_sftp_panel_render_cache().is_some()
     }
 
     pub fn sftp_panel_host_label(&self) -> String {
@@ -232,8 +481,15 @@ impl ShellViewModel {
             },
         };
 
-        if let Some(state) = self.quick_browser_session_mut() {
-            state.sort_state = next_sort_state;
+        if let Some(session_id) = {
+            if let Some(state) = self.quick_browser_session_mut() {
+                state.sort_state = next_sort_state;
+                Some(state.file_browser_session_id.clone())
+            } else {
+                None
+            }
+        } {
+            self.refresh_sftp_panel_projection_cache(session_id.as_str());
         } else {
             self.quick_browser_state.sort_state = next_sort_state;
         }
@@ -249,11 +505,18 @@ impl ShellViewModel {
             direction: Some(FileBrowserSortDirection::Asc),
         };
 
-        if let Some(state) = self.quick_browser_session_mut() {
-            if state.sort_state == next_sort_state {
-                return false;
+        if let Some(session_id) = {
+            if let Some(state) = self.quick_browser_session_mut() {
+                if state.sort_state == next_sort_state {
+                    return false;
+                }
+                state.sort_state = next_sort_state;
+                Some(state.file_browser_session_id.clone())
+            } else {
+                None
             }
-            state.sort_state = next_sort_state;
+        } {
+            self.refresh_sftp_panel_projection_cache(session_id.as_str());
         } else {
             if self.quick_browser_state.sort_state == next_sort_state {
                 return false;
@@ -279,14 +542,8 @@ impl ShellViewModel {
         }
 
         let first_selected_id = next_selection.first().cloned();
-        {
-            let Some(state) = self.active_sftp_session_state_mut() else {
-                return false;
-            };
-            if state.selected_entry_ids == next_selection {
-                return false;
-            }
-            state.selected_entry_ids = next_selection;
+        if !self.replace_active_sftp_selection(next_selection) {
+            return false;
         }
         self.context_target_asset_id = first_selected_id;
         true
@@ -366,30 +623,66 @@ impl ShellViewModel {
             return false;
         }
 
-        let Some(state) = self.quick_browser_session_mut() else {
+        let Some(session_id) = ({
+            let Some(state) = self.quick_browser_session_mut() else {
+                return false;
+            };
+            state.navigate_manual(trimmed.to_string());
+            Some(state.file_browser_session_id.clone())
+        }) else {
             return false;
         };
-        state.navigate_manual(trimmed.to_string());
         self.quick_browser_state.path_editing = false;
+        let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
         true
     }
 
     pub fn navigate_sftp_panel_back(&mut self) -> bool {
-        self.quick_browser_session_mut()
-            .map(FileBrowserSession::navigate_back)
-            .unwrap_or(false)
+        let Some(session_id) = ({
+            let Some(state) = self.quick_browser_session_mut() else {
+                return false;
+            };
+            if !state.navigate_back() {
+                return false;
+            }
+            Some(state.file_browser_session_id.clone())
+        }) else {
+            return false;
+        };
+        let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
+        true
     }
 
     pub fn navigate_sftp_panel_forward(&mut self) -> bool {
-        self.quick_browser_session_mut()
-            .map(FileBrowserSession::navigate_forward)
-            .unwrap_or(false)
+        let Some(session_id) = ({
+            let Some(state) = self.quick_browser_session_mut() else {
+                return false;
+            };
+            if !state.navigate_forward() {
+                return false;
+            }
+            Some(state.file_browser_session_id.clone())
+        }) else {
+            return false;
+        };
+        let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
+        true
     }
 
     pub fn navigate_sftp_panel_up(&mut self) -> bool {
-        self.quick_browser_session_mut()
-            .map(FileBrowserSession::navigate_up)
-            .unwrap_or(false)
+        let Some(session_id) = ({
+            let Some(state) = self.quick_browser_session_mut() else {
+                return false;
+            };
+            if !state.navigate_up() {
+                return false;
+            }
+            Some(state.file_browser_session_id.clone())
+        }) else {
+            return false;
+        };
+        let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
+        true
     }
 
     pub fn retry_sftp_panel(&mut self) -> bool {
@@ -409,16 +702,22 @@ impl ShellViewModel {
     }
 
     pub fn reenable_sftp_follow(&mut self) -> bool {
-        let Some(state) = self.quick_browser_session_mut() else {
+        let Some(session_id) = ({
+            let Some(state) = self.quick_browser_session_mut() else {
+                return false;
+            };
+            let path = if state.current_path.is_empty() {
+                "/".to_string()
+            } else {
+                state.current_path.clone()
+            };
+            state.reenable_follow(path);
+            Some(state.file_browser_session_id.clone())
+        }) else {
             return false;
         };
-        let path = if state.current_path.is_empty() {
-            "/".to_string()
-        } else {
-            state.current_path.clone()
-        };
-        state.reenable_follow(path);
         self.quick_browser_state.path_editing = false;
+        let _ = self.refresh_sftp_panel_render_cache(session_id.as_str());
         true
     }
 
@@ -683,6 +982,7 @@ impl ShellViewModel {
                 browser_session.selected_entry_ids.clear();
                 browser_session.last_error = None;
             }
+            let _ = self.refresh_sftp_panel_projection_cache(browser_session_id.as_str());
             let _ = self.activate_workspace_tab(tab_id.as_str());
             if !self.transfer_center_pinned {
                 self.transfer_center_open = false;
@@ -901,6 +1201,180 @@ fn transfer_task_workspace_dir(task: &crate::app::sftp::TransferTask) -> Option<
         | crate::app::sftp::TransferDirection::Delete => task.source_path.as_str(),
     };
     remote_parent_dir(path)
+}
+
+fn build_sftp_panel_render_row(
+    entry: &SftpDirectoryEntry,
+    selected: bool,
+) -> SftpPanelRenderRow {
+    let kind = sftp_panel_entry_kind(entry);
+    let type_label = sftp_panel_entry_type_label(kind);
+    let size_label = sftp_panel_entry_size_label(entry);
+    let modified_label = sftp_panel_entry_modified_label(entry);
+
+    SftpPanelRenderRow {
+        id: entry.id.clone(),
+        name: entry.name.clone(),
+        meta_label: sftp_panel_entry_meta_label(type_label, &size_label, &modified_label),
+        type_label: type_label.to_string(),
+        modified_label,
+        size_label,
+        kind: kind.to_string(),
+        selected,
+    }
+}
+
+fn sftp_panel_entry_type_label(kind: &str) -> &'static str {
+    match kind {
+        "directory" => "Folder",
+        "symlink" => "Link",
+        "archive" => "Archive",
+        "image" => "Image",
+        "config" => "Config",
+        "executable" => "Executable",
+        "unknown" => "Unknown",
+        _ => "File",
+    }
+}
+
+fn sftp_panel_entry_modified_label(entry: &SftpDirectoryEntry) -> String {
+    let Some(unix_seconds) = entry.modified_unix_seconds else {
+        return String::new();
+    };
+    let Some(timestamp) = DateTime::<Utc>::from_timestamp(unix_seconds as i64, 0) else {
+        return String::new();
+    };
+    timestamp.format("%Y-%m-%d %H:%M").to_string()
+}
+
+fn sftp_panel_entry_size_label(entry: &SftpDirectoryEntry) -> String {
+    entry.size_bytes.map(format_binary_size).unwrap_or_default()
+}
+
+fn sftp_panel_entry_meta_label(
+    type_label: &str,
+    size_label: &str,
+    modified_label: &str,
+) -> String {
+    if type_label.is_empty() {
+        return modified_label.to_string();
+    }
+    if !size_label.is_empty() && !modified_label.is_empty() {
+        return format!("{type_label} · {size_label} · {modified_label}");
+    }
+    if !size_label.is_empty() {
+        return format!("{type_label} · {size_label}");
+    }
+    if !modified_label.is_empty() {
+        return format!("{type_label} · {modified_label}");
+    }
+
+    type_label.to_string()
+}
+
+fn format_binary_size(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+
+    let bytes = bytes as f64;
+    if bytes >= GIB {
+        format!("{:.1} GB", bytes / GIB)
+    } else if bytes >= MIB {
+        format!("{:.1} MB", bytes / MIB)
+    } else if bytes >= KIB {
+        format!("{:.0} KB", bytes / KIB)
+    } else {
+        format!("{bytes:.0} B")
+    }
+}
+
+fn sftp_panel_entry_kind(entry: &SftpDirectoryEntry) -> &'static str {
+    match entry.kind {
+        crate::app::sftp::SftpDirectoryEntryKind::Directory => "directory",
+        crate::app::sftp::SftpDirectoryEntryKind::Symlink => "symlink",
+        crate::app::sftp::SftpDirectoryEntryKind::Unknown => "unknown",
+        crate::app::sftp::SftpDirectoryEntryKind::File => {
+            classify_sftp_file_visual_kind(entry.name.as_str())
+        }
+    }
+}
+
+fn classify_sftp_file_visual_kind(name: &str) -> &'static str {
+    let lowercase = name.to_ascii_lowercase();
+    if lowercase.ends_with(".tar.gz")
+        || lowercase.ends_with(".tgz")
+        || lowercase.ends_with(".tar.bz2")
+        || lowercase.ends_with(".tbz2")
+        || lowercase.ends_with(".tar.xz")
+        || lowercase.ends_with(".txz")
+        || has_any_suffix(
+            lowercase.as_str(),
+            &[".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".jar"],
+        )
+    {
+        return "archive";
+    }
+    if has_any_suffix(
+        lowercase.as_str(),
+        &[
+            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".ico", ".tif", ".tiff",
+            ".avif",
+        ],
+    ) {
+        return "image";
+    }
+    if lowercase.starts_with(".env")
+        || matches!(
+            lowercase.as_str(),
+            "dockerfile" | "compose.yml" | "compose.yaml" | "makefile" | "justfile"
+        )
+        || has_any_suffix(
+            lowercase.as_str(),
+            &[
+                ".json",
+                ".yaml",
+                ".yml",
+                ".toml",
+                ".ini",
+                ".cfg",
+                ".conf",
+                ".config",
+                ".service",
+                ".xml",
+                ".lock",
+                ".properties",
+            ],
+        )
+    {
+        return "config";
+    }
+    if matches!(
+        lowercase.as_str(),
+        "gradlew" | "configure" | "install" | "run" | "start" | "deploy"
+    ) || has_any_suffix(
+        lowercase.as_str(),
+        &[
+            ".sh",
+            ".bash",
+            ".zsh",
+            ".fish",
+            ".ps1",
+            ".cmd",
+            ".bat",
+            ".exe",
+            ".bin",
+            ".run",
+            ".appimage",
+        ],
+    ) {
+        return "executable";
+    }
+    "file"
+}
+
+fn has_any_suffix(value: &str, suffixes: &[&str]) -> bool {
+    suffixes.iter().any(|suffix| value.ends_with(suffix))
 }
 
 fn local_parent_dir(path: &str) -> Option<String> {
