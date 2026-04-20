@@ -9804,13 +9804,15 @@ fn workspace_terminal_scroll_callbacks_update_active_session_surface() {
     slint::platform::update_timers_and_animations();
 
     app.invoke_workspace_session_scroll_jump_requested(1.0);
-    settle_terminal_projection();
-    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 8);
+    wait_for_condition(Duration::from_secs(1), || {
+        app.get_workspace_session_viewport_offset_lines() == 8
+    });
     assert!(!app.get_workspace_session_viewport_at_bottom());
 
     app.invoke_workspace_session_scroll_thumb_drag_requested(0.0);
-    settle_terminal_projection();
-    assert_eq!(app.get_workspace_session_viewport_offset_lines(), 0);
+    wait_for_condition(Duration::from_secs(1), || {
+        app.get_workspace_session_viewport_offset_lines() == 0
+    });
     assert!(app.get_workspace_session_viewport_at_bottom());
 }
 

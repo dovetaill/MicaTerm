@@ -800,8 +800,9 @@ fn ssh_modal_narrow_viewport_preserves_right_gutter_after_trailing_action() {
     let chrome = fs::read_to_string("ui/components/modal-chrome.slint").unwrap();
 
     assert!(
-        chrome.contains("width: parent.width - 24px - (root.trailing-action-text != \"\" ? 70px : 0px);")
-            && chrome.contains("x: parent.width - self.width - 8px;"),
+        chrome.contains(
+            "width: parent.width - 24px - (root.trailing-action-text != \"\" ? 70px : 0px);"
+        ) && chrome.contains("x: parent.width - self.width - 8px;"),
         "shared dialog fields should reserve input width and an explicit 8px trailing gutter when an inline action button is present"
     );
 }

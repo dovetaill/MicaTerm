@@ -368,8 +368,12 @@ fn ssh_modal_no_longer_renders_dead_connection_options_group() {
     assert!(!ssh_modal.contains("label: \"Session Environment\""));
     assert!(ssh_modal.contains("title: \"Proxy chain\";"));
     assert!(ssh_modal.contains("text: \"Proxy type\""));
-    assert!(ssh_modal.contains("label: root.proxy-type == \"http\" ? \"HTTP host\" : \"SOCKS5 host\";"));
-    assert!(ssh_modal.contains("label: root.proxy-type == \"http\" ? \"HTTP port\" : \"SOCKS5 port\";"));
+    assert!(
+        ssh_modal.contains("label: root.proxy-type == \"http\" ? \"HTTP host\" : \"SOCKS5 host\";")
+    );
+    assert!(
+        ssh_modal.contains("label: root.proxy-type == \"http\" ? \"HTTP port\" : \"SOCKS5 port\";")
+    );
     assert!(ssh_modal.contains("label: \"Username\""));
     assert!(ssh_modal.contains("label: \"Password\""));
     assert!(ssh_modal.contains("text: \"Upstream SSH connection\""));
@@ -384,9 +388,8 @@ fn ssh_modal_exposes_private_key_import_guidance() {
         .expect("read ssh modal");
 
     assert!(
-        ssh_modal.contains(
-            "Only the private key is needed here. The public key stays on the server."
-        ),
+        ssh_modal
+            .contains("Only the private key is needed here. The public key stays on the server."),
         "ssh modal should explain that users only provide the private key locally"
     );
     assert!(
@@ -427,7 +430,8 @@ fn ssh_modal_labels_saved_path_mode_as_legacy_file_path() {
         "ssh modal should relabel saved path-mode assets as legacy file path"
     );
     assert!(
-        ssh_modal.contains("Paste or import a fresh key below to replace the legacy path reference."),
+        ssh_modal
+            .contains("Paste or import a fresh key below to replace the legacy path reference."),
         "ssh modal should explain how a legacy path asset migrates to imported key content"
     );
 }
@@ -706,7 +710,9 @@ fn blocking_modal_shell_exposes_a_full_frame_for_child_owned_chrome() {
 
     assert!(
         shell.contains("modal-event-scope := FocusScope {")
-            && shell.contains("content-host := Rectangle {\n                x: 0px;\n                y: 0px;"),
+            && shell.contains(
+                "content-host := Rectangle {\n                x: 0px;\n                y: 0px;"
+            ),
         "blocking modal shell content host must expose the full frame so child modals can own header and footer geometry"
     );
     assert!(
@@ -759,8 +765,8 @@ fn blocking_modal_shell_claims_focus_and_captures_escape_for_the_topmost_dialog(
 
 #[test]
 fn shared_modal_chrome_exports_unified_dialog_controls_for_forms_and_action_rows() {
-    let chrome = fs::read_to_string("ui/components/modal-chrome.slint")
-        .expect("read shared modal chrome");
+    let chrome =
+        fs::read_to_string("ui/components/modal-chrome.slint").expect("read shared modal chrome");
 
     assert!(
         chrome.contains("export component DialogActionButton")
@@ -1155,8 +1161,7 @@ fn blocking_modal_children_bind_overlay_parent_dimensions() {
 
 #[test]
 fn ssh_form_field_contract_allows_horizontal_rows_to_shrink_without_overflow() {
-    let chrome = fs::read_to_string("ui/components/modal-chrome.slint")
-        .expect("read modal chrome");
+    let chrome = fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome");
 
     assert!(
         chrome.contains("export component DialogTextField inherits Rectangle {")
@@ -1168,14 +1173,13 @@ fn ssh_form_field_contract_allows_horizontal_rows_to_shrink_without_overflow() {
 
 #[test]
 fn modal_refinement_regression_contract() {
-    let chrome = fs::read_to_string("ui/components/modal-chrome.slint")
-        .expect("read modal chrome");
+    let chrome = fs::read_to_string("ui/components/modal-chrome.slint").expect("read modal chrome");
     let folder_modal = fs::read_to_string("ui/components/assets-folder-create-modal.slint")
         .expect("read folder modal");
     let ssh_modal = fs::read_to_string("ui/components/assets-ssh-connection-modal.slint")
         .expect("read ssh modal");
-    let snippet_modal = fs::read_to_string("ui/components/assets-snippet-modal.slint")
-        .expect("read snippet modal");
+    let snippet_modal =
+        fs::read_to_string("ui/components/assets-snippet-modal.slint").expect("read snippet modal");
 
     assert!(
         !chrome.contains("action-rail := Rectangle {"),
@@ -1192,9 +1196,8 @@ fn modal_refinement_regression_contract() {
         "ssh modal should replace the current slogan-style subtitle with product copy that fits a real header"
     );
     assert!(
-        !snippet_modal.contains(
-            "Keep command snippets compact, searchable, and ready for quick execution."
-        ),
+        !snippet_modal
+            .contains("Keep command snippets compact, searchable, and ready for quick execution."),
         "snippet modal should replace the current slogan-style subtitle with product copy that fits a real header"
     );
 }

@@ -95,7 +95,11 @@ impl SftpRuntimeHandle {
         self.backend.open_file_reader(path).await
     }
 
-    pub async fn open_file_writer(&self, path: &str, mode: SftpWriteMode) -> Result<BoxedSftpWriter> {
+    pub async fn open_file_writer(
+        &self,
+        path: &str,
+        mode: SftpWriteMode,
+    ) -> Result<BoxedSftpWriter> {
         self.backend.open_file_writer(path, mode).await
     }
 

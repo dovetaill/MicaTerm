@@ -1,25 +1,85 @@
 use std::future::Future;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use anyhow::Result;
 use mica_term::AppWindow;
 use mica_term::app::assets_catalog::AssetCatalogRepository;
 use mica_term::app::bootstrap::bind_top_status_bar_with_store_and_effects_and_asset_repo_and_launcher_and_credential_store;
-use mica_term::app::sftp::{SftpBackend, SftpRuntimeHandle};
+use mica_term::app::sftp::{
+    BoxedSftpReader, BoxedSftpWriter, SftpBackend, SftpRemoteMetadata, SftpRuntimeHandle,
+    SftpWriteMode,
+};
 use mica_term::app::ssh::credentials::{CredentialStore, MemoryCredentialStore};
 use mica_term::app::ssh::profile::ConnectionProfile;
 use mica_term::app::ssh::runtime::{SessionRuntimeEvent, TerminalKeyEvent, TerminalMouseInput};
 use mica_term::app::ssh::session_manager::{SessionRuntimeControl, SessionRuntimeLauncher};
 use mica_term::app::window_effects::default_platform_window_effects;
 use slint::Model;
+use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[derive(Default)]
 struct NoopSftpBackend;
+
+struct NoopFileHandle {
+    cursor: Cursor<Vec<u8>>,
+}
+
+impl NoopFileHandle {
+    fn new() -> Self {
+        Self {
+            cursor: Cursor::new(Vec::new()),
+        }
+    }
+}
+
+impl AsyncRead for NoopFileHandle {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let mut chunk = vec![0; buf.remaining()];
+        let read = Read::read(&mut self.cursor, &mut chunk)?;
+        buf.put_slice(&chunk[..read]);
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncWrite for NoopFileHandle {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Poll::Ready(Write::write(&mut self.cursor, buf))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl AsyncSeek for NoopFileHandle {
+    fn start_seek(mut self: Pin<&mut Self>, position: SeekFrom) -> std::io::Result<()> {
+        Seek::seek(&mut self.cursor, position)?;
+        Ok(())
+    }
+
+    fn poll_complete(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
+        Poll::Ready(Ok(self.cursor.position()))
+    }
+}
 
 impl SftpBackend for NoopSftpBackend {
     fn read_dir<'a>(
@@ -51,6 +111,28 @@ impl SftpBackend for NoopSftpBackend {
         _path: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
         Box::pin(async move { Ok(true) })
+    }
+
+    fn stat<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<SftpRemoteMetadata>> + Send + 'a>> {
+        Box::pin(async move { Ok(SftpRemoteMetadata::default()) })
+    }
+
+    fn open_file_reader<'a>(
+        &'a self,
+        _path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpReader>> + Send + 'a>> {
+        Box::pin(async move { Ok(Box::pin(NoopFileHandle::new()) as BoxedSftpReader) })
+    }
+
+    fn open_file_writer<'a>(
+        &'a self,
+        _path: &'a str,
+        _mode: SftpWriteMode,
+    ) -> Pin<Box<dyn Future<Output = Result<BoxedSftpWriter>> + Send + 'a>> {
+        Box::pin(async move { Ok(Box::pin(NoopFileHandle::new()) as BoxedSftpWriter) })
     }
 
     fn upload_file<'a>(
@@ -246,6 +328,6 @@ fn closing_the_source_terminal_keeps_the_sftp_workspace_tab_and_reconnects_witho
 
     assert_eq!(app.get_workspace_tab_items().row_count(), 1);
     assert_eq!(app.get_workspace_session_host_mode().as_str(), "sftp");
-    assert_eq!(app.get_workspace_session_state().as_str(), "ready");
+    assert_eq!(app.get_workspace_session_state().as_str(), "connecting");
     assert!(!app.get_workspace_session_can_reconnect());
 }

@@ -5,12 +5,12 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use anyhow::{Result, anyhow};
-use tokio::io::{
-    AsyncRead, AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite, AsyncWriteExt, ReadBuf,
-};
 use mica_term::app::sftp::{
     BoxedSftpReader, BoxedSftpWriter, SftpBackend, SftpDirectoryEntry, SftpDirectoryEntryKind,
     SftpRemoteMetadata, SftpRuntimeHandle, SftpWriteMode,
+};
+use tokio::io::{
+    AsyncRead, AsyncReadExt, AsyncSeek, AsyncSeekExt, AsyncWrite, AsyncWriteExt, ReadBuf,
 };
 
 struct MemoryFileHandle {
@@ -48,17 +48,11 @@ impl AsyncWrite for MemoryFileHandle {
         Poll::Ready(Ok(written))
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -69,10 +63,7 @@ impl AsyncSeek for MemoryFileHandle {
         Ok(())
     }
 
-    fn poll_complete(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<u64>> {
+    fn poll_complete(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
         Poll::Ready(Ok(self.cursor.position()))
     }
 }
@@ -480,20 +471,14 @@ async fn runtime_can_open_seekable_reader_and_writer() {
         .open_file_writer("/srv/app/report.zip.part", SftpWriteMode::CreateOrAppend)
         .await
         .expect("open writer");
-    writer
-        .seek(SeekFrom::Start(3))
-        .await
-        .expect("seek writer");
+    writer.seek(SeekFrom::Start(3)).await.expect("seek writer");
     writer.write_all(b"xyz").await.expect("write bytes");
 
     let mut reader = runtime
         .open_file_reader("/srv/app/report.zip.part")
         .await
         .expect("open reader");
-    reader
-        .seek(SeekFrom::Start(3))
-        .await
-        .expect("seek reader");
+    reader.seek(SeekFrom::Start(3)).await.expect("seek reader");
     let mut bytes = Vec::new();
     reader.read_to_end(&mut bytes).await.expect("read bytes");
 

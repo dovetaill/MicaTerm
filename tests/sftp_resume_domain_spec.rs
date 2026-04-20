@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use mica_term::app::app_paths::{AppRootPaths, AppRootSource};
 use mica_term::app::sftp::{
-    download_part_path, TransferDirection, TransferResumeMode, TransferTask, TransferTaskAction,
-    TransferTaskState,
+    TransferDirection, TransferResumeMode, TransferTask, TransferTaskAction, TransferTaskState,
+    download_part_path,
 };
 
 fn sample_app_root_paths() -> AppRootPaths {
@@ -25,7 +25,10 @@ fn transfer_task_state_reports_resume_related_states() {
 #[test]
 fn app_root_paths_exposes_transfer_database_path() {
     let paths = sample_app_root_paths();
-    assert_eq!(paths.transfer_database_path(), paths.data_dir.join("transfers.redb"));
+    assert_eq!(
+        paths.transfer_database_path(),
+        paths.data_dir.join("transfers.redb")
+    );
 }
 
 #[test]

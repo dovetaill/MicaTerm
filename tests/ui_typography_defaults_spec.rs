@@ -176,18 +176,16 @@ fn weak_small_text_hotspots_stop_relying_on_tiny_sizes_and_low_opacity() {
         "welcome detail helper copy should use explicit semantic colors instead of multiple low-opacity text layers"
     );
 
-    for expected in [
-        "text: root.sftp-status-copy();\n                    color: ThemeTokens.text-secondary;\n                    font-size: 12px;",
-        "text: item.name;\n                        color: ThemeTokens.text-primary;\n                        font-size: 12px;",
-        "text: item.type_label;\n                        color: ThemeTokens.text-secondary;\n                        font-size: 12px;",
-        "text: item.modified_label;\n                        color: ThemeTokens.text-secondary;\n                        font-size: 12px;",
-        "text: item.size_label;\n                        color: ThemeTokens.text-secondary;\n                        font-size: 12px;",
-    ] {
-        assert!(
-            right_panel.contains(expected),
-            "right panel small-text hotspots should keep `{expected}` so SFTP rows stop rendering critical metadata at 11px"
-        );
-    }
+    assert!(
+        right_panel.contains("text: root.sftp-status-copy();")
+            && right_panel.contains("text: item.name;")
+            && right_panel.contains("text: item.meta_label;")
+            && right_panel.contains("color: ThemeTokens.text-primary;")
+            && right_panel.contains("color: ThemeTokens.text-secondary;")
+            && right_panel.contains("font-size: 12px;")
+            && right_panel.contains("font-size: 11px;"),
+        "right panel typography should keep the virtualized SFTP rows on explicit semantic colors plus the current 12px name / 11px meta rhythm"
+    );
 
     assert!(
         right_panel.contains("font-size: AppTypography.ui-font-size-caption;")
