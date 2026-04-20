@@ -205,6 +205,49 @@ fn right_panel_source_uses_compact_toolbar_buttons_without_horizontal_file_scrol
 }
 
 #[test]
+fn right_panel_source_virtualizes_sftp_rows_with_scrollview_windowing() {
+    let source = std::fs::read_to_string("ui/shell/right-panel.slint").unwrap();
+    let app_window_source = std::fs::read_to_string("ui/app-window.slint").unwrap();
+
+    assert!(
+        source.contains("import { ListView, ScrollView } from \"std-widgets.slint\";")
+            || source.contains("import { ScrollView } from \"std-widgets.slint\";"),
+        "right panel should use ScrollView support for the virtualized SFTP row host"
+    );
+    assert!(
+        source.contains("list-host := ScrollView"),
+        "the SFTP row host should switch to a ScrollView so the UI can keep the full scrollbar range while rendering only a bounded row window"
+    );
+    assert!(
+        source.contains("sftp-panel-total-content-height")
+            && source.contains("sftp-panel-top-spacer-height")
+            && source.contains("sftp-panel-bottom-spacer-height"),
+        "right panel should expose total content height plus top/bottom spacer contracts for windowed row virtualization"
+    );
+    assert!(
+        source.contains("callback sftp-panel-viewport-changed(length, length);")
+            || source.contains(
+                "callback sftp-panel-viewport-changed(length viewport-y, length visible-height);"
+            ),
+        "right panel should emit viewport changes so Rust can retarget the visible window"
+    );
+    assert!(
+        !source.contains("if root.sftp-panel-mode != \"empty\" : list-host := ListView"),
+        "the SFTP row host should stop binding the full directory row set directly into ListView once true virtualization lands"
+    );
+    assert!(
+        app_window_source
+            .contains("in-out property <length> sftp-panel-total-content-height: 0px;")
+            && app_window_source
+                .contains("in-out property <length> sftp-panel-top-spacer-height: 0px;")
+            && app_window_source
+                .contains("in-out property <length> sftp-panel-bottom-spacer-height: 0px;")
+            && app_window_source.contains("callback sftp-panel-viewport-changed(length, length);"),
+        "app window should own and forward the SFTP virtualization contract into the right panel"
+    );
+}
+
+#[test]
 fn app_window_source_threads_sftp_table_state_into_right_panel() {
     let source = std::fs::read_to_string("ui/app-window.slint").unwrap();
 

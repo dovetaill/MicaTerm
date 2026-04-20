@@ -129,6 +129,9 @@ export component AppWindow inherits Window {
     in-out property <length> sftp-panel-type-column-width: 78px;
     in-out property <length> sftp-panel-modified-column-width: 150px;
     in-out property <length> sftp-panel-size-column-width: 72px;
+    in-out property <length> sftp-panel-total-content-height: 0px;
+    in-out property <length> sftp-panel-top-spacer-height: 0px;
+    in-out property <length> sftp-panel-bottom-spacer-height: 0px;
     in-out property <[SftpPanelItem]> sftp-panel-items: [];
     in-out property <[string]> sftp-panel-selected-entry-ids: [];
     in-out property <int> sftp-panel-queue-active: 0;
@@ -416,6 +419,7 @@ export component AppWindow inherits Window {
     callback sftp-panel-path-submitted(string);
     callback sftp-panel-sort-requested(string);
     callback sftp-panel-column-width-change-requested(string, length);
+    callback sftp-panel-viewport-changed(length, length);
     callback sftp-panel-item-selected(string);
     callback sftp-panel-item-activated(string, string);
     callback sftp-panel-context-menu-requested(string, string, length, length);
@@ -1011,6 +1015,9 @@ export component AppWindow inherits Window {
                         sftp-panel-type-column-width: root.sftp-panel-type-column-width;
                         sftp-panel-modified-column-width: root.sftp-panel-modified-column-width;
                         sftp-panel-size-column-width: root.sftp-panel-size-column-width;
+                        sftp-panel-total-content-height: root.sftp-panel-total-content-height;
+                        sftp-panel-top-spacer-height: root.sftp-panel-top-spacer-height;
+                        sftp-panel-bottom-spacer-height: root.sftp-panel-bottom-spacer-height;
                         sftp-panel-items: root.sftp-panel-items;
                         sftp-panel-selected-entry-ids: root.sftp-panel-selected-entry-ids;
                         sftp-panel-queue-active: root.sftp-panel-queue-active;
@@ -1059,6 +1066,10 @@ export component AppWindow inherits Window {
 
                         sftp-panel-column-width-change-requested(column-id, width) => {
                             root.sftp-panel-column-width-change-requested(column-id, width);
+                        }
+
+                        sftp-panel-viewport-changed(viewport_y, visible_height) => {
+                            root.sftp-panel-viewport-changed(viewport_y, visible_height);
                         }
 
                         sftp-panel-item-selected(item-id) => {

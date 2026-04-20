@@ -107,6 +107,9 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &mut ShellViewMod
     window.set_sftp_panel_type_column_width(state.sftp_panel_type_column_width_px());
     window.set_sftp_panel_modified_column_width(state.sftp_panel_modified_column_width_px());
     window.set_sftp_panel_size_column_width(state.sftp_panel_size_column_width_px());
+    window.set_sftp_panel_total_content_height(state.sftp_panel_total_content_height_px());
+    window.set_sftp_panel_top_spacer_height(state.sftp_panel_top_spacer_height_px());
+    window.set_sftp_panel_bottom_spacer_height(state.sftp_panel_bottom_spacer_height_px());
     window.set_sftp_queue_drawer_open(state.sftp_queue_drawer_open());
     window.set_sftp_panel_drop_target_active(state.quick_browser_drop_target_active());
 
@@ -793,7 +796,11 @@ pub(super) fn apply_sftp_browser_background_message(
     message: SftpBrowserBackgroundMessage,
 ) -> bool {
     let request_id = message.request.request_id;
-    let request_result = if message.result.is_ok() { "ok" } else { "error" };
+    let request_result = if message.result.is_ok() {
+        "ok"
+    } else {
+        "error"
+    };
     let row_count = message.result.as_ref().ok().map(Vec::len);
     controller.complete_request(request_id);
     if message.kind != crate::app::sftp::SftpOperationKind::LoadDir {
@@ -2246,6 +2253,16 @@ pub(super) fn bind_sftp_callbacks(
         window.set_sftp_panel_external_drop_paths(ModelRc::new(VecModel::from(vec![])));
         let _ = scheduled;
         sync_right_panel_state(&window, &mut state);
+    });
+
+    let state = Rc::clone(view_model);
+    let handle = window.as_weak();
+    window.on_sftp_panel_viewport_changed(move |viewport_y, visible_height| {
+        let window = handle.unwrap();
+        let mut state = state.borrow_mut();
+        if state.update_active_sftp_panel_viewport(viewport_y, visible_height) {
+            sync_right_panel_state(&window, &mut state);
+        }
     });
 
     let state = Rc::clone(view_model);

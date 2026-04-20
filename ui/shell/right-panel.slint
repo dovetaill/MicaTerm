@@ -1,6 +1,6 @@
 // Optional right-side utility panel that collapses out of layout when hidden.
 
-import { ListView } from "std-widgets.slint";
+import { ScrollView } from "std-widgets.slint";
 import { ThemeTokens } from "../theme/tokens.slint";
 import { AppTypography } from "../theme/typography.slint";
 import { SidebarToolbarIconButton } from "../components/sidebar-toolbar-icon-button.slint";
@@ -37,6 +37,9 @@ export component RightPanel inherits Rectangle {
     in property <length> sftp-panel-type-column-width: 78px;
     in property <length> sftp-panel-modified-column-width: 150px;
     in property <length> sftp-panel-size-column-width: 72px;
+    in property <length> sftp-panel-total-content-height: 0px;
+    in property <length> sftp-panel-top-spacer-height: 0px;
+    in property <length> sftp-panel-bottom-spacer-height: 0px;
     in property <[SftpPanelItem]> sftp-panel-items: [];
     in property <[string]> sftp-panel-selected-entry-ids: [];
     in property <int> sftp-panel-queue-active: 0;
@@ -87,6 +90,7 @@ export component RightPanel inherits Rectangle {
     callback sftp-panel-path-submitted(string);
     callback sftp-panel-sort-requested(string);
     callback sftp-panel-column-width-change-requested(string, length);
+    callback sftp-panel-viewport-changed(length, length);
     callback sftp-panel-item-selected(string);
     callback sftp-panel-item-activated(string, string);
     callback sftp-panel-context-menu-requested(string, string, length, length);
@@ -612,126 +616,173 @@ export component RightPanel inherits Rectangle {
                 }
             }
 
-            if root.sftp-panel-mode != "empty" : list-host-blank-area-touch := TouchArea {
+            if root.sftp-panel-mode != "empty" : list-host := ScrollView {
                 x: 0px;
                 y: root.sftp-status-row-height;
                 width: parent.width;
                 height: parent.height - root.sftp-status-row-height;
+                viewport-width: scroll-body.width;
+                viewport-height: scroll-body.height;
+                mouse-drag-pan-enabled: false;
+                horizontal-scrollbar-policy: always-off;
 
-                pointer-event(event) => {
-                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
-                        root.sftp-panel-context-menu-requested(
-                            "",
-                            "sftp-blank",
-                            self.mouse-x + self.absolute-position.x,
-                            self.mouse-y + self.absolute-position.y,
-                        );
-                    }
+                init => {
+                    root.sftp-panel-viewport-changed(self.viewport-y, self.visible-height);
                 }
-            }
 
-            if root.sftp-panel-mode != "empty" : list-host := ListView {
-                x: 0px;
-                y: root.sftp-status-row-height;
-                width: parent.width;
-                height: parent.height - root.sftp-status-row-height;
+                changed viewport-y => {
+                    root.sftp-panel-viewport-changed(self.viewport-y, self.visible-height);
+                }
 
-                for item in root.sftp-panel-items : Rectangle {
-                    width: parent.width;
-                    height: 44px;
-                    background: item.selected ? ThemeTokens.explorer-row-selected-surface
-                        : row-touch.has-hover ? ThemeTokens.explorer-row-hover-surface
-                        : transparent;
+                changed visible-height => {
+                    root.sftp-panel-viewport-changed(self.viewport-y, self.visible-height);
+                }
 
-                    Rectangle {
-                        x: 12px;
-                        y: parent.height - 1px;
-                        width: parent.width - 24px;
-                        height: 1px;
-                        background: ThemeTokens.divider-subtle;
-                    }
+                scrolled => {
+                    root.sftp-panel-viewport-changed(self.viewport-y, self.visible-height);
+                }
 
-                    Image {
-                        x: 14px;
-                        y: 12px;
-                        width: 16px;
-                        height: 16px;
-                        source: item.kind == "parent-directory"
-                            ? root.arrow-hook-up-left-icon
-                            : item.kind == "directory" ? root.folder-icon
-                            : item.kind == "symlink" ? root.link-icon
-                            : item.kind == "archive" ? root.archive-icon
-                            : item.kind == "image" ? root.image-icon
-                            : item.kind == "config" ? root.document-code-icon
-                            : item.kind == "executable" ? root.executable-icon
-                            : root.document-icon;
-                        image-fit: contain;
-                        colorize: item.kind == "directory"
-                            ? ThemeTokens.status-busy-accent
-                            : item.kind == "parent-directory"
-                                ? ThemeTokens.text-muted
-                                : item.kind == "symlink"
-                                    ? ThemeTokens.link-accent
-                                    : item.kind == "archive"
-                                        ? ThemeTokens.accent
-                                        : item.kind == "image"
-                                            ? ThemeTokens.status-error-accent
-                                            : item.kind == "config"
-                                                ? ThemeTokens.text-muted
-                                                : item.kind == "executable"
-                                                    ? ThemeTokens.status-success-accent
-                                : ThemeTokens.text-secondary;
-                    }
+                scroll-body := Rectangle {
+                    width: list-host.visible-width;
+                    height: max(list-host.visible-height, root.sftp-panel-total-content-height);
+                    background: transparent;
 
-                    Text {
-                        x: 40px;
-                        y: 4px;
-                        width: parent.width - 52px;
-                        height: 18px;
-                        text: item.name;
-                        color: ThemeTokens.text-primary;
-                        font-size: 12px;
-                        font-weight: item.selected ? 700 : 500;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-
-                    meta-text := Text {
-                        x: 40px;
-                        y: 22px;
-                        width: parent.width - 52px;
-                        height: 16px;
-                        text: item.meta_label;
-                        color: ThemeTokens.text-secondary;
-                        font-size: 11px;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-
-                    row-touch := TouchArea {
+                    blank-area-touch := TouchArea {
                         width: parent.width;
                         height: parent.height;
-
-                        clicked => {
-                            root.sftp-panel-item-selected(item.id);
-                        }
-
-                        double-clicked => {
-                            root.sftp-panel-item-activated(item.id, item.kind);
-                        }
 
                         pointer-event(event) => {
                             if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
                                 root.sftp-panel-context-menu-requested(
-                                    item.id,
-                                    item.kind == "parent-directory"
-                                        ? "sftp-blank"
-                                        : item.kind == "directory" ? "sftp-directory" : "sftp-file",
+                                    "",
+                                    "sftp-blank",
                                     self.mouse-x + self.absolute-position.x,
                                     self.mouse-y + self.absolute-position.y,
                                 );
                             }
                         }
+                    }
+
+                    top-spacer := Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: root.sftp-panel-top-spacer-height;
+                        background: transparent;
+                    }
+
+                    visible-row-host := VerticalLayout {
+                        x: 0px;
+                        y: root.sftp-panel-top-spacer-height;
+                        width: parent.width;
+                        spacing: 0px;
+
+                        for item in root.sftp-panel-items : Rectangle {
+                            width: parent.width;
+                            height: 44px;
+                            background: item.selected ? ThemeTokens.explorer-row-selected-surface
+                                : row-touch.has-hover ? ThemeTokens.explorer-row-hover-surface
+                                : transparent;
+
+                            Rectangle {
+                                x: 12px;
+                                y: parent.height - 1px;
+                                width: parent.width - 24px;
+                                height: 1px;
+                                background: ThemeTokens.divider-subtle;
+                            }
+
+                            Image {
+                                x: 14px;
+                                y: 12px;
+                                width: 16px;
+                                height: 16px;
+                                source: item.kind == "parent-directory"
+                                    ? root.arrow-hook-up-left-icon
+                                    : item.kind == "directory" ? root.folder-icon
+                                    : item.kind == "symlink" ? root.link-icon
+                                    : item.kind == "archive" ? root.archive-icon
+                                    : item.kind == "image" ? root.image-icon
+                                    : item.kind == "config" ? root.document-code-icon
+                                    : item.kind == "executable" ? root.executable-icon
+                                    : root.document-icon;
+                                image-fit: contain;
+                                colorize: item.kind == "directory"
+                                    ? ThemeTokens.status-busy-accent
+                                    : item.kind == "parent-directory"
+                                        ? ThemeTokens.text-muted
+                                        : item.kind == "symlink"
+                                            ? ThemeTokens.link-accent
+                                            : item.kind == "archive"
+                                                ? ThemeTokens.accent
+                                                : item.kind == "image"
+                                                    ? ThemeTokens.status-error-accent
+                                                    : item.kind == "config"
+                                                        ? ThemeTokens.text-muted
+                                                        : item.kind == "executable"
+                                                            ? ThemeTokens.status-success-accent
+                                        : ThemeTokens.text-secondary;
+                            }
+
+                            Text {
+                                x: 40px;
+                                y: 4px;
+                                width: parent.width - 52px;
+                                height: 18px;
+                                text: item.name;
+                                color: ThemeTokens.text-primary;
+                                font-size: 12px;
+                                font-weight: item.selected ? 700 : 500;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            meta-text := Text {
+                                x: 40px;
+                                y: 22px;
+                                width: parent.width - 52px;
+                                height: 16px;
+                                text: item.meta_label;
+                                color: ThemeTokens.text-secondary;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            row-touch := TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+
+                                clicked => {
+                                    root.sftp-panel-item-selected(item.id);
+                                }
+
+                                double-clicked => {
+                                    root.sftp-panel-item-activated(item.id, item.kind);
+                                }
+
+                                pointer-event(event) => {
+                                    if event.kind == PointerEventKind.down && event.button == PointerEventButton.right {
+                                        root.sftp-panel-context-menu-requested(
+                                            item.id,
+                                            item.kind == "parent-directory"
+                                                ? "sftp-blank"
+                                                : item.kind == "directory" ? "sftp-directory" : "sftp-file",
+                                            self.mouse-x + self.absolute-position.x,
+                                            self.mouse-y + self.absolute-position.y,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    bottom-spacer := Rectangle {
+                        x: 0px;
+                        y: visible-row-host.y + visible-row-host.height;
+                        width: parent.width;
+                        height: root.sftp-panel-bottom-spacer-height;
+                        background: transparent;
                     }
                 }
             }

@@ -610,6 +610,13 @@ pub struct SftpPanelRenderRow {
 pub struct SftpPanelRenderCache {
     pub rows: Vec<SftpPanelRenderRow>,
     pub row_index_by_entry_id: HashMap<String, usize>,
+    pub viewport_offset_px: u32,
+    pub viewport_height_px: u32,
+    pub window_start_row: usize,
+    pub window_end_row: usize,
+    pub total_content_height_px: u32,
+    pub top_spacer_height_px: u32,
+    pub bottom_spacer_height_px: u32,
     pub dirty_row_indices: Vec<usize>,
     pub full_resync_required: bool,
 }

@@ -199,7 +199,8 @@ fn shell_view_model_clamps_sftp_column_widths_in_window_runtime_state() {
 #[test]
 fn sftp_panel_render_cache_only_marks_changed_selection_rows_dirty() {
     let mut view_model = ShellViewModel::default();
-    let mut session = FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
+    let mut session =
+        FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
     let session_id = session.file_browser_session_id.clone();
     session.entries = vec![
         SftpDirectoryEntry {
@@ -239,7 +240,9 @@ fn sftp_panel_render_cache_only_marks_changed_selection_rows_dirty() {
     assert!(view_model.mark_active_sftp_panel_render_clean());
     assert!(!view_model.active_sftp_panel_render_requires_full_resync());
     assert!(
-        view_model.active_sftp_panel_render_dirty_indices().is_empty(),
+        view_model
+            .active_sftp_panel_render_dirty_indices()
+            .is_empty(),
         "once the panel sync consumes the fresh snapshot, the render cache should go clean until another real change lands"
     );
 
@@ -314,5 +317,143 @@ fn sftp_panel_sync_uses_incremental_row_updates_instead_of_generic_full_reconcil
     assert!(
         !bootstrap_sftp.contains("sync_vec_model(window.get_sftp_panel_items(), items"),
         "right-panel bootstrap should stop feeding SFTP rows through the generic full-list reconcile path once incremental row patching exists"
+    );
+}
+
+#[test]
+fn sftp_panel_virtualization_exposes_bounded_visible_window_for_large_directories() {
+    let mut view_model = ShellViewModel::default();
+    let mut session =
+        FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
+    let session_id = session.file_browser_session_id.clone();
+    session.entries = (0..200)
+        .map(|index| SftpDirectoryEntry {
+            id: format!("file-{index:03}"),
+            name: format!("file-{index:03}.log"),
+            path: format!("/srv/app/file-{index:03}.log"),
+            kind: SftpDirectoryEntryKind::File,
+            modified_unix_seconds: Some(index as u64),
+            size_bytes: Some(index as u64),
+        })
+        .collect::<Vec<_>>();
+
+    view_model.quick_browser_session_id = Some(session_id);
+    view_model.set_file_browser_session(session);
+
+    let _ = view_model.update_active_sftp_panel_viewport(0.0, 44.0 * 8.0);
+    assert_eq!(
+        view_model.active_sftp_panel_total_row_count(),
+        201,
+        "the virtualized panel should still know the full directory row count, including the parent row"
+    );
+    assert!(
+        view_model.active_sftp_panel_render_rows().len()
+            < view_model.active_sftp_panel_total_row_count(),
+        "large directories should only expose a bounded visible window to Slint instead of the full row set"
+    );
+    assert_eq!(
+        view_model.sftp_panel_top_spacer_height_px(),
+        0.0,
+        "the first viewport should start at the top of the full content range"
+    );
+    assert_eq!(
+        view_model.sftp_panel_total_content_height_px(),
+        201.0 * 44.0,
+        "total content height should continue to represent the full directory so the scrollbar range stays correct"
+    );
+}
+
+#[test]
+fn sftp_panel_virtualization_updates_visible_window_and_spacers_when_scrolled() {
+    let mut view_model = ShellViewModel::default();
+    let mut session =
+        FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
+    let session_id = session.file_browser_session_id.clone();
+    session.entries = (0..200)
+        .map(|index| SftpDirectoryEntry {
+            id: format!("file-{index:03}"),
+            name: format!("file-{index:03}.log"),
+            path: format!("/srv/app/file-{index:03}.log"),
+            kind: SftpDirectoryEntryKind::File,
+            modified_unix_seconds: Some(index as u64),
+            size_bytes: Some(index as u64),
+        })
+        .collect::<Vec<_>>();
+
+    view_model.quick_browser_session_id = Some(session_id);
+    view_model.set_file_browser_session(session);
+
+    let _ = view_model.update_active_sftp_panel_viewport(0.0, 44.0 * 8.0);
+    let initial_range = view_model.active_sftp_panel_visible_row_range();
+
+    let _ = view_model.update_active_sftp_panel_viewport(-(44.0 * 60.0), 44.0 * 8.0);
+
+    let next_range = view_model.active_sftp_panel_visible_row_range();
+    assert!(
+        next_range.start > initial_range.start,
+        "scrolling down should move the visible window forward through the full row cache"
+    );
+    assert_eq!(
+        view_model.sftp_panel_top_spacer_height_px(),
+        next_range.start as f32 * 44.0,
+        "top spacer height should match the number of skipped full-cache rows above the current window"
+    );
+    assert_eq!(
+        view_model.sftp_panel_bottom_spacer_height_px(),
+        (view_model.active_sftp_panel_total_row_count() - next_range.end) as f32 * 44.0,
+        "bottom spacer height should preserve the remaining scroll range below the visible window"
+    );
+}
+
+#[test]
+fn sftp_panel_virtualization_keeps_non_visible_selection_changes_out_of_visible_dirty_patch_set() {
+    let mut view_model = ShellViewModel::default();
+    let mut session =
+        FileBrowserSession::quick_browser(HostProfileRef::new("asset-prod"), "/srv/app");
+    let session_id = session.file_browser_session_id.clone();
+    session.entries = (0..200)
+        .map(|index| SftpDirectoryEntry {
+            id: format!("file-{index:03}"),
+            name: format!("file-{index:03}.log"),
+            path: format!("/srv/app/file-{index:03}.log"),
+            kind: SftpDirectoryEntryKind::File,
+            modified_unix_seconds: Some(index as u64),
+            size_bytes: Some(index as u64),
+        })
+        .collect::<Vec<_>>();
+
+    view_model.quick_browser_session_id = Some(session_id);
+    view_model.set_file_browser_session(session);
+    let _ = view_model.update_active_sftp_panel_viewport(0.0, 44.0 * 8.0);
+    assert!(view_model.mark_active_sftp_panel_render_clean());
+
+    assert!(view_model.select_sftp_panel_entry("file-180"));
+    assert!(
+        view_model
+            .active_sftp_panel_render_dirty_indices()
+            .is_empty(),
+        "selection changes outside the current visible window should not force row patches into the bounded UI model"
+    );
+    assert!(
+        !view_model.active_sftp_panel_render_requires_full_resync(),
+        "non-visible selection changes should stay incremental instead of forcing a full visible-window rebuild"
+    );
+}
+
+#[test]
+fn sftp_panel_virtualization_contract_is_threaded_through_bootstrap() {
+    let bootstrap_sftp =
+        fs::read_to_string("src/app/bootstrap/sftp.rs").expect("read bootstrap sftp source");
+
+    assert!(
+        bootstrap_sftp.contains("window.set_sftp_panel_total_content_height(")
+            && bootstrap_sftp.contains("window.set_sftp_panel_top_spacer_height(")
+            && bootstrap_sftp.contains("window.set_sftp_panel_bottom_spacer_height("),
+        "bootstrap should sync total height and spacer heights so the right-panel scrollbar still represents the full directory while the row model stays windowed"
+    );
+    assert!(
+        bootstrap_sftp
+            .contains("window.on_sftp_panel_viewport_changed(move |viewport_y, visible_height| {"),
+        "bootstrap should listen to viewport changes from the right panel so Rust can retarget the visible window instead of keeping a full directory-sized UI model"
     );
 }
