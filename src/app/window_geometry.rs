@@ -20,17 +20,25 @@ impl MonitorWorkArea {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedWindowBounds {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
 pub fn resolve_startup_bounds(
     saved: Option<PersistedWindowBounds>,
     desired_size: (u32, u32),
     monitors: &[MonitorWorkArea],
-) -> Option<PersistedWindowBounds> {
+) -> Option<ResolvedWindowBounds> {
     let fallback_monitor = monitors.first().copied()?;
 
     if let Some(saved) = saved
-        && let Some(monitor) = first_intersecting_monitor(saved, monitors)
+        && let Some(monitor) = first_intersecting_monitor(saved, desired_size, monitors)
     {
-        return Some(clamp_bounds_to_monitor(saved, monitor));
+        return Some(clamp_position_to_monitor(saved, desired_size, monitor));
     }
 
     Some(center_bounds_in_monitor(desired_size, fallback_monitor))
@@ -42,53 +50,91 @@ pub fn persisted_window_bounds_for_placement(
     y: i32,
     width: u32,
     height: u32,
+    monitors: &[MonitorWorkArea],
 ) -> Option<PersistedWindowBounds> {
     if placement != WindowPlacementKind::Restored || width == 0 || height == 0 {
         return None;
     }
 
-    Some(PersistedWindowBounds {
-        x,
-        y,
-        width,
-        height,
-    })
+    if !bounds_fit_any_monitor(x, y, width, height, monitors) {
+        return None;
+    }
+
+    Some(PersistedWindowBounds { x, y })
 }
 
 fn first_intersecting_monitor(
-    bounds: PersistedWindowBounds,
+    saved: PersistedWindowBounds,
+    desired_size: (u32, u32),
     monitors: &[MonitorWorkArea],
 ) -> Option<MonitorWorkArea> {
-    monitors
-        .iter()
-        .copied()
-        .find(|monitor| bounds_intersects_monitor(bounds, *monitor))
+    monitors.iter().copied().find(|monitor| {
+        bounds_intersects_monitor(
+            saved.x,
+            saved.y,
+            desired_size.0,
+            desired_size.1,
+            *monitor,
+        )
+    })
 }
 
-fn bounds_intersects_monitor(bounds: PersistedWindowBounds, monitor: MonitorWorkArea) -> bool {
-    let bounds_right = bounds.x + bounds.width as i32;
-    let bounds_bottom = bounds.y + bounds.height as i32;
+fn bounds_intersects_monitor(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    monitor: MonitorWorkArea,
+) -> bool {
+    let bounds_right = x + width as i32;
+    let bounds_bottom = y + height as i32;
     let monitor_right = monitor.x + monitor.width as i32;
     let monitor_bottom = monitor.y + monitor.height as i32;
 
-    bounds.x < monitor_right
+    x < monitor_right
         && bounds_right > monitor.x
-        && bounds.y < monitor_bottom
+        && y < monitor_bottom
         && bounds_bottom > monitor.y
 }
 
-fn clamp_bounds_to_monitor(
-    bounds: PersistedWindowBounds,
+fn bounds_fit_any_monitor(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    monitors: &[MonitorWorkArea],
+) -> bool {
+    monitors
+        .iter()
+        .copied()
+        .any(|monitor| bounds_fit_monitor(x, y, width, height, monitor))
+}
+
+fn bounds_fit_monitor(x: i32, y: i32, width: u32, height: u32, monitor: MonitorWorkArea) -> bool {
+    let bounds_right = x + width as i32;
+    let bounds_bottom = y + height as i32;
+    let monitor_right = monitor.x + monitor.width as i32;
+    let monitor_bottom = monitor.y + monitor.height as i32;
+
+    x >= monitor.x
+        && bounds_right <= monitor_right
+        && y >= monitor.y
+        && bounds_bottom <= monitor_bottom
+}
+
+fn clamp_position_to_monitor(
+    saved: PersistedWindowBounds,
+    desired_size: (u32, u32),
     monitor: MonitorWorkArea,
-) -> PersistedWindowBounds {
-    let width = bounds.width.min(monitor.width);
-    let height = bounds.height.min(monitor.height);
+) -> ResolvedWindowBounds {
+    let width = desired_size.0.min(monitor.width);
+    let height = desired_size.1.min(monitor.height);
     let max_x = monitor.x + monitor.width.saturating_sub(width) as i32;
     let max_y = monitor.y + monitor.height.saturating_sub(height) as i32;
 
-    PersistedWindowBounds {
-        x: bounds.x.clamp(monitor.x, max_x),
-        y: bounds.y.clamp(monitor.y, max_y),
+    ResolvedWindowBounds {
+        x: saved.x.clamp(monitor.x, max_x),
+        y: saved.y.clamp(monitor.y, max_y),
         width,
         height,
     }
@@ -97,13 +143,13 @@ fn clamp_bounds_to_monitor(
 fn center_bounds_in_monitor(
     desired_size: (u32, u32),
     monitor: MonitorWorkArea,
-) -> PersistedWindowBounds {
+) -> ResolvedWindowBounds {
     let width = desired_size.0.min(monitor.width);
     let height = desired_size.1.min(monitor.height);
     let x = monitor.x + (monitor.width.saturating_sub(width) / 2) as i32;
     let y = monitor.y + (monitor.height.saturating_sub(height) / 2) as i32;
 
-    PersistedWindowBounds {
+    ResolvedWindowBounds {
         x,
         y,
         width,
@@ -131,12 +177,7 @@ mod tests {
     #[test]
     fn resolve_startup_bounds_rehomes_offscreen_saved_bounds() {
         let monitors = [MonitorWorkArea::new(0, 0, 1920, 1040)];
-        let saved = PersistedWindowBounds {
-            x: 4000,
-            y: 2800,
-            width: 1600,
-            height: 960,
-        };
+        let saved = PersistedWindowBounds { x: 4000, y: 2800 };
 
         let resolved = resolve_startup_bounds(Some(saved), (1600, 960), &monitors)
             .expect("resolved bounds");
@@ -146,42 +187,37 @@ mod tests {
     }
 
     #[test]
-    fn resolve_startup_bounds_keeps_visible_saved_bounds() {
+    fn resolve_startup_bounds_keeps_visible_saved_position_and_uses_default_size() {
         let monitors = [MonitorWorkArea::new(0, 0, 1920, 1040)];
-        let saved = PersistedWindowBounds {
-            x: 120,
-            y: 80,
-            width: 1500,
-            height: 900,
-        };
-
-        let resolved = resolve_startup_bounds(Some(saved), (1600, 960), &monitors)
-            .expect("resolved bounds");
-
-        assert_eq!(resolved, saved);
-    }
-
-    #[test]
-    fn resolve_startup_bounds_clamps_saved_bounds_into_work_area() {
-        let monitors = [MonitorWorkArea::new(0, 0, 1920, 1040)];
-        let saved = PersistedWindowBounds {
-            x: 600,
-            y: 400,
-            width: 1800,
-            height: 980,
-        };
+        let saved = PersistedWindowBounds { x: 120, y: 80 };
 
         let resolved = resolve_startup_bounds(Some(saved), (1600, 960), &monitors)
             .expect("resolved bounds");
 
         assert_eq!(resolved.x, 120);
-        assert_eq!(resolved.y, 60);
-        assert_eq!(resolved.width, 1800);
-        assert_eq!(resolved.height, 980);
+        assert_eq!(resolved.y, 80);
+        assert_eq!(resolved.width, 1600);
+        assert_eq!(resolved.height, 960);
+    }
+
+    #[test]
+    fn resolve_startup_bounds_clamps_saved_position_into_work_area() {
+        let monitors = [MonitorWorkArea::new(0, 0, 1920, 1040)];
+        let saved = PersistedWindowBounds { x: 600, y: 400 };
+
+        let resolved = resolve_startup_bounds(Some(saved), (1600, 960), &monitors)
+            .expect("resolved bounds");
+
+        assert_eq!(resolved.x, 320);
+        assert_eq!(resolved.y, 80);
+        assert_eq!(resolved.width, 1600);
+        assert_eq!(resolved.height, 960);
     }
 
     #[test]
     fn persisted_window_bounds_for_placement_skips_non_restored_states() {
+        let monitors = [MonitorWorkArea::new(0, 0, 1920, 1040)];
+
         assert_eq!(
             persisted_window_bounds_for_placement(
                 WindowPlacementKind::Maximized,
@@ -189,6 +225,7 @@ mod tests {
                 20,
                 1200,
                 800,
+                &monitors,
             ),
             None
         );
@@ -199,27 +236,43 @@ mod tests {
                 20,
                 1200,
                 800,
+                &monitors,
             ),
             None
         );
     }
 
     #[test]
-    fn persisted_window_bounds_for_placement_keeps_restored_bounds() {
+    fn persisted_window_bounds_for_placement_skips_partially_offscreen_restored_bounds() {
+        let monitors = [MonitorWorkArea::new(0, 0, 1920, 1040)];
+
+        assert_eq!(
+            persisted_window_bounds_for_placement(
+                WindowPlacementKind::Restored,
+                120,
+                120,
+                1800,
+                980,
+                &monitors,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn persisted_window_bounds_for_placement_keeps_fully_visible_restored_position() {
+        let monitors = [MonitorWorkArea::new(0, 0, 1920, 1040)];
+
         assert_eq!(
             persisted_window_bounds_for_placement(
                 WindowPlacementKind::Restored,
                 160,
-                120,
-                1680,
-                980,
+                40,
+                1600,
+                960,
+                &monitors,
             ),
-            Some(PersistedWindowBounds {
-                x: 160,
-                y: 120,
-                width: 1680,
-                height: 980,
-            })
+            Some(PersistedWindowBounds { x: 160, y: 40 })
         );
     }
 }

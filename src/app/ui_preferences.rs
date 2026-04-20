@@ -3,10 +3,10 @@
 use std::fs;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-use directories::ProjectDirs;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::app::app_paths::app_root_paths_for_app;
 use crate::app::vault::model::SnapshotUiPreferences;
 use crate::shell::view_model::{RightPanelView, ShellViewModel};
 use crate::theme::ThemeMode;
@@ -42,8 +42,6 @@ impl DownloadConflictDefault {
 pub struct PersistedWindowBounds {
     pub x: i32,
     pub y: i32,
-    pub width: u32,
-    pub height: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -104,9 +102,8 @@ impl UiPreferencesStore {
     }
 
     pub fn for_app() -> Result<Self> {
-        let dirs = ProjectDirs::from("dev", "MicaTerm", "MicaTerm")
-            .context("project directories are unavailable")?;
-        Ok(Self::new(dirs.config_dir().join("ui-preferences.json")))
+        let app_paths = app_root_paths_for_app()?;
+        Ok(Self::new(app_paths.config_dir.join("ui-preferences.json")))
     }
 
     pub fn load_or_default(&self) -> Result<UiPreferences> {
@@ -178,21 +175,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ui_preferences_round_trip_preserves_window_bounds() {
-        let prefs = UiPreferences {
-            window_bounds: Some(PersistedWindowBounds {
-                x: 160,
-                y: 120,
-                width: 1680,
-                height: 980,
-            }),
-            ..UiPreferences::default()
-        };
+    fn ui_preferences_round_trip_preserves_window_position_only() {
+        let json = serde_json::json!({
+            "theme_mode": "dark",
+            "always_on_top": false,
+            "right_panel_view": "sftp",
+            "terminal_scrollback_limit": 1500,
+            "terminal_active_idle_shrink_enabled": true,
+            "download_conflict_default": "ask",
+            "window_bounds": {
+                "x": 160,
+                "y": 120,
+                "width": 1680,
+                "height": 980
+            }
+        })
+        .to_string();
 
-        let json = serde_json::to_string(&prefs).expect("serialize preferences");
         let decoded: UiPreferences = serde_json::from_str(&json).expect("deserialize preferences");
+        let reencoded = serde_json::to_value(&decoded).expect("serialize preferences");
 
-        assert_eq!(decoded.window_bounds, prefs.window_bounds);
+        assert_eq!(reencoded["window_bounds"], serde_json::json!({ "x": 160, "y": 120 }));
     }
 
     #[test]

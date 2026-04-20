@@ -19,7 +19,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use slint::{
     Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
@@ -38,7 +37,7 @@ use crate::QuickLaunchGroupRow;
 use crate::SftpPanelItem;
 use crate::TransferCenterItem;
 use crate::WorkspaceTabItem;
-use crate::app::app_paths::{AppRootPathInputs, AppRootPaths, resolve_app_root_paths};
+use crate::app::app_paths::app_root_paths_for_app;
 use crate::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
     RedbAssetCatalogStore, asset_tree_to_catalog, asset_trees_to_catalog, catalog_to_asset_tree,
@@ -3864,12 +3863,14 @@ fn save_restored_window_bounds_for_window(
         return;
     };
     let size = winit_window.outer_size();
+    let monitors = windows_monitor_work_areas();
     let Some(bounds) = persisted_window_bounds_for_placement(
         placement,
         position.x,
         position.y,
         size.width,
         size.height,
+        &monitors,
     ) else {
         return;
     };
@@ -4006,21 +4007,6 @@ fn saved_ssh_asset_ids_for_tree(tree: &AssetTree) -> BTreeSet<String> {
     let mut output = BTreeSet::new();
     collect_saved_ssh_asset_ids(tree, tree.root_ids(), &mut output);
     output
-}
-
-fn app_root_paths_for_app() -> Result<AppRootPaths> {
-    let project_dirs = ProjectDirs::from("dev", "MicaTerm", "MicaTerm")
-        .context("project directories are unavailable")?;
-    let executable_dir = std::env::current_exe()?
-        .parent()
-        .context("executable directory is unavailable")?
-        .to_path_buf();
-    resolve_app_root_paths(&AppRootPathInputs {
-        env_root_dir: std::env::var_os("MICA_TERM_APP_DIR").map(PathBuf::from),
-        executable_dir,
-        standard_local_data_dir: project_dirs.data_local_dir().join("MicaTerm"),
-        portable_marker_name: ".mica-term-portable",
-    })
 }
 
 fn asset_catalog_repository_for_app() -> Result<Rc<dyn AssetCatalogRepository>> {
@@ -6694,12 +6680,7 @@ mod tests {
     #[test]
     fn merge_ui_preferences_preserves_existing_window_bounds() {
         let existing = UiPreferences {
-            window_bounds: Some(PersistedWindowBounds {
-                x: 100,
-                y: 80,
-                width: 1500,
-                height: 920,
-            }),
+            window_bounds: Some(PersistedWindowBounds { x: 100, y: 80 }),
             ..UiPreferences::default()
         };
 
