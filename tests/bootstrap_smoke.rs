@@ -9249,7 +9249,14 @@ fn workspace_terminal_named_key_matrix_forwards_navigation_keys() {
     let cases = [("home", "home"), ("end", "end"), ("insert", "insert")];
     for (named_key, expected_name) in cases {
         dispatch_named_key_chord(&app, named_key, false, false, false);
-        settle_terminal_projection();
+        wait_for_condition(Duration::from_secs(1), || {
+            let inputs = state
+                .key_inputs
+                .lock()
+                .expect("lock keyboard matrix key inputs");
+            inputs.len() == 1
+                && inputs[0] == TerminalKeyEvent::named(expected_name, false, false, false)
+        });
         assert_eq!(
             state.take_key_inputs(),
             vec![TerminalKeyEvent::named(expected_name, false, false, false)],
