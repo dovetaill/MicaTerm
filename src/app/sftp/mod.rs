@@ -10,6 +10,7 @@ pub mod operation_dispatch;
 pub mod queue;
 pub mod runtime;
 pub mod session_binding;
+pub mod transfer_store;
 pub mod working_copy;
 
 pub use browser_controller::{SftpBrowserController, SftpBrowserLoadRequest};
@@ -46,6 +47,7 @@ pub use session_binding::{
     SftpSessionBinding, collect_download_targets, delete_entries, execute_queued_transfers,
     execute_queued_transfers_with_progress, move_entry_between_directories,
 };
+pub use transfer_store::RedbTransferStore;
 pub use working_copy::{
     SftpWorkingCopy, WorkingCopySnapshot, snapshot_working_copy, working_copy_has_changed,
 };

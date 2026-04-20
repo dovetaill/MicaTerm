@@ -1,5 +1,7 @@
 //! File-browser-session-friendly SFTP panel state and navigation reducers.
 
+use serde::{Deserialize, Serialize};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SftpPanelMode {
     Empty,
@@ -38,7 +40,7 @@ impl SftpFollowMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SftpDirectoryEntryKind {
     File,
     Directory,

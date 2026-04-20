@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::app::sftp::local_ops::{
@@ -9,7 +10,7 @@ use crate::app::sftp::local_ops::{
 };
 use crate::app::sftp::model::{SftpDirectoryEntry, SftpDirectoryEntryKind};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransferDirection {
     Upload,
     Download,
@@ -17,7 +18,7 @@ pub enum TransferDirection {
     Move,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransferConflictPolicy {
     Overwrite,
     Skip,
@@ -25,7 +26,7 @@ pub enum TransferConflictPolicy {
     CancelCurrent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransferTaskAction {
     Upload { local_path: PathBuf },
     UploadDirectory { local_path: PathBuf },
@@ -35,7 +36,7 @@ pub enum TransferTaskAction {
     Move,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransferTaskState {
     Queued,
     Running,
@@ -75,13 +76,13 @@ impl TransferTaskState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransferResumeMode {
     ResumeIfPossible,
     RestartOnly,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DownloadTransferEntry {
     pub remote_path: String,
     pub local_path: PathBuf,
@@ -89,7 +90,7 @@ pub struct DownloadTransferEntry {
     pub bytes_total: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransferTask {
     pub id: String,
     pub session_id: String,
