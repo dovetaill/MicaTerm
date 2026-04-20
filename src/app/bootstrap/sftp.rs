@@ -175,6 +175,25 @@ pub(super) enum SftpLocalActionBackgroundMessage {
     },
 }
 
+fn persist_transfer_tasks_snapshot(
+    transfer_store: Option<&Arc<crate::app::sftp::RedbTransferStore>>,
+    tasks: &[crate::app::sftp::TransferTask],
+) {
+    let Some(transfer_store) = transfer_store.cloned() else {
+        return;
+    };
+    let tasks = tasks.to_vec();
+    std::thread::spawn(move || {
+        if let Err(err) = transfer_store.save_tasks(&tasks) {
+            tracing::error!(
+                target: "config.sftp_transfer_store",
+                error = %err,
+                "failed to persist SFTP transfer snapshot"
+            );
+        }
+    });
+}
+
 fn apply_download_conflict_default(
     tasks: &mut [crate::app::sftp::TransferTask],
     default: crate::app::ui_preferences::DownloadConflictDefault,
@@ -797,18 +816,22 @@ pub(super) fn drain_sftp_browser_background_messages(
 pub(super) fn drain_sftp_transfer_background_messages(
     state: &mut ShellViewModel,
     controller: &mut SftpBrowserController,
+    transfer_store: Option<&Arc<crate::app::sftp::RedbTransferStore>>,
     manager: &SessionManager,
     async_runtime: Option<&tokio::runtime::Handle>,
     browser_result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
     result_rx: &std::sync::mpsc::Receiver<SftpTransferBackgroundMessage>,
 ) -> bool {
     let mut changed = false;
+    let mut tasks_changed = false;
     loop {
         let Ok(message) = result_rx.try_recv() else {
             break;
         };
 
-        changed |= state.merge_sftp_transfer_tasks(&message.tasks);
+        let merged = state.merge_sftp_transfer_tasks(&message.tasks);
+        changed |= merged;
+        tasks_changed |= merged;
         changed |= state.recompute_sftp_queue_summary();
         if state.settings_modal_download_conflict_default()
             == crate::app::ui_preferences::DownloadConflictDefault::Ask
@@ -851,14 +874,20 @@ pub(super) fn drain_sftp_transfer_background_messages(
         }
     }
 
+    if tasks_changed {
+        persist_transfer_tasks_snapshot(transfer_store, state.sftp_transfer_tasks());
+    }
+
     changed
 }
 
 pub(super) fn drain_sftp_local_action_background_messages(
     state: &mut ShellViewModel,
+    transfer_store: Option<&Arc<crate::app::sftp::RedbTransferStore>>,
     result_rx: &std::sync::mpsc::Receiver<SftpLocalActionBackgroundMessage>,
 ) -> bool {
     let mut changed = false;
+    let mut tasks_changed = false;
     loop {
         let Ok(message) = result_rx.try_recv() else {
             break;
@@ -893,9 +922,14 @@ pub(super) fn drain_sftp_local_action_background_messages(
                         );
                     }
                     changed = true;
+                    tasks_changed = true;
                 }
             }
         }
+    }
+
+    if tasks_changed {
+        persist_transfer_tasks_snapshot(transfer_store, state.sftp_transfer_tasks());
     }
     changed
 }
@@ -1728,6 +1762,7 @@ pub(super) fn bind_sftp_callbacks(
     view_model: &Rc<RefCell<ShellViewModel>>,
     store: &Option<Rc<UiPreferencesStore>>,
     effects: &Rc<dyn PlatformWindowEffects>,
+    transfer_store: Option<&Arc<crate::app::sftp::RedbTransferStore>>,
     session_bridge: &Option<Rc<ShellSessionBridge>>,
     async_runtime: Option<&tokio::runtime::Handle>,
     sftp_result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
@@ -1740,6 +1775,7 @@ pub(super) fn bind_sftp_callbacks(
     let sftp_result_tx = sftp_result_tx.clone();
     let sftp_transfer_result_tx = sftp_transfer_result_tx.clone();
     let sftp_local_action_result_tx = sftp_local_action_result_tx.clone();
+    let transfer_store = transfer_store.cloned();
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     let store_ref = store.clone();
@@ -1900,10 +1936,15 @@ pub(super) fn bind_sftp_callbacks(
     let state = Rc::clone(view_model);
     let handle = window.as_weak();
     let effects_ref = Rc::clone(effects);
+    let transfer_store_ref = transfer_store.clone();
     window.on_transfer_center_clear_completed_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         if state.clear_completed_transfer_tasks() {
+            persist_transfer_tasks_snapshot(
+                transfer_store_ref.as_ref(),
+                state.sftp_transfer_tasks(),
+            );
             super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
             sync_sftp_conflict_modal_state(&window, &state);
         }

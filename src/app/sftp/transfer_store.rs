@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use redb::{Database, ReadableTable, TableDefinition};
 
-use super::queue::{TransferTask, TransferTaskState};
+use super::queue::{TransferResumeMode, TransferTask, TransferTaskAction, TransferTaskState};
 
 const TRANSFER_STORE_SCHEMA_VERSION: u64 = 1;
 const METADATA_SCHEMA_VERSION_KEY: &str = "schema_version";
@@ -104,8 +104,11 @@ impl RedbTransferStore {
                 .filter_map(|entry| entry.ok())
                 .filter_map(|(key, value)| {
                     let task = decode_task(value.value()).ok()?;
-                    matches!(task.state, TransferTaskState::Completed | TransferTaskState::Cancelled)
-                        .then(|| key.value().to_string())
+                    matches!(
+                        task.state,
+                        TransferTaskState::Completed | TransferTaskState::Cancelled
+                    )
+                    .then(|| key.value().to_string())
                 })
                 .collect::<Vec<_>>();
 
@@ -120,6 +123,49 @@ impl RedbTransferStore {
 
     fn open_database(&self) -> Result<Database> {
         Database::create(&self.database_path).context("failed to open SFTP transfer database")
+    }
+}
+
+pub fn restore_tasks_for_bootstrap(tasks: Vec<TransferTask>) -> Vec<TransferTask> {
+    tasks
+        .into_iter()
+        .map(restore_task_for_bootstrap)
+        .collect::<Vec<_>>()
+}
+
+fn restore_task_for_bootstrap(mut task: TransferTask) -> TransferTask {
+    if matches!(
+        task.state,
+        TransferTaskState::Running | TransferTaskState::VerifyingResume
+    ) {
+        task.state = TransferTaskState::Interrupted;
+        if task.error_message.is_none() {
+            task.error_message = Some("Transfer interrupted before the app closed.".into());
+        }
+    }
+
+    if task.resume_mode == TransferResumeMode::ResumeIfPossible
+        && !checkpoint_is_still_resumable(&task)
+    {
+        task.resume_mode = TransferResumeMode::RestartOnly;
+    }
+
+    task
+}
+
+fn checkpoint_is_still_resumable(task: &TransferTask) -> bool {
+    if task.bytes_confirmed == 0 {
+        return true;
+    }
+
+    match &task.action {
+        TransferTaskAction::Download { .. } | TransferTaskAction::DownloadDirectory { .. } => task
+            .temp_target_path
+            .as_ref()
+            .is_some_and(|path| path.exists()),
+        TransferTaskAction::Upload { local_path }
+        | TransferTaskAction::UploadDirectory { local_path } => local_path.exists(),
+        TransferTaskAction::Delete { .. } | TransferTaskAction::Move => false,
     }
 }
 

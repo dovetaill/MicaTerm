@@ -28,6 +28,15 @@ fn transfer_status_label(task: &crate::app::sftp::TransferTask) -> &'static str 
     if transfer_was_skipped(task) {
         return "Skipped";
     }
+    if matches!(
+        task.state,
+        crate::app::sftp::TransferTaskState::Paused
+            | crate::app::sftp::TransferTaskState::Interrupted
+            | crate::app::sftp::TransferTaskState::Failed
+    ) && task.resume_mode == crate::app::sftp::TransferResumeMode::RestartOnly
+    {
+        return "Restart required";
+    }
 
     match task.state {
         crate::app::sftp::TransferTaskState::Queued => "Queued",
@@ -256,8 +265,7 @@ fn project_transfer_center_items(state: &ShellViewModel) -> Vec<TransferCenterIt
                 error_tooltip: transfer_error_summary(task).into(),
                 show_error: transfer_show_error(task),
                 can_show_error: transfer_show_error(task),
-                can_retry: session_ready
-                    && task.state == crate::app::sftp::TransferTaskState::Failed,
+                can_retry: state.transfer_task_can_retry(task.id.as_str()),
                 can_resolve_conflict: session_ready
                     && task.state == crate::app::sftp::TransferTaskState::Conflict,
                 can_open_workspace: session_ready
