@@ -26,6 +26,7 @@ pub mod terminal_theme;
 pub mod ui_preferences;
 pub mod vault;
 pub mod window_effects;
+pub mod window_geometry;
 pub mod window_state;
 pub mod windowing;
 pub mod windows_frame;
