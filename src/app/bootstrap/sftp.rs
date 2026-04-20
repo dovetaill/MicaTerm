@@ -6,37 +6,6 @@ use crate::shell::view_model::PendingSftpContextAction;
 
 const SFTP_PARENT_ITEM_ID: &str = "__sftp_parent__";
 
-#[derive(Clone, Copy)]
-struct SftpAsyncLatencySeed {
-    flow: &'static str,
-    started_at: Instant,
-}
-
-fn log_sftp_async_latency(
-    flow: &str,
-    stage: &str,
-    started_at: Instant,
-    browser_session_id: &str,
-    request_id: Option<u64>,
-    path: &str,
-    result: Option<&str>,
-    row_count: Option<usize>,
-) {
-    tracing::debug!(
-        target: "app.async_latency",
-        flow,
-        stage,
-        elapsed_ms = started_at.elapsed().as_millis() as u64,
-        elapsed_us = started_at.elapsed().as_micros() as u64,
-        browser_session_id,
-        request_id = request_id.map(|value| value.to_string()).unwrap_or_default(),
-        path,
-        result = result.unwrap_or_default(),
-        row_count = row_count.unwrap_or_default(),
-        "measured SFTP async flow latency"
-    );
-}
-
 fn project_sftp_panel_item(row: &crate::shell::view_model::SftpPanelRenderRow) -> SftpPanelItem {
     SftpPanelItem {
         id: row.id.as_str().into(),
@@ -152,37 +121,8 @@ pub(super) fn sync_sftp_panel_state(window: &AppWindow, state: &mut ShellViewMod
 }
 
 pub(super) fn sync_right_panel_state(window: &AppWindow, state: &mut ShellViewModel) {
-    let pending_latency_trace = state.take_sftp_ui_sync_latency_trace();
-    if let Some(trace) = pending_latency_trace.as_ref() {
-        log_sftp_async_latency(
-            trace.flow,
-            "right-panel-sync-start",
-            trace.started_at,
-            trace.browser_session_id.as_str(),
-            Some(trace.request_id),
-            trace.path.as_str(),
-            None,
-            state
-                .quick_browser_session()
-                .map(|session| session.entries.len()),
-        );
-    }
     window.set_right_panel_view(state.right_panel_view_id().into());
     sync_sftp_panel_state(window, state);
-    if let Some(trace) = pending_latency_trace {
-        log_sftp_async_latency(
-            trace.flow,
-            "right-panel-sync-finished",
-            trace.started_at,
-            trace.browser_session_id.as_str(),
-            Some(trace.request_id),
-            trace.path.as_str(),
-            None,
-            state
-                .quick_browser_session()
-                .map(|session| session.entries.len()),
-        );
-    }
 }
 
 pub(super) fn sync_sftp_remote_file_modal_state(window: &AppWindow, state: &ShellViewModel) {
@@ -578,7 +518,6 @@ pub(super) fn open_transfer_task_in_workspace(
         controller,
         manager,
         request,
-        None,
         async_runtime,
         result_tx,
     ) || opened
@@ -773,7 +712,6 @@ fn queue_sftp_browser_request(
     controller: &mut SftpBrowserController,
     manager: &SessionManager,
     request: SftpBrowserLoadRequest,
-    latency_seed: Option<SftpAsyncLatencySeed>,
     async_runtime: Option<&tokio::runtime::Handle>,
     result_tx: &std::sync::mpsc::Sender<SftpBrowserBackgroundMessage>,
 ) -> bool {
@@ -785,26 +723,6 @@ fn queue_sftp_browser_request(
 
     if !controller.mark_request_in_flight(request.request_id) {
         return pending_changed;
-    }
-
-    if let Some(seed) = latency_seed {
-        state.begin_sftp_request_latency_trace(
-            request.request_id,
-            seed.flow,
-            request.file_browser_session_id.as_str(),
-            request.path.as_str(),
-            seed.started_at,
-        );
-        log_sftp_async_latency(
-            seed.flow,
-            "request-queued",
-            seed.started_at,
-            request.file_browser_session_id.as_str(),
-            Some(request.request_id),
-            request.path.as_str(),
-            None,
-            None,
-        );
     }
 
     let runtime_handle = async_runtime
@@ -825,26 +743,7 @@ pub(super) fn apply_sftp_browser_background_message(
     controller: &mut SftpBrowserController,
     message: SftpBrowserBackgroundMessage,
 ) -> bool {
-    let request_id = message.request.request_id;
-    let request_result = if message.result.is_ok() {
-        "ok"
-    } else {
-        "error"
-    };
-    let row_count = message.result.as_ref().ok().map(Vec::len);
-    if let Some(trace) = state.sftp_request_latency_traces.get(&request_id) {
-        log_sftp_async_latency(
-            trace.flow,
-            "result-drained",
-            trace.started_at,
-            trace.browser_session_id.as_str(),
-            Some(request_id),
-            trace.path.as_str(),
-            Some(request_result),
-            row_count,
-        );
-    }
-    controller.complete_request(request_id);
+    controller.complete_request(message.request.request_id);
     if message.kind != crate::app::sftp::SftpOperationKind::LoadDir {
         return false;
     }
@@ -873,43 +772,11 @@ pub(super) fn apply_sftp_browser_background_message(
         }
     }
 
-    let projected_changed = project_pending_sftp_browser_request(
+    project_pending_sftp_browser_request(
         state,
         controller,
         message.request.file_browser_session_id.as_str(),
-    );
-
-    if let Some(trace) = state.finish_sftp_request_latency_trace(request_id) {
-        log_sftp_async_latency(
-            trace.flow,
-            "browser-state-applied",
-            trace.started_at,
-            trace.browser_session_id.as_str(),
-            Some(request_id),
-            trace.path.as_str(),
-            Some(request_result),
-            row_count,
-        );
-        state.stage_sftp_ui_sync_latency_trace(
-            request_id,
-            trace.flow,
-            trace.browser_session_id.as_str(),
-            trace.path.as_str(),
-            trace.started_at,
-        );
-        log_sftp_async_latency(
-            trace.flow,
-            "request-finished",
-            trace.started_at,
-            trace.browser_session_id.as_str(),
-            Some(request_id),
-            trace.path.as_str(),
-            Some(request_result),
-            row_count,
-        );
-    }
-
-    projected_changed
+    )
 }
 
 pub(super) fn drain_sftp_browser_background_messages(
@@ -978,7 +845,6 @@ pub(super) fn drain_sftp_transfer_background_messages(
                 controller,
                 manager,
                 request,
-                None,
                 async_runtime,
                 browser_result_tx,
             );
@@ -1411,7 +1277,6 @@ pub(super) fn apply_pending_sftp_context_action(
                 controller,
                 &session_bridge.manager,
                 request,
-                None,
                 async_runtime,
                 browser_result_tx,
             )
@@ -1456,7 +1321,6 @@ pub(super) fn apply_pending_sftp_context_action(
                     controller,
                     &session_bridge.manager,
                     request,
-                    None,
                     async_runtime,
                     browser_result_tx,
                 )
@@ -1618,26 +1482,11 @@ pub(super) fn ensure_active_sftp_browser_started(
 
     initial_sftp_browser_path(manager, session_id).is_some_and(|path| {
         let request = controller.open(session_id, path.as_str());
-        let latency_seed = state
-            .take_sftp_panel_open_latency()
-            .map(|started_at| SftpAsyncLatencySeed {
-                flow: "sftp-panel-open",
-                started_at,
-            })
-            .or_else(|| {
-                state
-                    .take_sftp_panel_switch_latency(request.file_browser_session_id.as_str())
-                    .map(|started_at| SftpAsyncLatencySeed {
-                        flow: "sftp-panel-switch",
-                        started_at,
-                    })
-            });
         queue_sftp_browser_request(
             state,
             controller,
             manager,
             request,
-            latency_seed,
             async_runtime,
             result_tx,
         )
@@ -1674,18 +1523,11 @@ pub(super) fn open_active_sftp_browser_for_current_session(
         None
     };
     request.is_some_and(|request| {
-        let latency_seed = state
-            .take_sftp_panel_switch_latency(request.file_browser_session_id.as_str())
-            .map(|started_at| SftpAsyncLatencySeed {
-                flow: "sftp-panel-switch",
-                started_at,
-            });
         queue_sftp_browser_request(
             state,
             controller,
             manager,
             request,
-            latency_seed,
             async_runtime,
             result_tx,
         )
@@ -1742,7 +1584,6 @@ pub(super) fn sync_active_sftp_browser_follow_request(
                 controller,
                 manager,
                 request,
-                None,
                 async_runtime,
                 result_tx,
             )
@@ -1780,7 +1621,6 @@ pub(super) fn sync_active_sftp_browser_pending_request(
                 controller,
                 manager,
                 request,
-                None,
                 async_runtime,
                 result_tx,
             )
@@ -1829,7 +1669,6 @@ pub(super) fn ensure_active_workspace_sftp_browser_started(
         controller,
         manager,
         request,
-        None,
         async_runtime,
         result_tx,
     )
@@ -1878,7 +1717,6 @@ pub(super) fn sync_active_workspace_sftp_browser_pending_request(
                 controller,
                 manager,
                 request,
-                None,
                 async_runtime,
                 result_tx,
             )
@@ -1913,11 +1751,9 @@ pub(super) fn bind_sftp_callbacks(
     window.on_open_sftp_panel_requested(move || {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let started = Instant::now();
-        state.begin_sftp_panel_open_latency(started);
         let (width, height) = current_window_size(&window);
         state.open_sftp_panel();
-        let opened = if let Some(session_bridge) = session_bridge_ref.as_ref() {
+        if let Some(session_bridge) = session_bridge_ref.as_ref() {
             let mut controller = sftp_browser_controller_ref.borrow_mut();
             open_active_sftp_browser_for_current_session(
                 &mut state,
@@ -1925,27 +1761,12 @@ pub(super) fn bind_sftp_callbacks(
                 &session_bridge.manager,
                 open_runtime_handle.as_ref(),
                 &open_result_tx,
-            )
-        } else {
-            false
-        };
-        if !opened {
-            state.clear_sftp_panel_open_latency();
+            );
         }
         super::shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sync_right_panel_state(&window, &mut state);
         sync_shell_layout(&window, &mut state, width, height);
         save_ui_preferences(&store_ref, &state);
-        log_sftp_async_latency(
-            "sftp-panel-open",
-            "ui-return",
-            started,
-            state.quick_browser_session_id().unwrap_or_default(),
-            None,
-            state.sftp_panel_path().as_str(),
-            None,
-            None,
-        );
     });
 
     let state = Rc::clone(view_model);
@@ -2374,7 +2195,6 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
-                        None,
                         item_activated_runtime_handle.as_ref(),
                         &item_activated_result_tx,
                     );
@@ -2398,7 +2218,6 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
-                        None,
                         item_activated_runtime_handle.as_ref(),
                         &item_activated_result_tx,
                     );
@@ -2458,7 +2277,6 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
-                        None,
                         path_submit_runtime_handle.as_ref(),
                         &path_submit_result_tx,
                     )
@@ -2496,7 +2314,6 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
-                        None,
                         back_runtime_handle.as_ref(),
                         &back_result_tx,
                     )
@@ -2536,7 +2353,6 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
-                        None,
                         forward_runtime_handle.as_ref(),
                         &forward_result_tx,
                     )
@@ -2576,7 +2392,6 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
-                        None,
                         up_runtime_handle.as_ref(),
                         &up_result_tx,
                     )
@@ -2616,7 +2431,6 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
-                        None,
                         refresh_runtime_handle.as_ref(),
                         &refresh_result_tx,
                     )
@@ -2666,7 +2480,6 @@ pub(super) fn bind_sftp_callbacks(
                                 &mut controller,
                                 &session_bridge.manager,
                                 request,
-                                None,
                                 retry_runtime_handle.as_ref(),
                                 &retry_result_tx,
                             )
@@ -2712,7 +2525,6 @@ pub(super) fn bind_sftp_callbacks(
                         &mut controller,
                         &session_bridge.manager,
                         request,
-                        None,
                         follow_runtime_handle.as_ref(),
                         &follow_result_tx,
                     )

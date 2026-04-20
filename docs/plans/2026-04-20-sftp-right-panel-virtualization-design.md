@@ -11,7 +11,7 @@ The current right-panel path already avoids some unnecessary rebuilds:
 - directory projection is cached per browser session,
 - rendered row text/icon metadata is cached per browser session,
 - selection-only changes patch only dirty rows,
-- async latency probes now tell us whether the remaining hitch is UI-return, request-queued, or request-finished.
+- recent investigation showed the remaining hitch comes from synchronizing oversized UI row models, not from handing the action off to async work.
 
 But the UI-facing model is still a full `VecModel<SftpPanelItem>` containing every row in the active directory. Slint `ListView` only instantiates visible delegates, but the app still pays for creating, storing, diffing, and synchronizing a large UI model.
 
@@ -172,4 +172,4 @@ Mitigation:
 - SFTP open/switch on a very large directory no longer feeds the full row set into the right-panel UI model.
 - Row count in the UI stays bounded to the visible window plus overscan.
 - Selection, activation, context menu, and parent-row navigation still work.
-- Existing async latency probes remain valid and still show UI-return separately from background completion.
+- Open/switch stays async while the UI only reconciles a bounded row window after background work completes.

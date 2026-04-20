@@ -2,7 +2,6 @@
 
 use super::*;
 use chrono::{DateTime, Utc};
-use std::time::Instant;
 
 const SFTP_PANEL_ROW_HEIGHT_PX: u32 = 44;
 const SFTP_PANEL_DEFAULT_VIEWPORT_HEIGHT_PX: u32 = SFTP_PANEL_ROW_HEIGHT_PX * 10;
@@ -94,86 +93,6 @@ fn recompute_sftp_panel_virtual_window(render_cache: &mut SftpPanelRenderCache) 
 }
 
 impl ShellViewModel {
-    pub fn begin_sftp_panel_open_latency(&mut self, started_at: Instant) {
-        self.pending_sftp_panel_open_latency_started_at = Some(started_at);
-    }
-
-    pub fn take_sftp_panel_open_latency(&mut self) -> Option<Instant> {
-        self.pending_sftp_panel_open_latency_started_at.take()
-    }
-
-    pub fn clear_sftp_panel_open_latency(&mut self) {
-        self.pending_sftp_panel_open_latency_started_at = None;
-    }
-
-    pub fn begin_sftp_panel_switch_latency(
-        &mut self,
-        browser_session_id: impl Into<String>,
-        started_at: Instant,
-    ) {
-        self.pending_sftp_panel_switch_latency = Some(PendingSftpSwitchLatencyTrace {
-            started_at,
-            browser_session_id: browser_session_id.into(),
-        });
-    }
-
-    pub fn take_sftp_panel_switch_latency(&mut self, browser_session_id: &str) -> Option<Instant> {
-        let trace = self.pending_sftp_panel_switch_latency.take()?;
-        if trace.browser_session_id == browser_session_id {
-            Some(trace.started_at)
-        } else {
-            self.pending_sftp_panel_switch_latency = Some(trace);
-            None
-        }
-    }
-
-    pub fn begin_sftp_request_latency_trace(
-        &mut self,
-        request_id: u64,
-        flow: &'static str,
-        browser_session_id: &str,
-        path: &str,
-        started_at: Instant,
-    ) {
-        self.sftp_request_latency_traces.insert(
-            request_id,
-            SftpRequestLatencyTrace {
-                flow,
-                started_at,
-                browser_session_id: browser_session_id.to_string(),
-                path: path.to_string(),
-            },
-        );
-    }
-
-    pub fn finish_sftp_request_latency_trace(
-        &mut self,
-        request_id: u64,
-    ) -> Option<SftpRequestLatencyTrace> {
-        self.sftp_request_latency_traces.remove(&request_id)
-    }
-
-    pub fn stage_sftp_ui_sync_latency_trace(
-        &mut self,
-        request_id: u64,
-        flow: &'static str,
-        browser_session_id: &str,
-        path: &str,
-        started_at: Instant,
-    ) {
-        self.pending_sftp_ui_sync_latency_trace = Some(PendingSftpUiSyncLatencyTrace {
-            flow,
-            started_at,
-            browser_session_id: browser_session_id.to_string(),
-            path: path.to_string(),
-            request_id,
-        });
-    }
-
-    pub fn take_sftp_ui_sync_latency_trace(&mut self) -> Option<PendingSftpUiSyncLatencyTrace> {
-        self.pending_sftp_ui_sync_latency_trace.take()
-    }
-
     pub fn open_sftp_panel(&mut self) {
         self.right_panel_view = RightPanelView::Sftp;
         self.show_right_panel = true;
@@ -1597,34 +1516,5 @@ fn remote_parent_dir(path: &str) -> Option<String> {
         Some(("", _)) => Some("/".into()),
         Some((parent, _)) => Some(parent.to_string()),
         None => Some("/".into()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn staged_sftp_ui_sync_latency_trace_is_consumed_once() {
-        let mut state = ShellViewModel::default();
-        let started_at = Instant::now();
-
-        state.stage_sftp_ui_sync_latency_trace(
-            42,
-            "sftp-panel-open",
-            "browser-1",
-            "/var/log",
-            started_at,
-        );
-
-        let trace = state
-            .take_sftp_ui_sync_latency_trace()
-            .expect("trace should be staged");
-        assert_eq!(trace.request_id, 42);
-        assert_eq!(trace.flow, "sftp-panel-open");
-        assert_eq!(trace.browser_session_id, "browser-1");
-        assert_eq!(trace.path, "/var/log");
-        assert_eq!(trace.started_at, started_at);
-        assert!(state.take_sftp_ui_sync_latency_trace().is_none());
     }
 }

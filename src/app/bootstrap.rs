@@ -1427,72 +1427,16 @@ struct WorkspaceScrollInput {
     alt: bool,
 }
 
-fn log_ssh_async_latency(
-    stage: &str,
-    started_at: Instant,
-    session_id: Option<Uuid>,
-    asset_id: Option<&str>,
-    host: &str,
-    user: &str,
-) {
-    tracing::debug!(
-        target: "app.async_latency",
-        flow = "ssh-open",
-        stage,
-        elapsed_ms = started_at.elapsed().as_millis() as u64,
-        elapsed_us = started_at.elapsed().as_micros() as u64,
-        session_id = session_id.map(|value| value.to_string()).unwrap_or_default(),
-        asset_id = asset_id.unwrap_or_default(),
-        host,
-        user,
-        "measured SSH open async latency"
-    );
-}
-
-fn log_ssh_modal_latency(
-    flow: &str,
-    stage: &str,
-    started_at: Instant,
-    session_id: Option<Uuid>,
-    asset_id: Option<&str>,
-    host: &str,
-    user: &str,
-) {
-    tracing::debug!(
-        target: "app.async_latency",
-        flow,
-        stage,
-        elapsed_ms = started_at.elapsed().as_millis() as u64,
-        elapsed_us = started_at.elapsed().as_micros() as u64,
-        session_id = session_id.map(|value| value.to_string()).unwrap_or_default(),
-        asset_id = asset_id.unwrap_or_default(),
-        host,
-        user,
-        "measured SSH modal open latency"
-    );
-}
-
 fn open_session_with_profile(
     state: &mut ShellViewModel,
     bridge: &ShellSessionBridge,
     profile: ConnectionProfile,
     mode: OpenSessionMode,
 ) -> anyhow::Result<()> {
-    let started = Instant::now();
-    let host = profile.host.clone();
-    let user = profile.user.clone();
     let handle = bridge.manager.open_session(profile, mode)?;
     let resolved = bridge.manager.session(handle.session_id).unwrap_or(handle);
     merge_session_handle_into_tabs(state, &resolved);
     let _ = workspace_terminal::sync_workspace_projection_from_manager(state, &bridge.manager);
-    log_ssh_async_latency(
-        "ui-return",
-        started,
-        Some(resolved.session_id),
-        Some(resolved.asset_id.as_str()),
-        host.as_str(),
-        user.as_str(),
-    );
     Ok(())
 }
 
@@ -5077,19 +5021,7 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
         let (width, height) = current_window_size(&window);
-        let started = (!state.show_right_panel).then(Instant::now);
-        if let Some(started_at) = started {
-            if session_bridge_ref.as_ref().is_some()
-                && active_workspace_session_uuid(&state).is_some()
-            {
-                state.begin_sftp_panel_open_latency(started_at);
-            } else {
-                state.clear_sftp_panel_open_latency();
-            }
-            state.open_sftp_panel();
-        } else {
-            state.toggle_right_panel();
-        }
+        state.toggle_right_panel();
         shell_chrome::sync_top_status_bar_state(&window, &state, effects_ref.as_ref());
         sftp::sync_right_panel_state(&window, &mut state);
         sync_shell_layout(&window, &mut state, width, height);
@@ -5099,18 +5031,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             &mut workspace_follow_tracker_ref.borrow_mut(),
             session_bridge_ref.as_deref().map(|bridge| &bridge.manager),
         );
-        if let Some(started_at) = started {
-            tracing::debug!(
-                target: "app.async_latency",
-                flow = "sftp-panel-open",
-                stage = "ui-return",
-                elapsed_ms = started_at.elapsed().as_millis() as u64,
-                elapsed_us = started_at.elapsed().as_micros() as u64,
-                browser_session_id = state.quick_browser_session_id().unwrap_or_default(),
-                path = state.sftp_panel_path().as_str(),
-                "measured SFTP panel open UI handoff latency"
-            );
-        }
     });
 
     let state = Rc::clone(&view_model);
@@ -5817,20 +5737,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
     window.on_workspace_tab_selected(move |tab_id| {
         let window = handle.unwrap();
         let mut state = state.borrow_mut();
-        let started = Instant::now();
         if state.activate_workspace_tab(tab_id.as_str()) {
             let defer_quick_browser_sync =
                 state.show_right_panel && state.quick_browser_follows_active_terminal();
-            let switch_browser_session_id = if defer_quick_browser_sync {
-                state
-                    .active_workspace_terminal_session_id()
-                    .map(str::to_owned)
-            } else {
-                None
-            };
-            if let Some(browser_session_id) = switch_browser_session_id.as_deref() {
-                state.begin_sftp_panel_switch_latency(browser_session_id, started);
-            }
             if defer_quick_browser_sync {
                 let _ = state.defer_quick_browser_follow_to_active_terminal();
             }
@@ -5861,18 +5770,6 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
                 sftp::sync_right_panel_state(&window, &mut state);
             }
             assets_keychain::sync_assets_context_menu_state(&window, &state);
-            if let Some(browser_session_id) = switch_browser_session_id.as_deref() {
-                tracing::debug!(
-                    target: "app.async_latency",
-                    flow = "sftp-panel-switch",
-                    stage = "ui-return",
-                    elapsed_ms = started.elapsed().as_millis() as u64,
-                    elapsed_us = started.elapsed().as_micros() as u64,
-                    browser_session_id,
-                    tab_id = tab_id.as_str(),
-                    "measured SFTP panel switch UI handoff latency"
-                );
-            }
         }
     });
 

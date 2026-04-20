@@ -15,7 +15,6 @@ use self::asset_modal_executor::normalized_keychain_identity_auth_kind_id;
 pub use self::asset_modal_executor::welcome_actions;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::time::Instant;
 
 use crate::app::keychain::{
     KeychainCatalog, KeychainIdentityAuthKind, KeychainNodePayload, KeychainSshKeySpec,
@@ -621,29 +620,6 @@ pub struct SftpPanelRenderCache {
     pub full_resync_required: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PendingSftpSwitchLatencyTrace {
-    pub started_at: Instant,
-    pub browser_session_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SftpRequestLatencyTrace {
-    pub flow: &'static str,
-    pub started_at: Instant,
-    pub browser_session_id: String,
-    pub path: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PendingSftpUiSyncLatencyTrace {
-    pub flow: &'static str,
-    pub started_at: Instant,
-    pub browser_session_id: String,
-    pub path: String,
-    pub request_id: u64,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShellViewModel {
     pub show_welcome: bool,
@@ -682,10 +658,6 @@ pub struct ShellViewModel {
     pub sftp_panel_projection_cache: HashMap<String, Vec<SftpDirectoryEntry>>,
     pub sftp_panel_render_cache: HashMap<String, SftpPanelRenderCache>,
     pub sftp_panel_last_rendered_session_id: Option<String>,
-    pub pending_sftp_panel_open_latency_started_at: Option<Instant>,
-    pub pending_sftp_panel_switch_latency: Option<PendingSftpSwitchLatencyTrace>,
-    pub sftp_request_latency_traces: HashMap<u64, SftpRequestLatencyTrace>,
-    pub pending_sftp_ui_sync_latency_trace: Option<PendingSftpUiSyncLatencyTrace>,
     pub quick_browser_session_id: Option<String>,
     pub quick_browser_state: QuickBrowserState,
     pub sftp_queue_summary: TransferQueueSummary,
@@ -766,10 +738,6 @@ impl Default for ShellViewModel {
             sftp_panel_projection_cache: HashMap::new(),
             sftp_panel_render_cache: HashMap::new(),
             sftp_panel_last_rendered_session_id: None,
-            pending_sftp_panel_open_latency_started_at: None,
-            pending_sftp_panel_switch_latency: None,
-            sftp_request_latency_traces: HashMap::new(),
-            pending_sftp_ui_sync_latency_trace: None,
             quick_browser_session_id: None,
             quick_browser_state: QuickBrowserState::default(),
             sftp_queue_summary: TransferQueueSummary::default(),
