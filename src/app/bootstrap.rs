@@ -97,7 +97,9 @@ use crate::app::terminal_renderer::{
 use crate::app::terminal_theme::{
     TerminalThemePreset, preset_for_theme_mode, selection_overlay_rgba,
 };
-use crate::app::ui_preferences::{PersistedWindowBounds, UiPreferences, UiPreferencesStore};
+#[cfg(any(target_os = "windows", test))]
+use crate::app::ui_preferences::PersistedWindowBounds;
+use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, bootstrap_provider_credential_ref, load_local_vault_bootstrap_state,
     load_provider_credential, load_runtime_vault_key, persist_provider_credential,
