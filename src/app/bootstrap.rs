@@ -3677,51 +3677,85 @@ fn install_windows_frame_adapter(window: &AppWindow) {
 fn install_windows_frame_adapter(_window: &AppWindow) {}
 
 #[cfg(target_os = "windows")]
-fn windows_monitor_work_areas(window: &AppWindow) -> Vec<MonitorWorkArea> {
-    use slint::winit_030::WinitWindowAccessor;
-    use slint::winit_030::winit::platform::windows::MonitorHandleExtWindows;
+fn windows_monitor_work_areas() -> Vec<MonitorWorkArea> {
+    use windows_sys::Win32::Foundation::{BOOL, LPARAM, POINT, RECT};
+    use windows_sys::Win32::Graphics::Gdi::{
+        EnumDisplayMonitors, HDC, MonitorFromPoint, MONITOR_DEFAULTTONEAREST,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
-    let mut monitors = Vec::new();
-    let mut seen = HashSet::new();
-    let _ = window.window().with_winit_window(|winit_window| {
-        let preferred = winit_window
-            .current_monitor()
-            .or_else(|| winit_window.primary_monitor());
+    struct MonitorCollection {
+        monitors: Vec<MonitorWorkArea>,
+        seen: HashSet<(i32, i32, u32, u32)>,
+    }
 
-        if let Some(monitor) = preferred
-            .and_then(|monitor| work_area_from_hmonitor(monitor.hmonitor()))
-            && seen.insert((monitor.x, monitor.y, monitor.width, monitor.height))
-        {
-            monitors.push(monitor);
-        }
-
-        for monitor in winit_window.available_monitors() {
-            if let Some(work_area) = work_area_from_hmonitor(monitor.hmonitor())
-                && seen.insert((work_area.x, work_area.y, work_area.width, work_area.height))
-            {
-                monitors.push(work_area);
+    impl MonitorCollection {
+        unsafe fn push_hmonitor(
+            &mut self,
+            hmonitor: windows_sys::Win32::Graphics::Gdi::HMONITOR,
+        ) {
+            let Some(work_area) = work_area_from_hmonitor(hmonitor as isize) else {
+                return;
+            };
+            if self.seen.insert((
+                work_area.x,
+                work_area.y,
+                work_area.width,
+                work_area.height,
+            )) {
+                self.monitors.push(work_area);
             }
         }
-    });
-    monitors
+    }
+
+    unsafe extern "system" fn collect_monitor_work_areas(
+        hmonitor: windows_sys::Win32::Graphics::Gdi::HMONITOR,
+        _hdc: HDC,
+        _clip_rect: *mut RECT,
+        lparam: LPARAM,
+    ) -> BOOL {
+        let state = unsafe { &mut *(lparam as *mut MonitorCollection) };
+        unsafe {
+            state.push_hmonitor(hmonitor);
+        }
+        1
+    }
+
+    let mut collection = MonitorCollection {
+        monitors: Vec::new(),
+        seen: HashSet::new(),
+    };
+
+    unsafe {
+        let mut cursor = POINT { x: 0, y: 0 };
+        if GetCursorPos(&mut cursor) != 0 {
+            collection.push_hmonitor(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST));
+        }
+
+        EnumDisplayMonitors(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            Some(collect_monitor_work_areas),
+            (&mut collection as *mut MonitorCollection) as LPARAM,
+        );
+    }
+
+    collection.monitors
 }
 
 #[cfg(target_os = "windows")]
 fn apply_startup_window_bounds(window: &AppWindow, prefs: &UiPreferences) -> (u32, u32) {
-    use slint::winit_030::WinitWindowAccessor;
-    use slint::winit_030::winit::dpi::PhysicalPosition;
-
     let desired_size = default_window_size();
-    let monitors = windows_monitor_work_areas(window);
+    let monitors = windows_monitor_work_areas();
     let Some(bounds) = resolve_startup_bounds(prefs.window_bounds, desired_size, &monitors) else {
         apply_restored_window_size(window, desired_size);
         return desired_size;
     };
 
     apply_restored_window_size(window, (bounds.width, bounds.height));
-    let _ = window.window().with_winit_window(|winit_window| {
-        winit_window.set_outer_position(PhysicalPosition::new(bounds.x, bounds.y));
-    });
+    window.window().set_position(slint::WindowPosition::Physical(
+        slint::PhysicalPosition::new(bounds.x, bounds.y),
+    ));
     (bounds.width, bounds.height)
 }
 
