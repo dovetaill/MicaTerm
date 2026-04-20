@@ -3,9 +3,10 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use directories::ProjectDirs;
 
-use crate::app::app_paths::{AppRootPathInputs, AppRootSource, resolve_app_root_paths};
+use crate::app::app_paths::{
+    AppRootPathInputs, AppRootSource, resolve_app_root_paths, standard_app_root_dir_for_app,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoggingRootSource {
@@ -57,14 +58,12 @@ fn map_root_source(source: AppRootSource) -> LoggingRootSource {
 }
 
 pub fn resolve_logging_paths_for_app() -> Result<LoggingPaths> {
-    let project_dirs = ProjectDirs::from("dev", "MicaTerm", "MicaTerm")
-        .context("project directories are unavailable")?;
     let executable_dir = std::env::current_exe()?
         .parent()
         .context("executable directory is unavailable")?
         .to_path_buf();
     let env_log_dir = std::env::var_os("MICA_TERM_LOG_DIR").map(PathBuf::from);
-    let standard_local_data_dir = project_dirs.data_local_dir().join("MicaTerm");
+    let standard_local_data_dir = standard_app_root_dir_for_app()?;
 
     resolve_logging_paths(&LoggingPathInputs {
         env_log_dir,

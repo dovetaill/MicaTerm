@@ -19,7 +19,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use slint::{
     Color, ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
@@ -38,7 +37,7 @@ use crate::QuickLaunchGroupRow;
 use crate::SftpPanelItem;
 use crate::TransferCenterItem;
 use crate::WorkspaceTabItem;
-use crate::app::app_paths::{AppRootPathInputs, AppRootPaths, resolve_app_root_paths};
+use crate::app::app_paths::app_root_paths_for_app;
 use crate::app::assets_catalog::{
     ASSET_CATALOG_SCHEMA_VERSION, AssetCatalogRepository, PersistedAssetCatalog,
     RedbAssetCatalogStore, asset_tree_to_catalog, asset_trees_to_catalog, catalog_to_asset_tree,
@@ -97,6 +96,8 @@ use crate::app::terminal_renderer::{
 use crate::app::terminal_theme::{
     TerminalThemePreset, preset_for_theme_mode, selection_overlay_rgba,
 };
+#[cfg(any(target_os = "windows", test))]
+use crate::app::ui_preferences::PersistedWindowBounds;
 use crate::app::ui_preferences::{UiPreferences, UiPreferencesStore};
 use crate::app::vault::bootstrap::{
     LocalVaultBootstrapState, bootstrap_provider_credential_ref, load_local_vault_bootstrap_state,
@@ -140,6 +141,10 @@ use crate::app::vault::sync_service::RemoteHeadSnapshot;
 use crate::app::window_effects::{
     PlatformWindowEffects, build_native_window_appearance_request, default_platform_window_effects,
 };
+#[cfg(target_os = "windows")]
+use crate::app::window_geometry::{
+    MonitorWorkArea, persisted_window_bounds_for_placement, resolve_startup_bounds,
+};
 use crate::app::window_state::WindowPlacementKind;
 use crate::app::windowing::{
     ModalDragState, WindowController, apply_restored_window_size, parse_resize_direction,
@@ -148,6 +153,7 @@ use crate::app::windowing::{
 #[cfg(target_os = "windows")]
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
+    work_area_from_hmonitor,
 };
 use crate::app::windows_icon;
 use crate::shell::assets::{
@@ -577,10 +583,18 @@ pub fn startup_failure_message(profile: AppRuntimeProfile, err: &str) -> Option<
 }
 
 pub fn default_window_size() -> (u32, u32) {
-    (
-        ShellMetrics::WINDOW_DEFAULT_WIDTH,
-        ShellMetrics::WINDOW_DEFAULT_HEIGHT,
-    )
+    #[cfg(target_os = "windows")]
+    {
+        (1600, 960)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        (
+            ShellMetrics::WINDOW_DEFAULT_WIDTH,
+            ShellMetrics::WINDOW_DEFAULT_HEIGHT,
+        )
+    }
 }
 
 fn apply_pending_snippet_activation(
@@ -3662,6 +3676,96 @@ fn install_windows_frame_adapter(window: &AppWindow) {
 fn install_windows_frame_adapter(_window: &AppWindow) {}
 
 #[cfg(target_os = "windows")]
+fn windows_monitor_work_areas() -> Vec<MonitorWorkArea> {
+    use windows_sys::Win32::Foundation::{BOOL, LPARAM, POINT, RECT};
+    use windows_sys::Win32::Graphics::Gdi::{
+        EnumDisplayMonitors, HDC, MonitorFromPoint, MONITOR_DEFAULTTONEAREST,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    struct MonitorCollection {
+        monitors: Vec<MonitorWorkArea>,
+        seen: HashSet<(i32, i32, u32, u32)>,
+    }
+
+    impl MonitorCollection {
+        unsafe fn push_hmonitor(
+            &mut self,
+            hmonitor: windows_sys::Win32::Graphics::Gdi::HMONITOR,
+        ) {
+            let Some(work_area) = work_area_from_hmonitor(hmonitor as isize) else {
+                return;
+            };
+            if self.seen.insert((
+                work_area.x,
+                work_area.y,
+                work_area.width,
+                work_area.height,
+            )) {
+                self.monitors.push(work_area);
+            }
+        }
+    }
+
+    unsafe extern "system" fn collect_monitor_work_areas(
+        hmonitor: windows_sys::Win32::Graphics::Gdi::HMONITOR,
+        _hdc: HDC,
+        _clip_rect: *mut RECT,
+        lparam: LPARAM,
+    ) -> BOOL {
+        let state = unsafe { &mut *(lparam as *mut MonitorCollection) };
+        unsafe {
+            state.push_hmonitor(hmonitor);
+        }
+        1
+    }
+
+    let mut collection = MonitorCollection {
+        monitors: Vec::new(),
+        seen: HashSet::new(),
+    };
+
+    unsafe {
+        let mut cursor = POINT { x: 0, y: 0 };
+        if GetCursorPos(&mut cursor) != 0 {
+            collection.push_hmonitor(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST));
+        }
+
+        EnumDisplayMonitors(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            Some(collect_monitor_work_areas),
+            (&mut collection as *mut MonitorCollection) as LPARAM,
+        );
+    }
+
+    collection.monitors
+}
+
+#[cfg(target_os = "windows")]
+fn apply_startup_window_bounds(window: &AppWindow, prefs: &UiPreferences) -> (u32, u32) {
+    let desired_size = default_window_size();
+    let monitors = windows_monitor_work_areas();
+    let Some(bounds) = resolve_startup_bounds(prefs.window_bounds, desired_size, &monitors) else {
+        apply_restored_window_size(window, desired_size);
+        return desired_size;
+    };
+
+    apply_restored_window_size(window, (bounds.width, bounds.height));
+    window.window().set_position(slint::WindowPosition::Physical(
+        slint::PhysicalPosition::new(bounds.x, bounds.y),
+    ));
+    (bounds.width, bounds.height)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn apply_startup_window_bounds(window: &AppWindow, _prefs: &UiPreferences) -> (u32, u32) {
+    let size = default_window_size();
+    apply_restored_window_size(window, size);
+    size
+}
+
+#[cfg(target_os = "windows")]
 fn query_true_window_placement_from_app(window: &AppWindow) -> WindowPlacementKind {
     use slint::winit_030::WinitWindowAccessor;
 
@@ -3708,16 +3812,70 @@ fn load_quick_launch_preferences(
     }
 }
 
-fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellViewModel) {
-    if let Some(store) = store
-        && let Err(err) = store.save(&UiPreferences::from(state))
-    {
-        tracing::error!(
-            target: "config.preferences",
-            error = %err,
-            "failed to save ui preferences"
-        );
+fn merge_ui_preferences(existing: UiPreferences, mut next: UiPreferences) -> UiPreferences {
+    if next.window_bounds.is_none() {
+        next.window_bounds = existing.window_bounds;
     }
+    next
+}
+
+fn save_ui_preferences(store: &Option<Rc<UiPreferencesStore>>, state: &ShellViewModel) {
+    if let Some(store) = store {
+        let existing = store.load_or_default().unwrap_or_default();
+        let next = merge_ui_preferences(existing, UiPreferences::from(state));
+        if let Err(err) = store.save(&next) {
+            tracing::error!(
+                target: "config.preferences",
+                error = %err,
+                "failed to save ui preferences"
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn save_window_bounds_preference(
+    store: &Option<Rc<UiPreferencesStore>>,
+    bounds: PersistedWindowBounds,
+) {
+    if let Some(store) = store {
+        let mut prefs = store.load_or_default().unwrap_or_default();
+        prefs.window_bounds = Some(bounds);
+        if let Err(err) = store.save(&prefs) {
+            tracing::error!(
+                target: "config.preferences",
+                error = %err,
+                "failed to save window bounds preference"
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn save_restored_window_bounds_for_window(
+    store: &Option<Rc<UiPreferencesStore>>,
+    winit_window: &slint::winit_030::winit::window::Window,
+) {
+    let Some(placement) = query_true_window_placement(winit_window) else {
+        return;
+    };
+    let Ok(position) = winit_window.outer_position() else {
+        return;
+    };
+    let size = winit_window.outer_size();
+    let monitors = windows_monitor_work_areas();
+    let Some(bounds) = persisted_window_bounds_for_placement(
+        placement,
+        position.x,
+        position.y,
+        size.width,
+        size.height,
+        &monitors,
+    ) else {
+        return;
+    };
+
+    save_window_bounds_preference(store, bounds);
 }
 
 fn save_quick_launch_preferences(
@@ -3849,21 +4007,6 @@ fn saved_ssh_asset_ids_for_tree(tree: &AssetTree) -> BTreeSet<String> {
     let mut output = BTreeSet::new();
     collect_saved_ssh_asset_ids(tree, tree.root_ids(), &mut output);
     output
-}
-
-fn app_root_paths_for_app() -> Result<AppRootPaths> {
-    let project_dirs = ProjectDirs::from("dev", "MicaTerm", "MicaTerm")
-        .context("project directories are unavailable")?;
-    let executable_dir = std::env::current_exe()?
-        .parent()
-        .context("executable directory is unavailable")?
-        .to_path_buf();
-    resolve_app_root_paths(&AppRootPathInputs {
-        env_root_dir: std::env::var_os("MICA_TERM_APP_DIR").map(PathBuf::from),
-        executable_dir,
-        standard_local_data_dir: project_dirs.data_local_dir().join("MicaTerm"),
-        portable_marker_name: ".mica-term-portable",
-    })
 }
 
 fn asset_catalog_repository_for_app() -> Result<Rc<dyn AssetCatalogRepository>> {
@@ -4368,11 +4511,12 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         *surface.borrow_mut() = None;
     });
 
-    apply_restored_window_size(window, default_window_size());
+    let startup_window_size = apply_startup_window_bounds(window, &prefs);
     windowing::bind_windows_window_state_tracking(
         window,
         Rc::clone(&view_model),
         Rc::clone(&effects),
+        store.clone(),
         session_bridge.clone(),
         Rc::clone(&pending_workspace_paste_warning),
     );
@@ -4388,8 +4532,8 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
         sync_shell_layout(
             window,
             &mut state,
-            ShellMetrics::WINDOW_DEFAULT_WIDTH,
-            ShellMetrics::WINDOW_DEFAULT_HEIGHT,
+            startup_window_size.0,
+            startup_window_size.1,
         );
     }
     install_windows_frame_adapter(window);
@@ -6633,6 +6777,25 @@ mod tests {
     struct CacheTrackingPresenter {
         cached_rows: usize,
         clear_calls: usize,
+    }
+
+    #[test]
+    fn merge_ui_preferences_preserves_existing_window_bounds() {
+        let existing = UiPreferences {
+            window_bounds: Some(PersistedWindowBounds { x: 100, y: 80 }),
+            ..UiPreferences::default()
+        };
+
+        let next = UiPreferences {
+            theme_mode: ThemeMode::Light,
+            ..UiPreferences::default()
+        };
+        let expected_window_bounds = existing.window_bounds;
+
+        let merged = merge_ui_preferences(existing, next);
+
+        assert_eq!(merged.theme_mode, ThemeMode::Light);
+        assert_eq!(merged.window_bounds, expected_window_bounds);
     }
 
     #[test]
