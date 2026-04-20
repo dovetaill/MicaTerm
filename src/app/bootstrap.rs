@@ -1449,6 +1449,29 @@ fn log_ssh_async_latency(
     );
 }
 
+fn log_ssh_modal_latency(
+    flow: &str,
+    stage: &str,
+    started_at: Instant,
+    session_id: Option<Uuid>,
+    asset_id: Option<&str>,
+    host: &str,
+    user: &str,
+) {
+    tracing::debug!(
+        target: "app.async_latency",
+        flow,
+        stage,
+        elapsed_ms = started_at.elapsed().as_millis() as u64,
+        elapsed_us = started_at.elapsed().as_micros() as u64,
+        session_id = session_id.map(|value| value.to_string()).unwrap_or_default(),
+        asset_id = asset_id.unwrap_or_default(),
+        host,
+        user,
+        "measured SSH modal open latency"
+    );
+}
+
 fn open_session_with_profile(
     state: &mut ShellViewModel,
     bridge: &ShellSessionBridge,
@@ -5775,7 +5798,9 @@ fn bind_top_status_bar_with_store_and_profile_and_effects_and_session_bridge(
             let defer_quick_browser_sync =
                 state.show_right_panel && state.quick_browser_follows_active_terminal();
             let switch_browser_session_id = if defer_quick_browser_sync {
-                state.active_workspace_terminal_session_id().map(str::to_owned)
+                state
+                    .active_workspace_terminal_session_id()
+                    .map(str::to_owned)
             } else {
                 None
             };

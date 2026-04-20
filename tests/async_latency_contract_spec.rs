@@ -26,10 +26,10 @@ fn sftp_sources_expose_open_and_switch_latency_markers() {
 #[test]
 fn ssh_sources_expose_async_open_latency_markers() {
     let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
-    let assets_source = fs::read_to_string("src/app/bootstrap/assets_keychain.rs")
-        .expect("read asset bootstrap");
-    let session_manager_source = fs::read_to_string("src/app/ssh/session_manager.rs")
-        .expect("read session manager");
+    let assets_source =
+        fs::read_to_string("src/app/bootstrap/assets_keychain.rs").expect("read asset bootstrap");
+    let session_manager_source =
+        fs::read_to_string("src/app/ssh/session_manager.rs").expect("read session manager");
 
     for expected in [
         "app.async_latency",
@@ -47,6 +47,33 @@ fn ssh_sources_expose_async_open_latency_markers() {
 }
 
 #[test]
+fn ssh_modal_sources_expose_modal_open_latency_markers() {
+    let bootstrap_source = fs::read_to_string("src/app/bootstrap.rs").expect("read bootstrap");
+    let assets_source =
+        fs::read_to_string("src/app/bootstrap/assets_keychain.rs").expect("read asset bootstrap");
+    let plan = fs::read_to_string("docs/plans/2026-04-20-async-latency-instrumentation.md")
+        .expect("read async latency instrumentation plan");
+
+    for expected in [
+        "ssh-modal-connect",
+        "ssh-modal-save-connect",
+        "session-profile-built",
+        "modal-confirmed",
+        "secrets-persisted",
+        "asset-catalog-saved",
+        "session-dispatched",
+        "ui-return",
+    ] {
+        assert!(
+            bootstrap_source.contains(expected)
+                || assets_source.contains(expected)
+                || plan.contains(expected),
+            "SSH modal latency instrumentation should expose `{expected}` so save/connect can be split into synchronous preparation, persistence, dispatch, and final UI-return stages"
+        );
+    }
+}
+
+#[test]
 fn docs_plan_describes_async_latency_probe_points() {
     let plan = fs::read_to_string("docs/plans/2026-04-20-async-latency-instrumentation.md")
         .expect("read async latency instrumentation plan");
@@ -59,6 +86,10 @@ fn docs_plan_describes_async_latency_probe_points() {
         "ui-return",
         "request-finished",
         "session-connected",
+        "ssh-modal-connect",
+        "ssh-modal-save-connect",
+        "modal-confirmed",
+        "session-dispatched",
     ] {
         assert!(
             plan.contains(expected),

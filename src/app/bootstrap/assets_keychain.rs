@@ -819,6 +819,60 @@ fn sync_keychain_modal_defaults(window: &AppWindow) {
     window.set_keychain_ssh_key_modal_fingerprint("".into());
 }
 
+struct SshModalLatencyTrace {
+    flow: &'static str,
+    started_at: Instant,
+    host: String,
+    user: String,
+    asset_id: Option<String>,
+    session_id: Option<Uuid>,
+}
+
+impl SshModalLatencyTrace {
+    fn for_request(request: &crate::shell::view_model::PendingSshModalAction) -> Option<Self> {
+        let flow = match request.action {
+            SshModalAction::Connect => "ssh-modal-connect",
+            SshModalAction::SaveAndConnect => "ssh-modal-save-connect",
+            SshModalAction::Save | SshModalAction::TestConnection => return None,
+        };
+
+        Some(Self {
+            flow,
+            started_at: Instant::now(),
+            host: request.draft.host.clone(),
+            user: request.draft.user.clone(),
+            asset_id: None,
+            session_id: None,
+        })
+    }
+
+    fn set_asset_id(&mut self, asset_id: Option<String>) {
+        self.asset_id = asset_id;
+    }
+
+    fn update_profile(&mut self, profile: &ConnectionProfile) {
+        self.host = profile.host.clone();
+        self.user = profile.user.clone();
+        self.asset_id = profile.asset_id.clone();
+    }
+
+    fn capture_active_session(&mut self, state: &ShellViewModel) {
+        self.session_id = active_workspace_session_uuid(state);
+    }
+
+    fn log(&self, stage: &str) {
+        log_ssh_modal_latency(
+            self.flow,
+            stage,
+            self.started_at,
+            self.session_id,
+            self.asset_id.as_deref(),
+            self.host.as_str(),
+            self.user.as_str(),
+        );
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn bind_assets_keychain_callbacks(
     window: &AppWindow,
@@ -1311,6 +1365,9 @@ pub(super) fn bind_assets_keychain_callbacks(
         let pending_action = state.take_pending_ssh_modal_action();
         let mut did_mutate = false;
         let mut catalog_persisted_in_action = false;
+        let mut modal_latency = pending_action
+            .as_ref()
+            .and_then(SshModalLatencyTrace::for_request);
 
         if let Some(request) = pending_action {
             match request.action {
@@ -1373,34 +1430,44 @@ pub(super) fn bind_assets_keychain_callbacks(
                         Err(err) => state.finish_ssh_modal_action_error(err.to_string()),
                     }
                 }
-                SshModalAction::Connect => match runtime_profile_for_modal_action(&state, &request.draft) {
-                    Ok(mut profile) => {
-                        profile.asset_id = Some(temporary_session_asset_id_for_profile(&profile));
-                        if let Some(session_bridge) = session_bridge_ref.as_ref() {
-                            if let Err(err) = attempt_open_session_with_profile(
-                                &mut state,
-                                session_bridge.as_ref(),
-                                &pending_host_key_approval_ref,
-                                profile,
-                                OpenSessionMode::ActivateExisting,
-                            ) {
-                                tracing::error!(
-                                    target: "app.ssh",
-                                    error = %err,
-                                    "failed to open temporary ssh session from modal action"
-                                );
-                                state.finish_ssh_modal_action_error(err.to_string());
-                            } else {
-                                state.cancel_asset_modal();
+                SshModalAction::Connect => {
+                    match runtime_profile_for_modal_action(&state, &request.draft) {
+                        Ok(mut profile) => {
+                            profile.asset_id = Some(temporary_session_asset_id_for_profile(&profile));
+                            if let Some(trace) = modal_latency.as_mut() {
+                                trace.update_profile(&profile);
+                                trace.log("session-profile-built");
                             }
-                        } else {
-                            state.finish_ssh_modal_action_error(
-                                "SSH session bridge is unavailable.",
-                            );
+                            if let Some(session_bridge) = session_bridge_ref.as_ref() {
+                                if let Err(err) = attempt_open_session_with_profile(
+                                    &mut state,
+                                    session_bridge.as_ref(),
+                                    &pending_host_key_approval_ref,
+                                    profile,
+                                    OpenSessionMode::ActivateExisting,
+                                ) {
+                                    tracing::error!(
+                                        target: "app.ssh",
+                                        error = %err,
+                                        "failed to open temporary ssh session from modal action"
+                                    );
+                                    state.finish_ssh_modal_action_error(err.to_string());
+                                } else {
+                                    if let Some(trace) = modal_latency.as_mut() {
+                                        trace.capture_active_session(&state);
+                                        trace.log("session-dispatched");
+                                    }
+                                    state.cancel_asset_modal();
+                                }
+                            } else {
+                                state.finish_ssh_modal_action_error(
+                                    "SSH session bridge is unavailable.",
+                                );
+                            }
                         }
+                        Err(err) => state.finish_ssh_modal_action_error(err.to_string()),
                     }
-                    Err(err) => state.finish_ssh_modal_action_error(err.to_string()),
-                },
+                }
                 SshModalAction::SaveAndConnect => {
                     let previous_state = (*state).clone();
                     let existing_saved_spec = match &state.asset_modal_state {
@@ -1416,6 +1483,10 @@ pub(super) fn bind_assets_keychain_callbacks(
                     did_mutate = state.confirm_asset_modal();
                     if did_mutate {
                         if let Some(asset_id) = state.focused_asset_id.clone() {
+                            if let Some(trace) = modal_latency.as_mut() {
+                                trace.set_asset_id(Some(asset_id.clone()));
+                                trace.log("modal-confirmed");
+                            }
                             if let Err(err) = validate_saved_modal_profile(&state, &asset_id) {
                                 *state = previous_state;
                                 did_mutate = false;
@@ -1435,6 +1506,9 @@ pub(super) fn bind_assets_keychain_callbacks(
                                     did_mutate = false;
                                     state.finish_ssh_modal_action_error(err.to_string());
                                 } else {
+                                    if let Some(trace) = modal_latency.as_mut() {
+                                        trace.log("secrets-persisted");
+                                    }
                                     if let Some(repo) = asset_repo_ref.as_ref()
                                         && let Err(err) = save_asset_catalog(repo.as_ref(), &state)
                                     {
@@ -1443,8 +1517,16 @@ pub(super) fn bind_assets_keychain_callbacks(
                                         state.finish_ssh_modal_action_error(err.to_string());
                                     } else {
                                         catalog_persisted_in_action = asset_repo_ref.is_some();
+                                        if asset_repo_ref.is_some()
+                                            && let Some(trace) = modal_latency.as_mut()
+                                        {
+                                            trace.log("asset-catalog-saved");
+                                        }
                                         match runtime_profile_for_saved_asset(&state, &asset_id) {
                                             Ok(profile) => {
+                                                if let Some(trace) = modal_latency.as_mut() {
+                                                    trace.update_profile(&profile);
+                                                }
                                                 if let Some(session_bridge) = session_bridge_ref.as_ref()
                                                     && let Err(err) = attempt_open_session_with_profile(
                                                         &mut state,
@@ -1461,6 +1543,10 @@ pub(super) fn bind_assets_keychain_callbacks(
                                                     );
                                                     state.finish_ssh_modal_action_error(err.to_string());
                                                 } else {
+                                                    if let Some(trace) = modal_latency.as_mut() {
+                                                        trace.capture_active_session(&state);
+                                                        trace.log("session-dispatched");
+                                                    }
                                                     state.cancel_asset_modal();
                                                 }
                                             }
@@ -1517,6 +1603,9 @@ pub(super) fn bind_assets_keychain_callbacks(
         sync_assets_context_menu_state(&window, &state);
         sync_asset_modal_state(&window, &state);
         windowing::sync_ssh_host_key_modal_state(&window, &state);
+        if let Some(trace) = modal_latency.as_ref() {
+            trace.log("ui-return");
+        }
     });
 
     let state = Rc::clone(view_model);
