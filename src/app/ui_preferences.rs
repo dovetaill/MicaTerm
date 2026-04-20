@@ -38,6 +38,14 @@ impl DownloadConflictDefault {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PersistedWindowBounds {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UiPreferences {
     #[serde(default = "default_theme_mode")]
@@ -52,6 +60,8 @@ pub struct UiPreferences {
     pub terminal_active_idle_shrink_enabled: bool,
     #[serde(default)]
     pub download_conflict_default: DownloadConflictDefault,
+    #[serde(default)]
+    pub window_bounds: Option<PersistedWindowBounds>,
 }
 
 fn default_theme_mode() -> ThemeMode {
@@ -79,6 +89,7 @@ impl Default for UiPreferences {
             terminal_scrollback_limit: default_terminal_scrollback_limit(),
             terminal_active_idle_shrink_enabled: default_terminal_active_idle_shrink_enabled(),
             download_conflict_default: DownloadConflictDefault::Ask,
+            window_bounds: None,
         }
     }
 }
@@ -128,6 +139,7 @@ impl From<&ShellViewModel> for UiPreferences {
             terminal_active_idle_shrink_enabled: value
                 .settings_modal_terminal_active_idle_shrink_enabled(),
             download_conflict_default: value.settings_modal_download_conflict_default(),
+            window_bounds: None,
         }
     }
 }
@@ -157,5 +169,37 @@ pub fn ui_preferences_from_snapshot(snapshot: &SnapshotUiPreferences) -> UiPrefe
         terminal_scrollback_limit: default_terminal_scrollback_limit(),
         terminal_active_idle_shrink_enabled: default_terminal_active_idle_shrink_enabled(),
         download_conflict_default: DownloadConflictDefault::Ask,
+        window_bounds: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_preferences_round_trip_preserves_window_bounds() {
+        let prefs = UiPreferences {
+            window_bounds: Some(PersistedWindowBounds {
+                x: 160,
+                y: 120,
+                width: 1680,
+                height: 980,
+            }),
+            ..UiPreferences::default()
+        };
+
+        let json = serde_json::to_string(&prefs).expect("serialize preferences");
+        let decoded: UiPreferences = serde_json::from_str(&json).expect("deserialize preferences");
+
+        assert_eq!(decoded.window_bounds, prefs.window_bounds);
+    }
+
+    #[test]
+    fn ui_preferences_defaults_to_no_window_bounds() {
+        let decoded: UiPreferences =
+            serde_json::from_str("{}").expect("deserialize default preferences");
+
+        assert_eq!(decoded.window_bounds, None);
     }
 }
