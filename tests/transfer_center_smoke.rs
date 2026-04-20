@@ -46,25 +46,31 @@ fn transfer_center_exposes_filter_and_row_action_contracts() {
 
     assert!(
         content.contains("can_retry: bool")
+            && content.contains("attention_action: string")
+            && content.contains("attention_label: string")
             && content.contains("can_resolve_conflict: bool")
             && content.contains("can_open_workspace: bool"),
-        "transfer-center rows should expose lightweight action capability flags for retry/resolve/open-workspace affordances"
+        "transfer-center rows should expose lightweight action capability flags plus attention-action copy for resume/restart/pause affordances"
     );
     assert!(
         content.contains("in property <string> active-filter: \"all\";")
             && content.contains("callback filter-toggle-requested(string);")
-            && content.contains("callback retry-requested(string);")
+            && content.contains("callback transfer-row-resume-requested(string);")
+            && content.contains("callback transfer-row-restart-requested(string);")
+            && content.contains("callback transfer-row-pause-requested(string);")
             && content.contains("callback resolve-conflict-requested(string);")
             && content.contains("callback open-workspace-requested(string);"),
-        "transfer center should expose filter and row action callbacks so the lightweight UI can drive real host behavior"
+        "transfer center should expose filter and row action callbacks so the lightweight UI can drive pause/resume/restart host behavior"
     );
     assert!(
         app_window.contains("transfer-center-active-filter")
             && app_window.contains("callback transfer-center-filter-toggle-requested(string);")
-            && app_window.contains("callback transfer-center-retry-requested(string);")
+            && app_window.contains("callback transfer-center-resume-requested(string);")
+            && app_window.contains("callback transfer-center-restart-requested(string);")
+            && app_window.contains("callback transfer-center-pause-requested(string);")
             && app_window.contains("callback transfer-center-resolve-conflict-requested(string);")
             && app_window.contains("callback transfer-center-open-workspace-requested(string);"),
-        "app window should forward transfer-center filter and action callbacks into bootstrap"
+        "app window should forward transfer-center filter and pause/resume/restart callbacks into bootstrap"
     );
 }
 
@@ -836,19 +842,22 @@ fn transfer_center_row_actions_keep_a_stable_source_focus_order() {
 }
 
 #[test]
-fn transfer_center_retry_action_matches_attention_tooltip_contract() {
+fn transfer_center_attention_action_uses_dynamic_resume_restart_pause_copy() {
     let content =
         fs::read_to_string("ui/shell/transfer-center.slint").expect("read transfer center source");
 
     assert!(
-        content.contains("tooltip-text: \"Retry failed transfer\";")
-            && content.contains("tooltip-source-id: item.id + \"-retry\";"),
-        "transfer-center retry should expose explicit tooltip copy so failed-task recovery reads as clearly as resolve/workspace actions"
+        content.contains("label: item.attention_label;")
+            && content.contains("item.attention_action == \"pause\"")
+            && content.contains("root.transfer-row-pause-requested(item.id);")
+            && content.contains("root.transfer-row-resume-requested(item.id);")
+            && content.contains("root.transfer-row-restart-requested(item.id);"),
+        "transfer-center primary attention action should use projected pause/resume/restart copy and route to explicit callbacks instead of a hard-coded retry button"
     );
     assert!(
         content.contains("private property <bool> retry-tooltip-active: false;")
             && content.contains("private property <bool> row-action-tooltip-active: self.retry-tooltip-active || self.resolve-tooltip-active || self.workspace-tooltip-active;")
             && content.contains("row.retry-tooltip-active = active;"),
-        "transfer-center retry should participate in the shared action-tooltip ownership model so error hover text does not compete with the retry hint"
+        "transfer-center attention actions should stay inside the shared action-tooltip ownership model so error hover text does not compete with pause/resume/restart hints"
     );
 }

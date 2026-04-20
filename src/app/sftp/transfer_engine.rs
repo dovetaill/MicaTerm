@@ -20,7 +20,7 @@ pub async fn execute_download_task<F>(
     on_progress: &mut F,
 ) -> Result<()>
 where
-    F: FnMut(&TransferTask),
+    F: FnMut(&TransferTask) -> bool,
 {
     let target_path = download_target_path(task)?;
     let part_path = task
@@ -38,7 +38,10 @@ where
         task.temp_target_path = Some(part_path.clone());
         task.bytes_confirmed = resume_offset;
         task.bytes_transferred = resume_offset;
-        on_progress(task);
+        if should_pause(task, on_progress) {
+            pause_task(task, on_progress);
+            return Ok(());
+        }
     }
 
     validate_download_resume(task, resume_offset, &remote_meta)?;
@@ -50,7 +53,10 @@ where
         .unwrap_or(task.bytes_total.max(resume_offset));
     task.bytes_confirmed = resume_offset;
     task.bytes_transferred = resume_offset;
-    on_progress(task);
+    if should_pause(task, on_progress) {
+        pause_task(task, on_progress);
+        return Ok(());
+    }
 
     if let Some(parent) = part_path.parent() {
         fs::create_dir_all(parent).with_context(|| {
@@ -92,7 +98,13 @@ where
             .with_context(|| format!("failed to write local part `{}`", part_path.display()))?;
         task.bytes_transferred += read as u64;
         task.bytes_confirmed = task.bytes_transferred;
-        on_progress(task);
+        if should_pause(task, on_progress) {
+            writer
+                .flush()
+                .with_context(|| format!("failed to flush local part `{}`", part_path.display()))?;
+            pause_task(task, on_progress);
+            return Ok(());
+        }
     }
 
     writer
@@ -120,7 +132,7 @@ where
     task.bytes_confirmed = task.bytes_transferred;
     task.temp_target_path = None;
     task.error_message = None;
-    on_progress(task);
+    let _ = on_progress(task);
 
     Ok(())
 }
@@ -131,7 +143,7 @@ pub async fn execute_upload_task<F>(
     on_progress: &mut F,
 ) -> Result<()>
 where
-    F: FnMut(&TransferTask),
+    F: FnMut(&TransferTask) -> bool,
 {
     let local_source_path = upload_source_path(task)?;
     let local_metadata = fs::metadata(&local_source_path).with_context(|| {
@@ -153,7 +165,10 @@ where
         task.temp_target_path = Some(remote_part_path.clone());
         task.bytes_confirmed = remote_offset;
         task.bytes_transferred = remote_offset;
-        on_progress(task);
+        if should_pause(task, on_progress) {
+            pause_task(task, on_progress);
+            return Ok(());
+        }
     }
 
     validate_upload_resume(task, local_size, remote_offset)?;
@@ -163,7 +178,10 @@ where
     task.bytes_total = local_size;
     task.bytes_confirmed = remote_offset;
     task.bytes_transferred = remote_offset;
-    on_progress(task);
+    if should_pause(task, on_progress) {
+        pause_task(task, on_progress);
+        return Ok(());
+    }
 
     let mut local_reader = tokio::fs::File::open(&local_source_path)
         .await
@@ -210,7 +228,14 @@ where
             .with_context(|| format!("failed to write remote upload part `{remote_part}`"))?;
         task.bytes_transferred += read as u64;
         task.bytes_confirmed = task.bytes_transferred;
-        on_progress(task);
+        if should_pause(task, on_progress) {
+            remote_writer
+                .flush()
+                .await
+                .with_context(|| format!("failed to flush remote upload part `{remote_part}`"))?;
+            pause_task(task, on_progress);
+            return Ok(());
+        }
     }
     remote_writer
         .flush()
@@ -232,9 +257,25 @@ where
     task.bytes_confirmed = task.bytes_transferred;
     task.temp_target_path = None;
     task.error_message = None;
-    on_progress(task);
+    let _ = on_progress(task);
 
     Ok(())
+}
+
+fn should_pause<F>(task: &TransferTask, on_progress: &mut F) -> bool
+where
+    F: FnMut(&TransferTask) -> bool,
+{
+    !on_progress(task)
+}
+
+fn pause_task<F>(task: &mut TransferTask, on_progress: &mut F)
+where
+    F: FnMut(&TransferTask) -> bool,
+{
+    task.state = TransferTaskState::Paused;
+    task.error_message = None;
+    let _ = on_progress(task);
 }
 
 fn download_target_path(task: &TransferTask) -> Result<PathBuf> {

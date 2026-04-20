@@ -527,7 +527,7 @@ async fn interrupted_download_resumes_from_local_part_file() {
     let mut queue = seeded_download_queue(part_path.clone(), 3);
     let runtime = resumable_runtime_with_remote_bytes(b"abcdefghi");
 
-    execute_queued_transfers_with_progress(&runtime, &mut queue, |_| {})
+    execute_queued_transfers_with_progress(&runtime, &mut queue, |_| true)
         .await
         .expect("resume download");
 
@@ -553,7 +553,7 @@ async fn download_resume_falls_back_to_restart_when_remote_shrinks() {
     let mut queue = seeded_download_queue(part_path.clone(), 5);
     let runtime = resumable_runtime_with_remote_bytes(b"abc");
 
-    let error = execute_queued_transfers_with_progress(&runtime, &mut queue, |_| {})
+    let error = execute_queued_transfers_with_progress(&runtime, &mut queue, |_| true)
         .await
         .expect_err("shrunk remote should reject resume");
 
@@ -577,7 +577,7 @@ async fn interrupted_upload_resumes_from_remote_part_file() {
     let runtime = SftpRuntimeHandle::new(backend.clone());
     let mut queue = seeded_upload_queue(local_path, 3);
 
-    execute_queued_transfers_with_progress(&runtime, &mut queue, |_| {})
+    execute_queued_transfers_with_progress(&runtime, &mut queue, |_| true)
         .await
         .expect("resume upload");
 
@@ -604,7 +604,7 @@ async fn upload_resume_requires_restart_when_local_source_changes() {
     let mut queue = seeded_upload_queue(local_path.clone(), 3);
     fs::write(&local_path, b"abcdefghi").expect("mutate local upload source");
 
-    let error = execute_queued_transfers_with_progress(&runtime, &mut queue, |_| {})
+    let error = execute_queued_transfers_with_progress(&runtime, &mut queue, |_| true)
         .await
         .expect_err("changed local source should reject resume");
 

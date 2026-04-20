@@ -473,7 +473,7 @@ impl SessionManager {
         on_queue_updated: F,
     ) -> Result<()>
     where
-        F: FnMut(&TransferQueue),
+        F: FnMut(&TransferQueue) -> bool,
     {
         let runtime = self.sftp_runtime(session_id)?;
         self.runtime_handle

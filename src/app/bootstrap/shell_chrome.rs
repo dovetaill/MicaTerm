@@ -167,6 +167,36 @@ fn transfer_show_error(task: &crate::app::sftp::TransferTask) -> bool {
     task.state.needs_attention() && !transfer_error_summary(task).trim().is_empty()
 }
 
+fn transfer_attention_projection(
+    state: &ShellViewModel,
+    task: &crate::app::sftp::TransferTask,
+) -> Option<(&'static str, &'static str)> {
+    match task.state {
+        crate::app::sftp::TransferTaskState::Running => Some(("pause", "Pause")),
+        crate::app::sftp::TransferTaskState::Paused => {
+            if task.resume_mode == crate::app::sftp::TransferResumeMode::RestartOnly {
+                Some(("restart", "Restart"))
+            } else {
+                Some(("resume", "Resume"))
+            }
+        }
+        crate::app::sftp::TransferTaskState::Interrupted
+        | crate::app::sftp::TransferTaskState::Failed => state
+            .transfer_task_retry_label(task.id.as_str())
+            .map(|label| {
+                (
+                    if label == "Restart" {
+                        "restart"
+                    } else {
+                        "resume"
+                    },
+                    label,
+                )
+            }),
+        _ => None,
+    }
+}
+
 fn transfer_can_open_file(task: &crate::app::sftp::TransferTask) -> bool {
     task.state == crate::app::sftp::TransferTaskState::Completed
         && match &task.action {
@@ -249,6 +279,8 @@ fn project_transfer_center_items(state: &ShellViewModel) -> Vec<TransferCenterIt
         .into_iter()
         .map(|(_, task)| {
             let session_ready = state.has_connected_terminal_session(task.session_id.as_str());
+            let (attention_action, attention_label) =
+                transfer_attention_projection(state, task).unwrap_or(("", ""));
             TransferCenterItem {
                 id: task.id.clone().into(),
                 title: transfer_task_title(task).into(),
@@ -265,6 +297,8 @@ fn project_transfer_center_items(state: &ShellViewModel) -> Vec<TransferCenterIt
                 error_tooltip: transfer_error_summary(task).into(),
                 show_error: transfer_show_error(task),
                 can_show_error: transfer_show_error(task),
+                attention_action: attention_action.into(),
+                attention_label: attention_label.into(),
                 can_retry: state.transfer_task_can_retry(task.id.as_str()),
                 can_resolve_conflict: session_ready
                     && task.state == crate::app::sftp::TransferTaskState::Conflict,

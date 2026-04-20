@@ -67,7 +67,7 @@ pub async fn execute_queued_transfers(
     runtime: &SftpRuntimeHandle,
     queue: &mut TransferQueue,
 ) -> Result<()> {
-    execute_queued_transfers_with_progress(runtime, queue, |_| {}).await
+    execute_queued_transfers_with_progress(runtime, queue, |_| true).await
 }
 
 pub async fn execute_queued_transfers_with_progress<F>(
@@ -76,7 +76,7 @@ pub async fn execute_queued_transfers_with_progress<F>(
     mut on_queue_updated: F,
 ) -> Result<()>
 where
-    F: FnMut(&TransferQueue),
+    F: FnMut(&TransferQueue) -> bool,
 {
     let task_ids = queue.queued_task_ids();
     for task_id in task_ids {
@@ -239,7 +239,7 @@ async fn execute_transfer(
     runtime: &SftpRuntimeHandle,
     queue: &mut TransferQueue,
     task_id: &str,
-    on_queue_updated: &mut impl FnMut(&TransferQueue),
+    on_queue_updated: &mut impl FnMut(&TransferQueue) -> bool,
 ) -> Result<()> {
     let Some(task) = queue.task(task_id).cloned() else {
         return Ok(());
@@ -288,14 +288,16 @@ async fn execute_transfer(
 
             let mut sync_progress = |updated_task: &TransferTask| {
                 let _ = queue.replace_task(updated_task.clone());
-                on_queue_updated(queue);
+                on_queue_updated(queue)
             };
 
             let result = execute_upload_task(runtime, &mut queued_task, &mut sync_progress).await;
             let _ = queue.replace_task(queued_task);
 
             match result {
-                Ok(()) => on_queue_updated(queue),
+                Ok(()) => {
+                    let _ = on_queue_updated(queue);
+                }
                 Err(err) => return Err(err),
             }
         }
@@ -401,14 +403,16 @@ async fn execute_transfer(
 
             let mut sync_progress = |updated_task: &TransferTask| {
                 let _ = queue.replace_task(updated_task.clone());
-                on_queue_updated(queue);
+                on_queue_updated(queue)
             };
 
             let result = execute_download_task(runtime, &mut queued_task, &mut sync_progress).await;
             let _ = queue.replace_task(queued_task);
 
             match result {
-                Ok(()) => on_queue_updated(queue),
+                Ok(()) => {
+                    let _ = on_queue_updated(queue);
+                }
                 Err(err) => return Err(err),
             }
         }
