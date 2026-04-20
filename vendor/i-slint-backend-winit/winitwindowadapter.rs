@@ -155,6 +155,11 @@ fn icon_to_winit(
     winit::window::Icon::from_rgba(rgba_pixels, pixel_buffer.width(), pixel_buffer.height()).ok()
 }
 
+fn icon_is_effectively_empty(icon: &corelib::graphics::Image) -> bool {
+    let size = icon.size();
+    size.width == 0 || size.height == 0
+}
+
 fn window_is_resizable(
     min_size: Option<corelib::api::LogicalSize>,
     max_size: Option<corelib::api::LogicalSize>,
@@ -1264,7 +1269,22 @@ impl WindowAdapter for WinitWindowAdapter {
 
         // Update the icon only if it changes, to avoid flashing.
         let icon_image = window_item.icon();
+        #[allow(unused_variables)]
+        let icon_is_effectively_empty = icon_is_effectively_empty(&icon_image);
         let icon_image_cache_key = ImageCacheKey::new((&icon_image).into());
+
+        #[cfg(target_family = "windows")]
+        if icon_is_effectively_empty {
+            // slint icon is empty on Windows; preserving existing native window/taskbar icons
+        } else if !icon_is_effectively_empty && *self.window_icon_cache_key.borrow() != icon_image_cache_key {
+            *self.window_icon_cache_key.borrow_mut() = icon_image_cache_key;
+            winit_window_or_none.set_window_icon(icon_to_winit(
+                icon_image,
+                i_slint_core::lengths::LogicalSize::new(64., 64.) * ScaleFactor::new(sf),
+            ));
+        }
+
+        #[cfg(not(target_family = "windows"))]
         if *self.window_icon_cache_key.borrow() != icon_image_cache_key {
             *self.window_icon_cache_key.borrow_mut() = icon_image_cache_key;
             winit_window_or_none.set_window_icon(icon_to_winit(

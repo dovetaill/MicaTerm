@@ -149,6 +149,7 @@ use crate::app::windowing::{
 use crate::app::windows_frame::{
     CaptionButtonGeometry, install_window_frame_adapter, query_true_window_placement,
 };
+use crate::app::windows_icon;
 use crate::shell::assets::{
     AssetDisclosureState, AssetSocks5ProxySpec, AssetSshConnectionSpec, AssetSshProxySpec,
     AssetTree, ConsoleAssetKind, SSH_AUTH_SOURCE_KEYCHAIN_IDENTITY,
@@ -6496,9 +6497,11 @@ pub fn run_with_profile(
     configure_window_creation_env_for_profile(profile);
     configure_ui_font_fallbacks();
     let window = AppWindow::new()?;
+    windows_icon::log_window_icon_state(&window, "after_window_new");
     log_ui_shell_font_diagnostics();
     window.set_window_title(runtime_window_title(profile).into());
     bind_top_status_bar_with_profile_and_async_handle(&window, profile, Some(async_runtime_handle));
+    windows_icon::log_window_icon_state(&window, "before_window_run");
     window.run()?;
     Ok(())
 }

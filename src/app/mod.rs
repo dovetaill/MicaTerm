@@ -29,3 +29,4 @@ pub mod window_effects;
 pub mod window_state;
 pub mod windowing;
 pub mod windows_frame;
+pub(crate) mod windows_icon;
