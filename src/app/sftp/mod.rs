@@ -38,7 +38,8 @@ pub use operation_dispatch::{
 };
 pub use queue::{
     DownloadTransferEntry, TransferConflictPolicy, TransferDirection, TransferQueue,
-    TransferQueueSummary, TransferTask, TransferTaskAction, TransferTaskState,
+    TransferQueueSummary, TransferResumeMode, TransferTask, TransferTaskAction,
+    TransferTaskState, download_part_path,
 };
 pub use runtime::{SftpBackend, SftpOperationFuture, SftpRuntimeHandle};
 pub use session_binding::{

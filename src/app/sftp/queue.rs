@@ -40,6 +40,8 @@ pub enum TransferTaskState {
     Queued,
     Running,
     Paused,
+    VerifyingResume,
+    Interrupted,
     Completed,
     Failed,
     Cancelled,
@@ -48,11 +50,14 @@ pub enum TransferTaskState {
 
 impl TransferTaskState {
     pub fn is_active(self) -> bool {
-        matches!(self, Self::Queued | Self::Running | Self::Paused)
+        matches!(
+            self,
+            Self::Queued | Self::Running | Self::Paused | Self::VerifyingResume
+        )
     }
 
     pub fn needs_attention(self) -> bool {
-        matches!(self, Self::Failed | Self::Conflict)
+        matches!(self, Self::Interrupted | Self::Failed | Self::Conflict)
     }
 
     pub fn id(self) -> &'static str {
@@ -60,12 +65,20 @@ impl TransferTaskState {
             Self::Queued => "queued",
             Self::Running => "running",
             Self::Paused => "paused",
+            Self::VerifyingResume => "verifying-resume",
+            Self::Interrupted => "interrupted",
             Self::Completed => "completed",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
             Self::Conflict => "conflict",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferResumeMode {
+    ResumeIfPossible,
+    RestartOnly,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,8 +100,17 @@ pub struct TransferTask {
     pub state: TransferTaskState,
     pub bytes_total: u64,
     pub bytes_transferred: u64,
+    pub bytes_confirmed: u64,
+    pub temp_target_path: Option<PathBuf>,
+    pub resume_mode: TransferResumeMode,
     pub conflict_policy: Option<TransferConflictPolicy>,
     pub error_message: Option<String>,
+}
+
+pub fn download_part_path(path: &Path) -> PathBuf {
+    let mut part_path = path.as_os_str().to_os_string();
+    part_path.push(".part");
+    PathBuf::from(part_path)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -178,6 +200,7 @@ impl TransferQueue {
         };
         task.state = TransferTaskState::Completed;
         task.bytes_transferred = bytes_transferred;
+        task.bytes_confirmed = bytes_transferred;
         if task.bytes_total == 0 {
             task.bytes_total = bytes_transferred;
         }
@@ -329,6 +352,9 @@ impl TransferQueue {
                     state: TransferTaskState::Queued,
                     bytes_total: source.bytes_total,
                     bytes_transferred: 0,
+                    bytes_confirmed: 0,
+                    temp_target_path: None,
+                    resume_mode: TransferResumeMode::ResumeIfPossible,
                     conflict_policy: None,
                     error_message: None,
                 };
@@ -384,6 +410,9 @@ impl TransferQueue {
                     state: TransferTaskState::Queued,
                     bytes_total: entry.bytes_total,
                     bytes_transferred: 0,
+                    bytes_confirmed: 0,
+                    temp_target_path: None,
+                    resume_mode: TransferResumeMode::ResumeIfPossible,
                     conflict_policy: None,
                     error_message: None,
                 };
@@ -414,6 +443,9 @@ impl TransferQueue {
                     state: TransferTaskState::Queued,
                     bytes_total: 0,
                     bytes_transferred: 0,
+                    bytes_confirmed: 0,
+                    temp_target_path: None,
+                    resume_mode: TransferResumeMode::RestartOnly,
                     conflict_policy: None,
                     error_message: None,
                 };
@@ -442,6 +474,9 @@ impl TransferQueue {
             state: TransferTaskState::Queued,
             bytes_total: 0,
             bytes_transferred: 0,
+            bytes_confirmed: 0,
+            temp_target_path: None,
+            resume_mode: TransferResumeMode::RestartOnly,
             conflict_policy: None,
             error_message: None,
         };

@@ -14,11 +14,13 @@ fn transfer_state_priority(state: crate::app::sftp::TransferTaskState) -> usize 
     match state {
         crate::app::sftp::TransferTaskState::Running => 0,
         crate::app::sftp::TransferTaskState::Queued => 1,
-        crate::app::sftp::TransferTaskState::Paused => 2,
-        crate::app::sftp::TransferTaskState::Failed => 3,
-        crate::app::sftp::TransferTaskState::Conflict => 4,
-        crate::app::sftp::TransferTaskState::Completed => 5,
-        crate::app::sftp::TransferTaskState::Cancelled => 6,
+        crate::app::sftp::TransferTaskState::VerifyingResume => 2,
+        crate::app::sftp::TransferTaskState::Paused => 3,
+        crate::app::sftp::TransferTaskState::Interrupted => 4,
+        crate::app::sftp::TransferTaskState::Failed => 5,
+        crate::app::sftp::TransferTaskState::Conflict => 6,
+        crate::app::sftp::TransferTaskState::Completed => 7,
+        crate::app::sftp::TransferTaskState::Cancelled => 8,
     }
 }
 
@@ -31,6 +33,8 @@ fn transfer_status_label(task: &crate::app::sftp::TransferTask) -> &'static str 
         crate::app::sftp::TransferTaskState::Queued => "Queued",
         crate::app::sftp::TransferTaskState::Running => "Running",
         crate::app::sftp::TransferTaskState::Paused => "Paused",
+        crate::app::sftp::TransferTaskState::VerifyingResume => "Verifying",
+        crate::app::sftp::TransferTaskState::Interrupted => "Interrupted",
         crate::app::sftp::TransferTaskState::Completed => "Completed",
         crate::app::sftp::TransferTaskState::Failed => "Failed",
         crate::app::sftp::TransferTaskState::Cancelled => "Cancelled",
@@ -42,9 +46,11 @@ fn transfer_status_tone(state: crate::app::sftp::TransferTaskState) -> &'static 
     match state {
         crate::app::sftp::TransferTaskState::Queued
         | crate::app::sftp::TransferTaskState::Running
-        | crate::app::sftp::TransferTaskState::Paused => "busy",
+        | crate::app::sftp::TransferTaskState::Paused
+        | crate::app::sftp::TransferTaskState::VerifyingResume => "busy",
         crate::app::sftp::TransferTaskState::Completed => "success",
-        crate::app::sftp::TransferTaskState::Failed
+        crate::app::sftp::TransferTaskState::Interrupted
+        | crate::app::sftp::TransferTaskState::Failed
         | crate::app::sftp::TransferTaskState::Conflict => "error",
         crate::app::sftp::TransferTaskState::Cancelled => "muted",
     }
@@ -95,6 +101,8 @@ fn transfer_progress_label(task: &crate::app::sftp::TransferTask) -> String {
         crate::app::sftp::TransferTaskState::Queued => "Pending".into(),
         crate::app::sftp::TransferTaskState::Running => "Working".into(),
         crate::app::sftp::TransferTaskState::Paused => "Paused".into(),
+        crate::app::sftp::TransferTaskState::VerifyingResume => "Verifying resume".into(),
+        crate::app::sftp::TransferTaskState::Interrupted => "Resume available".into(),
         crate::app::sftp::TransferTaskState::Completed => "Done".into(),
         crate::app::sftp::TransferTaskState::Cancelled => {
             if transfer_was_skipped(task) {
