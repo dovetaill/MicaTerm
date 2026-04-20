@@ -9,8 +9,10 @@ use uuid::Uuid;
 use crate::app::sftp::{
     DownloadTransferEntry, SftpDirectoryEntry, SftpDirectoryEntryKind, SftpPanelMode,
     SftpRuntimeHandle, SftpSessionBindingState, TransferConflictPolicy, TransferQueue,
-    TransferTaskAction,
+    TransferTask, TransferTaskAction,
 };
+
+use super::transfer_engine::execute_download_task;
 
 #[derive(Clone)]
 pub struct SftpSessionBinding {
@@ -377,23 +379,28 @@ async fn execute_transfer(
 
             queue.mark_running(task_id);
             on_queue_updated(queue);
-            let bytes = runtime
-                .download_file(&task.source_path)
-                .await
-                .with_context(|| format!("failed to download `{}`", task.source_path))?;
-            if let Some(parent) = local_path.parent() {
-                fs::create_dir_all(parent).with_context(|| {
-                    format!(
-                        "failed to create local download directory `{}`",
-                        parent.display()
-                    )
-                })?;
+            let Some(mut queued_task) = queue.task(task_id).cloned() else {
+                return Ok(());
+            };
+            if !matches!(queued_task.action, TransferTaskAction::Download { .. }) {
+                return Ok(());
             }
-            fs::write(&local_path, &bytes).with_context(|| {
-                format!("failed to write local download `{}`", local_path.display())
-            })?;
-            queue.mark_completed(task_id, bytes.len() as u64);
-            on_queue_updated(queue);
+            if queued_task.target_path != local_path.to_string_lossy() {
+                queued_task.target_path = local_path.to_string_lossy().to_string();
+            }
+
+            let mut sync_progress = |updated_task: &TransferTask| {
+                let _ = queue.replace_task(updated_task.clone());
+                on_queue_updated(queue);
+            };
+
+            let result = execute_download_task(runtime, &mut queued_task, &mut sync_progress).await;
+            let _ = queue.replace_task(queued_task);
+
+            match result {
+                Ok(()) => on_queue_updated(queue),
+                Err(err) => return Err(err),
+            }
         }
         TransferTaskAction::DownloadDirectory { local_path } => {
             let mut local_path = local_path;

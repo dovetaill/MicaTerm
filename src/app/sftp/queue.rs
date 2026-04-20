@@ -186,6 +186,18 @@ impl TransferQueue {
         self.tasks.iter().find(|task| task.id == task_id)
     }
 
+    pub fn task_mut(&mut self, task_id: &str) -> Option<&mut TransferTask> {
+        self.tasks.iter_mut().find(|task| task.id == task_id)
+    }
+
+    pub fn replace_task(&mut self, updated_task: TransferTask) -> bool {
+        let Some(task) = self.task_mut(&updated_task.id) else {
+            return false;
+        };
+        *task = updated_task;
+        true
+    }
+
     pub fn mark_running(&mut self, task_id: &str) -> bool {
         let Some(task) = self.tasks.iter_mut().find(|task| task.id == task_id) else {
             return false;

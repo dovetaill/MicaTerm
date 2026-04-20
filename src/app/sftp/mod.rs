@@ -10,6 +10,7 @@ pub mod operation_dispatch;
 pub mod queue;
 pub mod runtime;
 pub mod session_binding;
+pub mod transfer_engine;
 pub mod transfer_store;
 pub mod working_copy;
 
@@ -39,13 +40,13 @@ pub use operation_dispatch::{
 };
 pub use queue::{
     DownloadTransferEntry, TransferConflictPolicy, TransferDirection, TransferQueue,
-    TransferQueueSummary, TransferResumeMode, TransferTask, TransferTaskAction,
-    TransferTaskState, download_part_path,
+    TransferQueueSummary, TransferResumeMode, TransferTask, TransferTaskAction, TransferTaskState,
+    download_part_path,
 };
 pub use runtime::{
     BoxedSftpReader, BoxedSftpWriter, SftpAsyncReader, SftpAsyncWriter, SftpBackend,
-    SftpOperationFuture, SftpReaderFuture, SftpRemoteMetadata, SftpRuntimeHandle,
-    SftpWriteMode, SftpWriterFuture,
+    SftpOperationFuture, SftpReaderFuture, SftpRemoteMetadata, SftpRuntimeHandle, SftpWriteMode,
+    SftpWriterFuture,
 };
 pub use session_binding::{
     SftpSessionBinding, collect_download_targets, delete_entries, execute_queued_transfers,
